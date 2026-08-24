@@ -21,12 +21,6 @@ references.
   and no CORS or preflight handling of any kind. `[servers.locations].headers` sets headers on the
   *upstream request*, not on the response to the client. A WASM middleware plugin is the only way to
   set a response header today.
-- **Informational responses drop the final status (#331):** an upstream that sends `103 Early Hints`
-  — which Go's reverse proxy forwards — makes Jul's response-writer wrappers latch on the interim
-  code and discard the real one, so the client receives `200` instead of the status the upstream sent.
-  `Recorder` is on the global chain unconditionally, so this affects every listener, not only routes
-  with the cache or compression enabled. Nothing is cached from such a response, so no corrupt entry
-  is stored.
 - **A cache hit replays a stale `X-Request-ID` (#332):** `RequestID` sets the response header before
   the router runs, so it is in the map the cache snapshots at header commit and is stored with the
   entry. `Cache.serve` merges stored headers with `Add`, so a hit carries two `X-Request-ID` values —

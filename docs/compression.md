@@ -57,6 +57,7 @@ response to a client that cannot decompress it.
 | SSE stream with `Flush()` | Decision forced, encoder flushed + underlying flushed | ✅ `TestCompressSSEFlush` |
 | WebSocket upgrade (Hijack) | No finalisation, raw connection preserved | ✅ `TestCompressHijack` |
 | Empty body (204/304) | No compression, `Vary` still added | ✅ `TestCompressEmptyResponseHasVary` |
+| `103 Early Hints` (or any other 1xx) ahead of the real status | Passes through untouched; the compression decision is made against the final status alone | ✅ `TestCompressInterimResponseDoesNotLatchTheFinalStatus`, `TestCompressInterimThenImplicitOKStillCompresses` |
 | Encoder pool reuse | Same encoder instance reset across requests | ✅ `TestCompressEncoderReuse` |
 | Unknown encoder in config | Startup error: "not compiled in this build" | ✅ `TestCompressUnknownEncoderErrors` |
 
@@ -65,7 +66,9 @@ response to a client that cannot decompress it.
 All gates must pass:
 
 1. **Client accepts** — `Accept-Encoding` includes a configured coding with q > 0.
-2. **Body allowed** — not 1xx, 204, or 304.
+2. **Body allowed** — not 204 or 304. A `1xx` (`103 Early Hints`, etc.) never reaches this gate at
+   all: it passes straight through, without latching, so the decision is made once against the real
+   final status (#331).
 3. **Not already encoded** — `Content-Encoding` header is absent.
 4. **Transformation allowed** — neither the request nor response carries the case-insensitive `Cache-Control: no-transform` directive.
 5. **No Range** — request does not carry a `Range` header.

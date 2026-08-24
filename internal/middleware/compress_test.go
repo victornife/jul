@@ -290,6 +290,80 @@ func TestCompressEmptyResponseHasVary(t *testing.T) {
 	}
 }
 
+// TestCompressInterimResponseDoesNotLatchTheFinalStatus is the regression test
+// for #331: a 103 Early Hints ahead of a body-less final status must reach the
+// client as that final status, not as an implicit 200.
+func TestCompressInterimResponseDoesNotLatchTheFinalStatus(t *testing.T) {
+	mw := gzipMiddleware(t, CompressionOptions{MinSize: 1})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	sink := newClientSink()
+
+	mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Link", "</style.css>; rel=preload")
+		w.WriteHeader(http.StatusEarlyHints)
+		w.WriteHeader(http.StatusEarlyHints) // multiple interim responses are permitted
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(sink, req)
+
+	want := []int{http.StatusEarlyHints, http.StatusEarlyHints, http.StatusNoContent}
+	if !slicesEqual(sink.statuses, want) {
+		t.Fatalf("statuses forwarded to the client = %v, want %v", sink.statuses, want)
+	}
+	if got := sink.finalStatus(); got != http.StatusNoContent {
+		t.Fatalf("status delivered to the client = %d, want 204", got)
+	}
+}
+
+// TestCompressInterimThenImplicitOKStillCompresses proves the compression
+// decision is made against the final status and headers, not the 1xx that
+// preceded them.
+func TestCompressInterimThenImplicitOKStillCompresses(t *testing.T) {
+	mw := gzipMiddleware(t, CompressionOptions{MinSize: 1})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	sink := newClientSink()
+	body := strings.Repeat("z", 100)
+
+	mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Link", "</style.css>; rel=preload")
+		w.WriteHeader(http.StatusEarlyHints)
+		w.Header().Set("Content-Type", "text/plain")
+		io.WriteString(w, body) // no explicit WriteHeader: implicit 200
+	})).ServeHTTP(sink, req)
+
+	want := []int{http.StatusEarlyHints, http.StatusOK}
+	if !slicesEqual(sink.statuses, want) {
+		t.Fatalf("statuses forwarded to the client = %v, want %v", sink.statuses, want)
+	}
+	if sink.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", sink.Header().Get("Content-Encoding"))
+	}
+	if got := gunzip(t, sink.body.Bytes()); got != body {
+		t.Fatalf("decoded body = %q, want %q", got, body)
+	}
+}
+
+// TestCompressWriter101StillPassesThroughImmediately proves 101 keeps its
+// existing treatment: bodyAllowed(101) is false, so it starts pass-through on
+// the spot exactly as it did before interim responses were handled specially.
+func TestCompressWriter101StillPassesThroughImmediately(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	sink := newClientSink()
+	c := &compression{mime: newMimeMatcher([]string{"text/*"})}
+	cw := &compressWriter{ResponseWriter: sink, c: c, r: req}
+
+	cw.WriteHeader(http.StatusSwitchingProtocols)
+
+	if !cw.decided || cw.enc != nil {
+		t.Fatal("101 must start pass-through immediately, as before")
+	}
+	if len(sink.statuses) != 1 || sink.statuses[0] != http.StatusSwitchingProtocols {
+		t.Fatalf("statuses forwarded to the client = %v, want [101]", sink.statuses)
+	}
+}
+
 func TestParseAcceptEncoding(t *testing.T) {
 	q := parseAcceptEncoding("gzip, br;q=0.8, *;q=0.1")
 	if q["gzip"] != 1.0 {

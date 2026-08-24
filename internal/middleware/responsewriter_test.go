@@ -5,6 +5,7 @@ package middleware
 
 import (
 	"bufio"
+	"bytes"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -131,4 +132,112 @@ type hijackableRecorder struct {
 
 func (h *hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, nil
+}
+
+// clientSink is the innermost http.ResponseWriter in a wrapper-chain test. It
+// mimics what a real connection does with WriteHeader (net/http's own
+// response.WriteHeader forwards any number of 1xx calls and only latches on
+// the first non-1xx one): every call is recorded, unlike httptest.ResponseRecorder,
+// which silently drops every call but its own first — the same class of bug
+// this file is testing for, so it cannot stand in for "what the client saw".
+type clientSink struct {
+	header   http.Header
+	statuses []int
+	body     bytes.Buffer
+}
+
+func newClientSink() *clientSink { return &clientSink{header: make(http.Header)} }
+
+func (s *clientSink) Header() http.Header { return s.header }
+
+func (s *clientSink) WriteHeader(code int) { s.statuses = append(s.statuses, code) }
+
+func (s *clientSink) Write(b []byte) (int, error) {
+	if len(s.statuses) == 0 {
+		s.WriteHeader(http.StatusOK)
+	}
+	return s.body.Write(b)
+}
+
+// finalStatus is the status a real HTTP client would see: whatever was last
+// written, since anything earlier was necessarily a 1xx interim response.
+func (s *clientSink) finalStatus() int {
+	if len(s.statuses) == 0 {
+		return http.StatusOK
+	}
+	return s.statuses[len(s.statuses)-1]
+}
+
+// TestRecorderInterimResponsesDoNotLatchTheStatus is the regression test for
+// #331: a 103 Early Hints ahead of the real status must not make WriteHeader
+// treat the response as already finalized.
+func TestRecorderInterimResponsesDoNotLatchTheStatus(t *testing.T) {
+	sink := newClientSink()
+	rw := NewRecorder(sink)
+	w := rw.Writer()
+
+	w.Header().Set("Link", "</style.css>; rel=preload")
+	w.WriteHeader(http.StatusEarlyHints)
+	w.WriteHeader(http.StatusEarlyHints) // multiple interim responses are permitted
+	w.WriteHeader(http.StatusNoContent)
+
+	if rw.Status() != http.StatusNoContent {
+		t.Fatalf("recorded status = %d, want 204", rw.Status())
+	}
+	want := []int{http.StatusEarlyHints, http.StatusEarlyHints, http.StatusNoContent}
+	if !slicesEqual(sink.statuses, want) {
+		t.Fatalf("statuses forwarded to the client = %v, want %v", sink.statuses, want)
+	}
+	if got := sink.finalStatus(); got != http.StatusNoContent {
+		t.Fatalf("status delivered to the client = %d, want 204", got)
+	}
+}
+
+// TestRecorderInterimThenImplicitOK proves the 1xx-then-Write path: no explicit
+// final WriteHeader call still latches the implicit 200, not the interim status.
+func TestRecorderInterimThenImplicitOK(t *testing.T) {
+	sink := newClientSink()
+	rw := NewRecorder(sink)
+	w := rw.Writer()
+
+	w.WriteHeader(http.StatusEarlyHints)
+	_, _ = w.Write([]byte("body"))
+
+	if rw.Status() != http.StatusOK {
+		t.Fatalf("recorded status = %d, want 200", rw.Status())
+	}
+	if got := sink.finalStatus(); got != http.StatusOK {
+		t.Fatalf("status delivered to the client = %d, want 200", got)
+	}
+}
+
+// TestRecorder101StillLatchesImmediately proves 101 keeps its existing
+// treatment: it is a protocol switch, not an interim response, so it finalizes
+// the status on the spot and a later WriteHeader is ignored.
+func TestRecorder101StillLatchesImmediately(t *testing.T) {
+	sink := newClientSink()
+	rw := NewRecorder(sink)
+	w := rw.Writer()
+
+	w.WriteHeader(http.StatusSwitchingProtocols)
+	w.WriteHeader(http.StatusOK) // must be ignored
+
+	if rw.Status() != http.StatusSwitchingProtocols {
+		t.Fatalf("recorded status = %d, want 101", rw.Status())
+	}
+	if len(sink.statuses) != 1 || sink.statuses[0] != http.StatusSwitchingProtocols {
+		t.Fatalf("statuses forwarded to the client = %v, want [101]", sink.statuses)
+	}
+}
+
+func slicesEqual(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

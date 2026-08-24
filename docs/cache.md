@@ -543,7 +543,8 @@ at all.
 
 | Response | Stored? | Why |
 | --- | :---: | --- |
-| `101 Switching Protocols` and any other `1xx` | no | An interim or protocol-switch response is not a representation. |
+| `101 Switching Protocols` | no | A protocol switch, not a representation; the connection is leaving HTTP. |
+| Any other `1xx` (e.g. `103 Early Hints`) | n/a | Not evaluated for storage at all: it passes through untouched, without latching the writer, so the real final status that follows it is judged entirely on its own merits (#331). |
 | Anything written after a successful hijack | no | The connection has left HTTP; the wrapper also refuses further writes with `http.ErrHijacked`. |
 | `Content-Type: text/event-stream` | no | An event stream never ends. Capture stops at the first byte, so an open SSE connection accumulates nothing. |
 | A body larger than `memory_max_size` | no | Existing size bound; capture is discarded when the limit is passed. |

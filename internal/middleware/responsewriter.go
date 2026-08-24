@@ -52,6 +52,14 @@ func (r *Recorder) WriteHeader(code int) {
 	if r.wroteHeader || r.hijacked {
 		return
 	}
+	// A 1xx other than 101 is an interim response: RFC 9110 §15.2 permits any
+	// number of them ahead of exactly one final status, so it must pass through
+	// without latching wroteHeader or the recorded status. 101 is a protocol
+	// switch, not an interim response, and keeps the normal latch below.
+	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
+		r.ResponseWriter.WriteHeader(code)
+		return
+	}
 	r.status = code
 	r.wroteHeader = true
 	r.ResponseWriter.WriteHeader(code)
