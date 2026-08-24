@@ -29,6 +29,7 @@
 | 2026-08-25 | Fourth external review round. **§11.2 defined the successful path and left the failing ones undefined.** Moving the snapshot after the rename means steps 3 and 4 can fail *after* the configuration has already changed, and the failure matrix still claimed persistence failures happen "before the rename". The transaction now names its **durable commit point** — the rename — states that the reload is enqueued at that point and does not wait for provenance, and gives a per-step failure outcome: a failure before the commit is `503 storage_unavailable` with nothing changed, and a failure after it returns **success with `baseline_error`**, joining the `HistoryError` and `FinalizationError` fields the ledger already carries for exactly this class. A repair that cannot be persisted is `managed_inconsistent`/`baseline_unwritable` and **never** `managed_clean`. **The recovery table claimed three inputs and then wrote `any` in every `preparing` row**, discarding the evidence it had just introduced; the full matrix now distinguishes the pre-commit abort, the post-restoration case, the roll-forward, and — materially — the two `matches neither` cases, since a surviving snapshot at the intended digest is ordinary drift with a usable baseline while one at the prior digest is not. Every repair writes **the same verified buffer**, never a re-read of the path, closing a time-of-check/time-of-use window. **§11.2.3 is new: the composition of the baseline and planned-restart state machines**, which `marker_contradicts_staged_restart` had named without defining. They are layered rather than peers — planned restart is authoritative for which bytes belong on disk, the baseline for what Jul last wrote, and planned restart reconciles first — so there is no combined matrix. A `stage_restart` advances the baseline to the staged candidate, which is what keeps §16's expected desired-versus-active divergence from being reported as drift. **§27.2 is new:** the terminal ledger is an in-memory map, so "512 records or one hour" overstated the guarantee; retention is now scoped to one server **boot**, the ledger is deliberately not persisted, and the already-existing `applyInstanceID` is surfaced as `boot_id` so a client can detect the boundary rather than infer a durable window. **§27.1's fingerprint encoding was ambiguous** — decoded query values can contain any separator, so `a="b&c=d"` and `a="b", c="d"` collided; every component is now length-prefixed. `recorded_path` becomes `recorded_operation` carrying the **route template**, because a concrete path contains a `route_id` or listener address and §26 forbids configuration values in `details`. **§11.2.1 no longer conflates a first installation with state loss:** a marker absent beside a surviving snapshot or non-empty managed history is `managed_inconsistent`/`marker_missing` and alertable, and the case where all three are gone is stated as a filesystem-trust residual rather than an assertion that nothing existed. |
 | 2026-08-25 | Fifth external review round. **A legitimate authority round trip was classified as corruption.** The fourth round admitted non-empty managed history as evidence of marker loss, which misreads `managed → file_owned → managed` — §17.2 deliberately retains history while removing the baseline artifacts, so every operator who hands a configuration to a pipeline and takes it back would have been told their state was damaged. History is **withdrawn as evidence**: it records what Jul did, not which epoch it is in. The epoch boundary is now an explicit **handoff tombstone**, written by the `file_owned` startup that closes a managed epoch, carrying no configuration bytes and therefore safe to leave in place. §17.1's "managed history begins empty" was false on every epoch after the first and is corrected. The inverse case — a cleanup that could not run on a read-only mount, leaving a previous epoch's marker to be read as current — is stated as a named residual with its cost, rather than left to be discovered. **The protocol covered writes and was being reused for transitions that write nothing.** Adoption of already-present bytes, first establishment, and the rewind after a restoration or discard were all routed through a rename-committed protocol that does not describe them. There are now **four transaction primitives** — T1 advance, T2 establish, T3 adopt-in-place, T4 rewind — each with its own ordered writes, commit point, per-step failure outcome and crash behaviour. T2 and T3 write no configuration and perform no reload; T3's commit point is last, so a failure before it is an operation that did not happen rather than a degraded success. The background retry now **re-verifies the configuration digest under `applyMu` and abandons** if a restoration superseded it, which closes a concrete race. §11.2.3 gains an **I/O-failure table** for all seven staged writes and answers the three questions it had left open: a failed baseline write still promotes the planned-restart marker, a step-7 failure is a `staging_error` rather than a `baseline_error`, and the retry cannot outrun a restoration. **§33.2 is new: `baseline_error` was invisible to clients.** A provenance failure could commit the change, return success and leave managed writes refused while the CLI exited 0 — green pipeline, stalled control plane. A bounded `degraded` array now appears in the v1 apply DTO, the polling result and the CLI JSON; **exit 4 broadens to "success with a degraded outcome"**; `staged` plus a degradation takes exit 4; and the cross-product is stated explicitly — a degradation never upgrades or downgrades a terminal outcome, so a post-commit provenance failure cannot turn a `not_applied` reload into an API success. Idempotent replay returns the identical array. Also: the §34 shorthand "no marker ⇒ unadopted" is qualified, fingerprint lengths are UTF-8 byte lengths, and §26's "four rules" enumerated five. |
 | 2026-08-26 | Sixth external review round. **The four-primitive protocol inferred intent from digests, and two different operations left identical digests behind while requiring opposite recoveries.** Adoption (T3) wrote a `preparing` marker, so an adoption whose snapshot write failed — and whose API response reported failure — left artifacts indistinguishable from an interrupted apply, which the recovery matrix then rolled *forward*, silently committing it. Separately, T4's promised crash recovery was impossible: because the snapshot advanced at **commit**, the previous bytes existed only in process memory during the reload window, so a crash before restoration left nothing to restore from. Both are structural, and both are fixed by the same two changes rather than by more rows. There are now **two primitives**: **T-write**, for anything that changes the configuration file, and **T-mark**, for anything that does not. **The snapshot advances at terminalization, not at commit**, which makes the pre-existing snapshot the durable rollback material for exactly the window a restoration could need it — aligning with `completeManagedApply`, the single point where history, audit, metrics and the ledger already finalize, and which already carries `baseline.Raw`. **T-mark commits with one atomic marker write and never writes `preparing`**, so the collision is unreachable rather than tabulated around. §11.2.3's ordering changes accordingly: the planned-restart promotion now precedes the baseline writes, which is the stronger form of the guarantee it previously stated. **§14.2 is new: adoption bound itself to an `observed_digest` that nothing could hold still**, since external writers do not take `applyMu`. The fence is now defined as a linearization point at T-mark's marker write, with all three orderings specified — before it, `409`; after it, **success plus `drift_after_adopt` in the same response with no compensating write**, because rolling back would discard a committed adoption and overwriting would destroy the external writer's bytes; and a failed post-fence re-read yields `drift_unknown` with assessment deferred to §12's triggers. **§33.1's outcome table is now total and keyed on the terminal outcome**, replacing a `not_applied` row that read "1 or 5 per §33.1" — unresolvable, because §33.1 maps error codes and a reload that returns `not_applied` produces none; the distinguishing fact is whether restoration succeeded (exit 1) or failed (exit 5). This also corrects the claim that a post-commit baseline failure yields "success with `baseline_error`", which contradicted §33.2 in the one case that matters: restoration inside a failed apply. Finally, §11.2.2's "both artifacts absent in `file_owned`" contradicted §17.2's deliberate tombstone; the invariant is restated as **no configuration bytes and no live baseline**, and corrected in §17.2, the Consequences and both test bullets. |
+| 2026-08-25 | Seventh external review round. **Naming `completeManagedApply` as the terminalization point was wrong, and the coordinator says so in its own comment: *"A later apply may start while that work finishes."*** It is serialized by `finalizeMu` only — not by the configuration mutation gate — and all three call sites run after `inFlightState` is cleared and `c.mu` released. Apply A could therefore promote `current(I)` *after* apply B had written `preparing(I→J)`, destroying B's marker and leaving configuration *J* with baseline *I*, undetectably. §11.2.0.1 relocates the baseline terminalization point to **the end of the configuration-path mutation phase, under `c.mu`, before `inFlightState` is cleared** — the same critical section that already performs configuration-path disk writes through `restorePreviousLocked`. History, audit, metrics and ledger publication stay after the release. **Baseline mutation is part of the configuration-path transaction; telemetry is not.** **§11.2.4 is new: `stage_restart` adoption had no defined transaction and would have destroyed data.** `PlannedRestartStore.StageManaged` writes `.bak` from the previous *on-disk* bytes, which in an adoption are the bytes being adopted — so `.bak(I)` would make discard a silent no-op while T-mark had already replaced the snapshot holding *P*, losing the last known-good configuration permanently. The composition now takes `baseRaw` **from the baseline snapshot, never the file**, omits the candidate write that §11.2.3 assumes, and holds the snapshot overwrite until `.bak(P)` and the `staged` marker are both durable, with all six ordered writes tabulated. **§14.2's linearization claim is corrected**: the fence is step 8's verification read, conditional on the marker write succeeding — not the marker write itself, because an external write landing between the two is physically before the marker yet reported as after, and a fence Jul cannot observe is not one it can claim. Behaviour is unchanged. Also: the fence failure reuses the existing **`409 drift_detected`** rather than an undefined `config_changed`, keeping §26 closed at 22 codes; exit 5's description and the `exit_codes` capability broaden to include uncertain state after a failed restoration; §34's post-rename row no longer says every such failure returns success; the `managed_drift` row now names the **baseline** as desired state rather than the externally written file; and the T-mark test bullet no longer asserts that one snapshot failure both succeeded and failed. |
 
 ## Context
 
@@ -1014,7 +1015,7 @@ stateDiagram-v2
 | --- | --- | --- | --- | --- |
 | `managed_clean` | the file, owned by Jul | matches | allowed | Jul's own writes only |
 | `managed_unadopted` | none yet — ownership not established | the file | **refused** until adopted | n/a |
-| `managed_drift` | the file, **not** written by Jul | last managed version, or the drifted file after a restart | **refused** until resolved | refused |
+| `managed_drift` | the last managed baseline — the file is **not** written by Jul and is not authoritative | last managed version, or the drifted file after a restart | **refused** until resolved | refused |
 | `managed_pending_restart` | the file (staged candidate) + marker | previous version | refused (existing rule) | n/a |
 | `managed_failed_apply` | previous bytes restored to the file | previous version | allowed once restored | n/a |
 | `managed_inconsistent` | ambiguous — see the reason | previous version | **refused** | refused |
@@ -1128,7 +1129,8 @@ the restoration arm of a failed apply.
 1. write the marker "preparing"(P → I)
 2. write the configuration                        <- COMMIT
 3. reload, or stage, and wait for the terminal outcome
-4. AT TERMINALIZATION, and only then:
+4. AT TERMINALIZATION — the end of the configuration-path mutation phase,
+   while the mutation gate is still held (§11.2.0.1) — and only then:
      success   -> write the snapshot from the committed bytes; promote to "current"(I)
      restored  -> the configuration is back at P; rewrite the marker to "current"(P)
 ```
@@ -1147,14 +1149,12 @@ bytes that are already on disk.
 This is the load-bearing change, and it resolves two problems at once.
 
 **It gives the failed-apply path durable rollback material it otherwise does not have.** The
-coordinator holds the previous bytes in memory as `baseline.Raw` and carries them all the way to
-`completeManagedApply`, which is the single point where history, audit, metrics and the ledger already
-finalize. If the snapshot advanced at commit, then between the configuration write and the reload
-outcome the *only* copy of the previous configuration would be that in-memory buffer — and a crash in
-that window would leave nothing to restore from. By deferring the advance, **the existing snapshot
-still holds the previous bytes for exactly as long as a restoration might need them**, and no third
-artifact, rollback slot or garbage-collection step is required. The baseline finalizes where
-everything else terminal already finalizes.
+coordinator holds the previous bytes in memory as `baseline.Raw`. If the snapshot advanced at commit,
+then between the configuration write and the reload outcome the *only* copy of the previous
+configuration would be that in-memory buffer — and a crash in that window would leave nothing to
+restore from. By deferring the advance, **the existing snapshot still holds the previous bytes for
+exactly as long as a restoration might need them**, and no third artifact, rollback slot or
+garbage-collection step is required.
 
 **It makes a `preparing` marker mean exactly one thing.** Only T-write writes `preparing`, and it does
 so only around a configuration change. T-mark writes `current` directly, in one atomic rename, so it
@@ -1169,6 +1169,46 @@ marker write leaves the prior marker and prior snapshot both intact — the oper
 happen. A crash *after* it leaves a `current(D)` marker whose digest the configuration file matches
 and a snapshot that does not, which the recovery matrix repairs from the file. Every interruption
 lands somewhere well-defined, and nothing is ever destroyed before its replacement is durable.
+
+##### 11.2.0.1 "Terminalization" is the end of the config-path mutation phase, not `completeManagedApply`
+
+An earlier draft of this section placed the baseline advance in `completeManagedApply`, on the
+reasoning that history, audit, metrics and the ledger already finalize there. **That was wrong, and
+the coordinator says so in its own comment: *"A later apply may start while that work finishes."***
+`completeManagedApply` is serialized by `finalizeMu` only — **not** by the configuration mutation
+gate — and every one of its three call sites runs *after* `inFlightState` has been cleared and `c.mu`
+released. Putting baseline writes there admits this interleaving:
+
+```
+apply A: commits config I, reaches its terminal outcome
+apply A: clears inFlightState, releases the gate
+apply B: admitted; writes preparing(I -> J)
+apply A: (delayed) writes snapshot I and promotes current(I)   <-- overwrites B's marker
+apply B: writes config J
+                                        result: config J with baseline I
+```
+
+The baseline would be silently wrong, and — worse — B's `preparing` marker would be destroyed, so the
+recovery matrix could not detect it either.
+
+> **The baseline terminalization point is therefore the end of the configuration-path mutation phase:
+> the baseline snapshot write and marker promotion complete while `c.mu` is still held, immediately
+> before `inFlightState` is cleared and the mutation gate is released.** History, audit, metrics and
+> ledger publication remain where they are, after the release.
+
+This is a narrower claim than "the baseline finalizes where everything else terminal finalizes", and
+it is the correct one. **Baseline mutation is part of the configuration-path transaction; history and
+telemetry are not.** The distinction is exactly the one the coordinator already draws — the same
+critical section already performs configuration-path disk writes under `c.mu` through
+`restorePreviousLocked`, so a baseline write there is consistent with the existing design rather than
+a new burden on the lock. The corollary is that the admission gate now means what a client reads it
+to mean: **when the next apply is admitted, the previous apply's baseline is already durable.**
+
+The property this preserves is the one §11.2.0 exists for. The snapshot still holds the *previous*
+bytes for the whole reload window — the window closes at the end of the mutation phase, not at
+`completeManagedApply` — so restoration material remains available exactly as long as restoration is
+possible, and the enqueue-failure path, whose `restorePreviousLocked` runs under the same lock before
+`inFlightState` is cleared, rewinds the baseline in that same critical section.
 
 #### 11.2.1a Commit points, and what a failure at each step means
 
@@ -1449,6 +1489,68 @@ reconciliation has settled the configuration file, the baseline marker names a `
 matches neither that file nor the snapshot.** Every other combination is resolved by the table in
 §11.2, because by then only one machine is still deciding.
 
+#### 11.2.4 Adopt-and-stage: the one composition where the backup cannot come from the file
+
+§14 permits adoption with `mode: "stage_restart"`, for the case where the external bytes are
+restart-required. This composition is **not** covered by §11.2.3, and assuming it was would have
+destroyed data. §11.2.3 sequences a *configuration rename*; adoption performs none, because the bytes
+are already on disk. The situation is:
+
+| | Bytes |
+| --- | --- |
+| Baseline snapshot, and what the runtime is serving | *P* |
+| The configuration file, written externally | *I* |
+| The planned-restart `.bak`, which discard restores | **must be *P*** |
+
+**`PlannedRestartStore.StageManaged` takes `baseRaw` and, on a fresh stage, writes it to `.bak`;
+callers today pass the previous *on-disk* bytes, because for a normal stage the file has not changed
+yet.** In adopt-and-stage the file has *already* changed. Passing what is on disk would write
+`.bak(I)` — a discard would then "restore" the bytes being discarded, silently becoming a no-op, and
+*P* would be unrecoverable because T-mark had meanwhile replaced the snapshot holding it. That is
+permanent loss of the operator's last known-good configuration, produced by a path that reports
+success.
+
+> **In adopt-and-stage, `baseRaw` comes from the baseline snapshot, never from the configuration
+> file.** The snapshot is the only durable copy of *P* at that moment, which is the whole reason
+> §11.2 persists bytes.
+
+Ordered writes. Note that step 3 of the ordinary planned-restart sequence — *caller writes the
+candidate* — is **absent**, and `PromoteToStaged` is therefore called directly:
+
+```
+1. read the baseline snapshot P and verify it against current_digest
+2. write .bak from P                       (from the snapshot, NOT the file)
+3. write the planned-restart marker "prepared"(base=P, candidate=I)
+4. write the baseline marker "current"(I)                          <- COMMIT
+5. promote the planned-restart marker to "staged"
+6. overwrite the baseline snapshot with I
+```
+
+**The commit point is step 4 — T-mark's marker write — and it is placed after the backup exists.**
+The ordering constraint that makes the composition safe is stated as an invariant:
+
+> **The previous baseline bytes must remain durably readable until the planned-restart state that
+> depends on them is durable.** The snapshot is not overwritten until step 6, after `.bak(P)` and the
+> `staged` marker both exist, so at no instant is *P* absent from disk.
+
+| Fails at | `.bak` | Planned marker | Baseline | Result |
+| --- | --- | --- | --- | --- |
+| 1, snapshot unreadable or mismatched | — | — | unchanged | adoption fails, `managed_inconsistent` per §11.2.1b — there is nothing to back up, and staging without a backup would make discard unsafe |
+| 2, `.bak` write | — | — | unchanged | adoption fails, `503 storage_unavailable`; nothing happened |
+| 3, `prepared` write | *P* | — | unchanged | adoption fails; the stray `.bak` is collected by `Reconcile`, which sees no marker |
+| 4, baseline marker | *P* | `prepared` | unchanged | **adoption fails**; `Reconcile` sees `prepared` with the disk matching neither base nor candidate, and §11.2.3's `marker_contradicts_staged_restart` applies. The operator retries the adoption |
+| 5, `staged` promotion | *P* | `prepared` | `current(I)` | **adoption succeeds** with a `staging_error` degradation; `Reconcile` promotes at the next start |
+| 6, snapshot overwrite | *P* | `staged` | marker at *I*, snapshot at *P* | **adoption succeeds** with `baseline_error`; the snapshot is repairable from the file, which matches `current_digest` (§11.2.1b) |
+
+**Discard semantics are unchanged and now actually work**: a verified discard restores `.bak(P)` over
+the configuration file, which is a real configuration write, so it rewinds the baseline through
+**T-write** exactly as §11.2.3's discard does. The runtime was serving *P* throughout, so nothing
+reloads.
+
+**A crash between steps 4 and 6** leaves the marker at *I*, the file at *I* and the snapshot at *P* —
+`current(D)` with the file matching and the snapshot not, which §11.2.1b **repairs** from the verified
+file buffer. `.bak(P)` is untouched by that repair, so discard remains correct.
+
 #### 11.3 Managed mode requires a writable, non-symlinked config path
 
 `atomicfile.Write` creates its temporary file in the config file's directory and renames over the
@@ -1564,8 +1666,11 @@ side-effect-free.
    because the bytes being adopted are already on disk, so T-mark's single atomic marker write is the
    commit point and no `preparing` state exists;
 10. if the adopted bytes are **not already live**, reload or stage them through the existing
-   coordinator, unchanged. Adoption after a restart skips this: the bytes are already serving
-   (§11.2.2). **The baseline is established before the reload**, which is safe because the
+   coordinator. A **hot** reload uses it unchanged. A **`stage_restart` adoption does not**, and must
+   follow §11.2.4: the existing stage path takes its `.bak` from the previous on-disk bytes, which in
+   an adoption are the bytes being adopted, so used unchanged it would back up the wrong revision and
+   make discard a no-op. Adoption after a restart skips this step entirely: the bytes are already
+   serving (§11.2.2). **The baseline is established before the reload**, which is safe because the
    configuration file needs no change and therefore nothing can require rolling back; a reload that
    then fails is an ordinary reload failure reported through the existing terminal outcome, not a
    baseline problem, and it leaves the managed analogue of §16's desired-ahead state;
@@ -1614,27 +1719,39 @@ Adoption binds itself to an `observed_digest` (step 6) and re-checks it under `a
 is worth being exact about what that buys, because **an external writer does not take `applyMu`** —
 that is the entire premise of drift. The file can change between the check and the marker write, and
 no amount of locking inside Jul prevents it. So the fence is defined by a linearization point rather
-than by mutual exclusion:
+than by mutual exclusion — and the point has to be the *read*, not the write:
 
-> **The fence is T-mark's marker write.** The adoption is linearized there. The `observed_digest`
-> check immediately precedes it, under `applyMu`, and the verified buffer from step 8 — not a re-read
-> — is what the snapshot is written from.
+> **The fence is step 8's successful verification read, conditional on the marker write that follows
+> it succeeding.** The adoption is linearized there. The verified buffer from that read — never a
+> re-read of the path — is what the snapshot is written from.
+
+An earlier draft named T-mark's *marker write* as the fence. That claim is not sound, and the
+imprecision matters because it is unobservable in exactly the wrong direction: an external write
+landing between the verification read and the marker write is physically **before** the marker, yet
+the post-commit re-read reports it as **after**. Jul cannot distinguish that interleaving, so a fence
+it cannot observe is not a fence it can claim. Anchoring on the verification read makes the claim
+true: **every external write after that read is concurrent with the adoption and is ordered after
+it**, which is precisely what the implementation reports. The behaviour below is unchanged; only the
+formal claim is corrected.
 
 Three outcomes follow, and all three are specified because the middle one is the one an implementer
 would otherwise invent badly:
 
 1. **The external write is ordered before the fence.** The step-8 re-check sees a different digest and
-   the adoption fails with **`409`**, `config_changed`, naming the observed and expected digests.
+   the adoption fails with **`409 drift_detected`**, carrying `observed_digest` and `disk_version`
+   alongside the existing `baseline_version` and `detected_at` details. §26's catalogue is closed and
+   this needs no new member: the condition *is* drift — the disk no longer holds the bytes the
+   operator previewed and confirmed — and it maps to exit 5 through the existing conflict row.
    Nothing was written and no state changed.
 2. **The external write is ordered after the fence.** The adoption **succeeds** — it correctly adopted
-   the bytes it observed and reported. Jul then re-reads the configuration once after the fence, finds
+   the bytes it observed and reported. Jul then re-reads the configuration once after the commit, finds
    it no longer matches, and **reports `managed_drift` in the same response**, in the `degraded` array
    (§33.2) with reason `drift_after_adopt`. **No compensation is attempted**: rolling the baseline back
    would discard a committed adoption on the strength of a race, and overwriting the file would
    destroy the external writer's bytes, which is precisely the thing managed mode must never do
    without an explicit act. The operator is told they now own a configuration that has already drifted,
    and the ordinary §14 loop resolves it.
-3. **The post-fence re-read fails on I/O.** The adoption still succeeded. Drift assessment is
+3. **The post-commit re-read fails on I/O.** The adoption still succeeded. Drift assessment is
    **deferred to the next assessment point** (§12's four triggers) rather than guessed at, and the
    response carries a `degraded` entry with reason `drift_unknown`.
 
@@ -2231,7 +2348,7 @@ namespace adds it.
 | `not_found` | 404 | the addressed resource does not exist | `kind`, `id` |
 | `config_authority_read_only` | 409 | file-owned; the server does not write configuration | `config_authority`, `config_authority_source` |
 | `stale_base_version` | 409 | CAS failure | `base_version`, `current_version` |
-| `drift_detected` | 409 | managed mode, external write present | `baseline_version`, `disk_version`, `detected_at` |
+| `drift_detected` | 409 | managed mode, external write present — including an adoption whose bytes changed under it at §14.2's fence | `baseline_version`, `disk_version`, `detected_at`, and `observed_digest` when the request bound one |
 | `pending_restart_conflict` | 409 | a staged restart blocks this operation | `pending_restart` |
 | `restart_required` | 409 | the candidate cannot be hot-applied | `subsystems[]`, `can_stage` |
 | `admin_reachability_confirmation_required` | 409 | the change would alter admin reachability | `changes[]` |
@@ -2570,7 +2687,7 @@ An external client must not have to infer capability from an error.
 | `config_authority`, `config_authority_source` | §9.1 |
 | `boot_id` | the process's apply-instance identity; a change means the terminal ledger and every idempotency binding were discarded (§27.2) |
 | `ledger_retention` | `{max_records: 512, ttl_seconds: 3600}`, scoped to `boot_id` |
-| `exit_codes` | the CLI contract table (§33), so `jul capabilities` and the API agree |
+| `exit_codes` | the CLI contract table (§33), so `jul capabilities` and the API agree. Each entry carries the **full** meaning, including exit 5's second sense — conflict *or* uncertain state after a failed restoration |
 
 Two boundaries:
 
@@ -2722,7 +2839,7 @@ the API report the same code for the same condition.
 | 2 | usage error: bad flags, missing argument, disabled admin *(unchanged)* |
 | 3 | success, **staged** for the next restart |
 | 4 | success with a **degraded outcome** — applied degraded, or committed with a non-empty `degraded` array (§33.2) |
-| 5 | conflict: stale `base_version`, drift, or a pending restart |
+| 5 | conflict, **or state left uncertain by a failed restoration** — the operation could not proceed against current state, or it failed and the previous configuration could not be put back (§33.1). In both cases re-reading state is required before retrying |
 | 6 | authority denial: the server is file-owned |
 | 7 | authentication or authorization failure |
 | 8 | connectivity or TLS failure |
@@ -2865,7 +2982,7 @@ compatibility surface, appears in `jul capabilities --json`, and is contract-tes
 | Stale `base_version` | unchanged | unchanged | unchanged | `409 stale_base_version` with `current_version`; re-plan |
 | Duplicate `route_id` in a candidate | unchanged | unchanged | unchanged | `validation_failed` naming both locations; nothing written |
 | Persistence fails **before** the configuration rename | unchanged | unchanged | unchanged | `503 storage_unavailable`; `atomicfile` leaves the previous complete file (§11.2) |
-| Persistence fails **after** the rename — the snapshot or marker write | **committed** | new version | stale until repaired | **success** with `baseline_error`; retried once, then `managed_inconsistent`/`baseline_unwritable`; the next start rolls forward (§11.2) |
+| Persistence fails **after** the rename — the snapshot or marker write | **committed** | new version | stale until repaired | **the operation's own terminal outcome, unchanged**, plus `baseline_error` (§33.2) — so a failed apply stays `not_applied`; retried once, then `managed_inconsistent`/`baseline_unwritable`; the next start rolls forward (§11.2) |
 | Apply committed, reload `not_applied` | previous bytes restored | previous version | previous | existing Phase 5 restoration |
 | Restoration itself fails | ambiguous — candidate on disk | previous version | ambiguous | `recovery` history snapshot written; `managed_inconsistent`; managed writes refused until resolved |
 | Restart with a staged candidate | staged bytes | new version after restart | as staged | existing planned-restart reconciliation |
@@ -3187,14 +3304,27 @@ Grouped by the decision each pins.
   nothing on disk changed. The reload is enqueued at T-write's commit point and does not wait for the
   baseline.
 - **§11.2 transaction primitives:** T-mark writes **no configuration**, performs **no reload**, and
-  **never writes a `preparing` marker** — the regression test for the defect this model was corrected
-  for is that a T-mark whose snapshot write fails, and which therefore returned failure, must **not**
-  be committed by a later recovery pass. A crash between T-mark's marker and its snapshot resolves
-  `managed_clean` by repair. T-write's rewind arm leaves the baseline naming the restored bytes, and
-  a crash mid-window must be recoverable **from the snapshot alone**, with the process holding no
-  in-memory copy.
-- **§14.2 the digest fence:** an external write ordered **before** the fence yields `409` and changes
-  nothing; ordered **after** it, the adoption **succeeds** and the same response reports
+  **never writes a `preparing` marker**. The regression test for the defect this model was corrected
+  for is that **a T-mark whose *marker* write fails returns failure and leaves nothing for a later
+  recovery pass to commit** — the prior marker and snapshot are both intact and the state is unchanged.
+  A T-mark whose *snapshot* write fails is a different case and must **succeed** with `baseline_error`,
+  because its marker already committed; an earlier draft asserted both of these of the same write and
+  could not have had both. A crash between T-mark's marker and its snapshot resolves `managed_clean`
+  by repair. T-write's rewind arm leaves the baseline naming the restored bytes, and a crash mid-window
+  must be recoverable **from the snapshot alone**, with the process holding no in-memory copy.
+- **§11.2.0.1 the baseline is durable before the next apply is admitted:** a test that pauses apply A
+  immediately before its baseline terminalization and submits apply B concurrently must find B
+  **refused as in-flight**, not admitted — and must never produce a configuration whose baseline names
+  a different revision. This is the deterministic falsification of the interleaving that made
+  `completeManagedApply` the wrong home for baseline writes.
+- **§11.2.4 adopt-and-stage:** `.bak` after an adopt-and-stage contains **the previous serving bytes
+  *P*, taken from the baseline snapshot, never the external bytes *I* already on disk** — asserted by
+  content, and paired with a discard that must restore *P* and actually change the file rather than
+  being a silent no-op. The baseline snapshot is not overwritten until `.bak(P)` and the `staged`
+  marker both exist; an injected I/O failure at each of the six ordered writes leaves *P* readable
+  from disk at every instant.
+- **§14.2 the digest fence:** an external write ordered **before** the fence yields `409 drift_detected`
+  and changes nothing; ordered **after** it, the adoption **succeeds** and the same response reports
   `drift_after_adopt` — no compensating write to the configuration file is issued, which is asserted
   by digest, not by inspection; a post-fence re-read I/O failure yields `drift_unknown` and defers
   assessment. Every repair and snapshot write uses the **verified buffer**, never a re-read of the
@@ -3320,8 +3450,11 @@ Grouped by the decision each pins.
    `PlannedRestartStore`'s atomic-write, `0o600`, two-phase-marker and crash-recovery discipline. The
    marker holds digests and versions; the snapshot holds the exact last-managed bytes, which §14
    requires, and **advances at terminalization rather than at commit** so it doubles as the durable
-   rollback material for the reload window (§11.2.0). In `file_owned` mode no configuration bytes and
-   no live marker survive; a secret-free `closed` tombstone remains as the epoch boundary.
+   rollback material for the reload window (§11.2.0). **The coordinator gains one ordering constraint:
+   the baseline write completes before `inFlightState` is cleared**, so the next apply is never
+   admitted while the previous one's baseline is still pending (§11.2.0.1). In `file_owned` mode no
+   configuration bytes and no live marker survive; a secret-free `closed` tombstone remains as the
+   epoch boundary.
    `managed_unadopted` joins the state vocabulary and `managed_inconsistent` gains a bounded `reason`.
 6. **`external_divergence` is generalized** from "startup-bound subsystems differ" to §12's digest
    comparison, and the existing `PlannedRestartStateEnum` is reused rather than duplicated.
