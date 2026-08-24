@@ -27,6 +27,11 @@ references.
   `Recorder` is on the global chain unconditionally, so this affects every listener, not only routes
   with the cache or compression enabled. Nothing is cached from such a response, so no corrupt entry
   is stored.
+- **A cache hit replays a stale `X-Request-ID` (#332):** `RequestID` sets the response header before
+  the router runs, so it is in the map the cache snapshots at header commit and is stored with the
+  entry. `Cache.serve` merges stored headers with `Add`, so a hit carries two `X-Request-ID` values —
+  the current request's and the one belonging to whichever request populated the entry. Correlation
+  by request id is unreliable on any `cache = true` route until this is fixed.
 
 ---
 

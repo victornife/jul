@@ -23,6 +23,7 @@
 | 2026-08-21 | Initial record. |
 | 2026-08-21 | §2/§9: `cors.enabled` widens a `methods` predicate for preflights; header predicates get a lint warning instead of a hidden exemption. Found by adversarial review — a CORS route with a method predicate could not be selected for its own preflight. |
 | 2026-08-24 | External review. Seven substantive changes: §8 rejects `Vary` operations on cached locations (an outer-layer `Vary` cannot protect Jul's own cache); §8a fixes CORS/`response_headers` ownership and order; §10 adds a coarse pre-authentication guard for approved preflights and drops two weak justifications; §9 makes the credential-free wildcard unconditional so suppressing `Vary: Origin` is actually sound; §14 demotes `match_ordinal` to a CAS-bound selector and moves internal scopes to a predicate fingerprint; §9/§16 complete the CORS and field-validation bounds; §10 specifies `1xx` handling. Corrected three factual errors: `CONNECT` *is* routed to Go handlers, RFC 9110's HEAD requirement is in §9.1, and the performance argument against 405 was wrong. |
+| 2026-08-24 | Second review round. §11's invariant was **falsified** and is narrowed to the commit boundary, with the stronger form required from #332: `RequestID` pre-sets `X-Request-ID` before `next`, so a cache hit replays a stale id beside the current one. §12 renamed to *HTTP semantic parity* with a transport/action matrix, because the previous blanket claim was untrue for WebSocket, native gRPC and the L4 stream proxy. §10's WAF justification was **factually wrong** — Coraza inspects URI, query, headers, method and client address without a body — so the preflight terminator now runs the WAF as well as the rate guard, restructured as decide-then-guard so nothing is evaluated twice. §9 states CORS defaults, empty-list semantics and `enabled = false` validation. §15's unreachable-route rule is reduced to the provable cases. §10's diagram had `BodyLimit` outermost, contradicting this record's own *Existing architecture* table. |
 
 ## Context
 
@@ -448,11 +449,27 @@ Therefore:
 - `set` and `remove` on `Vary` remain rejected everywhere, because compression and CORS co-own the
   field.
 
+**The condition is the location's own `cache = true`, not the effective cache state.** A location is
+only really cached when the global `[cache]` block is also enabled, but validation keys on the
+location's declaration alone. Keying on the effective state would mean toggling a distant block
+retroactively invalidates a location the operator did not touch, and — worse — that a configuration
+which validates today starts leaking the day someone enables the global cache. Keying on the
+declaration fails at the moment the operator writes the contradiction, which is the only moment they
+can act on it.
+
 Making this conditional on `cache` means enabling the cache later fails the reload loudly instead of
 turning a working route into a leaking one. That is the correct direction for the failure to point.
 
-Expressing genuine upstream variance to Jul's own cache needs a cache-key contract consumed *inside*
-the cache. That is deferred (§17) rather than smuggled in through a header operation.
+**What an operator with genuine variance does instead.** Jul's cache *does* honour a `Vary` that
+arrives on the upstream response: it is inside the §11 snapshot, so `buildEntry` records it, and
+`variantKey`/`matchesVary` key on it exactly as RFC 9110 requires. The supported answer to "my
+backend varies by `X-Tenant`" is therefore *the correct one* — make the backend say so — and it needs
+no feature from this record. What is rejected is only the case where the operator asserts variance
+Jul's own store did not observe. The reference documentation must state this at the point of use,
+because "rejected" without "here is what to do instead" is a bad error message.
+
+Expressing variance to Jul's own cache *without* the upstream's cooperation needs a cache-key contract
+consumed inside the cache. That is deferred (§17) rather than smuggled in through a header operation.
 
 ### 8b. CORS owns every `Access-Control-*` field
 
@@ -471,6 +488,12 @@ When `cors.enabled = true`:
   set. An upstream that also implements CORS would otherwise produce two `Access-Control-Allow-Origin`
   field lines, which the Fetch standard treats as a failure — so a working upstream plus a working Jul
   policy would compose into a broken one;
+- **an upstream `Vary: Origin` is *not* removed**, even though it makes Jul's cache create one variant
+  per origin against the 64-variant ceiling. Stripping it is the tempting optimization and it is the
+  §8a leak with the sign flipped: if the upstream's *body* genuinely varies by origin, removing its
+  `Vary` stops Jul keying on something the stored representation actually depends on. The variant cost
+  is accepted; correctness is not negotiable against it. Jul strips the *grant* headers, which it is
+  replacing, and never the *variance* declaration, which it did not author;
 - **generic `response_headers` operations do not apply to a Jul-generated preflight response.** Its
   header set is exactly the CORS set of §9 plus `Vary`, nothing else. A preflight is a protocol
   artefact Jul manufactures, not a representation of the operator's resource; keeping it closed is
@@ -548,6 +571,36 @@ default. A configured value must be a whole number of seconds — a sub-second d
 `"500ms"` is a validation error rather than a silent truncation — non-negative, and at most 24 hours,
 which is the ceiling every major browser clamps to. `max_age = "0s"` is legal and emits `0`, which
 means "do not cache this preflight". The header is serialized as an integer count of seconds.
+
+**Defaults, empties and `enabled = false`.** Each of these has exactly one answer, because "unstated"
+is how a security feature acquires two:
+
+| Field | Omitted | Explicitly `[]` | Emitted when the effective list is empty |
+| --- | --- | --- | --- |
+| `allowed_origins` | **validation error** when `enabled = true` | validation error | n/a |
+| `allowed_methods` | defaults to `["GET", "HEAD", "POST"]` | validation error | n/a |
+| `allowed_headers` | defaults to `[]` | validation error | header **omitted**, not emitted empty |
+| `exposed_headers` | defaults to `[]` | validation error | header **omitted**, not emitted empty |
+
+- `allowed_origins` has no default. A CORS block that allows nothing is a mistake, and the way to
+  turn CORS off is `enabled = false`, not an empty allow-list that silently denies every request
+  while looking configured.
+- `allowed_methods` defaults to the CORS-safelisted methods. Those are the methods a browser will
+  send *without* a preflight at all, so defaulting to them makes an operator who writes only
+  `allowed_origins` get the behaviour they expected rather than a policy that denies every preflight.
+  Defaulting to empty — deny everything — would be defensible in isolation and is rejected because it
+  makes the minimal configuration silently useless.
+- An explicit `[]` is a **validation error** on all four, for the same reason `match.methods = []` is
+  (§1): a list that can never match is a mistake, not a way to express a policy.
+- `allowed_headers` empty means only the CORS-safelisted request headers pass preflight approval, and
+  `Access-Control-Allow-Headers` is omitted from the response rather than emitted with an empty
+  value. Jul never reflects `Access-Control-Request-Headers` back: reflecting is how a bounded policy
+  becomes an unbounded one.
+- **`enabled = false` does not skip validation.** Every field is validated exactly as if the block
+  were enabled, and the block is inert at runtime. This is the same principle as §8a's cached-location
+  rule: an operator who flips `enabled = true` must not discover then that their configuration was
+  never valid. A populated block with `enabled = false` is accepted and lint-warned, so a
+  deliberately-parked policy is possible and a forgotten one is visible.
 
 **Two questions, kept separate.** Whether Jul *processes* the request and whether Jul *tells the
 browser the response may be read* are different questions. CORS is a browser policy, not server
@@ -629,7 +682,7 @@ Private Network Access (`Access-Control-Request-Private-Network`) is out of scop
 
 ### 10. Execution order
 
-The per-location chain gains three positions. Nothing existing moves.
+The per-location chain gains two positions. Nothing existing moves.
 
 ```
 request
@@ -639,27 +692,35 @@ request
   Recover
   Compression
   router: host -> location (§6)     <- method/header/query predicates evaluated here
-    BodyLimit
     >> response policy + CORS response headers        (NEW, outermost per-location)
     plugins
     ClientCert
-    >> coarse preflight guard                         (NEW, preflight requests only)
-    >> CORS preflight termination                     (NEW)
+    >> CORS preflight termination                     (NEW: decide, then guard, then 204)
     Auth
     RateLimit
     WAF
+    BodyLimit
     cache
     action (static / proxy / gRPC / transcode / fastcgi / redirect / return / deny)
 ```
 
+`BodyLimit` is inside the location modifiers, not outside them: `buildServerRoute` applies it to the
+action and the modifier chain then wraps the result, deliberately, so rate limiting runs before the
+request body is read. An earlier draft of this diagram placed it outermost, which contradicted this
+record's own *Existing architecture* table. The correction matters for exactly one decision, and it
+falls the right way — see the 413 in the list below.
+
 **Response policy is the outermost per-location layer** so that it decorates every response the
-location can produce: an auth 401, a rate-limit 429, a WAF 403, an upstream 502, a cache hit, a
-static 404, a redirect. It is implemented as a `ResponseWriter` wrapper that applies its operations
-inside `WriteHeader`, immediately before delegating outward — never by pre-setting headers before
-calling `next`, which would put them in the shared header map where the cache would capture them
-(§11). It is composed through `respwriter.Wrap`, so `Flusher`, `Hijacker`, `Pusher`, `ReaderFrom` and
-`Unwrap` remain exactly as truthful as they are without it. After a hijack it is inert. A location
-with neither `response_headers` nor `cors` installs no wrapper at all.
+location can produce: an auth 401, a rate-limit 429, a WAF 403, a **BodyLimit 413**, an upstream 502,
+a cache hit, a static 404, a redirect. The 413 is worth naming: a cross-origin upload that exceeds
+`client_max_body_size` is precisely a case where the browser must be able to read the error, and it
+is readable only because the policy wrapper sits outside `BodyLimit`. It is implemented as a
+`ResponseWriter` wrapper that applies its operations inside `WriteHeader`, immediately before
+delegating outward — never by pre-setting headers before calling `next`, which would put them in the
+shared header map where the cache would capture them (§11). It is composed through `respwriter.Wrap`,
+so `Flusher`, `Hijacker`, `Pusher`, `ReaderFrom` and `Unwrap` remain exactly as truthful as they are
+without it. After a hijack it is inert. A location with neither `response_headers` nor `cors`
+installs no wrapper at all.
 
 **Informational responses do not trigger the policy.** Go permits any number of `1xx` calls to
 `WriteHeader` followed by exactly one final status. The wrapper passes `1xx` straight through without
@@ -680,32 +741,54 @@ authenticate first. Because `Auth` currently wraps `RateLimit` and the WAF — d
 `jwt:<claim>` rate-limit keys and identity-aware WAF rules work — terminating outside `Auth` would
 also skip those two, and an earlier draft simply accepted that. It should not have. `Origin` is
 attacker-controlled outside a browser and permitted frontend origins are normally public, so "the
-attacker must know an allowed origin" is not a control. The two remaining pieces are treated
-differently, because they are not equivalent:
+attacker must know an allowed origin" is not a control.
 
-- **Rate limiting is restored, at the coarsest useful granularity.** When a location has
-  `cors.enabled = true` **and** an effective rate-limit policy — its own `[rate_limit]` or the global
-  one — a second instance of that same policy is installed immediately outside preflight
-  termination, keyed by the ADR 0016 canonical client address, in its own scope. It runs **only** for
-  requests that are CORS preflights, so no other request pays for it, and it shares no bucket with
-  the identity-aware limiter that still guards actual requests after authentication. There is no new
-  configuration surface: the operator's own rate settings govern it. A location with no rate-limit
-  policy at all gets no guard, which is consistent — a preflight is no cheaper to abuse there than
-  any other request on a route the operator chose not to limit.
-- **The WAF is not restored, and does not need to be.** A preflight has no body and exactly three
-  request fields Jul itself parses, validates and bounds (§9). There is nothing left for a rule to
-  inspect. Skipping it removes an inspection surface that is already empty, which is a different
-  claim from "the risk is acceptable".
+**The terminator therefore decides first and guards second**, in one layer rather than two:
 
-The bounded-response argument now holds without qualification, because §8b excludes generic
-`response_headers` operations from a generated preflight: the reply is exactly the CORS header set
-over an empty body, computed from three request fields, with no upstream contact and no cache
-interaction. Listener-level protections (`client_max_body_size`, `max_header_bytes`, read timeouts)
-still apply. ADR 0017's admission control was cited in an earlier draft and is **withdrawn**: it
-bounds work sent to an *upstream*, and an approved preflight never reaches one.
+```
+if the request is not a preflight            -> pass through untouched
+approval := evaluate CORS policy             -> pure, three header fields, no side effects
+if not approved                              -> pass through untouched; the ordinary chain
+                                                (Auth, RateLimit, WAF) handles it as any OPTIONS
+if approved:
+    coarse rate-limit check                  -> 429 on reject
+    WAF check                                -> the firewall's own verdict on reject
+    emit 204 with the CORS header set
+```
+
+Deciding before guarding is what keeps the guards from running twice: a denied preflight is guarded
+by the ordinary chain, an approved one by the terminator, never both. Authentication is the only
+thing genuinely skipped.
+
+- **Rate limiting.** When the location has an effective rate-limit policy — its own `[rate_limit]` or
+  the global one — the terminator evaluates a second instance of that same policy, in its own scope,
+  for approved preflights only. No other request pays for it, and it shares no bucket with the
+  identity-aware limiter that still guards actual requests after authentication. There is no new
+  configuration surface: the operator's own rate and burst govern it.
+
+  **The guard overrides the policy's `key` to the canonical client address**, unconditionally. A
+  policy keyed `jwt:<claim>` or `header:<name>` cannot be evaluated here — authentication has not run
+  and a preflight carries neither — and silently falling back to an unkeyed global bucket would make
+  one client's preflights limit everyone's. Reusing a per-user rate as a per-client-address rate is a
+  change of meaning, and a deliberate one: it is the conservative direction, and it applies only to
+  preflights. The guard reports through the existing rate-limit counter with the existing `ip` kind;
+  no new metric and no new label value is introduced.
+
+  A location with no rate-limit policy at all gets no guard, which is consistent — a preflight is no
+  cheaper to abuse there than any other request on a route the operator chose not to limit.
+
+- **The WAF also runs**, reusing the location's already-compiled firewall from `wafByScope`. An
+  earlier draft skipped it on the claim that "a preflight's entire inspectable surface is three
+  fields Jul has already parsed and bounded". **That claim was wrong and is withdrawn.** A preflight
+  is a complete HTTP request: it carries the full request target, the query string, every other
+  request header, the method and the canonical client address, and Coraza's request-phase rules
+  operate on exactly those without ever needing a body. Skipping the WAF would have created a
+  request shape that reaches a Jul-generated response having passed no rule at all — and an attacker
+  chooses the shape. Running it costs a request-phase evaluation on approved preflights only, which
+  is what the operator asked for by enabling the WAF on that route.
 
 Moving `Auth` inside `RateLimit`/`WAF` remains rejected: it would break two documented, load-bearing
-behaviours to solve a problem the coarse guard solves without moving anything.
+behaviours to solve a problem the terminator's own guards already solve without moving anything.
 
 **Responses produced outside route selection carry no location policy**, by construction and by
 design: the router's own 404, the HTTP→HTTPS redirect, the ACME challenge handler, and the 500 that
@@ -731,9 +814,22 @@ defect described in the Context, and a response policy would inherit it exactly.
 
 The consequences of rule 2 are what this record wants:
 
-- A stored entry contains the upstream/origin representation and nothing Jul's own outer layers
-  added. No `Access-Control-Allow-Origin`, no operator header operations, no `Content-Encoding` that
-  Jul applied.
+- A stored entry contains the origin representation and nothing an outer layer added **after the
+  handler committed its response**. No `Access-Control-Allow-Origin`, no operator header operations,
+  no `Content-Encoding` that Jul applied.
+- **The guarantee stops at the commit boundary, and this record says so rather than rounding up.**
+  A layer outside the cache that writes a response header *before* calling `next` is already in the
+  shared map when the snapshot is taken, so the snapshot cannot exclude it. That class is not
+  hypothetical: `RequestID` does exactly this, so a hit is served a stale `X-Request-ID` beside the
+  current one (#332), and the cache does it to itself with `X-Cache`, which is why
+  `buildEntry`'s `stored.Del("X-Cache")` is load-bearing rather than vestigial. **#332 closes the
+  class constructively** — store the multiset difference between the commit snapshot and the header
+  map as it stood when the cache handler was entered, so only what the handler itself contributed is
+  stored, with no denylist to keep in step.
+- **Nothing in §8, §9 or §10 is a member of that class.** The response-policy and CORS wrapper applies
+  at commit, never before `next` (§10), which is the same rule stated from the other side. This is
+  why the ordering rule in §10 is a contract and not a style preference: it is what keeps the
+  per-origin CORS argument true.
 - **No policy generation stamp is needed anywhere in the cache.** A gob-encoded entry rehydrated from
   disk after a restart, written under a configuration nobody can inspect any more, cannot carry a
   CORS or operator header because it never contained one. This is why the simplest architecture is
@@ -741,43 +837,71 @@ The consequences of rule 2 are what this record wants:
   cache on policy change — requires the cache to understand policy identity, survives neither disk
   persistence nor a config edit made while the process was stopped, and would still be wrong for the
   compression case.
-- **Jul's cache does not vary by `Origin`, and must not.** `Vary: Origin` is appended outside the
-  cache, so it is not stored, so it does not create variants. That is correct rather than merely
-  convenient, and §8a says why: the *stored representation* is origin-independent, because CORS
-  introduces origin-variance at emission and nothing before the cache did. One entry serves every
-  origin, and the per-request CORS layer decorates each hit. Varying by `Origin` would multiply every
-  cached resource by the tenant count against a 64-variant ceiling, to store headers that are cheaper
-  to recompute than to look up.
-- **The same reasoning is why §8a forbids operator `Vary` operations on a cached location.** Rule 1's
-  safety is conditional on every outer layer announcing only variance it introduced itself. A generic
-  `Vary: X-Tenant` breaks that condition, and it is the one case where the outer layer is describing
-  the *stored body* rather than its own output. §8 rejects it at validation so this invariant has no
-  exception to reason about.
+- **Jul-generated CORS variance creates no internal variants; an upstream `Vary: Origin` remains
+  authoritative and still does.** `Vary: Origin` that *Jul* appends is added outside the cache, is not
+  stored, and therefore creates no variants — correctly, because the stored representation is
+  origin-independent when CORS introduced the variance at emission (§8a). A `Vary: Origin` that
+  arrived *on the upstream response* is inside the snapshot, is stored, and does create one variant
+  per origin against the 64-variant ceiling. That cost is accepted: the upstream is asserting that its
+  own body varies, and §8b therefore strips upstream `Access-Control-*` grants while never touching
+  upstream `Vary`.
 - Approved preflights never reach the cache: they terminate above it, and `OPTIONS` is not a stored
   method in any case.
 - Cache invalidation, `Vary` stubs, variant membership and the disk store are otherwise untouched.
 
-**Invariant, testable as stated:** *no header written by a layer outside the cache handler may appear
-in a stored cache entry.*
+**Invariant, as the implementation can state it today:** *no header written by a layer outside the
+cache handler **after the handler commits its response** may appear in a stored cache entry.*
 
-### 12. Protocol parity
+**Invariant this record requires, and #332 delivers:** *a stored cache entry contains only the header
+field lines the handler itself contributed.* The second subsumes the first and is the one §8's and
+§9's reasoning should be read against; the first is what is true on `main` today.
 
-Predicates, response policy and CORS are properties of a *location*, so they apply identically on
-HTTP/1.1, h2c, HTTP/2 and HTTP/3, and to every action. There is exactly one matcher and exactly one
-response-policy wrapper. Specifically:
+### 12. HTTP semantic parity — not capability parity
 
-- **WebSocket upgrade.** Response-header operations apply to the 101 response like any other, which
+Predicates, response policy and CORS are properties of a *location*, so there is exactly one matcher
+and exactly one response-policy wrapper, and their semantics never differ by transport. What differs
+is which actions a given inbound transport can carry at all, and an earlier draft of this section
+claimed "identically on HTTP/1.1, h2c, HTTP/2 and HTTP/3, and to every action", which is not true and
+would have produced a test matrix full of impossible combinations.
+
+The precise claim:
+
+> **Wherever an action is supported on an inbound transport, this record's matching and policy
+> semantics are identical on that transport. Where the action is unsupported, this record changes
+> nothing about that.**
+
+| Inbound | Predicates | `response_headers` | CORS | Notes |
+| --- | --- | --- | --- | --- |
+| HTTP/1.1 | yes | yes | yes | — |
+| h2c / HTTP/2 | yes | yes | yes | — |
+| HTTP/3 | yes | yes | yes | — |
+| WebSocket upgrade | yes (it is an HTTP request) | on the 101 only | **no** | HTTP/1.1 and HTTP/2 only; already rejected over HTTP/3 (`docs/http3.md`) |
+| Native gRPC | yes | yes, on the HTTP response headers | accepted, lint-warned | end-to-end **HTTP/2 only** by design (`docs/grpc-proxy.md`) |
+| gRPC transcoding | yes | yes | yes | the transcoded response is an ordinary HTTP response |
+| L4 `[[stream]]` TCP/UDP | **none** | **none** | **none** | out of scope — see below |
+
+- **WebSocket upgrade.** Response-header operations apply to the 101 like any other response, which
   is safe because `Connection` and `Upgrade` are rejected at validation, so the handshake cannot be
-  broken by configuration. After the hijack the wrapper is inert. CORS headers are not emitted on a
-  101: the WebSocket handshake has its own origin model and `Access-Control-*` means nothing on it.
-- **Native gRPC passthrough.** Predicates apply (the method is always `POST`; `content-type`,
-  `te` and gRPC metadata are ordinary header fields). Response-header operations apply to the HTTP
-  response headers. **gRPC trailers are not touched** — `Trailer` is a rejected name and trailer
-  policy is out of scope. Mutating `Content-Type` on a gRPC location produces a lint warning because
-  it will break clients.
-- **gRPC transcoding.** Identical treatment; the transcoded HTTP response is an ordinary response.
-- **CORS on a native gRPC location** is accepted but lint-warned: gRPC-Web is not implemented, so the
+  broken by configuration. After the hijack the wrapper is inert. CORS headers are **not** emitted on
+  a 101: the WebSocket handshake has its own origin model and `Access-Control-*` means nothing on it.
+  Jul rejects WebSocket upgrade over HTTP/3 today; this record neither changes that nor depends on
+  it.
+- **Native gRPC passthrough.** Predicates apply — the method is always `POST`, and `content-type`,
+  `te` and gRPC metadata are ordinary header fields. Response-header operations apply to the HTTP
+  response headers. **gRPC trailers are not touched**: `Trailer` is a rejected name and trailer policy
+  is out of scope, so `grpc-status` and `grpc-message` are untouched end to end. Mutating
+  `Content-Type` on a gRPC location produces a lint warning because it will break clients. `cors` on
+  a native gRPC location is accepted but lint-warned: gRPC-Web is not implemented, so the
   configuration is almost certainly not doing what the operator expects.
+- **The L4 stream proxy is explicitly out of scope.** `[[stream]]` routes TCP and UDP by listener,
+  not by request: there is no method, no header, no query and no response header to operate on,
+  because there is no HTTP message. This record adds nothing there and no part of it should be read
+  as implying otherwise. Stating it matters because "routing" is the same word in both subsystems and
+  the omission would otherwise look like an oversight rather than a boundary.
+
+**Consequence for #145 and #146:** the required cross-protocol tests use a *supported*
+transport/action matrix. A test asserting CORS behaviour on a WebSocket 101, or predicates on an L4
+stream route, is asserting something this record does not claim.
 
 ### 13. Lifecycle
 
@@ -872,11 +996,26 @@ operator meant:
   `cors.enabled` location that also carries header predicates (§9); an `Access-Control-*` operation
   on a location where `cors.enabled = false` (§8b); an `add` on `Vary` at a location without the
   cache, noting it reaches downstream caches only (§8a).
-- Warning: **unreachable routes.** The existing duplicate-match rule extends to predicates. Two
-  locations with the same `(type, path)` are duplicates only when their normalized predicate sets are
-  equal. A later location is unreachable when an earlier location with the same `(type, path)` has a
-  predicate set that is a *subset* of its own — including the empty set, which is the common case of
-  a predicate-free route declared above a predicated one.
+- Warning: **unreachable routes, reported only where shadowing is provable.** The existing
+  duplicate-match rule extends to predicates, conservatively. An earlier draft said "a later location
+  is unreachable when an earlier location's predicate set is a subset of its own", which is not
+  sound: `methods` is an OR-set, so a *subset* of methods shadows nothing, and regex implication is
+  undecidable in general. A later location with the same `(type, path)` is reported unreachable only
+  when **every** predicate of the earlier location provably subsumes the later one's, by one of these
+  rules and no other:
+
+  | Case | Provable when |
+  | --- | --- |
+  | Earlier has no predicates at all | always — it matches everything the later one could |
+  | Structural equality | the two normalized predicate sets are identical (this is the duplicate case) |
+  | Methods | the earlier method set **contains** the later's, or the earlier omits `methods` entirely |
+  | Header/query `present` vs anything | the earlier has `present` on name *N* and the later has any predicate on *N* |
+  | Header/query `exact` | both are `exact` on the same name with byte-equal values |
+  | Header regex | both are `regex` on the same name with byte-equal patterns |
+
+  Anything else — two different regexes, a regex against an exact, disjoint names — is **not
+  reported**. A false "this route is unreachable" on a route that is in fact reachable is worse than
+  silence: an operator who deletes it loses traffic. The rule is deliberately incomplete and says so.
 
 The distinction is the existing one: Jul does not reject a valid HTTP construct for being unusual,
 but it never lets an unusual one be silent.
@@ -976,7 +1115,9 @@ approximated silently.
 | `max_age` grammar and 24h ceiling (§9) | Two-way door upward | raising the ceiling is additive | low |
 | Response policy outermost per-location (§10) | Expensive two-way door | which responses carry policy is observable | breaking for error-path headers |
 | `1xx` passes through without applying policy (§10) | Two-way door | no sane alternative; the other behaviour is #331 | local |
-| Preflight terminated outside `Auth`, guarded by a coarse pre-auth limiter (§10) | **One-way door** | durable security contract | tightening breaks credentialed CORS on authenticated routes |
+| Preflight terminated outside `Auth`, guarded by its own rate and WAF passes (§10) | **One-way door** | durable security contract | tightening breaks credentialed CORS on authenticated routes |
+| CORS defaults: no `allowed_origins` default, safelisted `allowed_methods`, `[]` rejected (§9) | **One-way door** | changes what a deployed minimal configuration does | breaking |
+| HTTP semantic parity scoped to supported transport/action pairs (§12) | Two-way door | a description of existing capability, not a new constraint | none |
 | Cache stores the origin representation; snapshot at commit (§11) | Two-way door in mechanism, **one-way in guarantee** | the *guarantee* is a security contract; the snapshot is private | mechanism: local refactor. Guarantee: not reversible |
 | `match_ordinal` as a CAS-bound **selector**, never an identity (§14) | **One-way door** on the field, two-way on the policy | public API field; the CAS requirement can only be relaxed, not added, later | additive now |
 | Internal scopes keyed by predicate fingerprint (§14) | Expensive two-way door | one-time bucket reset on upgrade | documented changelog entry |
@@ -1008,7 +1149,8 @@ nobody noticed until review.
 4. **Credentialed CORS cannot emit `*`.** Rejected at validation, not repaired at runtime (§9).
 5. **A cached response cannot carry another origin's CORS grant.** §11 makes it unrepresentable
    rather than merely unlikely, including for entries rehydrated from disk under a configuration that
-   no longer exists.
+   no longer exists. The guarantee holds at the commit boundary today and unconditionally once #332
+   lands; §11 states both forms rather than the flattering one.
 6. **An operator cannot announce a variance Jul's own cache does not honour.** §8a rejects `Vary`
    operations on a cached location, which closes a cross-tenant leak in which Jul serves one tenant's
    stored body while truthfully telling downstream caches the response varies.
@@ -1020,18 +1162,19 @@ nobody noticed until review.
    it cross-origin. Under the wildcard it is omitted, which is sound *only* because §9 makes that
    policy unconditional — the two rules are load-bearing for each other and must not be changed
    independently.
-9. **An approved preflight is still rate-limited.** §10's coarse guard applies the location's own
-   rate policy, keyed by canonical client address, before termination. Authentication is skipped
-   because the Fetch standard makes authenticating a preflight impossible, not because it was
-   convenient; the WAF is skipped because a preflight's entire inspectable surface is three fields
-   Jul has already parsed and bounded.
+9. **An approved preflight is still rate-limited and still passes the WAF.** §10's terminator decides
+   approval first, then applies the location's own rate policy keyed by canonical client address and
+   the location's already-compiled firewall, before emitting the 204. Authentication is the only
+   layer skipped, and only because the Fetch standard makes authenticating a preflight impossible.
+   A denied preflight is guarded by the ordinary chain instead, so neither shape reaches a
+   Jul-generated response unguarded and nothing is evaluated twice.
 10. **Route topology is not disclosed.** No 405, no `Allow`, no CORS-specific rejection status for a
     denied preflight (§7, §9).
 11. **No request value becomes a metric label.** Predicate values, header values, query values and
     origins never appear in telemetry labels; this is the existing rule and it is not relaxed.
 
-**Residual exposure, stated plainly:** an approved preflight skips per-location authentication and
-the WAF, for the reasons in item 9. It does not skip rate limiting.
+**Residual exposure, stated plainly:** an approved preflight skips per-location authentication, for
+the reason in item 9. It skips nothing else.
 
 ## Performance
 
@@ -1107,13 +1250,17 @@ required by it.
 - **§8 response headers:** add/set/remove and their ordering; multi-value; empty value vs omitted;
   every rejected name; a value carrying a C0 control or DEL rejected, not only CR/LF/NUL; the 8 KiB
   per-response byte bound.
-- **§8a `Vary`:** any `Vary` operation on a `cache = true` location is rejected; `add` is accepted
-  without the cache; `set`/`remove` rejected either way; enabling `cache` on a location that already
-  has a `Vary` operation fails the reload rather than silently changing behaviour.
+- **§8a `Vary`:** any `Vary` operation on a location declaring `cache = true` is rejected — including
+  when the global `[cache]` block is disabled, so the rejection does not depend on distant state;
+  `add` is accepted without the cache; `set`/`remove` rejected either way; enabling `cache` on a
+  location that already has a `Vary` operation fails the reload rather than silently changing
+  behaviour; an upstream-supplied `Vary` still produces cache variants, which is the supported way to
+  express real variance.
 - **§8b ownership:** an `Access-Control-*` operation is rejected when `cors.enabled = true` and
   lint-warned when it is false; an upstream `Access-Control-Allow-Origin` is stripped and replaced,
-  leaving exactly one field line; a generated preflight carries the CORS set and `Vary` and nothing
-  a `response_headers` operation added; generic operations run before CORS.
+  leaving exactly one field line; **an upstream `Vary: Origin` survives and still creates variants**;
+  a generated preflight carries the CORS set and `Vary` and nothing a `response_headers` operation
+  added; generic operations run before CORS.
 - **§9 CORS:** exact, `null`, malformed, duplicate `Origin`, disallowed; `*`+credentials rejected;
   `*` combined with another origin rejected; `*` in the header/method lists rejected; non-normalized
   origin rejected; `max_age` sub-second, negative and over-24h rejected, `"0s"` emits `0`, omitted
@@ -1123,24 +1270,36 @@ required by it.
   `["*"]`+no-credentials, `*` is emitted for an allowed origin, for `Origin: null`, and for a request
   with no `Origin` at all, and `Vary: Origin` is absent in all three; under every other policy
   `Vary: Origin` is present in all three. CORS headers present on 401, 403, 429 and 502.
-- **§10 ordering:** policy applied to auth, rate-limit, WAF, upstream-error and cache-hit responses;
-  not applied to the router 404, the HTTPS redirect or the `Recover` 500; approved preflight reaches
-  neither auth nor the action; denied preflight does; **the coarse guard rate-limits approved
-  preflights** and shares no bucket with the identity-aware limiter; a location without a rate policy
-  installs no guard.
+- **§9 defaults:** `allowed_origins` omitted with `enabled = true` is rejected; `allowed_methods`
+  omitted defaults to the safelisted set and a route configured with origins alone approves a `POST`
+  preflight; an explicit `[]` is rejected on all four lists; empty `allowed_headers`/`exposed_headers`
+  **omit** their response header rather than emitting it empty; `Access-Control-Request-Headers` is
+  never reflected; a populated block with `enabled = false` validates fully, is inert, and lint-warns.
+- **§10 ordering:** policy applied to auth, rate-limit, WAF, **BodyLimit 413**, upstream-error and
+  cache-hit responses; not applied to the router 404, the HTTPS redirect or the `Recover` 500;
+  approved preflight reaches neither auth nor the action; denied preflight does; **an approved
+  preflight is rate-limited and WAF-inspected by the terminator**, keys on the client address even
+  when the policy says `jwt:<claim>`, and shares no bucket with the identity-aware limiter; a denied
+  preflight is guarded by the ordinary chain and **not** by the terminator, so neither is evaluated
+  twice; a location without a rate policy installs no rate guard.
 - **§10 informational responses:** `1xx` passes through without applying policy and without latching;
   the final status reaches the client after one or more `103`s; an implicit `200` via `Write` with no
   explicit `WriteHeader` still gets policy applied exactly once; `ReaderFrom` and `Flusher` paths
   behave after an interim response; `101` is unchanged.
 - **§11 cache — the invariant test:** a response stored under a location with a CORS policy and
   header operations contains none of them; a second request from a different origin receives its own
-  correct headers; an entry rehydrated from disk carries no policy headers. (The regression test for
-  the pre-existing compression defect that the same snapshot fixes — a compressible cacheable
-  response served on a hit must have a body whose encoding matches its `Content-Encoding` — already
-  landed with the snapshot itself in #327, ahead of this ADR's own implementation.)
-- **§12 protocols:** identical predicate and policy behaviour on HTTP/1.1, h2c, HTTP/2 and HTTP/3;
-  WebSocket upgrade unaffected and the wrapper inert after hijack; native gRPC and transcoding
-  policy applied without touching trailers.
+  correct headers; an entry rehydrated from disk carries no policy headers. **Plus the boundary the
+  invariant actually has:** a hit must carry exactly one `X-Request-ID`, and it must be the current
+  request's — that test belongs to #332 and fails today. (The regression test for the compression
+  defect the same snapshot fixes landed with the snapshot itself in #327.)
+- **§12 parity:** the cross-protocol matrix runs only *supported* transport/action pairs — predicates
+  and policy on HTTP/1.1, h2c, HTTP/2 and HTTP/3; WebSocket upgrade on HTTP/1.1 and HTTP/2 with the
+  wrapper inert after hijack and **no CORS headers on the 101**; native gRPC over HTTP/2 with
+  trailers untouched; transcoding as an ordinary response. No test asserts CORS on a 101, WebSocket
+  over HTTP/3, or predicates on an L4 `[[stream]]` route, because this record claims none of them.
+- **§15 lint:** each provable shadowing case is reported; **two different regexes on the same header,
+  a regex against an exact, and disjoint predicate names are NOT reported** — a false unreachable
+  warning costs an operator real traffic.
 - **§13/§14 lifecycle and API:** invalid predicate or policy aborts the reload before `Publish`;
   order preserved across reload; typed patch round-trip including clear; `match_ordinal` resolution
   including the ambiguity rejection and the `409` when `base_version` is absent or stale; the
@@ -1162,13 +1321,15 @@ required by it.
 5. The typed patch API gains `match_ordinal` and, with it, a required `base_version` for any patch
    that uses it.
 6. `internal/admin/routetest.go` loses its private matcher and gains real method/header inputs.
-7. A coarse, preflight-only rate-limit guard is added to the per-location chain (§10). It reuses the
-   location's existing rate policy and adds no configuration surface.
+7. The CORS preflight terminator is added to the per-location chain (§10), carrying its own rate and
+   WAF passes. Both reuse the location's existing policy and compiled firewall and add no
+   configuration surface.
 8. The lifecycle registry, `docs/config-lifecycle.yaml` and both generated mirrors grow entries; a
    new `cors` subsystem is added.
-9. #331 — `1xx` dropping the final status in `Recorder`, `compressWriter` and `cacheWriter` — should
-   land before #146, so §10's informational-response rule has one implementation to follow rather
-   than a fourth divergent one.
+9. #331 (`1xx` drops the final status) and #332 (a hit replays a stale `X-Request-ID`) should both
+   land before #146. #331 gives §10's informational-response rule one implementation to follow rather
+   than a fourth divergent one; #332 upgrades §11's invariant from the commit-boundary form to the
+   unconditional one the CORS reasoning reads best against.
 10. `docs/configuration.md`, `docs/core-http.md`, `docs/cache.md`, `docs/compression.md`,
     `docs/security-posture.md`, `docs/nginx-importer.md`, `docs/known-limitations.md`,
     `docs/console.md`, `docs/reload-semantics.md`, the generated configuration reference and
@@ -1241,6 +1402,29 @@ state — costs one derived value and removes both failure modes.
 cross-origin data-disclosure bug, and the bounded exact list covers every use case currently
 evidenced. Additive later, with a grammar, if a real deployment needs it.
 
+**Skipping the WAF for approved preflights.** Rejected in §10 on the second review round, having been
+proposed in the first. The justification offered — that a preflight has nothing a rule could inspect
+— was simply false: a preflight carries a full request target, query string, every non-CORS request
+header, the method and the client address, all of which Coraza's request-phase rules read without
+ever needing a body. The rejected shape would have handed an attacker a request shape that reaches a
+Jul-generated response having passed no rule at all.
+
+**A denylist in `buildEntry` for Jul-owned response headers.** Rejected in §11 in favour of #332's
+constructive rule. `stored.Del("X-Cache")` already exists and nobody called it a denylist, which is
+exactly how `X-Request-ID` joined the class unnoticed. Storing only the field lines the handler
+itself contributed leaves nothing to keep in step.
+
+**Claiming protocol parity across all transports and actions.** Withdrawn in §12. WebSocket upgrade
+is unavailable over HTTP/3, native gRPC is end-to-end HTTP/2 by design, and the L4 stream proxy has
+no HTTP message to match on at all. The honest claim — identical semantics wherever the action is
+supported — is both true and testable; the blanket one would have generated a matrix of impossible
+cases.
+
+**Reporting unreachable routes on predicate-set subset.** Rejected in §15: `methods` is an OR-set, so
+a subset shadows nothing, and regex implication is undecidable. A false unreachable warning costs an
+operator traffic when they act on it, so the rule is restricted to provable cases and is deliberately
+incomplete.
+
 **Deriving `limit_except` and bare `add_header` translations in the importer.** Rejected in §18: both
 change semantics silently, which is worse than an explicit unsupported finding.
 
@@ -1253,6 +1437,8 @@ change semantics silently, which is worse than an explicit unsupported finding.
 - #326 — the pre-existing cache × compression corruption §11 also fixes; already resolved by #327
 - #331 — `1xx` makes every response-writer wrapper drop the final status; §10's informational-response
   rule exists so this record does not add a fourth
+- #332 — a cache hit replays a stale `X-Request-ID`; §11's invariant is written against the boundary
+  this defect exposes, and is upgraded when it lands
 - #108 — Core Gateway Completeness epic; `docs/specs/core-gateway-completeness.md` §7 (D12)
 - [ADR 0016](0016-inbound-identity-and-backend-peer-trust.md) §12 — identity asserted to the backend
 - [ADR 0011](0011-reload-plan.md) — reload transaction and the closed-world lifecycle registry
