@@ -225,6 +225,13 @@ fault evidence shows that the simple breaker is insufficient.
 
 ## 7. Routing and response policy
 
+> **Decided.** [ADR 0018](../adr/0018-bounded-route-matching-and-response-policy.md) accepts D12
+> and freezes the public names: `[servers.locations.match]` gains `methods` plus the
+> `[[match.headers]]` / `[[match.query]]` predicate arrays, response policy is the ordered
+> `[[servers.locations.response_headers]]` operation list, and CORS is `[servers.locations.cors]`.
+> It also fixes route precedence, the no-405 contract, the cache interaction and middleware order.
+> Implementation is tracked by #145, #146 and #147.
+
 ### Required bounded feature set — D12
 
 #### Request matching
@@ -548,7 +555,7 @@ acceptable final outcome.
 | Inbound identity | #115 — accepted, [ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md) | #135-#136, #259 |
 | Backend trust | #115 — accepted, [ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md) | #109, #137-#140 |
 | Resilience | #116 | #110, #141-#144 |
-| Routing/response policy | #117 | #145-#147 |
+| Routing/response policy | #117 — accepted, [ADR 0018](../adr/0018-bounded-route-matching-and-response-policy.md) | #145-#147 |
 | Authority/generated contracts/API/CLI | #118 | #111, #148-#151 |
 | Lifecycle authority | D07 | #89, #128, #149 |
 | Cache correctness | D05-D06 | #107, #131-#134 |

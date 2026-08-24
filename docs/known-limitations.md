@@ -14,6 +14,24 @@ references.
 - **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
 - **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust have shipped ([ADR 0016](adr/0016-inbound-identity-and-backend-peer-trust.md)). The remaining boundaries are documented as deferrals with explicit promotion triggers in that record, not as gaps: proxy-aware Admin identity, QUIC and UDP client preservation, and per-tenant policy.
 - **Upstream overload control:** the bounded model decided by [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) is not yet implemented. Until #141–#144 land, the running binary has: no cap on concurrent upstream requests or on physical backend connections (`MaxConnsPerHost` is unset); no retry budget, overall retry deadline or backoff between attempts; no bound on how many requests probe a backend the instant its `fail_timeout` cooldown elapses; no load balancing, health checking or failure accounting for `fastcgi_pass` and `uwsgi_pass`, whose connection count is unbounded; no connection cap on L4 TCP routes (UDP already has `max_udp_sessions`); and no circuit breaker on the forward-auth and JWKS subrequests, which carry a fixed 10s timeout.
+- **Routing and response policy:** the bounded model proposed by
+  [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md) is not yet implemented. Until
+  #145 and #146 land, a location can only be selected by host and path: there is no method,
+  request-header or query-parameter matching, no way to add, replace or remove a response header,
+  and no CORS or preflight handling of any kind. `[servers.locations].headers` sets headers on the
+  *upstream request*, not on the response to the client. A WASM middleware plugin is the only way to
+  set a response header today.
+- **Informational responses drop the final status (#331):** an upstream that sends `103 Early Hints`
+  — which Go's reverse proxy forwards — makes Jul's response-writer wrappers latch on the interim
+  code and discard the real one, so the client receives `200` instead of the status the upstream sent.
+  `Recorder` is on the global chain unconditionally, so this affects every listener, not only routes
+  with the cache or compression enabled. Nothing is cached from such a response, so no corrupt entry
+  is stored.
+- **A cache hit replays a stale `X-Request-ID` (#332):** `RequestID` sets the response header before
+  the router runs, so it is in the map the cache snapshots at header commit and is stored with the
+  entry. `Cache.serve` merges stored headers with `Add`, so a hit carries two `X-Request-ID` values —
+  the current request's and the one belonging to whichever request populated the entry. Correlation
+  by request id is unreliable on any `cache = true` route until this is fixed.
 
 ---
 
@@ -231,8 +249,14 @@ references.
 
 ## HTTP/3 over QUIC ([http3.md](http3.md))
 
-- **No WebSocket over HTTP/3.** WebSocket requires HTTP/1.1 or HTTP/2; a
-  WebSocket upgrade over HTTP/3 will be rejected.
+- **No WebSocket over HTTP/3 — or over HTTP/2.** Jul.IA implements the HTTP/1.1 `Upgrade` mechanism
+  only. WebSocket over HTTP/2 and HTTP/3 uses extended `CONNECT` (RFC 8441 / RFC 9220), which Jul.IA
+  does not implement. Go's bundled HTTP/2 server keeps extended `CONNECT` behind
+  `GODEBUG=http2xconnect=1` for a reason that applies directly here: advertising it makes browsers
+  *stop* sending HTTP/1.1 `Upgrade` and start sending extended `CONNECT`, which then fails against a
+  server whose WebSocket path does not implement it. A WebSocket upgrade over HTTP/3 will be
+  rejected. Browsers fall back to an HTTP/1.1 connection for the WebSocket, so nothing is
+  unreachable.
 - **HTTP/3 settings require a restart.** The QUIC listener is built at bind
   time; changes to `[servers.http3]` take effect only after a full restart.
 - **QUIC path MTU discovery.** Some networks drop oversized UDP packets; QUIC
