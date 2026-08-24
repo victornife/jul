@@ -1600,9 +1600,10 @@ required by it.
 5. The typed patch API gains `match_ordinal` and, with it, a required `base_version` for any patch
    that uses it.
 6. `internal/admin/routetest.go` loses its private matcher and gains real method/header inputs.
-7. The CORS preflight terminator is added to the per-location chain (§10), carrying its own rate and
-   WAF passes. Both reuse the location's existing policy and compiled firewall and add no
-   configuration surface.
+7. The per-location chain gains three positions (§10): the response-policy wrapper, a **location
+   recover** so a routed panic's 500 carries the policy, and the CORS preflight terminator carrying
+   its own rate and WAF passes. The guards reuse the location's existing policy and compiled
+   firewall; none of the three adds a configuration surface.
 8. The lifecycle registry, `docs/config-lifecycle.yaml` and both generated mirrors grow entries; a
    new `cors` subsystem is added.
 9. **#146 must not merge until #331 and #332 have landed**, or fixes them atomically in the same
