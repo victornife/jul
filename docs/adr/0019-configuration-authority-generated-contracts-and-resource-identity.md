@@ -32,6 +32,7 @@
 | 2026-08-25 | Seventh external review round. **Naming `completeManagedApply` as the terminalization point was wrong, and the coordinator says so in its own comment: *"A later apply may start while that work finishes."*** It is serialized by `finalizeMu` only — not by the configuration mutation gate — and all three call sites run after `inFlightState` is cleared and `c.mu` released. Apply A could therefore promote `current(I)` *after* apply B had written `preparing(I→J)`, destroying B's marker and leaving configuration *J* with baseline *I*, undetectably. §11.2.0.1 relocates the baseline terminalization point to **the end of the configuration-path mutation phase, under `c.mu`, before `inFlightState` is cleared** — the same critical section that already performs configuration-path disk writes through `restorePreviousLocked`. History, audit, metrics and ledger publication stay after the release. **Baseline mutation is part of the configuration-path transaction; telemetry is not.** **§11.2.4 is new: `stage_restart` adoption had no defined transaction and would have destroyed data.** `PlannedRestartStore.StageManaged` writes `.bak` from the previous *on-disk* bytes, which in an adoption are the bytes being adopted — so `.bak(I)` would make discard a silent no-op while T-mark had already replaced the snapshot holding *P*, losing the last known-good configuration permanently. The composition now takes `baseRaw` **from the baseline snapshot, never the file**, omits the candidate write that §11.2.3 assumes, and holds the snapshot overwrite until `.bak(P)` and the `staged` marker are both durable, with all six ordered writes tabulated. **§14.2's linearization claim is corrected**: the fence is step 8's verification read, conditional on the marker write succeeding — not the marker write itself, because an external write landing between the two is physically before the marker yet reported as after, and a fence Jul cannot observe is not one it can claim. Behaviour is unchanged. Also: the fence failure reuses the existing **`409 drift_detected`** rather than an undefined `config_changed`, keeping §26 closed at 22 codes; exit 5's description and the `exit_codes` capability broaden to include uncertain state after a failed restoration; §34's post-rename row no longer says every such failure returns success; the `managed_drift` row now names the **baseline** as desired state rather than the externally written file; and the T-mark test bullet no longer asserts that one snapshot failure both succeeded and failed. |
 | 2026-08-25 | Self-audit of the seventh round, before review. **§11.2.4 as first written reintroduced the very defect §11.2.0 was corrected for.** Its `prepared` marker preceded the commit point, and `PlannedRestartStore.Reconcile` promotes a `prepared` marker to `staged` whenever the configuration file matches the **candidate** digest — which in an adopt-and-stage is true from the outset, because the candidate is already on disk. A failed baseline marker write would therefore have returned failure to the client and had the stage silently committed by the next start. The baseline commit now precedes the planned-restart marker, under a stated invariant: **nothing a later `Reconcile` can complete may precede the commit point.** §11.2.3 satisfies the same invariant by the opposite ordering, because its file matches the *base* digest until the rename commits, so `Reconcile` clears rather than promotes — the invariant is general, the ordering that achieves it is not. Also corrected: §11.2.0.1 claimed **all three** `completeManagedApply` call sites run after the gate is released. Only the asynchronous reload path does; `applyStageRestart` is reached from `ApplyRaw`, which holds `applyMu` across the whole call and is already safe. The rule is restated as a property of the gate rather than of a function, so it holds on both paths without overclaiming about either. |
 | 2026-08-25 | Second self-audit, mechanical this time: every `§` cross-reference, every closed set, and the state diagram checked against their declarations. The closed sets hold — §26 has exactly 22 codes with none referenced that it does not define, the six `degraded` kinds declared and used match exactly, all ten `managed_inconsistent` reasons are enumerated, and the §10 state diagram and state table carry the same six states. **One real inconsistency was found and fixed: §33.1 escalated every successful outcome to exit 4 when a degradation was present — except `saved_not_live`, left at "either → 3".** That is not theoretical: §11.2.4's rows 4 and 5 produce exactly a successful, not-live adoption carrying `staging_error`, which would have exited 3 while every comparable outcome exited 4. The row is split, and §11.2.4 now names `saved_not_live` as its terminal outcome explicitly rather than leaving an implementer to infer it — `staged` would assert a pending restart that does not exist. |
+| 2026-08-25 | Eighth external review round. **§11.2.4 specified `PromoteToStaged` where `PromoteToStagedVerified` exists precisely to close the window it opened.** The unverified call would let an external writer replace the file between the `prepared` marker and the promotion, and Jul would record `staged(I)` and report success while the file held *J*. §11.2.4.1 requires the verified call and defines what a mismatch means **after** the adoption has already committed, where a `409` is no longer available: the adoption is preserved, the planned-restart marker and `.bak` are removed **without touching the file** — the store's own contract is *"do not repair the file"*, and §14.2 forbids overwriting an external writer's bytes — and the response reports `drift_after_adopt` plus `staging_incomplete`; a failed cleanup is `managed_inconsistent`/`cleanup_incomplete`. **A reachable state had no name and a reachable outcome was given the one value that means the opposite of terminal.** §11.2.4 row 4 and §14 step 10 both leave baseline and file at *I*, the runtime at *P*, and nothing staged. The `file_owned` side of the state model already had `file_owned_desired_ahead`; the managed side had no counterpart, so an earlier draft gestured at the analogy instead of deciding. **§11.2.5 adds `managed_desired_ahead`** with entry conditions, allowed operations — managed writes are **permitted**, because the on-disk state is coherent and refusing would lock an operator out over Jul's own staging failure — recovery by restart or re-stage, and its state-diagram edges. **§33.1 adds the terminal outcome `owned_not_serving` and removes `saved_not_live` from the terminal table entirely**: `isTerminalApplyResult` returns **false** for `saved_not_live` and the API answers `202`, so the previous round's row would have told clients to stop polling for a result that had not arrived — and using it for adoption would have told them to poll forever for one that had. `staging_incomplete` joins §33.2's closed set, distinct from `staging_error` because that one is reconciled automatically and this one never will be. **Two data-integrity fixes:** §14 step 11 wrote history "from the baseline snapshot", which T-mark has by then advanced to *I* — history would have recorded the adopted revision as its own predecessor, so the verified *P* buffer is now retained at step 5 and reopening the path is forbidden; and §11.2.4's failed-baseline path deleted nothing, leaving a `.bak` holding *P* that `Reconcile` never collects because it reads "no marker" as clean. That orphan carries resolved secrets, so it is deleted on failure and §17.2's `file_owned` startup now removes any orphan backup even when no planned marker exists — without which §11.2.2's "no configuration bytes survive" was simply false. |
 
 ## Context
 
@@ -206,7 +207,7 @@ not touch that decision; §6 states why the fingerprint must not become the publ
 | Admin transport | `internal/admin/server.go` | plaintext HTTP, bearer token or RBAC principals, loopback assumed, warning when bound elsewhere. **No TLS, no mTLS.** |
 | Error shapes | `internal/admin` | five structured shapes (`validationErrorResponse`, `conflictResponse`, `adminGuardResponse`, `patchOperationFailureResponse`, `ConfigApplyResult`) plus ad-hoc `map[string]string{"error": …}`. **No stable machine codes, no request correlation id.** |
 | Optimistic concurrency | apply, patch, rollback | optional `base_version`; 409 with `current_version` on mismatch; omitted means force |
-| Apply outcomes | `internal/server/reload_result.go` | `applied_live`, `applied_degraded`, `not_applied`, `saved_not_live` |
+| Apply outcomes | `internal/server/reload_result.go` | `applied_live`, `applied_degraded`, `not_applied`, `saved_not_live`, and **`owned_not_serving` added by this record** (§33.1) |
 | Pending restart | `internal/app/planned_restart.go` | `none`, `managed_staged`, `external_divergence`, `inconsistent` |
 | Schema inventory | `internal/config/inventory.go` | `SchemaPaths()` 322, `SchemaLeaves()` 274, build-tag independent |
 | Lifecycle authority | `internal/lifecycle` | 274 entries, 49 subsystems, 5 classes, 8 flags; `lifecyclegen`; `make lifecycle-generate` / `make generated-check` |
@@ -995,6 +996,11 @@ stateDiagram-v2
         managed_failed_apply --> managed_clean: previous bytes restored
         managed_failed_apply --> managed_inconsistent: restoration failed
         managed_drift --> managed_drift: restart, baseline marker survives
+        managed_drift --> managed_desired_ahead: adopt commits, not staged or not live
+        managed_unadopted --> managed_desired_ahead: adopt commits, not staged or not live
+        managed_desired_ahead --> [*]: restart, converged
+        managed_desired_ahead --> managed_pending_restart: operator re-stages
+        managed_desired_ahead --> managed_drift: external write after adoption
     }
 
     state "file_owned" as F {
@@ -1019,6 +1025,7 @@ stateDiagram-v2
 | `managed_unadopted` | none yet — ownership not established | the file | **refused** until adopted | n/a |
 | `managed_drift` | the last managed baseline — the file is **not** written by Jul and is not authoritative | last managed version, or the drifted file after a restart | **refused** until resolved | refused |
 | `managed_pending_restart` | the file (staged candidate) + marker | previous version | refused (existing rule) | n/a |
+| `managed_desired_ahead` | the file, owned by Jul — it **matches** the baseline | **previous version**; the runtime is behind the desired state and **no restart is staged** | allowed (§11.2.5) | Jul's own writes only |
 | `managed_failed_apply` | previous bytes restored to the file | previous version | allowed once restored | n/a |
 | `managed_inconsistent` | ambiguous — see the reason | previous version | **refused** | refused |
 | `file_owned_clean` | the file, owned externally | matches | denied (always) | yes |
@@ -1525,14 +1532,15 @@ success.
 > §11.2 persists bytes.
 
 Ordered writes. Note that step 3 of the ordinary planned-restart sequence — *caller writes the
-candidate* — is **absent**, and `PromoteToStaged` is therefore called directly:
+candidate* — is **absent**, and promotion is therefore called directly — through
+**`PromoteToStagedVerified`**, never the unverified variant (§11.2.4.1):
 
 ```
 1. read the baseline snapshot P and verify it against current_digest
 2. write .bak from P                       (from the snapshot, NOT the file)
 3. write the baseline marker "current"(I)                          <- COMMIT
 4. write the planned-restart marker "prepared"(base=P, candidate=I)
-5. promote the planned-restart marker to "staged"
+5. promote the planned-restart marker to "staged"   (verified; see 11.2.4.1)
 6. overwrite the baseline snapshot with I
 ```
 
@@ -1564,9 +1572,9 @@ The second invariant is about the bytes:
 | --- | --- | --- | --- | --- |
 | 1, snapshot unreadable or mismatched | — | — | unchanged | adoption fails, `managed_inconsistent` per §11.2.1b — there is nothing to back up, and staging without a backup would make discard unsafe |
 | 2, `.bak` write | — | — | unchanged | adoption fails, `503 storage_unavailable`; nothing happened |
-| 3, baseline marker | *P* | — | unchanged | **adoption fails**, and nothing can complete it: there is no planned marker, so `Reconcile` sees a clean state. The stray `.bak` is inert — it is overwritten by the next fresh stage and read by nothing else — and is the stated residual of this path |
-| 4, `prepared` write | *P* | — | `current(I)` | **adoption succeeds** with a `staging_error` degradation: the bytes are owned but no restart is staged. The runtime still serves *P*, so this is §16's desired-ahead-of-active state, reported as such. The operator re-stages |
-| 5, `staged` promotion | *P* | `prepared` | `current(I)` | **adoption succeeds** with a `staging_error` degradation; `Reconcile` promotes at the next start — consistent with the reported outcome, because the operation had already committed |
+| 3, baseline marker | deleted | — | unchanged | **adoption fails**, and nothing can complete it: there is no planned marker, so `Reconcile` sees a clean state. **`.bak` is deleted on this path**, because `Reconcile` treats "no marker" as clean and would never collect it — an orphan holding *P* could otherwise outlive the deployment and carry literal secrets. A cleanup failure is `managed_inconsistent`, reason `cleanup_incomplete` |
+| 4, `prepared` write | *P* | — | `current(I)` | **adoption succeeds**, terminal outcome **`owned_not_serving`**, with a **`staging_incomplete`** degradation: the bytes are owned but no restart is staged and nothing will reconcile it. The state is **`managed_desired_ahead`** (§11.2.5). The operator re-stages or restarts |
+| 5, `staged` promotion | *P* | `prepared` | `current(I)` | **adoption succeeds** with a `staging_error` degradation; `Reconcile` promotes at the next start — consistent with the reported outcome, because the operation had already committed. A **verified-promotion mismatch** is a different case entirely, resolved by §11.2.4.1 |
 | 6, snapshot overwrite | *P* | `staged` | marker at *I*, snapshot at *P* | **adoption succeeds** with `baseline_error`; the snapshot is repairable from the file, which matches `current_digest` (§11.2.1b) |
 
 **Discard semantics are unchanged and now actually work**: a verified discard restores `.bak(P)` over
@@ -1574,11 +1582,11 @@ the configuration file, which is a real configuration write, so it rewinds the b
 **T-write** exactly as §11.2.3's discard does. The runtime was serving *P* throughout, so nothing
 reloads.
 
-**The terminal outcome for rows 4 and 5 is `saved_not_live`, not `staged`**, and it is named here
-because an implementer would otherwise have to infer it: the bytes are owned and persisted but the
-restart is not recorded, so claiming `staged` would assert a pending restart that does not exist.
-With a `staging_error` present, §33.1 maps that to **exit 4** by the same precedence rule that applies
-to a degraded `staged`.
+**The terminal outcome for rows 4 and 5 is `owned_not_serving`** (§33.1), a terminal app-layer outcome
+meaning *owned and persisted, not serving, nothing staged*. It is **not** `saved_not_live`: that value
+is explicitly non-terminal — `isTerminalApplyResult` returns false and the API answers `202` — so using
+it here would have told the client to poll indefinitely for a result it had already been given.
+Claiming `staged` would be equally wrong, because it asserts a pending restart that does not exist.
 
 **A crash between steps 3 and 6** leaves the marker at *I*, the file at *I* and the snapshot at *P* —
 `current(D)` with the file matching and the snapshot not, which §11.2.1b **repairs** from the verified
@@ -1589,6 +1597,74 @@ marker precedes the configuration rename, but the file matches the *base* digest
 commits — so `Reconcile` clears the marker rather than promoting it, and no pre-commit failure can be
 completed later either. The invariant is general; only the ordering that achieves it differs, because
 one sequence changes the file and the other does not.
+
+##### 11.2.4.1 Promotion must be verified, and a post-commit mismatch cannot be a `409`
+
+**Step 5 uses `PromoteToStagedVerified`, never `PromoteToStaged`.** An earlier draft specified the
+unverified call, which would have opened exactly the window the verified one exists to close:
+
+```
+1. T-mark commits the baseline at current(I)
+2. Jul writes prepared(candidate=I)
+3. an external writer replaces the file with J
+4. unverified promotion records staged(I)
+5. the operation reports success while the file holds J
+```
+
+`PromoteToStagedVerified` re-reads the configuration immediately **before** and **after** the marker
+update, returns `ErrStagedCandidateChanged` on either mismatch, and — importantly — its contract is
+already *"do not report success and do not repair the file."* That is the correct instinct and this
+record keeps it: **Jul must never write the external writer's bytes away** (§14.2).
+
+The outcomes have to differ from the ordinary stage, because **adoption has already committed at step
+3**. A `409` is not available; the operator owns *I* whether or not the staging finished.
+
+| Condition | Resolution |
+| --- | --- |
+| Mismatch on the **pre**-promotion read | The marker is still `prepared`. **Adoption is preserved.** Delete the planned-restart marker and `.bak`, leaving the file untouched, and report success with `drift_after_adopt` **and** `staging_incomplete` |
+| Mismatch on the **post**-promotion read | The marker is already `staged` and the store has set its own `inconsistent` flag. Same resolution — the artifacts are removed rather than trusted, because a `staged` marker naming bytes the file no longer holds would be reconciled into a restart of the wrong revision |
+| The cleanup write itself fails | `managed_inconsistent`, reason **`cleanup_incomplete`**, with managed writes refused. Reported, not swallowed: a planned-restart marker naming a revision the file does not hold is exactly the condition `marker_contradicts_staged_restart` describes at the next start |
+
+**Removing the planned artifacts is not the same as restoring the file, and only the second is
+forbidden.** The `.bak` and the marker are Jul's own bookkeeping for a stage that provably did not
+complete; leaving them would arm a restart to a revision nobody chose. The external writer's bytes are
+left exactly where they are, and the resulting state — file *J*, baseline *I* — is ordinary
+`managed_drift`, resolved by the ordinary §14 loop.
+
+#### 11.2.5 `managed_desired_ahead`: the state two paths reach and the model had no name for
+
+Two paths produce the same condition — **baseline and file both at *I*, the runtime still serving *P*,
+and no durable staged restart**:
+
+- **§11.2.4 row 4**, where the `prepared` marker write fails after the baseline committed;
+- **§14 step 10**, where adoption commits and the subsequent hot reload does not take.
+
+An earlier draft called this "the managed analogue of §16's desired-ahead state" and left it there.
+That was a description, not a decision: the managed state model contained no such member, so the
+condition was none of `managed_clean` (the runtime does not match), `managed_drift` (the file *does*
+match the baseline), `managed_pending_restart` (nothing is staged), `managed_failed_apply` (nothing
+was restored, and the operation succeeded) or any enumerated `managed_inconsistent` reason. **The
+`file_owned` side of the state model already has `file_owned_desired_ahead`; the managed side simply
+lacked its counterpart**, which is why the analogy was reachable but the state was not.
+
+| | |
+| --- | --- |
+| **Entry** | an adoption that committed the baseline but neither staged a restart nor became live |
+| **Desired state** | the configuration file, which matches the baseline — there is no drift |
+| **Active runtime** | the previous generation, *P* |
+| **Managed writes** | **allowed** |
+| **Recovery** | a process restart converges it, because the file already holds *I*; or the operator re-stages explicitly, entering `managed_pending_restart` |
+| **Leaves the state by** | restart, re-stage, or an external write (which makes it `managed_drift`) |
+| **Alertable** | yes — the runtime is not serving the owned configuration |
+
+**Managed writes are allowed here, and that is a deliberate departure from `managed_pending_restart`,
+which refuses them.** The reason is that the on-disk state is completely coherent: file, baseline and
+desired state agree, and nothing is ambiguous. The divergence is runtime-only, which §16 already
+models as legitimate rather than damaged. Refusing writes would lock an operator out of the control
+plane because *Jul's own* staging step failed, leaving a restart as the only exit — a worse outcome
+than the condition being reported. Lifecycle classification for any subsequent apply continues to be
+computed against the **live** generation, exactly as it is today, so a further restart-required change
+is still correctly identified as such.
 
 #### 11.3 Managed mode requires a writable, non-symlinked config path
 
@@ -1695,7 +1771,10 @@ side-effect-free.
 2. strict decode (D03: unknown fields fail), resolve secrets, validate;
 3. lint, and return findings with severities (§22) without converting them into invalidity;
 4. classify lifecycle against the live generation, producing `hot` / `stage_restart` / refused;
-5. compute the diff **against the baseline snapshot** (§11.2), by §7's rules;
+5. compute the diff **against the baseline snapshot** (§7's rules), and **retain that verified
+   snapshot buffer *P* in memory for the remainder of the operation** — T-mark overwrites the snapshot
+   with the adopted bytes, so anything later needing the *previous* managed configuration must use
+   this buffer and not the path;
 6. bind the operation to **both** the observed external digest and the managed baseline version;
 7. require explicit confirmation that managed ownership resumes over these bytes;
 8. under `applyMu`, re-read the file and re-check the digest — a change since the preview is a `409`.
@@ -1710,12 +1789,16 @@ side-effect-free.
    an adoption are the bytes being adopted, so used unchanged it would back up the wrong revision and
    make discard a no-op. Adoption after a restart skips this step entirely: the bytes are already
    serving (§11.2.2). **The baseline is established before the reload**, which is safe because the
-   configuration file needs no change and therefore nothing can require rolling back; a reload that
-   then fails is an ordinary reload failure reported through the existing terminal outcome, not a
-   baseline problem, and it leaves the managed analogue of §16's desired-ahead state;
-11. write a history snapshot of the *previous managed* configuration **from the baseline snapshot**,
-   with the adoption source recorded in the metadata sidecar. From `no_baseline` there is none, so
-   none is written (§14.1);
+   configuration file needs no change and therefore nothing can require rolling back. **A reload that
+   then fails does not fail the adoption** — the bytes are owned, and no restoration is possible or
+   wanted because nothing was written. The operation terminates as **`owned_not_serving`** (§33.1)
+   and the process enters **`managed_desired_ahead`** (§11.2.5). It is specifically **not**
+   `not_applied`: that outcome's exit mapping turns on whether a restoration succeeded, and an
+   adoption has nothing to restore, so routing this case through it would have produced exit 1 or 5
+   for an operation that succeeded;
+11. write a history snapshot of the *previous managed* configuration **from the pre-adoption buffer
+   retained at step 5** — **never** by reopening the snapshot path, which T-mark has by now advanced
+   to the adopted bytes. From `no_baseline` there is none, so none is written (§14.1);
 12. audit the adoption with actor, origin, digests and versions — never the content;
 13. return the exact resulting state, including the terminal reload outcome and any `degraded`
    entries (§33.2).
@@ -1952,14 +2035,23 @@ for is the moment to do it.
 
    ```
    1. delete the snapshot                     (the secret-bearing artifact goes first)
-   2. replace the marker with a tombstone     {state: "closed", closed_at, last_digest}
+   2. delete any orphan planned-restart .bak  (also configuration bytes; see below)
+   3. replace the marker with a tombstone     {state: "closed", closed_at, last_digest}
    ```
+
+   **Step 2 exists because `Reconcile` will not do it.** It treats an absent planned-restart marker as
+   a clean state and leaves the backup untouched, so a `.bak` orphaned by a failed stage or a failed
+   adopt-and-stage (§11.2.4) can survive indefinitely — and it holds **literal configuration bytes,
+   including resolved secrets**. Without this step §11.2.2's invariant would be false in a way that
+   matters far more than the tombstone did: the claim is that `file_owned` retains *no configuration
+   bytes*, and an orphan `.bak` is exactly that.
 
    The tombstone carries **no configuration bytes**, so it is safe to leave in place indefinitely, and
    it is what makes a later `file_owned → managed` return distinguishable from marker loss (§11.2.1).
-   Deleting the snapshot first means a failure between the two leaves the *safe* artifact behind
-   rather than the secret-bearing one. §11.2.2's invariant is therefore that no configuration bytes
-   and no **live** baseline survive — not that the directory is empty.
+   **The secret-bearing artifacts are deleted before the tombstone is written**, so a failure partway
+   through leaves the safe artifact behind rather than a secret-bearing one. §11.2.2's invariant is
+   therefore that no configuration bytes and no **live** baseline survive — not that the directory is
+   empty.
 
    The exception is named and bounded rather than left implicit:
 
@@ -2960,7 +3052,8 @@ Every v1 apply DTO, the apply-polling result and the CLI `--json` object therefo
 | `kind` | Meaning |
 | --- | --- |
 | `baseline_error` | the change committed; its provenance did not (§11.2) |
-| `staging_error` | the candidate is staged; the planned-restart marker was not promoted and will be reconciled at the next start (§11.2.3) |
+| `staging_error` | the candidate **is** staged; the planned-restart marker was not promoted and **will be reconciled** at the next start (§11.2.3) |
+| `staging_incomplete` | the operation committed but **nothing is staged and nothing will reconcile it**; the operator must re-stage explicitly (§11.2.4, §11.2.4.1). Distinct from `staging_error` precisely because that one is self-healing and this one is not |
 | `drift_after_adopt` | the adoption committed, and an external write landed after the fence; the configuration is already in `managed_drift` (§14.2) |
 | `drift_unknown` | the adoption committed, and the post-fence re-read failed; drift assessment is deferred to the next assessment point (§14.2) |
 | `history_error` | the history snapshot failed — the existing `HistoryError`, surfaced |
@@ -2981,10 +3074,26 @@ tenth code for it would split one operator action across two.
 | `applied_degraded` | n/a | either | **4** |
 | `staged` | n/a | empty | 3 |
 | `staged` | n/a | non-empty | **4** — degradation takes precedence over staging |
-| `saved_not_live` | n/a | empty | 3 |
-| `saved_not_live` | n/a | non-empty | **4** — same precedence rule |
+| `owned_not_serving` | n/a | empty | 3 |
+| `owned_not_serving` | n/a | non-empty | **4** — same precedence rule |
 | `not_applied` | restored cleanly | either | **1** |
 | `not_applied` | restoration failed | either | **5** |
+
+**`saved_not_live` is deliberately absent from this table, because it is not a terminal outcome.**
+`internal/server/reload_result.go` defines it as *"the configuration was persisted but the live reload
+outcome is not yet known"*, `isTerminalApplyResult` returns **false** for it, and the API answers
+`202 Accepted`. It therefore maps to no exit code at all: the CLI **keeps polling**. Reaching the poll
+deadline is `operation_timeout` (§26) and exits through §33.1's error map. An earlier draft listed it
+as a terminal row worth exit 3, which would have told a client to stop waiting for an outcome that
+had not happened yet.
+
+**`owned_not_serving` is new, and it is what §11.2.4 row 4 and §14 step 10 actually produce**: the
+configuration is owned and on disk, the runtime is not serving it, and **no restart is staged**. It is
+defined at the app layer and never produced by the server, following the existing precedent of
+`saved_not_live` — but unlike it, **it is terminal**, because nothing further is pending. Reusing
+`saved_not_live` for this was wrong in the most damaging way available: it is the one outcome that
+means *keep polling*, so a client would have waited forever for a result that had already arrived.
+The corresponding managed state is `managed_desired_ahead` (§11.2.5).
 
 **The table is total, and it is keyed on the terminal outcome rather than on an error code.** An
 earlier draft wrote "1 or 5 per §33.1" in the `not_applied` row, which does not resolve: §33.1 maps
@@ -3365,7 +3474,27 @@ Grouped by the decision each pins.
   from disk at every instant. **The commit-point falsification:** fail the baseline marker write,
   assert the adoption reports failure, then run `Reconcile` and assert **no staged restart appears** —
   the ordering exists precisely because `Reconcile` promotes a `prepared` marker whenever the file
-  matches the candidate digest, which in an adoption is true from the start.
+  matches the candidate digest, which in an adoption is true from the start. **The orphan-backup
+  test:** after that same failure, assert `.bak` is **gone**, because `Reconcile` treats "no marker"
+  as clean and would never collect it.
+- **§11.2.4.1 verified promotion:** an external write injected between the `prepared` marker and the
+  promotion must **not** produce a reported-successful stage. Assert `PromoteToStagedVerified` is the
+  call used, that the adoption is **preserved**, that the planned-restart marker and `.bak` are
+  removed, that **the configuration file is byte-for-byte the external writer's bytes** — Jul never
+  repairs it — and that the response carries both `drift_after_adopt` and `staging_incomplete`. Inject
+  the same write after the marker update to exercise the post-promotion branch, and fail the cleanup
+  write to assert `managed_inconsistent`/`cleanup_incomplete`.
+- **§11.2.5 `managed_desired_ahead`:** both entry paths — a failed `prepared` write, and an adoption
+  whose hot reload does not take — resolve to this state with terminal outcome `owned_not_serving`,
+  **not** `saved_not_live` and **not** `not_applied`. Assert the result **is terminal**, so a polling
+  client stops; assert managed writes remain **allowed**; assert a restart converges without any
+  further operator act; and assert an external write from this state becomes `managed_drift`.
+- **§14 step 11 history provenance:** after an adoption, the history snapshot contains **the previous
+  managed bytes *P*, byte-for-byte** — the regression test being that the snapshot *path* by then
+  holds *I*, so any implementation that reopens it instead of using the retained buffer fails.
+- **§17.2 orphan cleanup:** a `file_owned` startup that inherits an orphan planned-restart `.bak` —
+  with no planned marker present — removes it. This is asserted by content, because the orphan may
+  hold resolved secrets and `Reconcile` will not collect it.
 - **§14.2 the digest fence:** an external write ordered **before** the fence yields `409 drift_detected`
   and changes nothing; ordered **after** it, the adoption **succeeds** and the same response reports
   `drift_after_adopt` — no compensating write to the configuration file is issued, which is asserted
@@ -3497,8 +3626,10 @@ Grouped by the decision each pins.
    the baseline write completes before `inFlightState` is cleared**, so the next apply is never
    admitted while the previous one's baseline is still pending (§11.2.0.1). In `file_owned` mode no
    configuration bytes and no live marker survive; a secret-free `closed` tombstone remains as the
-   epoch boundary.
-   `managed_unadopted` joins the state vocabulary and `managed_inconsistent` gains a bounded `reason`.
+   epoch boundary, and any orphan planned-restart `.bak` is removed with it (§17.2).
+   **`managed_unadopted` and `managed_desired_ahead` join the state vocabulary**, `managed_inconsistent`
+   gains a bounded `reason`, and the app layer gains one terminal outcome, **`owned_not_serving`**
+   (§33.1), for a configuration that is owned and persisted but neither serving nor staged.
 6. **`external_divergence` is generalized** from "startup-bound subsystems differ" to §12's digest
    comparison, and the existing `PlannedRestartStateEnum` is reused rather than duplicated.
 7. **One new permission**, `config:adopt`, and one new mutating endpoint pair for adoption.
