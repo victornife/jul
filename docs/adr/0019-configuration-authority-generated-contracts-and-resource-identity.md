@@ -3394,7 +3394,8 @@ control plane writable, and the changelog names it as a required migration step.
 | Admin listener TLS/mTLS design | **owned by the prerequisite issue §28.1 files**; this record only states the dependency |
 | A generic job scheduler for long-running operations | an operation whose duration the existing ledger plus bounded polling cannot express |
 | A general-purpose HTTP idempotency layer beyond §27.1's mutating-operation key | an operation outside `/api/v1` mutations that needs replay protection |
-| **Raw configuration export as an external v1 contract** (§24) | a decision that reviews secret handling on its own terms and reconciles it with #150's "no secret readback"; raw export remains available on the internal route under `config:raw` meanwhile |
+| **Raw configuration bytes as an external v1 contract** (§24) — both `config/raw` **and raw history snapshot bodies**, which are the same data class and are withdrawn together | a decision that reviews secret handling on its own terms and reconciles it with #150's "no secret readback"; both remain available on the internal routes under `config:raw` and `history:raw` meanwhile |
+| **A `/metrics` exemption from §28.1's transport gate** | evidence that plaintext scraping is blocking a real deployment that cannot terminate TLS or scrape over loopback; the exemption is scoped by the route's required permission, which is static and known before authentication |
 | External SSE contracts, `Last-Event-ID` resume | an external client that genuinely cannot poll |
 | Audit export as an external contract | the export format is reviewed on its own terms |
 | Plugin upload and descriptor upload as external contracts | a size, path, permission and streaming-error review |
@@ -3415,8 +3416,8 @@ control plane writable, and the changelog names it as a required migration step.
 | Idempotency key semantics, binding and retention window (§27.1) | **One-way door** | clients branch on `idempotent_replay` and on the two typed conflicts, and the window bounds their retry logic | additive now; narrowing the window later is breaking |
 | `Idempotency-Key` grammar (§27.1) | One-way to *narrow*, additive to *widen* | widening accepts strictly more | low upward |
 | Preview mints and returns the `route_id` (§4.7) | Expensive two-way door | clients echo it back; changing which side mints changes what a diff means | client migration |
-| Raw export withdrawn from v1 (§24) | **Two-way door** | adding an endpoint later is additive | none |
-| Plaintext mutation rejected on `/api/v1` (§28.1) | **One-way door** to relax | relaxing is a security regression; it is scoped to v1 so nothing existing breaks | one-directional |
+| Raw bytes withdrawn from v1 — `config/raw` **and** history snapshot bodies (§24) | **Two-way door** | adding either endpoint later is additive | none |
+| Plaintext rejected on **every authenticated route** (§28.1) | **One-way door** to relax | relaxing is a security regression, and after adoption it becomes one operators have built around | **breaking on arrival**: it is the record's one breaking change, shipped as a v1 security correctness fix per §35 |one-directional |
 | Unknown request fields rejected (§24a) | **One-way door** | accepting them later is additive, rejecting them later is breaking | one-directional |
 | Declaration-ordered collections (§24a) | **One-way door** | clients and the Console depend on the order matching routing precedence | breaking |
 | Ledger retention published as a client contract (§24a) | Expensive two-way door | raising it is additive, lowering it breaks retry logic | one-directional |
