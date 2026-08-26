@@ -3374,7 +3374,7 @@ control plane writable, and the changelog names it as a required migration step.
    lands, which is itself sequenced behind #100. Deferring would preserve a known-bad default through
    exactly the period in which correcting it is cheapest.
 
-   The implementing issue **must** add a `docs/compatibility.md` entry in the #132 style and a
+   **#150 owns this** and **must** add a `docs/compatibility.md` entry in the #132 style and a
    changelog migration step. This record does not write either, because no behaviour has changed yet.
 
 ### 36. What is not built
@@ -4019,6 +4019,7 @@ transport. The CLI polls the terminal ledger instead, which is bounded and alrea
 | **#148** | `[DRAFT]` comes off **on merge**. Implements §9–§18 exactly: the fixed `file_owned` default, the persisted baseline and its transaction, the three origins behind one gate, the drift definition, the adoption sequence, the denial matrix, the transitions including sidecar cleanup, and the history rules. Its open questions about ID ownership are answered by §6 and it must not invent any |
 | **#149** | `[DRAFT]` comes off **on merge**. Implements §21–§23: three artifacts, `additionalProperties: false` for typed objects, controlled dynamic maps, presence preservation, the resource catalog, and the `route_id` grammar and uniqueness metadata — consuming #89, creating no second registry |
 | **#150** | remains blocked on #148; contract fixed. Implements §24–§29: the `Stability` field, the initial external set, `/api/v1`, the error envelope, mandatory CAS, and generated OpenAPI checked against the catalog. It must not invent route hashes, composite mutable URIs or any other identifier |
+| **#150** *(named separately because it is the only breaking change here)* | **owns §28.1's transport gate in full** — including its application to the **existing `/api/…` routes and `/metrics`**, not only `/api/v1`. That scope is not inferable from "§24–§29", so it is stated: the gate is pre-authentication, has no override, and covers every authenticated route. #150 **must** also land the `docs/compatibility.md` entry in the #132 security-correctness style and the changelog migration step that §35 requires, plus a `docs/observability.md` note that scraping `/metrics` requires loopback or TLS. Merging §28.1 without those is shipping a breaking change with no migration path |
 | **#151** | remains blocked on #150 **and** on the new admin-transport prerequisite. Implements §31–§33; consumes #150's identity model and invents no targeting scheme of its own |
 | **new** | admin listener TLS and optional mTLS (§28.1), a hard dependency of #151 |
 
