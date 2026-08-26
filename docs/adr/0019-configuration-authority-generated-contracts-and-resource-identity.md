@@ -34,6 +34,7 @@
 | 2026-08-26 | Second self-audit, mechanical this time: every `§` cross-reference, every closed set, and the state diagram checked against their declarations. The closed sets hold — §26 has exactly 22 codes with none referenced that it does not define, the six `degraded` kinds declared and used match exactly, all ten `managed_inconsistent` reasons are enumerated, and the §10 state diagram and state table carry the same six states. **One real inconsistency was found and fixed: §33.1 escalated every successful outcome to exit 4 when a degradation was present — except `saved_not_live`, left at "either → 3".** That is not theoretical: §11.2.4's rows 4 and 5 produce exactly a successful, not-live adoption carrying `staging_error`, which would have exited 3 while every comparable outcome exited 4. The row is split, and §11.2.4 now names `saved_not_live` as its terminal outcome explicitly rather than leaving an implementer to infer it — `staged` would assert a pending restart that does not exist. |
 | 2026-08-26 | Eighth external review round. **§11.2.4 specified `PromoteToStaged` where `PromoteToStagedVerified` exists precisely to close the window it opened.** The unverified call would let an external writer replace the file between the `prepared` marker and the promotion, and Jul would record `staged(I)` and report success while the file held *J*. §11.2.4.1 requires the verified call and defines what a mismatch means **after** the adoption has already committed, where a `409` is no longer available: the adoption is preserved, the planned-restart marker and `.bak` are removed **without touching the file** — the store's own contract is *"do not repair the file"*, and §14.2 forbids overwriting an external writer's bytes — and the response reports `drift_after_adopt` plus `staging_incomplete`; a failed cleanup is `managed_inconsistent`/`cleanup_incomplete`. **A reachable state had no name and a reachable outcome was given the one value that means the opposite of terminal.** §11.2.4 row 4 and §14 step 10 both leave baseline and file at *I*, the runtime at *P*, and nothing staged. The `file_owned` side of the state model already had `file_owned_desired_ahead`; the managed side had no counterpart, so an earlier draft gestured at the analogy instead of deciding. **§11.2.5 adds `managed_desired_ahead`** with entry conditions, allowed operations — managed writes are **permitted**, because the on-disk state is coherent and refusing would lock an operator out over Jul's own staging failure — recovery by restart or re-stage, and its state-diagram edges. **§33.1 adds the terminal outcome `owned_not_serving` and removes `saved_not_live` from the terminal table entirely**: `isTerminalApplyResult` returns **false** for `saved_not_live` and the API answers `202`, so the previous round's row would have told clients to stop polling for a result that had not arrived — and using it for adoption would have told them to poll forever for one that had. `staging_incomplete` joins §33.2's closed set, distinct from `staging_error` because that one is reconciled automatically and this one never will be. **Two data-integrity fixes:** §14 step 11 wrote history "from the baseline snapshot", which T-mark has by then advanced to *I* — history would have recorded the adopted revision as its own predecessor, so the verified *P* buffer is now retained at step 5 and reopening the path is forbidden; and §11.2.4's failed-baseline path deleted nothing, leaving a `.bak` holding *P* that `Reconcile` never collects because it reads "no marker" as clean. That orphan carries resolved secrets, so it is deleted on failure and §17.2's `file_owned` startup now removes any orphan backup even when no planned marker exists — without which §11.2.2's "no configuration bytes survive" was simply false. |
 | 2026-08-26 | Ninth external review round — final architecture and merge-gate review. Five blockers, four external-contract defects, all upheld. **A second raw-readback path was about to ship in v1.** `GET /api/v1/config/history/{id}` returned a snapshot body under `history:raw` — an `os.ReadFile` of a configuration file that may hold literal secrets — in the same record that withdrew `/api/v1/config/raw` for that exact reason and required a test asserting no v1 route returns raw bytes. The route is removed from v1; listing, diff and rollback stay, rollback being unaffected because the server reads its own snapshot internally. **Hot adoption could not use the existing coordinator "unchanged", and saying so was not a simplification but an impossibility.** Every existing entry takes `applyMu` itself, so calling one while adoption holds it deadlocks — and their shared path persists the candidate and calls `restorePreviousLocked` on failure, which would overwrite the external writer's file, the precise compensation §14.2 forbids. **§14.3 defines `AdoptExternal`**: one lock acquisition, the already-verified buffer as input, no configuration write on any path, no restoration ever, existing terminalization and ledger reused, and the single post-commit read scoped explicitly to drift assessment so it is never transaction input. **Adopt-and-stage row 5 asserted two mutually exclusive things.** It reported `staging_error` — defined as *the candidate is staged and reconciliation will finish it* — while the same paragraph gave it `owned_not_serving`, defined as *nothing staged*. `Reconcile` does promote that marker, so row 5 is genuinely `staged`; only row 4 and the verified-promotion mismatch are `owned_not_serving`. **The plaintext transport control could not deliver its stated guarantee and was scoped so narrowly it protected nothing.** A middleware receives `Authorization` only after the request crossed the wire, so "a credential is never accepted over a channel that would expose it" overclaimed; and gating only mutating `/api/v1` while permitting authenticated plaintext reads and exempting every legacy route meant a token disclosed by a permitted read could be replayed against an exempt mutation — the legacy identity is a wildcard principal holding both. The gate now covers **every authenticated route**, `/healthz` and `/readyz` alone excepted; the CLI refuses non-loopback `http://` **before transmitting a token**, which is the half that actually protects it; and the promise is worded as what a server can keep. The compatibility break is accepted and named rather than hidden. **§10's state model had no wire representation**, so clients told to report `managed_drift` and `managed_inconsistent` distinctly would have inferred them from unrelated booleans — a second state machine in every client. A closed `config_state` enum is added, computed once, emitted never accepted, always accompanied by its `reason`. Also: `/metrics` is external **authenticated**, not `StabilityPublic`, because the route catalogue and the accepted Console RBAC spec both require `metrics:read`; exit 3 is redefined as *success, restart required to converge*, since `owned_not_serving` is by definition not staged; `ledger_retention` publishes `min_terminal_records`/`min_age_seconds` with an `evict_after_both` policy, because `pruneLocked` evicts only when **both** bounds are exceeded and the old names advertised a ceiling and an expiry that do not exist; idempotency storage becomes **five** fields, adding the principal explicitly, because `OwnerTokenID` is a credential identifier and scoping to it would have changed the contract at every rotation. Editorial: the row-4 orphan `.bak` is deleted, the nonexistent history TTL claim is dropped, the apply-id example is made parseable (twelve hex characters), "resolved secrets" becomes "literal secrets" since the coordinator persists raw bytes, the post-rename failure row now says runtime state follows the terminal outcome, `owned_not_serving` is attributed to the app layer, and revision dates and EOF whitespace are normalized. |
+| 2026-08-26 | Critical re-read of the ninth round's own fixes, before merge. Two findings had been accepted separately without tracing their interaction. **Widening the §28.1 transport gate to every authenticated route, together with reclassifying `/metrics` as authenticated, silently breaks every Prometheus deployment that scrapes over plaintext on a non-loopback address** — `/metrics` requires `metrics:read` and has no authentication bypass. Neither the review nor the previous commit named that consequence. §28.1 now states it explicitly and records the alternative that was weighed: the claim that a pre-authentication gate cannot be scoped by permission is true of the **caller's** permissions but not of the **route's**, which is static metadata, so exempting `/metrics` was implementable. It is not taken, because the legacy single-token identity is a wildcard principal holding read *and* write — so in exactly the deployments least likely to have issued a dedicated scrape token, the token used for `/metrics` **is** the admin token, and the exemption would protect the deployments needing it least. **Six statements still described the old narrow scope**, including §35's migration note asserting that existing `/api/…` routes are unaffected, the §26 catalogue entry, the pre-authentication ordering exception, a security-consideration claiming credentials are never accepted over an exposing channel, and the required test asserting that a plaintext **read succeeds** — which the widened gate makes false. All corrected, and §35 now carries the breaking change as a named migration step rather than denying it. Also verified rather than assumed: `rollbackToSnapshot` calls `hist.get(id)` server-side, so removing the raw history route from v1 genuinely does not affect rollback; and the `ManagedApplyRecord` field count is five in both places that state it. |
 
 ## Context
 
@@ -2038,7 +2039,8 @@ response, in apply results wherever this record promises state reporting, and in
 object.
 
 No surface may present `desired_version` as what is being served, and the Console banner must
-distinguish them. This is not new — Phase 5 already carries all four fields — but a file-owned mode
+distinguish them. This is not new — Phase 5 already carries the three version fields and
+`pending_restart.state`; `config_state` is the one addition — but a file-owned mode
 makes the divergence a normal steady state rather than a transient, so the distinction stops being a
 detail.
 
@@ -2571,7 +2573,7 @@ namespace adds it.
 | `operation_failed` | 400 | a typed patch operation was rejected | `op_index`, `op`, `errors[]` |
 | `unauthenticated` | 401 | no or invalid credential | — |
 | `forbidden` | 403 | authenticated, lacks the permission | `required_permission` |
-| `insecure_transport` | 403 | a mutating request arrived in cleartext on a non-loopback listener (§28.1) | `required` |
+| `insecure_transport` | 403 | a request arrived in cleartext on a non-loopback listener, on any authenticated route (§28.1) | `required` |
 | `not_found` | 404 | the addressed resource does not exist | `kind`, `id` |
 | `config_authority_read_only` | 409 | file-owned; the server does not write configuration | `config_authority`, `config_authority_source` |
 | `stale_base_version` | 409 | CAS failure | `base_version`, `current_version` |
@@ -2751,7 +2753,7 @@ key is therefore registered before side effects, and the duplicate gets a typed 
 naming the operation it should poll.
 
 Three properties keep it small. It reuses `ManagedApplyRecord`, which already exists, already has
-retention, and is already the thing `GET /api/v1/config/applies/{apply_id}` reads — so this is four
+retention, and is already the thing `GET /api/v1/config/applies/{apply_id}` reads — so this is five
 fields, not a subsystem. It is **not** a general-purpose HTTP idempotency layer: it applies to the
 mutating `/api/v1` operations and nothing else. And it does not replace CAS, which still runs: the key
 answers *"is this the same request?"*, `base_version` answers *"against the same state?"*, and a
@@ -2815,8 +2817,9 @@ the write permissions for mutations, evaluated before the resource is resolved.
 Checking permission before lookup is what makes the 403/404 boundary meaningful; the reverse order
 turns every 404-vs-403 difference into an oracle for an unauthorized caller.
 
-**One named exception: the transport check of §28.1 runs before all of this.** A mutating `/api/v1`
-request on a cleartext non-loopback listener is rejected with `403 insecure_transport` **before route
+**One named exception: the transport check of §28.1 runs before all of this.** A request to any
+authenticated route on a cleartext non-loopback listener is rejected with `403 insecure_transport`
+**before route
 lookup and before authentication**, so an unauthenticated caller receives a `403` where the table
 above would give a `401`. The exception is deliberate and discloses nothing: the verdict is a property
 of the listener, identical for every request and every principal, and reached without consulting the
@@ -2890,6 +2893,30 @@ configuration this record judges unsafe, it is named in the changelog and in §3
 the one already documented: terminate TLS, or bind to loopback and tunnel. The alternative — keeping
 the exemption so nothing breaks — preserves the disclosure path that makes the rest of the control
 theatre.
+
+**The largest single consequence is `/metrics`, and it is called out separately because it is the one
+most likely to be discovered in production rather than in review.** `/metrics` requires `metrics:read`
+and has no authentication bypass, so it is an authenticated route and the gate covers it. **Every
+Prometheus deployment scraping Jul over plaintext on a non-loopback address stops working**, which is
+a common and not obviously unsafe topology. Two options were weighed:
+
+| | Scope | Cost | Residual |
+| --- | --- | --- | --- |
+| **A — gate `/metrics` too** *(specified above)* | every authenticated route | breaks plaintext scraping everywhere | none |
+| **B — exempt `/metrics`** | every route whose *required* permission can read or mutate configuration | scraping keeps working | a deployment scraping with an over-privileged token still discloses it |
+
+The argument that the gate *must* run before authentication, and therefore cannot be scoped by
+permission, is true of the **caller's** permissions but not of the **route's**: a route's required
+permission is static metadata and is known before any credential is examined. So option B is
+implementable, and it is not obviously wrong — `metrics:read` alone grants no configuration access, so
+a purpose-issued scrape token has a genuinely smaller blast radius than an admin token.
+
+**This record specifies option A**, on the ground that the legacy single-token identity authenticates
+as a wildcard principal holding read *and* write, so in precisely the deployments least likely to have
+issued a dedicated scrape token, the token used for `/metrics` **is** the admin token. Option B would
+protect the deployments that need it least. The cost is stated here so that the decision is visible
+and can be revisited on evidence rather than rediscovered from an incident; §36 records it as the
+re-entry trigger, and reversing to option B is additive.
 
 Once #336 lands, a TLS-terminated admin listener satisfies the test on any address, which is the
 point: the rule does not forbid remote administration, it forbids doing it in cleartext.
@@ -3313,9 +3340,16 @@ control plane writable, and the changelog names it as a required migration step.
    canonical rewrites; no existing route changes behaviour. The only downgrade hazard is the ordinary
    D03 one: a configuration containing `route_id` is rejected by a binary predating it, which is true
    of every new field and is what strict decoding is for.
-6. **Existing `/api/…` routes keep working**, reclassified as internal rather than removed — so
-   §28.1's plaintext-mutation rejection, which is scoped to `/api/v1`, changes nothing for a client
-   using them today.
+6. **Existing `/api/…` routes keep working**, reclassified as internal rather than removed. Their
+   paths, permissions and payloads are unchanged.
+7. **§28.1's transport gate is the one genuinely breaking change in this record, and it is not scoped
+   to `/api/v1`.** A deployment that authenticates to Jul over cleartext HTTP on a **non-loopback**
+   address will be rejected with `403 insecure_transport` on every authenticated route — including
+   the existing `/api/…` routes and **`/metrics`**. Deployments on loopback, on a TLS-terminated
+   listener, or behind an SSH tunnel or loopback-bound sidecar are unaffected, which is every
+   documented topology. **The migration is one of: terminate TLS, bind to loopback and tunnel, or
+   run the scrape target and admin client on the same host.** The changelog names it as a required
+   migration step, and §28.1 records the alternative that was weighed and why it was not taken.
 
 ### 36. What is not built
 
@@ -3457,12 +3491,15 @@ if the entries it names are not the ones that actually move.
 13. **A managed write cannot silently detach a mounted configuration.** §11.3 rejects a symlinked
     config path under managed authority in lint and reports it at startup, so a ConfigMap-style mount
     cannot be replaced by a regular file.
-14. **A credential is never accepted over an exposing channel *on the external namespace*.** §28.1
-    rejects a mutating `/api/v1` request on a cleartext non-loopback listener before authentication,
-    with no server-side override. The scope is deliberate and is stated rather than implied: the
-    existing unversioned `/api/…` routes keep their current behaviour, so a deployment mutating over
-    a private network today is not broken by this record. It will meet the rule the day it adopts
-    `/api/v1`, and the changelog says so.
+14. **The server refuses to authenticate or act on an exposing channel.** §28.1 rejects a request to
+    any authenticated route on a cleartext non-loopback listener before authentication, with no
+    server-side override, and the CLI refuses a non-loopback `http://` endpoint before transmitting a
+    credential. **The claim is bounded deliberately:** a server cannot promise that a credential
+    already present in a received request never crossed the network — only the client can, which is
+    why both halves exist. The scope covers existing `/api/…` routes and `/metrics` as well as
+    `/api/v1`, because the legacy identity is a wildcard principal and a token disclosed by a
+    permitted plaintext read would otherwise be replayable against an exempt mutation. §35 records
+    the resulting breaking change.
 15. **The default authority is the fail-safe one.** §9.1 defaults to `file_owned`, so an upgraded
     deployment never grants Jul write authority over a file nobody said it owned.
 
@@ -3729,10 +3766,10 @@ Grouped by the decision each pins.
 - **§28 authorization:** 401 without a credential, 403 with a credential lacking the permission and
   **no existence signal**, 404 only when authorized; `config:adopt` is required for adoption and held
   by no predefined role but `admin`.
-- **§28.1 transport:** a mutating `/api/v1` request over plaintext on a non-loopback listener is
-  rejected with `403 insecure_transport` **before authentication** — asserted by proving the
-  credential was never evaluated; the same request over loopback succeeds; a read over plaintext
-  succeeds; the same mutation on the internal `/api/…` route is unaffected.
+- **§28.1 transport:** a request to any authenticated route over plaintext on a non-loopback listener
+  is rejected with `403 insecure_transport` **before authentication** — asserted by proving the
+  credential was never evaluated; the same request over loopback succeeds; a **read** over plaintext
+  is rejected too, and so is `/metrics`; `/healthz` and `/readyz` still answer.
 - **§30 capabilities:** a lean build reports the same configuration schema as a full build; an
   endpoint absent from the build returns `501 not_implemented` naming the capability, not `404`;
   `jul capabilities --json` and `/api/v1/capabilities` agree on the exit-code table.
@@ -3783,8 +3820,8 @@ Grouped by the decision each pins.
    assertion covering external, public and deprecated routes.
 10. **A new external response encoder** is added and adopted endpoint by endpoint; the five existing
     internal error shapes stay on the internal routes.
-11. **The admin server gains a transport check** on mutating `/api/v1` requests, evaluated before
-    authentication (§28.1).
+11. **The admin server gains a transport check** on every authenticated route, evaluated before
+    authentication (§28.1). This is the record's one breaking change (§35).
 12. **Three generated artifacts are added** and wired into `make generated-check` and `make ci-pr`.
 13. **A new prerequisite issue is filed** for admin listener TLS and optional mTLS; #151 gains it as a
     hard dependency.
