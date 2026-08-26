@@ -1,7 +1,7 @@
 # ADR 0019 — Configuration authority, generated contracts, resource identity and remote automation
 
 - **Status:** Accepted
-- **Date:** 2026-08-24 (revised 2026-08-24 after external review)
+- **Date:** 2026-08-24 (revised 2026-08-26 after nine rounds of external review)
 - **Deciders:** Jul.IA maintainer
 - **Applies to:** configuration ownership and persistence, the file watcher and SIGHUP, managed apply,
   drift and adoption, configuration history and rollback, planned restart, durable resource identity,
@@ -28,11 +28,12 @@
 | 2026-08-24 | Third external review round. **§11.2's transaction was wrong in a way that defeated its own purpose.** It wrote the snapshot from the *current* bytes and never updated it, so a completed write left marker and file at revision N+1 and the snapshot at N — and the next adoption would have diffed against the wrong revision and preserved the wrong configuration. The cause was following the `.bak` precedent one step too far: `.bak` holds the **old** bytes because it is rollback material, whereas a steady-state baseline must finish holding the **new** ones. The snapshot is now written after the rename, from the bytes in hand, and recovery takes the **snapshot digest as a third input** — an earlier draft could resolve a missing or stale snapshot to `managed_clean`, the one state that asserts the baseline is trustworthy. A `.next` slot with garbage collection was considered and rejected: whenever the file matches `current_digest` the file *is* the snapshot's content, so a lost snapshot is repairable rather than fatal, which removes the need for a third artifact and a promotion step. **§17.1 contradicted §11.2.1** by having startup establish the baseline automatically, which reintroduced the hole `managed_unadopted` exists to close; the transition now enters `managed_unadopted` and an explicit adoption creates the marker and snapshot. **§17.2 had nobody delete the baseline artifacts**, leaving a snapshot of exact configuration bytes — possibly containing literal secrets — beside a file the operator now believes their pipeline owns; `file_owned` startup now removes them once, as a named and bounded exception to writing nothing. **§27.1's fingerprint is defined as a tuple** over method, path, canonical query, content type and a digest of the exact body bytes, because the earlier description named only the body, `mode` and `base_version` while §24a puts other parameters in the query string; the method and path are stored rather than only hashed, since `idempotency_key_reused` promises them. Also: the 1 MiB cap applies to every body-bearing request rather than only mutations; `insecure_transport` no longer returns the listen address, which is a configuration value returned before authentication; the failure matrix covers a restart into an unparseable drifted file, where startup fails rather than substituting the snapshot; a merged row in the §10 state table is repaired; and the downstream table stops describing the withdrawn derived default and states `[DRAFT]` removal as happening on merge. |
 | 2026-08-25 | Fourth external review round. **§11.2 defined the successful path and left the failing ones undefined.** Moving the snapshot after the rename means steps 3 and 4 can fail *after* the configuration has already changed, and the failure matrix still claimed persistence failures happen "before the rename". The transaction now names its **durable commit point** — the rename — states that the reload is enqueued at that point and does not wait for provenance, and gives a per-step failure outcome: a failure before the commit is `503 storage_unavailable` with nothing changed, and a failure after it returns **success with `baseline_error`**, joining the `HistoryError` and `FinalizationError` fields the ledger already carries for exactly this class. A repair that cannot be persisted is `managed_inconsistent`/`baseline_unwritable` and **never** `managed_clean`. **The recovery table claimed three inputs and then wrote `any` in every `preparing` row**, discarding the evidence it had just introduced; the full matrix now distinguishes the pre-commit abort, the post-restoration case, the roll-forward, and — materially — the two `matches neither` cases, since a surviving snapshot at the intended digest is ordinary drift with a usable baseline while one at the prior digest is not. Every repair writes **the same verified buffer**, never a re-read of the path, closing a time-of-check/time-of-use window. **§11.2.3 is new: the composition of the baseline and planned-restart state machines**, which `marker_contradicts_staged_restart` had named without defining. They are layered rather than peers — planned restart is authoritative for which bytes belong on disk, the baseline for what Jul last wrote, and planned restart reconciles first — so there is no combined matrix. A `stage_restart` advances the baseline to the staged candidate, which is what keeps §16's expected desired-versus-active divergence from being reported as drift. **§27.2 is new:** the terminal ledger is an in-memory map, so "512 records or one hour" overstated the guarantee; retention is now scoped to one server **boot**, the ledger is deliberately not persisted, and the already-existing `applyInstanceID` is surfaced as `boot_id` so a client can detect the boundary rather than infer a durable window. **§27.1's fingerprint encoding was ambiguous** — decoded query values can contain any separator, so `a="b&c=d"` and `a="b", c="d"` collided; every component is now length-prefixed. `recorded_path` becomes `recorded_operation` carrying the **route template**, because a concrete path contains a `route_id` or listener address and §26 forbids configuration values in `details`. **§11.2.1 no longer conflates a first installation with state loss:** a marker absent beside a surviving snapshot or non-empty managed history is `managed_inconsistent`/`marker_missing` and alertable, and the case where all three are gone is stated as a filesystem-trust residual rather than an assertion that nothing existed. |
 | 2026-08-25 | Fifth external review round. **A legitimate authority round trip was classified as corruption.** The fourth round admitted non-empty managed history as evidence of marker loss, which misreads `managed → file_owned → managed` — §17.2 deliberately retains history while removing the baseline artifacts, so every operator who hands a configuration to a pipeline and takes it back would have been told their state was damaged. History is **withdrawn as evidence**: it records what Jul did, not which epoch it is in. The epoch boundary is now an explicit **handoff tombstone**, written by the `file_owned` startup that closes a managed epoch, carrying no configuration bytes and therefore safe to leave in place. §17.1's "managed history begins empty" was false on every epoch after the first and is corrected. The inverse case — a cleanup that could not run on a read-only mount, leaving a previous epoch's marker to be read as current — is stated as a named residual with its cost, rather than left to be discovered. **The protocol covered writes and was being reused for transitions that write nothing.** Adoption of already-present bytes, first establishment, and the rewind after a restoration or discard were all routed through a rename-committed protocol that does not describe them. There are now **four transaction primitives** — T1 advance, T2 establish, T3 adopt-in-place, T4 rewind — each with its own ordered writes, commit point, per-step failure outcome and crash behaviour. T2 and T3 write no configuration and perform no reload; T3's commit point is last, so a failure before it is an operation that did not happen rather than a degraded success. The background retry now **re-verifies the configuration digest under `applyMu` and abandons** if a restoration superseded it, which closes a concrete race. §11.2.3 gains an **I/O-failure table** for all seven staged writes and answers the three questions it had left open: a failed baseline write still promotes the planned-restart marker, a step-7 failure is a `staging_error` rather than a `baseline_error`, and the retry cannot outrun a restoration. **§33.2 is new: `baseline_error` was invisible to clients.** A provenance failure could commit the change, return success and leave managed writes refused while the CLI exited 0 — green pipeline, stalled control plane. A bounded `degraded` array now appears in the v1 apply DTO, the polling result and the CLI JSON; **exit 4 broadens to "success with a degraded outcome"**; `staged` plus a degradation takes exit 4; and the cross-product is stated explicitly — a degradation never upgrades or downgrades a terminal outcome, so a post-commit provenance failure cannot turn a `not_applied` reload into an API success. Idempotent replay returns the identical array. Also: the §34 shorthand "no marker ⇒ unadopted" is qualified, fingerprint lengths are UTF-8 byte lengths, and §26's "four rules" enumerated five. |
-| 2026-08-26 | Sixth external review round. **The four-primitive protocol inferred intent from digests, and two different operations left identical digests behind while requiring opposite recoveries.** Adoption (T3) wrote a `preparing` marker, so an adoption whose snapshot write failed — and whose API response reported failure — left artifacts indistinguishable from an interrupted apply, which the recovery matrix then rolled *forward*, silently committing it. Separately, T4's promised crash recovery was impossible: because the snapshot advanced at **commit**, the previous bytes existed only in process memory during the reload window, so a crash before restoration left nothing to restore from. Both are structural, and both are fixed by the same two changes rather than by more rows. There are now **two primitives**: **T-write**, for anything that changes the configuration file, and **T-mark**, for anything that does not. **The snapshot advances at terminalization, not at commit**, which makes the pre-existing snapshot the durable rollback material for exactly the window a restoration could need it — aligning with `completeManagedApply`, the single point where history, audit, metrics and the ledger already finalize, and which already carries `baseline.Raw`. **T-mark commits with one atomic marker write and never writes `preparing`**, so the collision is unreachable rather than tabulated around. §11.2.3's ordering changes accordingly: the planned-restart promotion now precedes the baseline writes, which is the stronger form of the guarantee it previously stated. **§14.2 is new: adoption bound itself to an `observed_digest` that nothing could hold still**, since external writers do not take `applyMu`. The fence is now defined as a linearization point at T-mark's marker write, with all three orderings specified — before it, `409`; after it, **success plus `drift_after_adopt` in the same response with no compensating write**, because rolling back would discard a committed adoption and overwriting would destroy the external writer's bytes; and a failed post-fence re-read yields `drift_unknown` with assessment deferred to §12's triggers. **§33.1's outcome table is now total and keyed on the terminal outcome**, replacing a `not_applied` row that read "1 or 5 per §33.1" — unresolvable, because §33.1 maps error codes and a reload that returns `not_applied` produces none; the distinguishing fact is whether restoration succeeded (exit 1) or failed (exit 5). This also corrects the claim that a post-commit baseline failure yields "success with `baseline_error`", which contradicted §33.2 in the one case that matters: restoration inside a failed apply. Finally, §11.2.2's "both artifacts absent in `file_owned`" contradicted §17.2's deliberate tombstone; the invariant is restated as **no configuration bytes and no live baseline**, and corrected in §17.2, the Consequences and both test bullets. |
-| 2026-08-25 | Seventh external review round. **Naming `completeManagedApply` as the terminalization point was wrong, and the coordinator says so in its own comment: *"A later apply may start while that work finishes."*** It is serialized by `finalizeMu` only — not by the configuration mutation gate — and all three call sites run after `inFlightState` is cleared and `c.mu` released. Apply A could therefore promote `current(I)` *after* apply B had written `preparing(I→J)`, destroying B's marker and leaving configuration *J* with baseline *I*, undetectably. §11.2.0.1 relocates the baseline terminalization point to **the end of the configuration-path mutation phase, under `c.mu`, before `inFlightState` is cleared** — the same critical section that already performs configuration-path disk writes through `restorePreviousLocked`. History, audit, metrics and ledger publication stay after the release. **Baseline mutation is part of the configuration-path transaction; telemetry is not.** **§11.2.4 is new: `stage_restart` adoption had no defined transaction and would have destroyed data.** `PlannedRestartStore.StageManaged` writes `.bak` from the previous *on-disk* bytes, which in an adoption are the bytes being adopted — so `.bak(I)` would make discard a silent no-op while T-mark had already replaced the snapshot holding *P*, losing the last known-good configuration permanently. The composition now takes `baseRaw` **from the baseline snapshot, never the file**, omits the candidate write that §11.2.3 assumes, and holds the snapshot overwrite until `.bak(P)` and the `staged` marker are both durable, with all six ordered writes tabulated. **§14.2's linearization claim is corrected**: the fence is step 8's verification read, conditional on the marker write succeeding — not the marker write itself, because an external write landing between the two is physically before the marker yet reported as after, and a fence Jul cannot observe is not one it can claim. Behaviour is unchanged. Also: the fence failure reuses the existing **`409 drift_detected`** rather than an undefined `config_changed`, keeping §26 closed at 22 codes; exit 5's description and the `exit_codes` capability broaden to include uncertain state after a failed restoration; §34's post-rename row no longer says every such failure returns success; the `managed_drift` row now names the **baseline** as desired state rather than the externally written file; and the T-mark test bullet no longer asserts that one snapshot failure both succeeded and failed. |
-| 2026-08-25 | Self-audit of the seventh round, before review. **§11.2.4 as first written reintroduced the very defect §11.2.0 was corrected for.** Its `prepared` marker preceded the commit point, and `PlannedRestartStore.Reconcile` promotes a `prepared` marker to `staged` whenever the configuration file matches the **candidate** digest — which in an adopt-and-stage is true from the outset, because the candidate is already on disk. A failed baseline marker write would therefore have returned failure to the client and had the stage silently committed by the next start. The baseline commit now precedes the planned-restart marker, under a stated invariant: **nothing a later `Reconcile` can complete may precede the commit point.** §11.2.3 satisfies the same invariant by the opposite ordering, because its file matches the *base* digest until the rename commits, so `Reconcile` clears rather than promotes — the invariant is general, the ordering that achieves it is not. Also corrected: §11.2.0.1 claimed **all three** `completeManagedApply` call sites run after the gate is released. Only the asynchronous reload path does; `applyStageRestart` is reached from `ApplyRaw`, which holds `applyMu` across the whole call and is already safe. The rule is restated as a property of the gate rather than of a function, so it holds on both paths without overclaiming about either. |
-| 2026-08-25 | Second self-audit, mechanical this time: every `§` cross-reference, every closed set, and the state diagram checked against their declarations. The closed sets hold — §26 has exactly 22 codes with none referenced that it does not define, the six `degraded` kinds declared and used match exactly, all ten `managed_inconsistent` reasons are enumerated, and the §10 state diagram and state table carry the same six states. **One real inconsistency was found and fixed: §33.1 escalated every successful outcome to exit 4 when a degradation was present — except `saved_not_live`, left at "either → 3".** That is not theoretical: §11.2.4's rows 4 and 5 produce exactly a successful, not-live adoption carrying `staging_error`, which would have exited 3 while every comparable outcome exited 4. The row is split, and §11.2.4 now names `saved_not_live` as its terminal outcome explicitly rather than leaving an implementer to infer it — `staged` would assert a pending restart that does not exist. |
-| 2026-08-25 | Eighth external review round. **§11.2.4 specified `PromoteToStaged` where `PromoteToStagedVerified` exists precisely to close the window it opened.** The unverified call would let an external writer replace the file between the `prepared` marker and the promotion, and Jul would record `staged(I)` and report success while the file held *J*. §11.2.4.1 requires the verified call and defines what a mismatch means **after** the adoption has already committed, where a `409` is no longer available: the adoption is preserved, the planned-restart marker and `.bak` are removed **without touching the file** — the store's own contract is *"do not repair the file"*, and §14.2 forbids overwriting an external writer's bytes — and the response reports `drift_after_adopt` plus `staging_incomplete`; a failed cleanup is `managed_inconsistent`/`cleanup_incomplete`. **A reachable state had no name and a reachable outcome was given the one value that means the opposite of terminal.** §11.2.4 row 4 and §14 step 10 both leave baseline and file at *I*, the runtime at *P*, and nothing staged. The `file_owned` side of the state model already had `file_owned_desired_ahead`; the managed side had no counterpart, so an earlier draft gestured at the analogy instead of deciding. **§11.2.5 adds `managed_desired_ahead`** with entry conditions, allowed operations — managed writes are **permitted**, because the on-disk state is coherent and refusing would lock an operator out over Jul's own staging failure — recovery by restart or re-stage, and its state-diagram edges. **§33.1 adds the terminal outcome `owned_not_serving` and removes `saved_not_live` from the terminal table entirely**: `isTerminalApplyResult` returns **false** for `saved_not_live` and the API answers `202`, so the previous round's row would have told clients to stop polling for a result that had not arrived — and using it for adoption would have told them to poll forever for one that had. `staging_incomplete` joins §33.2's closed set, distinct from `staging_error` because that one is reconciled automatically and this one never will be. **Two data-integrity fixes:** §14 step 11 wrote history "from the baseline snapshot", which T-mark has by then advanced to *I* — history would have recorded the adopted revision as its own predecessor, so the verified *P* buffer is now retained at step 5 and reopening the path is forbidden; and §11.2.4's failed-baseline path deleted nothing, leaving a `.bak` holding *P* that `Reconcile` never collects because it reads "no marker" as clean. That orphan carries resolved secrets, so it is deleted on failure and §17.2's `file_owned` startup now removes any orphan backup even when no planned marker exists — without which §11.2.2's "no configuration bytes survive" was simply false. |
+| 2026-08-25 | Sixth external review round. **The four-primitive protocol inferred intent from digests, and two different operations left identical digests behind while requiring opposite recoveries.** Adoption (T3) wrote a `preparing` marker, so an adoption whose snapshot write failed — and whose API response reported failure — left artifacts indistinguishable from an interrupted apply, which the recovery matrix then rolled *forward*, silently committing it. Separately, T4's promised crash recovery was impossible: because the snapshot advanced at **commit**, the previous bytes existed only in process memory during the reload window, so a crash before restoration left nothing to restore from. Both are structural, and both are fixed by the same two changes rather than by more rows. There are now **two primitives**: **T-write**, for anything that changes the configuration file, and **T-mark**, for anything that does not. **The snapshot advances at terminalization, not at commit**, which makes the pre-existing snapshot the durable rollback material for exactly the window a restoration could need it — aligning with `completeManagedApply`, the single point where history, audit, metrics and the ledger already finalize, and which already carries `baseline.Raw`. **T-mark commits with one atomic marker write and never writes `preparing`**, so the collision is unreachable rather than tabulated around. §11.2.3's ordering changes accordingly: the planned-restart promotion now precedes the baseline writes, which is the stronger form of the guarantee it previously stated. **§14.2 is new: adoption bound itself to an `observed_digest` that nothing could hold still**, since external writers do not take `applyMu`. The fence is now defined as a linearization point at T-mark's marker write, with all three orderings specified — before it, `409`; after it, **success plus `drift_after_adopt` in the same response with no compensating write**, because rolling back would discard a committed adoption and overwriting would destroy the external writer's bytes; and a failed post-fence re-read yields `drift_unknown` with assessment deferred to §12's triggers. **§33.1's outcome table is now total and keyed on the terminal outcome**, replacing a `not_applied` row that read "1 or 5 per §33.1" — unresolvable, because §33.1 maps error codes and a reload that returns `not_applied` produces none; the distinguishing fact is whether restoration succeeded (exit 1) or failed (exit 5). This also corrects the claim that a post-commit baseline failure yields "success with `baseline_error`", which contradicted §33.2 in the one case that matters: restoration inside a failed apply. Finally, §11.2.2's "both artifacts absent in `file_owned`" contradicted §17.2's deliberate tombstone; the invariant is restated as **no configuration bytes and no live baseline**, and corrected in §17.2, the Consequences and both test bullets. |
+| 2026-08-26 | Seventh external review round. **Naming `completeManagedApply` as the terminalization point was wrong, and the coordinator says so in its own comment: *"A later apply may start while that work finishes."*** It is serialized by `finalizeMu` only — not by the configuration mutation gate — and all three call sites run after `inFlightState` is cleared and `c.mu` released. Apply A could therefore promote `current(I)` *after* apply B had written `preparing(I→J)`, destroying B's marker and leaving configuration *J* with baseline *I*, undetectably. §11.2.0.1 relocates the baseline terminalization point to **the end of the configuration-path mutation phase, under `c.mu`, before `inFlightState` is cleared** — the same critical section that already performs configuration-path disk writes through `restorePreviousLocked`. History, audit, metrics and ledger publication stay after the release. **Baseline mutation is part of the configuration-path transaction; telemetry is not.** **§11.2.4 is new: `stage_restart` adoption had no defined transaction and would have destroyed data.** `PlannedRestartStore.StageManaged` writes `.bak` from the previous *on-disk* bytes, which in an adoption are the bytes being adopted — so `.bak(I)` would make discard a silent no-op while T-mark had already replaced the snapshot holding *P*, losing the last known-good configuration permanently. The composition now takes `baseRaw` **from the baseline snapshot, never the file**, omits the candidate write that §11.2.3 assumes, and holds the snapshot overwrite until `.bak(P)` and the `staged` marker are both durable, with all six ordered writes tabulated. **§14.2's linearization claim is corrected**: the fence is step 8's verification read, conditional on the marker write succeeding — not the marker write itself, because an external write landing between the two is physically before the marker yet reported as after, and a fence Jul cannot observe is not one it can claim. Behaviour is unchanged. Also: the fence failure reuses the existing **`409 drift_detected`** rather than an undefined `config_changed`, keeping §26 closed at 22 codes; exit 5's description and the `exit_codes` capability broaden to include uncertain state after a failed restoration; §34's post-rename row no longer says every such failure returns success; the `managed_drift` row now names the **baseline** as desired state rather than the externally written file; and the T-mark test bullet no longer asserts that one snapshot failure both succeeded and failed. |
+| 2026-08-26 | Self-audit of the seventh round, before review. **§11.2.4 as first written reintroduced the very defect §11.2.0 was corrected for.** Its `prepared` marker preceded the commit point, and `PlannedRestartStore.Reconcile` promotes a `prepared` marker to `staged` whenever the configuration file matches the **candidate** digest — which in an adopt-and-stage is true from the outset, because the candidate is already on disk. A failed baseline marker write would therefore have returned failure to the client and had the stage silently committed by the next start. The baseline commit now precedes the planned-restart marker, under a stated invariant: **nothing a later `Reconcile` can complete may precede the commit point.** §11.2.3 satisfies the same invariant by the opposite ordering, because its file matches the *base* digest until the rename commits, so `Reconcile` clears rather than promotes — the invariant is general, the ordering that achieves it is not. Also corrected: §11.2.0.1 claimed **all three** `completeManagedApply` call sites run after the gate is released. Only the asynchronous reload path does; `applyStageRestart` is reached from `ApplyRaw`, which holds `applyMu` across the whole call and is already safe. The rule is restated as a property of the gate rather than of a function, so it holds on both paths without overclaiming about either. |
+| 2026-08-26 | Second self-audit, mechanical this time: every `§` cross-reference, every closed set, and the state diagram checked against their declarations. The closed sets hold — §26 has exactly 22 codes with none referenced that it does not define, the six `degraded` kinds declared and used match exactly, all ten `managed_inconsistent` reasons are enumerated, and the §10 state diagram and state table carry the same six states. **One real inconsistency was found and fixed: §33.1 escalated every successful outcome to exit 4 when a degradation was present — except `saved_not_live`, left at "either → 3".** That is not theoretical: §11.2.4's rows 4 and 5 produce exactly a successful, not-live adoption carrying `staging_error`, which would have exited 3 while every comparable outcome exited 4. The row is split, and §11.2.4 now names `saved_not_live` as its terminal outcome explicitly rather than leaving an implementer to infer it — `staged` would assert a pending restart that does not exist. |
+| 2026-08-26 | Eighth external review round. **§11.2.4 specified `PromoteToStaged` where `PromoteToStagedVerified` exists precisely to close the window it opened.** The unverified call would let an external writer replace the file between the `prepared` marker and the promotion, and Jul would record `staged(I)` and report success while the file held *J*. §11.2.4.1 requires the verified call and defines what a mismatch means **after** the adoption has already committed, where a `409` is no longer available: the adoption is preserved, the planned-restart marker and `.bak` are removed **without touching the file** — the store's own contract is *"do not repair the file"*, and §14.2 forbids overwriting an external writer's bytes — and the response reports `drift_after_adopt` plus `staging_incomplete`; a failed cleanup is `managed_inconsistent`/`cleanup_incomplete`. **A reachable state had no name and a reachable outcome was given the one value that means the opposite of terminal.** §11.2.4 row 4 and §14 step 10 both leave baseline and file at *I*, the runtime at *P*, and nothing staged. The `file_owned` side of the state model already had `file_owned_desired_ahead`; the managed side had no counterpart, so an earlier draft gestured at the analogy instead of deciding. **§11.2.5 adds `managed_desired_ahead`** with entry conditions, allowed operations — managed writes are **permitted**, because the on-disk state is coherent and refusing would lock an operator out over Jul's own staging failure — recovery by restart or re-stage, and its state-diagram edges. **§33.1 adds the terminal outcome `owned_not_serving` and removes `saved_not_live` from the terminal table entirely**: `isTerminalApplyResult` returns **false** for `saved_not_live` and the API answers `202`, so the previous round's row would have told clients to stop polling for a result that had not arrived — and using it for adoption would have told them to poll forever for one that had. `staging_incomplete` joins §33.2's closed set, distinct from `staging_error` because that one is reconciled automatically and this one never will be. **Two data-integrity fixes:** §14 step 11 wrote history "from the baseline snapshot", which T-mark has by then advanced to *I* — history would have recorded the adopted revision as its own predecessor, so the verified *P* buffer is now retained at step 5 and reopening the path is forbidden; and §11.2.4's failed-baseline path deleted nothing, leaving a `.bak` holding *P* that `Reconcile` never collects because it reads "no marker" as clean. That orphan carries resolved secrets, so it is deleted on failure and §17.2's `file_owned` startup now removes any orphan backup even when no planned marker exists — without which §11.2.2's "no configuration bytes survive" was simply false. |
+| 2026-08-26 | Ninth external review round — final architecture and merge-gate review. Five blockers, four external-contract defects, all upheld. **A second raw-readback path was about to ship in v1.** `GET /api/v1/config/history/{id}` returned a snapshot body under `history:raw` — an `os.ReadFile` of a configuration file that may hold literal secrets — in the same record that withdrew `/api/v1/config/raw` for that exact reason and required a test asserting no v1 route returns raw bytes. The route is removed from v1; listing, diff and rollback stay, rollback being unaffected because the server reads its own snapshot internally. **Hot adoption could not use the existing coordinator "unchanged", and saying so was not a simplification but an impossibility.** Every existing entry takes `applyMu` itself, so calling one while adoption holds it deadlocks — and their shared path persists the candidate and calls `restorePreviousLocked` on failure, which would overwrite the external writer's file, the precise compensation §14.2 forbids. **§14.3 defines `AdoptExternal`**: one lock acquisition, the already-verified buffer as input, no configuration write on any path, no restoration ever, existing terminalization and ledger reused, and the single post-commit read scoped explicitly to drift assessment so it is never transaction input. **Adopt-and-stage row 5 asserted two mutually exclusive things.** It reported `staging_error` — defined as *the candidate is staged and reconciliation will finish it* — while the same paragraph gave it `owned_not_serving`, defined as *nothing staged*. `Reconcile` does promote that marker, so row 5 is genuinely `staged`; only row 4 and the verified-promotion mismatch are `owned_not_serving`. **The plaintext transport control could not deliver its stated guarantee and was scoped so narrowly it protected nothing.** A middleware receives `Authorization` only after the request crossed the wire, so "a credential is never accepted over a channel that would expose it" overclaimed; and gating only mutating `/api/v1` while permitting authenticated plaintext reads and exempting every legacy route meant a token disclosed by a permitted read could be replayed against an exempt mutation — the legacy identity is a wildcard principal holding both. The gate now covers **every authenticated route**, `/healthz` and `/readyz` alone excepted; the CLI refuses non-loopback `http://` **before transmitting a token**, which is the half that actually protects it; and the promise is worded as what a server can keep. The compatibility break is accepted and named rather than hidden. **§10's state model had no wire representation**, so clients told to report `managed_drift` and `managed_inconsistent` distinctly would have inferred them from unrelated booleans — a second state machine in every client. A closed `config_state` enum is added, computed once, emitted never accepted, always accompanied by its `reason`. Also: `/metrics` is external **authenticated**, not `StabilityPublic`, because the route catalogue and the accepted Console RBAC spec both require `metrics:read`; exit 3 is redefined as *success, restart required to converge*, since `owned_not_serving` is by definition not staged; `ledger_retention` publishes `min_terminal_records`/`min_age_seconds` with an `evict_after_both` policy, because `pruneLocked` evicts only when **both** bounds are exceeded and the old names advertised a ceiling and an expiry that do not exist; idempotency storage becomes **five** fields, adding the principal explicitly, because `OwnerTokenID` is a credential identifier and scoping to it would have changed the contract at every rotation. Editorial: the row-4 orphan `.bak` is deleted, the nonexistent history TTL claim is dropped, the apply-id example is made parseable (twelve hex characters), "resolved secrets" becomes "literal secrets" since the coordinator persists raw bytes, the post-rename failure row now says runtime state follows the terminal outcome, `owned_not_serving` is attributed to the app layer, and revision dates and EOF whitespace are normalized. |
 
 ## Context
 
@@ -207,7 +208,7 @@ not touch that decision; §6 states why the fingerprint must not become the publ
 | Admin transport | `internal/admin/server.go` | plaintext HTTP, bearer token or RBAC principals, loopback assumed, warning when bound elsewhere. **No TLS, no mTLS.** |
 | Error shapes | `internal/admin` | five structured shapes (`validationErrorResponse`, `conflictResponse`, `adminGuardResponse`, `patchOperationFailureResponse`, `ConfigApplyResult`) plus ad-hoc `map[string]string{"error": …}`. **No stable machine codes, no request correlation id.** |
 | Optimistic concurrency | apply, patch, rollback | optional `base_version`; 409 with `current_version` on mismatch; omitted means force |
-| Apply outcomes | `internal/server/reload_result.go` | `applied_live`, `applied_degraded`, `not_applied`, `saved_not_live`, and **`owned_not_serving` added by this record** (§33.1) |
+| Apply outcomes | `internal/server/reload_result.go` | `applied_live`, `applied_degraded`, `not_applied`, `saved_not_live`; **`owned_not_serving` is added by this record at the app layer** (§33.1) and, like `saved_not_live`, is never produced by the server |
 | Pending restart | `internal/app/planned_restart.go` | `none`, `managed_staged`, `external_divergence`, `inconsistent` |
 | Schema inventory | `internal/config/inventory.go` | `SchemaPaths()` 322, `SchemaLeaves()` 274, build-tag independent |
 | Lifecycle authority | `internal/lifecycle` | 274 entries, 49 subsystems, 5 classes, 8 flags; `lifecyclegen`; `make lifecycle-generate` / `make generated-check` |
@@ -1573,8 +1574,8 @@ The second invariant is about the bytes:
 | 1, snapshot unreadable or mismatched | — | — | unchanged | adoption fails, `managed_inconsistent` per §11.2.1b — there is nothing to back up, and staging without a backup would make discard unsafe |
 | 2, `.bak` write | — | — | unchanged | adoption fails, `503 storage_unavailable`; nothing happened |
 | 3, baseline marker | deleted | — | unchanged | **adoption fails**, and nothing can complete it: there is no planned marker, so `Reconcile` sees a clean state. **`.bak` is deleted on this path**, because `Reconcile` treats "no marker" as clean and would never collect it — an orphan holding *P* could otherwise outlive the deployment and carry literal secrets. A cleanup failure is `managed_inconsistent`, reason `cleanup_incomplete` |
-| 4, `prepared` write | *P* | — | `current(I)` | **adoption succeeds**, terminal outcome **`owned_not_serving`**, with a **`staging_incomplete`** degradation: the bytes are owned but no restart is staged and nothing will reconcile it. The state is **`managed_desired_ahead`** (§11.2.5). The operator re-stages or restarts |
-| 5, `staged` promotion | *P* | `prepared` | `current(I)` | **adoption succeeds** with a `staging_error` degradation; `Reconcile` promotes at the next start — consistent with the reported outcome, because the operation had already committed. A **verified-promotion mismatch** is a different case entirely, resolved by §11.2.4.1 |
+| 4, `prepared` write | **deleted** | — | `current(I)` | **adoption succeeds**, terminal outcome **`owned_not_serving`**, with a **`staging_incomplete`** degradation: the bytes are owned but no restart is staged and nothing will reconcile it. `.bak` is deleted here too — no planned marker exists, so `Reconcile` would never collect it. The state is **`managed_desired_ahead`** (§11.2.5) |
+| 5, `staged` promotion | *P* | `prepared` | `current(I)` | **adoption succeeds**, terminal outcome **`staged`**, with a `staging_error` degradation; `Reconcile` promotes at the next start because the file matches the candidate — consistent with the reported outcome, because the operation had already committed. A **verified-promotion mismatch** is a different case entirely, resolved by §11.2.4.1 |
 | 6, snapshot overwrite | *P* | `staged` | marker at *I*, snapshot at *P* | **adoption succeeds** with `baseline_error`; the snapshot is repairable from the file, which matches `current_digest` (§11.2.1b) |
 
 **Discard semantics are unchanged and now actually work**: a verified discard restores `.bak(P)` over
@@ -1582,11 +1583,24 @@ the configuration file, which is a real configuration write, so it rewinds the b
 **T-write** exactly as §11.2.3's discard does. The runtime was serving *P* throughout, so nothing
 reloads.
 
-**The terminal outcome for rows 4 and 5 is `owned_not_serving`** (§33.1), a terminal app-layer outcome
-meaning *owned and persisted, not serving, nothing staged*. It is **not** `saved_not_live`: that value
-is explicitly non-terminal — `isTerminalApplyResult` returns false and the API answers `202` — so using
-it here would have told the client to poll indefinitely for a result it had already been given.
-Claiming `staged` would be equally wrong, because it asserts a pending restart that does not exist.
+**The terminal outcome differs between rows 4 and 5, and an earlier draft gave them the same one —
+which cannot be right, because their degradations are defined as opposites.** `staging_error` means
+*the candidate is staged and reconciliation will finish the job*; `staging_incomplete` and
+`owned_not_serving` both mean *nothing is staged*. Row 5 leaves a `prepared` marker over a file that
+matches the candidate, which `Reconcile` **does** promote, so row 5 genuinely is staged.
+
+| Case | Terminal outcome | Degradation | Exit | Meaning |
+| --- | --- | --- | --- | --- |
+| Row 4 — `prepared` write fails | `owned_not_serving` | `staging_incomplete` | 4 | nothing staged; explicit re-stage required |
+| Row 5 — ordinary promotion I/O failure | **`staged`** | `staging_error` | 4 | candidate pending; startup reconciliation completes it |
+| §11.2.4.1 verified-promotion mismatch | `owned_not_serving` | `staging_incomplete` + `drift_after_adopt` | 4 | the external writer won; artifacts removed, file untouched |
+
+Row 5 carries a degradation, so its exit is **4** rather than the undegraded `staged` exit of 3.
+
+`owned_not_serving` is **not** `saved_not_live`: that value is explicitly non-terminal —
+`isTerminalApplyResult` returns false and the API answers `202` — so using it here would have told the
+client to poll indefinitely for a result it had already been given. Claiming `staged` for row 4 would
+be equally wrong, because it asserts a pending restart that does not exist.
 
 **A crash between steps 3 and 6** leaves the marker at *I*, the file at *I* and the snapshot at *P* —
 `current(D)` with the file matching and the snapshot not, which §11.2.1b **repairs** from the verified
@@ -1621,7 +1635,7 @@ The outcomes have to differ from the ordinary stage, because **adoption has alre
 
 | Condition | Resolution |
 | --- | --- |
-| Mismatch on the **pre**-promotion read | The marker is still `prepared`. **Adoption is preserved.** Delete the planned-restart marker and `.bak`, leaving the file untouched, and report success with `drift_after_adopt` **and** `staging_incomplete` |
+| Mismatch on the **pre**-promotion read | The marker is still `prepared`. **Adoption is preserved.** Delete the planned-restart marker and `.bak`, leaving the file untouched, and report `owned_not_serving` with `drift_after_adopt` **and** `staging_incomplete` |
 | Mismatch on the **post**-promotion read | The marker is already `staged` and the store has set its own `inconsistent` flag. Same resolution — the artifacts are removed rather than trusted, because a `staged` marker naming bytes the file no longer holds would be reconciled into a restart of the wrong revision |
 | The cleanup write itself fails | `managed_inconsistent`, reason **`cleanup_incomplete`**, with managed writes refused. Reported, not swallowed: a planned-restart marker naming a revision the file does not hold is exactly the condition `marker_contradicts_staged_restart` describes at the next start |
 
@@ -1783,19 +1797,19 @@ side-effect-free.
 9. establish or adopt the baseline through **T-mark** (§11.2) — **no configuration is written**,
    because the bytes being adopted are already on disk, so T-mark's single atomic marker write is the
    commit point and no `preparing` state exists;
-10. if the adopted bytes are **not already live**, reload or stage them through the existing
-   coordinator. A **hot** reload uses it unchanged. A **`stage_restart` adoption does not**, and must
-   follow §11.2.4: the existing stage path takes its `.bak` from the previous on-disk bytes, which in
-   an adoption are the bytes being adopted, so used unchanged it would back up the wrong revision and
-   make discard a no-op. Adoption after a restart skips this step entirely: the bytes are already
-   serving (§11.2.2). **The baseline is established before the reload**, which is safe because the
-   configuration file needs no change and therefore nothing can require rolling back. **A reload that
-   then fails does not fail the adoption** — the bytes are owned, and no restoration is possible or
-   wanted because nothing was written. The operation terminates as **`owned_not_serving`** (§33.1)
-   and the process enters **`managed_desired_ahead`** (§11.2.5). It is specifically **not**
-   `not_applied`: that outcome's exit mapping turns on whether a restoration succeeded, and an
-   adoption has nothing to restore, so routing this case through it would have produced exit 1 or 5
-   for an operation that succeeded;
+10. if the adopted bytes are **not already live**, submit them for reload through the **adoption entry
+   defined in §14.3** — *not* through the ordinary coordinator entries, which cannot serve this path.
+   A **`stage_restart` adoption** additionally follows §11.2.4: the existing stage path takes its
+   `.bak` from the previous on-disk bytes, which in an adoption are the bytes being adopted, so used
+   unchanged it would back up the wrong revision and make discard a no-op. Adoption after a restart
+   skips this step entirely: the bytes are already serving (§11.2.2). **The baseline is established
+   before the reload**, which is safe because the configuration file needs no change and therefore
+   nothing can require rolling back. **A reload that then fails does not fail the adoption** — the
+   bytes are owned, and no restoration is possible or wanted because nothing was written. The
+   operation terminates as **`owned_not_serving`** (§33.1) and the process enters
+   **`managed_desired_ahead`** (§11.2.5). It is specifically **not** `not_applied`: that outcome's
+   exit mapping turns on whether a restoration succeeded, and an adoption has nothing to restore, so
+   routing this case through it would have produced exit 1 or 5 for an operation that succeeded;
 11. write a history snapshot of the *previous managed* configuration **from the pre-adoption buffer
    retained at step 5** — **never** by reopening the snapshot path, which T-mark has by now advanced
    to the adopted bytes. From `no_baseline` there is none, so none is written (§14.1);
@@ -1882,6 +1896,40 @@ file still holds them"** — the second is not a property any process can promis
 processes write. Everything downstream is built on the first, which is why §11.2's snapshot stores
 bytes: the baseline remains exact and self-describing no matter what the file does afterwards.
 
+#### 14.3 Adoption needs its own coordinator entry, because every existing one would break it
+
+An earlier draft said a hot adoption reloads "through the existing coordinator, unchanged." It cannot,
+and the reason is structural rather than a matter of care:
+
+- **The existing entries take `applyMu` themselves.** `ApplyRaw` locks it with `defer` on the way in.
+  Adoption is already holding it from step 8 — that is what makes the digest fence meaningful — so
+  calling one of them **deadlocks**. Releasing the lock first reopens the window the fence exists to
+  close.
+- **Their shared candidate path persists the candidate and restores the previous bytes** on an enqueue
+  failure or a reload that never publishes (`restorePreviousLocked`). Adoption must do **neither**:
+  it writes no configuration, and restoring would overwrite the external writer's file — the exact
+  compensation §14.2 forbids and a required test asserts against.
+
+So the record names a distinct entry rather than leaving an implementer to discover this:
+
+> **`AdoptExternal` is a coordinator entry that takes the serialization lock exactly once, accepts the
+> already-verified candidate, submits a reload, and never writes or restores configuration bytes.**
+
+| Property | Requirement |
+| --- | --- |
+| Locking | acquires `applyMu` **once**, for the whole operation including the fence, the baseline commit and the reload submission. It is an entry point, not a helper called under a lock held elsewhere |
+| Candidate | consumes the buffer verified at step 8. It does **not** re-read the path and does **not** re-parse |
+| Persistence | performs **no** configuration write — no `atomicfile.Write`, no rename, no `.bak` except §11.2.4's, which comes from the snapshot |
+| Failure | **never** calls `restorePreviousLocked` or any equivalent. There is nothing to restore, and attempting it would destroy external bytes |
+| Reload failure | terminates `owned_not_serving` (§33.1), not `not_applied` |
+| Terminalization | reuses the existing terminalization, ledger and audit path unchanged, including §11.2.0.1's ordering |
+
+**The one post-commit read of the configuration path is drift assessment and never transaction
+input.** §14.2 requires a re-read after the fence, while §11.2's repair rule says nothing re-reads the
+path once a buffer is verified. Both hold only if the boundary is explicit: the post-commit read
+decides `drift_after_adopt` versus `drift_unknown` and **nothing else**. It never feeds the snapshot,
+the marker, the history snapshot or the reload — all of which use the retained buffers.
+
 ### 15. File-owned semantics
 
 In `file_owned` mode the external file is the desired state and Jul is a reader.
@@ -1958,6 +2006,36 @@ the existing vocabulary rather than a new one:
 | `persisted_version` | canonical version of the bytes on disk |
 | `pending_restart.state` | `none`, `managed_staged`, `external_divergence`, `inconsistent` |
 | `config_authority` / `config_authority_source` | who owns the desired state, and whether that was explicit |
+| **`config_state`** | the operational authority state of §10, as a closed enum — see below |
+
+**`config_state` is new, and without it §10's state model has no wire representation at all.** The
+record defines operationally distinct states and then requires that `managed_unadopted`,
+`managed_drift` and `managed_inconsistent` be reported distinctly and `managed_desired_ahead` be
+alertable — but the only state-shaped field in the contract is `pending_restart.state`, whose four
+values describe the *planned-restart* machine and nothing else. A client asked to distinguish these
+would have had to infer them from unrelated booleans and version comparisons, and that inference
+**is** a second state machine: one that lives in every client, drifts from the server's, and cannot be
+corrected without a breaking change.
+
+| `config_state` | Emitted when |
+| --- | --- |
+| `managed_clean` | marker matches the file; the runtime matches the desired state |
+| `managed_unadopted` | no live marker and no snapshot, or a closed handoff tombstone (§11.2.1) |
+| `managed_drift` | marker present and disagreeing with the file (§12) |
+| `managed_desired_ahead` | file matches the baseline; the runtime is behind and nothing is staged (§11.2.5) |
+| `managed_pending_restart` | a staged restart is durable |
+| `managed_failed_apply` | an apply committed, the reload did not, and the previous bytes were restored |
+| `managed_inconsistent` | any §11.2.1 `reason`; the `reason` accompanies it |
+| `file_owned_clean` | file-owned; the runtime matches the file |
+| `file_owned_desired_ahead` | file-owned; a restart-required external edit is not yet live |
+| `file_owned_invalid` | file-owned; the current file fails validation |
+
+Three rules keep it from becoming a second source of truth. **It is computed once**, from the same
+assessment that drives §12 and §11.2.1b — never recomputed per surface. **It is emitted, never
+accepted**: no request may set it, so it cannot become an input. And **`managed_inconsistent` always
+travels with its `reason`**, because the state alone is not actionable. It appears in the status
+response, in apply results wherever this record promises state reporting, and in the CLI `--json`
+object.
 
 No surface may present `desired_version` as what is being served, and the Console banner must
 distinguish them. This is not new — Phase 5 already carries all four fields — but a file-owned mode
@@ -2042,7 +2120,7 @@ for is the moment to do it.
    **Step 2 exists because `Reconcile` will not do it.** It treats an absent planned-restart marker as
    a clean state and leaves the backup untouched, so a `.bak` orphaned by a failed stage or a failed
    adopt-and-stage (§11.2.4) can survive indefinitely — and it holds **literal configuration bytes,
-   including resolved secrets**. Without this step §11.2.2's invariant would be false in a way that
+   including literal secrets**. Without this step §11.2.2's invariant would be false in a way that
    matters far more than the tombstone did: the claim is that `file_owned` retains *no configuration
    bytes*, and an orphan `.bak` is exactly that.
 
@@ -2088,7 +2166,7 @@ any other — can move ownership of the configuration file as a side effect.
 | List / read / export | allowed per RBAC | allowed per RBAC, for entries created while managed |
 | Rollback **preview** | allowed | **allowed** — it is a diff |
 | Rollback **write** | allowed | **denied**, `config_authority_read_only` |
-| Retention | existing `history_keep` and TTL rules | unchanged; entries are not pruned by the mode change |
+| Retention | the existing `history_keep` count bound | unchanged; entries are not pruned by the mode change |
 
 **File-owned mode records no history**, and this is a decision rather than an omission. #148 floats
 "observed versions/metadata" as optional. It is rejected: recording every externally-observed version
@@ -2340,8 +2418,7 @@ and the remote CLI need, and nothing else.
 | `/api/v1/config/applies/{apply_id}` | GET | any of `status:read`, `config:apply`, `history:rollback` | terminal outcome of one operation |
 | `/api/v1/config/pending-restart` | GET | any of `config:read`, `config:write`, `config:apply` | staged state |
 | `/api/v1/config/pending-restart/discard` | POST | `config:apply` | verified discard |
-| `/api/v1/config/history` | GET | `history:read` | list |
-| `/api/v1/config/history/{id}` | GET | `history:raw` | snapshot bytes |
+| `/api/v1/config/history` | GET | `history:read` | list; metadata only |
 | `/api/v1/config/history/{id}/diff` | GET | `history:rollback` | rollback preview |
 | `/api/v1/config/rollback` | POST | `history:rollback` | rollback |
 | `/api/v1/routes` | GET | `status:read` | route collection; each entry carries `route_id` **or** the revision-scoped selector |
@@ -2367,6 +2444,21 @@ simply not part of the supported external contract. §36 records the re-entry tr
 cost is that `jul export --raw` is local-only in v1, which is acceptable because the deployment that
 needs exact bytes — the managed → file-owned handoff of §17.2 — is one where the operator has
 filesystem access to the file itself.
+
+**The same reasoning removes `GET /api/v1/config/history/{id}` from v1, and an earlier draft published
+it while asserting the opposite two paragraphs later.** That route returns a stored snapshot body under
+`history:raw`, whose implementation is a direct `os.ReadFile` of the snapshot and whose permission is
+defined as *"reading the raw TOML body of a historical snapshot."* A history snapshot is a
+configuration file, so it may contain literal secret values — which makes this a **second raw-readback
+path**, not a naming inconsistency, and one that would have shipped in v1 alongside a required test
+asserting that no v1 route returns raw configuration bytes.
+
+What v1 publishes instead is everything that does not require the body: **the history listing with its
+safe metadata, the diff endpoints, and rollback.** Rollback is unaffected, because it never needed the
+bytes to cross the API — the server reads its own snapshot internally. Raw snapshot bodies remain
+available on the internal `/api/config/history/{id}` route under the unchanged `history:raw`
+permission. The withdrawal is additive to reverse, and §36 records the same re-entry trigger as raw
+export, because the two decisions must be made together or not at all.
 
 ### 24a. Wire semantics the external contract must fix
 
@@ -2394,10 +2486,14 @@ semantics rather than DTO detail**, and #150 would otherwise have to invent them
 Two of these are one-way doors and are listed as such in the reversibility table: unknown-field
 rejection on requests, and declaration-ordered collections.
 
-**Unversioned and external by necessity:** `/healthz`, `/readyz` and `/metrics` keep their current
-paths and are declared `StabilityPublic` / external at those paths. Moving a liveness probe or a
-Prometheus scrape target under `/api/v1` would break every deployment for no benefit; their contracts
-are already released.
+**Unversioned by necessity:** `/healthz`, `/readyz` and `/metrics` keep their current paths. Moving a
+liveness probe or a Prometheus scrape target under `/api/v1` would break every deployment for no
+benefit; their contracts are already released. **Only `/healthz` and `/readyz` are `StabilityPublic`**,
+which this record defines as requiring no authentication. **`/metrics` is external but authenticated**
+— the route catalogue requires `metrics:read` and the accepted Console RBAC specification says the
+same — so classifying it public would have published a contract the server does not implement and
+implied an unauthenticated scrape endpoint that does not exist. Its path and permission are both
+unchanged; only this record's classification of it is corrected.
 
 **Explicitly internal in v1**, with the reason, because "why is this not external" is the question
 each will attract:
@@ -2586,7 +2682,7 @@ So `/api/v1` mutations accept a **client-supplied idempotency key**:
 | Grammar | 8–128 bytes, `[A-Za-z0-9_-]`; anything else is `invalid_request` |
 | Generation | the client's, opaque to the server, never parsed |
 | **Binding** | `principal` plus the **request fingerprint** defined below |
-| Storage | four fields on the existing `ManagedApplyRecord` — the key, the fingerprint, and the recorded method and **route template**; no new store |
+| Storage | **five** fields on the existing `ManagedApplyRecord` — the key, the fingerprint, the recorded method, the **route template**, and the **principal** the key is scoped to; no new store. The principal is stored explicitly because `OwnerTokenID` is a *credential* identifier and §28's identity model deliberately separates it from `Principal`: scoping to the token would silently change the contract at every credential rotation, so the field is private (`json:"-"`) and never serialized |
 | Registration | the key is recorded **before any side effect**, in a `pending` state, under the same lock that guards the write |
 | Retention | the ledger's existing bounds, 512 records or one hour — **within one server boot** (§27.2) |
 | Replay of a **terminal** record | the recorded outcome is returned, **the operation is not executed**, and the response carries `idempotent_replay: true` |
@@ -2753,25 +2849,47 @@ this record said remote mutation required secure transport and then permitted it
 which is not a control — a warning on the client cannot constrain a client, and the thing being
 protected is a bearer token that grants full read/write access.
 
-> **A mutating `/api/v1` request received on a listener that is neither TLS-terminated nor bound to
-> loopback is rejected with `403 insecure_transport`, before authentication and before any side
-> effect.**
+> **A request received on a listener that is neither TLS-terminated nor bound to loopback is rejected
+> with `403 insecure_transport`, before authentication and before any side effect, on every route that
+> consumes an admin credential.**
 
 | Property | Value |
 | --- | --- |
-| Applies to | mutating `/api/v1` operations |
-| Does not apply to | reads, `/healthz`, `/readyz`, `/metrics`, and **every existing `/api/…` route** |
+| Applies to | **every authenticated route**, read or write, `/api/v1` and existing `/api/…` alike — anything that consumes a bearer token, including `/metrics`, which requires `metrics:read` (§24) |
+| Does not apply to | `/healthz` and `/readyz` only — genuinely public, credential-free liveness and readiness probes |
 | Test | the connection's local address is loopback, **or** the connection is TLS |
-| Order | before authentication, so a credential is never accepted over a channel that would expose it |
+| Order | before authentication, so the server never *accepts* a credential presented over an exposed channel |
 | Override | **none** — a server-side bypass would be the same hole as the `--insecure` this record already refuses |
 
-**Scoping it to `/api/v1` is what makes it shippable.** Every documented safe deployment presents to
-Jul as a loopback connection — an SSH tunnel terminates locally, a systemd socket is local, a sidecar
-proxy is loopback-bound — so the rule permits all of them and rejects only the shape nobody should be
-running: a bearer token in cleartext across a network. And because it binds to the new namespace, an
-existing deployment mutating over `0.0.0.0` on a private network through the current `/api/…` routes
-is untouched, keeping this a forward-looking contract rather than a breaking change. The changelog
-still names it, because that deployment will hit the rule the day it adopts `/api/v1`.
+**The guarantee is stated precisely, because an earlier draft claimed one that no HTTP middleware can
+deliver.** It said the gate runs before authentication "so a credential is never accepted over a
+channel that would expose it", which reads as *the token does not cross the wire*. By the time any
+handler runs, the request — `Authorization` header included — has already traversed the network.
+Server-side ordering cannot unsend it.
+
+> **What the server promises: it refuses to authenticate or act on an unsafe channel. What it cannot
+> promise: that a credential already present in the request never crossed the network.** Only the
+> client can prevent that, so the client is where the corresponding rule lives.
+
+**The CLI refuses a non-loopback `http://` endpoint before it loads or transmits a token at all.**
+Loopback HTTP and HTTPS both remain supported. This is the half of the control that actually protects
+the credential, and it is a client-side rule not because clients can be trusted to enforce policy —
+they cannot — but because the disclosure happens on the client's side of the wire.
+
+**The scope had to widen from "mutating `/api/v1`" to every authenticated route, and the narrow
+version was not merely incomplete — it was ineffective.** The earlier scoping permitted authenticated
+plaintext *reads* and exempted every existing `/api/…` route, while the legacy single-token identity
+authenticates as a wildcard principal holding both read and write permissions. So a token disclosed by
+a permitted plaintext read could simply be replayed against an exempt legacy mutation, and the control
+would have protected nothing while appearing to protect the thing that mattered most.
+
+**The compatibility cost is real and accepted rather than hidden.** A deployment that today
+authenticates over `0.0.0.0` in cleartext on a private network — through any `/api/…` route, not only
+the new ones — will be rejected after this change. That is a breaking change for exactly the
+configuration this record judges unsafe, it is named in the changelog and in §35, and the remedy is
+the one already documented: terminate TLS, or bind to loopback and tunnel. The alternative — keeping
+the exemption so nothing breaks — preserves the disclosure path that makes the rest of the control
+theatre.
 
 Once #336 lands, a TLS-terminated admin listener satisfies the test on any address, which is the
 point: the rule does not forbid remote administration, it forbids doing it in cleartext.
@@ -2817,7 +2935,7 @@ An external client must not have to infer capability from an error.
 | `endpoints` | external paths this build actually serves, with unavailable ones flagged and their required capability named |
 | `config_authority`, `config_authority_source` | §9.1 |
 | `boot_id` | the process's apply-instance identity; a change means the terminal ledger and every idempotency binding were discarded (§27.2) |
-| `ledger_retention` | `{max_records: 512, ttl_seconds: 3600}`, scoped to `boot_id` |
+| `ledger_retention` | `{min_terminal_records: 512, min_age_seconds: 3600, policy: "evict_after_both"}`, scoped to `boot_id`. **These are minimum guarantees, not caps.** ADR 0015 and `pruneLocked` evict a terminal record only when it is **both** past the age bound **and** over the count bound, so a `max_records`/`ttl_seconds` naming — which an earlier draft used — would have advertised a hard ceiling and an expiry that the implementation does not enforce, and a client could have wrongly concluded a record was gone |
 | `exit_codes` | the CLI contract table (§33), so `jul capabilities` and the API agree. Each entry carries the **full** meaning, including exit 5's second sense — conflict *or* uncertain state after a failed restoration |
 
 Two boundaries:
@@ -2944,7 +3062,7 @@ the only direction that is usable.
   "command": "apply",
   "ok": true,
   "outcome": "staged",
-  "apply_id": "rl_9f2c1ab7_41",
+  "apply_id": "rl_9f2c1ab74e60_41",
   "idempotency_key": "ci-build-8842",
   "idempotent_replay": false,
   "base_version": "1c0d5e9a77b34f21",
@@ -2968,7 +3086,7 @@ the API report the same code for the same condition.
 | 0 | success — applied live, or a read completed |
 | 1 | validation or configuration error *(unchanged)* |
 | 2 | usage error: bad flags, missing argument, disabled admin *(unchanged)* |
-| 3 | success, **staged** for the next restart |
+| 3 | success; **a restart is required to converge** — either an explicitly staged candidate (`staged`) or a configuration that is owned but not serving (`owned_not_serving`). The JSON outcome distinguishes them |
 | 4 | success with a **degraded outcome** — applied degraded, or committed with a non-empty `degraded` array (§33.2) |
 | 5 | conflict, **or state left uncertain by a failed restoration** — the operation could not proceed against current state, or it failed and the previous configuration could not be put back (§33.1). In both cases re-reading state is required before retrying |
 | 6 | authority denial: the server is file-owned |
@@ -3131,7 +3249,7 @@ compatibility surface, appears in `jul capabilities --json`, and is contract-tes
 | Stale `base_version` | unchanged | unchanged | unchanged | `409 stale_base_version` with `current_version`; re-plan |
 | Duplicate `route_id` in a candidate | unchanged | unchanged | unchanged | `validation_failed` naming both locations; nothing written |
 | Persistence fails **before** the configuration rename | unchanged | unchanged | unchanged | `503 storage_unavailable`; `atomicfile` leaves the previous complete file (§11.2) |
-| Persistence fails **after** the rename — the snapshot or marker write | **committed** | new version | stale until repaired | **the operation's own terminal outcome, unchanged**, plus `baseline_error` (§33.2) — so a failed apply stays `not_applied`; retried once, then `managed_inconsistent`/`baseline_unwritable`; the next start rolls forward (§11.2) |
+| Persistence fails **after** the rename — the snapshot or marker write | **committed** | runtime state follows the terminal reload outcome | stale until repaired | **the operation's own terminal outcome, unchanged**, plus `baseline_error` (§33.2) — so a failed apply stays `not_applied`; retried once, then `managed_inconsistent`/`baseline_unwritable`; the next start rolls forward (§11.2) |
 | Apply committed, reload `not_applied` | previous bytes restored | previous version | previous | existing Phase 5 restoration |
 | Restoration itself fails | ambiguous — candidate on disk | previous version | ambiguous | `recovery` history snapshot written; `managed_inconsistent`; managed writes refused until resolved |
 | Restart with a staged candidate | staged bytes | new version after restart | as staged | existing planned-restart reconciliation |
@@ -3494,7 +3612,30 @@ Grouped by the decision each pins.
   holds *I*, so any implementation that reopens it instead of using the retained buffer fails.
 - **§17.2 orphan cleanup:** a `file_owned` startup that inherits an orphan planned-restart `.bak` —
   with no planned marker present — removes it. This is asserted by content, because the orphan may
-  hold resolved secrets and `Reconcile` will not collect it.
+  hold literal secrets and `Reconcile` will not collect it.
+- **§14.3 the adoption coordinator entry:** adoption acquires the serialization lock **once** — a test
+  that would deadlock if adoption called an existing entry while holding `applyMu` must pass. The
+  entry writes **no** configuration bytes on any path, and **never** restores: inject an enqueue
+  failure and a non-publishing reload, and assert by digest that the configuration file is unchanged
+  in both. **The falsification for §14.2:** inject an external write between T-mark and the reload
+  submission and assert the external bytes survive byte-for-byte — no compensation, no restoration.
+  Assert the post-commit read affects only `drift_after_adopt`/`drift_unknown` and never the snapshot,
+  marker, history snapshot or reload input.
+- **§24 no raw bytes in v1:** enumerate the v1 route table and assert **no route returns a
+  configuration or history snapshot body** — specifically that `GET /api/v1/config/history/{id}` does
+  not exist while its internal counterpart still does, and that rollback works without it.
+- **§28.1 transport gate:** a plaintext non-loopback request is refused with `403 insecure_transport`
+  **before authentication** on every authenticated route — reads as well as writes, existing `/api/…`
+  as well as `/api/v1`, and `/metrics` — while `/healthz` and `/readyz` still answer. Assert the CLI
+  refuses a non-loopback `http://` endpoint **without transmitting a token**, which is the half of the
+  control that protects the credential.
+- **§16 `config_state`:** every state in §10 maps to exactly one emitted `config_state` value; it is
+  computed once and identical across the status response, apply results and CLI JSON for the same
+  assessment; `managed_inconsistent` always carries its `reason`; and a request that attempts to set
+  it is rejected as an unknown field (D03).
+- **§27.1 idempotency scope:** the key is bound to the **principal**, not the credential — the same
+  principal presenting a rotated token replays successfully, and a different principal presenting the
+  same key is rejected. Assert the principal field is never serialized.
 - **§14.2 the digest fence:** an external write ordered **before** the fence yields `409 drift_detected`
   and changes nothing; ordered **after** it, the adoption **succeeds** and the same response reports
   `drift_after_adopt` — no compensating write to the configuration file is issued, which is asserted
@@ -3633,7 +3774,7 @@ Grouped by the decision each pins.
 6. **`external_divergence` is generalized** from "startup-bound subsystems differ" to §12's digest
    comparison, and the existing `PlannedRestartStateEnum` is reused rather than duplicated.
 7. **One new permission**, `config:adopt`, and one new mutating endpoint pair for adoption.
-8. **`ManagedApplyRecord` gains four fields** — the idempotency key, the request fingerprint, and the
+8. **`ManagedApplyRecord` gains five fields** — the idempotency key, the request fingerprint, and the
    recorded method and route template (§27.1) — plus registration before side effects, and
    `baseline_error` alongside the existing `HistoryError` and `FinalizationError` (§11.2). No new
    store, no new retention policy; the ledger's existing 512-record/one-hour bounds become a published
@@ -3793,7 +3934,7 @@ rejection was wrong and is withdrawn**. Mandatory CAS does prevent the lost upda
 is not needed for safety; what it is needed for is *outcome attribution*. A changed `base_version`
 does not prove this client's operation committed, an unchanged one does not prove it failed, and the
 `409` a retry receives cannot distinguish "my first attempt won" from "someone else won". §27.1 adds
-the key as four fields on a ledger record that already exists, with the existing retention, rather than
+the key as five fields on a ledger record that already exists, with the existing retention, rather than
 as a subsystem.
 
 **Exposing `/api/events` as an external SSE contract in v1.** Rejected in §24: without `Last-Event-ID`
@@ -3839,7 +3980,3 @@ prerequisites are not merged.
 - [ADR 0011](0011-reload-plan.md) — the reload transaction and the lifecycle registry
 - [ADR 0016](0016-inbound-identity-and-backend-peer-trust.md) — `config:trust`, the precedent for
   splitting a privileged capability into its own permission
-
-
-
-

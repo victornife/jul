@@ -432,10 +432,14 @@ address, and `(protocol, listen)` for L4 streams. Server blocks remain a revisio
   client-supplied idempotency key for unambiguous retry;
 - preview/apply/stage/pending/history/status contracts;
 - deterministic OpenAPI checked against route/DTO catalogs;
-- no secret readback, and no raw configuration export in the first external version.
+- no secret readback, and no raw configuration export in the first external version — which
+  includes raw *history snapshot* bodies, since a snapshot is a configuration file; v1 publishes
+  history listing, diff and rollback, and raw bodies stay on the internal route.
 
-Remote *mutating* automation additionally requires admin listener transport security: a mutating
-external request in cleartext on a non-loopback listener is rejected, and the transport work is a hard
+Remote automation additionally requires admin listener transport security: an external request in
+cleartext on a non-loopback listener is rejected on **every authenticated route**, read or write,
+before authentication; only `/healthz` and `/readyz` are exempt. The client refuses a non-loopback
+`http://` endpoint before transmitting a credential. The transport work is a hard
 prerequisite rather than an assumption.
 
 ### Remote CLI
