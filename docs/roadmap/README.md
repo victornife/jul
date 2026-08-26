@@ -37,7 +37,7 @@ portfolio has parallel lanes.
 | **2 — Cache correctness** | Generation-owned revalidation, immutable entries, HTTP semantics, upgrade transparency, recertification | Race-clean, protocol-safe, truthful conformance matrix | ✅ complete: #131, #133 and #132 merged; #134 recertification closed #107; the cache retains GA |
 | **3 — Lifecycle authority** | Closed-world field inventory, Go registry authority, generated/checkable mirrors | Every field classified exactly once; no unknown path defaults to hot | ✅ complete: #89 |
 | **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ✅ complete: #77 → #78 → #79 → #80 → #81 → #82 |
-| **5 — Core architecture decisions** | Trust, resilience, routing, configuration authority/automation | ADRs merge and downstream drafts become implementation-ready | ▶ in progress: #115 accepted (ADR 0016) and #116 accepted (ADR 0017); #117 → #118 remain |
+| **5 — Core architecture decisions** | Trust, resilience, routing, configuration authority/automation | ADRs merge and downstream drafts become implementation-ready | ✅ complete: #115 (ADR 0016), #116 (ADR 0017), #117 (ADR 0018) and #118 (ADR 0019) are accepted |
 | **6 — Core implementation** | Canonical client identity, backend trust, generic resilience, routing policy, schema/API/CLI | Standalone completeness gaps closed with protocol/operational evidence | ▶ in progress: canonical client identity (#135 → #136 → #259) and backend trust (#137 → #138 → #139 → #140) complete; generic resilience (#141-#144) unblocked and next; routing/automation gated by #117/#118 |
 | **7 — Selected runtime dynamics** | Value-ranked certificate, credential, logging, sink, cache-policy, and Alt-Svc transitions | Selected settings are safely dynamic; structural settings retain planned restart | ⬜ planned |
 | **8 — Migration and diagnostics** | NGINX assessment, provenance, compatibility corpus, support bundle, `jul doctor` | Operator-safe evidence and recovery workflows | ⬜ planned |
@@ -88,10 +88,20 @@ Global and Traffic Controls Console migration (#81), and the Phase 5 closure
 work (#82) are complete. #115 and #116 are accepted and closed: their
 implementation lanes — inbound identity (#135 → #136 → #259) and backend trust
 (#137 → #138 → #139 → #140) — are complete, and generic resilience
-(#141 → #142 → #143 → #144) is unblocked. The architecture-decision sequence's
-remaining stage is #117 → #118; #117 is READY / NEXT, but implementation has not
-started. Shared edits to routing policy, configuration authority or automation
-remain gated by those decisions.
+(#141 → #142 → #143 → #144) is unblocked. **The architecture-decision sequence is
+complete**: #117 (ADR 0018, routing and response policy) and #118 (ADR 0019,
+configuration authority, generated contracts and resource identity) are both
+accepted and closed. `[DRAFT]` is removed from #147, #148, #149, #150 and #151.
+
+Three of those are **READY and unblocked** — #147 (routing policy completion),
+#148 (authority modes) and #149 (generated artifacts). Two keep a
+**hard-predecessor block** rather than a draft gate, because their contracts are
+fixed but their prerequisites are not built: #150 is blocked on #148, and #151 on
+#150 and on #336 (admin listener TLS and optional mTLS), which is itself
+sequenced behind #100 so it consumes the existing certificate-provider seam
+rather than introducing a second one. Shared edits to routing policy,
+configuration authority or automation are no longer gated by a pending decision;
+they are gated only by the WIP limits in §4 of the operating model.
 
 Phase 5 closure does not authorize universal hot reload, does not imply dynamic
 cache backend replacement, and does not automatically continue into an AI
