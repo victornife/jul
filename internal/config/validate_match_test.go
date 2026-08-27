@@ -92,9 +92,7 @@ func TestMatchMethodsValidation(t *testing.T) {
 
 	t.Run("the count bound is enforced", func(t *testing.T) {
 		methods := make([]string, 0, MaxMatchMethods+1)
-		for _, m := range []string{"GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "TRACE"} {
-			methods = append(methods, m)
-		}
+		methods = append(methods, "GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "TRACE")
 		for i := len(methods); i <= MaxMatchMethods; i++ {
 			methods = append(methods, "EXT"+strings.Repeat("X", i))
 		}
