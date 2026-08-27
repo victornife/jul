@@ -91,9 +91,16 @@ func (e *patchBaselineError) Unwrap() error { return e.Err }
 // any operation is dispatched.
 type patchVersionConflictError struct {
 	CurrentVersion string
+	// Message overrides the default explanation. It is set for the one conflict
+	// that is not a stale version but a missing one: an ordinal-bearing patch
+	// with no base_version at all.
+	Message string
 }
 
 func (e *patchVersionConflictError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
 	return "configuration changed since the patch batch was prepared"
 }
 
@@ -154,6 +161,23 @@ func executePatchBatch(
 	}
 	if requestedVersion != "" && requestedVersion != baseVersion {
 		return out, &patchVersionConflictError{CurrentVersion: baseVersion}
+	}
+	// An empty base_version is an explicit force-apply, which is safe for a
+	// coordinate tuple that names a route and unsafe for an ordinal: inserting a
+	// same-path route above the target shifts every later ordinal, so a
+	// force-applied ordinal patch edits a route the operator never previewed.
+	// Requiring the CAS binding turns that race into a 409 (ADR 0018 §14).
+	if requestedVersion == "" {
+		for i, op := range ops {
+			if op.MatchOrdinal == nil {
+				continue
+			}
+			return out, &patchVersionConflictError{
+				CurrentVersion: baseVersion,
+				Message: fmt.Sprintf("operation %d (%s) selects a route by match_ordinal, which requires base_version",
+					i+1, op.Op),
+			}
+		}
 	}
 
 	// Reparse the canonical form before cloning. This makes preview and apply

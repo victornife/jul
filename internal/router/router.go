@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"sort"
 
 	"jul/internal/config"
 	"jul/internal/middleware"
@@ -28,15 +29,31 @@ type locationRoute struct {
 	matchType string
 	path      string
 	re        *regexp.Regexp
-	rewrites  []compiledRewrite
-	handler   http.Handler
+	// predicates is the location's compiled method/header/query predicate set,
+	// or nil when it constrains nothing beyond its path (ADR 0018 §2-§5).
+	predicates *compiledPredicates
+	rewrites   []compiledRewrite
+	handler    http.Handler
+	// index is the location's position in its server block's declaration order,
+	// which is the only tie-breaker in selection and the coordinate the typed
+	// patch API and the route-test surface address a location by.
+	index int
 }
 
 type serverRoute struct {
-	names         []string
-	locations     []*locationRoute
-	fallback      *locationRoute // the "/" prefix location, if present
-	redirectHTTPS int            // status code (301/308) to redirect HTTP->HTTPS, or 0
+	names     []string
+	locations []*locationRoute
+	// The four selection tiers, precomputed so no ordering decision is made per
+	// request: exact, regex and root in declaration order, non-root prefixes by
+	// descending path length with ties in declaration order (ADR 0018 §6).
+	exactLocations  []*locationRoute
+	prefixLocations []*locationRoute
+	regexLocations  []*locationRoute
+	rootLocations   []*locationRoute
+	redirectHTTPS   int // status code (301/308) to redirect HTTP->HTTPS, or 0
+	// index is the server block's position in config.Config.Servers, so a
+	// selection can be reported back in the operator's own coordinates.
+	index int
 }
 
 func (s *serverRoute) score(host string) int { return hostScore(s.names, host) }
@@ -93,7 +110,7 @@ func New(cfg *config.Config, builders map[string]Builder, fallback Builder, locM
 	}
 	r := &Router{byAddr: map[string]*addrRouter{}, log: log}
 
-	for _, srv := range cfg.Servers {
+	for i, srv := range cfg.Servers {
 		if srv.Listen == "" {
 			continue
 		}
@@ -101,6 +118,7 @@ func New(cfg *config.Config, builders map[string]Builder, fallback Builder, locM
 		if err != nil {
 			return nil, err
 		}
+		sr.index = i
 		ar := r.byAddr[srv.Listen]
 		if ar == nil {
 			ar = &addrRouter{}
@@ -118,8 +136,8 @@ func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback 
 	sr := &serverRoute{names: srv.ServerNames, redirectHTTPS: srv.RedirectHTTPS}
 
 	bodyLimit := srv.ClientMaxBodySize.Bytes()
-	for _, loc := range srv.Locations {
-		lr := &locationRoute{matchType: loc.Match.Type, path: loc.Match.Path}
+	for i, loc := range srv.Locations {
+		lr := &locationRoute{matchType: loc.Match.Type, path: loc.Match.Path, index: i}
 
 		if loc.Match.Type == "regex" {
 			re, err := regexp.Compile(loc.Match.Path)
@@ -128,6 +146,14 @@ func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback 
 			}
 			lr.re = re
 		}
+
+		// Predicates compile here, inside Prepare, so an invalid one fails the
+		// reload transaction before Publish and can never partially activate.
+		predicates, err := compilePredicates(loc)
+		if err != nil {
+			return nil, err
+		}
+		lr.predicates = predicates
 
 		rewrites, err := compileRewrites(loc.Rewrites)
 		if err != nil {
@@ -168,11 +194,34 @@ func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback 
 
 		lr.handler = h
 		sr.locations = append(sr.locations, lr)
-		if loc.Match.Type == "prefix" && loc.Match.Path == "/" {
-			sr.fallback = lr
+	}
+	sr.indexLocations()
+	return sr, nil
+}
+
+// indexLocations derives the selection tiers from the declaration-ordered
+// location list. It runs once per handler generation, so no ordering decision is
+// ever made per request (ADR 0018 §6).
+func (s *serverRoute) indexLocations() {
+	s.exactLocations, s.prefixLocations = nil, nil
+	s.regexLocations, s.rootLocations = nil, nil
+	for _, lr := range s.locations {
+		switch {
+		case lr.matchType == "exact":
+			s.exactLocations = append(s.exactLocations, lr)
+		case lr.matchType == "regex":
+			s.regexLocations = append(s.regexLocations, lr)
+		case lr.path == "/":
+			s.rootLocations = append(s.rootLocations, lr)
+		default:
+			s.prefixLocations = append(s.prefixLocations, lr)
 		}
 	}
-	return sr, nil
+	// Longest prefix first, ties in declaration order. SliceStable is what makes
+	// the tie-break a property of the table rather than of the sort.
+	sort.SliceStable(s.prefixLocations, func(i, j int) bool {
+		return len(s.prefixLocations[i].path) > len(s.prefixLocations[j].path)
+	})
 }
 
 func compileRewrites(rules []config.RewriteConfig) ([]compiledRewrite, error) {
@@ -204,7 +253,7 @@ func (r *Router) For(addr string) http.Handler {
 			redirectToHTTPS(w, req, srv.redirectHTTPS)
 			return
 		}
-		loc := srv.matchLocation(req.URL.Path)
+		loc := srv.selectLocation(req)
 		if loc == nil {
 			http.NotFound(w, req)
 			return

@@ -1,7 +1,8 @@
 # ADR 0018 — Bounded route matching and response policy
 
 - **Status:** Accepted
-- **Date:** 2026-08-21 (revised 2026-08-24 after external review)
+- **Date:** 2026-08-21 (revised 2026-08-24 after external review; §6 corrected 2026-08-27 during
+  implementation)
 - **Deciders:** Jul.IA maintainer
 - **Applies to:** location matching, route selection, the HTTP request pipeline, response-header
   policy, CORS, the response cache, compression, WebSocket upgrade, native gRPC passthrough, gRPC
@@ -30,6 +31,7 @@
 | 2026-08-24 | Review of the record's own stated doubts. One design change: §10 adds a **location-scoped recover**, so a panic after route selection produces a 500 carrying the location's response headers and CORS — the earlier draft documented that hole as a boundary, which was wrong, since §9 already argues a cross-origin 401/403/429/502 must be readable and 500 is not different. Three accuracy corrections: §16's bounds are labelled conservative and **unmeasured**, with worst-case benchmarks at the maxima required of #145/#146; §14's reversibility is downgraded to an *internal* two-way door with transient impact, because `authByScope`/`wafByScope` are rebuilt per generation and only rate-limit buckets are keyed across reloads (evicted by the store's idle TTL); and #331/#332 become **hard merge gates** for #146 rather than sequencing preferences. §9's `allowed_methods` default is **kept**, with the rule that makes it safe now stated exactly: every `Access-Control-Request-Headers` token must be listed, with **no safelist exemption**, because a browser lists a name there precisely when it is *not* safelisted. |
 | 2026-08-24 | #331 landed: `Recorder`, `compressWriter` and `cacheWriter` now pass `1xx` straight through and apply their own logic exactly once, on the first status `>= 200`, matching the rule §10 specifies for the response-policy wrapper. One of the two hard merge gates on #146 is satisfied; #332 remains open. |
 | 2026-08-24 | #332 landed, choosing the mechanism this record left open: `cacheWriter` stores the multiset difference between the header map at commit and the same map as it stood when the cache handler was entered, so `X-Request-ID` and the cache's own `X-Cache` — both pre-set before the handler runs — cancel out of a stored entry unless the handler overwrote them with a different value. §11's invariant is upgraded from the commit-boundary form to the unconditional one, as anticipated, with the residual this record predicted: the difference delivers no-leak, not fidelity, so a handler `Set`ting a field to the outer layer's exact value under-stores it, and a handler deleting an outer-set field sees it resurface on a later hit. Both are tested (`TestHandlerSettingTheOuterLayersExactValueIsNotStored`, `TestHandlerDeletingAnOuterHeaderIsResurrectedOnAHit`) rather than left to be rediscovered. Both hard merge gates on #146 are now satisfied. |
+| 2026-08-27 | **§6 corrected during #145's implementation, by the differential gate this record mandates.** The `/`-fold was unsound: it justified making `prefix "/"` an ordinary tier-2 candidate on the grounds that it "behaves exactly as the current `sr.fallback` does", but `sr.fallback` is consulted *after* the regex tier, so the fold would have let a `prefix "/"` location shadow every regex location in its block — the ordinary `location /` plus `location ~ \.php$` shape, already pinned by `TestLocationPrecedence`. The catch-all keeps its position as tier 4; everything the fold was for (enumerated candidate, fallthrough, predicates, first-declared wins) is unaffected. §6 also now states what the fold left implicit: a non-rooted path matches no tier, including tier 4, which is the property §2's `CONNECT` rule already assumed and which the old unconditional fallback did not provide. |
 
 ## Context
 
@@ -305,18 +307,28 @@ declared on the address.
 candidates := []
   tier 1  every location with match.type = "exact" and path == r.URL.Path,
           in declaration order
-  tier 2  every location with match.type = "prefix" whose path is a prefix of r.URL.Path,
-          ordered by descending len(path), ties in declaration order
+  tier 2  every location with match.type = "prefix", path != "/", whose path is a
+          prefix of r.URL.Path, ordered by descending len(path),
+          ties in declaration order
   tier 3  every location with match.type = "regex" whose compiled pattern matches r.URL.Path,
           in declaration order
+  tier 4  every location with match.type = "prefix" and path == "/",
+          in declaration order
 
-for candidate in candidates (tier 1, then tier 2, then tier 3):
+for candidate in candidates (tier 1, then 2, then 3, then 4):
     if candidate has no predicates            -> select it
     if every predicate of candidate matches   -> select it
     otherwise                                 -> continue
 
 no candidate selected -> 404 (Router.For, unchanged)
 ```
+
+A request path that is not rooted matches no tier, tier 4 included. Go gives an authority-form
+`CONNECT` an empty `r.URL.Path` and a server-wide `OPTIONS` carries `*`; neither is a prefix of any
+configured path, not even of `/`. §2's `CONNECT` rule depends on this. It is a behaviour change:
+the pre-record `sr.fallback` was returned *without* testing that the path was a prefix of it, so both
+reached the catch-all. Answering them with a 404 is the safer of the two, and it is the one §2
+already assumes.
 
 Four properties are frozen by that algorithm.
 
@@ -328,13 +340,26 @@ and the completeness spec forbids a hidden one.
 **Declaration order is the only tie-breaker**, at every tier, in every case. No map is iterated
 anywhere in selection.
 
-**The `/` fallback stops being a special case.** `prefix "/"` becomes an ordinary tier-2 candidate of
-length 1, which sorts last among prefixes and therefore behaves exactly as the current `sr.fallback`
-does — with one difference. Today `sr.fallback` is reassigned on every `prefix "/"` location, so the
-*last* one wins, while `lint.go` tells the operator the *first* one wins and the rest are
-"unreachable". The router and the lint disagree today. Unifying `/` into tier 2 makes the first
-declared win, which is what every other tier already does and what the lint already claims. The
-behaviour change is confined to configurations that lint already flags.
+**The `/` catch-all keeps its position, and stops being a special *mechanism*.** An earlier revision
+of this record folded `prefix "/"` into tier 2 as an ordinary candidate of length 1, on the stated
+grounds that it "sorts last among prefixes and therefore behaves exactly as the current `sr.fallback`
+does". **That justification was wrong, and the differential gate this record mandates is what proved
+it.** `sr.fallback` is consulted *after* the regex tier, not within the prefix tier. As a tier-2
+candidate it would be consulted *before* every regex, so a `prefix "/"` location would shadow every
+`match.type = "regex"` location in its server block — the ordinary `location /` plus
+`location ~ \.php$` shape, and the shape `internal/router/router_test.go` has pinned since before
+this record existed. That is a silent traffic move on a very common configuration, which is the one
+outcome §6 exists to prevent.
+
+So the catch-all keeps the position it has always had, as tier 4, and everything the fold was
+*for* survives: it is an enumerated candidate with fallthrough, it can carry predicates like any
+other location, and it is selected by declaration order. That last part is the one intended
+behaviour change. Today `sr.fallback` is reassigned on every `prefix "/"` location, so the *last*
+one wins, while `lint.go` tells the operator the *first* one wins and the rest are "unreachable".
+The router and the lint disagree today; tier 4 makes the first declared win, which is what every
+other tier already does and what the lint already claims. That behaviour change is confined to
+configurations lint already flags, and it is the only path-only divergence the differential gate
+may allowlist.
 
 **Rewrites still run after selection, on the selected location only.** `applyRewrites` is unchanged;
 a rewritten path does not trigger a second location search, exactly as today.
@@ -1364,7 +1389,8 @@ approximated silently.
 | Query parsing semantics; malformed pairs absent, never a 400 (§4) | **One-way door** | client-visible behaviour under malformed input | breaking |
 | AND composition, OR only within a list (§5) | One-way door to *narrow*, two-way to *extend* | adding a bounded OR later is additive | low if additive |
 | Tiered enumeration with fallthrough; path specificity over predicates (§6) | **One-way door** | the single most observable behaviour in the record | breaking; traffic moves |
-| `/` folded into tier 2, first-declared wins (§6) | Expensive two-way door | affects only configurations lint already flags | small, documented |
+| `/` is tier 4, first-declared wins (§6) | Expensive two-way door | affects only configurations lint already flags | small, documented |
+| A non-rooted path (empty, `*`) reaches no tier (§6) | Expensive two-way door | authority-form `CONNECT` and server-wide `OPTIONS` stop reaching the catch-all | small, documented |
 | No automatic 405 (§7) | Two-way door **into** 405, one-way back out | adding 405 later is a behaviour change; removing it after shipping is worse | adding later is the cheap direction |
 | Ordered operation list for response headers (§8) | **One-way door** | public schema and typed API | schema migration |
 | Protected-header denylist, including §8a's `Vary` rule (§8) | Expensive two-way door | relaxing is additive, tightening breaks deployed configs | one-directional |
@@ -1508,10 +1534,10 @@ required by it.
   all §16 bounds.
 - **§4 query:** absent, `?x`, `?x=`, repeated, percent-encoded, `+`, malformed escape (deterministic,
   no 400), `;` not a separator, the 1024-pair bound, and parsed exactly once per request.
-- **§5/§6 selection:** AND across kinds; fallthrough within the exact, prefix and regex tiers;
-  descending prefix length then declaration order; path specificity beating predicates; `/` folded
-  into tier 2 with first-declared winning; no map iteration anywhere in selection; order stable
-  across reload; unreachable/duplicate lint.
+- **§5/§6 selection:** AND across kinds; fallthrough within every tier; descending prefix length
+  then declaration order; path specificity beating predicates; a regex candidate outranking the `/`
+  catch-all; `/` as tier 4 with first-declared winning; a non-rooted path reaching no tier; no map
+  iteration anywhere in selection; order stable across reload; unreachable/duplicate lint.
 - **§7:** method mismatch yields 404 and no `Allow` header.
 - **§8 response headers:** add/set/remove and their ordering; multi-value; empty value vs omitted;
   every rejected name; a value carrying a C0 control or DEL rejected, not only CR/LF/NUL; the 8 KiB

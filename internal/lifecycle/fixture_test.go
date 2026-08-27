@@ -10,6 +10,10 @@ import (
 	"jul/internal/config"
 )
 
+// strPtr returns a pointer to s, for the schema's optional string fields where
+// an omitted value and an explicitly empty one are different configurations.
+func strPtr(s string) *string { return &s }
+
 // fullConfig returns a configuration that populates every public schema leaf
 // with a non-zero value. It is the reachability fixture for the closed-world
 // contract: TestFullyPopulatedFixtureReachesEveryEntry fails when a registered
@@ -109,7 +113,21 @@ func fullConfig() *config.Config {
 				MaxHops:          8,
 			},
 			Locations: []config.LocationConfig{{
-				Match: config.MatchConfig{Type: "prefix", Path: "/"},
+				Match: config.MatchConfig{
+					Type:    "prefix",
+					Path:    "/",
+					Methods: []string{"GET", "POST"},
+					Headers: []config.HeaderMatch{{
+						Name:  "X-Tenant",
+						Op:    "exact",
+						Value: strPtr("public"),
+					}},
+					Query: []config.QueryMatch{{
+						Name:  "version",
+						Op:    "exact",
+						Value: strPtr("v2"),
+					}},
+				},
 
 				Root:             "/srv",
 				Index:            []string{"index.html"},

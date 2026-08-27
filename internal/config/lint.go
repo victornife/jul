@@ -94,22 +94,13 @@ func Lint(c *Config) []Diagnostic {
 			})
 		}
 
-		// Duplicate location matches: the later block is unreachable because the
-		// router selects the first equivalent match.
-		seen := map[string]int{}
-		for j, loc := range srv.Locations {
-			key := loc.Match.Type + "\x00" + loc.Match.Path
-			if first, ok := seen[key]; ok {
-				diags = append(diags, Diagnostic{
-					Severity: SeverityWarning,
-					Field:    fmt.Sprintf("servers[%d].locations[%d]", i, j),
-					Message:  fmt.Sprintf("duplicate match of locations[%d] (%s %q); this block is unreachable", first, loc.Match.Type, loc.Match.Path),
-					Hint:     "remove the duplicate or change its match",
-				})
-			} else {
-				seen[key] = j
-			}
+		// Unreachable locations, reported only where the shadowing is provable
+		// (ADR 0018 §15): a coordinate clash alone no longer implies it, because
+		// two locations may now legitimately share a path and differ by predicate.
+		diags = append(diags, unreachableLocationDiagnostics(&c.Servers[i], i)...)
+		diags = append(diags, matchPredicateDiagnostics(&c.Servers[i], i)...)
 
+		for j, loc := range srv.Locations {
 			// Directory listing leaks file names and structure.
 			if loc.DirectoryListing {
 				diags = append(diags, Diagnostic{

@@ -14,13 +14,43 @@ references.
 - **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
 - **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust have shipped ([ADR 0016](adr/0016-inbound-identity-and-backend-peer-trust.md)). The remaining boundaries are documented as deferrals with explicit promotion triggers in that record, not as gaps: proxy-aware Admin identity, QUIC and UDP client preservation, and per-tenant policy.
 - **Upstream overload control:** the bounded model decided by [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) is not yet implemented. Until #141–#144 land, the running binary has: no cap on concurrent upstream requests or on physical backend connections (`MaxConnsPerHost` is unset); no retry budget, overall retry deadline or backoff between attempts; no bound on how many requests probe a backend the instant its `fail_timeout` cooldown elapses; no load balancing, health checking or failure accounting for `fastcgi_pass` and `uwsgi_pass`, whose connection count is unbounded; no connection cap on L4 TCP routes (UDP already has `max_udp_sessions`); and no circuit breaker on the forward-auth and JWKS subrequests, which carry a fixed 10s timeout.
-- **Routing and response policy:** the bounded model proposed by
-  [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md) is not yet implemented. Until
-  #145 and #146 land, a location can only be selected by host and path: there is no method,
-  request-header or query-parameter matching, no way to add, replace or remove a response header,
-  and no CORS or preflight handling of any kind. `[servers.locations].headers` sets headers on the
-  *upstream request*, not on the response to the client. A WASM middleware plugin is the only way to
-  set a response header today.
+- **Routing and response policy:** the request-matching half of
+  [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md) has shipped (#145): a location
+  can be constrained by method, request header and query parameter. The response half has not.
+  Until #146 lands there is no way to add, replace or remove a response header, and no CORS or
+  preflight handling of any kind. `[servers.locations].headers` sets headers on the *upstream
+  request*, not on the response to the client, and a WASM middleware plugin is the only way to set
+  a response header today.
+
+---
+
+## Route matching ([configuration.md](configuration.md#request-predicates))
+
+- **The Boolean model is deliberately small.** A list inside one field is an
+  OR-set and everything else is ANDed. There is no negation, no grouping, no OR
+  across fields, no expression language, no body or cookie matching, and no
+  weighted, canary or mirrored routing. These are D12 exclusions, not oversights.
+- **There is no automatic 405 and no `Allow` header.** A method mismatch makes a
+  route non-matching, and a final no-match is the router's ordinary 404. `Allow`
+  is a property of the resource, and a gateway route enumerating `["GET"]` says
+  nothing about whether the upstream implements POST. Use the route-test surface
+  for "the path matched but the method did not" diagnostics.
+- **A predicate mismatch is never logged per request**, and no predicate value
+  ever becomes a metric label. The route-test surface is the diagnostic.
+- **Query predicates have no `regex` operator** in this tranche, and only the
+  first 1024 query pairs of a request are parsed.
+- **`cors.enabled` widening is implemented but unreachable.** ADR 0018 §2 widens
+  a `methods` predicate to accept that location's own CORS preflight. The
+  matcher implements it and the policy-scope fingerprint reserves the bit, but
+  the `[servers.locations.cors]` block that turns it on arrives with #146, so no
+  configuration can set it yet.
+- **`prefix "/"` is consulted after the regex tier, not folded into the prefix
+  tier.** ADR 0018 §6 specifies the fold on the stated grounds that a
+  length-1 prefix "behaves exactly as the current `sr.fallback` does". It does
+  not: the fallback was consulted *after* regex, so folding it in would let a
+  `location /` shadow every regex route. The implementation keeps the catch-all
+  in its own tier and the record needs an amendment; see the differential gate in
+  [`internal/router/precedence_diff_test.go`](../internal/router/precedence_diff_test.go).
 
 ---
 

@@ -6,86 +6,147 @@ package router
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"testing"
 )
 
-func TestMatchLocationExact(t *testing.T) {
-	s := &serverRoute{
-		locations: []*locationRoute{
-			{matchType: "exact", path: "/api"},
-			{matchType: "exact", path: "/api/users"},
-		},
-		fallback: &locationRoute{matchType: "prefix", path: "/"},
+// testServerRoute assembles a server block from declaration-ordered locations
+// and derives its selection tiers exactly as buildServerRoute does.
+func testServerRoute(locs ...*locationRoute) *serverRoute {
+	s := &serverRoute{}
+	for i, loc := range locs {
+		loc.index = i
+		s.locations = append(s.locations, loc)
 	}
+	s.indexLocations()
+	return s
+}
 
-	if loc := s.matchLocation("/api"); loc == nil || loc.path != "/api" {
+// selectRequest builds a bare GET for a path without going through URL
+// parsing, so an arbitrary fuzzer-supplied path reaches the matcher verbatim.
+func selectRequest(path, rawQuery string) *http.Request {
+	return &http.Request{
+		Method: http.MethodGet,
+		URL:    &url.URL{Path: path, RawQuery: rawQuery},
+		Header: http.Header{},
+	}
+}
+
+// selectPath resolves a bare GET for the given path.
+func selectPath(s *serverRoute, path string) *locationRoute {
+	return s.selectLocation(selectRequest(path, ""))
+}
+
+func TestSelectLocationExact(t *testing.T) {
+	s := testServerRoute(
+		&locationRoute{matchType: "exact", path: "/api"},
+		&locationRoute{matchType: "exact", path: "/api/users"},
+		&locationRoute{matchType: "prefix", path: "/"},
+	)
+
+	if loc := selectPath(s, "/api"); loc == nil || loc.path != "/api" {
 		t.Fatalf("expected exact match /api, got %v", loc)
 	}
-	if loc := s.matchLocation("/api/users"); loc == nil || loc.path != "/api/users" {
+	if loc := selectPath(s, "/api/users"); loc == nil || loc.path != "/api/users" {
 		t.Fatalf("expected exact match /api/users, got %v", loc)
 	}
 }
 
-func TestMatchLocationLongestPrefix(t *testing.T) {
-	s := &serverRoute{
-		locations: []*locationRoute{
-			{matchType: "prefix", path: "/api"},
-			{matchType: "prefix", path: "/api/v1"},
-		},
-		fallback: &locationRoute{matchType: "prefix", path: "/"},
-	}
+func TestSelectLocationLongestPrefix(t *testing.T) {
+	s := testServerRoute(
+		&locationRoute{matchType: "prefix", path: "/api"},
+		&locationRoute{matchType: "prefix", path: "/api/v1"},
+		&locationRoute{matchType: "prefix", path: "/"},
+	)
 
-	loc := s.matchLocation("/api/v1/users")
+	loc := selectPath(s, "/api/v1/users")
 	if loc == nil || loc.path != "/api/v1" {
 		t.Fatalf("expected longest prefix /api/v1, got %v", loc)
 	}
 }
 
-func TestMatchLocationPrefixSkipsRootDuringSearch(t *testing.T) {
-	s := &serverRoute{
-		locations: []*locationRoute{
-			{matchType: "prefix", path: "/"},
-			{matchType: "prefix", path: "/docs"},
-		},
-		fallback: &locationRoute{matchType: "prefix", path: "/"},
-	}
+// TestSelectLocationRootIsConsultedLast pins that `prefix "/"` is the last
+// candidate of all: a longer prefix and a regex both outrank it, whatever order
+// they are declared in.
+func TestSelectLocationRootIsConsultedLast(t *testing.T) {
+	s := testServerRoute(
+		&locationRoute{matchType: "prefix", path: "/"},
+		&locationRoute{matchType: "prefix", path: "/docs"},
+		&locationRoute{matchType: "regex", path: `\.png$`, re: regexp.MustCompile(`\.png$`)},
+	)
 
-	loc := s.matchLocation("/docs/readme")
-	if loc == nil || loc.path != "/docs" {
+	if loc := selectPath(s, "/docs/readme"); loc == nil || loc.path != "/docs" {
 		t.Fatalf("expected /docs, got %v", loc)
 	}
-}
-
-func TestMatchLocationRegex(t *testing.T) {
-	s := &serverRoute{
-		locations: []*locationRoute{
-			{matchType: "regex", re: regexp.MustCompile(`^/users/\d+$`)},
-		},
-		fallback: &locationRoute{matchType: "prefix", path: "/"},
+	if loc := selectPath(s, "/img/logo.png"); loc == nil || loc.matchType != "regex" {
+		t.Fatalf("expected the regex candidate to outrank the catch-all, got %v", loc)
 	}
-
-	loc := s.matchLocation("/users/123")
-	if loc == nil {
-		t.Fatal("expected regex match")
-	}
-
-	loc = s.matchLocation("/users/abc")
-	if loc != s.fallback {
-		t.Fatal("expected fallback for non-matching regex")
+	if loc := selectPath(s, "/other"); loc == nil || loc.path != "/" {
+		t.Fatalf("expected /, got %v", loc)
 	}
 }
 
-func TestMatchLocationFallback(t *testing.T) {
-	fallback := &locationRoute{matchType: "prefix", path: "/"}
-	s := &serverRoute{
-		locations: []*locationRoute{},
-		fallback:  fallback,
-	}
+// TestSelectLocationDuplicateRootTakesTheFirstDeclared pins the one path-only
+// behaviour ADR 0018 §6 changes: the old sr.fallback was reassigned on every
+// `prefix "/"` location so the LAST one won, while lint has always told the
+// operator the first one wins. The router now agrees with the lint.
+func TestSelectLocationDuplicateRootTakesTheFirstDeclared(t *testing.T) {
+	first := &locationRoute{matchType: "prefix", path: "/"}
+	s := testServerRoute(first, &locationRoute{matchType: "prefix", path: "/"})
 
-	loc := s.matchLocation("/anything")
-	if loc != fallback {
-		t.Fatal("expected fallback")
+	if loc := selectPath(s, "/anything"); loc != first {
+		t.Fatal("expected the first declared \"/\" location, not the last")
+	}
+}
+
+// TestSelectLocationRejectsANonRootedPath pins the property ADR 0018 §2 rests
+// on: Go gives an authority-form CONNECT an empty URL path, and a server-wide
+// OPTIONS carries "*". Neither is a prefix of any configured path, so both fall
+// through to the router's 404 instead of reaching the catch-all.
+func TestSelectLocationRejectsANonRootedPath(t *testing.T) {
+	s := testServerRoute(&locationRoute{matchType: "prefix", path: "/"})
+
+	for _, path := range []string{"", "*"} {
+		if loc := selectPath(s, path); loc != nil {
+			t.Errorf("path %q selected %v, want no candidate", path, loc)
+		}
+	}
+}
+
+func TestSelectLocationRegex(t *testing.T) {
+	root := &locationRoute{matchType: "prefix", path: "/"}
+	s := testServerRoute(
+		&locationRoute{matchType: "regex", path: `^/users/\d+$`, re: regexp.MustCompile(`^/users/\d+$`)},
+		root,
+	)
+
+	if loc := selectPath(s, "/users/123"); loc == nil || loc.matchType != "regex" {
+		t.Fatalf("expected regex match, got %v", loc)
+	}
+	if loc := selectPath(s, "/users/abc"); loc != root {
+		t.Fatal("expected the catch-all for a non-matching regex")
+	}
+}
+
+// TestSelectLocationPrefixOutranksRegex pins the tier order: a non-root prefix
+// candidate is consulted before any regex, however specific the pattern.
+func TestSelectLocationPrefixOutranksRegex(t *testing.T) {
+	s := testServerRoute(
+		&locationRoute{matchType: "regex", path: `^/users/\d+$`, re: regexp.MustCompile(`^/users/\d+$`)},
+		&locationRoute{matchType: "prefix", path: "/users/"},
+	)
+
+	if loc := selectPath(s, "/users/123"); loc == nil || loc.matchType != "prefix" {
+		t.Fatalf("expected the prefix candidate to outrank the regex, got %v", loc)
+	}
+}
+
+func TestSelectLocationNoCandidate(t *testing.T) {
+	s := testServerRoute(&locationRoute{matchType: "exact", path: "/only"})
+
+	if loc := selectPath(s, "/anything"); loc != nil {
+		t.Fatal("expected no selection, which Router.For answers with a 404")
 	}
 }
 

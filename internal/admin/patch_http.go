@@ -142,10 +142,14 @@ func writePatchExecutionError(w http.ResponseWriter, err error) bool {
 	}
 	var conflictErr *patchVersionConflictError
 	if errors.As(err, &conflictErr) {
+		message := "The configuration changed since this edit was prepared; reload and try again."
+		if conflictErr.Message != "" {
+			message = conflictErr.Message
+		}
 		writeJSON(w, http.StatusConflict, conflictResponse{
 			OK:             false,
 			Conflict:       true,
-			Message:        "The configuration changed since this edit was prepared; reload and try again.",
+			Message:        message,
 			CurrentVersion: conflictErr.CurrentVersion,
 		})
 		return true
@@ -386,11 +390,17 @@ func (s *Server) applyPatchOps(w http.ResponseWriter, r *http.Request, params pa
 		}
 		var conflictErr *patchVersionConflictError
 		if errors.As(err, &conflictErr) {
-			s.recordAudit(r, params.auditAction, "config", "failure", "rejected: base version stale (concurrent change)")
+			message := "The configuration changed since this edit was prepared; reload and try again."
+			auditReason := "rejected: base version stale (concurrent change)"
+			if conflictErr.Message != "" {
+				message = conflictErr.Message
+				auditReason = "rejected: " + conflictErr.Message
+			}
+			s.recordAudit(r, params.auditAction, "config", "failure", auditReason)
 			writeJSON(w, http.StatusConflict, conflictResponse{
 				OK:             false,
 				Conflict:       true,
-				Message:        "The configuration changed since this edit was prepared; reload and try again.",
+				Message:        message,
 				CurrentVersion: conflictErr.CurrentVersion,
 			})
 			return

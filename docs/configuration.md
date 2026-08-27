@@ -409,6 +409,130 @@ Only one action may be present per location; validation rejects ambiguous blocks
 match = { type = "prefix", path = "/api/" }   # prefix, exact, or regex
 ```
 
+A location may additionally constrain the request method, its headers and its
+query parameters. See [Request predicates](#request-predicates) below.
+
+### Request predicates
+
+`type` and `path` decide which locations a request is a *candidate* for.
+Predicates filter within that candidate set; they never promote a route past a
+more specific path.
+
+```toml
+[[servers.locations]]
+proxy_pass = "http://api"
+
+[servers.locations.match]
+type = "prefix"
+path = "/api/"
+methods = ["GET", "POST"]
+
+[[servers.locations.match.headers]]
+name = "X-Tenant"
+op = "exact"          # present | exact | regex
+value = "public"
+
+[[servers.locations.match.query]]
+name = "version"
+op = "exact"          # present | exact
+value = "v2"
+```
+
+**One Boolean rule:** a list inside one field is an OR-set; separate fields and
+separate table entries are ANDed. There is no negation, no grouping and no OR
+across fields.
+
+`headers` and `query` are arrays of tables rather than maps, because declaration
+order is preserved and round-tripped, and because one name may carry more than
+one predicate.
+
+#### `methods`
+
+| Rule | Behaviour |
+| --- | --- |
+| Comparison | byte-exact against the request method; nothing is case-folded (RFC 9110 §9.1) |
+| `GET` | also matches `HEAD`, which RFC 9110 §9.3.2 defines as GET without a body |
+| `HEAD` alone | matches HEAD only |
+| Omitted | the route does not constrain the method |
+| `methods = []` | a validation error — a route that can never match is a mistake, not a way to disable one |
+| `"get"` | rejected, naming `"GET"`; a genuinely lowercase extension method is accepted |
+| Duplicates | rejected rather than silently collapsed |
+| `CONNECT` | rejected: Jul implements no tunnelling, and Go gives an authority-form CONNECT an empty path, which matches no location |
+| Extension methods | accepted when they are valid tokens |
+
+#### `headers`
+
+| `op` | Matches when |
+| --- | --- |
+| `present` | the field is present at all, **including** a present-but-empty one |
+| `exact` | **any one** field line is byte-equal to `value` |
+| `regex` | **any one** field line matches the RE2 pattern |
+
+Field *names* are canonicalized, so they match case-insensitively on every
+protocol version. Field *values* are compared byte-exactly, and are never split
+on commas: `Accept: a, b` is one value.
+
+`regex` is **unanchored**, matching the existing `match.type = "regex"` path
+matcher. Write `^…$` when you mean the whole value.
+
+`op = "exact"` with `value = ""` matches only a present-but-empty field, which is
+how absent and present-empty stay distinguishable.
+
+Rejected at validation: `Host` (Go moves it out of the request headers, so the
+predicate could never fire — use `server_names`), and any `:`-prefixed
+pseudo-header. Hop-by-hop names are accepted with a lint warning, because they
+are connection-scoped and behave differently per protocol version.
+
+`Forwarded`, `X-Forwarded-*` and RFC 9440 certificate-assertion names are
+**rejected unless the listener declares
+[`[servers.client_address]` `trusted_proxies`](#client-address-and-trusted-proxies)**.
+Matching runs before Jul rebuilds the forwarded chain, so at that moment the
+field still holds whatever the client sent. Even when accepted the predicate
+produces a `SeverityError` lint finding: the declared trust reaches the proxy,
+not the client behind it.
+
+#### `query`
+
+| `op` | Matches when |
+| --- | --- |
+| `present` | the key appears, including `?x` and `?x=` |
+| `exact` | any occurrence of the key decodes to `value` |
+
+The query string is parsed with `url.ParseQuery` semantics — `&` separates,
+`;` does not, `+` decodes to a space, `%XX` is percent-decoded. It is parsed at
+most once per request, lazily, and **only when a candidate route actually
+carries a query predicate**, so a configuration without one never parses a query
+string. A malformed escape makes only that pair absent; the request is never
+turned into a 400.
+
+#### Bounds
+
+| Bound | Limit |
+| --- | --- |
+| `methods` entries | 16 |
+| `headers` entries per location | 16 |
+| `query` entries per location | 16 |
+| `regex` header predicates per location | 8 |
+| Header regex pattern length | 512 bytes |
+| Header predicate `value` length | 1 KiB |
+| Query `name` / `value` length | 1 KiB |
+| Query pairs parsed per request | 1024 |
+
+All but the last are checked before the configuration is published. These are
+conservative initial ceilings, not measured capacity limits; raising one is
+additive and needs evidence.
+
+#### No automatic 405
+
+A method mismatch makes a route non-matching, and the search continues. When no
+candidate remains the answer is the ordinary **404** — there is no 405 and no
+`Allow` header anywhere. `Allow` is a property of the resource, and a gateway
+route listing `["GET"]` says nothing about whether the upstream implements POST.
+
+Use the Console's route tester (`POST /api/routes/test`) to see which candidates
+a request produced and which predicate rejected each one; a predicate mismatch
+is never logged per request.
+
 ### Static file serving
 
 Serve files from a local directory. Ideal for SPAs, asset delivery, and simple
