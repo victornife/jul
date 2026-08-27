@@ -49,7 +49,7 @@ references.
   length-1 prefix "behaves exactly as the current `sr.fallback` does". It does
   not: the fallback was consulted *after* regex, so folding it in would let a
   `location /` shadow every regex route. The implementation keeps the catch-all
-  in its own tier and the record needs an amendment; see the differential gate in
+  in its own tier, and the record was amended to match; see the differential gate in
   [`internal/router/precedence_diff_test.go`](../internal/router/precedence_diff_test.go).
 
 ---

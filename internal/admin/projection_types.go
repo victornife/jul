@@ -27,11 +27,24 @@ type RouteProjection struct {
 
 // LocationProjection is a structured location within a route.
 type LocationProjection struct {
-	Index       int    `json:"index"`
-	Match       string `json:"match"`
-	Type        string `json:"type"`   // exact, prefix, regex
-	Action      string `json:"action"` // static, proxy, grpc, grpc_transcode, fastcgi, redirect, deny, return
-	Target      string `json:"target,omitempty"`
+	Index  int    `json:"index"`
+	Match  string `json:"match"`
+	Type   string `json:"type"`   // exact, prefix, regex
+	Action string `json:"action"` // static, proxy, grpc, grpc_transcode, fastcgi, redirect, deny, return
+	Target string `json:"target,omitempty"`
+	// MatchOrdinal is the route's 0-based index among the locations of its
+	// server block sharing its match type and path, which predicates made
+	// non-unique (ADR 0018 §14). A typed patch sends it, together with the
+	// base_version it was read at, to address one of several same-path routes.
+	//
+	// It is a revision-relative selector and not an identity: it must not be
+	// stored, shown as a resource name, or correlated across revisions. A
+	// durable route_id belongs to ADR 0019.
+	MatchOrdinal int `json:"match_ordinal"`
+	// Predicates summarises the route's method, header and query predicates so
+	// two routes sharing a path are distinguishable in a list. Values are
+	// omitted deliberately; names and operations are enough to tell them apart.
+	Predicates  string `json:"predicates,omitempty"`
 	Auth        bool   `json:"auth"`
 	Cache       bool   `json:"cache"`
 	Compression bool   `json:"compression"`

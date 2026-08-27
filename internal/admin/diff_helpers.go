@@ -100,14 +100,56 @@ func orNone(s string) string {
 	return s
 }
 
-// locationKey identifies a location within a server block by match type+path,
-// which is how routes are addressed operationally.
+// locationKey correlates a location across two revisions. Match type and path
+// stopped being unique when ADR 0018 §14 gave a location predicates, and a
+// colliding key silently drops one of two same-path routes from the preview —
+// an operator approving a change they were never shown. It therefore keys on the
+// same normalized predicate set the policy-scope fingerprint uses, not on an
+// ordinal: an ordinal would re-key every route below an inserted one, rendering
+// an insertion as a mutation of all of them.
 func locationKey(l *config.LocationConfig) string {
+	return locationCoordinates(l) + "\x00" + l.Match.CanonicalPredicates()
+}
+
+// locationCoordinates is the match type and path alone.
+func locationCoordinates(l *config.LocationConfig) string {
 	t := l.Match.Type
 	if t == "" {
 		t = "prefix"
 	}
 	return t + " " + l.Match.Path
+}
+
+// locationLabel is the operator-facing name of a route in the diff. It carries a
+// predicate summary so two routes sharing a path are distinguishable in a
+// preview rather than appearing as the same line twice.
+func locationLabel(l *config.LocationConfig) string {
+	if summary := locationPredicateSummary(l); summary != "" {
+		return locationCoordinates(l) + " " + summary
+	}
+	return locationCoordinates(l)
+}
+
+// locationPredicateSummary renders a route's predicates compactly. Values are
+// deliberately omitted: a diff line is not the place to print a header value an
+// operator may consider sensitive, and the name and operation are enough to tell
+// two routes apart.
+func locationPredicateSummary(l *config.LocationConfig) string {
+	m := l.Match
+	if !m.HasPredicates() {
+		return ""
+	}
+	var parts []string
+	if m.Methods != nil {
+		parts = append(parts, strings.Join(m.Methods, "|"))
+	}
+	for _, h := range m.Headers {
+		parts = append(parts, h.Name+" "+h.Op)
+	}
+	for _, q := range m.Query {
+		parts = append(parts, "?"+q.Name+" "+q.Op)
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
 }
 
 // locationAction summarizes the action a location performs for diff display.
@@ -197,22 +239,41 @@ func diffLocations(server string, before, after []config.LocationConfig, beforeG
 	bs, as := locationIndex(before), locationIndex(after)
 	for _, key := range sortedKeys(as) {
 		a := as[key]
+		label := locationLabel(a)
 		b, ok := bs[key]
-		name := server + " " + key
+		name := server + " " + label
 		if !ok {
-			d.add(DiffEntry{Kind: "location", Name: name, After: locationAction(a) + " → " + orNone(locationTarget(a)), Detail: "Add route " + key + " on " + server}, "route "+name)
+			d.add(DiffEntry{Kind: "location", Name: name, After: locationAction(a) + " → " + orNone(locationTarget(a)), Detail: "Add route " + label + " on " + server}, "route "+name)
 			continue
 		}
-		diffLocationFields(server, key, b, a, beforeGlobWAF, afterGlobWAF, d)
+		diffLocationFields(server, label, b, a, beforeGlobWAF, afterGlobWAF, d)
 	}
 	for _, key := range sortedKeys(bs) {
 		if _, ok := as[key]; !ok {
 			b := bs[key]
-			name := server + " " + key
-			d.del(DiffEntry{Kind: "location", Name: name, Before: locationAction(b) + " → " + orNone(locationTarget(b)), Detail: "Remove route " + key + " on " + server}, "route "+name)
-			d.warn("Removing route %s on %s will stop matching requests from being handled by it.", key, server)
+			label := locationLabel(b)
+			name := server + " " + label
+			d.del(DiffEntry{Kind: "location", Name: name, Before: locationAction(b) + " → " + orNone(locationTarget(b)), Detail: "Remove route " + label + " on " + server}, "route "+name)
+			// Editing a predicate re-keys the route, so it renders as a removal
+			// plus an addition. Warning that traffic will stop being handled would
+			// be false whenever another route still covers the same coordinates.
+			if !coordinatesStillPresent(b, after) {
+				d.warn("Removing route %s on %s will stop matching requests from being handled by it.", label, server)
+			}
 		}
 	}
+}
+
+// coordinatesStillPresent reports whether any location in the new revision keeps
+// the same match type and path.
+func coordinatesStillPresent(l *config.LocationConfig, after []config.LocationConfig) bool {
+	want := locationCoordinates(l)
+	for i := range after {
+		if locationCoordinates(&after[i]) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeGlobWAF, afterGlobWAF config.WAFConfig, d *ConfigDiff) {

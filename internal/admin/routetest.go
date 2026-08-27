@@ -283,6 +283,7 @@ func projectLocation(c *config.Config, srv *config.ServerConfig, loc *config.Loc
 	lp := LocationProjection{
 		Match:       loc.Match.Path,
 		Type:        loc.Match.Type,
+		Predicates:  locationPredicateSummary(loc),
 		Auth:        loc.Auth != nil,
 		Cache:       loc.Cache,
 		RateLimit:   loc.RateLimit != nil && loc.RateLimit.Enabled,
