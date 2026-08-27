@@ -110,11 +110,6 @@ func compilePredicates(loc config.LocationConfig) (*compiledPredicates, error) {
 	return p, nil
 }
 
-// needsQuery reports whether evaluating this location can require the query
-// string. It is what keeps a configuration without query predicates from ever
-// parsing one.
-func (p *compiledPredicates) needsQuery() bool { return p != nil && len(p.query) > 0 }
-
 // match evaluates every predicate against the request. The predicates of one
 // location are ANDed; a list inside one field is an OR-set (§5). The second
 // result names the first predicate that failed, for the route-test surface.

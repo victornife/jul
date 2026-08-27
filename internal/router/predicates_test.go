@@ -323,9 +323,22 @@ func TestQueryParsingIsBounded(t *testing.T) {
 // path-only fast path untouched: a configuration with no query predicate never
 // parses a query string at all.
 func TestQueryIsParsedAtMostOnceAndOnlyWhenNeeded(t *testing.T) {
-	noQuery := predicateRoute(t, config.MatchConfig{Type: "prefix", Path: "/", Methods: []string{"GET"}})
-	if noQuery.needsQuery() {
-		t.Error("a route with no query predicate must not require the query")
+	// Evaluating a route that carries no query predicate must leave the query
+	// untouched, however many other predicates it has to check.
+	noQuery := predicateRoute(t, config.MatchConfig{
+		Type:    "prefix",
+		Path:    "/",
+		Methods: []string{"GET"},
+		Headers: []config.HeaderMatch{{Name: "X-Tenant", Op: "present"}},
+	})
+	req := selectRequest("/x", "a=1")
+	req.Header.Set("X-Tenant", "public")
+	unused := requestQuery{raw: req.URL.RawQuery}
+	if ok, _ := noQuery.match(req, &unused); !ok {
+		t.Fatal("expected the request to match")
+	}
+	if unused.parsed {
+		t.Error("a configuration with no query predicate must never parse a query string")
 	}
 
 	q := requestQuery{raw: "a=1"}
