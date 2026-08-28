@@ -14,6 +14,13 @@ import (
 // an omitted value and an explicitly empty one are different configurations.
 func strPtr(s string) *string { return &s }
 
+// durationPtr returns a pointer to a config.Duration of d, for optional
+// duration fields with the same omitted-vs-zero distinction as strPtr.
+func durationPtr(d time.Duration) *config.Duration {
+	cd := config.Duration(d)
+	return &cd
+}
+
 // fullConfig returns a configuration that populates every public schema leaf
 // with a non-zero value. It is the reachability fixture for the closed-world
 // contract: TestFullyPopulatedFixtureReachesEveryEntry fails when a registered
@@ -212,6 +219,20 @@ func fullConfig() *config.Config {
 					MaxMessageSize: config.Size(4 << 20),
 				},
 				Deny: true,
+				ResponseHeaders: []config.ResponseHeaderOp{{
+					Op:    "set",
+					Name:  "X-Frame-Options",
+					Value: strPtr("DENY"),
+				}},
+				CORS: &config.CORSConfig{
+					Enabled:          true,
+					AllowedOrigins:   []string{"https://app.example.test"},
+					AllowedMethods:   []string{"GET", "POST"},
+					AllowedHeaders:   []string{"Content-Type"},
+					ExposedHeaders:   []string{"X-Request-Id"},
+					AllowCredentials: true,
+					MaxAge:           durationPtr(10 * time.Minute),
+				},
 			}},
 		}},
 		Upstreams: []config.UpstreamConfig{{

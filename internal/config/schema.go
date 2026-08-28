@@ -342,10 +342,81 @@ type QueryMatch struct {
 	Value *string `toml:"value,omitempty"`
 }
 
+// ResponseHeaderOp is one response-header operation
+// ([[servers.locations.response_headers]], ADR 0018 §8). Operations apply top
+// to bottom in declaration order, and a later one observes the earlier ones'
+// effect on the response header map — this is what makes an ordered list, not
+// a map, the schema: a "set" followed by two "add"s is the canonical
+// deterministic way to express a multi-value header.
+type ResponseHeaderOp struct {
+	// Op is "add" (Header.Add), "set" (Header.Set) or "remove" (Header.Del).
+	Op   string `toml:"op"`
+	Name string `toml:"name"`
+	// Value is required for "add"/"set" and forbidden for "remove". A pointer so
+	// an omitted value (an error) stays distinguishable from an explicitly empty
+	// one (legal: it emits an empty field value).
+	Value *string `toml:"value,omitempty"`
+}
+
+// CORSConfig is a location's CORS policy ([servers.locations.cors], ADR 0018
+// §9). A nil pointer means the location has no CORS policy at all, which is
+// distinct from Enabled = false: both are inert at runtime, but a populated,
+// disabled block still has every field validated (§9's "flipping enabled later
+// must not surface a value that was never valid").
+type CORSConfig struct {
+	Enabled bool `toml:"enabled"`
+
+	// AllowedOrigins is required when Enabled. Exact, normalized origins
+	// ("scheme://host[:port]", lowercase, no path, no default port) — no
+	// wildcard subdomains, no regex — or exactly ["*"], which is unconditional:
+	// it forbids AllowCredentials and forbids any other entry, and matches
+	// every request including one with no Origin or Origin: null.
+	AllowedOrigins []string `toml:"allowed_origins,omitempty"`
+
+	// AllowedMethods governs preflight approval only, never ordinary requests
+	// (that is match.methods). Omitted defaults to the CORS-safelisted set
+	// ["GET", "HEAD", "POST"]; an explicit empty list is a validation error.
+	// No "*".
+	AllowedMethods []string `toml:"allowed_methods,omitempty"`
+
+	// AllowedHeaders governs preflight approval only. Omitted or empty means no
+	// header is approved beyond the safelist Access-Control-Request-Headers
+	// never lists; the response omits Access-Control-Allow-Headers rather than
+	// emitting it empty. No "*" — under Fetch a wildcard does not cover
+	// Authorization, the header an operator writing "*" usually wants.
+	AllowedHeaders []string `toml:"allowed_headers,omitempty"`
+
+	// ExposedHeaders is emitted as Access-Control-Expose-Headers on a granted
+	// response. Omitted or empty omits the header. No "*".
+	ExposedHeaders []string `toml:"exposed_headers,omitempty"`
+
+	// AllowCredentials emits Access-Control-Allow-Credentials: true on a granted
+	// response. Forbidden together with AllowedOrigins = ["*"].
+	AllowCredentials bool `toml:"allow_credentials"`
+
+	// MaxAge is Access-Control-Max-Age, in whole seconds, 0 to 24h. Omitted
+	// means the header is not emitted at all; "0s" is legal and emits 0. A
+	// pointer so omitted and zero stay distinguishable.
+	MaxAge *Duration `toml:"max_age,omitempty"`
+}
+
 // LocationConfig describes how to handle requests matching Match. Exactly one
 // action (root/proxy_pass/fastcgi_pass/redirect/return) should be set.
 type LocationConfig struct {
 	Match MatchConfig `toml:"match"`
+
+	// ResponseHeaders is the ordered list of add/set/remove operations applied
+	// to the response this location produces, outside the cache and outside
+	// compression's own headers (ADR 0018 §8). CORS's own Access-Control-*
+	// fields are governed separately by CORS below and run after these.
+	ResponseHeaders []ResponseHeaderOp `toml:"response_headers,omitempty"`
+
+	// CORS is this location's Cross-Origin Resource Sharing policy (ADR 0018
+	// §9). A nil pointer means no policy; CORS is authoritative over any
+	// Access-Control-* field ResponseHeaders might otherwise have set, which is
+	// why configuring one when the other targets the same fields is a
+	// validation error (§8b) rather than an ordering rule.
+	CORS *CORSConfig `toml:"cors,omitempty"`
 
 	// Static file serving.
 	Root             string   `toml:"root"`

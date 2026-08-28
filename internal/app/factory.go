@@ -367,6 +367,32 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		return fw.Middleware()
 	}
 
+	// locPreflightRateLimit is the CORS preflight terminator's own rate guard
+	// (ADR 0018 §10): the location's effective rate policy (own or global),
+	// evaluated a second time in its own scope so it shares no bucket with the
+	// identity-aware limiter that guards actual requests after authentication.
+	// key is overridden to the canonical client address unconditionally —
+	// jwt:<claim> and header:<name> cannot be evaluated before auth, and
+	// falling back to an unkeyed global bucket would let one client limit
+	// everyone. It reports through the existing counter with the existing "ip"
+	// kind; no new metric, no new label. No effective rate policy means no
+	// guard, consistent with an ordinary request to the same route.
+	locPreflightRateLimit := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
+		rl := c.RateLimit
+		scope := "preflight:global"
+		if loc.RateLimit != nil {
+			rl = *loc.RateLimit
+			scope = "preflight:" + LocationScope(srv, loc)
+		}
+		if !rl.Enabled {
+			return nil
+		}
+		lim := f.RLStore.Scoped(scope, rl.Rate, rl.Burst)
+		return middleware.RateLimit(lim, middleware.RateKeyFunc("ip"), func() {
+			f.Metrics.ObserveRateLimited("ip")
+		})
+	}
+
 	// Compose the per-location modifiers. WASM middleware plugins run
 	// OUTERMOST (edge position) so they can inspect or block a request before
 	// authentication; server-level plugins wrap location-level ones. Inside
@@ -377,6 +403,13 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		au := locAuth(srv, loc)
 		rl := locRateLimit(srv, loc)
 		wf := locWAF(srv, loc)
+		// The CORS preflight terminator (ADR 0018 §10) needs no config surface
+		// of its own: an enabled cors policy is what turns it on, and it reuses
+		// this same location's WAF (wf) and a rate limiter in its own scope.
+		// nil when the location has no CORS policy, so it costs a location
+		// without one nothing.
+		cors := middleware.CompileCORS(loc.CORS)
+		pf := middleware.Preflight(cors, locPreflightRateLimit(srv, loc), wf)
 		// Client-certificate handling applies when the server enables mutual
 		// TLS or the location requires a client certificate. It populates the
 		// $ssl_client_* identity for proxied requests and, when the location
@@ -403,7 +436,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 				pluginMW = append(pluginMW, mw)
 			}
 		}
-		if au == nil && rl == nil && cc == nil && wf == nil && len(pluginMW) == 0 {
+		if au == nil && rl == nil && cc == nil && wf == nil && pf == nil && len(pluginMW) == 0 {
 			return nil
 		}
 		return func(next http.Handler) http.Handler {
@@ -421,6 +454,14 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			}
 			if au != nil {
 				h = au(h)
+			}
+			// The preflight terminator sits outside Auth (an approved
+			// preflight always skips it — Fetch sends preflights without
+			// credentials) and inside ClientCert, so a denied preflight that
+			// falls through still gets the ordinary chain exactly as any other
+			// request would (ADR 0018 §10).
+			if pf != nil {
+				h = pf(h)
 			}
 			if cc != nil {
 				h = cc(h)

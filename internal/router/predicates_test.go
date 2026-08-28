@@ -132,6 +132,38 @@ func TestPreflightWideningAcceptsACORSPreflight(t *testing.T) {
 	}
 }
 
+// TestCompilePredicatesReadsCORSEnabledFromConfig pins the config-level half of
+// the rule above: compilePredicates derives preflightWidening from the real
+// [servers.locations.cors] block via config.LocationPreflightWidening, not from
+// a hand-set field. This is the one seam #146 turns on (ADR 0018 §2, §14).
+func TestCompilePredicatesReadsCORSEnabledFromConfig(t *testing.T) {
+	loc := config.LocationConfig{
+		Match: config.MatchConfig{Type: "prefix", Path: "/", Methods: []string{"GET"}},
+		CORS:  &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://app.example.test"}},
+	}
+	p, err := compilePredicates(loc)
+	if err != nil {
+		t.Fatalf("compile predicates: %v", err)
+	}
+
+	preflight := selectRequest("/api/users", "")
+	preflight.Method = http.MethodOptions
+	preflight.Header.Set("Origin", "https://app.example.test")
+	preflight.Header.Set("Access-Control-Request-Method", "POST")
+	if !matches(p, preflight) {
+		t.Error("a cors.enabled route with a methods predicate should be selected for its own preflight")
+	}
+
+	loc.CORS.Enabled = false
+	p, err = compilePredicates(loc)
+	if err != nil {
+		t.Fatalf("compile predicates: %v", err)
+	}
+	if matches(p, preflight) {
+		t.Error("cors.enabled = false should not widen the methods predicate for a preflight")
+	}
+}
+
 func TestHeaderPresentIncludesPresentEmpty(t *testing.T) {
 	p := predicateRoute(t, config.MatchConfig{
 		Type:    "prefix",
