@@ -63,6 +63,129 @@ func onOff(b bool) string {
 	return "disabled"
 }
 
+// applyLocationPredicates mutates loc's match predicate facets in place from
+// the wire payload, replacing each facet the payload names and leaving the
+// others untouched (nil means "leave this facet as configured"). Op-level
+// checks mirror config.HeaderMatch/QueryMatch's own grammar (value required
+// for exact/regex, forbidden for present) so a malformed predicate is rejected
+// with an operation-indexed message before the diff is generated; the
+// validated re-parse still enforces the rest (e.g. header name grammar).
+func applyLocationPredicates(loc *config.LocationConfig, p locationPredicates) (string, error) {
+	var applied []string
+	if p.Methods != nil {
+		loc.Match.Methods = normalizeStringSlice(*p.Methods)
+		applied = append(applied, fmt.Sprintf("methods=%d", len(loc.Match.Methods)))
+	}
+	if p.Headers != nil {
+		hs := make([]config.HeaderMatch, 0, len(*p.Headers))
+		for i, h := range *p.Headers {
+			name := strings.TrimSpace(h.Name)
+			op := strings.ToLower(strings.TrimSpace(h.Op))
+			if name == "" {
+				return "", fmt.Errorf("location_set_predicates: headers[%d]: name is required", i)
+			}
+			switch op {
+			case "present":
+				if h.Value != nil {
+					return "", fmt.Errorf("location_set_predicates: headers[%d]: value is forbidden for op %q", i, op)
+				}
+			case "exact", "regex":
+				if h.Value == nil {
+					return "", fmt.Errorf("location_set_predicates: headers[%d]: value is required for op %q", i, op)
+				}
+			default:
+				return "", fmt.Errorf("location_set_predicates: headers[%d]: op must be %q, %q, or %q", i, "present", "exact", "regex")
+			}
+			hs = append(hs, config.HeaderMatch{Name: name, Op: op, Value: h.Value})
+		}
+		loc.Match.Headers = hs
+		applied = append(applied, fmt.Sprintf("headers=%d", len(hs)))
+	}
+	if p.Query != nil {
+		qs := make([]config.QueryMatch, 0, len(*p.Query))
+		for i, q := range *p.Query {
+			name := strings.TrimSpace(q.Name)
+			op := strings.ToLower(strings.TrimSpace(q.Op))
+			if name == "" {
+				return "", fmt.Errorf("location_set_predicates: query[%d]: name is required", i)
+			}
+			switch op {
+			case "present":
+				if q.Value != nil {
+					return "", fmt.Errorf("location_set_predicates: query[%d]: value is forbidden for op %q", i, op)
+				}
+			case "exact":
+				if q.Value == nil {
+					return "", fmt.Errorf("location_set_predicates: query[%d]: value is required for op %q", i, op)
+				}
+			default:
+				return "", fmt.Errorf("location_set_predicates: query[%d]: op must be %q or %q", i, "present", "exact")
+			}
+			qs = append(qs, config.QueryMatch{Name: name, Op: op, Value: q.Value})
+		}
+		loc.Match.Query = qs
+		applied = append(applied, fmt.Sprintf("query=%d", len(qs)))
+	}
+	if len(applied) == 0 {
+		return "", fmt.Errorf("location_set_predicates: at least one of methods, headers, or query is required")
+	}
+	return strings.Join(applied, ", "), nil
+}
+
+// buildResponseHeaderOps translates the wire payload into the location's new
+// ordered []config.ResponseHeaderOp wholesale. Op-level checks mirror
+// config.ResponseHeaderOp's own grammar; bounds (max count, byte limits) are
+// left to the validated re-parse, which reports them per ADR 0018 §8a/§8b.
+func buildResponseHeaderOps(in []responseHeaderOpPatch) ([]config.ResponseHeaderOp, error) {
+	ops := make([]config.ResponseHeaderOp, 0, len(in))
+	for i, p := range in {
+		op := strings.ToLower(strings.TrimSpace(p.Op))
+		name := strings.TrimSpace(p.Name)
+		if name == "" {
+			return nil, fmt.Errorf("location_response_headers_set: ops[%d]: name is required", i)
+		}
+		switch op {
+		case "add", "set":
+			if p.Value == nil {
+				return nil, fmt.Errorf("location_response_headers_set: ops[%d]: value is required for op %q", i, op)
+			}
+		case "remove":
+			if p.Value != nil {
+				return nil, fmt.Errorf("location_response_headers_set: ops[%d]: value is forbidden for op %q", i, op)
+			}
+		default:
+			return nil, fmt.Errorf("location_response_headers_set: ops[%d]: op must be %q, %q, or %q", i, "add", "set", "remove")
+		}
+		ops = append(ops, config.ResponseHeaderOp{Op: op, Name: name, Value: p.Value})
+	}
+	return ops, nil
+}
+
+// buildCORS translates the wire payload into a *config.CORSConfig wholesale,
+// the same "replace in full" convention as buildLocationAuth. Bounds (origin
+// count/length, no wildcard alongside credentials, etc.) are left to the
+// validated re-parse (ADR 0018 §9), which reports them with the exact field.
+func buildCORS(p corsPatch) (*config.CORSConfig, error) {
+	cors := &config.CORSConfig{
+		Enabled:          p.Enabled,
+		AllowedOrigins:   normalizeStringSlice(p.AllowedOrigins),
+		AllowedMethods:   normalizeStringSlice(p.AllowedMethods),
+		AllowedHeaders:   normalizeStringSlice(p.AllowedHeaders),
+		ExposedHeaders:   normalizeStringSlice(p.ExposedHeaders),
+		AllowCredentials: p.AllowCredentials,
+	}
+	if p.MaxAge != nil {
+		if trimmed := strings.TrimSpace(*p.MaxAge); trimmed != "" {
+			var d config.Duration
+			if err := d.UnmarshalText([]byte(trimmed)); err != nil {
+				return nil, fmt.Errorf("location_cors_set: max_age: %w", err)
+			}
+			cors.MaxAge = &d
+		}
+	}
+	return cors, nil
+}
+
 // orDefault returns s, or def when s is empty — used to echo the effective value
 // (after re-parse defaulting) in an audit summary.
 func orDefault(s, def string) string {

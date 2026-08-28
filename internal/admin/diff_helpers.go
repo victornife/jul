@@ -402,6 +402,127 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 
 	// Proxy timeouts.
 	diffProxyTimeouts(server, key, b, a, d)
+
+	// Response-header operations (ADR 0018 §8).
+	diffResponseHeaders(server, key, b.ResponseHeaders, a.ResponseHeaders, d)
+
+	// CORS policy (ADR 0018 §9).
+	diffCORS(server, key, b.CORS, a.CORS, d)
+}
+
+// diffResponseHeaders compares a route's ordered response-header operations.
+// Values are omitted from the diff (the same reasoning as
+// locationPredicateSummary): the operation and header name are enough to tell
+// an operator what changed without repeating a value they may consider
+// sensitive, and the full list is already visible in the preview's generated
+// config.
+func diffResponseHeaders(server, key string, b, a []config.ResponseHeaderOp, d *ConfigDiff) {
+	name := server + " " + key
+	if responseHeaderOpsEqual(b, a) {
+		d.cover("servers.*.locations.*.response_headers")
+		return
+	}
+	d.mod(DiffEntry{Kind: "response_headers", Name: name, Before: responseHeaderOpsSummary(b), After: responseHeaderOpsSummary(a), Detail: "Change response-header operations on route " + key}, "route "+name+" response_headers")
+	d.cover("servers.*.locations.*.response_headers")
+}
+
+func responseHeaderOpsEqual(b, a []config.ResponseHeaderOp) bool {
+	if len(b) != len(a) {
+		return false
+	}
+	for i := range b {
+		if b[i].Op != a[i].Op || b[i].Name != a[i].Name || !stringPtrsEqual(b[i].Value, a[i].Value) {
+			return false
+		}
+	}
+	return true
+}
+
+func responseHeaderOpsSummary(ops []config.ResponseHeaderOp) string {
+	if len(ops) == 0 {
+		return "(none)"
+	}
+	parts := make([]string, 0, len(ops))
+	for _, op := range ops {
+		parts = append(parts, op.Op+" "+op.Name)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func stringPtrsEqual(x, y *string) bool {
+	if x == nil || y == nil {
+		return x == y
+	}
+	return *x == *y
+}
+
+// diffCORS compares a route's CORS policy, reporting enable/disable and which
+// fields changed by name (ADR 0018 §9). Origin/method/header lists are not
+// classified sensitive, so their values are surfaced elsewhere (the preview's
+// generated config); this comparator names only which fields moved, matching
+// the granularity #147 requires without duplicating the full policy here.
+func diffCORS(server, key string, b, a *config.CORSConfig, d *ConfigDiff) {
+	name := server + " " + key
+	bOn, aOn := b != nil && b.Enabled, a != nil && a.Enabled
+	switch {
+	case a == nil && b != nil:
+		d.mod(DiffEntry{Kind: "cors", Name: name, Detail: "Remove CORS policy from route " + key}, "route "+name+" cors")
+	case b == nil && a != nil:
+		d.mod(DiffEntry{Kind: "cors", Name: name, Detail: "Add CORS policy to route " + key}, "route "+name+" cors")
+		if a.Enabled {
+			d.warn("Adding an enabled CORS policy to route %s on %s allows cross-origin browser requests from the configured origins.", key, server)
+		}
+	case bOn != aOn:
+		action := "Enable"
+		if !aOn {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "cors", Name: name, Detail: fmt.Sprintf("%s CORS on route %s", action, key)}, "route "+name+" cors enabled")
+	}
+	if b != nil && a != nil {
+		for _, field := range corsFieldsChanged(b, a) {
+			d.mod(DiffEntry{Kind: "cors", Name: name, Detail: fmt.Sprintf("Change CORS %s on route %s", field, key)}, "route "+name+" cors "+field)
+		}
+		if !b.AllowCredentials && a.AllowCredentials {
+			d.warn("Enabling allow_credentials in the CORS policy on route %s on %s lets approved browsers send cookies/credentials cross-origin.", key, server)
+		}
+	}
+	d.cover("servers.*.locations.*.cors")
+}
+
+// corsFieldsChanged returns the names of the CORSConfig fields that differ
+// between b and a, in a fixed order.
+func corsFieldsChanged(b, a *config.CORSConfig) []string {
+	var changed []string
+	if !stringSlicesEqual(sortedStringSlice(b.AllowedOrigins), sortedStringSlice(a.AllowedOrigins)) {
+		changed = append(changed, "allowed_origins")
+	}
+	if !stringSlicesEqual(sortedStringSlice(b.AllowedMethods), sortedStringSlice(a.AllowedMethods)) {
+		changed = append(changed, "allowed_methods")
+	}
+	if !stringSlicesEqual(sortedStringSlice(b.AllowedHeaders), sortedStringSlice(a.AllowedHeaders)) {
+		changed = append(changed, "allowed_headers")
+	}
+	if !stringSlicesEqual(sortedStringSlice(b.ExposedHeaders), sortedStringSlice(a.ExposedHeaders)) {
+		changed = append(changed, "exposed_headers")
+	}
+	if b.AllowCredentials != a.AllowCredentials {
+		changed = append(changed, "allow_credentials")
+	}
+	if durPtrStr(b.MaxAge) != durPtrStr(a.MaxAge) {
+		changed = append(changed, "max_age")
+	}
+	return changed
+}
+
+// durPtrStr renders an optional duration for comparison/display, treating a
+// nil pointer as its own distinct state ("(unset)") so an omitted max_age never
+// compares equal to an explicit "0s".
+func durPtrStr(d *config.Duration) string {
+	if d == nil {
+		return "(unset)"
+	}
+	return durStr(*d)
 }
 
 func diffProxyTimeouts(server, key string, b, a *config.LocationConfig, d *ConfigDiff) {

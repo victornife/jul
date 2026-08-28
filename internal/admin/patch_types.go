@@ -139,6 +139,72 @@ type patchRequest struct {
 	// every server block sharing Listen. nil clears the policy from all of
 	// them, returning the listener to peer-only identity.
 	ClientAddress *clientAddressPatch `json:"client_address,omitempty"`
+
+	// location_set_predicates payload: the route's method/header/query predicate
+	// facets (ADR 0018 §1-§6). location_clear_predicates ignores it.
+	Predicates *locationPredicates `json:"predicates,omitempty"`
+
+	// location_response_headers_set payload: the route's ordered response-header
+	// operations, replaced wholesale. location_response_headers_clear ignores it.
+	ResponseHeaders *[]responseHeaderOpPatch `json:"response_headers,omitempty"`
+
+	// location_cors_set payload: the route's whole CORS policy, replaced
+	// wholesale. location_cors_clear ignores it.
+	CORS *corsPatch `json:"cors_set,omitempty"`
+}
+
+// locationPredicates carries the new method/header/query predicate facets for
+// location_set_predicates. Each facet is a pointer so it can be edited (or
+// cleared, with an explicit empty list) independently of the other two: nil
+// means "leave this facet as currently configured", matching the sparse-
+// presence convention clientAddressPatch.ForwardedHeaders already uses.
+type locationPredicates struct {
+	Methods *[]string          `json:"methods,omitempty"`
+	Headers *[]headerPredicate `json:"headers,omitempty"`
+	Query   *[]queryPredicate  `json:"query,omitempty"`
+}
+
+// headerPredicate is one request-header predicate on the wire, mirroring
+// config.HeaderMatch. Value is a pointer for the same reason: "present" has no
+// value, "exact"/"regex" require one, and an omitted value must stay
+// distinguishable from an explicitly empty one.
+type headerPredicate struct {
+	Name  string  `json:"name"`
+	Op    string  `json:"op"`
+	Value *string `json:"value,omitempty"`
+}
+
+// queryPredicate is one query-parameter predicate on the wire, mirroring
+// config.QueryMatch.
+type queryPredicate struct {
+	Name  string  `json:"name"`
+	Op    string  `json:"op"`
+	Value *string `json:"value,omitempty"`
+}
+
+// responseHeaderOpPatch is one response-header operation on the wire,
+// mirroring config.ResponseHeaderOp. location_response_headers_set replaces
+// the location's whole ordered list from a slice of these rather than editing
+// one row at a time, so the "a later op observes an earlier one's effect"
+// ordering contract (ADR 0018 §8) can never be applied out of order.
+type responseHeaderOpPatch struct {
+	Op    string  `json:"op"`
+	Name  string  `json:"name"`
+	Value *string `json:"value,omitempty"`
+}
+
+// corsPatch carries a location's whole CORS policy for location_cors_set,
+// replacing it wholesale (the same convention as locationWAF/locationAuth).
+// MaxAge is a duration string (e.g. "10m") so the wire shape matches the TOML
+// an operator reads; a nil pointer omits the header, an explicit "0s" is legal.
+type corsPatch struct {
+	Enabled          bool     `json:"enabled"`
+	AllowedOrigins   []string `json:"allowed_origins,omitempty"`
+	AllowedMethods   []string `json:"allowed_methods,omitempty"`
+	AllowedHeaders   []string `json:"allowed_headers,omitempty"`
+	ExposedHeaders   []string `json:"exposed_headers,omitempty"`
+	AllowCredentials bool     `json:"allow_credentials,omitempty"`
+	MaxAge           *string  `json:"max_age,omitempty"`
 }
 
 // clientAddressPatch carries the listener-scoped trusted-proxy policy.
