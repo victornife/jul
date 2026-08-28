@@ -67,6 +67,15 @@ type LocationProjection struct {
 	// route editor truthfully offer to add, edit, or remove a per-location WAF
 	// override and show its current mode/CRS.
 	WAF *LocationWAFState `json:"waf,omitempty"`
+	// ResponseHeaders reports whether the location has any
+	// [[servers.locations.response_headers]] operations (ADR 0018 §8). The
+	// operations themselves are not projected here: a value may be operator-
+	// sensitive, and the route-test surface (routetest.go) already explains a
+	// predicate/policy outcome in full for a specific request.
+	ResponseHeaders bool `json:"response_headers"`
+	// CORS is the location's own [cors] policy, present only when configured
+	// (ADR 0018 §9).
+	CORS *LocationCORSState `json:"cors,omitempty"`
 	// AuthDetail is the location's access-control rule, present only when the
 	// location defines one. It lets the guided auth editor seed truthfully; it
 	// carries no secrets (htpasswd path, JWKS URL, issuer/audience, and CIDR
@@ -113,6 +122,19 @@ type LocationWAFState struct {
 	ResponseBodyCheck bool     `json:"response_body_check"`
 	DirectivesFiles   []string `json:"directives_files,omitempty"`
 	InlineRules       string   `json:"inline_rules,omitempty"`
+}
+
+// LocationCORSState summarises a location's own [cors] policy for the route
+// editor (ADR 0018 §9). Values are the operator's configured ones, not the
+// runtime-normalized form: this is a read view, not the compiled policy.
+type LocationCORSState struct {
+	Enabled          bool     `json:"enabled"`
+	AllowedOrigins   []string `json:"allowed_origins,omitempty"`
+	AllowedMethods   []string `json:"allowed_methods,omitempty"`
+	AllowedHeaders   []string `json:"allowed_headers,omitempty"`
+	ExposedHeaders   []string `json:"exposed_headers,omitempty"`
+	AllowCredentials bool     `json:"allow_credentials"`
+	MaxAge           string   `json:"max_age,omitempty"`
 }
 
 // AppProjection is a structured upstream/app for the Console v2 Apps panel.

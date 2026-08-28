@@ -128,6 +128,21 @@ func projectRoutes(c *config.Config) []RouteProjection {
 			if loc.Auth != nil {
 				lp.AuthDetail = locationAuthState(loc.Auth)
 			}
+			lp.ResponseHeaders = len(loc.ResponseHeaders) > 0
+			if loc.CORS != nil {
+				cs := &LocationCORSState{
+					Enabled:          loc.CORS.Enabled,
+					AllowedOrigins:   loc.CORS.AllowedOrigins,
+					AllowedMethods:   loc.CORS.AllowedMethods,
+					AllowedHeaders:   loc.CORS.AllowedHeaders,
+					ExposedHeaders:   loc.CORS.ExposedHeaders,
+					AllowCredentials: loc.CORS.AllowCredentials,
+				}
+				if loc.CORS.MaxAge != nil {
+					cs.MaxAge = loc.CORS.MaxAge.Std().String()
+				}
+				lp.CORS = cs
+			}
 			lp.Warnings = locationWarnings(c, srv, loc, &lp)
 			rp.Locations = append(rp.Locations, lp)
 		}
