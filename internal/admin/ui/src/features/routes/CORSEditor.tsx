@@ -60,7 +60,11 @@ export function CORSEditor({ target, seed, existing = Boolean(seed), onClose }: 
       footer={
         <div className="w-full space-y-2">
           <div className="flex items-center justify-between gap-3">
-            {error && <span className="text-xs text-jul-danger">{error}</span>}
+            {error && (
+              <span role="alert" className="text-xs text-jul-danger">
+                {error}
+              </span>
+            )}
             {existing && (
               <button
                 type="button"
@@ -163,7 +167,10 @@ export function CORSEditor({ target, seed, existing = Boolean(seed), onClose }: 
         />
 
         {warnings.length > 0 && (
-          <div className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3">
+          <div
+            role="alert"
+            className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3"
+          >
             {warnings.map((w, i) => (
               <p key={`corsw-${String(i)}`} className="text-xs text-jul-text">
                 {w}

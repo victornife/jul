@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Drawer } from "@/components/Drawer.tsx";
 import { type RouteTarget } from "@/api/client.ts";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
@@ -64,6 +64,34 @@ export function PredicatesEditor({
   const { has } = usePermission();
   const canWrite = has("config:write");
 
+  const headersContainerRef = useRef<HTMLDivElement>(null);
+  const addHeaderButtonRef = useRef<HTMLButtonElement>(null);
+  const focusNewHeaderRef = useRef(false);
+  const queryContainerRef = useRef<HTMLDivElement>(null);
+  const addQueryButtonRef = useRef<HTMLButtonElement>(null);
+  const focusNewQueryRef = useRef(false);
+
+  // Focus management (#147 §9): a new row's name field gets focus once it
+  // mounts, and removing a row returns focus to its list's "+ Add" button
+  // rather than letting it silently fall back to the document body.
+  useEffect(() => {
+    if (!focusNewHeaderRef.current) return;
+    focusNewHeaderRef.current = false;
+    const inputs = headersContainerRef.current?.querySelectorAll<HTMLInputElement>(
+      'input[aria-label$="name"]',
+    );
+    inputs?.[inputs.length - 1]?.focus();
+  }, [draft.headers.length]);
+
+  useEffect(() => {
+    if (!focusNewQueryRef.current) return;
+    focusNewQueryRef.current = false;
+    const inputs = queryContainerRef.current?.querySelectorAll<HTMLInputElement>(
+      'input[aria-label$="name"]',
+    );
+    inputs?.[inputs.length - 1]?.focus();
+  }, [draft.query.length]);
+
   const where = `${target.listen}${target.path ? ` ${target.path}` : ""}`;
   const warnings = predicatesWarnings(draft);
 
@@ -90,7 +118,11 @@ export function PredicatesEditor({
       footer={
         <div className="w-full space-y-2">
           <div className="flex items-center justify-between gap-3">
-            {error && <span className="text-xs text-jul-danger">{error}</span>}
+            {error && (
+              <span role="alert" className="text-xs text-jul-danger">
+                {error}
+              </span>
+            )}
             {existing && (
               <button
                 type="button"
@@ -149,62 +181,67 @@ export function PredicatesEditor({
 
         <div className="space-y-2">
           <span className="text-sm font-medium text-jul-text">Header predicates</span>
-          {draft.headers.map((row, i) => (
-            <div
-              key={`hp-${String(i)}`}
-              className="flex items-start gap-2 rounded-md border border-jul-border bg-jul-surface p-2"
-            >
-              <input
-                type="text"
-                aria-label={`Header row ${String(i + 1)} name`}
-                placeholder="X-Api-Version"
-                value={row.name}
-                onChange={(e) => {
-                  updateHeader(i, { name: e.target.value });
-                }}
-                className="flex-1 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
-              />
-              <select
-                aria-label={`Header row ${String(i + 1)} operator`}
-                value={row.op}
-                onChange={(e) => {
-                  updateHeader(i, { op: e.target.value as HeaderPredicateOp });
-                }}
-                className="rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+          <div ref={headersContainerRef} className="space-y-2">
+            {draft.headers.map((row, i) => (
+              <div
+                key={`hp-${String(i)}`}
+                className="flex items-start gap-2 rounded-md border border-jul-border bg-jul-surface p-2"
               >
-                {HEADER_OPS.map((op) => (
-                  <option key={op} value={op}>
-                    {op}
-                  </option>
-                ))}
-              </select>
-              {row.op !== "present" && (
                 <input
                   type="text"
-                  aria-label={`Header row ${String(i + 1)} value`}
-                  placeholder={row.op === "regex" ? "^v[0-9]+$" : "2"}
-                  value={row.value}
+                  aria-label={`Header row ${String(i + 1)} name`}
+                  placeholder="X-Api-Version"
+                  value={row.name}
                   onChange={(e) => {
-                    updateHeader(i, { value: e.target.value });
+                    updateHeader(i, { name: e.target.value });
                   }}
                   className="flex-1 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
                 />
-              )}
-              <button
-                type="button"
-                aria-label={`Remove header row ${String(i + 1)}`}
-                onClick={() => {
-                  setDraft((d) => ({ ...d, headers: d.headers.filter((_, j) => j !== i) }));
-                }}
-                className="rounded-md border border-jul-border px-2 py-1.5 text-xs text-jul-danger hover:bg-jul-bg"
-              >
-                Remove
-              </button>
-            </div>
-          ))}
+                <select
+                  aria-label={`Header row ${String(i + 1)} operator`}
+                  value={row.op}
+                  onChange={(e) => {
+                    updateHeader(i, { op: e.target.value as HeaderPredicateOp });
+                  }}
+                  className="rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+                >
+                  {HEADER_OPS.map((op) => (
+                    <option key={op} value={op}>
+                      {op}
+                    </option>
+                  ))}
+                </select>
+                {row.op !== "present" && (
+                  <input
+                    type="text"
+                    aria-label={`Header row ${String(i + 1)} value`}
+                    placeholder={row.op === "regex" ? "^v[0-9]+$" : "2"}
+                    value={row.value}
+                    onChange={(e) => {
+                      updateHeader(i, { value: e.target.value });
+                    }}
+                    className="flex-1 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
+                  />
+                )}
+                <button
+                  type="button"
+                  aria-label={`Remove header row ${String(i + 1)}`}
+                  onClick={() => {
+                    setDraft((d) => ({ ...d, headers: d.headers.filter((_, j) => j !== i) }));
+                    addHeaderButtonRef.current?.focus();
+                  }}
+                  className="rounded-md border border-jul-border px-2 py-1.5 text-xs text-jul-danger hover:bg-jul-bg"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
           <button
             type="button"
+            ref={addHeaderButtonRef}
             onClick={() => {
+              focusNewHeaderRef.current = true;
               setDraft((d) => ({ ...d, headers: [...d.headers, emptyHeaderRow()] }));
             }}
             className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg"
@@ -215,62 +252,67 @@ export function PredicatesEditor({
 
         <div className="space-y-2">
           <span className="text-sm font-medium text-jul-text">Query predicates</span>
-          {draft.query.map((row, i) => (
-            <div
-              key={`qp-${String(i)}`}
-              className="flex items-start gap-2 rounded-md border border-jul-border bg-jul-surface p-2"
-            >
-              <input
-                type="text"
-                aria-label={`Query row ${String(i + 1)} name`}
-                placeholder="debug"
-                value={row.name}
-                onChange={(e) => {
-                  updateQuery(i, { name: e.target.value });
-                }}
-                className="flex-1 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
-              />
-              <select
-                aria-label={`Query row ${String(i + 1)} operator`}
-                value={row.op}
-                onChange={(e) => {
-                  updateQuery(i, { op: e.target.value as QueryPredicateOp });
-                }}
-                className="rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+          <div ref={queryContainerRef} className="space-y-2">
+            {draft.query.map((row, i) => (
+              <div
+                key={`qp-${String(i)}`}
+                className="flex items-start gap-2 rounded-md border border-jul-border bg-jul-surface p-2"
               >
-                {QUERY_OPS.map((op) => (
-                  <option key={op} value={op}>
-                    {op}
-                  </option>
-                ))}
-              </select>
-              {row.op !== "present" && (
                 <input
                   type="text"
-                  aria-label={`Query row ${String(i + 1)} value`}
-                  placeholder="true"
-                  value={row.value}
+                  aria-label={`Query row ${String(i + 1)} name`}
+                  placeholder="debug"
+                  value={row.name}
                   onChange={(e) => {
-                    updateQuery(i, { value: e.target.value });
+                    updateQuery(i, { name: e.target.value });
                   }}
                   className="flex-1 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
                 />
-              )}
-              <button
-                type="button"
-                aria-label={`Remove query row ${String(i + 1)}`}
-                onClick={() => {
-                  setDraft((d) => ({ ...d, query: d.query.filter((_, j) => j !== i) }));
-                }}
-                className="rounded-md border border-jul-border px-2 py-1.5 text-xs text-jul-danger hover:bg-jul-bg"
-              >
-                Remove
-              </button>
-            </div>
-          ))}
+                <select
+                  aria-label={`Query row ${String(i + 1)} operator`}
+                  value={row.op}
+                  onChange={(e) => {
+                    updateQuery(i, { op: e.target.value as QueryPredicateOp });
+                  }}
+                  className="rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+                >
+                  {QUERY_OPS.map((op) => (
+                    <option key={op} value={op}>
+                      {op}
+                    </option>
+                  ))}
+                </select>
+                {row.op !== "present" && (
+                  <input
+                    type="text"
+                    aria-label={`Query row ${String(i + 1)} value`}
+                    placeholder="true"
+                    value={row.value}
+                    onChange={(e) => {
+                      updateQuery(i, { value: e.target.value });
+                    }}
+                    className="flex-1 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text placeholder:text-jul-muted focus:outline-none focus:ring-1 focus:ring-jul-accent"
+                  />
+                )}
+                <button
+                  type="button"
+                  aria-label={`Remove query row ${String(i + 1)}`}
+                  onClick={() => {
+                    setDraft((d) => ({ ...d, query: d.query.filter((_, j) => j !== i) }));
+                    addQueryButtonRef.current?.focus();
+                  }}
+                  className="rounded-md border border-jul-border px-2 py-1.5 text-xs text-jul-danger hover:bg-jul-bg"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
           <button
             type="button"
+            ref={addQueryButtonRef}
             onClick={() => {
+              focusNewQueryRef.current = true;
               setDraft((d) => ({ ...d, query: [...d.query, emptyQueryRow()] }));
             }}
             className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg"
@@ -280,7 +322,10 @@ export function PredicatesEditor({
         </div>
 
         {warnings.length > 0 && (
-          <div className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3">
+          <div
+            role="alert"
+            className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3"
+          >
             {warnings.map((w, i) => (
               <p key={`pw-${String(i)}`} className="text-xs text-jul-text">
                 {w}

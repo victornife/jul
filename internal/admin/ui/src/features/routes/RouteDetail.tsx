@@ -60,6 +60,18 @@ function Flag({ on, label }: { readonly on: boolean; readonly label: string }) {
   );
 }
 
+// routeOrderNote explains this location's declaration-order position among
+// any other locations sharing its exact match type and path — the ambiguity
+// predicates introduced (ADR 0018 §14). It returns null when this location's
+// coordinates are unique, since match_ordinal is meaningless there. Computed
+// purely from the already-fetched route projection; no new backend field.
+function routeOrderNote(route: RouteProjection, loc: LocationProjection): string | null {
+  const siblings = route.locations.filter((l) => l.type === loc.type && l.match === loc.match);
+  if (siblings.length <= 1) return null;
+  const position = (loc.match_ordinal ?? 0) + 1;
+  return `${String(position)} of ${String(siblings.length)} routes sharing this match — evaluated in declaration order; the first whose predicates all match wins.`;
+}
+
 function describe(action: string): string {
   switch (action) {
     case "proxy":
@@ -866,6 +878,7 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
   const { has } = usePermission();
   const canWrite = has("config:write");
   const canReadRaw = has("config:raw");
+  const orderNote = routeOrderNote(route, loc);
   const canClone =
     loc.action === "proxy" ||
     loc.action === "static" ||
@@ -995,6 +1008,7 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
           {loc.predicates && (
             <Row label="Predicates" value={<span className="font-mono">{loc.predicates}</span>} />
           )}
+          {orderNote && <Row label="Route order" value={orderNote} />}
           <Row label="Action" value={loc.action} />
           {loc.target && (
             <Row label="Target" value={<span className="font-mono">{loc.target}</span>} />

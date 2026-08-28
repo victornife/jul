@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Drawer } from "@/components/Drawer.tsx";
 import { type RouteTarget } from "@/api/client.ts";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
@@ -59,6 +59,21 @@ export function ResponseHeadersEditor({
   const { run: runPatch, error, busy } = useRunPatch();
   const { has } = usePermission();
   const canWrite = has("config:write");
+  const rowsContainerRef = useRef<HTMLDivElement>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  const focusNewRowRef = useRef(false);
+
+  // Focus management (#147 §9): a new row's name field gets focus once it
+  // mounts, and removing a row returns focus to "+ Add operation" rather than
+  // letting it silently fall back to the document body.
+  useEffect(() => {
+    if (!focusNewRowRef.current) return;
+    focusNewRowRef.current = false;
+    const inputs = rowsContainerRef.current?.querySelectorAll<HTMLInputElement>(
+      'input[aria-label$="header name"]',
+    );
+    inputs?.[inputs.length - 1]?.focus();
+  }, [rows.length]);
 
   const where = `${target.listen}${target.path ? ` ${target.path}` : ""}`;
   const warnings = responseHeaderWarnings(rows);
@@ -68,11 +83,13 @@ export function ResponseHeadersEditor({
   }
 
   function addRow(): void {
+    focusNewRowRef.current = true;
     setRows((rs) => [...rs, emptyResponseHeaderRow()]);
   }
 
   function removeRow(i: number): void {
     setRows((rs) => rs.filter((_, j) => j !== i));
+    addButtonRef.current?.focus();
   }
 
   function move(i: number, dir: -1 | 1): void {
@@ -99,7 +116,11 @@ export function ResponseHeadersEditor({
       footer={
         <div className="w-full space-y-2">
           <div className="flex items-center justify-between gap-3">
-            {error && <span className="text-xs text-jul-danger">{error}</span>}
+            {error && (
+              <span role="alert" className="text-xs text-jul-danger">
+                {error}
+              </span>
+            )}
             {existing && (
               <button
                 type="button"
@@ -138,7 +159,7 @@ export function ResponseHeadersEditor({
           </p>
         )}
 
-        <div className="space-y-2">
+        <div className="space-y-2" ref={rowsContainerRef}>
           {rows.map((row, i) => (
             <div
               key={`rh-${String(i)}`}
@@ -218,6 +239,7 @@ export function ResponseHeadersEditor({
           ))}
           <button
             type="button"
+            ref={addButtonRef}
             onClick={addRow}
             className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg"
           >
@@ -226,7 +248,10 @@ export function ResponseHeadersEditor({
         </div>
 
         {warnings.length > 0 && (
-          <div className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3">
+          <div
+            role="alert"
+            className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3"
+          >
             {warnings.map((w, i) => (
               <p key={`rhw-${String(i)}`} className="text-xs text-jul-text">
                 {w}
