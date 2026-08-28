@@ -18,9 +18,11 @@ references.
   has shipped in full: request matching by method, header and query parameter (#145), and bounded
   response-header add/set/remove operations plus CORS (#146). `[servers.locations].headers` still
   sets headers on the *upstream request*, not the response to the client — use
-  `[[servers.locations.response_headers]]` for that. Typed-patch/Console editing and the importer's
-  method/header/CORS translation have landed (#147); real-server E2E and generated-contract closure
-  for the same issue remain open.
+  `[[servers.locations.response_headers]]` for that. Typed-patch/Console editing, the importer's
+  method/header/CORS translation, and real-server E2E for the same surfaces have landed (#147);
+  the CORS-plus-cache-variant and CORS-plus-error/auth/WAF combinations remain covered at the Go
+  integration-test level rather than re-derived as real-server E2E — see the importer and E2E
+  entries below.
 
 ---
 
@@ -85,7 +87,13 @@ references.
   predicate values and response-header operation values are not read back from the admin API (they
   may be operator-sensitive, the same reasoning that already kept the response-header boolean
   value-free) — editing an existing set opens the form blank and replaces it wholesale; the drawer
-  says so explicitly. Real-server E2E and generated-contract closure for the same issue remain open.
+  says so explicitly. Real-server E2E covers method/header/query selection, response-header
+  ordering, CORS actual/preflight requests, an invalid-candidate rejection, and a live-traffic edit
+  followed by rollback — but not the CORS-plus-cache-variant or CORS-plus-error/auth/WAF
+  combinations, which stay proven at the Go integration-test level (enabling the E2E fixture's
+  global cache would risk destabilizing every other test sharing that server process). Full
+  H1/H2/H3-explicit E2E (the acceptance criterion asks for protocol-independent behavior to be
+  "consistent where applicable") has not been separately exercised per protocol.
 
 ---
 
