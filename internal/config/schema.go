@@ -287,11 +287,59 @@ type ClientAddressConfig struct {
 	MaxHops int `toml:"max_hops"`
 }
 
-// MatchConfig selects requests for a location.
+// MatchConfig selects requests for a location. Type and Path decide which
+// candidates a request produces; the predicate fields filter within that
+// candidate set without ever promoting a route across it (ADR 0018 §1-§6).
+//
+// A list inside one field is an OR-set; separate fields and separate table
+// entries are ANDed. That is the whole Boolean model: no negation, no grouping,
+// no OR across fields.
 type MatchConfig struct {
 	// Type is one of "exact", "prefix", or "regex".
 	Type string `toml:"type"`
 	Path string `toml:"path"`
+
+	// Methods is the OR-set of request methods the location accepts, compared
+	// byte-exactly against r.Method. Omitted means the route does not constrain
+	// the method; an explicitly empty list is a validation error, because a
+	// route that can never match is a mistake rather than a way to disable one.
+	// A route listing GET also matches HEAD (RFC 9110 §9.3.2).
+	Methods []string `toml:"methods,omitempty"`
+
+	// Headers are request-header predicates. An array of tables rather than a
+	// map, because declaration order is part of the contract, one field name may
+	// carry more than one predicate, and a Go map has no iteration order.
+	Headers []HeaderMatch `toml:"headers,omitempty"`
+
+	// Query are query-parameter predicates, in the same shape and for the same
+	// reasons as Headers.
+	Query []QueryMatch `toml:"query,omitempty"`
+}
+
+// HeaderMatch is one request-header predicate. Value is a pointer so an omitted
+// value stays distinguishable from an explicitly empty one: `op = "exact"` with
+// an empty value matches only a present-but-empty field, which is a different
+// configuration from omitting the key altogether.
+type HeaderMatch struct {
+	// Name is the field name, canonicalized with textproto.CanonicalMIMEHeaderKey
+	// when the router compiles it, so lookup is case-insensitive as HTTP requires.
+	Name string `toml:"name"`
+	// Op is "present", "exact" or "regex".
+	Op string `toml:"op"`
+	// Value is required for "exact" and "regex" and forbidden for "present".
+	Value *string `toml:"value,omitempty"`
+}
+
+// QueryMatch is one query-parameter predicate. Value is a pointer for the same
+// reason as HeaderMatch.Value.
+type QueryMatch struct {
+	// Name is the parameter name, compared after percent-decoding.
+	Name string `toml:"name"`
+	// Op is "present" or "exact". There is no regex operator for query
+	// parameters in this tranche.
+	Op string `toml:"op"`
+	// Value is required for "exact" and forbidden for "present".
+	Value *string `toml:"value,omitempty"`
 }
 
 // LocationConfig describes how to handle requests matching Match. Exactly one

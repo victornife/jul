@@ -223,13 +223,16 @@ func streamKey(s *config.StreamServer) string {
 }
 
 // locationKey is the operational identity of a location: the match type and
-// path the router dispatches on.
+// path the router dispatches on, plus the normalized predicate set that ADR 0018
+// §14 made part of that identity. Two locations may now legitimately share a
+// type and path, and a colliding key silently drops one of them out of the
+// extracted value — which under-reports a real change in the reload preview.
 func locationKey(l *config.LocationConfig) string {
 	t := l.Match.Type
 	if t == "" {
 		t = "prefix"
 	}
-	return t + " " + l.Match.Path
+	return t + " " + l.Match.Path + "\x00" + l.Match.CanonicalPredicates()
 }
 
 // sniKey is the order-insensitive rendering of a server block's host names,

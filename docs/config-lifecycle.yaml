@@ -74,12 +74,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 322
-  schema_leaves: 274
-  registry_entries: 274
+  schema_paths: 331
+  schema_leaves: 281
+  registry_entries: 281
   startup_consumed: 58
   by_class:
-    hot_reload: 202
+    hot_reload: 209
     restart_required: 58
     new_listener_only: 8
     ignored_deprecated: 4
@@ -686,7 +686,35 @@ fields:
     class: hot_reload
     subsystem: static_files
     reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.match.headers.*.name"
+    class: hot_reload
+    subsystem: routing
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.match.headers.*.op"
+    class: hot_reload
+    subsystem: routing
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.match.headers.*.value"
+    class: hot_reload
+    subsystem: routing
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.match.methods"
+    class: hot_reload
+    subsystem: routing
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
   - path: "servers.*.locations.*.match.path"
+    class: hot_reload
+    subsystem: routing
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.match.query.*.name"
+    class: hot_reload
+    subsystem: routing
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.match.query.*.op"
+    class: hot_reload
+    subsystem: routing
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.match.query.*.value"
     class: hot_reload
     subsystem: routing
     reason: "the handler tree is rebuilt from the effective config on each successful reload"

@@ -26,7 +26,7 @@ import (
 func applyPatch(c *config.Config, req patchRequest) (string, error) {
 	switch req.Op {
 	case "route_set_target":
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}
@@ -37,7 +37,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("route %s%s proxy_pass set to %s", req.Listen, req.Path, req.Target), nil
 
 	case "route_toggle_cache":
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}
@@ -48,7 +48,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("route %s%s cache %s", req.Listen, req.Path, onOff(*req.Enabled)), nil
 
 	case "route_toggle_rate_limit":
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}
@@ -78,7 +78,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return applyRouteRateLimit(c, req)
 
 	case "location_waf_set":
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}
@@ -120,7 +120,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 			onOff(req.WAF.Enabled), wafModeNote(req.WAF.Enabled, mode, req.WAF.CRSEnabled)), nil
 
 	case "location_waf_clear":
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}
@@ -131,7 +131,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("route %s%s WAF override cleared (inherits the global [waf])", req.Listen, req.Path), nil
 
 	case "location_set_auth":
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}
@@ -146,7 +146,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("route %s%s auth set (%s)", req.Listen, req.Path, summary), nil
 
 	case "location_clear_auth":
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}
@@ -157,7 +157,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("route %s%s auth cleared", req.Listen, req.Path), nil
 
 	case "location_set_match":
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}
@@ -187,7 +187,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("route %s%s match changed to %s %s", req.Listen, req.Path, newType, newPath), nil
 
 	case "location_set_action":
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}
@@ -201,7 +201,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("route %s%s action changed to %s", req.Listen, req.Path, kind), nil
 
 	case "location_set_transcode":
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}
@@ -479,7 +479,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("plugin %s removed", name), nil
 
 	case "location_attach_plugin":
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}
@@ -503,7 +503,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("plugin %s attached to route %s%s", name, req.Listen, loc.Match.Path), nil
 
 	case "location_detach_plugin":
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}
@@ -602,7 +602,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		if req.Enabled == nil {
 			return "", fmt.Errorf("location_toggle_require_client_cert: enabled is required")
 		}
-		loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}
@@ -674,7 +674,7 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		return fmt.Sprintf("route %s %q (%s) added on server %s", matchType, path, label, req.Listen), nil
 
 	case "location_remove":
-		srvIdx, locIdx, err := findLocationIndex(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+		srvIdx, locIdx, err := findLocationIndex(c, req.locationTarget())
 		if err != nil {
 			return "", err
 		}

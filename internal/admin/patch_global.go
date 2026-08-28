@@ -13,7 +13,7 @@ import (
 )
 
 func applyRouteRateLimit(c *config.Config, req patchRequest) (string, error) {
-	loc, err := findLocation(c, req.Listen, req.ServerNames, req.MatchType, req.Path)
+	loc, err := findLocation(c, req.locationTarget())
 	if err != nil {
 		return "", err
 	}

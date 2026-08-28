@@ -190,71 +190,94 @@ func namesLabel(names []string) string {
 // for exactly one method, mirroring the route-creation form. It returns a short
 // human label for the audit summary, and rejects a method whose required fields
 // are missing rather than persisting an inert auth block.
-// findLocation returns a pointer to the single location uniquely identified by
-// its server's listen address and ServerNames set plus the location's match
-// type and path, so a mutation updates exactly the intended route in place.
-// Matching on listen + path alone (the earlier behavior) could silently target
-// the wrong virtual host when several server blocks share a listen, or the
-// wrong location when a path repeats under different match types. The console
-// always sends the full coordinates from the route projection; a target that
-// resolves to more than one location is rejected rather than guessed.
-func findLocation(c *config.Config, listen string, serverNames []string, matchType, path string) (*config.LocationConfig, error) {
-	if strings.TrimSpace(listen) == "" || strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("route target requires both listen and path")
-	}
-	var found *config.LocationConfig
-	matches := 0
-	for i := range c.Servers {
-		srv := &c.Servers[i]
-		if srv.Listen != listen || !stringSetsEqual(srv.ServerNames, serverNames) {
-			continue
-		}
-		for j := range srv.Locations {
-			loc := &srv.Locations[j]
-			if loc.Match.Path == path && loc.Match.Type == matchType {
-				found = loc
-				matches++
-			}
-		}
-	}
-	switch {
-	case matches == 0:
-		return nil, fmt.Errorf("no route found for listen %q names %v match %q path %q", listen, serverNames, matchType, path)
-	case matches > 1:
-		return nil, fmt.Errorf("route target is ambiguous: %d locations match listen %q names %v match %q path %q", matches, listen, serverNames, matchType, path)
-	default:
-		return found, nil
+// routeTarget is the addressing tuple a typed patch resolves a route with.
+//
+// The four coordinates were unique until ADR 0018 gave a location predicates:
+// the whole point of method and header predicates is that two locations can now
+// legitimately share a listen, host set, match type and path. Ordinal is the
+// additive extension that keeps such a target addressable.
+type routeTarget struct {
+	Listen      string
+	ServerNames []string
+	MatchType   string
+	Path        string
+	// Ordinal is the optional 0-based index among the locations sharing the
+	// other four coordinates, in declaration order. Omitted means "there must be
+	// exactly one", which is the pre-ADR-0018 behaviour, so every existing
+	// client and every existing payload keeps working unchanged.
+	//
+	// It is a revision-relative selector and explicitly not an identity: it is
+	// never persisted, never exported as a resource name, and never used to
+	// correlate a route across revisions. Inserting a same-path route above the
+	// target shifts every later ordinal, which is why a patch carrying one is
+	// bound to a base_version (ADR 0018 §14).
+	Ordinal *int
+}
+
+// locationTarget builds the target a patch operation addresses.
+func (r patchRequest) locationTarget() routeTarget {
+	return routeTarget{
+		Listen:      r.Listen,
+		ServerNames: r.ServerNames,
+		MatchType:   r.MatchType,
+		Path:        r.Path,
+		Ordinal:     r.MatchOrdinal,
 	}
 }
 
-// findLocationIndex resolves the same unique route coordinates as findLocation
-// but returns the enclosing server index and the location index, which
-// location_remove needs to splice the location out of its server's slice.
-func findLocationIndex(c *config.Config, listen string, serverNames []string, matchType, path string) (int, int, error) {
-	if strings.TrimSpace(listen) == "" || strings.TrimSpace(path) == "" {
+// findLocation returns a pointer to the single location the target identifies,
+// so a mutation updates exactly the intended route in place.
+//
+// Matching on listen + path alone (the earliest behavior) could silently target
+// the wrong virtual host when several server blocks share a listen, or the
+// wrong location when a path repeats under different match types. The console
+// always sends the full coordinates from the route projection. Without an
+// ordinal a target that resolves to more than one location is still rejected
+// rather than guessed.
+func findLocation(c *config.Config, t routeTarget) (*config.LocationConfig, error) {
+	srvIdx, locIdx, err := findLocationIndex(c, t)
+	if err != nil {
+		return nil, err
+	}
+	return &c.Servers[srvIdx].Locations[locIdx], nil
+}
+
+// findLocationIndex resolves the same target as findLocation but returns the
+// enclosing server index and the location index, which location_remove needs to
+// splice the location out of its server's slice.
+func findLocationIndex(c *config.Config, t routeTarget) (int, int, error) {
+	if strings.TrimSpace(t.Listen) == "" || strings.TrimSpace(t.Path) == "" {
 		return -1, -1, fmt.Errorf("route target requires both listen and path")
 	}
-	srvIdx, locIdx, matches := -1, -1, 0
+	type coordinate struct{ srv, loc int }
+	var matches []coordinate
 	for i := range c.Servers {
 		srv := &c.Servers[i]
-		if srv.Listen != listen || !stringSetsEqual(srv.ServerNames, serverNames) {
+		if srv.Listen != t.Listen || !stringSetsEqual(srv.ServerNames, t.ServerNames) {
 			continue
 		}
 		for j := range srv.Locations {
-			if srv.Locations[j].Match.Path == path && srv.Locations[j].Match.Type == matchType {
-				srvIdx, locIdx = i, j
-				matches++
+			if srv.Locations[j].Match.Path == t.Path && srv.Locations[j].Match.Type == t.MatchType {
+				matches = append(matches, coordinate{i, j})
 			}
 		}
 	}
-	switch {
-	case matches == 0:
-		return -1, -1, fmt.Errorf("no route found for listen %q names %v match %q path %q", listen, serverNames, matchType, path)
-	case matches > 1:
-		return -1, -1, fmt.Errorf("route target is ambiguous: %d locations match listen %q names %v match %q path %q", matches, listen, serverNames, matchType, path)
-	default:
-		return srvIdx, locIdx, nil
+	if len(matches) == 0 {
+		return -1, -1, fmt.Errorf("no route found for listen %q names %v match %q path %q", t.Listen, t.ServerNames, t.MatchType, t.Path)
 	}
+	if t.Ordinal == nil {
+		if len(matches) > 1 {
+			return -1, -1, fmt.Errorf("route target is ambiguous: %d locations match listen %q names %v match %q path %q; send match_ordinal with a base_version to choose one",
+				len(matches), t.Listen, t.ServerNames, t.MatchType, t.Path)
+		}
+		return matches[0].srv, matches[0].loc, nil
+	}
+	ordinal := *t.Ordinal
+	if ordinal < 0 || ordinal >= len(matches) {
+		return -1, -1, fmt.Errorf("match_ordinal %d is out of range: %d location(s) match listen %q names %v match %q path %q",
+			ordinal, len(matches), t.Listen, t.ServerNames, t.MatchType, t.Path)
+	}
+	return matches[ordinal].srv, matches[ordinal].loc, nil
 }
 
 // stringSetsEqual reports whether a and b contain the same elements regardless

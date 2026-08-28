@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 322 |
-| Schema leaves (configurable values) | 274 |
-| Registry entries | 274 |
+| Schema paths (containers included) | 331 |
+| Schema leaves (configurable values) | 281 |
+| Registry entries | 281 |
 | Startup-consumed entries | 58 |
-| Class `hot_reload` | 202 |
+| Class `hot_reload` | 209 |
 | Class `restart_required` | 58 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
@@ -248,7 +248,14 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.grpc_transcode.use_reflection` | `hot_reload` | `grpc_transcode` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.headers.*` | `hot_reload` | `headers` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.index` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.match.headers.*.name` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.match.headers.*.op` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.match.headers.*.value` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.match.methods` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.match.path` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.match.query.*.name` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.match.query.*.op` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.match.query.*.value` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.match.type` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.plugin` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `servers.*.locations.*.plugins` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |

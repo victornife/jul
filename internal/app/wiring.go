@@ -13,7 +13,10 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,16 +42,68 @@ func RateKeyKind(spec string) string {
 	}
 }
 
+// LocationScope is the canonical identity of a location's matching behaviour:
+// a deterministic digest over its listen address, its normalized server_names
+// set, its match type, its path, its normalized predicate set, and the
+// preflight-widening bit that makes CORS a matcher input (ADR 0018 §14).
+//
+// It replaces the old `listen | names | match.path` key, which already collided
+// between an exact and a prefix location on the same path — a pre-existing
+// defect that predicates turn from unlikely into ordinary, since the whole point
+// of method and header predicates is that two locations may legitimately share
+// a path.
+//
+// It is a fingerprint rather than an ordinal on purpose. A rate-limit bucket
+// carries live state, and an ordinal-keyed bucket would transfer to a different
+// predicate set the moment an operator inserted or reordered a same-path route,
+// silently handing one route's accumulated limiter state to another. A
+// fingerprint is stable across insertion and reordering and changes exactly when
+// the route's matching behaviour changes — which is exactly when resetting the
+// state is the correct answer.
+//
+// The digest algorithm itself is private: nothing persists it, exports it as a
+// resource name, or correlates it across revisions. A durable external route_id
+// is ADR 0019's to define.
+func LocationScope(srv config.ServerConfig, loc config.LocationConfig) string {
+	names := append([]string(nil), srv.ServerNames...)
+	sort.Strings(names)
+
+	h := sha256.New()
+	writeScopeField := func(parts ...string) {
+		for _, p := range parts {
+			// Length-prefixed so no operator-controlled value can impersonate a
+			// different tuple by containing the separator.
+			fmt.Fprintf(h, "%d:%s\n", len(p), p)
+		}
+	}
+	writeScopeField(srv.Listen)
+	writeScopeField(names...)
+	writeScopeField(matchTypeOrDefault(loc.Match.Type), loc.Match.Path, loc.Match.CanonicalPredicates())
+	if config.LocationPreflightWidening(loc) {
+		writeScopeField("preflight_widening")
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16])
+}
+
+// matchTypeOrDefault renders an omitted match type as the documented default, so
+// two spellings of the same route produce one scope.
+func matchTypeOrDefault(t string) string {
+	if t == "" {
+		return "prefix"
+	}
+	return t
+}
+
 // AuthScope builds a stable identity for a location's auth policy, used to map a
 // pre-built Authenticator back to the location during router construction.
 func AuthScope(srv config.ServerConfig, loc config.LocationConfig) string {
-	return srv.Listen + "|" + strings.Join(srv.ServerNames, ",") + "|" + loc.Match.Path
+	return LocationScope(srv, loc)
 }
 
 // WAFScope builds a stable identity for a location's WAF policy, used to map a
 // pre-built Firewall back to the location during router construction.
 func WAFScope(srv config.ServerConfig, loc config.LocationConfig) string {
-	return srv.Listen + "|" + strings.Join(srv.ServerNames, ",") + "|" + loc.Match.Path
+	return LocationScope(srv, loc)
 }
 
 // EffectiveWAF resolves the WAF policy that applies to a location: its own [waf]

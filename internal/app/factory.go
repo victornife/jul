@@ -262,12 +262,18 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// store persists across reloads, so a stable scope keeps each bucket's
 	// state; global-policy locations share one "global" bucket per key while
 	// overrides get their own scope.
+	//
+	// The override scope is the canonical predicate fingerprint (ADR 0018 §14),
+	// not the location's coordinates: two same-path routes distinguished only by
+	// a predicate are two routes and must not share a bucket. Changing the
+	// derivation resets existing buckets once, on upgrade; orphans are evicted by
+	// the store's idle TTL.
 	locRateLimit := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
 		rl := c.RateLimit
 		scope := "global"
 		if loc.RateLimit != nil {
 			rl = *loc.RateLimit
-			scope = "loc:" + srv.Listen + "|" + strings.Join(srv.ServerNames, ",") + "|" + loc.Match.Path
+			scope = "loc:" + LocationScope(srv, loc)
 		}
 		if !rl.Enabled {
 			return nil

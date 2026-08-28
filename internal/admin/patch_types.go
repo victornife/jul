@@ -37,6 +37,17 @@ type patchRequest struct {
 	ServerNames []string `json:"server_names,omitempty"`
 	MatchType   string   `json:"match_type,omitempty"`
 	Path        string   `json:"path,omitempty"`
+	// MatchOrdinal disambiguates locations that share all four coordinates,
+	// which predicates made possible (ADR 0018 §14): it is the 0-based index
+	// among them, in declaration order. Omitted means "there must be exactly
+	// one", so every payload written before predicates existed keeps working.
+	//
+	// A patch that carries it requires base_version and is rejected with 409
+	// when that is absent or stale. An ordinal is only meaningful relative to a
+	// specific revision — inserting a same-path route above the target shifts
+	// every later ordinal — so a force-applied ordinal patch would silently edit
+	// a different route than the operator previewed.
+	MatchOrdinal *int `json:"match_ordinal,omitempty"`
 
 	// Upstream target (upstream_* ops).
 	Upstream string `json:"upstream,omitempty"`

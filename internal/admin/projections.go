@@ -49,6 +49,8 @@ func projectRoutes(c *config.Config) []RouteProjection {
 				Index:             j,
 				Match:             loc.Match.Path,
 				Type:              loc.Match.Type,
+				MatchOrdinal:      matchOrdinalOf(srv, j),
+				Predicates:        locationPredicateSummary(loc),
 				Auth:              loc.Auth != nil,
 				Cache:             loc.Cache,
 				RateLimit:         loc.RateLimit != nil && loc.RateLimit.Enabled,

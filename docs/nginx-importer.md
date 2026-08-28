@@ -77,7 +77,18 @@ reported in `Skipped` for manual porting.
 | `try_files` | ✅ | → `try_files` (string slice) |
 | `return` | ✅ | Numeric codes map directly; `return <url>` maps to `return = 302` + `redirect`. Response body text is dropped with a note. |
 | `rewrite` | ✅ | `pattern`, `replacement`, and `flag` (`last`/`break`/`redirect`/`permanent`) are preserved; unknown flags are noted |
-| `if`, `limit_except` | ❌ | Reported |
+| `if`, `limit_except` | ❌ | Reported with the source line and a reason; never silently converted |
+
+> `match.methods` can now express a method constraint (see
+> [Request predicates](configuration.md#request-predicates)), but `limit_except`
+> is still reported rather than translated. `limit_except GET { deny all; }`
+> means "for any method other than GET, apply these directives" — a *deny*
+> inside the same location. Translating it to `methods = ["GET"]` would change a
+> 403 into whatever the next matching route does, which is usually the `/`
+> catch-all, so the two are not equivalent and a silent conversion would move
+> traffic. Translating it faithfully needs the per-method action modelling that
+> ROUTE-03 and the [MIGOPS epic](https://github.com/victornife/jul/issues/112)
+> own.
 
 ### `upstream` block
 

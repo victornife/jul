@@ -29,7 +29,7 @@ func BenchmarkHostScore(b *testing.B) {
 }
 
 // benchServerRoute builds a representative server block with exact, prefix,
-// regex, and "/" fallback locations for matching benchmarks and fuzzing.
+// regex, and "/" catch-all locations for matching benchmarks and fuzzing.
 func benchServerRoute() *serverRoute {
 	mk := func(typ, p string) *locationRoute {
 		lr := &locationRoute{matchType: typ, path: p}
@@ -38,21 +38,17 @@ func benchServerRoute() *serverRoute {
 		}
 		return lr
 	}
-	fb := mk("prefix", "/")
-	return &serverRoute{
-		locations: []*locationRoute{
-			mk("exact", "/health"),
-			mk("prefix", "/api/v1"),
-			mk("prefix", "/api"),
-			mk("prefix", "/static"),
-			mk("regex", `\.php$`),
-			fb,
-		},
-		fallback: fb,
-	}
+	return testServerRoute(
+		mk("exact", "/health"),
+		mk("prefix", "/api/v1"),
+		mk("prefix", "/api"),
+		mk("prefix", "/static"),
+		mk("regex", `\.php$`),
+		mk("prefix", "/"),
+	)
 }
 
-func BenchmarkMatchLocation(b *testing.B) {
+func BenchmarkSelectLocation(b *testing.B) {
 	sr := benchServerRoute()
 	cases := []struct {
 		name string
@@ -64,10 +60,11 @@ func BenchmarkMatchLocation(b *testing.B) {
 		{"fallback", "/nothing/here"},
 	}
 	for _, c := range cases {
+		req := selectRequest(c.path, "")
 		b.Run(c.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				_ = sr.matchLocation(c.path)
+				_ = sr.selectLocation(req)
 			}
 		})
 	}

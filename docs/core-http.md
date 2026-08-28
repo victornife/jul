@@ -50,7 +50,9 @@ servers  = [
    scored against each server block's `server_names`; the best score wins, with
    the first-declared block as the default.
 3. **Location** selection: the request path is matched against the server's
-   locations by precedence (exact → longest prefix → regex → `/` fallback).
+   locations by precedence (exact → longest non-root prefix → regex →
+   `prefix "/"`), and the first candidate whose predicates all match is
+   selected. See [Location selection](#location-selection).
 4. **Rewrites** (if any) run against the matched location's path.
 5. **Middleware** wraps the handler (request ID, recover, body limit, optional
    timeout / rate limit / access log).
@@ -71,19 +73,39 @@ handled) and scored against each block's `server_names`:
 The highest score wins. When nothing scores above 0, the request falls to the
 **default server** — the first server block declared for that listen address.
 
-## Location matching
+## Location selection
 
-A request path is resolved against the server's locations in this fixed order:
+A request is resolved against the server's locations by walking four tiers in a
+fixed order and taking the first candidate whose predicates all match:
 
-| Step | Match type | Rule |
+| Tier | Match type | Candidates, in order |
 | --- | --- | --- |
-| 1 | `exact` | `match.path` equals the request path exactly |
-| 2 | `prefix` | longest `match.path` that is a prefix of the request path (the `/` catch-all is excluded here) |
-| 3 | `regex` | first regex (in config order) that matches |
-| 4 | fallback | the `prefix` location whose path is `/`, if present |
+| 1 | `exact` | every location whose `match.path` equals the request path, in declaration order |
+| 2 | `prefix` | every non-root location whose `match.path` is a prefix of the request path, longest first, ties in declaration order |
+| 3 | `regex` | every location whose pattern matches, in declaration order |
+| 4 | `prefix "/"` | the catch-all locations, in declaration order |
 
-If no location matches and there is no `/` fallback, the request is unhandled
-(the router's default action returns **501 Not Implemented**).
+Four properties are guaranteed.
+
+- **Path specificity always outranks predicates.** A `prefix "/api/v2/"` route
+  with no predicates beats a `prefix "/api/"` route with three. Predicates
+  filter candidates *within* a tier; they never promote one across tiers or
+  across prefix lengths. There is no scoring.
+- **A predicate failure continues the search.** The route does not consume the
+  request; the next candidate is tried.
+- **Declaration order is the only tie-breaker**, at every tier. No map is
+  iterated during selection, so the same configuration always selects the same
+  location.
+- **Rewrites run after selection**, on the selected location only. A rewritten
+  path does not trigger a second location search.
+
+If no candidate is selected the request is unhandled and the router returns
+**404**. There is no 405 and no `Allow` header — see
+[Request predicates](configuration.md#request-predicates).
+
+A request path that is not rooted — the empty path Go gives an authority-form
+`CONNECT`, or the `*` of a server-wide `OPTIONS` — is a prefix of no configured
+path, including `/`, and therefore reaches no location.
 
 ### Rewrites
 

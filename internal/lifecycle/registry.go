@@ -472,7 +472,20 @@ func tlsEntries() []Entry {
 
 func locationEntries() []Entry {
 	loc := "servers.*.locations.*."
-	out := hotGroup(SubRouting, reasonHandlerRebuild, loc+"match.path", loc+"match.type")
+	// The match predicates compile inside router.New during Prepare, so an
+	// invalid one fails the reload transaction before Publish and can never
+	// partially activate (ADR 0018 §13). None is startup-consumed.
+	out := hotGroup(SubRouting, reasonHandlerRebuild,
+		loc+"match.headers.*.name",
+		loc+"match.headers.*.op",
+		loc+"match.headers.*.value",
+		loc+"match.methods",
+		loc+"match.path",
+		loc+"match.query.*.name",
+		loc+"match.query.*.op",
+		loc+"match.query.*.value",
+		loc+"match.type",
+	)
 	out = append(out, backendTLSEntries(loc+"backend_tls.", true)...)
 	out = append(out, hotGroup(SubStaticFiles, reasonHandlerRebuild,
 		loc+"allow_hidden",

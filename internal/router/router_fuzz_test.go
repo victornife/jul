@@ -5,6 +5,7 @@ package router
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -30,9 +31,9 @@ func FuzzHostScore(f *testing.F) {
 	})
 }
 
-// FuzzMatchLocation checks that location resolution never panics for arbitrary
-// request paths and always resolves a location when a "/" fallback is present.
-func FuzzMatchLocation(f *testing.F) {
+// FuzzSelectLocation checks that location resolution never panics for arbitrary
+// request paths and always resolves a location when a "/" catch-all is present.
+func FuzzSelectLocation(f *testing.F) {
 	sr := benchServerRoute()
 	seeds := []string{
 		"/health", "/api/v1/x", "/x.php", "/../../etc/passwd",
@@ -42,8 +43,9 @@ func FuzzMatchLocation(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, path string) {
-		if loc := sr.matchLocation(path); loc == nil {
-			t.Fatalf("matchLocation(%q) = nil, want non-nil (fallback present)", path)
+		loc := selectPath(sr, path)
+		if loc == nil && strings.HasPrefix(path, "/") {
+			t.Fatalf("selectLocation(%q) = nil, want non-nil (a \"/\" candidate is present)", path)
 		}
 	})
 }
@@ -53,15 +55,13 @@ func FuzzMatchLocation(f *testing.F) {
 // are exercised and never panic. It uses a serverRoute with all match types
 // populated.
 func FuzzLocationMatch(f *testing.F) {
-	sr := &serverRoute{
-		locations: []*locationRoute{
-			{matchType: "exact", path: "/api/health"},
-			{matchType: "prefix", path: "/api/v1"},
-			{matchType: "prefix", path: "/static"},
-			{matchType: "regex", re: regexp.MustCompile(`^/files/.*\.pdf$`)},
-		},
-		fallback: &locationRoute{matchType: "prefix", path: "/"},
-	}
+	sr := testServerRoute(
+		&locationRoute{matchType: "exact", path: "/api/health"},
+		&locationRoute{matchType: "prefix", path: "/api/v1"},
+		&locationRoute{matchType: "prefix", path: "/static"},
+		&locationRoute{matchType: "regex", path: `^/files/.*\.pdf$`, re: regexp.MustCompile(`^/files/.*\.pdf$`)},
+		&locationRoute{matchType: "prefix", path: "/"},
+	)
 	seeds := []string{
 		"/api/health", "/api/v1/users", "/static/css/main.css",
 		"/files/report.pdf", "/files/report.docx", "/", "",
@@ -72,7 +72,8 @@ func FuzzLocationMatch(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, path string) {
-		_ = sr.matchLocation(path)
-		// Must never panic. matchLocation always returns non-nil because fallback is set.
+		_ = selectPath(sr, path)
+		// Must never panic. A "/" candidate is present, so a rooted path always
+		// resolves.
 	})
 }

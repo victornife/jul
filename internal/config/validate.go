@@ -99,9 +99,7 @@ func Validate(c *Config) error {
 
 		for j, loc := range srv.Locations {
 			locWhere := fmt.Sprintf("%s.locations[%d]", where, j)
-			if err := validateMatch(loc.Match, locWhere); err != nil {
-				errs = append(errs, err)
-			}
+			errs = append(errs, validateMatch(loc.Match, srv, locWhere)...)
 			if loc.RequireClientCert && (srv.TLS == nil || !srv.TLS.ClientAuth.Active()) {
 				errs = append(errs, fmt.Errorf("%s: require_client_cert needs the server's tls.client_auth enabled (mode request or require)", locWhere))
 			}

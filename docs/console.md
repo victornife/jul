@@ -408,6 +408,42 @@ browser tab) cannot silently overwrite a change applied in between:
   session does not trip a spurious conflict.
 - Sending an empty/absent `base_version` skips the check (an explicit
   force-apply); the console always sends it.
+- **One exception, and it is not optional.** A patch that selects a route with
+  `match_ordinal` (see [Route tester](#route-tester)) is rejected with 409 when
+  `base_version` is absent *or* stale. An ordinal is meaningful only relative to
+  one revision — inserting a same-path route above the target shifts every later
+  ordinal — so a force-applied ordinal patch would edit a route the operator
+  never previewed.
+
+### Route tester
+
+`POST /api/routes/test` resolves a synthetic request against the running
+configuration using the router's own selection, so the answer cannot drift from
+what the server would actually do. It never dials an upstream, runs a handler or
+mutates anything.
+
+The request carries `method`, `path`, `host` and, optionally:
+
+| Field | Purpose |
+| --- | --- |
+| `headers` | a `{name: value}` map — the convenient single-value form |
+| `header_values` | an ordered `[{name, value}]` list appended to `headers`, so two field lines of the same name are expressible |
+| `raw_query` | the query string exactly as it appears after `?`, so repeated keys, percent-encoding, `+` and malformed escapes survive. It is *not* derived by splitting `path`, where a `?` stays a literal |
+
+The result names every candidate the path produced, in the order the router
+visited them: its `match_type`, `match`, `tier`, `match_ordinal`, whether it was
+`selected`, and — for each rejected one — the exact configuration path of the
+predicate that rejected it (`match.methods`, `match.headers[1]`, `match.query[0]`).
+
+This is the only place an operator can see a predicate mismatch. One is an
+ordinary routing outcome that happens on every request to a predicate-bearing
+path, so it is never logged per request, and no predicate value ever becomes a
+metric label.
+
+`match_ordinal` is a revision-relative selector, not an identity. It is safe to
+feed straight back into a typed patch together with the `base_version` the same
+session read; it must not be stored or used to correlate a route across
+revisions.
 
 ### Restart-required changes
 

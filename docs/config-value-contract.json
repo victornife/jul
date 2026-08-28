@@ -400,6 +400,35 @@
       "active_when": "HTTP/3 enabled"
     },
     {
+      "go_field": "HeaderMatch.Name",
+      "path": "servers[].locations[].match.headers[].name",
+      "kind": "grammar",
+      "constraint": "RFC 9110 field-name token, canonicalized for lookup; Host and :-prefixed pseudo-headers rejected; Forwarded/X-Forwarded-*/RFC 9440 names require client_address.trusted_proxies on the listener",
+      "zero_semantics": "required; there is no default",
+      "active_when": "a match.headers entry is present"
+    },
+    {
+      "go_field": "HeaderMatch.Op",
+      "path": "servers[].locations[].match.headers[].op",
+      "kind": "enum",
+      "constraint": "exact lowercase enum; value is required for exact and regex and forbidden for present",
+      "zero_semantics": "required; there is no default",
+      "active_when": "a match.headers entry is present",
+      "allowed": [
+        "exact",
+        "present",
+        "regex"
+      ]
+    },
+    {
+      "go_field": "HeaderMatch.Value",
+      "path": "servers[].locations[].match.headers[].value",
+      "kind": "grammar",
+      "constraint": "at most 1 KiB; an unanchored RE2 pattern of at most 512 bytes when op = regex, with at most 8 regex predicates per location",
+      "zero_semantics": "omitted and explicitly empty are different: omitted is only legal for op = present, and an empty value matches only a present-but-empty field",
+      "active_when": "op is exact or regex"
+    },
+    {
       "go_field": "HealthCheckConfig.HealthyThreshold",
       "path": "upstreams[].health_check.healthy_threshold",
       "kind": "integer",
@@ -540,6 +569,14 @@
       "active_when": "always"
     },
     {
+      "go_field": "MatchConfig.Methods",
+      "path": "servers[].locations[].match.methods",
+      "kind": "grammar",
+      "constraint": "at most 16 distinct RFC 9110 method tokens, compared byte-exactly; a lowercase spelling of an IANA-registered method and CONNECT are rejected; listing GET also matches HEAD",
+      "zero_semantics": "omitted leaves the method unconstrained; an explicitly empty list is an error, because it is a route that can never match",
+      "active_when": "location configured"
+    },
+    {
       "go_field": "MatchConfig.Type",
       "path": "servers[].locations[].match.type",
       "kind": "enum",
@@ -627,6 +664,34 @@
         "middleware",
         "handler"
       ]
+    },
+    {
+      "go_field": "QueryMatch.Name",
+      "path": "servers[].locations[].match.query[].name",
+      "kind": "grammar",
+      "constraint": "non-empty, at most 1 KiB, compared after percent-decoding",
+      "zero_semantics": "required; there is no default",
+      "active_when": "a match.query entry is present"
+    },
+    {
+      "go_field": "QueryMatch.Op",
+      "path": "servers[].locations[].match.query[].op",
+      "kind": "enum",
+      "constraint": "exact lowercase enum; value is required for exact and forbidden for present. There is no regex operator for query parameters",
+      "zero_semantics": "required; there is no default",
+      "active_when": "a match.query entry is present",
+      "allowed": [
+        "exact",
+        "present"
+      ]
+    },
+    {
+      "go_field": "QueryMatch.Value",
+      "path": "servers[].locations[].match.query[].value",
+      "kind": "grammar",
+      "constraint": "at most 1 KiB, compared after percent-decoding",
+      "zero_semantics": "omitted and explicitly empty are different: omitted is only legal for op = present, and an empty value matches ?x and ?x=",
+      "active_when": "op is exact"
     },
     {
       "go_field": "RateLimitConfig.Burst",

@@ -255,25 +255,6 @@ func validateProxyPass(pass, where string, upstreamNames map[string]int) []error
 	return nil
 }
 
-func validateMatch(m MatchConfig, where string) error {
-	switch m.Type {
-	case "exact", "prefix", "regex":
-	case "":
-		return fmt.Errorf("%s: match.type is required (exact|prefix|regex)", where)
-	default:
-		return fmt.Errorf("%s: invalid match.type %q (want exact|prefix|regex)", where, m.Type)
-	}
-	if strings.TrimSpace(m.Path) == "" {
-		return fmt.Errorf("%s: match.path is required", where)
-	}
-	if m.Type == "regex" {
-		if _, err := regexp.Compile(m.Path); err != nil {
-			return fmt.Errorf("%s: invalid match regex %q: %v", where, m.Path, err)
-		}
-	}
-	return nil
-}
-
 // validateCGIPass checks a fastcgi_pass or uwsgi_pass target.
 //
 // A bare name that matches no upstream used to be accepted and then dialled as
