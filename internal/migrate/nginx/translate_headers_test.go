@@ -263,6 +263,113 @@ http {
 	}
 }
 
+func TestTranslateLimitExceptSecondOneIsReportedNotMerged(t *testing.T) {
+	// Two limit_except directives on one location: the second finds
+	// Match.Methods already set by the first, and is reported rather than
+	// silently overwriting or merging it.
+	cfg, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      limit_except GET {
+        deny all;
+      }
+      limit_except POST {
+        deny all;
+      }
+      proxy_pass http://127.0.0.1:9000;
+    }
+  }
+}`)
+	loc := onlyServer(t, cfg).Locations[0]
+	if len(loc.Match.Methods) != 1 || loc.Match.Methods[0] != "GET" {
+		t.Fatalf("match.methods = %v, want the first limit_except's [GET] preserved", loc.Match.Methods)
+	}
+	if !hasSkip(rep, "already has a method constraint") {
+		t.Errorf("expected a skip for the second limit_except, got %+v", rep.Skipped)
+	}
+}
+
+// ── location-level directives not otherwise covered ────────────────────────────
+
+func TestTranslateLocationLevelIfIsReported(t *testing.T) {
+	_, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      if ($request_method = POST) {
+        return 405;
+      }
+      return 200;
+    }
+  }
+}`)
+	if !hasSkip(rep, "location-level if is not translated") {
+		t.Errorf("expected a skip for location-level if, got %+v", rep.Skipped)
+	}
+}
+
+func TestTranslateUnsupportedLocationDirectiveIsReported(t *testing.T) {
+	_, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      internal;
+      return 200;
+    }
+  }
+}`)
+	if !hasSkip(rep, "unsupported location-level directive") {
+		t.Errorf("expected a skip for an unsupported location-level directive, got %+v", rep.Skipped)
+	}
+}
+
+// ── add_header edge cases ───────────────────────────────────────────────────────
+
+func TestTranslateAddHeaderMalformedIsReported(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      add_header X-Only-Name;
+      return 200;
+    }
+  }
+}`)
+	loc := onlyServer(t, cfg).Locations[0]
+	if len(loc.ResponseHeaders) != 0 {
+		t.Errorf("expected no response_headers from a malformed add_header, got %+v", loc.ResponseHeaders)
+	}
+	if !hasSkip(rep, "malformed add_header") {
+		t.Errorf("expected a skip for malformed add_header, got %+v", rep.Skipped)
+	}
+}
+
+func TestTranslateCORSMaxAgeInvalidValueIsReported(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location /api/ {
+      add_header Access-Control-Allow-Origin "https://app.example.test" always;
+      add_header Access-Control-Max-Age "not-a-number" always;
+      proxy_pass http://127.0.0.1:9000;
+    }
+  }
+}`)
+	loc := onlyServer(t, cfg).Locations[0]
+	if loc.CORS == nil || loc.CORS.MaxAge != nil {
+		t.Fatalf("expected max_age left unset after an invalid value, got %+v", loc.CORS)
+	}
+	if !hasSkip(rep, "non-negative whole number of seconds") {
+		t.Errorf("expected a skip explaining the invalid max_age, got %+v", rep.Skipped)
+	}
+}
+
 // assertValidNginxOutput proves the translated config marshals, re-parses, and
 // validates cleanly — the same gate cmd/jul's `import nginx` runs before ever
 // writing output, and the #147 §7 requirement that generated config passes

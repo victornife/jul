@@ -292,3 +292,96 @@ func TestApplyPatchCORSClearRefusesWhenNone(t *testing.T) {
 		t.Fatal("expected error: no cors policy to clear")
 	}
 }
+
+// ── missing-payload and route-not-found branches (#147, Codecov patch coverage) ─
+
+func TestApplyPatchSetPredicatesRequiresPayload(t *testing.T) {
+	c := crudConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_set_predicates", Listen: ":8080", ServerNames: []string{"app.example"}, MatchType: "prefix", Path: "/",
+	}); err == nil {
+		t.Fatal("expected error: predicates payload is required")
+	}
+}
+
+func TestApplyPatchResponseHeadersSetRequiresPayload(t *testing.T) {
+	c := crudConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_response_headers_set", Listen: ":8080", ServerNames: []string{"app.example"}, MatchType: "prefix", Path: "/",
+	}); err == nil {
+		t.Fatal("expected error: response_headers payload is required")
+	}
+}
+
+func TestApplyPatchCORSSetRequiresPayload(t *testing.T) {
+	c := crudConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_cors_set", Listen: ":8080", ServerNames: []string{"app.example"}, MatchType: "prefix", Path: "/",
+	}); err == nil {
+		t.Fatal("expected error: cors_set payload is required")
+	}
+}
+
+func TestApplyPatchNewOpsRouteNotFound(t *testing.T) {
+	c := crudConfig()
+	missing := patchRequest{Op: "", Listen: ":9999", MatchType: "prefix", Path: "/nope"}
+	cases := []patchRequest{
+		{Op: "location_set_predicates", Predicates: &locationPredicates{Methods: &[]string{"GET"}}},
+		{Op: "location_clear_predicates"},
+		{Op: "location_response_headers_set", ResponseHeaders: &[]responseHeaderOpPatch{{Op: "set", Name: "X-A", Value: strp("v")}}},
+		{Op: "location_response_headers_clear"},
+		{Op: "location_cors_set", CORS: &corsPatch{Enabled: true, AllowedOrigins: []string{"https://a.example"}}},
+		{Op: "location_cors_clear"},
+	}
+	for _, tc := range cases {
+		req := tc
+		req.Listen, req.MatchType, req.Path = missing.Listen, missing.MatchType, missing.Path
+		if _, err := applyPatch(c, req); err == nil {
+			t.Errorf("%s: expected a route-not-found error, got none", tc.Op)
+		}
+	}
+}
+
+// ── applyLocationPredicates: header/query name and query-op validation ─────────
+
+func TestApplyPatchSetPredicatesRejectsEmptyHeaderName(t *testing.T) {
+	c := crudConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_set_predicates", Listen: ":8080", ServerNames: []string{"app.example"}, MatchType: "prefix", Path: "/",
+		Predicates: &locationPredicates{Headers: &[]headerPredicate{{Name: "  ", Op: "present"}}},
+	}); err == nil {
+		t.Fatal("expected error: header name is required")
+	}
+}
+
+func TestApplyPatchSetPredicatesRejectsEmptyQueryName(t *testing.T) {
+	c := crudConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_set_predicates", Listen: ":8080", ServerNames: []string{"app.example"}, MatchType: "prefix", Path: "/",
+		Predicates: &locationPredicates{Query: &[]queryPredicate{{Name: "  ", Op: "present"}}},
+	}); err == nil {
+		t.Fatal("expected error: query name is required")
+	}
+}
+
+func TestApplyPatchSetPredicatesRejectsBadQueryOp(t *testing.T) {
+	c := crudConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_set_predicates", Listen: ":8080", ServerNames: []string{"app.example"}, MatchType: "prefix", Path: "/",
+		Predicates: &locationPredicates{Query: &[]queryPredicate{{Name: "v", Op: "bogus"}}},
+	}); err == nil {
+		t.Fatal("expected error: invalid query op")
+	}
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_set_predicates", Listen: ":8080", ServerNames: []string{"app.example"}, MatchType: "prefix", Path: "/",
+		Predicates: &locationPredicates{Query: &[]queryPredicate{{Name: "v", Op: "exact"}}},
+	}); err == nil {
+		t.Fatal("expected error: value required for exact")
+	}
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_set_predicates", Listen: ":8080", ServerNames: []string{"app.example"}, MatchType: "prefix", Path: "/",
+		Predicates: &locationPredicates{Query: &[]queryPredicate{{Name: "v", Op: "present", Value: strp("x")}}},
+	}); err == nil {
+		t.Fatal("expected error: value forbidden for present")
+	}
+}
