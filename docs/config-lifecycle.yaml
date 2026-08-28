@@ -26,6 +26,7 @@ subsystems:
   cache: "The two-tier response cache backend."
   client_address: "The per-listener trusted-proxy policy that derives the canonical client address."
   compression: "Negotiated response compression."
+  cors: "Per-location Cross-Origin Resource Sharing policy and the preflight terminator it turns on."
   discovery: "Dynamic backend discovery for an upstream pool."
   egress: "The outbound-destination allow-list applied to auxiliary fetches."
   error_log: "Legacy error-log destinations kept for v1 compatibility."
@@ -34,7 +35,7 @@ subsystems:
   grpc: "Native gRPC / HTTP-2 passthrough proxying."
   grpc_transcode: "gRPC-JSON transcoding for a location."
   h2c: "Cleartext HTTP/2 on a plaintext listener."
-  headers: "Headers added to the upstream request."
+  headers: "Headers added to the upstream request, and response-header add/set/remove operations."
   health_check: "Active health probing for an upstream pool."
   http3: "The HTTP/3 (QUIC) listener and its Alt-Svc advertisement."
   listener: "The listen address a socket binds to."
@@ -74,12 +75,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 331
-  schema_leaves: 281
-  registry_entries: 281
+  schema_paths: 343
+  schema_leaves: 291
+  registry_entries: 291
   startup_consumed: 58
   by_class:
-    hot_reload: 209
+    hot_reload: 219
     restart_required: 58
     new_listener_only: 8
     ignored_deprecated: 4
@@ -626,6 +627,34 @@ fields:
     class: hot_reload
     subsystem: server_limits
     reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.cors.allow_credentials"
+    class: hot_reload
+    subsystem: cors
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.cors.allowed_headers"
+    class: hot_reload
+    subsystem: cors
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.cors.allowed_methods"
+    class: hot_reload
+    subsystem: cors
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.cors.allowed_origins"
+    class: hot_reload
+    subsystem: cors
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.cors.enabled"
+    class: hot_reload
+    subsystem: cors
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.cors.exposed_headers"
+    class: hot_reload
+    subsystem: cors
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.cors.max_age"
+    class: hot_reload
+    subsystem: cors
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
   - path: "servers.*.locations.*.deny"
     class: hot_reload
     subsystem: access_control
@@ -799,6 +828,18 @@ fields:
     class: hot_reload
     subsystem: resilience
     reason: "the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent"
+  - path: "servers.*.locations.*.response_headers.*.name"
+    class: hot_reload
+    subsystem: headers
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.response_headers.*.op"
+    class: hot_reload
+    subsystem: headers
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.response_headers.*.value"
+    class: hot_reload
+    subsystem: headers
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
   - path: "servers.*.locations.*.return"
     class: hot_reload
     subsystem: return

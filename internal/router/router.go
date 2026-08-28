@@ -114,7 +114,7 @@ func New(cfg *config.Config, builders map[string]Builder, fallback Builder, locM
 		if srv.Listen == "" {
 			continue
 		}
-		sr, err := buildServerRoute(srv, reg, fallback, locModifier)
+		sr, err := buildServerRoute(srv, reg, fallback, locModifier, log)
 		if err != nil {
 			return nil, err
 		}
@@ -132,7 +132,7 @@ func New(cfg *config.Config, builders map[string]Builder, fallback Builder, locM
 	return r, nil
 }
 
-func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback Builder, locModifier LocationModifier) (*serverRoute, error) {
+func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback Builder, locModifier LocationModifier, log *slog.Logger) (*serverRoute, error) {
 	sr := &serverRoute{names: srv.ServerNames, redirectHTTPS: srv.RedirectHTTPS}
 
 	bodyLimit := srv.ClientMaxBodySize.Bytes()
@@ -190,6 +190,18 @@ func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback 
 			if mw := locModifier(srv, loc); mw != nil {
 				h = mw(h)
 			}
+		}
+
+		// The response policy (response_headers + CORS) is the outermost
+		// per-location wrapper (ADR 0018 §10), so it decorates every response the
+		// location can produce: auth 401, rate-limit 429, WAF 403, BodyLimit 413,
+		// upstream 502, cache hit, static 404, redirect. The location-scoped
+		// recover sits immediately inside it, so a panic after route selection
+		// produces a 500 carrying the location's policy headers instead of an
+		// opaque one from the global recover outside the router. A location with
+		// neither response_headers nor cors installs no wrapper.
+		if rp := middleware.ResponsePolicy(loc.ResponseHeaders, middleware.CompileCORS(loc.CORS)); rp != nil {
+			h = rp(middleware.Recover(log)(h))
 		}
 
 		lr.handler = h

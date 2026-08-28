@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 331 |
-| Schema leaves (configurable values) | 281 |
-| Registry entries | 281 |
+| Schema paths (containers included) | 343 |
+| Schema leaves (configurable values) | 291 |
+| Registry entries | 291 |
 | Startup-consumed entries | 58 |
-| Class `hot_reload` | 209 |
+| Class `hot_reload` | 219 |
 | Class `restart_required` | 58 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
@@ -61,6 +61,7 @@ set, so preview and apply reach the same verdict.
 | `cache` | The two-tier response cache backend. |
 | `client_address` | The per-listener trusted-proxy policy that derives the canonical client address. |
 | `compression` | Negotiated response compression. |
+| `cors` | Per-location Cross-Origin Resource Sharing policy and the preflight terminator it turns on. |
 | `discovery` | Dynamic backend discovery for an upstream pool. |
 | `egress` | The outbound-destination allow-list applied to auxiliary fetches. |
 | `error_log` | Legacy error-log destinations kept for v1 compatibility. |
@@ -69,7 +70,7 @@ set, so preview and apply reach the same verdict.
 | `grpc` | Native gRPC / HTTP-2 passthrough proxying. |
 | `grpc_transcode` | gRPC-JSON transcoding for a location. |
 | `h2c` | Cleartext HTTP/2 on a plaintext listener. |
-| `headers` | Headers added to the upstream request. |
+| `headers` | Headers added to the upstream request, and response-header add/set/remove operations. |
 | `health_check` | Active health probing for an upstream pool. |
 | `http3` | The HTTP/3 (QUIC) listener and its Alt-Svc advertisement. |
 | `listener` | The listen address a socket binds to. |
@@ -233,6 +234,13 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.cache` | `hot_reload` | `cache` | — | whether a location may serve from the cache is decided by the rebuilt handler tree; the backend itself is startup-owned |
 | `servers.*.locations.*.cache_control` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.client_max_body_size` | `hot_reload` | `server_limits` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.cors.allow_credentials` | `hot_reload` | `cors` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.cors.allowed_headers` | `hot_reload` | `cors` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.cors.allowed_methods` | `hot_reload` | `cors` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.cors.allowed_origins` | `hot_reload` | `cors` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.cors.enabled` | `hot_reload` | `cors` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.cors.exposed_headers` | `hot_reload` | `cors` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.cors.max_age` | `hot_reload` | `cors` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.deny` | `hot_reload` | `access_control` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.directory_listing` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.fastcgi_params.*` | `hot_reload` | `fastcgi` | — | the handler tree is rebuilt from the effective config on each successful reload |
@@ -276,6 +284,9 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.resilience.retry_backoff_initial` | `hot_reload` | `resilience` | — | the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent |
 | `servers.*.locations.*.resilience.retry_backoff_max` | `hot_reload` | `resilience` | — | the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent |
 | `servers.*.locations.*.resilience.retry_deadline` | `hot_reload` | `resilience` | — | the retry settings are read from the live policy at the start of each request, so a changed value governs the next request; a sequence already in flight keeps the values it started under, because changing an attempt budget underneath a running retry would make the deadline arithmetic incoherent |
+| `servers.*.locations.*.response_headers.*.name` | `hot_reload` | `headers` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.response_headers.*.op` | `hot_reload` | `headers` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.response_headers.*.value` | `hot_reload` | `headers` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.return` | `hot_reload` | `return` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.rewrites.*.flag` | `hot_reload` | `rewrites` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.rewrites.*.pattern` | `hot_reload` | `rewrites` | — | the handler tree is rebuilt from the effective config on each successful reload |

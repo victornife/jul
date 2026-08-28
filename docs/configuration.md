@@ -533,6 +533,146 @@ Use the Console's route tester (`POST /api/routes/test`) to see which candidates
 a request produced and which predicate rejected each one; a predicate mismatch
 is never logged per request.
 
+### Response headers and CORS
+
+A location may add, set/replace or remove response headers, and enforce a CORS
+policy. Both apply outside the cache and outside compression's own headers, and
+both apply to every response the location produces — normal, error (401, 403,
+429, 502, 413), a cache hit, and a panic recovered after route selection.
+
+```toml
+[[servers.locations.response_headers]]
+op = "set"                    # add | set | remove
+name = "X-Frame-Options"
+value = "DENY"
+
+[[servers.locations.response_headers]]
+op = "add"
+name = "Set-Cookie"
+value = "flavour=chocolate; Path=/; Secure; HttpOnly"
+
+[[servers.locations.response_headers]]
+op = "remove"
+name = "X-Powered-By"
+```
+
+An **ordered list**, not a map: operations apply top to bottom, and a later one
+observes the earlier ones' effect — `set` followed by two `add`s is the
+canonical way to express a deterministic multi-value header. `add` is
+`Header.Add`, `set` is `Header.Set`, `remove` is `Header.Del`. `value` is
+required for `add`/`set` (an empty string is legal and emits an empty field
+value; omitting it is an error) and forbidden for `remove`.
+
+**Rejected at validation:** names that are not RFC 9110 tokens or that start
+with `:`; values carrying any byte outside RFC 9110 §5.5's field-value grammar
+(not only CR/LF/NUL — the other C0 controls and DEL are rejected too, since Go
+silently drops an invalid header at write time and configuration time is the
+only place the operator finds out); `Connection`, `Content-Length`,
+`Transfer-Encoding`, `Upgrade`, `Keep-Alive`, `Proxy-Connection`, `TE`,
+`Trailer`, `Proxy-Authenticate`, `Proxy-Authorization`; `Content-Encoding`
+(compression owns it); any `Vary` operation on a `cache = true` location; and
+any `Access-Control-*` operation on a `cors.enabled = true` location.
+
+**`Vary`:** on a location with `cache = true`, any operation is rejected — the
+cache snapshots headers at commit, so an operator-added `Vary` would be
+invisible to it and can leak a representation across a variance it truthfully
+claims to declare (see [cache.md](cache.md)). Without a cache, `add` is
+permitted as a directive to *downstream* caches only; `set`/`remove` are always
+rejected.
+
+| Bound | Limit |
+| --- | --- |
+| Operations per location | 32 |
+| One value | 4 KiB |
+| Total added to one response | 8 KiB (a static, conservative estimate) |
+
+#### CORS
+
+```toml
+[servers.locations.cors]
+enabled = true
+allowed_origins = ["https://app.example.test"]
+allowed_methods = ["GET", "POST"]
+allowed_headers = ["Content-Type", "Authorization"]
+exposed_headers = ["X-Request-Id"]
+allow_credentials = true
+max_age = "10m"
+```
+
+**CORS is not authorization.** A disallowed origin is still routed,
+authenticated, rate-limited and served exactly as without a `[cors]` block; it
+simply gets no `Access-Control-*`. Do not build access control on it.
+
+**Order:** generic `response_headers` operations run first, then CORS, which is
+authoritative — every `Access-Control-*` field an upstream response carries is
+removed before Jul emits its own set, so a CORS-implementing upstream cannot
+produce a duplicate grant. An upstream `Vary: Origin` is never stripped: if the
+body genuinely varies by origin, that is a fact about the stored
+representation, not an optimization opportunity.
+
+**Origins** are exact, byte-compared: `scheme://host[:port]`, no path, no
+explicitly-written default port. No wildcard subdomains, no regex. `"null"` is
+accepted literally (a sandboxed iframe, a local file) and lint-warns.
+**`allowed_origins = ["*"]` is unconditional**: it forbids
+`allow_credentials = true`, forbids any other entry, and grants
+`Access-Control-Allow-Origin: *` on **every** response — including one with no
+`Origin` and `Origin: null` — with `Vary: Origin` correctly **omitted** (the
+output is constant regardless of origin). Any other policy **always appends**
+`Vary: Origin`, including on a disallowed or missing origin — that is what
+stops a shared downstream cache replaying a no-origin variant cross-origin.
+
+**`allowed_methods` / `allowed_headers` / `exposed_headers`** govern **preflight
+approval only** — never ordinary requests, which is `match.methods`. Conflating
+the two is the most common CORS misconfiguration there is.
+`allowed_methods` defaults to the CORS-safelisted `["GET", "HEAD", "POST"]`
+when omitted; an explicit empty list is a validation error. None of the three
+accepts `"*"` — under Fetch a wildcard in `Access-Control-Allow-Headers` does
+not cover `Authorization`, usually the header an operator writing `"*"` wants.
+**Every token in `Access-Control-Request-Headers` must appear in
+`allowed_headers`, with no implicit safelist exemption**, and a token is never
+reflected back into the response.
+
+**`max_age`:** omitted emits no header; otherwise a whole number of seconds
+(`"500ms"` is a validation error, not a silent truncation), 0 to 24h.
+
+**Preflight** is `OPTIONS` carrying exactly one `Origin` field line and exactly
+one well-formed `Access-Control-Request-Method` field line (a single token —
+repeated lines or a comma-separated list is not well-formed and is never
+approved). An **approved** preflight is answered with **204 No Content**, no
+upstream contact and no cache interaction. A **denied** preflight is **not**
+short-circuited: it falls through to the ordinary chain and receives whatever
+that route returns for `OPTIONS`, with no `Access-Control-*` header added on
+its behalf — Jul invents no status that discloses a policy exists.
+
+A `cors.enabled = true` location's `methods` predicate additionally accepts its
+own preflight (§2); a location that also carries **header** predicates
+lint-warns, because a browser preflight carries none of the application
+headers the real request will and the location will not be selected for it.
+
+**Execution order** adds three positions around the existing chain, all
+outside the cache and outside `BodyLimit`'s body-size guard for the
+`response_headers`/CORS wrapper, and inside `ClientCert`/outside `Auth` for the
+preflight terminator — an approved preflight always skips authentication
+(Fetch sends preflights without credentials) but is still rate-limited (its
+own scope, keyed by client address) and passed through the location's WAF. See
+[core-http.md](core-http.md#execution-order) for the full diagram.
+
+**A panic after route selection produces a 500 carrying the location's
+response-header and CORS policy**, so a cross-origin client can still read it;
+only a panic before a location is chosen falls back to the process-wide
+generic 500.
+
+| Bound | Limit |
+| --- | --- |
+| `allowed_origins` entries / one origin | 64 / 256 bytes |
+| `allowed_methods` entries | 32 |
+| `allowed_headers` entries | 64 |
+| `exposed_headers` entries | 32 |
+| One method/header token | 256 bytes |
+| `Access-Control-Request-Headers` tokens accepted at request time | 64 |
+| `max_age` | 24h |
+| Generated `Access-Control-*`/`Vary` header set (worst case) | 4 KiB |
+
 ### Static file serving
 
 Serve files from a local directory. Ideal for SPAs, asset delivery, and simple

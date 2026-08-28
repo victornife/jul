@@ -99,6 +99,7 @@ func Lint(c *Config) []Diagnostic {
 		// two locations may now legitimately share a path and differ by predicate.
 		diags = append(diags, unreachableLocationDiagnostics(&c.Servers[i], i)...)
 		diags = append(diags, matchPredicateDiagnostics(&c.Servers[i], i)...)
+		diags = append(diags, responsePolicyDiagnostics(&c.Servers[i], i)...)
 
 		for j, loc := range srv.Locations {
 			// Directory listing leaks file names and structure.

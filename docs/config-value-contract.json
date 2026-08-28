@@ -173,6 +173,22 @@
       "active_when": "the backend is reached over TLS and insecure_skip_verify is false"
     },
     {
+      "go_field": "CORSConfig.AllowedOrigins",
+      "path": "servers[].locations[].cors.allowed_origins",
+      "kind": "grammar_list",
+      "constraint": "exact scheme://host[:port] origins (no path, no explicitly-written default port), or exactly [\"*\"], which is unconditional and forbids any other entry or allow_credentials; at most 64 entries, 256 bytes each",
+      "zero_semantics": "required when enabled = true; there is no default",
+      "active_when": "location configured"
+    },
+    {
+      "go_field": "CORSConfig.MaxAge",
+      "path": "servers[].locations[].cors.max_age",
+      "kind": "duration",
+      "constraint": "whole seconds only; 0 to 24h",
+      "zero_semantics": "omitted emits no Access-Control-Max-Age header; \"0s\" is legal and emits 0",
+      "active_when": "cors.enabled = true"
+    },
+    {
       "go_field": "CacheConfig.DefaultTTL",
       "path": "cache.default_ttl",
       "kind": "duration",
@@ -828,6 +844,35 @@
       "constraint": "0s to 5m",
       "zero_semantics": "omitted/zero means the request context is the only bound",
       "active_when": "always"
+    },
+    {
+      "go_field": "ResponseHeaderOp.Name",
+      "path": "servers[].locations[].response_headers[].name",
+      "kind": "grammar",
+      "constraint": "RFC 9110 field-name token; hop-by-hop/framing names, Content-Encoding, and Vary/Access-Control-* under their §8a/§8b conditions are rejected",
+      "zero_semantics": "required; there is no default",
+      "active_when": "a response_headers entry is present"
+    },
+    {
+      "go_field": "ResponseHeaderOp.Op",
+      "path": "servers[].locations[].response_headers[].op",
+      "kind": "enum",
+      "constraint": "exact lowercase enum; value is required for add/set and forbidden for remove",
+      "zero_semantics": "required; there is no default",
+      "active_when": "a response_headers entry is present",
+      "allowed": [
+        "add",
+        "remove",
+        "set"
+      ]
+    },
+    {
+      "go_field": "ResponseHeaderOp.Value",
+      "path": "servers[].locations[].response_headers[].value",
+      "kind": "grammar",
+      "constraint": "at most 4 KiB; every byte must be RFC 9110 \u00a75.5 VCHAR / SP / HTAB / obs-text",
+      "zero_semantics": "omitted and explicitly empty are different: omitted is only legal for op = remove, and an empty value emits an empty field value on add/set",
+      "active_when": "op is add or set"
     },
     {
       "go_field": "RewriteConfig.Flag",

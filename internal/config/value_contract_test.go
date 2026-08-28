@@ -111,7 +111,8 @@ func TestConfigValueContractCoversEveryNumericPublicLeaf(t *testing.T) {
 		"ACMEConfig.CA", "ACMEConfig.Challenge", "AccessLogConfig.Format",
 		"BackendTLSConfig.CAMode", "BackendTLSConfig.MinVersion",
 		"BackendTLSConfig.PeerIdentities",
-		"AccessLogConfig.Sinks", "ClientAddressConfig.ForwardedHeaders",
+		"AccessLogConfig.Sinks", "CORSConfig.AllowedOrigins",
+		"ClientAddressConfig.ForwardedHeaders",
 		"ClientAddressConfig.TrustedProxies", "ClientAuthConfig.Mode",
 		"CompressionConfig.Encoders",
 		"DiscoveryConfig.Type", "GlobalConfig.LogFormat", "GlobalConfig.LogLevel",
@@ -119,7 +120,7 @@ func TestConfigValueContractCoversEveryNumericPublicLeaf(t *testing.T) {
 		"HeaderMatch.Name", "HeaderMatch.Op", "HeaderMatch.Value",
 		"HealthCheckConfig.Type", "MatchConfig.Methods", "MatchConfig.Type",
 		"PluginConfig.Type", "QueryMatch.Name", "QueryMatch.Op", "QueryMatch.Value",
-		"RateLimitConfig.Key", "RewriteConfig.Flag", "StreamServer.Protocol",
+		"RateLimitConfig.Key", "ResponseHeaderOp.Op", "RewriteConfig.Flag", "StreamServer.Protocol",
 		"StreamServer.ProxyProtocol", "TLSConfig.MinVersion", "TracingConfig.Exporter",
 		"UpstreamConfig.Strategy", "WAFConfig.Mode",
 	}

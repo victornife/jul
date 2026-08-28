@@ -588,6 +588,21 @@ A layer outside the cache that wants full fidelity for a header it also sets
 must apply it at commit, the same rule §10 states for the response-policy
 wrapper — never before calling the next handler.
 
+**The response-header/CORS wrapper (#146) follows exactly this rule and is the
+sharpest instance of why it matters.** It sits outside the cache and applies
+its operations, including any `Access-Control-*` grant, inside its own
+`WriteHeader`, after the cache has already taken its commit-time snapshot — so
+a stored entry never contains a CORS grant, and a hit can never replay one
+origin's `Access-Control-Allow-Origin` to a different one.
+`TestCORSResponseHeadersNeverEnterTheCacheAcrossOrigins` in `internal/app`
+proves it end to end: two requests from different allowed origins against the
+same cached route get one `MISS` and one `HIT` with byte-identical bodies, and
+each response carries its *own* request's origin, never the other's. An
+upstream-authored `Vary: Origin`, in contrast, is inside the commit snapshot and
+is stored and honoured normally — `TestUpstreamVaryOriginStillCreatesCacheVariants`
+pins that Jul's own CORS layer creates no cache variants while an upstream's
+does.
+
 ### Flushing does not make a response uncacheable
 
 An ordinary flushed response **is** still cached. This is deliberate: the

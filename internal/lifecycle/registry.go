@@ -32,6 +32,7 @@ const (
 	SubCache          Subsystem = "cache"
 	SubClientAddress  Subsystem = "client_address"
 	SubCompression    Subsystem = "compression"
+	SubCORS           Subsystem = "cors"
 	SubDiscovery      Subsystem = "discovery"
 	SubEgress         Subsystem = "egress"
 	SubErrorLog       Subsystem = "error_log"
@@ -92,6 +93,7 @@ var subsystemDescriptions = map[Subsystem]string{
 	SubCache:          "The two-tier response cache backend.",
 	SubClientAddress:  "The per-listener trusted-proxy policy that derives the canonical client address.",
 	SubCompression:    "Negotiated response compression.",
+	SubCORS:           "Per-location Cross-Origin Resource Sharing policy and the preflight terminator it turns on.",
 	SubDiscovery:      "Dynamic backend discovery for an upstream pool.",
 	SubEgress:         "The outbound-destination allow-list applied to auxiliary fetches.",
 	SubErrorLog:       "Legacy error-log destinations kept for v1 compatibility.",
@@ -100,7 +102,7 @@ var subsystemDescriptions = map[Subsystem]string{
 	SubGRPC:           "Native gRPC / HTTP-2 passthrough proxying.",
 	SubGRPCTranscode:  "gRPC-JSON transcoding for a location.",
 	SubH2C:            "Cleartext HTTP/2 on a plaintext listener.",
-	SubHeaders:        "Headers added to the upstream request.",
+	SubHeaders:        "Headers added to the upstream request, and response-header add/set/remove operations.",
 	SubHealthCheck:    "Active health probing for an upstream pool.",
 	SubHTTP3:          "The HTTP/3 (QUIC) listener and its Alt-Svc advertisement.",
 	SubListener:       "The listen address a socket binds to.",
@@ -475,7 +477,8 @@ func locationEntries() []Entry {
 	// The match predicates compile inside router.New during Prepare, so an
 	// invalid one fails the reload transaction before Publish and can never
 	// partially activate (ADR 0018 §13). None is startup-consumed.
-	out := hotGroup(SubRouting, reasonHandlerRebuild,
+	var out []Entry
+	out = append(out, hotGroup(SubRouting, reasonHandlerRebuild,
 		loc+"match.headers.*.name",
 		loc+"match.headers.*.op",
 		loc+"match.headers.*.value",
@@ -485,7 +488,7 @@ func locationEntries() []Entry {
 		loc+"match.query.*.op",
 		loc+"match.query.*.value",
 		loc+"match.type",
-	)
+	)...)
 	out = append(out, backendTLSEntries(loc+"backend_tls.", true)...)
 	out = append(out, hotGroup(SubStaticFiles, reasonHandlerRebuild,
 		loc+"allow_hidden",
@@ -526,6 +529,26 @@ func locationEntries() []Entry {
 		loc+"waf.paranoia",
 		loc+"waf.request_body_limit",
 		loc+"waf.response_body_check",
+	)...)
+	// The response-header policy and CORS compile inside the same handler
+	// generation as everything else (ADR 0018 §13): response_headers.* joins
+	// the existing request-header subsystem, and cors.* gets its own, since the
+	// preflight terminator and the response-header/scope fingerprint bit it
+	// turns on (preflight_widening) are new mechanisms, not new fields on an
+	// old one.
+	out = append(out, hotGroup(SubHeaders, reasonHandlerRebuild,
+		loc+"response_headers.*.name",
+		loc+"response_headers.*.op",
+		loc+"response_headers.*.value",
+	)...)
+	out = append(out, hotGroup(SubCORS, reasonHandlerRebuild,
+		loc+"cors.allow_credentials",
+		loc+"cors.allowed_headers",
+		loc+"cors.allowed_methods",
+		loc+"cors.allowed_origins",
+		loc+"cors.enabled",
+		loc+"cors.exposed_headers",
+		loc+"cors.max_age",
 	)...)
 	out = append(out, hotGroup(SubRateLimit, reasonRateLimitPolicy,
 		loc+"rate_limit.burst",

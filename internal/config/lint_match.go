@@ -23,16 +23,8 @@ import (
 // only a policy input. Two routes with the same type, path and predicates but
 // different cors.enabled are therefore different routes, and collapsing them
 // would give them one auth, WAF and rate-limit scope.
-//
-// The [servers.locations.cors] block itself is ROUTE-02's (#146) to add. Until
-// it exists no location can set it, so the bit is false everywhere — but it is
-// computed through this one function, and named in the fingerprint and the
-// subsumption rule, so #146 turns the rule on by changing this body alone.
 func LocationPreflightWidening(loc LocationConfig) bool {
-	// corsEnabled stands in for the [servers.locations.cors] enabled flag that
-	// ROUTE-02 (#146) introduces. Until that block exists no location can set it.
-	corsEnabled := false
-	return corsEnabled && loc.Match.Methods != nil
+	return loc.CORS != nil && loc.CORS.Enabled && loc.Match.Methods != nil
 }
 
 // matchPredicateDiagnostics reports the per-predicate findings of §3: a

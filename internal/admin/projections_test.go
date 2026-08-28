@@ -100,6 +100,65 @@ func TestProjectRoutesGRPCTranscodeTarget(t *testing.T) {
 	}
 }
 
+func TestProjectRoutesResponseHeadersAndCORS(t *testing.T) {
+	maxAge := config.Duration(10 * 60 * 1e9)
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen: ":8080",
+			Locations: []config.LocationConfig{
+				{
+					Match:  config.MatchConfig{Type: "prefix", Path: "/a"},
+					Return: 200,
+					ResponseHeaders: []config.ResponseHeaderOp{
+						{Op: "set", Name: "X-Frame-Options", Value: adminStrPtr("DENY")},
+					},
+					CORS: &config.CORSConfig{
+						Enabled:          true,
+						AllowedOrigins:   []string{"https://app.example.test"},
+						AllowedMethods:   []string{"GET", "POST"},
+						AllowedHeaders:   []string{"Content-Type"},
+						ExposedHeaders:   []string{"X-Request-Id"},
+						AllowCredentials: true,
+						MaxAge:           &maxAge,
+					},
+				},
+				{Match: config.MatchConfig{Type: "prefix", Path: "/b"}, Return: 200},
+			},
+		}},
+	}
+	routes := projectRoutes(cfg)
+	locs := routes[0].Locations
+
+	if !locs[0].ResponseHeaders {
+		t.Error("locs[0].ResponseHeaders = false, want true")
+	}
+	if locs[0].CORS == nil {
+		t.Fatal("locs[0].CORS = nil, want populated")
+	}
+	cs := locs[0].CORS
+	if !cs.Enabled || !cs.AllowCredentials {
+		t.Errorf("CORS state = %+v, want enabled+credentials", cs)
+	}
+	if len(cs.AllowedOrigins) != 1 || cs.AllowedOrigins[0] != "https://app.example.test" {
+		t.Errorf("AllowedOrigins = %v", cs.AllowedOrigins)
+	}
+	if len(cs.AllowedMethods) != 2 || len(cs.AllowedHeaders) != 1 || len(cs.ExposedHeaders) != 1 {
+		t.Errorf("CORS state = %+v", cs)
+	}
+	if cs.MaxAge != "10m0s" {
+		t.Errorf("MaxAge = %q, want 10m0s", cs.MaxAge)
+	}
+
+	if locs[1].ResponseHeaders {
+		t.Error("locs[1].ResponseHeaders = true, want false (no response_headers configured)")
+	}
+	if locs[1].CORS != nil {
+		t.Errorf("locs[1].CORS = %+v, want nil (no cors configured)", locs[1].CORS)
+	}
+}
+
+func adminStrPtr(s string) *string { return &s }
+
 // poolVerdict is what the Console and any API consumer read to decide whether a
 // pool is in trouble. The case that matters is partial degradation: one healthy
 // backend must not mask a tripped one, and "not yet observed" must not be

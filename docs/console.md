@@ -445,6 +445,22 @@ feed straight back into a typed patch together with the `base_version` the same
 session read; it must not be stored or used to correlate a route across
 revisions.
 
+### Response headers and CORS (read-only)
+
+A route projection (`GET /api/routes`) reports whether a location has a
+response-header policy (`response_headers: true`) and its CORS policy, when
+configured (`cors: {enabled, allowed_origins, allowed_methods, allowed_headers,
+exposed_headers, allow_credentials, max_age}`) — the operator's configured
+values, not the compiled runtime form. Individual `response_headers` operations
+are not projected: a value may be operator-sensitive, and the route tester
+above already explains a rejection in full for a specific request. A change to
+either surfaces in the structured diff through the same registry-driven
+completeness pass every other field relies on.
+
+Adding, editing or removing individual operations through a guided editor and
+the typed patch API is ROUTE-03's (#147) to close; today the block is read-only
+in the Console and editable only by hand-editing the raw TOML.
+
 ### Restart-required changes
 
 A few settings are fixed when the process starts and cannot take effect on a hot
