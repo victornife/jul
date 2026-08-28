@@ -131,6 +131,31 @@ func TestEvaluatePreflightHeaders(t *testing.T) {
 	}
 }
 
+func TestRequestedHeadersApprovedSkipsEmptyTokens(t *testing.T) {
+	p := compileCORS(t, &config.CORSConfig{
+		Enabled:        true,
+		AllowedOrigins: []string{"https://a.example.test"},
+		AllowedHeaders: []string{"X-A"},
+	})
+	r := preflightRequest("https://a.example.test", "GET")
+	r.Header.Set("Access-Control-Request-Headers", "X-A,") // trailing comma: an empty token
+	if _, ok := p.EvaluatePreflight(r); !ok {
+		t.Error("a trailing empty token must not affect approval")
+	}
+}
+
+func TestIsCORSTokenRejectsEmpty(t *testing.T) {
+	if isCORSToken("") {
+		t.Error("an empty token is not well-formed")
+	}
+}
+
+func TestIsCORSTokenAcceptsSpecialTokenChars(t *testing.T) {
+	if !isCORSToken("X-Custom!~") {
+		t.Error("RFC 9110 token special characters should be accepted")
+	}
+}
+
 func TestEvaluatePreflightHeaderCountBound(t *testing.T) {
 	p := compileCORS(t, &config.CORSConfig{
 		Enabled:        true,
@@ -285,6 +310,27 @@ func TestApplyToResponseNonWildcardAlwaysVaries(t *testing.T) {
 			t.Errorf("Vary = %q, want Origin appended even with no Origin header", h.Get("Vary"))
 		}
 	})
+}
+
+func TestApplyToResponseNonWildcardGrantsCredentialsAndExposedHeaders(t *testing.T) {
+	p := compileCORS(t, &config.CORSConfig{
+		Enabled:          true,
+		AllowedOrigins:   []string{"https://a.example.test"},
+		AllowCredentials: true,
+		ExposedHeaders:   []string{"X-Request-Id"},
+	})
+	h := http.Header{}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Origin", "https://a.example.test")
+
+	p.ApplyToResponse(h, r)
+
+	if got := h.Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Errorf("Allow-Credentials = %q, want true", got)
+	}
+	if got := h.Get("Access-Control-Expose-Headers"); got != "X-Request-Id" {
+		t.Errorf("Expose-Headers = %q", got)
+	}
 }
 
 func TestApplyToResponseStripsUpstreamAccessControlHeaders(t *testing.T) {

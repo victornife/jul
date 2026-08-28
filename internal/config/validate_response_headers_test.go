@@ -62,6 +62,32 @@ func TestResponseHeaderOpValidation(t *testing.T) {
 		}}), "takes no value")
 	})
 
+	t.Run("empty name rejected", func(t *testing.T) {
+		requirePolicyError(t, locationPolicyConfig(LocationConfig{ResponseHeaders: []ResponseHeaderOp{
+			{Op: "set", Name: "", Value: sp("x")},
+		}}), "name is required")
+	})
+
+	t.Run("invalid field name rejected", func(t *testing.T) {
+		requirePolicyError(t, locationPolicyConfig(LocationConfig{ResponseHeaders: []ResponseHeaderOp{
+			{Op: "set", Name: "bad name", Value: sp("x")},
+		}}), "not a valid header field name")
+	})
+
+	t.Run("omitted op rejected", func(t *testing.T) {
+		requirePolicyError(t, locationPolicyConfig(LocationConfig{ResponseHeaders: []ResponseHeaderOp{
+			{Op: "", Name: "X-Test", Value: sp("x")},
+		}}), "op is required")
+	})
+
+	t.Run("total bytes over the limit rejected", func(t *testing.T) {
+		requirePolicyError(t, locationPolicyConfig(LocationConfig{ResponseHeaders: []ResponseHeaderOp{
+			{Op: "set", Name: "X-A", Value: sp(strings.Repeat("a", MaxResponseHeaderValueBytes))},
+			{Op: "set", Name: "X-B", Value: sp(strings.Repeat("b", MaxResponseHeaderValueBytes))},
+			{Op: "set", Name: "X-C", Value: sp(strings.Repeat("c", MaxResponseHeaderValueBytes))},
+		}}), "over the limit")
+	})
+
 	t.Run("invalid op rejected", func(t *testing.T) {
 		requirePolicyError(t, locationPolicyConfig(LocationConfig{ResponseHeaders: []ResponseHeaderOp{
 			{Op: "delete", Name: "X-Test", Value: sp("x")},

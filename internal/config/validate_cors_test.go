@@ -4,10 +4,116 @@
 package config
 
 import (
+	"strings"
 	"testing"
 )
 
 func TestCORSValidation(t *testing.T) {
+	t.Run("too many origins is rejected", func(t *testing.T) {
+		origins := make([]string, MaxCORSOrigins+1)
+		for i := range origins {
+			origins[i] = "https://tenant-" + string(rune('a'+i%26)) + ".example.test"
+		}
+		requirePolicyError(t, locationPolicyConfig(LocationConfig{CORS: &CORSConfig{
+			Enabled:        true,
+			AllowedOrigins: origins,
+		}}), "over the limit")
+	})
+
+	t.Run("an origin over the byte limit is rejected", func(t *testing.T) {
+		requirePolicyError(t, locationPolicyConfig(LocationConfig{CORS: &CORSConfig{
+			Enabled:        true,
+			AllowedOrigins: []string{"https://" + strings.Repeat("a", MaxCORSOriginBytes) + ".example.test"},
+		}}), "over the limit")
+	})
+
+	t.Run("too many allowed_methods is rejected", func(t *testing.T) {
+		methods := make([]string, MaxCORSAllowedMethods+1)
+		for i := range methods {
+			methods[i] = "M" + string(rune('A'+i%26))
+		}
+		requirePolicyError(t, locationPolicyConfig(LocationConfig{CORS: &CORSConfig{
+			Enabled:        true,
+			AllowedOrigins: []string{"https://app.example.test"},
+			AllowedMethods: methods,
+		}}), "over the limit")
+	})
+
+	t.Run("too many allowed_headers is rejected", func(t *testing.T) {
+		headers := make([]string, MaxCORSAllowedHeaders+1)
+		for i := range headers {
+			headers[i] = "X-H" + string(rune('A'+i%26))
+		}
+		requirePolicyError(t, locationPolicyConfig(LocationConfig{CORS: &CORSConfig{
+			Enabled:        true,
+			AllowedOrigins: []string{"https://app.example.test"},
+			AllowedHeaders: headers,
+		}}), "over the limit")
+	})
+
+	t.Run("too many exposed_headers is rejected", func(t *testing.T) {
+		headers := make([]string, MaxCORSExposedHeaders+1)
+		for i := range headers {
+			headers[i] = "X-E" + string(rune('A'+i%26))
+		}
+		requirePolicyError(t, locationPolicyConfig(LocationConfig{CORS: &CORSConfig{
+			Enabled:        true,
+			AllowedOrigins: []string{"https://app.example.test"},
+			ExposedHeaders: headers,
+		}}), "over the limit")
+	})
+
+	t.Run("a token that is not a valid RFC 9110 token is rejected", func(t *testing.T) {
+		requirePolicyError(t, locationPolicyConfig(LocationConfig{CORS: &CORSConfig{
+			Enabled:        true,
+			AllowedOrigins: []string{"https://app.example.test"},
+			AllowedHeaders: []string{"bad header"},
+		}}), "not a valid token")
+	})
+
+	t.Run("a token over the byte limit is rejected", func(t *testing.T) {
+		requirePolicyError(t, locationPolicyConfig(LocationConfig{CORS: &CORSConfig{
+			Enabled:        true,
+			AllowedOrigins: []string{"https://app.example.test"},
+			AllowedHeaders: []string{strings.Repeat("a", MaxCORSTokenBytes+1)},
+		}}), "over the limit")
+	})
+
+	t.Run("negative max_age is rejected", func(t *testing.T) {
+		d := Duration(-1)
+		requirePolicyError(t, locationPolicyConfig(LocationConfig{CORS: &CORSConfig{
+			Enabled:        true,
+			AllowedOrigins: []string{"https://app.example.test"},
+			MaxAge:         &d,
+		}}), "must not be negative")
+	})
+
+	t.Run("the generated header estimate over the limit is rejected", func(t *testing.T) {
+		headers := make([]string, MaxCORSAllowedHeaders)
+		for i := range headers {
+			headers[i] = strings.Repeat("x", MaxCORSTokenBytes)
+		}
+		requirePolicyError(t, locationPolicyConfig(LocationConfig{CORS: &CORSConfig{
+			Enabled:        true,
+			AllowedOrigins: []string{"https://app.example.test"},
+			AllowedHeaders: headers,
+		}}), "generated Access-Control-*/Vary header set")
+	})
+
+	for _, bad := range []string{
+		"https://",                     // missing host
+		"https://:8080",                // missing host, explicit port
+		"https://app.example.test:",    // empty port
+		"https://app.example.test:abc", // non-numeric port
+	} {
+		t.Run("malformed origin grammar "+bad+" is rejected", func(t *testing.T) {
+			requirePolicyError(t, locationPolicyConfig(LocationConfig{CORS: &CORSConfig{
+				Enabled:        true,
+				AllowedOrigins: []string{bad},
+			}}), "is not a valid origin")
+		})
+	}
+
 	t.Run("valid enabled policy accepted", func(t *testing.T) {
 		cfg := locationPolicyConfig(LocationConfig{CORS: &CORSConfig{
 			Enabled:          true,
@@ -174,4 +280,10 @@ func TestCORSValidation(t *testing.T) {
 func durationPtr(seconds int64) *Duration {
 	d := Duration(seconds * 1e9)
 	return &d
+}
+
+func TestJoinedLenEmpty(t *testing.T) {
+	if got := joinedLen(nil); got != 0 {
+		t.Errorf("joinedLen(nil) = %d, want 0", got)
+	}
 }

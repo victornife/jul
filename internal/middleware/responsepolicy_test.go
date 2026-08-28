@@ -144,3 +144,95 @@ func TestResponsePolicySkipsDecorationForAMarkedGeneratedResponse(t *testing.T) 
 		t.Errorf("Allow-Origin = %v, want exactly the terminator's own single value untouched", got)
 	}
 }
+
+func TestPolicyWriterWriteHeaderIgnoresASecondCall(t *testing.T) {
+	ops := []config.ResponseHeaderOp{{Op: "set", Name: "X-Test", Value: corsStrPtr("v")}}
+	mw := ResponsePolicy(ops, nil)
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.WriteHeader(http.StatusOK) // must be ignored: the first final status wins
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (the second WriteHeader must be ignored)", rec.Code)
+	}
+}
+
+func TestPolicyWriterWriteAfterHijackFails(t *testing.T) {
+	mw := ResponsePolicy(nil, compileCORS(t, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a.example.test"}}))
+	var gotErr error
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("expected the writer to implement http.Hijacker")
+		}
+		if _, _, err := hj.Hijack(); err != nil {
+			t.Fatalf("Hijack: %v", err)
+		}
+		_, gotErr = w.Write([]byte("x"))
+	}))
+	h.ServeHTTP(&hijackableRecorder{ResponseRecorder: httptest.NewRecorder()}, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if gotErr != http.ErrHijacked {
+		t.Errorf("Write after hijack = %v, want http.ErrHijacked", gotErr)
+	}
+}
+
+func TestPolicyWriterFlushDelegatesAndAppliesPolicyOnce(t *testing.T) {
+	ops := []config.ResponseHeaderOp{{Op: "set", Name: "X-Test", Value: corsStrPtr("v")}}
+	mw := ResponsePolicy(ops, nil)
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("expected the writer to implement http.Flusher")
+		}
+		f.Flush() // implicit 200: the policy must apply exactly once here
+		f.Flush() // a second flush must not re-apply or duplicate anything
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 from the implicit flush", rec.Code)
+	}
+	if got := rec.Header().Values("X-Test"); len(got) != 1 {
+		t.Errorf("X-Test = %v, want exactly one value (policy applied once)", got)
+	}
+}
+
+func TestPolicyWriterFlushAfterHijackNoops(t *testing.T) {
+	ops := []config.ResponseHeaderOp{{Op: "set", Name: "X-Test", Value: corsStrPtr("v")}}
+	mw := ResponsePolicy(ops, nil)
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj := w.(http.Hijacker)
+		if _, _, err := hj.Hijack(); err != nil {
+			t.Fatalf("Hijack: %v", err)
+		}
+		w.(http.Flusher).Flush() // must not panic
+	}))
+	h.ServeHTTP(&hijackableRecorder{ResponseRecorder: httptest.NewRecorder()}, httptest.NewRequest(http.MethodGet, "/", nil))
+}
+
+func TestPolicyWriterHijackNotSupported(t *testing.T) {
+	pw := &policyWriter{ResponseWriter: httptest.NewRecorder()}
+	_, _, err := pw.Hijack()
+	if err == nil {
+		t.Fatal("expected an error hijacking a non-Hijacker underlying writer")
+	}
+}
+
+func TestPolicyWriterHijackDelegates(t *testing.T) {
+	pw := &policyWriter{ResponseWriter: &hijackableRecorder{ResponseRecorder: httptest.NewRecorder()}}
+	conn, brw, err := pw.Hijack()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if conn != nil || brw != nil {
+		t.Fatal("expected nil conn and bufio from our stub")
+	}
+	if !pw.hijacked {
+		t.Fatal("expected hijacked to be set after a successful Hijack")
+	}
+}
