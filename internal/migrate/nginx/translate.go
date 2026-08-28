@@ -8,6 +8,7 @@ package nginx
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"jul/internal/config"
 
@@ -259,11 +260,28 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 			applyReturn(&loc, cp, &t.report, c.GetLine())
 		case "rewrite":
 			applyRewrite(&loc, cp, &t.report, c.GetLine())
-		case "if", "limit_except":
-			t.report.skip(c, "location-level "+c.GetName()+" is not translated")
+		case "add_header":
+			t.applyAddHeader(&loc, cp, c.GetLine())
+		case "limit_except":
+			t.applyLimitExcept(&loc, c, cp)
+		case "if":
+			t.report.skip(c, "location-level if is not translated")
 		default:
 			t.report.skip(c, "unsupported location-level directive")
 		}
+	}
+
+	// Reject a CORS policy the importer itself assembled but that Jul.IA's
+	// stricter model forbids outright (ADR 0018 §9: allow_credentials is
+	// incompatible with the "*" wildcard origin) — nginx enforces no such
+	// rule, so a hand-rolled CORS block can combine them without nginx ever
+	// objecting. Emitting it anyway would fail config.Validate at import time
+	// for the whole file; back off this one location's CORS instead, the
+	// same "degrade to a note, never emit something known-broken" principle
+	// the top-level recover() already applies to unexpected panics.
+	if loc.CORS != nil && loc.CORS.AllowCredentials && containsStar(loc.CORS.AllowedOrigins) {
+		t.report.skipNamed("add_header Access-Control-*", d.GetLine(), "Access-Control-Allow-Origin \"*\" together with Access-Control-Allow-Credentials is not representable (ADR 0018 §9 forbids the combination Jul.IA would otherwise emit); port this CORS policy manually")
+		loc.CORS = nil
 	}
 
 	// Inherited root/index apply only to static locations (no other action).
@@ -278,6 +296,170 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 
 	t.report.Locations++
 	return loc, true
+}
+
+// applyAddHeader maps `add_header NAME VALUE always;` to a response_headers
+// `add` operation, or to the location's CORS policy when NAME is one of the
+// Access-Control-* set. Without the `always` flag nginx skips the header on
+// 3xx/4xx/5xx responses while Jul.IA's response_headers always applies it —
+// translating that case would silently widen where the header appears on
+// error paths (the same reasoning docs/nginx-importer.md already gives for
+// why add_header was unconditionally skipped before this), so it is reported
+// instead of guessed. A value referencing an nginx variable (e.g. the common
+// `$http_origin` reflection idiom) is never translated: Jul.IA response-header
+// and CORS-origin values are static, and reflecting an arbitrary request
+// header back as an allowed origin is exactly the silent-widening this
+// importer must never perform.
+func (t *translator) applyAddHeader(loc *config.LocationConfig, params []string, line int) {
+	if len(params) < 2 {
+		t.report.skipNamed("add_header", line, "malformed add_header")
+		return
+	}
+	name, value := params[0], params[1]
+	always := len(params) > 2 && params[2] == "always"
+	if !always {
+		t.report.skipNamed("add_header "+name, line, `no "always" flag: nginx skips this header on 3xx/4xx/5xx responses, but response_headers always applies it — translating would silently widen where it appears on error responses`)
+		return
+	}
+	value = unquoteHeaderValue(value)
+	if strings.Contains(value, "$") {
+		t.report.skipNamed("add_header "+name, line, "value references an nginx variable; Jul.IA response-header/CORS values must be static")
+		return
+	}
+	if field := corsHeaderField(name); field != "" {
+		t.applyCORSHeader(loc, field, value, line)
+		return
+	}
+	loc.ResponseHeaders = append(loc.ResponseHeaders, config.ResponseHeaderOp{Op: "add", Name: name, Value: &value})
+}
+
+// corsHeaderField reports which CORSConfig field an Access-Control-* header
+// name populates, or "" when name is not one of the six recognized headers.
+func corsHeaderField(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "access-control-allow-origin":
+		return "allow_origin"
+	case "access-control-allow-methods":
+		return "allow_methods"
+	case "access-control-allow-headers":
+		return "allow_headers"
+	case "access-control-expose-headers":
+		return "expose_headers"
+	case "access-control-allow-credentials":
+		return "allow_credentials"
+	case "access-control-max-age":
+		return "max_age"
+	default:
+		return ""
+	}
+}
+
+// applyCORSHeader folds one recognized Access-Control-* header into the
+// location's CORS policy, creating it enabled on first use. This is the "safe
+// common CORS form" #147 §7 asks for: a set of always-applied, static-value
+// Access-Control-* headers with no request-conditional if/variable gating —
+// exactly what a hand-rolled static CORS block looks like, and nothing an
+// operator would need to review to confirm the intent.
+func (t *translator) applyCORSHeader(loc *config.LocationConfig, field, value string, line int) {
+	if loc.CORS == nil {
+		loc.CORS = &config.CORSConfig{Enabled: true}
+	}
+	switch field {
+	case "allow_origin":
+		loc.CORS.AllowedOrigins = []string{value}
+	case "allow_methods":
+		loc.CORS.AllowedMethods = splitCommaList(value)
+	case "allow_headers":
+		loc.CORS.AllowedHeaders = splitCommaList(value)
+	case "expose_headers":
+		loc.CORS.ExposedHeaders = splitCommaList(value)
+	case "allow_credentials":
+		loc.CORS.AllowCredentials = strings.EqualFold(strings.TrimSpace(value), "true")
+	case "max_age":
+		if secs, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && secs >= 0 {
+			d := config.Duration(time.Duration(secs) * time.Second)
+			loc.CORS.MaxAge = &d
+		} else {
+			t.report.skipNamed("add_header Access-Control-Max-Age", line, "value is not a non-negative whole number of seconds")
+		}
+	}
+}
+
+// splitCommaList splits an nginx header value like "GET, POST, OPTIONS" into
+// trimmed, non-empty tokens — the conventional way a single quoted add_header
+// value carries a list.
+func splitCommaList(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// containsStar reports whether origins is exactly the unconditional wildcard.
+func containsStar(origins []string) bool {
+	for _, o := range origins {
+		if o == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+// unquoteHeaderValue strips one matching pair of surrounding quotes from an
+// nginx directive argument. gonginx's parameter values retain literal quote
+// characters (needed to preserve embedded whitespace/commas during parsing),
+// which header and CORS values are almost always wrapped in.
+func unquoteHeaderValue(s string) string {
+	if len(s) >= 2 {
+		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
+}
+
+// applyLimitExcept maps `limit_except METHODS { deny all; }` (or `{ return
+// 403; }`) onto the location's own method predicate — the common, idiomatic
+// shape, which restricts the location to exactly the listed methods for every
+// other request. Any other content inside limit_except (a directive that
+// would apply only to the non-listed methods, rather than a bare denial) has
+// no single-location representation in Jul.IA's model — a location either
+// matches a method or it does not, with one action — so it is reported
+// instead of guessed.
+func (t *translator) applyLimitExcept(loc *config.LocationConfig, d ngx.IDirective, params []string) {
+	if len(params) == 0 {
+		t.report.skip(d, "limit_except with no methods")
+		return
+	}
+	kids := children(d)
+	if len(kids) != 1 || !isDenyAllOrReturn403(kids[0]) {
+		t.report.skip(d, "limit_except body is not a bare denial (deny all / return 403); Jul.IA has no per-method directive override within one location")
+		return
+	}
+	if loc.Match.Methods != nil {
+		t.report.skip(d, "location already has a method constraint; limit_except not merged")
+		return
+	}
+	loc.Match.Methods = append([]string(nil), params...)
+	t.report.note("limit_except at line %d: mapped to match.methods; nginx returns 403 for other methods, Jul.IA makes the route not match them at all (404 via any other location, or the server's own default) — verify this is an acceptable difference", d.GetLine())
+}
+
+// isDenyAllOrReturn403 reports whether d is exactly "deny all;" or a "return
+// 403 ...;" — the two idiomatic ways limit_except denies the other methods.
+func isDenyAllOrReturn403(d ngx.IDirective) bool {
+	ps := paramValues(d)
+	switch d.GetName() {
+	case "deny":
+		return len(ps) == 1 && ps[0] == "all"
+	case "return":
+		return len(ps) > 0 && ps[0] == "403"
+	default:
+		return false
+	}
 }
 
 // translateUpstream converts an upstream block into a config.UpstreamConfig,

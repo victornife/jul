@@ -18,8 +18,9 @@ references.
   has shipped in full: request matching by method, header and query parameter (#145), and bounded
   response-header add/set/remove operations plus CORS (#146). `[servers.locations].headers` still
   sets headers on the *upstream request*, not the response to the client — use
-  `[[servers.locations.response_headers]]` for that. Full typed-patch/Console editing and the
-  importer's CORS translation are ROUTE-03's (#147) to close.
+  `[[servers.locations.response_headers]]` for that. Typed-patch/Console editing and the importer's
+  method/header/CORS translation have landed (#147); real-server E2E and generated-contract closure
+  for the same issue remain open.
 
 ---
 
@@ -70,15 +71,21 @@ references.
   conservative, documented judgment call** (`internal/config/validate_cors.go`), not a number ADR
   0018 itself fixes: the record only requires that an unbounded-length entry not count as a bound.
   Raising any of them later is additive.
-- **The NGINX importer does not translate `add_header`.** A plain `add_header` (without `always`)
-  does not apply to NGINX's own 4xx/5xx responses, while Jul's `response_headers` operations always
-  apply; translating the common case would silently widen where the header appears. It is reported
-  for manual porting, the same as `limit_except`. CORS configurations built from `add_header
-  Access-Control-*` plus `if ($http_origin ...)` are reported, never inferred.
-- **Full typed-patch/Console editing of `response_headers` and `cors` is ROUTE-03's (#147).** The
-  admin API projects a location's policy (whether it has one, and its CORS fields) and reports any
-  change in a config diff today; adding/editing individual operations through the typed patch API
-  is not yet wired.
+- **The NGINX importer translates `add_header NAME VALUE always;` and static `Access-Control-*`
+  CORS blocks, nothing more.** Without the `always` flag, or with a value referencing an nginx
+  variable, `add_header` is still reported for manual porting — translating either would silently
+  widen where the header applies or misrepresent a reflected value as a literal. `limit_except` is
+  translated only for its one idiomatic shape (`METHODS { deny all; }` / `{ return 403; }`); any
+  other body is reported. A CORS block gated by `if` or referencing a variable (the common,
+  insecure `Access-Control-Allow-Origin: $http_origin` idiom) is never inferred. See
+  [nginx-importer.md](nginx-importer.md#location-block) for the exact boundary.
+- **Typed-patch/Console editing of `response_headers` and `cors` has landed (#147).** The admin API
+  now offers `location_set_predicates`, `location_response_headers_set`/`_clear`, and
+  `location_cors_set`/`_clear`, with matching guided Console drawers. Existing header/query
+  predicate values and response-header operation values are not read back from the admin API (they
+  may be operator-sensitive, the same reasoning that already kept the response-header boolean
+  value-free) — editing an existing set opens the form blank and replaces it wholesale; the drawer
+  says so explicitly. Real-server E2E and generated-contract closure for the same issue remain open.
 
 ---
 
@@ -407,9 +414,11 @@ references.
   configs must be concatenated or imported individually.
 - **`stream`, `mail`, and Lua are not translated.** Module-specific directives
   are reported as untranslated and must be ported manually.
-- **Many directives are not mapped.** `add_header`, `proxy_set_header`,
+- **Many directives are not mapped.** `proxy_set_header`,
   `client_max_body_size`, `autoindex`, and others are reported for manual
-  porting. Translation is a best-effort aid, not a 1:1 converter.
+  porting. `add_header` and `limit_except` are mapped for their common,
+  unambiguous shapes only (see [nginx-importer.md](nginx-importer.md#location-block)).
+  Translation is a best-effort aid, not a 1:1 converter.
 
 ---
 
