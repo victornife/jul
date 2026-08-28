@@ -44,11 +44,16 @@ type LocationProjection struct {
 	// Predicates summarises the route's method, header and query predicates so
 	// two routes sharing a path are distinguishable in a list. Values are
 	// omitted deliberately; names and operations are enough to tell them apart.
-	Predicates  string `json:"predicates,omitempty"`
-	Auth        bool   `json:"auth"`
-	Cache       bool   `json:"cache"`
-	Compression bool   `json:"compression"`
-	RateLimit   bool   `json:"rate_limit"`
+	Predicates string `json:"predicates,omitempty"`
+	// Methods is the route's method predicate, projected in full because a
+	// method name is never operator-sensitive (unlike a header/query
+	// predicate's name or value) — it seeds the guided predicates editor's
+	// method field faithfully instead of leaving it blank on every edit.
+	Methods     []string `json:"methods,omitempty"`
+	Auth        bool     `json:"auth"`
+	Cache       bool     `json:"cache"`
+	Compression bool     `json:"compression"`
+	RateLimit   bool     `json:"rate_limit"`
 	// RateLimitDetail carries the per-location rate-limit configuration (rate,
 	// burst, key) when the location has a rate_limit block, so the guided editor
 	// can seed the detailed rate-limit form and round-trip values faithfully.

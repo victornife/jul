@@ -504,6 +504,20 @@ export const LocationAuthStateSchema = z.object({
 });
 export type LocationAuthState = z.infer<typeof LocationAuthStateSchema>;
 
+// LocationCORSStateSchema is a location's own [cors] policy, present only when
+// configured (ADR 0018 §9). It seeds the guided CORS editor; values are the
+// operator's configured ones, not the runtime-normalized form.
+export const LocationCORSStateSchema = z.object({
+  enabled: z.boolean(),
+  allowed_origins: z.array(z.string()).optional(),
+  allowed_methods: z.array(z.string()).optional(),
+  allowed_headers: z.array(z.string()).optional(),
+  exposed_headers: z.array(z.string()).optional(),
+  allow_credentials: z.boolean().default(false),
+  max_age: z.string().optional(),
+});
+export type LocationCORSState = z.infer<typeof LocationCORSStateSchema>;
+
 export const TranscodeProjectionSchema = z.object({
   descriptor_set: z.string().optional(),
   use_reflection: z.boolean().optional(),
@@ -521,6 +535,23 @@ export const LocationProjectionSchema = z.object({
   type: z.string(),
   action: z.string(),
   target: z.string().optional(),
+  // match_ordinal is the route's 0-based index among the locations of its
+  // server block sharing its match type and path (ADR 0018 §14) — a typed
+  // patch that targets a location must send it back, together with a
+  // base_version, whenever predicates make several such locations exist. It is
+  // a revision-relative selector, never an identity. Optional (rather than
+  // defaulted) so every existing projection fixture that predates it stays
+  // valid; absent means "treat as 0", the same as an omitted patch ordinal
+  // means "there must be exactly one".
+  match_ordinal: z.number().optional(),
+  // predicates summarises the route's method/header/query predicates so two
+  // routes sharing a path are distinguishable in a list. Values are omitted
+  // deliberately; names and operations are enough to tell them apart.
+  predicates: z.string().optional(),
+  // methods is the route's method predicate, projected in full — unlike a
+  // header/query predicate's name or value, a method name is never
+  // operator-sensitive.
+  methods: z.array(z.string()).optional(),
   auth: z.boolean(),
   auth_detail: LocationAuthStateSchema.optional(),
   cache: z.boolean(),
@@ -538,6 +569,13 @@ export const LocationProjectionSchema = z.object({
   require_client_cert: z.boolean().default(false),
   upstream: z.string().optional(),
   waf: LocationWAFStateSchema.optional(),
+  // response_headers reports whether the location has any
+  // [[servers.locations.response_headers]] operations (ADR 0018 §8). The
+  // operations themselves are not projected: a value may be operator-sensitive.
+  // Optional rather than defaulted, like match_ordinal above.
+  response_headers: z.boolean().optional(),
+  // cors is the location's own [cors] policy, present only when configured.
+  cors: LocationCORSStateSchema.optional(),
   transcode: TranscodeProjectionSchema.optional(),
   warnings: z.array(z.string()).optional(),
 });
@@ -1271,6 +1309,10 @@ export type RouteTarget = {
   server_names: string[];
   match_type: string;
   path: string;
+  // match_ordinal disambiguates locations that share every coordinate above,
+  // which predicates made possible (ADR 0018 §14). Omitted means "there must
+  // be exactly one"; a patch that carries it requires base_version.
+  match_ordinal?: number;
 };
 
 // LocationWAFPatch is the per-location [waf] override the guided editor sets. As
@@ -1306,6 +1348,52 @@ export type LocationAuthPatch = {
   jwt_issuer?: string;
   jwt_audience?: string;
   forward_url?: string;
+};
+
+// HeaderPredicatePatch/QueryPredicatePatch mirror config.HeaderMatch/
+// QueryMatch. value is omitted for "present" and required for the other ops.
+export type HeaderPredicatePatch = {
+  name: string;
+  op: "present" | "exact" | "regex";
+  value?: string;
+};
+export type QueryPredicatePatch = {
+  name: string;
+  op: "present" | "exact";
+  value?: string;
+};
+
+// LocationPredicatesPatch is the location_set_predicates payload. Each facet
+// is optional so naming one (even as an empty array, which clears it) leaves
+// the other two untouched — omitting a facet entirely means "leave it as
+// configured", the same sparse-presence convention client_address's
+// forwarded_headers already uses.
+export type LocationPredicatesPatch = {
+  methods?: string[];
+  headers?: HeaderPredicatePatch[];
+  query?: QueryPredicatePatch[];
+};
+
+// ResponseHeaderOpPatch mirrors config.ResponseHeaderOp. value is required for
+// add/set and forbidden for remove.
+export type ResponseHeaderOpPatch = {
+  op: "add" | "set" | "remove";
+  name: string;
+  value?: string;
+};
+
+// CORSPatch is the location_cors_set payload — the location's whole CORS
+// policy, replaced wholesale (the same convention as LocationWAFPatch).
+// max_age is a duration string (e.g. "10m"); omitted means the header is not
+// emitted, an explicit "0s" is legal.
+export type CORSPatch = {
+  enabled: boolean;
+  allowed_origins?: string[];
+  allowed_methods?: string[];
+  allowed_headers?: string[];
+  exposed_headers?: string[];
+  allow_credentials?: boolean;
+  max_age?: string;
 };
 
 // LocationMatchPatch is the new match (type + path) for location_set_match. It
@@ -1427,6 +1515,15 @@ export type ConfigPatch =
   | ({ op: "location_waf_clear" } & RouteTarget)
   | ({ op: "location_set_auth"; auth: LocationAuthPatch } & RouteTarget)
   | ({ op: "location_clear_auth" } & RouteTarget)
+  | ({ op: "location_set_predicates"; predicates: LocationPredicatesPatch } & RouteTarget)
+  | ({ op: "location_clear_predicates" } & RouteTarget)
+  | ({
+      op: "location_response_headers_set";
+      response_headers: ResponseHeaderOpPatch[];
+    } & RouteTarget)
+  | ({ op: "location_response_headers_clear" } & RouteTarget)
+  | ({ op: "location_cors_set"; cors_set: CORSPatch } & RouteTarget)
+  | ({ op: "location_cors_clear" } & RouteTarget)
   | ({ op: "location_set_match"; match_set: LocationMatchPatch } & RouteTarget)
   | ({ op: "location_set_action"; action: LocationActionPatch } & RouteTarget)
   | ({ op: "location_set_transcode"; transcode: TranscodePatch } & RouteTarget)

@@ -6,11 +6,19 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
-import { type LocationProjection, type LocationWAF, type RouteProjection } from "@/api/client.ts";
+import {
+  type LocationProjection,
+  type LocationWAF,
+  type RouteProjection,
+  type RouteTarget,
+} from "@/api/client.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { AuthEditor } from "@/features/routes/AuthEditor.tsx";
+import { PredicatesEditor } from "@/features/routes/PredicatesEditor.tsx";
+import { ResponseHeadersEditor } from "@/features/routes/ResponseHeadersEditor.tsx";
+import { CORSEditor } from "@/features/routes/CORSEditor.tsx";
 import {
   RouteActionEditor,
   RouteMatchEditor,
@@ -189,8 +197,23 @@ function QuickEdits({
   const [matchEditing, setMatchEditing] = useState(false);
   const [actionEditing, setActionEditing] = useState(false);
   const [rateLimitEditing, setRateLimitEditing] = useState(false);
+  const [predicatesEditing, setPredicatesEditing] = useState(false);
+  const [responseHeadersEditing, setResponseHeadersEditing] = useState(false);
+  const [corsEditing, setCorsEditing] = useState(false);
 
   const canSetTarget = loc.action === "proxy";
+
+  // routeTarget builds the structured location selector shared by the new
+  // predicate/response-header/CORS editors. match_ordinal is only included
+  // when the projection reports one, so exactOptionalPropertyTypes never sees
+  // an explicit undefined where RouteTarget expects the key omitted entirely.
+  const routeTarget: RouteTarget = {
+    listen: route.listen,
+    server_names: route.server_names ?? [],
+    match_type: loc.type,
+    path: loc.match,
+    ...(loc.match_ordinal !== undefined ? { match_ordinal: loc.match_ordinal } : {}),
+  };
 
   // wafTarget builds the LocationWAF the guided per-location editor expects from
   // the route coordinates plus the location's current override (or safe
@@ -369,6 +392,36 @@ function QuickEdits({
         >
           {loc.auth ? "Edit auth" : "Add auth"} →
         </button>
+        <button
+          type="button"
+          disabled={busy || !canWrite}
+          onClick={() => {
+            setPredicatesEditing(true);
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          {loc.predicates ? "Edit predicates" : "Add predicates"} →
+        </button>
+        <button
+          type="button"
+          disabled={busy || !canWrite}
+          onClick={() => {
+            setResponseHeadersEditing(true);
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          {loc.response_headers ? "Edit response headers" : "Add response headers"} →
+        </button>
+        <button
+          type="button"
+          disabled={busy || !canWrite}
+          onClick={() => {
+            setCorsEditing(true);
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          {loc.cors ? "Edit CORS" : "Add CORS"} →
+        </button>
       </div>
 
       {loc.action === "grpc_transcode" && <TranscodeQuickEdit route={route} loc={loc} />}
@@ -398,6 +451,40 @@ function QuickEdits({
           existing={loc.auth}
           onClose={() => {
             setAuthEditing(false);
+          }}
+        />
+      )}
+
+      {predicatesEditing && (
+        <PredicatesEditor
+          target={routeTarget}
+          seedMethods={loc.methods}
+          seedHeaders={undefined}
+          seedQuery={undefined}
+          existing={Boolean(loc.predicates)}
+          onClose={() => {
+            setPredicatesEditing(false);
+          }}
+        />
+      )}
+
+      {responseHeadersEditing && (
+        <ResponseHeadersEditor
+          target={routeTarget}
+          existing={Boolean(loc.response_headers)}
+          onClose={() => {
+            setResponseHeadersEditing(false);
+          }}
+        />
+      )}
+
+      {corsEditing && (
+        <CORSEditor
+          target={routeTarget}
+          seed={loc.cors}
+          existing={Boolean(loc.cors)}
+          onClose={() => {
+            setCorsEditing(false);
           }}
         />
       )}
@@ -905,6 +992,9 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
           />
           <Row label="Path match" value={<span className="font-mono">{loc.match}</span>} />
           <Row label="Match type" value={loc.type} />
+          {loc.predicates && (
+            <Row label="Predicates" value={<span className="font-mono">{loc.predicates}</span>} />
+          )}
           <Row label="Action" value={loc.action} />
           {loc.target && (
             <Row label="Target" value={<span className="font-mono">{loc.target}</span>} />
@@ -927,6 +1017,8 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
           <Flag on={loc.require_client_cert} label="client cert" />
           <Flag on={route.http3} label="HTTP/3" />
           <Flag on={route.h2c} label="h2c" />
+          <Flag on={Boolean(loc.response_headers)} label="response headers" />
+          <Flag on={Boolean(loc.cors?.enabled)} label="CORS" />
         </div>
 
         <QuickEdits route={route} loc={loc} />
