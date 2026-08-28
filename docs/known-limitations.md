@@ -14,13 +14,12 @@ references.
 - **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
 - **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust have shipped ([ADR 0016](adr/0016-inbound-identity-and-backend-peer-trust.md)). The remaining boundaries are documented as deferrals with explicit promotion triggers in that record, not as gaps: proxy-aware Admin identity, QUIC and UDP client preservation, and per-tenant policy.
 - **Upstream overload control:** the bounded model decided by [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) is not yet implemented. Until #141–#144 land, the running binary has: no cap on concurrent upstream requests or on physical backend connections (`MaxConnsPerHost` is unset); no retry budget, overall retry deadline or backoff between attempts; no bound on how many requests probe a backend the instant its `fail_timeout` cooldown elapses; no load balancing, health checking or failure accounting for `fastcgi_pass` and `uwsgi_pass`, whose connection count is unbounded; no connection cap on L4 TCP routes (UDP already has `max_udp_sessions`); and no circuit breaker on the forward-auth and JWKS subrequests, which carry a fixed 10s timeout.
-- **Routing and response policy:** the request-matching half of
-  [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md) has shipped (#145): a location
-  can be constrained by method, request header and query parameter. The response half has not.
-  Until #146 lands there is no way to add, replace or remove a response header, and no CORS or
-  preflight handling of any kind. `[servers.locations].headers` sets headers on the *upstream
-  request*, not on the response to the client, and a WASM middleware plugin is the only way to set
-  a response header today.
+- **Routing and response policy:** [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md)
+  has shipped in full: request matching by method, header and query parameter (#145), and bounded
+  response-header add/set/remove operations plus CORS (#146). `[servers.locations].headers` still
+  sets headers on the *upstream request*, not the response to the client — use
+  `[[servers.locations.response_headers]]` for that. Full typed-patch/Console editing and the
+  importer's CORS translation are ROUTE-03's (#147) to close.
 
 ---
 
@@ -39,11 +38,10 @@ references.
   ever becomes a metric label. The route-test surface is the diagnostic.
 - **Query predicates have no `regex` operator** in this tranche, and only the
   first 1024 query pairs of a request are parsed.
-- **`cors.enabled` widening is implemented but unreachable.** ADR 0018 §2 widens
-  a `methods` predicate to accept that location's own CORS preflight. The
-  matcher implements it and the policy-scope fingerprint reserves the bit, but
-  the `[servers.locations.cors]` block that turns it on arrives with #146, so no
-  configuration can set it yet.
+- **`cors.enabled` widening is reachable.** ADR 0018 §2 widens a `methods` predicate to
+  accept that location's own CORS preflight when `[servers.locations.cors]` sets `enabled = true`
+  (#146). The matcher implemented the rule and the policy-scope fingerprint reserved the bit before
+  the block existed (#145); #146 is the one-line flip that reads the real field.
 - **`prefix "/"` is consulted after the regex tier, not folded into the prefix
   tier.** ADR 0018 §6 specifies the fold on the stated grounds that a
   length-1 prefix "behaves exactly as the current `sr.fallback` does". It does
@@ -51,6 +49,36 @@ references.
   `location /` shadow every regex route. The implementation keeps the catch-all
   in its own tier, and the record was amended to match; see the differential gate in
   [`internal/router/precedence_diff_test.go`](../internal/router/precedence_diff_test.go).
+
+---
+
+## Response headers and CORS ([configuration.md](configuration.md#response-headers-and-cors))
+
+- **The Boolean/ordering model is deliberately small.** `[[servers.locations.response_headers]]`
+  is an ordered add/set/remove list; there is no conditional logic, no expression language and no
+  response-body rewriting.
+- **`Vary` cannot be operated on a cached location at all**, and `add` is the only permitted
+  operation elsewhere, as a directive to *downstream* caches only — Jul's own cache is never
+  affected by it. See [cache.md](cache.md) for the invariant this rests on.
+- **CORS is not authorization.** A disallowed origin is still routed, authenticated, rate-limited
+  and served exactly as it would be without a `[cors]` block; it simply receives no
+  `Access-Control-*` grant. Do not build access control on it.
+- **No private-network-access CORS, no origin patterns or wildcard subdomains, and
+  `Access-Control-Request-Headers` is never reflected back** — these are deliberate D12 exclusions,
+  not a future promotion.
+- **The count/length bounds on `allowed_methods`, `allowed_headers` and `exposed_headers` are a
+  conservative, documented judgment call** (`internal/config/validate_cors.go`), not a number ADR
+  0018 itself fixes: the record only requires that an unbounded-length entry not count as a bound.
+  Raising any of them later is additive.
+- **The NGINX importer does not translate `add_header`.** A plain `add_header` (without `always`)
+  does not apply to NGINX's own 4xx/5xx responses, while Jul's `response_headers` operations always
+  apply; translating the common case would silently widen where the header appears. It is reported
+  for manual porting, the same as `limit_except`. CORS configurations built from `add_header
+  Access-Control-*` plus `if ($http_origin ...)` are reported, never inferred.
+- **Full typed-patch/Console editing of `response_headers` and `cors` is ROUTE-03's (#147).** The
+  admin API projects a location's policy (whether it has one, and its CORS fields) and reports any
+  change in a config diff today; adding/editing individual operations through the typed patch API
+  is not yet wired.
 
 ---
 

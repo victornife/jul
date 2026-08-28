@@ -55,7 +55,9 @@ servers  = [
    selected. See [Location selection](#location-selection).
 4. **Rewrites** (if any) run against the matched location's path.
 5. **Middleware** wraps the handler (request ID, recover, body limit, optional
-   timeout / rate limit / access log).
+   timeout / rate limit / access log) — see [Execution order](#execution-order)
+   for the full per-location diagram, including the response-header/CORS
+   wrapper and the CORS preflight terminator (ADR 0018 §10).
 6. **Handler** serves the response (static, proxy, FastCGI, uWSGI, or a config
    action such as `return`/`redirect`/`deny`).
 
@@ -338,10 +340,53 @@ outlier ejection.
 
 ## Core middleware
 
+### Execution order
+
+The global chain wraps every request, outermost first: `RequestID` →
+`ClientAddress` → tracing → metrics/access-log observers → `Recover` →
+compression. Inside the router, each location composes its own chain, also
+outermost first (ADR 0018 §10):
+
+```
+response-header/CORS wrapper   (§8/§9: applies once, at the first status >= 200;
+                                 1xx passes straight through)
+location-scoped recover        (a panic here still gets the location's policy headers)
+plugins (WASM middleware)
+ClientCert
+CORS preflight terminator      (§10: decide, then guard, then 204 — see below)
+Auth
+Rate limit (per-request)
+WAF
+BodyLimit
+cache
+action
+```
+
+The response-header/CORS wrapper and the location-scoped recover are installed
+automatically whenever a location has `response_headers` or `cors`; a location
+with neither installs no wrapper and allocates nothing. The preflight
+terminator exists only when `cors.enabled = true`:
+
+```
+not a preflight     -> pass through untouched
+evaluate approval   -> pure, three header fields, no side effects
+not approved        -> pass through untouched; Auth/RateLimit/WAF handle it normally
+approved            -> rate-limit check (own scope, keyed by client address)
+                       -> WAF check (the location's own compiled firewall)
+                       -> 204, no upstream contact, no cache interaction
+```
+
+An approved preflight is the **only** case that skips `Auth` (Fetch sends
+preflights without credentials); it is still rate-limited and WAF-checked. See
+[configuration.md](configuration.md#response-headers-and-cors) for the schema.
+
 | Middleware | Trigger | Behaviour |
 | --- | --- | --- |
 | Request ID | always | `X-Request-ID` (incoming preserved or generated) |
 | Recover | always | converts a panic to 500; re-panics `http.ErrAbortHandler` |
+| Response-header/CORS wrapper | `response_headers` or `cors` set | applies operations and CORS grants once, at the first final status |
+| Location recover | same as above | a panic after route selection still carries the location's policy headers |
+| CORS preflight terminator | `cors.enabled = true` | decide-then-guard 204 for an approved preflight |
 | Body limit | always | `client_max_body_size`: an oversized declared `Content-Length` is rejected with 413 before the body is read; an unknown length trips via `MaxBytesReader` → 413 |
 | Timeout | when configured | `http.TimeoutHandler` → 503 |
 | Access log | when a sink is set | structured `slog` access records |

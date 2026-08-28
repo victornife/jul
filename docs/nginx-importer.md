@@ -77,7 +77,7 @@ reported in `Skipped` for manual porting.
 | `try_files` | ✅ | → `try_files` (string slice) |
 | `return` | ✅ | Numeric codes map directly; `return <url>` maps to `return = 302` + `redirect`. Response body text is dropped with a note. |
 | `rewrite` | ✅ | `pattern`, `replacement`, and `flag` (`last`/`break`/`redirect`/`permanent`) are preserved; unknown flags are noted |
-| `if`, `limit_except` | ❌ | Reported with the source line and a reason; never silently converted |
+| `if`, `limit_except`, `add_header` | ❌ | Reported with the source line and a reason; never silently converted |
 
 > `match.methods` can now express a method constraint (see
 > [Request predicates](configuration.md#request-predicates)), but `limit_except`
@@ -89,6 +89,19 @@ reported in `Skipped` for manual porting.
 > traffic. Translating it faithfully needs the per-method action modelling that
 > ROUTE-03 and the [MIGOPS epic](https://github.com/victornife/jul/issues/112)
 > own.
+>
+> `[[servers.locations.response_headers]]` and `[servers.locations.cors]` can
+> now express response-header and CORS policy (see
+> [Response headers and CORS](configuration.md#response-headers-and-cors)), but
+> `add_header` is still reported rather than translated. Plain `add_header`
+> (without the `always` flag) does not apply to NGINX's own 4xx/5xx responses;
+> Jul's `response_headers` operations always apply, to every response the
+> location produces. Translating the common case would silently widen where the
+> header appears on an error path, so a silent conversion would change behavior
+> exactly where an operator is least likely to notice. A CORS block built from
+> `add_header Access-Control-*` plus `if ($http_origin ...)` is reported the
+> same way — it is never inferred, because the conditional logic nginx
+> configurations use for CORS has no bounded equivalent in `[cors]`.
 
 ### `upstream` block
 

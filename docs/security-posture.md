@@ -195,6 +195,38 @@ WASM plugins run in a wazero sandbox:
 
 ---
 
+## CORS and response-header policy
+
+`[servers.locations.cors]` and `[[servers.locations.response_headers]]`
+(ADR 0018 §8–§10) are bounded, non-scriptable primitives, with the security
+properties an operator should rely on stated explicitly rather than assumed:
+
+- **CORS is not authorization.** A disallowed origin is still routed,
+  authenticated, rate-limited and served exactly as without a `[cors]` block;
+  it simply receives no `Access-Control-*` grant. Do not gate access on it.
+- **`allowed_origins = ["*"]` and `allow_credentials = true` are mutually
+  exclusive by validation**, not by a silent downgrade — the combination lets a
+  credentialed cross-origin request read any origin's response.
+- **`Access-Control-Request-Headers` is never reflected back** into the
+  response. Reflecting the client's own request would turn a bounded allow-list
+  into an unbounded one under attacker control.
+- **Every `Access-Control-*` field an upstream response carries is stripped**
+  before Jul emits its own set, so a compromised or misconfigured upstream
+  cannot append a second, contradictory CORS grant.
+- **CORS response headers never enter the response cache** — they are applied
+  by a wrapper outside the cache, after the entry's commit-time header snapshot
+  is already taken, so a cache hit cannot replay one origin's grant to a
+  different origin. See [cache.md](cache.md#which-response-headers-are-stored).
+- **An approved CORS preflight still passes the location's own rate limit and
+  WAF checks** (in its own rate-limit scope, keyed by the canonical client
+  address); only authentication is skipped, because the Fetch standard sends
+  preflights without credentials.
+- **Response-header values are validated against the full RFC 9110 §5.5
+  field-value grammar**, not only CR/LF/NUL, so a configuration cannot smuggle
+  another C0 control or DEL byte into a header value.
+
+---
+
 ## TLS and mTLS recommendations
 
 - Set `min_version = "1.3"` on internet-facing listeners that do not need
