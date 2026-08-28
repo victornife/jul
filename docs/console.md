@@ -445,21 +445,32 @@ feed straight back into a typed patch together with the `base_version` the same
 session read; it must not be stored or used to correlate a route across
 revisions.
 
-### Response headers and CORS (read-only)
+### Match predicates, response headers and CORS
 
-A route projection (`GET /api/routes`) reports whether a location has a
-response-header policy (`response_headers: true`) and its CORS policy, when
+A route projection (`GET /api/routes`) reports a location's method predicate
+in full (`methods`, never operator-sensitive) and a compact, value-free
+summary of its header/query predicates (`predicates`), whether it has a
+response-header policy (`response_headers: true`), and its CORS policy, when
 configured (`cors: {enabled, allowed_origins, allowed_methods, allowed_headers,
 exposed_headers, allow_credentials, max_age}`) — the operator's configured
-values, not the compiled runtime form. Individual `response_headers` operations
-are not projected: a value may be operator-sensitive, and the route tester
-above already explains a rejection in full for a specific request. A change to
-either surfaces in the structured diff through the same registry-driven
-completeness pass every other field relies on.
+values, not the compiled runtime form. Individual header/query predicate values
+and `response_headers` operation values are not projected: they may be
+operator-sensitive, and the route tester above already explains a rejection in
+full for a specific request. A change to any of them surfaces in the structured
+diff — predicates through the route's re-keyed add/remove pair (editing a
+predicate set changes the route's identity, ADR 0018 §14), response headers and
+CORS through their own named, value-free modification entries.
 
-Adding, editing or removing individual operations through a guided editor and
-the typed patch API is ROUTE-03's (#147) to close; today the block is read-only
-in the Console and editable only by hand-editing the raw TOML.
+Three guided drawers in the route detail view cover the typed patch API
+(`location_set_predicates`/`_clear_predicates`,
+`location_response_headers_set`/`_clear`, `location_cors_set`/`_clear`), each
+replacing what it edits wholesale — the same convention the WAF and auth
+editors use. Because header/query predicate values and response-header
+operation values are not projected, opening either editor on a route that
+already has them starts from a blank form and says so explicitly: saving
+replaces the whole set, so re-add anything the route should keep. The CORS
+editor has no such gap — every field is projected, so it seeds and round-trips
+completely.
 
 ### Restart-required changes
 
@@ -824,6 +835,8 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 | --- | --- | --- |
 | Server blocks / virtual hosts | Guided-create · Structured-edit (limits/timeouts, host-name rename) | Routes, TLS |
 | HTTP routes / locations | Guided-create · Structured-edit (match path/type, action, proxy target, cache, rate-limit, WAF) | Routes |
+| Match predicates (method / header / query) | Structured-edit (per-location, replaces the whole predicate set) | Routes |
+| Response headers / CORS | Structured-edit (per-location, replaces the whole operation list / policy) | Routes |
 | gRPC proxy / transcoding, FastCGI, redirect, deny, return | Structured-edit (switch action: redirect/return/deny) · Read-only for gRPC/transcode/FastCGI/plugin | Routes |
 | Response cache | Structured-edit (global + per-location toggle) | Traffic Controls, Routes |
 | Compression | Structured-edit (global) | Traffic Controls |

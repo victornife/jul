@@ -230,7 +230,11 @@ fault evidence shows that the simple breaker is insufficient.
 > `[[match.headers]]` / `[[match.query]]` predicate arrays, response policy is the ordered
 > `[[servers.locations.response_headers]]` operation list, and CORS is `[servers.locations.cors]`.
 > It also fixes route precedence, the no-405 contract, the cache interaction and middleware order.
-> Implementation is tracked by #145, #146 and #147.
+> Implementation: #145 (request matching) and #146 (response headers/CORS) are merged. #147 (typed
+> patch API, Console editors, NGINX importer mapping, real-server E2E) has landed the backend,
+> Console and importer surfaces; full H1/H2/H3-explicit E2E and the CORS+cache/error/auth/WAF
+> real-server combinations remain covered at the Go integration-test level rather than re-derived
+> as separate real-server E2E (see [known-limitations.md](../known-limitations.md)).
 
 ### Required bounded feature set — D12
 

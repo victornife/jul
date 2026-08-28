@@ -77,31 +77,54 @@ reported in `Skipped` for manual porting.
 | `try_files` | ✅ | → `try_files` (string slice) |
 | `return` | ✅ | Numeric codes map directly; `return <url>` maps to `return = 302` + `redirect`. Response body text is dropped with a note. |
 | `rewrite` | ✅ | `pattern`, `replacement`, and `flag` (`last`/`break`/`redirect`/`permanent`) are preserved; unknown flags are noted |
-| `if`, `limit_except`, `add_header` | ❌ | Reported with the source line and a reason; never silently converted |
+| `limit_except` | ⚠️ | `limit_except METHODS { deny all; }` or `{ return 403; }` maps to `match.methods`, with a note about the 403-vs-404 difference below. Any other body is reported, never guessed. |
+| `add_header` | ⚠️ | `NAME VALUE always;` with a static (non-variable) value maps to `response_headers` or, for `Access-Control-*` names, to `[cors]`. Without `always`, or with a value referencing an nginx variable, it is reported instead. See below. |
+| `if` | ❌ | Reported with the source line and a reason; never silently converted |
 
 > `match.methods` can now express a method constraint (see
-> [Request predicates](configuration.md#request-predicates)), but `limit_except`
-> is still reported rather than translated. `limit_except GET { deny all; }`
-> means "for any method other than GET, apply these directives" — a *deny*
-> inside the same location. Translating it to `methods = ["GET"]` would change a
-> 403 into whatever the next matching route does, which is usually the `/`
-> catch-all, so the two are not equivalent and a silent conversion would move
-> traffic. Translating it faithfully needs the per-method action modelling that
-> ROUTE-03 and the [MIGOPS epic](https://github.com/victornife/jul/issues/112)
-> own.
+> [Request predicates](configuration.md#request-predicates)), and `limit_except`
+> is translated for its one idiomatic, unambiguous shape:
+> `limit_except METHODS { deny all; }` or `{ return 403; }`, with no other
+> directive in the block. That shape means "requests using any other method are
+> denied," which maps cleanly onto `match.methods = [METHODS]` — a request using
+> a different method simply does not match this location. The mapping is not
+> perfect: nginx returns 403 for the excluded methods, while Jul.IA makes the
+> route not match them at all (typically a 404, or whichever other location
+> covers the path), so a note flags the difference for review. Any other body
+> inside `limit_except` — a directive meant to apply only to the *excluded*
+> methods, rather than a bare denial — has no single-location equivalent in
+> Jul.IA's model (a location matches or it does not, with one action) and is
+> reported instead of guessed.
 >
 > `[[servers.locations.response_headers]]` and `[servers.locations.cors]` can
 > now express response-header and CORS policy (see
-> [Response headers and CORS](configuration.md#response-headers-and-cors)), but
-> `add_header` is still reported rather than translated. Plain `add_header`
-> (without the `always` flag) does not apply to NGINX's own 4xx/5xx responses;
-> Jul's `response_headers` operations always apply, to every response the
-> location produces. Translating the common case would silently widen where the
-> header appears on an error path, so a silent conversion would change behavior
-> exactly where an operator is least likely to notice. A CORS block built from
-> `add_header Access-Control-*` plus `if ($http_origin ...)` is reported the
-> same way — it is never inferred, because the conditional logic nginx
-> configurations use for CORS has no bounded equivalent in `[cors]`.
+> [Response headers and CORS](configuration.md#response-headers-and-cors)), and
+> `add_header` is translated for the cases that are actually equivalent. Plain
+> `add_header` (without the `always` flag) does not apply to nginx's own 4xx/5xx
+> responses, while Jul's `response_headers` operations always apply — that case
+> is still reported, not translated, because doing so would silently widen where
+> the header appears on an error path, exactly where an operator is least likely
+> to notice. `add_header NAME VALUE always;` has identical semantics in both
+> servers and is translated directly, unless `VALUE` references an nginx
+> variable (e.g. `$http_origin`, `$request_id`): Jul.IA response-header and CORS
+> values are static, so a variable reference is reported rather than silently
+> dropped or misrepresented as a literal.
+>
+> A location whose only CORS-relevant directives are always-flagged, static
+> `add_header Access-Control-*` lines — the common hand-rolled static CORS
+> block — is translated into `[servers.locations.cors]`: `Allow-Origin` maps to
+> `allowed_origins`, `Allow-Methods`/`Allow-Headers`/`Expose-Headers` split on
+> commas into their list fields, `Allow-Credentials` and `Max-Age` map directly.
+> This is deliberately narrow: any `Access-Control-*` header gated by an `if`
+> block, or whose value reflects a variable (the common and insecure
+> `Access-Control-Allow-Origin: $http_origin` idiom), is reported instead — it
+> is never inferred, because nginx enforces no relationship between a
+> conditional origin check and the header it sets, and guessing one would be
+> exactly the silent widening this importer must never perform. A source
+> combining `Access-Control-Allow-Origin "*"` with
+> `Access-Control-Allow-Credentials "true"` — which nginx accepts without
+> complaint but ADR 0018 §9 forbids outright — is detected and reported rather
+> than emitted as a `[cors]` block that would fail Jul.IA's own validation.
 
 ### `upstream` block
 

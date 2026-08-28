@@ -1,43 +1,471 @@
-# Minimal server config for the Playwright real-server E2E test (C2).
-# Starts a static-file server on loopback + an admin listener with a known token
-# so real-server.spec.ts can exercise the admin API and verify JSON shapes match
-# the Zod schemas in client.ts without any mocking.
-#
-# The admin token is intentionally fixed and short — this config is for CI tests
-# only and never runs with real data.
-
 [global]
-log_level = "debug"
+worker_threads = ''
+access_log = ''
+error_log = ''
+log_level = 'debug'
+log_format = 'text'
+shutdown_timeout = '30s'
+redact_min_secret_length = 0
+reload_timeout = '10s'
 
 [[servers]]
-listen = "127.0.0.1:9292"
-server_names = ["localhost"]
+name = ''
+listen = '127.0.0.1:9292'
+server_names = ['localhost']
+proxy_protocol = ''
+h2c = false
+client_max_body_size = '1m'
+read_header_timeout = '10s'
+read_timeout = '0s'
+write_timeout = '0s'
+idle_timeout = '1m0s'
+max_header_bytes = '1m'
+access_log = ''
+error_log = ''
+redirect_https = 0
+plugins = []
 
-  [[servers.locations]]
-  match = { type = "prefix", path = "/" }
-  root = "testdata/www"
-  index = ["index.html"]
+[[servers.locations]]
+root = 'testdata/www'
+index = []
+try_files = []
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = ''
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+proxy_retries = 0
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 0
+deny = false
+rewrites = []
+cache = false
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
 
-  # Routed so the upstream is actually instantiated at runtime. An upstream that
-  # no location references is projected from config alone, with no live backend
-  # state, which would leave the E2E asserting "unknown" and prove nothing.
-  [[servers.locations]]
-  match = { type = "prefix", path = "/e2e-upstream" }
-  proxy_pass = "http://e2e-pool"
+[servers.locations.match]
+type = 'prefix'
+path = '/'
+
+[[servers.locations]]
+root = ''
+index = []
+try_files = []
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = 'http://e2e-pool'
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+proxy_retries = 0
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 0
+deny = false
+rewrites = []
+cache = false
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
+
+[servers.locations.match]
+type = 'prefix'
+path = '/e2e-upstream'
+
+[[servers.locations]]
+root = ''
+index = []
+try_files = []
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = ''
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+proxy_retries = 0
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 200
+deny = false
+rewrites = []
+cache = false
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
+
+[servers.locations.match]
+type = 'prefix'
+path = '/e2e-method/'
+methods = ['GET']
+
+[[servers.locations]]
+root = ''
+index = []
+try_files = []
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = ''
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+proxy_retries = 0
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 201
+deny = false
+rewrites = []
+cache = false
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
+
+[servers.locations.match]
+type = 'prefix'
+path = '/e2e-method/'
+methods = ['POST']
+
+[[servers.locations]]
+root = ''
+index = []
+try_files = []
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = ''
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+proxy_retries = 0
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 200
+deny = false
+rewrites = []
+cache = false
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
+
+[servers.locations.match]
+type = 'prefix'
+path = '/e2e-header/'
+
+[[servers.locations.match.headers]]
+name = 'X-Api-Version'
+op = 'exact'
+value = '2'
+
+[[servers.locations]]
+root = ''
+index = []
+try_files = []
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = ''
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+proxy_retries = 0
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 204
+deny = false
+rewrites = []
+cache = false
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
+
+[servers.locations.match]
+type = 'prefix'
+path = '/e2e-header/'
+
+[[servers.locations]]
+root = ''
+index = []
+try_files = []
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = ''
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+proxy_retries = 0
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 200
+deny = false
+rewrites = []
+cache = false
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
+
+[servers.locations.match]
+type = 'prefix'
+path = '/e2e-query/'
+
+[[servers.locations.match.query]]
+name = 'flag'
+op = 'present'
+
+[[servers.locations]]
+root = ''
+index = []
+try_files = []
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = ''
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+proxy_retries = 0
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 205
+deny = false
+rewrites = []
+cache = false
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
+
+[servers.locations.match]
+type = 'prefix'
+path = '/e2e-query/'
+
+[[servers.locations]]
+root = ''
+index = []
+try_files = []
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = ''
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+proxy_retries = 0
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 200
+deny = false
+rewrites = []
+cache = false
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
+
+[servers.locations.match]
+type = 'prefix'
+path = '/e2e-headers-op/'
+
+[[servers.locations.response_headers]]
+op = 'set'
+name = 'X-Frame-Options'
+value = 'DENY'
+
+[[servers.locations.response_headers]]
+op = 'add'
+name = 'X-Multi'
+value = 'one'
+
+[[servers.locations.response_headers]]
+op = 'add'
+name = 'X-Multi'
+value = 'two'
+
+[[servers.locations.response_headers]]
+op = 'remove'
+name = 'X-Request-Id'
+
+[[servers.locations]]
+root = ''
+index = []
+try_files = []
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = ''
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+proxy_retries = 0
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 200
+deny = false
+rewrites = []
+cache = true
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
+
+[servers.locations.match]
+type = 'prefix'
+path = '/e2e-cors/'
+
+[servers.locations.cors]
+enabled = true
+allowed_origins = ['https://allowed.example.test']
+allowed_methods = ['GET', 'POST']
+allowed_headers = ['Content-Type']
+allow_credentials = false
+
+[[servers.locations]]
+root = ''
+index = []
+try_files = []
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = ''
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+proxy_retries = 0
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 200
+deny = false
+rewrites = []
+cache = false
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
+
+[servers.locations.match]
+type = 'prefix'
+path = '/e2e-mutate/'
+
+[[upstreams]]
+name = 'e2e-pool'
+strategy = 'round_robin'
+servers = ['127.0.0.1:9393']
+max_fails = 0
+fail_timeout = '0s'
+
+[cache]
+enabled = false
+memory_max_size = '0'
+disk_path = ''
+disk_max_size = '0'
+default_ttl = '0s'
+stale_while_revalidate = '0s'
+stale_if_error = '0s'
 
 [admin]
 enabled = true
-listen = "127.0.0.1:9291"
-token = "jul-e2e-test-token"
+listen = '127.0.0.1:9291'
+token = 'jul-e2e-test-token'
 console = true
+history_dir = './jul-data/config-history'
+history_keep = 50
+rate_limit_read_per_min = 240
+rate_limit_write_per_min = 60
+rate_limit_apply_per_min = 30
+max_event_conns = 4
+audit_log_file = ''
+audit_log_rotate_max_mb = 0
+audit_log_rotate_keep = 0
+plugin_upload_dir = './jul-data/plugins'
+plugin_upload_max_size = 0
+plugin_upload_enabled = false
 
-# One upstream so GET /api/apps returns a populated pool rather than an empty
-# array. Without it the AppProjection schema check passes vacuously and no
-# backend `state` or pool `verdict` is ever exercised end to end. The backend
-# address is never dialled by these tests: with no health check configured and
-# the circuit closed, a backend reports "available" from birth, so the projected
-# state is deterministic without needing anything listening on the port.
-[[upstreams]]
-name = "e2e-pool"
-strategy = "round_robin"
-servers = ["127.0.0.1:9393"]
+[admin.rbac]
+enabled = false
+default_role = ''
+roles = []
+principals = []
+
+[compression]
+enabled = false
+encoders = []
+level = 0
+min_size = '0'
+types = []
+precompressed = false
+
+[rate_limit]
+enabled = false
+key = ''
+rate = 0
+burst = 0
+max_conns = 0
+
+[observability]
+[observability.tracing]
+enabled = false
+exporter = ''
+endpoint = ''
+sample_ratio = 0.0
+service_name = ''
+insecure = false
+
+[observability.metrics]
+host_label = false
+
+[observability.access_log]
+sinks = ['stdout']
+file = ''
+format = 'text'
+rotate_max_mb = 100
+rotate_keep = 7
+
+[egress]
+enabled = false
+allow = []
+
+[waf]
+enabled = false
+mode = ''
+block_status = 0
+directives_files = []
+inline_rules = ''
+crs_enabled = false
+paranoia = 0
+request_body_limit = '0'
+response_body_check = false

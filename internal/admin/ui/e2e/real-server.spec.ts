@@ -811,3 +811,260 @@ test(
     await request.post("/api/config/pending-restart/discard");
   },
 );
+
+// ── ROUTE-03 (#147) real-server E2E: predicates, response headers, CORS ──────
+//
+// These hit the real data-plane listener (127.0.0.1:9292) for genuinely
+// end-to-end proof — the same compiled binary serving both the admin API
+// and real HTTP traffic — rather than re-deriving what internal/router and
+// internal/middleware's own integration tests (responsepolicy_wiring_test.go,
+// cors_cache_test.go) already prove at the Go level. Two #147 §8 scenarios are
+// deliberately not re-proven here: CORS-plus-cache-variant behavior (already
+// covered by TestCORSResponseHeadersNeverEnterTheCacheAcrossOrigins and
+// TestUpstreamVaryOriginStillCreatesCacheVariants, and enabling the global
+// cache here would risk destabilizing every other test in this shared-server
+// file) and NGINX importer assessment (orthogonal to the admin API, covered
+// by internal/migrate/nginx's own marshal/parse/validate round-trip tests).
+
+async function trafficGet(request: any, path: string, opts: Record<string, unknown> = {}) {
+  const { headers, ...rest } = opts;
+  return request.get(`http://127.0.0.1:9292${path}`, {
+    headers: { Authorization: "", ...(headers as Record<string, string> | undefined) },
+    ...rest,
+  });
+}
+
+async function trafficFetch(
+  request: any,
+  method: string,
+  path: string,
+  opts: Record<string, unknown> = {},
+) {
+  const { headers, ...rest } = opts;
+  return request.fetch(`http://127.0.0.1:9292${path}`, {
+    method,
+    headers: { Authorization: "", ...(headers as Record<string, string> | undefined) },
+    ...rest,
+  });
+}
+
+test("method predicate selects the location matching the request method", async ({ request }) => {
+  const get = await trafficGet(request, "/e2e-method/");
+  expect(get.status()).toBe(200);
+  const post = await trafficFetch(request, "POST", "/e2e-method/");
+  expect(post.status()).toBe(201);
+});
+
+test("header exact predicate matches, and falls through without it", async ({ request }) => {
+  const matched = await trafficGet(request, "/e2e-header/", { headers: { "X-Api-Version": "2" } });
+  expect(matched.status()).toBe(200);
+  const noHeader = await trafficGet(request, "/e2e-header/");
+  expect(noHeader.status()).toBe(204);
+  // A present-but-different value must not match either.
+  const wrongValue = await trafficGet(request, "/e2e-header/", { headers: { "X-Api-Version": "1" } });
+  expect(wrongValue.status()).toBe(204);
+});
+
+test(
+  "query predicate matches a bare, repeated, or percent-encoded key, and falls through without it",
+  async ({ request }) => {
+    const bare = await trafficGet(request, "/e2e-query/?flag");
+    expect(bare.status()).toBe(200);
+    const repeated = await trafficGet(request, "/e2e-query/?flag=1&flag=2");
+    expect(repeated.status()).toBe(200);
+    const encodedName = await trafficGet(request, "/e2e-query/?fl%61g=x");
+    expect(encodedName.status()).toBe(200);
+    const fallback = await trafficGet(request, "/e2e-query/");
+    expect(fallback.status()).toBe(205);
+  },
+);
+
+test("response_headers set/add/remove apply in declaration order to a real response", async ({ request }) => {
+  const resp = await trafficGet(request, "/e2e-headers-op/");
+  expect(resp.status()).toBe(200);
+  expect(resp.headers()["x-frame-options"]).toBe("DENY");
+  // Two "add" operations for the same name produce two field lines, not one
+  // comma-joined value — resp.headers() folds duplicates, so check the array.
+  const multi = resp
+    .headersArray()
+    .filter((h) => h.name.toLowerCase() === "x-multi")
+    .map((h) => h.value);
+  expect(multi).toEqual(["one", "two"]);
+  // "remove" deleted a header the process would otherwise always set.
+  expect(resp.headers()["x-request-id"]).toBeUndefined();
+});
+
+test("CORS grants an allowed origin and stays silent for a denied one", async ({ request }) => {
+  const allowed = await trafficGet(request, "/e2e-cors/", {
+    headers: { Origin: "https://allowed.example.test" },
+  });
+  expect(allowed.status()).toBe(200);
+  expect(allowed.headers()["access-control-allow-origin"]).toBe("https://allowed.example.test");
+  expect(allowed.headers().vary ?? "").toContain("Origin");
+
+  const denied = await trafficGet(request, "/e2e-cors/", {
+    headers: { Origin: "https://denied.example.test" },
+  });
+  // A disallowed origin is still routed and served normally — CORS is not
+  // authorization (docs/known-limitations.md).
+  expect(denied.status()).toBe(200);
+  expect(denied.headers()["access-control-allow-origin"]).toBeUndefined();
+});
+
+test("CORS preflight is approved for an allowed origin and falls through for a denied one", async ({ request }) => {
+  const approved = await trafficFetch(request, "OPTIONS", "/e2e-cors/", {
+    headers: {
+      Origin: "https://allowed.example.test",
+      "Access-Control-Request-Method": "GET",
+    },
+  });
+  expect(approved.status()).toBe(204);
+  expect(approved.headers()["access-control-allow-origin"]).toBe("https://allowed.example.test");
+  expect(approved.headers()["access-control-allow-methods"] ?? "").toContain("GET");
+
+  const deniedPreflight = await trafficFetch(request, "OPTIONS", "/e2e-cors/", {
+    headers: {
+      Origin: "https://denied.example.test",
+      "Access-Control-Request-Method": "GET",
+    },
+  });
+  // A denied preflight is never blocked — it falls through to the location's
+  // own action untouched (the "decide-then-guard" design), which here is
+  // `return 200`, not a 204 with no grant.
+  expect(deniedPreflight.status()).toBe(200);
+  expect(deniedPreflight.headers()["access-control-allow-origin"]).toBeUndefined();
+});
+
+// ── Patch-API mutation tests on the dedicated /e2e-mutate/ location ──────────
+// Isolated from every read-only fixture above so a failure here can never
+// affect the traffic-selection assertions (one shared server, workers: 1).
+
+const mutateTarget = {
+  listen: "127.0.0.1:9292",
+  server_names: ["localhost"],
+  match_type: "prefix",
+  path: "/e2e-mutate/",
+};
+
+async function currentBaseVersion(request: any): Promise<string> {
+  const cfgResp = await request.get("/api/config");
+  const cfg = RawConfigSchema.parse(await cfgResp.json());
+  return cfg.base_version ?? "";
+}
+
+test(
+  "an invalid CORS candidate is rejected at preview without mutating the live config",
+  async ({ request }) => {
+    const before = await currentBaseVersion(request);
+    const previewResp = await request.post("/api/config/patch/preview", {
+      headers: { "Content-Type": "application/json" },
+      data: JSON.stringify({
+        base_version: before,
+        ops: [
+          {
+            op: "location_cors_set",
+            ...mutateTarget,
+            cors_set: { enabled: true, allowed_origins: ["*"], allow_credentials: true },
+          },
+        ],
+      }),
+    });
+    const body = (await previewResp.json()) as Record<string, unknown>;
+    expect(body.valid).toBe(false);
+    expect((body.validation_errors as unknown[]).length).toBeGreaterThan(0);
+
+    // The live config must be untouched: same base_version, and the location
+    // still has no CORS policy.
+    const after = await currentBaseVersion(request);
+    expect(after).toBe(before);
+    const routes = z.array(RouteProjectionSchema).parse(await (await request.get("/api/routes")).json());
+    const loc = routes
+      .find((r) => r.listen === "127.0.0.1:9292")
+      ?.locations.find((l) => l.match === "/e2e-mutate/");
+    expect(loc?.cors).toBeUndefined();
+  },
+);
+
+test(
+  "response_headers applied under live traffic take effect immediately, and rollback restores the exact order",
+  async ({ request }) => {
+    let failure: unknown;
+    try {
+      // 1. Baseline: no response_headers on /e2e-mutate/.
+      const baseline = await trafficGet(request, "/e2e-mutate/");
+      expect(baseline.headers()["x-frame-options"]).toBeUndefined();
+
+      // 2. Apply state A: set X-Frame-Options.
+      const applyA = await postWithConflictRetry(request, "/api/config/patch/apply", {
+        headers: { "Content-Type": "application/json" },
+        data: JSON.stringify({
+          base_version: await currentBaseVersion(request),
+          ops: [
+            {
+              op: "location_response_headers_set",
+              ...mutateTarget,
+              response_headers: [{ op: "set", name: "X-Frame-Options", value: "DENY" }],
+            },
+          ],
+        }),
+      });
+      expect(applyA.status()).toBe(200);
+
+      // 3. Traffic reflects state A immediately (hot reload, no restart).
+      const afterA = await trafficGet(request, "/e2e-mutate/");
+      expect(afterA.headers()["x-frame-options"]).toBe("DENY");
+
+      // 4. Apply state B: a different, ordered operation set, entirely
+      //    replacing A — editing predicates/policy under live traffic (§8.10).
+      const applyB = await postWithConflictRetry(request, "/api/config/patch/apply", {
+        headers: { "Content-Type": "application/json" },
+        data: JSON.stringify({
+          base_version: await currentBaseVersion(request),
+          ops: [
+            {
+              op: "location_response_headers_set",
+              ...mutateTarget,
+              response_headers: [
+                { op: "add", name: "X-Mutate-Order", value: "two" },
+                { op: "add", name: "X-Mutate-Order", value: "one" },
+              ],
+            },
+          ],
+        }),
+      });
+      expect(applyB.status()).toBe(200);
+      const afterB = await trafficGet(request, "/e2e-mutate/");
+      expect(afterB.headers()["x-frame-options"]).toBeUndefined();
+      expect(afterB.headersArray().filter((h) => h.name.toLowerCase() === "x-mutate-order").map((h) => h.value)).toEqual(["two", "one"]);
+
+      // 5. Roll back to the snapshot taken just before state B (i.e. state A).
+      const history = z.array(HistoryEntrySchema).parse(await (await request.get("/api/config/history")).json());
+      expect(history.length).toBeGreaterThan(0);
+      const rollbackResp = await postWithConflictRetry(request, "/api/config/rollback", {
+        headers: { "Content-Type": "application/json" },
+        data: JSON.stringify({ id: history[0].id }),
+      });
+      expect([200, 204]).toContain(rollbackResp.status());
+
+      // 6. Traffic reflects the exact rolled-back policy (state A) again.
+      const afterRollback = await trafficGet(request, "/e2e-mutate/");
+      expect(afterRollback.headers()["x-frame-options"]).toBe("DENY");
+      expect(afterRollback.headers()["x-mutate-order"]).toBeUndefined();
+    } catch (err) {
+      failure = err;
+    }
+
+    // Always restore the fixture's clean baseline, even on failure — otherwise
+    // a failure here leaves response_headers on /e2e-mutate/ for every later
+    // test in this file (one shared server, workers: 1). Best-effort: the
+    // clear op legitimately 400s if an earlier failure left nothing to clear.
+    await postWithConflictRetry(request, "/api/config/patch/apply", {
+      headers: { "Content-Type": "application/json" },
+      data: JSON.stringify({
+        base_version: await currentBaseVersion(request),
+        ops: [{ op: "location_response_headers_clear", ...mutateTarget }],
+      }),
+    });
+    if (failure) throw failure;
+  },
+);

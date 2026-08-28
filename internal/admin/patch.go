@@ -733,6 +733,85 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 	case "rate_limit_global_set":
 		return applyGlobalRateLimitSet(c, req.RateLimit)
 
+	case "location_set_predicates":
+		loc, err := findLocation(c, req.locationTarget())
+		if err != nil {
+			return "", err
+		}
+		if req.Predicates == nil {
+			return "", fmt.Errorf("location_set_predicates: predicates payload is required")
+		}
+		summary, err := applyLocationPredicates(loc, *req.Predicates)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("route %s%s predicates updated (%s)", req.Listen, req.Path, summary), nil
+
+	case "location_clear_predicates":
+		loc, err := findLocation(c, req.locationTarget())
+		if err != nil {
+			return "", err
+		}
+		if !loc.Match.HasPredicates() {
+			return "", fmt.Errorf("route %s%s has no predicates to clear", req.Listen, req.Path)
+		}
+		loc.Match.Methods = nil
+		loc.Match.Headers = nil
+		loc.Match.Query = nil
+		return fmt.Sprintf("route %s%s predicates cleared", req.Listen, req.Path), nil
+
+	case "location_response_headers_set":
+		loc, err := findLocation(c, req.locationTarget())
+		if err != nil {
+			return "", err
+		}
+		if req.ResponseHeaders == nil {
+			return "", fmt.Errorf("location_response_headers_set: response_headers payload is required")
+		}
+		ops, err := buildResponseHeaderOps(*req.ResponseHeaders)
+		if err != nil {
+			return "", err
+		}
+		loc.ResponseHeaders = ops
+		return fmt.Sprintf("route %s%s response headers set (%d operation(s))", req.Listen, req.Path, len(ops)), nil
+
+	case "location_response_headers_clear":
+		loc, err := findLocation(c, req.locationTarget())
+		if err != nil {
+			return "", err
+		}
+		if len(loc.ResponseHeaders) == 0 {
+			return "", fmt.Errorf("route %s%s has no response headers to clear", req.Listen, req.Path)
+		}
+		loc.ResponseHeaders = nil
+		return fmt.Sprintf("route %s%s response headers cleared", req.Listen, req.Path), nil
+
+	case "location_cors_set":
+		loc, err := findLocation(c, req.locationTarget())
+		if err != nil {
+			return "", err
+		}
+		if req.CORS == nil {
+			return "", fmt.Errorf("location_cors_set: cors_set payload is required")
+		}
+		cors, err := buildCORS(*req.CORS)
+		if err != nil {
+			return "", err
+		}
+		loc.CORS = cors
+		return fmt.Sprintf("route %s%s CORS policy set (%s)", req.Listen, req.Path, onOff(cors.Enabled)), nil
+
+	case "location_cors_clear":
+		loc, err := findLocation(c, req.locationTarget())
+		if err != nil {
+			return "", err
+		}
+		if loc.CORS == nil {
+			return "", fmt.Errorf("route %s%s has no CORS policy to clear", req.Listen, req.Path)
+		}
+		loc.CORS = nil
+		return fmt.Sprintf("route %s%s CORS policy cleared", req.Listen, req.Path), nil
+
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)
 	}
