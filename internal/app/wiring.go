@@ -76,7 +76,9 @@ func LocationScope(srv config.ServerConfig, loc config.LocationConfig) string {
 			fmt.Fprintf(h, "%d:%s\n", len(p), p)
 		}
 	}
-	writeScopeField(srv.Listen, strings.Join(names, ","), matchTypeOrDefault(loc.Match.Type), loc.Match.Path, loc.Match.CanonicalPredicates())
+	writeScopeField(srv.Listen)
+	writeScopeField(names...)
+	writeScopeField(matchTypeOrDefault(loc.Match.Type), loc.Match.Path, loc.Match.CanonicalPredicates())
 	if config.LocationPreflightWidening(loc) {
 		writeScopeField("preflight_widening")
 	}

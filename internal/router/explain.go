@@ -23,7 +23,8 @@ type RouteCandidate struct {
 	// configuration: config.Config.Servers[ServerIndex].Locations[LocationIndex].
 	ServerIndex   int
 	LocationIndex int
-	// Tier is 1 for exact, 2 for prefix and 3 for regex.
+	// Tier is 1 for exact, 2 for prefix, 3 for regex and 4 for the `prefix "/"`
+	// catch-all.
 	Tier      int
 	MatchType string
 	Path      string
