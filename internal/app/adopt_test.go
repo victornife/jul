@@ -50,6 +50,70 @@ func TestAdoptExternalNoBaseline(t *testing.T) {
 	}
 }
 
+// TestAssessAdoptExternalRejectsFileOwned pins that the assessment refuses to
+// run at all outside managed mode, rather than reporting a hollow result.
+func TestAssessAdoptExternalRejectsFileOwned(t *testing.T) {
+	c, _ := newAuthorityTestCoordinator(t, AuthorityFileOwned, nil, nil)
+	if _, err := c.AssessAdoptExternal(); err == nil {
+		t.Fatal("expected an error outside managed mode")
+	}
+}
+
+// TestAssessAdoptExternalParseError pins that an unparseable external file
+// still returns a usable, side-effect-free assessment (origin, digest,
+// baseline version) carrying the parse error, rather than failing outright.
+func TestAssessAdoptExternalParseError(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	if err := os.WriteFile(path, []byte("{not valid toml"), 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	assessment, err := c.AssessAdoptExternal()
+	if err != nil {
+		t.Fatalf("AssessAdoptExternal: %v", err)
+	}
+	if assessment.OK {
+		t.Fatal("a parse error must not report OK=true")
+	}
+	if len(assessment.ValidationErrors) == 0 {
+		t.Error("expected a validation error for unparseable content")
+	}
+	if assessment.Origin != "no_baseline" {
+		t.Errorf("origin = %q, want no_baseline even on a parse error", assessment.Origin)
+	}
+}
+
+// TestAssessAdoptExternalRestartRequired pins that a restart-required
+// external candidate is reported (RestartRequired=true, OK=true) rather than
+// rejected — a preview classifies, it never refuses.
+func TestAssessAdoptExternalRestartRequired(t *testing.T) {
+	seed := validConfigRaw(t, ":8080")
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	restartRequired := restartRequiredConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, restartRequired, 0o600); err != nil {
+		t.Fatalf("write restart-required external file: %v", err)
+	}
+
+	assessment, err := c.AssessAdoptExternal()
+	if err != nil {
+		t.Fatalf("AssessAdoptExternal: %v", err)
+	}
+	if !assessment.OK {
+		t.Fatalf("assessment = %+v, want OK=true", assessment)
+	}
+	if !assessment.RestartRequired {
+		t.Error("expected RestartRequired=true for a restart-bound candidate")
+	}
+}
+
 func TestAdoptExternalDriftWithDiffAndHistorySnapshot(t *testing.T) {
 	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
 	c.ManagedBaseline = NewManagedBaselineStore(path)

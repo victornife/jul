@@ -32,6 +32,10 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 10_000 },
   reporter: process.env.CI ? "github" : "list",
+  // CI runners are shared and occasionally slower than a fixed local wait
+  // anticipates; retrying absorbs that noise without masking a deterministic
+  // failure, which would still fail on every retry.
+  retries: process.env.CI ? 2 : 0,
   // Establishes the managed baseline for the real-server project once, after
   // its webServer entry is confirmed healthy and before any spec runs; a
   // no-op for the mocked chromium project. See e2e/global-setup.ts.

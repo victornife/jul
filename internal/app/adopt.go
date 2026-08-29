@@ -11,6 +11,7 @@ import (
 
 	"jul/internal/admin"
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/server"
 )
 
@@ -84,22 +85,27 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 	}
 
 	// PreflightStageRestart classifies restart-required changes instead of
-	// rejecting them, which is what a preview needs.
+	// rejecting them, which is what a preview needs: it never returns
+	// admin.ErrRestartRequired (that error is only raised by the hot-apply
+	// gates in another mode), so restart-required-ness has to be read back
+	// from the classified lifecycle changeset, not from the error.
 	pfResult, err := c.Preflight.Apply(context.Background(), cfg, prevCfg, PreflightStageRestart)
-	restartRequired := false
 	if err != nil {
-		if errors.Is(err, admin.ErrRestartRequired) {
+		return AdoptExternalAssessment{
+			Origin:           origin,
+			ObservedDigest:   digest,
+			BaselineVersion:  bst.BaselineCanonicalVersion,
+			ValidationErrors: []string{err.Error()},
+		}, nil
+	}
+	restartRequired := false
+	for _, e := range pfResult.Lifecycle {
+		if e.Class == lifecycle.RestartRequiredClass {
 			restartRequired = true
-		} else {
-			return AdoptExternalAssessment{
-				Origin:           origin,
-				ObservedDigest:   digest,
-				BaselineVersion:  bst.BaselineCanonicalVersion,
-				ValidationErrors: []string{err.Error()},
-			}, nil
+			break
 		}
 	}
-	if pfResult != nil && pfResult.PreparedAdmin != nil {
+	if pfResult.PreparedAdmin != nil {
 		pfResult.PreparedAdmin.Abort()
 	}
 
