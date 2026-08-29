@@ -6,11 +6,13 @@ package app
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"testing"
 
 	"jul/internal/admin"
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/server"
 )
 
@@ -111,6 +113,211 @@ func TestAssessAdoptExternalRestartRequired(t *testing.T) {
 	}
 	if !assessment.RestartRequired {
 		t.Error("expected RestartRequired=true for a restart-bound candidate")
+	}
+}
+
+// TestAdoptExternalRejectsFileOwnedDirectly pins AdoptExternal's own
+// defense-in-depth authority check (distinct from the HTTP-layer
+// denyIfFileOwned gate tested in internal/admin).
+func TestAdoptExternalRejectsFileOwnedDirectly(t *testing.T) {
+	c, _ := newAuthorityTestCoordinator(t, AuthorityFileOwned, nil, nil)
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if res.OK || !res.AuthorityDenied {
+		t.Fatalf("result = %+v, want OK=false AuthorityDenied=true", res)
+	}
+}
+
+// TestAdoptExternalRejectsNilManagedBaseline pins the guard for a
+// misconfigured coordinator: managed authority with no baseline store wired.
+func TestAdoptExternalRejectsNilManagedBaseline(t *testing.T) {
+	c, _ := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if res.OK {
+		t.Fatal("expected rejection with no ManagedBaseline wired")
+	}
+}
+
+// TestAdoptExternalStaleBaseVersionConflict pins the base_version fence: a
+// preview bound to a baseline version that has since moved on must conflict
+// rather than adopt against stale context.
+func TestAdoptExternalStaleBaseVersionConflict(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+		Mode: "hot", Confirm: true, BaseVersion: "stale-version-from-an-earlier-preview",
+	})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if res.OK || !res.Conflict {
+		t.Fatalf("result = %+v, want a conflict", res)
+	}
+}
+
+// TestAdoptExternalReadConfigRawFailure pins the digest-fence read's own
+// storage-error path.
+func TestAdoptExternalReadConfigRawFailure(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	c.ReadConfigRaw = func() ([]byte, error) { return nil, errors.New("disk unavailable") }
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true})
+	if err == nil {
+		t.Fatal("expected a storage error")
+	}
+	if res.OK {
+		t.Fatalf("result = %+v, want OK=false", res)
+	}
+}
+
+// TestAdoptExternalParseErrorDirect pins AdoptExternal's own parse-error
+// branch (distinct from AssessAdoptExternal's preview equivalent).
+func TestAdoptExternalParseErrorDirect(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	if err := os.WriteFile(path, []byte("{not valid toml"), 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if res.OK || len(res.ValidationErrors) == 0 {
+		t.Fatalf("result = %+v, want OK=false with a validation error", res)
+	}
+}
+
+// TestAdoptExternalHotModeRestartRequiredCandidate pins that hot-mode
+// adoption of a restart-bound candidate is rejected (with CanStage=true)
+// rather than silently persisted.
+func TestAdoptExternalHotModeRestartRequiredCandidate(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	if err := os.WriteFile(path, restartRequiredConfigRaw(t, ":8080"), 0o600); err != nil {
+		t.Fatalf("write restart-required external file: %v", err)
+	}
+	// Hot-mode restart-required detection compares against the startup
+	// fingerprint, not the managed baseline, so it must be wired here.
+	c.Preflight.StartupFP = lifecycle.ComputeFingerprint(mustParseForTest(t, seed))
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if res.OK || !res.RestartRequired || !res.CanStage {
+		t.Fatalf("result = %+v, want OK=false RestartRequired=true CanStage=true", res)
+	}
+}
+
+// TestAdoptExternalPreflightValidationError pins a non-restart-required
+// preflight failure (e.g. handler construction rejecting the config).
+func TestAdoptExternalPreflightValidationError(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	external := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+	c.Preflight = &Preflight{
+		BuildHandlers: func(context.Context, *config.Config, bool) (map[string]http.Handler, func(), error) {
+			return nil, nil, errors.New("handler construction rejected this configuration")
+		},
+		Stream: &mockStreamPreflighter{},
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if res.OK || res.RestartRequired || len(res.ValidationErrors) == 0 {
+		t.Fatalf("result = %+v, want OK=false RestartRequired=false with a validation error", res)
+	}
+}
+
+// TestAdoptExternalHotReloadNotPublished pins ADR 0019 §14 step 10's second
+// non-fatal outcome: the reload is enqueued and runs, but the runtime does
+// not publish it. The adoption still succeeds as owned_not_serving.
+func TestAdoptExternalHotReloadNotPublished(t *testing.T) {
+	submit := func(req server.ReloadRequest) error {
+		go func() {
+			req.Result <- server.ReloadResult{ID: req.ID, Source: server.ReloadSourceAdmin, Outcome: server.ReloadNotApplied, Published: false}
+		}()
+		return nil
+	}
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, submit)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	drifted := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, drifted, 0o600); err != nil {
+		t.Fatalf("simulate external edit: %v", err)
+	}
+	liveCfg := mustParseForTest(t, seed)
+	c.LiveSnapshot = func() server.LiveSnapshot { return server.LiveSnapshot{EffectiveConfig: liveCfg} }
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+		ObservedDigest: digestHex(drifted), Mode: "hot", Confirm: true,
+	})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("a reload that does not publish must not fail the adoption, got %+v", res)
+	}
+	if res.AppOutcome != "owned_not_serving" {
+		t.Errorf("AppOutcome = %q, want owned_not_serving", res.AppOutcome)
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedDesiredAhead {
+		t.Errorf("state = %v, want managed_desired_ahead", st.State)
+	}
+}
+
+// TestAdoptExternalHotModeCommitMarkFailure pins that a failed T-mark commit
+// during hot adoption fails cleanly with a storage error, changing nothing.
+func TestAdoptExternalHotModeCommitMarkFailure(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	external := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+	if err := os.Mkdir(path+".managed-baseline.json", 0o755); err != nil {
+		t.Fatalf("occupy baseline marker path: %v", err)
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true})
+	if err == nil {
+		t.Fatal("expected a storage error")
+	}
+	if res.OK {
+		t.Fatalf("result = %+v, want OK=false", res)
 	}
 }
 
