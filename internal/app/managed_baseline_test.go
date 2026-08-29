@@ -6,8 +6,10 @@ package app
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -136,7 +138,7 @@ func TestManagedBaselineReconcileClosedTombstoneIsUnadoptedNotAlertable(t *testi
 	if err := store.CommitMark(raw, "v1"); err != nil {
 		t.Fatalf("CommitMark: %v", err)
 	}
-	if err := store.CloseEpoch(); err != nil {
+	if err := store.CloseEpoch(nil); err != nil {
 		t.Fatalf("CloseEpoch: %v", err)
 	}
 	// The ordinary managed -> file_owned -> managed round trip: reconcile
@@ -161,7 +163,7 @@ func TestManagedBaselineReconcileClosedTombstoneWithSurvivingSnapshotIsInconsist
 	if err := store.CommitMark(raw, "v1"); err != nil {
 		t.Fatalf("CommitMark: %v", err)
 	}
-	if err := store.CloseEpoch(); err != nil {
+	if err := store.CloseEpoch(nil); err != nil {
 		t.Fatalf("CloseEpoch: %v", err)
 	}
 	// Simulate a snapshot reappearing next to the tombstone.
@@ -448,13 +450,56 @@ func TestManagedBaselineAssessDriftDiskReadErrorReportsDrift(t *testing.T) {
 	}
 }
 
+// TestManagedBaselineAssessDriftFromDesiredAheadDetectsExternalWrite pins the
+// ADR 0019 §10 state-diagram edge "managed_desired_ahead -> managed_drift:
+// external write after adoption" — AssessDrift previously only assessed
+// while managed_clean or managed_drift and silently ignored an external
+// edit that landed while desired-ahead.
+func TestManagedBaselineAssessDriftFromDesiredAheadDetectsExternalWrite(t *testing.T) {
+	store, _ := newBaselineStoreForTest(t)
+	raw := []byte("a = 1\n")
+	if err := store.CommitMark(raw, "v1"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	store.MarkDesiredAhead()
+	if st := store.Status(); st.State != ConfigStateManagedDesiredAhead {
+		t.Fatalf("precondition: state = %v, want managed_desired_ahead", st.State)
+	}
+
+	external := []byte("a = 2\n")
+	store.AssessDrift(external, nil, "v-ext", "")
+	st := store.Status()
+	if !st.Drift || st.State != ConfigStateManagedDrift {
+		t.Fatalf("an external write while desired-ahead must become managed_drift, got %+v", st)
+	}
+}
+
+// TestManagedBaselineAssessDriftFromDesiredAheadStaysDesiredAheadWhenClean
+// pins the complementary case: AssessDrift observes only the
+// baseline-vs-disk dimension, so a match found while desired-ahead must
+// leave that state alone rather than asserting a runtime convergence it
+// cannot see.
+func TestManagedBaselineAssessDriftFromDesiredAheadStaysDesiredAheadWhenClean(t *testing.T) {
+	store, _ := newBaselineStoreForTest(t)
+	raw := []byte("a = 1\n")
+	if err := store.CommitMark(raw, "v1"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	store.MarkDesiredAhead()
+
+	store.AssessDrift(raw, nil, "v1", "")
+	if st := store.Status(); st.State != ConfigStateManagedDesiredAhead || st.Drift {
+		t.Fatalf("a matching disk read while desired-ahead must not clear the state, got %+v", st)
+	}
+}
+
 func TestManagedBaselineCloseEpochRemovesSnapshotAndWritesTombstone(t *testing.T) {
 	store, cfgPath := newBaselineStoreForTest(t)
 	raw := []byte("a = 1\n")
 	if err := store.CommitMark(raw, "v1"); err != nil {
 		t.Fatalf("CommitMark: %v", err)
 	}
-	if err := store.CloseEpoch(); err != nil {
+	if err := store.CloseEpoch(nil); err != nil {
 		t.Fatalf("CloseEpoch: %v", err)
 	}
 	if _, err := os.Stat(cfgPath + ".managed-baseline.snapshot"); !os.IsNotExist(err) {
@@ -474,10 +519,10 @@ func TestManagedBaselineCloseEpochIsIdempotent(t *testing.T) {
 	if err := store.CommitMark(raw, "v1"); err != nil {
 		t.Fatalf("CommitMark: %v", err)
 	}
-	if err := store.CloseEpoch(); err != nil {
+	if err := store.CloseEpoch(nil); err != nil {
 		t.Fatalf("first CloseEpoch: %v", err)
 	}
-	if err := store.CloseEpoch(); err != nil {
+	if err := store.CloseEpoch(nil); err != nil {
 		t.Fatalf("second CloseEpoch (idempotent) must not fail: %v", err)
 	}
 }
@@ -503,7 +548,7 @@ func TestManagedBaselineNilAndEmptyPathAreInert(t *testing.T) {
 	if err := nilStore.Reconcile([]byte("x"), nil, "v", ""); err != nil {
 		t.Errorf("nil store Reconcile should be a no-op: %v", err)
 	}
-	if err := nilStore.CloseEpoch(); err != nil {
+	if err := nilStore.CloseEpoch(nil); err != nil {
 		t.Errorf("nil store CloseEpoch should be a no-op: %v", err)
 	}
 	if nilStore.HasArtifacts() {
@@ -532,7 +577,7 @@ func TestManagedBaselineNilAndEmptyPathAreInert(t *testing.T) {
 	if err := memStore.Reconcile([]byte("x"), nil, "v", ""); err != nil {
 		t.Errorf("empty-path store Reconcile should be a no-op: %v", err)
 	}
-	if err := memStore.CloseEpoch(); err != nil {
+	if err := memStore.CloseEpoch(nil); err != nil {
 		t.Errorf("empty-path store CloseEpoch should be a no-op: %v", err)
 	}
 	if memStore.HasArtifacts() {
@@ -831,6 +876,30 @@ func TestManagedBaselineRewindWriteNoopWithoutPreparingMarker(t *testing.T) {
 	}
 }
 
+// TestManagedBaselineRewindWriteSurfacesMarkerReadError pins that a genuine
+// marker read failure (as opposed to a legitimately absent/non-preparing
+// marker) is reported as an error rather than silently collapsed into the
+// same no-op — an earlier version treated both cases identically, so the
+// caller believed rewind succeeded (no degraded entry) while nothing
+// happened.
+func TestManagedBaselineRewindWriteSurfacesMarkerReadError(t *testing.T) {
+	store, cfgPath := newBaselineStoreForTest(t)
+	raw := []byte("a = 1\n")
+	if err := store.CommitMark(raw, "v1"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	if err := os.Remove(cfgPath + ".managed-baseline.json"); err != nil {
+		t.Fatalf("remove real marker: %v", err)
+	}
+	if err := os.Mkdir(cfgPath+".managed-baseline.json", 0o755); err != nil {
+		t.Fatalf("occupy marker path with a directory: %v", err)
+	}
+
+	if err := store.RewindWrite(); err == nil {
+		t.Fatal("want an error when the marker cannot be read, not a silent no-op")
+	}
+}
+
 // ─── CloseEpoch / HasArtifacts remaining branches ────────────────────────────
 
 func TestManagedBaselineCloseEpochMarkerUnreadableFails(t *testing.T) {
@@ -839,7 +908,7 @@ func TestManagedBaselineCloseEpochMarkerUnreadableFails(t *testing.T) {
 		t.Fatalf("occupy marker path: %v", err)
 	}
 
-	if err := store.CloseEpoch(); err == nil {
+	if err := store.CloseEpoch(nil); err == nil {
 		t.Fatal("want error when the marker cannot be read")
 	}
 }
@@ -862,8 +931,80 @@ func TestManagedBaselineCloseEpochSnapshotRemoveFailure(t *testing.T) {
 		t.Fatalf("write occupant file: %v", err)
 	}
 
-	if err := store.CloseEpoch(); err == nil {
+	if err := store.CloseEpoch(nil); err == nil {
 		t.Fatal("want error when the snapshot cannot be removed")
+	}
+}
+
+// TestManagedBaselineCloseEpochRemovesOrphanSnapshotWithoutMarker pins ADR
+// 0019 §17.2's invariant that file_owned mode retains no configuration
+// bytes: a snapshot that survives with no marker at all (§11.2.1b's own
+// "absent marker, present snapshot" row) is still secret-bearing and must
+// not be left behind just because there is no marker left to tombstone.
+func TestManagedBaselineCloseEpochRemovesOrphanSnapshotWithoutMarker(t *testing.T) {
+	store, cfgPath := newBaselineStoreForTest(t)
+	if err := os.WriteFile(cfgPath+".managed-baseline.snapshot", []byte("a = 1\n"), 0o600); err != nil {
+		t.Fatalf("write orphan snapshot: %v", err)
+	}
+
+	if err := store.CloseEpoch(nil); err != nil {
+		t.Fatalf("CloseEpoch: %v", err)
+	}
+	if _, err := os.Stat(cfgPath + ".managed-baseline.snapshot"); !os.IsNotExist(err) {
+		t.Errorf("orphan snapshot must be removed even with no marker, stat err = %v", err)
+	}
+}
+
+// TestManagedBaselineCloseEpochRunsOrphanCallbackBeforeTombstone pins ADR
+// 0019 §17.2's exact ordering: both secret-bearing artifacts (snapshot, then
+// the orphan planned-restart backup via the callback) must be gone before
+// the safe tombstone is ever written, so a failure in the callback leaves no
+// tombstone behind.
+func TestManagedBaselineCloseEpochRunsOrphanCallbackBeforeTombstone(t *testing.T) {
+	store, _ := newBaselineStoreForTest(t)
+	raw := []byte("a = 1\n")
+	if err := store.CommitMark(raw, "v1"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+
+	var callbackRan bool
+	if err := store.CloseEpoch(func() error {
+		callbackRan = true
+		return nil
+	}); err != nil {
+		t.Fatalf("CloseEpoch: %v", err)
+	}
+	if !callbackRan {
+		t.Fatal("the orphan-artifact callback must run as part of closing the epoch")
+	}
+	if st := store.Status(); st.State != ConfigStateManagedUnadopted {
+		t.Errorf("state = %v, want managed_unadopted after a successful close", st.State)
+	}
+}
+
+// TestManagedBaselineCloseEpochOrphanCallbackFailureAbortsBeforeTombstone
+// pins that a failing callback (step 2) prevents the tombstone write (step
+// 3): a crash or storage failure must never report "closed" while a
+// secret-bearing backup still survives.
+func TestManagedBaselineCloseEpochOrphanCallbackFailureAbortsBeforeTombstone(t *testing.T) {
+	store, cfgPath := newBaselineStoreForTest(t)
+	raw := []byte("a = 1\n")
+	if err := store.CommitMark(raw, "v1"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+
+	err := store.CloseEpoch(func() error {
+		return errors.New("orphan backup could not be removed")
+	})
+	if err == nil {
+		t.Fatal("want an error when the orphan-artifact callback fails")
+	}
+	marker, rerr := os.ReadFile(cfgPath + ".managed-baseline.json")
+	if rerr != nil {
+		t.Fatalf("read marker: %v", rerr)
+	}
+	if strings.Contains(string(marker), `"closed"`) {
+		t.Error("the tombstone must not be written when the orphan-artifact callback fails")
 	}
 }
 

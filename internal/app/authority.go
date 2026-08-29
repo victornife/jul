@@ -3,6 +3,14 @@
 
 package app
 
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"jul/internal/config"
+)
+
 // ConfigAuthority is the process-wide, immutable ownership mode of the
 // configuration file, established exactly once at startup from the effective
 // configuration and never changed while the process runs (ADR 0019 §9/§10).
@@ -141,4 +149,74 @@ const (
 type DegradedEntry struct {
 	Kind    DegradedKind `json:"kind"`
 	Message string       `json:"message"`
+}
+
+// CheckManagedFilesystem implements ADR 0019 §11.3: managed mode requires a
+// writable, non-symlinked configuration path. It is validation-adjacent
+// rather than validation — the filesystem is not part of the configuration
+// document, so a check that failed the configuration outright on a property
+// of the machine would make it non-portable — which is why it returns
+// lint-shaped diagnostics instead of an error. It is a no-op outside managed
+// authority or when configPath is empty (no configuration file).
+//
+// Symlink detection uses os.Lstat, which reports the path's own type rather
+// than following it; os.Stat would report the symlink's target and could
+// never see that the path itself is a link. A Kubernetes ConfigMap/Secret
+// mount is exactly this shape (`server.toml` -> `..data/server.toml`):
+// os.Rename, which atomicfile.Write uses to commit every managed write,
+// replaces the symlink itself rather than the file it points to, detaching
+// the configuration from the volume that is supposed to update it.
+//
+// Directory writability is checked functionally — creating and removing a
+// temporary file — rather than by inspecting permission bits, so the check
+// behaves the same on every platform atomicfile.Write itself runs on.
+func CheckManagedFilesystem(configPath string, authority ConfigAuthority) []config.Diagnostic {
+	if authority != AuthorityManaged || configPath == "" {
+		return nil
+	}
+	var diags []config.Diagnostic
+	if fi, err := os.Lstat(configPath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		diags = append(diags, config.Diagnostic{
+			Severity: config.SeverityError,
+			Field:    "global.config_authority",
+			Message:  fmt.Sprintf("config_authority is managed, but %s is a symlink", configPath),
+			Hint:     "a managed write replaces the symlink itself with a regular file, detaching it from whatever it points to (e.g. a Kubernetes ConfigMap/Secret mount); declare config_authority = \"file_owned\" instead",
+		})
+	}
+	if dir := filepath.Dir(configPath); !dirIsWritable(dir) {
+		diags = append(diags, config.Diagnostic{
+			Severity: config.SeverityWarning,
+			Field:    "global.config_authority",
+			Message:  fmt.Sprintf("config_authority is managed, but %s is not writable", dir),
+			Hint:     "every managed write will fail until the directory is writable, or declare config_authority = \"file_owned\"",
+		})
+	}
+	return diags
+}
+
+// dirIsWritable reports whether dir accepts a new file, using the same
+// create-temp-file operation atomicfile.Write performs for a real managed
+// write, so the answer matches what a write would actually do.
+func dirIsWritable(dir string) bool {
+	f, err := os.CreateTemp(dir, ".jul-writable-check-*")
+	if err != nil {
+		return false
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+	return true
+}
+
+// truncatedDigest bounds a raw hex digest to the same 16 hex characters
+// server.CanonicalVersion uses (ADR 0019 §13), so drift status never carries
+// more of the digest than the wire contract permits. Shorter-than-16 inputs
+// (notably an empty digest, when nothing has been read yet) pass through
+// unchanged.
+func truncatedDigest(digest string) string {
+	const n = 16
+	if len(digest) <= n {
+		return digest
+	}
+	return digest[:n]
 }

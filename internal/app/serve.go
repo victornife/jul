@@ -339,6 +339,18 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			"config_authority", authority.String(),
 			"hint", `set [global].config_authority = "managed" or "file_owned" to declare it explicitly`)
 	}
+	// ADR 0019 §11.3: managed mode requires a writable, non-symlinked config
+	// path. Reported rather than fatal — the process still runs, serves
+	// traffic, and reports the mode; only managed writes will fail.
+	if hasConfigPath {
+		for _, d := range CheckManagedFilesystem(tomlSrc.Path, authority) {
+			if d.Severity == config.SeverityError {
+				log.Error("managed configuration path is unsuitable", "message", d.Message, "hint", d.Hint)
+			} else {
+				log.Warn("managed configuration path may be unsuitable", "message", d.Message, "hint", d.Hint)
+			}
+		}
+	}
 
 	// In managed mode neither the file watcher nor SIGHUP triggers a reload
 	// (ADR 0019 §11 points 4-5): both become drift detectors. The real
@@ -623,12 +635,12 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				// one bounded cleanup performed once at startup (§17.2): close
 				// any managed epoch inherited from a prior restart, and remove
 				// any orphan planned-restart backup Reconcile would never
-				// collect on its own.
-				if err := managedBaseline.CloseEpoch(); err != nil {
+				// collect on its own. RemoveOrphanBackup is threaded through
+				// as the step-2 callback so CloseEpoch runs the two
+				// secret-bearing removals (snapshot, then orphan backup)
+				// strictly before the safe tombstone write.
+				if err := managedBaseline.CloseEpoch(sharedStore.RemoveOrphanBackup); err != nil {
 					log.Warn("file-owned startup could not remove leftover managed-baseline artifacts (read-only mount?)", "error", err)
-				}
-				if err := sharedStore.RemoveOrphanBackup(); err != nil {
-					log.Warn("file-owned startup could not remove an orphan planned-restart backup", "error", err)
 				}
 			}
 		}
@@ -781,10 +793,17 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			Mode:   authority.String(),
 			Source: string(authoritySource),
 		}
-		if coordinator != nil && coordinator.ManagedBaseline != nil {
+		if coordinator != nil {
+			state, reason := coordinator.currentConfigState()
+			status.ConfigState = string(state)
+			status.InconsistentReason = string(reason)
+		}
+		// Drift/version/digest fields are managed-mode baseline evidence.
+		// Gating them on authority (not just a nil coordinator) keeps a
+		// file_owned process from surfacing artifacts a prior managed epoch
+		// left behind, matching config_state's own no-leak requirement.
+		if coordinator != nil && authority == AuthorityManaged && coordinator.ManagedBaseline != nil {
 			bst := coordinator.ManagedBaseline.Status()
-			status.ConfigState = string(bst.State)
-			status.InconsistentReason = string(bst.Reason)
 			status.Drift = bst.Drift
 			if !bst.DriftDetectedAt.IsZero() {
 				status.DriftDetectedAt = bst.DriftDetectedAt
@@ -792,6 +811,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			status.BaselineVersion = bst.BaselineCanonicalVersion
 			status.DiskVersion = bst.DiskCanonicalVersion
 			status.DiskParseError = bst.DiskParseError
+			status.DiskRawDigest = truncatedDigest(bst.DiskRawSHA256)
 		}
 		return status
 	}

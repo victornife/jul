@@ -258,3 +258,131 @@ func TestCoordinatorManagedFailedApplyRewindsBaseline(t *testing.T) {
 		t.Fatalf("disk should have been restored to seed content")
 	}
 }
+
+// ─── currentConfigState / fileOwnedConfigState (ADR 0019 §16) ───────────────
+
+// TestCurrentConfigStatePendingRestartTakesPriority pins that a durable
+// staged restart is reported as managed_pending_restart even though the
+// baseline itself already advanced to the staged candidate and independently
+// reports managed_clean (ADR 0019 §11.2.3: a stage is not drift).
+func TestCurrentConfigStatePendingRestartTakesPriority(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	c.PlannedRestart = NewFilePlannedRestartStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	c.PlannedRestart.Stage([]byte("staged-candidate"))
+
+	if bst := c.ManagedBaseline.Status(); bst.State != ConfigStateManagedClean {
+		t.Fatalf("precondition: baseline state = %v, want managed_clean", bst.State)
+	}
+	state, reason := c.currentConfigState()
+	if state != ConfigStateManagedPendingRestart || reason != "" {
+		t.Errorf("currentConfigState() = (%v, %v), want (managed_pending_restart, \"\")", state, reason)
+	}
+}
+
+// TestCurrentConfigStateDelegatesToBaselineWhenNotPending pins the ordinary
+// case: with no staged restart, the managed state is exactly what the
+// baseline reports, reason included.
+func TestCurrentConfigStateDelegatesToBaselineWhenNotPending(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	drifted := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, drifted, 0o600); err != nil {
+		t.Fatalf("simulate external edit: %v", err)
+	}
+	c.ManagedBaseline.AssessDrift(drifted, nil, "v-ext", "")
+
+	state, reason := c.currentConfigState()
+	if state != ConfigStateManagedDrift || reason != "" {
+		t.Errorf("currentConfigState() = (%v, %v), want (managed_drift, \"\")", state, reason)
+	}
+}
+
+// TestCurrentConfigStateFileOwnedNeverLeaksManagedBaseline pins the exact
+// bug ADR 0019 §16 warns against: a file_owned process must never surface a
+// managed_* config_state merely because a ManagedBaselineStore happens to
+// exist (it is constructed regardless of authority so a file_owned startup
+// can clean up artifacts from a prior managed epoch).
+func TestCurrentConfigStateFileOwnedNeverLeaksManagedBaseline(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityFileOwned, nil, nil)
+	// A stale managed baseline as if inherited from a prior epoch, not yet
+	// (or never) cleaned up.
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	if bst := c.ManagedBaseline.Status(); bst.State != ConfigStateManagedClean {
+		t.Fatalf("precondition: baseline state = %v, want managed_clean", bst.State)
+	}
+
+	state, _ := c.currentConfigState()
+	if state != ConfigStateFileOwnedClean {
+		t.Errorf("currentConfigState() = %v, want file_owned_clean (never a managed_* leak)", state)
+	}
+}
+
+// TestFileOwnedConfigStateDesiredAheadFromExternalDivergence pins that a
+// restart-required external edit not yet live is file_owned_desired_ahead,
+// reusing the same external-divergence signal PendingRestartCheck already
+// maintains.
+func TestFileOwnedConfigStateDesiredAheadFromExternalDivergence(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityFileOwned, nil, nil)
+	c.PlannedRestart = NewFilePlannedRestartStore(path)
+	if err := os.WriteFile(path, validConfigRaw(t, ":8080"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	c.PlannedRestart.SetExternalDivergence(true)
+
+	if state := c.fileOwnedConfigState(); state != ConfigStateFileOwnedDesiredAhead {
+		t.Errorf("fileOwnedConfigState() = %v, want file_owned_desired_ahead", state)
+	}
+}
+
+// TestFileOwnedConfigStateInvalidWhenFileFailsToParse pins the third
+// file_owned state: a current file that fails to parse.
+func TestFileOwnedConfigStateInvalidWhenFileFailsToParse(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityFileOwned, nil, nil)
+	if err := os.WriteFile(path, []byte("{not valid toml"), 0o600); err != nil {
+		t.Fatalf("write invalid config: %v", err)
+	}
+
+	if state := c.fileOwnedConfigState(); state != ConfigStateFileOwnedInvalid {
+		t.Errorf("fileOwnedConfigState() = %v, want file_owned_invalid", state)
+	}
+}
+
+// TestFileOwnedConfigStateCleanForValidFileOrNoConfigPath covers the two
+// remaining file_owned_clean paths: an ordinary valid file, and a process
+// with no configuration file at all (ADR 0019 §9.1.1).
+func TestFileOwnedConfigStateCleanForValidFileOrNoConfigPath(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityFileOwned, nil, nil)
+	if err := os.WriteFile(path, validConfigRaw(t, ":8080"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if state := c.fileOwnedConfigState(); state != ConfigStateFileOwnedClean {
+		t.Errorf("fileOwnedConfigState() = %v, want file_owned_clean for a valid file", state)
+	}
+
+	c.Path = ""
+	if state := c.fileOwnedConfigState(); state != ConfigStateFileOwnedClean {
+		t.Errorf("fileOwnedConfigState() = %v, want file_owned_clean with no config path", state)
+	}
+}

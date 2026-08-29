@@ -720,6 +720,64 @@ func (c *ConfigApplyCoordinator) managedBaselineBlockMessage() (string, bool) {
 	}
 }
 
+// currentConfigState computes the single authoritative ADR 0019 §16
+// config_state enum for the coordinator's current authority. It is the one
+// place this value is computed; every surface (status, apply/adopt results,
+// the CLI --json object) reads it from here rather than re-deriving it —
+// otherwise a file-owned process could leak a managed_* value from the
+// ManagedBaselineStore that is constructed regardless of authority (purely
+// so a file_owned startup can find and clean up artifacts a prior managed
+// epoch left behind), and a managed process with a durable staged restart
+// would report managed_clean, because the baseline itself already advanced
+// to the staged candidate and is not drift (ADR 0019 §11.2.3).
+//
+// A managed_pending_restart takes priority over whatever the baseline alone
+// reports: the baseline's own view is correct evidence about provenance, but
+// §16's table defines managed_pending_restart for "a staged restart is
+// durable" regardless of what the baseline separately shows.
+func (c *ConfigApplyCoordinator) currentConfigState() (ConfigState, ManagedInconsistentReason) {
+	if c.Authority == AuthorityFileOwned {
+		return c.fileOwnedConfigState(), ""
+	}
+	if c.ManagedBaseline == nil {
+		return "", ""
+	}
+	if c.PlannedRestart != nil && c.PlannedRestart.IsPending() {
+		return ConfigStateManagedPendingRestart, ""
+	}
+	bst := c.ManagedBaseline.Status()
+	return bst.State, bst.Reason
+}
+
+// fileOwnedConfigState computes the file_owned half of ADR 0019 §16's state
+// model, entirely independent of any ManagedBaselineStore artifacts a prior
+// managed epoch may have left behind. file_owned_desired_ahead reuses the
+// same external-divergence signal PendingRestartCheck already maintains for
+// a restart-required edit that is not yet live; file_owned_invalid is a
+// current file that fails to parse; file_owned_clean is everything else,
+// including a process with no configuration file at all (ADR 0019 §9.1.1).
+func (c *ConfigApplyCoordinator) fileOwnedConfigState() ConfigState {
+	if c.PlannedRestart != nil {
+		if st := c.PlannedRestart.State(); st.State == PlannedRestartStateExternalDivergence {
+			return ConfigStateFileOwnedDesiredAhead
+		}
+	}
+	if c.Path == "" {
+		return ConfigStateFileOwnedClean
+	}
+	raw, err := c.readConfigRaw()
+	if err != nil {
+		// A read failure says nothing about the content's validity; report
+		// the least-alarming state rather than asserting invalidity we did
+		// not observe.
+		return ConfigStateFileOwnedClean
+	}
+	if _, perr := config.Parse(raw); perr != nil {
+		return ConfigStateFileOwnedInvalid
+	}
+	return ConfigStateFileOwnedClean
+}
+
 // rewindOrMarkInconsistent resolves the managed-baseline transaction when a
 // managed write's reload failed and restoration was attempted (T-write's
 // restored arm, ADR 0019 §11.2). When restoration succeeded it rewinds the
@@ -1502,6 +1560,11 @@ func (c *ConfigApplyCoordinator) completeManagedApply(reqCtx admin.ApplyRequestC
 	// releases the config mutation gate before terminal publication.
 	c.finalizeMu.Lock()
 	defer c.finalizeMu.Unlock()
+
+	// ADR 0019 §16: config_state is computed once, here — the single point
+	// every managed apply/adopt path funnels through at terminalization —
+	// rather than re-derived independently by each surface.
+	result.ConfigState, _ = c.currentConfigState()
 
 	fin := c.notifyManagedApplyComplete(admin.ManagedApplyCompletion{
 		Context:     reqCtx,

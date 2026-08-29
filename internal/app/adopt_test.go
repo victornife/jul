@@ -208,6 +208,94 @@ func TestAssessAdoptExternalAbortsPreparedAdmin(t *testing.T) {
 	}
 }
 
+// TestAssessAdoptExternalSnapshotUnreadableIsInconsistent pins ADR 0019 §14
+// step 5/§11.2.1b: a baseline the marker claims exists but whose snapshot
+// bytes cannot be read must never be silently treated as if no prior
+// baseline existed — it is damage, reported as managed_inconsistent.
+func TestAssessAdoptExternalSnapshotUnreadableIsInconsistent(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	if err := os.Remove(path + ".managed-baseline.snapshot"); err != nil {
+		t.Fatalf("remove real snapshot: %v", err)
+	}
+	if err := os.Mkdir(path+".managed-baseline.snapshot", 0o755); err != nil {
+		t.Fatalf("occupy snapshot path: %v", err)
+	}
+	external := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	assessment, err := c.AssessAdoptExternal()
+	if err != nil {
+		t.Fatalf("AssessAdoptExternal: %v", err)
+	}
+	if assessment.OK {
+		t.Fatalf("assessment = %+v, want OK=false", assessment)
+	}
+	if assessment.Origin != "inconsistent" {
+		t.Errorf("origin = %q, want inconsistent", assessment.Origin)
+	}
+	if len(assessment.ValidationErrors) == 0 {
+		t.Error("expected a validation error naming the unreadable snapshot")
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonSnapshotUnreadable {
+		t.Errorf("state=%v reason=%v, want managed_inconsistent/snapshot_unreadable", st.State, st.Reason)
+	}
+}
+
+// TestAdoptExternalSnapshotUnreadableRefusesAdoption mirrors the preview
+// case for the actual commit path: AdoptExternal must refuse rather than
+// silently proceed as though no prior baseline existed.
+func TestAdoptExternalSnapshotUnreadableRefusesAdoption(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	if err := os.Remove(path + ".managed-baseline.snapshot"); err != nil {
+		t.Fatalf("remove real snapshot: %v", err)
+	}
+	if err := os.Mkdir(path+".managed-baseline.snapshot", 0o755); err != nil {
+		t.Fatalf("occupy snapshot path: %v", err)
+	}
+	external := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+		ObservedDigest: digestHex(external),
+		BaseVersion:    "seed-version",
+		Mode:           "hot",
+		Confirm:        true,
+	})
+	if err == nil {
+		t.Fatal("expected an error refusing the adoption")
+	}
+	if res.OK {
+		t.Fatalf("result = %+v, want OK=false", res)
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonSnapshotUnreadable {
+		t.Errorf("state=%v reason=%v, want managed_inconsistent/snapshot_unreadable", st.State, st.Reason)
+	}
+	onDisk, _ := os.ReadFile(path)
+	if string(onDisk) != string(external) {
+		t.Error("a refused adoption must not touch the file")
+	}
+}
+
 // TestAdoptExternalRejectsFileOwnedDirectly pins AdoptExternal's own
 // defense-in-depth authority check (distinct from the HTTP-layer
 // denyIfFileOwned gate tested in internal/admin).
@@ -285,7 +373,7 @@ func TestAdoptExternalParseErrorDirect(t *testing.T) {
 		t.Fatalf("write external file: %v", err)
 	}
 
-	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true})
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true, ObservedDigest: digestHex([]byte("{not valid toml"))})
 	if err != nil {
 		t.Fatalf("AdoptExternal: %v", err)
 	}
@@ -314,7 +402,8 @@ func TestAdoptExternalHotModeRestartRequiredCandidate(t *testing.T) {
 	// fingerprint, not the managed baseline, so it must be wired here.
 	c.Preflight.StartupFP = lifecycle.ComputeFingerprint(mustParseForTest(t, seed))
 
-	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true})
+	restartRequired := restartRequiredConfigRaw(t, ":8080")
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true, BaseVersion: "seed-version", ObservedDigest: digestHex(restartRequired)})
 	if err != nil {
 		t.Fatalf("AdoptExternal: %v", err)
 	}
@@ -339,7 +428,7 @@ func TestAdoptExternalPreflightValidationError(t *testing.T) {
 		Stream: &mockStreamPreflighter{},
 	}
 
-	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true})
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true, ObservedDigest: digestHex(external)})
 	if err != nil {
 		t.Fatalf("AdoptExternal: %v", err)
 	}
@@ -375,7 +464,7 @@ func TestAdoptExternalHotReloadNotPublished(t *testing.T) {
 	c.LiveSnapshot = func() server.LiveSnapshot { return server.LiveSnapshot{EffectiveConfig: liveCfg} }
 
 	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
-		ObservedDigest: digestHex(drifted), Mode: "hot", Confirm: true,
+		ObservedDigest: digestHex(drifted), Mode: "hot", Confirm: true, BaseVersion: "seed-version",
 	})
 	if err != nil {
 		t.Fatalf("AdoptExternal: %v", err)
@@ -414,7 +503,7 @@ func TestAdoptExternalHotModeCommitMarkFailure(t *testing.T) {
 		t.Fatalf("occupy baseline marker path: %v", err)
 	}
 
-	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true})
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true, ObservedDigest: digestHex(external)})
 	if err == nil {
 		t.Fatal("expected a storage error")
 	}
@@ -436,12 +525,217 @@ func TestAdoptExternalDefaultsEmptyModeToHot(t *testing.T) {
 		t.Fatalf("write external file: %v", err)
 	}
 
-	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Confirm: true})
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Confirm: true, ObservedDigest: digestHex(external)})
 	if err != nil {
 		t.Fatalf("AdoptExternal: %v", err)
 	}
 	if !res.OK || res.Mode != ApplyHot {
 		t.Fatalf("result = %+v, want OK=true Mode=hot for an omitted mode", res)
+	}
+}
+
+// TestAdoptExternalHotModeSnapshotOnlyFailureDegradesNotFails pins ADR 0019
+// §11.2.1a's T-mark row for a snapshot failure: the marker write is the
+// commit point, so once it succeeds a subsequent snapshot-only failure must
+// degrade the result, never fail it outright — contrast with
+// TestAdoptExternalHotModeCommitMarkFailure, where occupying the MARKER path
+// instead fails the whole operation because nothing committed yet.
+func TestAdoptExternalHotModeSnapshotOnlyFailureDegradesNotFails(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	external := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+	if err := os.Mkdir(path+".managed-baseline.snapshot", 0o755); err != nil {
+		t.Fatalf("occupy snapshot path: %v", err)
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true, ObservedDigest: digestHex(external)})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("a snapshot-only failure must not fail the adoption (the marker already committed), got %+v", res)
+	}
+	found := false
+	for _, d := range res.Degraded {
+		if d.Kind == DegradedBaselineError {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("degraded array missing baseline_error: %+v", res.Degraded)
+	}
+	if bst := c.ManagedBaseline.Status(); bst.BaselineRawSHA256 != digestHex(external) {
+		t.Error("the baseline marker must still have committed to the adopted bytes")
+	}
+}
+
+// TestAdoptExternalHotPostCommitExternalWriteReportsDriftAfterAdopt pins ADR
+// 0019 §14.2 outcome 2 / §14.3: an external write ordered after the digest
+// fence still lets the adoption succeed, and the one post-commit read
+// reports the resulting drift in the same response rather than silently
+// missing it or compensating for it.
+func TestAdoptExternalHotPostCommitExternalWriteReportsDriftAfterAdopt(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	external := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+	drifted := validConfigRaw(t, ":9999")
+	reads := 0
+	c.ReadConfigRaw = func() ([]byte, error) {
+		reads++
+		if reads == 1 {
+			return external, nil // the digest fence read (§14 step 8)
+		}
+		return drifted, nil // the post-commit read: an external write won the race
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+		Mode: "hot", Confirm: true, ObservedDigest: digestHex(external),
+	})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("result = %+v, want OK=true: the adoption itself succeeded", res)
+	}
+	found := false
+	for _, d := range res.Degraded {
+		if d.Kind == DegradedDriftAfterAdopt {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("degraded array missing drift_after_adopt: %+v", res.Degraded)
+	}
+	st := c.ManagedBaseline.Status()
+	if st.State != ConfigStateManagedDrift {
+		t.Errorf("state = %v, want managed_drift", st.State)
+	}
+	if st.BaselineRawSHA256 != digestHex(external) {
+		t.Error("the baseline must record the fenced bytes, never the post-commit read (never transaction input)")
+	}
+}
+
+// TestAdoptExternalHotPostCommitReadFailureReportsDriftUnknown pins ADR 0019
+// §14.2 outcome 3: a post-commit read failure defers drift assessment to
+// the next §12 trigger instead of guessing, and does not fail the adoption.
+func TestAdoptExternalHotPostCommitReadFailureReportsDriftUnknown(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	external := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+	reads := 0
+	c.ReadConfigRaw = func() ([]byte, error) {
+		reads++
+		if reads == 1 {
+			return external, nil
+		}
+		return nil, errors.New("disk unavailable for the post-commit read")
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+		Mode: "hot", Confirm: true, ObservedDigest: digestHex(external),
+	})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("result = %+v, want OK=true", res)
+	}
+	found := false
+	for _, d := range res.Degraded {
+		if d.Kind == DegradedDriftUnknown {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("degraded array missing drift_unknown: %+v", res.Degraded)
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedClean {
+		t.Errorf("state = %v, want managed_clean (deferred, not guessed)", st.State)
+	}
+}
+
+// TestAdoptExternalRejectsMissingObservedDigest pins ADR 0019 §14 step 6:
+// observed_digest is always required to adopt, even with no established
+// baseline — a preview always returns one, and omitting it would let a
+// caller adopt whatever happens to be on disk without ever previewing it.
+func TestAdoptExternalRejectsMissingObservedDigest(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	external := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if res.OK {
+		t.Fatal("adoption without observed_digest must be rejected, even with no established baseline")
+	}
+}
+
+// TestAdoptExternalRejectsMissingBaseVersionWhenBaselineExists pins the other
+// half of §14 step 6: base_version is required whenever a managed baseline
+// already exists, so an omitted value cannot silently disable the CAS.
+func TestAdoptExternalRejectsMissingBaseVersionWhenBaselineExists(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	drifted := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, drifted, 0o600); err != nil {
+		t.Fatalf("simulate external edit: %v", err)
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+		Mode: "hot", Confirm: true, ObservedDigest: digestHex(drifted),
+	})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if res.OK {
+		t.Fatal("adoption without base_version must be rejected when a managed baseline exists")
+	}
+	onDisk, _ := os.ReadFile(path)
+	if string(onDisk) != string(drifted) {
+		t.Error("a rejected adoption must not touch the file")
+	}
+}
+
+// TestAdoptExternalAllowsMissingBaseVersionWhenNoBaseline pins the
+// complementary case: base_version has nothing to bind to for a no_baseline
+// origin, so its absence must not block an otherwise-valid adoption.
+func TestAdoptExternalAllowsMissingBaseVersionWhenNoBaseline(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	external := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+		Mode: "hot", Confirm: true, ObservedDigest: digestHex(external),
+	})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("result = %+v, want OK=true: base_version is not required for a no_baseline origin", res)
 	}
 }
 
@@ -479,6 +773,7 @@ func TestAdoptExternalDriftWithDiffAndHistorySnapshot(t *testing.T) {
 
 	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
 		ObservedDigest: assessment.ObservedDigest,
+		BaseVersion:    "seed-version",
 		Mode:           "hot",
 		Confirm:        true,
 	})
@@ -632,6 +927,7 @@ func TestAdoptExternalDigestFenceConflict(t *testing.T) {
 
 	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
 		ObservedDigest: "stale-digest-from-an-earlier-preview",
+		BaseVersion:    "seed-version",
 		Mode:           "hot",
 		Confirm:        true,
 	})
@@ -753,6 +1049,7 @@ func TestAdoptExternalReloadFailureIsOwnedNotServing(t *testing.T) {
 
 	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
 		ObservedDigest: digestHex(drifted),
+		BaseVersion:    "seed-version",
 		Mode:           "hot",
 		Confirm:        true,
 	})
@@ -833,6 +1130,7 @@ func TestAdoptExternalStageRestartHappyPath(t *testing.T) {
 	}
 	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
 		ObservedDigest: assessment.ObservedDigest,
+		BaseVersion:    "seed-version",
 		Mode:           "stage_restart",
 		Confirm:        true,
 	})
@@ -999,6 +1297,7 @@ func TestAdoptExternalStageRestartBaselineSnapshotMismatchFails(t *testing.T) {
 
 	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
 		ObservedDigest: digestHex(candidate),
+		BaseVersion:    "seed-version",
 		Mode:           "stage_restart",
 		Confirm:        true,
 	})
@@ -1041,6 +1340,7 @@ func TestAdoptExternalStageRestartBaselineMarkerCommitFailureRow3(t *testing.T) 
 
 	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
 		ObservedDigest: digestHex(candidate),
+		BaseVersion:    "seed-version",
 		Mode:           "stage_restart",
 		Confirm:        true,
 	})
@@ -1076,6 +1376,7 @@ func TestAdoptExternalStageRestartPreparedMarkerFailureRow4(t *testing.T) {
 
 	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
 		ObservedDigest: digestHex(candidate),
+		BaseVersion:    "seed-version",
 		Mode:           "stage_restart",
 		Confirm:        true,
 	})
