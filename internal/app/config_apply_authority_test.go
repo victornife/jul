@@ -560,4 +560,3 @@ func TestCoordinatorManagedApplyRetriesBaselineWriteAfterSnapshotFailure(t *test
 		t.Errorf("state=%v reason=%v, want managed_inconsistent/baseline_unwritable", st.State, st.Reason)
 	}
 }
-
