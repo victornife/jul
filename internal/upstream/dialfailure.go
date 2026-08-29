@@ -31,10 +31,12 @@ func ClassifyDialError(err error) string {
 	if errors.Is(err, syscall.ECONNREFUSED) {
 		return "refused"
 	}
-	// Windows does not always surface WSAECONNREFUSED as a syscall.Errno that
-	// errors.Is can match (the wrapping varies by Go/OS version); its message
-	// still says "actively refused", so fall back to that rather than losing
-	// the bucket entirely on that platform.
+	if isPlatformConnRefused(err) {
+		return "refused"
+	}
+	// Last resort: the platform-specific errno check above should already
+	// catch every real dial failure, but a caller-supplied or message-only
+	// error (no wrapped errno) still carries "refused" in English text.
 	if strings.Contains(err.Error(), "refused") {
 		return "refused"
 	}

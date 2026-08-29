@@ -7,6 +7,7 @@ log_format = 'text'
 shutdown_timeout = '30s'
 redact_min_secret_length = 0
 reload_timeout = '10s'
+config_authority = 'managed'
 
 [[servers]]
 name = ''

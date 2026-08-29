@@ -532,6 +532,41 @@ feature groups are active) and, for the two non-live outcomes, surfaces the
 actionable detail inline. See [reload-semantics.md](reload-semantics.md) for the
 underlying *applied vs. serving* model that motivates the distinction.
 
+### Configuration authority banner
+
+`GET /api/runtime/overview` carries an `authority` object
+(`config_authority`, `config_authority_source`, `config_state`, and — in
+managed mode — `drift`/`drift_detected_at`) reflecting ADR 0019's
+`[global].config_authority` field. The Console renders it as a persistent,
+global banner, separate from the per-apply outcome banner above:
+
+- **`file_owned`** (the default) — the banner explains that an external file
+  or GitOps pipeline owns the configuration, names `config_authority_source`
+  so an operator can tell "declared" from "defaulted," and every write
+  control (raw/settings/patch editors, the trust-policy patch, stage/discard,
+  history rollback) is disabled with the server's own reason rather than
+  hidden — the Console still shows *why*, and preview/validate/diff/lint/
+  history-list/export stay fully available.
+- **`managed`, no drift** — editors behave exactly as documented elsewhere in
+  this file.
+- **`managed`, drift detected** — the banner turns into a blocking notice
+  naming the drifted-since timestamp and offers the **adopt external file**
+  flow (`GET`/`POST /api/config/adopt-external`), which previews a diff
+  against the last managed configuration and requires explicit confirmation
+  before resuming ownership. Ordinary write controls stay disabled until the
+  operator adopts or restores the file to match the managed baseline.
+- **`managed_unadopted`** — a fresh managed boot with no established
+  baseline; the banner asks for the same one-time adoption before any
+  ordinary write is allowed.
+- **`managed_inconsistent`** — a bounded reason (e.g. a corrupted or missing
+  baseline marker) is shown verbatim; this generally means investigating
+  storage rather than editing the configuration.
+
+**Server denial is authoritative; the banner and disabled controls are a
+convenience.** Every mutating endpoint independently refuses the operation
+with `409 config_authority_read_only` in `file_owned` mode, so a client that
+bypasses the Console gains nothing.
+
 ### Listener changes
 
 Adding or removing a `listen` address **is** hot-applied: the reload binds new

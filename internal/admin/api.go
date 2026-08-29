@@ -156,6 +156,10 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 	}
 	// Admin subsystem health is surfaced only when degraded (F-05).
 	out.AdminHealth = s.adminHealthProjection()
+	if s.deps.Authority != nil {
+		status := s.deps.Authority()
+		out.Authority = &status
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -478,6 +482,9 @@ func applyRequestContext(r *http.Request, op ApplyOperation) ApplyRequestContext
 func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if s.denyIfFileOwned(w, r, string(ApplyOperationConfigApply)) {
 		return
 	}
 	reqCtx := applyRequestContext(r, ApplyOperationConfigApply)

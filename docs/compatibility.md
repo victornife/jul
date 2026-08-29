@@ -92,6 +92,34 @@ gob decodes an absent field as its zero value, every added field's zero value is
 the conservative answer, and an older binary ignores fields it does not know. No
 migration is required, and no cache needs to be cleared on upgrade or rollback.
 
+### Configuration authority default (ADR 0019)
+
+`[global].config_authority` is a new, additive, optional field, so no existing
+configuration file becomes invalid. **One deployment shape requires a required
+migration step to keep its control plane writable**, and it is called out here
+in the same terms as the response-cache changes above: the previous behavior
+(every deployment implicitly able to write its configuration file through the
+Console/API) contradicted the ownership contract this record establishes, so
+the new fixed default is a correctness fix, not a feature toggle, and is not
+configurable to anything else.
+
+- **A file-operated deployment** — edits `server.toml` directly and relies on
+  SIGHUP or the file watcher, with or without the admin API enabled — resolves
+  to `file_owned` and is **unaffected**. This is the majority shape and the
+  reason the default is what it is.
+- **A Console- or API-operated deployment that has never declared
+  `config_authority` becomes read-only at its next restart.** Every mutating
+  admin endpoint returns `409 config_authority_read_only`, naming the exact
+  field to set. Setting `config_authority = "managed"` restores exactly
+  today's write behavior, with one deliberate difference: a direct file edit
+  is no longer adopted by SIGHUP or the watcher in `managed` mode — it becomes
+  drift, resolved through `POST /api/config/adopt-external`. See
+  [reload-semantics.md](reload-semantics.md#configuration-authority-managed-vs-file-owned)
+  and [deployment.md](deployment.md#configuration-authority).
+
+No file gains a `config_authority` value on upgrade; it must be declared
+explicitly to opt into `managed`.
+
 ## What it does not cover
 
 - **Beta / Prototype / Alpha features** — still evolving; their config and APIs

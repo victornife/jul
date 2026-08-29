@@ -17,12 +17,12 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 343 |
-| Schema leaves (configurable values) | 291 |
-| Registry entries | 291 |
-| Startup-consumed entries | 58 |
+| Schema paths (containers included) | 344 |
+| Schema leaves (configurable values) | 292 |
+| Registry entries | 292 |
+| Startup-consumed entries | 59 |
 | Class `hot_reload` | 219 |
-| Class `restart_required` | 58 |
+| Class `restart_required` | 59 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 2 |
@@ -61,6 +61,7 @@ set, so preview and apply reach the same verdict.
 | `cache` | The two-tier response cache backend. |
 | `client_address` | The per-listener trusted-proxy policy that derives the canonical client address. |
 | `compression` | Negotiated response compression. |
+| `config_authority` | Which subsystem owns configuration persistence, history and drift: managed or file_owned. |
 | `cors` | Per-location Cross-Origin Resource Sharing policy and the preflight terminator it turns on. |
 | `discovery` | Dynamic backend discovery for an upstream pool. |
 | `egress` | The outbound-destination allow-list applied to auxiliary fetches. |
@@ -158,6 +159,7 @@ value is compared as a digest so no secret material leaves the process.
 | `egress.allow` | `restart_required` | `egress` | startup | the outbound dial policy is built once at startup and captured as an immutable set |
 | `egress.enabled` | `restart_required` | `egress` | startup | the outbound dial policy is built once at startup and captured as an immutable set |
 | `global.access_log` | `ignored_deprecated` | `access_log` | deprecated, ignored | superseded by observability.access_log; no runtime consumer reads it |
+| `global.config_authority` | `restart_required` | `config_authority` | startup | authority is resolved once at startup and wires the file watcher, SIGHUP, and the managed baseline before any writer exists; changing it moves ownership of the configuration file and cannot be hot-applied (ADR 0019 §9.2) |
 | `global.error_log` | `ignored_deprecated` | `error_log` | deprecated, ignored | structured process logs are written to stderr; no runtime consumer reads it |
 | `global.log_format` | `restart_required` | `log_format` | startup | the slog handler encoding is chosen once when the logger is built at startup |
 | `global.log_level` | `hot_reload` | `log_level` | — | the level var is updated by OnReloaded on each successful reload |

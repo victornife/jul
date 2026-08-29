@@ -63,6 +63,8 @@ func TestValidateRejectsInvalidGlobalKnownValues(t *testing.T) {
 		{"shutdown timeout", func(c *Config) { c.Global.ShutdownTimeout = -1 }, `[global].shutdown_timeout`},
 		{"reload timeout", func(c *Config) { c.Global.ReloadTimeout = -1 }, `[global].reload_timeout`},
 		{"redaction floor", func(c *Config) { c.Global.RedactMinSecretLength = -1 }, `[global].redact_min_secret_length`},
+		{"config authority reserved value", func(c *Config) { c.Global.ConfigAuthority = "controller_owned" }, `reserved for a future release`},
+		{"config authority invalid value", func(c *Config) { c.Global.ConfigAuthority = "sometimes" }, `[global].config_authority`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

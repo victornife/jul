@@ -33,6 +33,31 @@ func warnHas(d ConfigDiff, substr string) bool {
 	return false
 }
 
+// TestDiffConfigsExportedWrapper pins that the exported DiffConfigs (used by
+// the app composition root to build adopt-preview diffs without importing
+// admin's unexported diff internals) delegates to diffConfigs verbatim.
+func TestDiffConfigsExportedWrapper(t *testing.T) {
+	before := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":8080",
+		Locations: []config.LocationConfig{{
+			Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+			ProxyPass: "http://127.0.0.1:3000",
+		}},
+	}}}
+	after := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":8080",
+		Locations: []config.LocationConfig{{
+			Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+			ProxyPass: "http://127.0.0.1:4000",
+		}},
+	}}}
+	got := DiffConfigs(before, after)
+	want := diffConfigs(before, after)
+	if len(got.Modifications) != len(want.Modifications) || !diffHas(got, "Change target of route") {
+		t.Fatalf("DiffConfigs() = %+v, want equivalent to diffConfigs() = %+v", got, want)
+	}
+}
+
 func TestDiffLocationActionAndTarget(t *testing.T) {
 	before := &config.Config{Servers: []config.ServerConfig{{
 		Listen: ":8080",

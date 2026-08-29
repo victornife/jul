@@ -63,6 +63,10 @@
       "description": "Negotiated response compression."
     },
     {
+      "name": "config_authority",
+      "description": "Which subsystem owns configuration persistence, history and drift: managed or file_owned."
+    },
+    {
       "name": "cors",
       "description": "Per-location Cross-Origin Resource Sharing policy and the preflight terminator it turns on."
     },
@@ -252,15 +256,15 @@
     }
   ],
   "counts": {
-    "schema_paths": 343,
-    "schema_leaves": 291,
-    "registry_entries": 291,
-    "startup_consumed": 58,
+    "schema_paths": 344,
+    "schema_leaves": 292,
+    "registry_entries": 292,
+    "startup_consumed": 59,
     "by_class": {
       "hot_reload": 219,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
-      "restart_required": 58,
+      "restart_required": 59,
       "validation_rejected_reserved": 2
     }
   },
@@ -809,6 +813,19 @@
       "conditional": false,
       "deprecated": true,
       "ignored": true,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "global.config_authority",
+      "class": "restart_required",
+      "subsystem": "config_authority",
+      "reason": "authority is resolved once at startup and wires the file watcher, SIGHUP, and the managed baseline before any writer exists; changing it moves ownership of the configuration file and cannot be hot-applied (ADR 0019 §9.2)",
+      "startup_consumed": true,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
       "reserved": false,
       "secret_digested": false
     },

@@ -51,6 +51,22 @@
       "state": "merged_release_pending"
     },
     {
+      "name": "jul_config_authority_denied_total",
+      "type": "counter",
+      "help": "Mutating configuration requests refused because the process is file_owned, labeled by the bounded operation name.",
+      "labels": [
+        "reason"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_config_authority_drift",
+      "type": "gauge",
+      "help": "1 when managed configuration authority has detected an unresolved external edit to the configuration file; 0 otherwise.",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_config_pending_restart",
       "type": "gauge",
       "help": "1 when a managed staged-restart candidate is pending (waiting for process restart); 0 otherwise.",

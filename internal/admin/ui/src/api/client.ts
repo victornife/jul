@@ -407,6 +407,23 @@ export const ManagedApplyOutcomeSchema = z.object({
 });
 export type ManagedApplyOutcome = z.infer<typeof ManagedApplyOutcomeSchema>;
 
+// ConfigAuthoritySchema mirrors admin.ConfigAuthorityStatus (ADR 0019): who
+// owns configuration persistence and drift detection. config_authority_source
+// distinguishes an operator-declared value from the fixed file_owned default
+// and from a process with no configuration file at all.
+export const ConfigAuthoritySchema = z.object({
+  config_authority: z.enum(["managed", "file_owned"]),
+  config_authority_source: z.enum(["explicit", "default", "no_config_file"]),
+  config_state: z.string().optional(),
+  config_inconsistent_reason: z.string().optional(),
+  drift: z.boolean(),
+  drift_detected_at: z.string().optional(),
+  baseline_version: z.string().optional(),
+  disk_version: z.string().optional(),
+  disk_parse_error: z.string().optional(),
+});
+export type ConfigAuthority = z.infer<typeof ConfigAuthoritySchema>;
+
 export const OverviewSchema = z.object({
   product: z.string(),
   version: z.string(),
@@ -459,6 +476,10 @@ export const OverviewSchema = z.object({
   // configuration apply, including any async restoration (H-06/M-05). Absent
   // until the first managed apply completes.
   last_managed_apply: ManagedApplyOutcomeSchema.optional(),
+  // authority reports the process's configuration-authority mode, source, and
+  // (in managed mode) drift/state (ADR 0019). Absent only for a build that
+  // predates this field; every current server always sends it.
+  authority: ConfigAuthoritySchema.optional(),
 });
 export type Overview = z.infer<typeof OverviewSchema>;
 

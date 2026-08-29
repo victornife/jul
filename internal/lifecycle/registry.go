@@ -23,123 +23,125 @@ import "sort"
 // Subsystem identifiers. The set is closed: TestSubsystemsAreDocumented fails
 // for an entry whose subsystem has no description.
 const (
-	SubAccessControl  Subsystem = "access_control"
-	SubAccessLog      Subsystem = "access_log"
-	SubACME           Subsystem = "acme"
-	SubAdmin          Subsystem = "admin"
-	SubAuth           Subsystem = "auth"
-	SubBackendTLS     Subsystem = "backend_tls"
-	SubCache          Subsystem = "cache"
-	SubClientAddress  Subsystem = "client_address"
-	SubCompression    Subsystem = "compression"
-	SubCORS           Subsystem = "cors"
-	SubDiscovery      Subsystem = "discovery"
-	SubEgress         Subsystem = "egress"
-	SubErrorLog       Subsystem = "error_log"
-	SubErrorPages     Subsystem = "error_pages"
-	SubFastCGI        Subsystem = "fastcgi"
-	SubGRPC           Subsystem = "grpc"
-	SubGRPCTranscode  Subsystem = "grpc_transcode"
-	SubH2C            Subsystem = "h2c"
-	SubHeaders        Subsystem = "headers"
-	SubHealthCheck    Subsystem = "health_check"
-	SubHTTP3          Subsystem = "http3"
-	SubListener       Subsystem = "listener"
-	SubListenerLimits Subsystem = "listener_limits"
-	SubListenerTimes  Subsystem = "listener_timeouts"
-	SubLogFormat      Subsystem = "log_format"
-	SubLogLevel       Subsystem = "log_level"
-	SubMetrics        Subsystem = "metrics"
-	SubMTLS           Subsystem = "mtls"
-	SubPlugins        Subsystem = "plugins"
-	SubProxyPass      Subsystem = "proxy_pass"
-	SubProxyRetries   Subsystem = "proxy_retries"
-	SubProxyTimeouts  Subsystem = "proxy_timeouts"
-	SubRateLimit      Subsystem = "rate_limit"
-	SubRBAC           Subsystem = "rbac"
-	SubRedact         Subsystem = "redact"
-	SubRedirect       Subsystem = "redirect"
-	SubReloadTimeout  Subsystem = "reload_timeout"
-	SubResilience     Subsystem = "resilience"
-	SubReturn         Subsystem = "return"
-	SubRewrites       Subsystem = "rewrites"
-	SubRoot           Subsystem = "root"
-	SubRouting        Subsystem = "routing"
-	SubServerIdentity Subsystem = "server_identity"
-	SubServerLimits   Subsystem = "server_limits"
-	SubServerNames    Subsystem = "server_names"
-	SubServerRedirect Subsystem = "server_redirect"
-	SubShutdown       Subsystem = "shutdown_timeout"
-	SubStaticFiles    Subsystem = "static_files"
-	SubStream         Subsystem = "stream"
-	SubTLS            Subsystem = "tls"
-	SubTracing        Subsystem = "tracing"
-	SubTryFiles       Subsystem = "try_files"
-	SubUpstream       Subsystem = "upstream"
-	SubUWSGI          Subsystem = "uwsgi"
-	SubWAF            Subsystem = "waf"
-	SubWorkerThreads  Subsystem = "worker_threads"
+	SubAccessControl   Subsystem = "access_control"
+	SubAccessLog       Subsystem = "access_log"
+	SubACME            Subsystem = "acme"
+	SubAdmin           Subsystem = "admin"
+	SubAuth            Subsystem = "auth"
+	SubBackendTLS      Subsystem = "backend_tls"
+	SubCache           Subsystem = "cache"
+	SubClientAddress   Subsystem = "client_address"
+	SubCompression     Subsystem = "compression"
+	SubConfigAuthority Subsystem = "config_authority"
+	SubCORS            Subsystem = "cors"
+	SubDiscovery       Subsystem = "discovery"
+	SubEgress          Subsystem = "egress"
+	SubErrorLog        Subsystem = "error_log"
+	SubErrorPages      Subsystem = "error_pages"
+	SubFastCGI         Subsystem = "fastcgi"
+	SubGRPC            Subsystem = "grpc"
+	SubGRPCTranscode   Subsystem = "grpc_transcode"
+	SubH2C             Subsystem = "h2c"
+	SubHeaders         Subsystem = "headers"
+	SubHealthCheck     Subsystem = "health_check"
+	SubHTTP3           Subsystem = "http3"
+	SubListener        Subsystem = "listener"
+	SubListenerLimits  Subsystem = "listener_limits"
+	SubListenerTimes   Subsystem = "listener_timeouts"
+	SubLogFormat       Subsystem = "log_format"
+	SubLogLevel        Subsystem = "log_level"
+	SubMetrics         Subsystem = "metrics"
+	SubMTLS            Subsystem = "mtls"
+	SubPlugins         Subsystem = "plugins"
+	SubProxyPass       Subsystem = "proxy_pass"
+	SubProxyRetries    Subsystem = "proxy_retries"
+	SubProxyTimeouts   Subsystem = "proxy_timeouts"
+	SubRateLimit       Subsystem = "rate_limit"
+	SubRBAC            Subsystem = "rbac"
+	SubRedact          Subsystem = "redact"
+	SubRedirect        Subsystem = "redirect"
+	SubReloadTimeout   Subsystem = "reload_timeout"
+	SubResilience      Subsystem = "resilience"
+	SubReturn          Subsystem = "return"
+	SubRewrites        Subsystem = "rewrites"
+	SubRoot            Subsystem = "root"
+	SubRouting         Subsystem = "routing"
+	SubServerIdentity  Subsystem = "server_identity"
+	SubServerLimits    Subsystem = "server_limits"
+	SubServerNames     Subsystem = "server_names"
+	SubServerRedirect  Subsystem = "server_redirect"
+	SubShutdown        Subsystem = "shutdown_timeout"
+	SubStaticFiles     Subsystem = "static_files"
+	SubStream          Subsystem = "stream"
+	SubTLS             Subsystem = "tls"
+	SubTracing         Subsystem = "tracing"
+	SubTryFiles        Subsystem = "try_files"
+	SubUpstream        Subsystem = "upstream"
+	SubUWSGI           Subsystem = "uwsgi"
+	SubWAF             Subsystem = "waf"
+	SubWorkerThreads   Subsystem = "worker_threads"
 )
 
 // subsystemDescriptions is the closed set of subsystems with the operator-facing
 // sentence rendered into the generated reference.
 var subsystemDescriptions = map[Subsystem]string{
-	SubAccessControl:  "Per-location allow/deny gates evaluated by the handler tree.",
-	SubAccessLog:      "Access-record emission and its sinks.",
-	SubACME:           "Automatic certificate management (ACME) for a TLS listener.",
-	SubAdmin:          "The admin/observability listener and its startup-owned resources.",
-	SubAuth:           "Per-location credential checks (CIDR, Basic, JWT, forward-auth).",
-	SubBackendTLS:     "Outbound TLS trust for backend connections: roots, client certificate, verified name and peer identities.",
-	SubCache:          "The two-tier response cache backend.",
-	SubClientAddress:  "The per-listener trusted-proxy policy that derives the canonical client address.",
-	SubCompression:    "Negotiated response compression.",
-	SubCORS:           "Per-location Cross-Origin Resource Sharing policy and the preflight terminator it turns on.",
-	SubDiscovery:      "Dynamic backend discovery for an upstream pool.",
-	SubEgress:         "The outbound-destination allow-list applied to auxiliary fetches.",
-	SubErrorLog:       "Legacy error-log destinations kept for v1 compatibility.",
-	SubErrorPages:     "Per-server custom error documents.",
-	SubFastCGI:        "FastCGI upstream dispatch.",
-	SubGRPC:           "Native gRPC / HTTP-2 passthrough proxying.",
-	SubGRPCTranscode:  "gRPC-JSON transcoding for a location.",
-	SubH2C:            "Cleartext HTTP/2 on a plaintext listener.",
-	SubHeaders:        "Headers added to the upstream request, and response-header add/set/remove operations.",
-	SubHealthCheck:    "Active health probing for an upstream pool.",
-	SubHTTP3:          "The HTTP/3 (QUIC) listener and its Alt-Svc advertisement.",
-	SubListener:       "The listen address a socket binds to.",
-	SubListenerLimits: "Byte limits fixed when a listener binds.",
-	SubListenerTimes:  "Timeouts fixed when a listener binds.",
-	SubLogFormat:      "The process log encoding chosen when the logger is built.",
-	SubLogLevel:       "The process log level.",
-	SubMetrics:        "The Prometheus registry and its label configuration.",
-	SubMTLS:           "Mutual-TLS client-certificate verification.",
-	SubPlugins:        "WASM plugin definitions and the chains that reference them.",
-	SubProxyPass:      "The reverse-proxy target of a location.",
-	SubProxyRetries:   "Retry budget for idempotent proxied requests.",
-	SubProxyTimeouts:  "Per-location proxy dial and I/O timeouts.",
-	SubRateLimit:      "Request rate limiting and the per-listener connection cap.",
-	SubRBAC:           "Admin role-based access control policy.",
-	SubRedact:         "Secret redaction applied to logs.",
-	SubRedirect:       "Location redirect targets.",
-	SubReloadTimeout:  "The threshold that reports a slow reload.",
-	SubResilience:     "Admission and overload control for an upstream pool: concurrency limits, the pending queue and its timeout.",
-	SubReturn:         "Bare status returns for a location.",
-	SubRewrites:       "Regex rewrite rules applied before dispatch.",
-	SubRoot:           "Static-file document roots.",
-	SubRouting:        "Location match selection.",
-	SubServerIdentity: "Labels that identify a server block in projections.",
-	SubServerLimits:   "Per-request body limits read by the handler tree.",
-	SubServerNames:    "Virtual-host names used for routing and TLS certificate selection.",
-	SubServerRedirect: "Server-level HTTPS redirection.",
-	SubShutdown:       "The graceful-shutdown drain budget.",
-	SubStaticFiles:    "Static-file serving behavior.",
-	SubStream:         "L4 (TCP/UDP) stream-proxy listeners and routes.",
-	SubTLS:            "TLS termination material and parameters for a listener.",
-	SubTracing:        "OpenTelemetry tracing export.",
-	SubTryFiles:       "Static-file fallback chains.",
-	SubUpstream:       "Backend pools and their balancing policy.",
-	SubUWSGI:          "uWSGI upstream dispatch.",
-	SubWAF:            "Web application firewall policy.",
-	SubWorkerThreads:  "The GOMAXPROCS cap applied to the process.",
+	SubAccessControl:   "Per-location allow/deny gates evaluated by the handler tree.",
+	SubAccessLog:       "Access-record emission and its sinks.",
+	SubACME:            "Automatic certificate management (ACME) for a TLS listener.",
+	SubAdmin:           "The admin/observability listener and its startup-owned resources.",
+	SubAuth:            "Per-location credential checks (CIDR, Basic, JWT, forward-auth).",
+	SubBackendTLS:      "Outbound TLS trust for backend connections: roots, client certificate, verified name and peer identities.",
+	SubCache:           "The two-tier response cache backend.",
+	SubClientAddress:   "The per-listener trusted-proxy policy that derives the canonical client address.",
+	SubCompression:     "Negotiated response compression.",
+	SubConfigAuthority: "Which subsystem owns configuration persistence, history and drift: managed or file_owned.",
+	SubCORS:            "Per-location Cross-Origin Resource Sharing policy and the preflight terminator it turns on.",
+	SubDiscovery:       "Dynamic backend discovery for an upstream pool.",
+	SubEgress:          "The outbound-destination allow-list applied to auxiliary fetches.",
+	SubErrorLog:        "Legacy error-log destinations kept for v1 compatibility.",
+	SubErrorPages:      "Per-server custom error documents.",
+	SubFastCGI:         "FastCGI upstream dispatch.",
+	SubGRPC:            "Native gRPC / HTTP-2 passthrough proxying.",
+	SubGRPCTranscode:   "gRPC-JSON transcoding for a location.",
+	SubH2C:             "Cleartext HTTP/2 on a plaintext listener.",
+	SubHeaders:         "Headers added to the upstream request, and response-header add/set/remove operations.",
+	SubHealthCheck:     "Active health probing for an upstream pool.",
+	SubHTTP3:           "The HTTP/3 (QUIC) listener and its Alt-Svc advertisement.",
+	SubListener:        "The listen address a socket binds to.",
+	SubListenerLimits:  "Byte limits fixed when a listener binds.",
+	SubListenerTimes:   "Timeouts fixed when a listener binds.",
+	SubLogFormat:       "The process log encoding chosen when the logger is built.",
+	SubLogLevel:        "The process log level.",
+	SubMetrics:         "The Prometheus registry and its label configuration.",
+	SubMTLS:            "Mutual-TLS client-certificate verification.",
+	SubPlugins:         "WASM plugin definitions and the chains that reference them.",
+	SubProxyPass:       "The reverse-proxy target of a location.",
+	SubProxyRetries:    "Retry budget for idempotent proxied requests.",
+	SubProxyTimeouts:   "Per-location proxy dial and I/O timeouts.",
+	SubRateLimit:       "Request rate limiting and the per-listener connection cap.",
+	SubRBAC:            "Admin role-based access control policy.",
+	SubRedact:          "Secret redaction applied to logs.",
+	SubRedirect:        "Location redirect targets.",
+	SubReloadTimeout:   "The threshold that reports a slow reload.",
+	SubResilience:      "Admission and overload control for an upstream pool: concurrency limits, the pending queue and its timeout.",
+	SubReturn:          "Bare status returns for a location.",
+	SubRewrites:        "Regex rewrite rules applied before dispatch.",
+	SubRoot:            "Static-file document roots.",
+	SubRouting:         "Location match selection.",
+	SubServerIdentity:  "Labels that identify a server block in projections.",
+	SubServerLimits:    "Per-request body limits read by the handler tree.",
+	SubServerNames:     "Virtual-host names used for routing and TLS certificate selection.",
+	SubServerRedirect:  "Server-level HTTPS redirection.",
+	SubShutdown:        "The graceful-shutdown drain budget.",
+	SubStaticFiles:     "Static-file serving behavior.",
+	SubStream:          "L4 (TCP/UDP) stream-proxy listeners and routes.",
+	SubTLS:             "TLS termination material and parameters for a listener.",
+	SubTracing:         "OpenTelemetry tracing export.",
+	SubTryFiles:        "Static-file fallback chains.",
+	SubUpstream:        "Backend pools and their balancing policy.",
+	SubUWSGI:           "uWSGI upstream dispatch.",
+	SubWAF:             "Web application firewall policy.",
+	SubWorkerThreads:   "The GOMAXPROCS cap applied to the process.",
 }
 
 // SubsystemDescription returns the operator-facing description of a subsystem.
@@ -280,6 +282,7 @@ func secretDigest(e Entry) Entry {
 func globalEntries() []Entry {
 	return []Entry{
 		ignored("global.access_log", SubAccessLog, "superseded by observability.access_log; no runtime consumer reads it", true),
+		restart("global.config_authority", SubConfigAuthority, "authority is resolved once at startup and wires the file watcher, SIGHUP, and the managed baseline before any writer exists; changing it moves ownership of the configuration file and cannot be hot-applied (ADR 0019 \u00a79.2)"),
 		ignored("global.error_log", SubErrorLog, "structured process logs are written to stderr; no runtime consumer reads it", true),
 		restart("global.log_format", SubLogFormat, "the slog handler encoding is chosen once when the logger is built at startup"),
 		hot("global.log_level", SubLogLevel, "the level var is updated by OnReloaded on each successful reload"),

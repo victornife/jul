@@ -337,6 +337,9 @@ type patchApplyParams struct {
 // managed-apply coordinator. Every caller reaches persistence through here, so
 // no route can bypass validation or the audit trail.
 func (s *Server) applyPatchOps(w http.ResponseWriter, r *http.Request, params patchApplyParams) {
+	if s.denyIfFileOwned(w, r, params.auditAction) {
+		return
+	}
 	reqCtx := applyRequestContext(r, ApplyOperationPatchApply)
 	s.bindManagedApplyDeadline(&reqCtx)
 

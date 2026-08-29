@@ -166,6 +166,13 @@ type PlannedRestartStore struct {
 	stagedAt     time.Time
 	inconsistent bool // set by Reconcile when sidecar state cannot be repaired
 	external     bool // true when an unmanaged external disk/runtime divergence is present
+
+	// testHookAfterStagedMarkerWritten, when non-nil, runs once immediately
+	// after PromoteToStagedVerified durably writes the "staged" marker and
+	// before its post-promotion disk re-read. It exists so a test can
+	// deterministically simulate an external write landing in that exact
+	// window (ADR 0019 §11.2.4.1); always nil in production.
+	testHookAfterStagedMarkerWritten func()
 }
 
 // NewFilePlannedRestartStore creates a PlannedRestartStore backed by sidecar
@@ -347,6 +354,48 @@ func (s *PlannedRestartStore) StageManaged(baseRaw, candidateRaw []byte, marker 
 	return nil
 }
 
+// WriteAdoptBackup performs step 2 of ADR 0019 §11.2.4's adopt-and-stage
+// composition in isolation: write baseRaw (the baseline snapshot, never the
+// file) to .bak. Unlike StageManaged, it never branches on an existing
+// staged update — adopt-and-stage only ever runs when IsPending() is false
+// (AdoptExternal rejects while a restart is already pending), so there is
+// always exactly one fresh backup to write.
+func (s *PlannedRestartStore) WriteAdoptBackup(baseRaw []byte) error {
+	if s == nil || s.ConfigPath == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.writeBackupLocked(baseRaw); err != nil {
+		return fmt.Errorf("planned-restart stage: write adopt backup: %w", err)
+	}
+	s.baseRaw = baseRaw
+	return nil
+}
+
+// WritePreparedAfterAdoptBackup performs step 4 of the adopt-and-stage
+// composition in isolation: write the "prepared" planned-restart marker.
+// Call only after WriteAdoptBackup, and only after the managed baseline has
+// already committed (step 3) — the commit interposed between the two halves
+// is exactly why adoption cannot use StageManaged, which writes both halves
+// back to back in one call.
+func (s *PlannedRestartStore) WritePreparedAfterAdoptBackup(marker PlannedRestartMarker) error {
+	if s == nil || s.ConfigPath == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	marker.Version = plannedRestartMarkerVersion
+	marker.State = plannedRestartStatePrepared
+	marker.ConfigPath = s.ConfigPath
+	marker.StagedAt = time.Now()
+	marker.BaseRawSHA256 = sha256Hex(s.baseRaw)
+	if err := s.writeMarkerLocked(marker); err != nil {
+		return fmt.Errorf("planned-restart stage: write prepared marker: %w", err)
+	}
+	return nil
+}
+
 // AbortPrepared restores the sidecar state that existed before StageManaged
 // when the final expected-base check rejects the candidate. It never touches
 // the active config file. A fresh stage removes its new marker and backup; a
@@ -384,6 +433,41 @@ func (s *PlannedRestartStore) AbortPrepared(previous *PlannedRestartMarker) erro
 	}
 	s.pending = true
 	s.stagedAt = previous.StagedAt
+	s.inconsistent = false
+	return nil
+}
+
+// ClearStagingArtifacts removes the marker and backup unconditionally,
+// whatever state the marker is in (or even if only the backup exists, with
+// no marker at all), without touching the configuration file. The
+// adopt-and-stage composition (ADR 0019 §11.2.4) uses it wherever its table
+// requires the planned-restart artifacts removed after the baseline has
+// already committed: a prepared-marker write failure (row 4), and a
+// promotion mismatch where AbortPrepared cannot help because the marker was
+// already written "staged" before the mismatch was caught (§11.2.4.1's
+// post-promotion row) — AbortPrepared requires the marker to still be
+// "prepared" and returns ErrNoManagedPreparedMarker otherwise. Left alone in
+// either case, a later Reconcile would find the marker (or an orphaned
+// backup) and either complete an operation already reported as failed, or
+// leave secret-bearing bytes on disk indefinitely. Callers must not report
+// success on the operation this clears; removing Jul's own bookkeeping is
+// not the same as restoring the file, and only the second is forbidden.
+func (s *PlannedRestartStore) ClearStagingArtifacts() error {
+	if s == nil || s.ConfigPath == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := os.Remove(s.markerPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("clear staging marker: %w", err)
+	}
+	if err := os.Remove(s.backupPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("clear staging backup: %w", err)
+	}
+	s.pending = false
+	s.raw = nil
+	s.baseRaw = nil
+	s.stagedAt = time.Time{}
 	s.inconsistent = false
 	return nil
 }
@@ -636,6 +720,9 @@ func (s *PlannedRestartStore) PromoteToStagedVerified(candidateRaw []byte) error
 	if err := s.writeMarkerLocked(*marker); err != nil {
 		return fmt.Errorf("planned-restart promote: write staged marker: %w", err)
 	}
+	if s.testHookAfterStagedMarkerWritten != nil {
+		s.testHookAfterStagedMarkerWritten()
+	}
 
 	// Post-promotion disk check: detect a write that landed during the marker
 	// update. The marker is already staged, so a mismatch is an inconsistency.
@@ -763,6 +850,29 @@ func (s *PlannedRestartStore) SetExternalDivergence(present bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.external = present
+}
+
+// RemoveOrphanBackup removes the planned-restart backup sidecar when no
+// marker exists to claim it. Reconcile treats an absent marker as a clean
+// state and never collects such a backup, so it can otherwise survive
+// indefinitely holding literal configuration bytes, including secrets — a
+// file_owned startup performs this cleanup once, alongside closing any
+// inherited managed epoch (ADR 0019 §17.2). It is idempotent and a no-op when
+// a marker is present (a discard or reconciliation still owns the backup) or
+// when nothing exists.
+func (s *PlannedRestartStore) RemoveOrphanBackup() error {
+	if s == nil || s.ConfigPath == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := os.Stat(s.markerPath()); err == nil {
+		return nil
+	}
+	if err := os.Remove(s.backupPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove orphan planned-restart backup: %w", err)
+	}
+	return nil
 }
 
 // Reconcile runs the crash-recovery rules from §17.4 on startup. It inspects

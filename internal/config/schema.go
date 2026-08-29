@@ -203,6 +203,18 @@ type GlobalConfig struct {
 	// want to be warned about slow reloads without disabling the threshold should
 	// use a very large duration (e.g. "1h").
 	ReloadTimeout Duration `toml:"reload_timeout"`
+	// ConfigAuthority declares who owns configuration persistence, managed
+	// history, and drift detection: "managed" (Jul owns the file; Console/API
+	// writes are subject to RBAC and CAS, and external edits become drift that
+	// must be explicitly adopted) or "file_owned" (an external file or GitOps
+	// pipeline owns the file; every mutating admin endpoint is refused and the
+	// file watcher/SIGHUP behave exactly as they do without this field).
+	// "controller_owned" is a reserved value rejected by validation until a
+	// real external controller exists. Omitted resolves to "file_owned" — a
+	// fixed default, never derived from any other field (ADR 0019 §9.1). It is
+	// restart-required: changing it moves ownership of the configuration file
+	// and can only be staged through stage_restart (ADR 0019 §9.2).
+	ConfigAuthority string `toml:"config_authority"`
 }
 
 // ServerConfig is a virtual host bound to one listen address.

@@ -46,6 +46,8 @@ changing it requires a restart.
 | `jul_auth_decisions_total` | Counter | `method`, `result` | Released `v1.32.0` | Access-control decisions, labeled by method (cidr/basic/jwt/forward) and result (allow/deny). |
 | `jul_cache_events_total` | Counter | `state` | Released `v1.32.0` | Response cache outcomes, labeled by state (HIT/MISS/STALE/BYPASS). |
 | `jul_cache_revalidations_total` | Counter | `outcome` | Merged, release pending | Cache validation and revalidation decisions, labeled by bounded outcome (`stored`, `not_modified`, `uncacheable`, `origin_error`, `canceled`, `panic`, `no_lease`, `deduplicated`). |
+| `jul_config_authority_denied_total` | Counter | `reason` | Merged / release pending | Mutating configuration requests refused because the process is `file_owned` (ADR 0019 §15), labeled by the bounded operation name — never a path or actor. |
+| `jul_config_authority_drift` | Gauge | — | Merged / release pending | 1 when managed configuration authority has detected an unresolved external edit to the configuration file; 0 otherwise. Carries no path, digest, or version. |
 | `jul_config_pending_restart` | Gauge | — | Merged / release pending | 1 when a managed staged-restart candidate is pending (waiting for process restart); 0 otherwise. |
 | `jul_config_stage_restart_total` | Counter | `result` | Merged / release pending | Staged-restart apply operations, labeled by result (created/updated/discarded/failed). |
 | `jul_discovery_errors_total` | Counter | `pool` | Released `v1.32.0` | Failed or empty service-discovery resolves, labeled by pool (last-good backends are kept). |

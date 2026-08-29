@@ -12,7 +12,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { ConsoleHealthBadge } from "@/features/observability/ConsoleHealthBadge.tsx";
 import { CommandPalette, type CommandItem } from "@/app/CommandPalette.tsx";
 import { openCommandPalette } from "@/app/commandPaletteBus.ts";
-import { fetchOverview, type CertRisk } from "@/api/client.ts";
+import { fetchOverview, type CertRisk, type ConfigAuthority } from "@/api/client.ts";
 import { usePermission } from "@/auth/usePermission.ts";
 
 type NavLayout = "top" | "side";
@@ -467,6 +467,61 @@ function RestartRequiredBanner({ subsystems }: { readonly subsystems: readonly s
 	);
 }
 
+// ConfigAuthorityBanner shows a persistent notice at the top of every page
+// reflecting ADR 0019's config_authority state. It is purely informational —
+// the server, not this banner, is what refuses a write in file_owned mode or
+// while drift is unresolved (409 config_authority_read_only). Dismissible per
+// session, matching the other global banners on this page.
+function ConfigAuthorityBanner({ authority }: { readonly authority: ConfigAuthority | undefined }) {
+	const navigate = useNavigate();
+	const [dismissed, setDismissed] = useState(false);
+
+	if (dismissed || !authority) return null;
+
+	let text: string;
+	let tone: string;
+	let cta: { label: string; to: string } | null = null;
+	if (authority.config_authority === "file_owned") {
+		const sourceNote =
+			authority.config_authority_source === "default"
+				? " (not declared; set config_authority explicitly to silence this notice)"
+				: authority.config_authority_source === "no_config_file"
+					? " (no configuration file)"
+					: "";
+		text = `Configuration is file-owned${sourceNote} — an external file or pipeline owns it, and every write here is refused.`;
+		tone = "bg-jul-accent/10 text-jul-text border-jul-accent/40";
+	} else if (authority.config_state === "managed_drift") {
+		text = "Managed configuration has drifted from an external edit — writes are refused until you adopt or restore the file.";
+		tone = "bg-jul-warning/15 text-jul-warning border-jul-warning/40";
+		cta = { label: "Review and adopt →", to: "/config" };
+	} else if (authority.config_state === "managed_unadopted") {
+		text = "Managed configuration has not been adopted yet — writes are refused until an explicit one-time adoption.";
+		tone = "bg-jul-warning/15 text-jul-warning border-jul-warning/40";
+		cta = { label: "Adopt now →", to: "/config" };
+	} else if (authority.config_state === "managed_inconsistent") {
+		text = `Managed baseline is inconsistent (${authority.config_inconsistent_reason ?? "unknown reason"}) — writes are refused; investigate before proceeding.`;
+		tone = "bg-jul-danger/15 text-jul-danger border-jul-danger/40";
+	} else {
+		return null;
+	}
+
+	return (
+		<div className={`border-b ${tone} px-6 py-2 text-xs font-medium flex items-center justify-between`} role="alert">
+			<span>
+				{text}{" "}
+				{cta && (
+					<button className="underline" onClick={() => { void navigate(cta.to); }}>
+						{cta.label}
+					</button>
+				)}
+			</span>
+			<button type="button" onClick={() => { setDismissed(true); }} className="text-xs opacity-60 hover:opacity-100" aria-label="Dismiss authority notice">
+				✕
+			</button>
+		</div>
+	);
+}
+
 export function Layout() {
   const loc = useLocation();
   const [layout, setLayout] = usePersistentState<NavLayout>("nav_layout", "top", isNavLayout);
@@ -481,6 +536,7 @@ export function Layout() {
   const version = overview?.version ?? "";
   const certRisk = overview?.cert_risk;
   const pendingRestart = overview?.pending_restart;
+  const authority = overview?.authority;
 
   const controlsTop = (
     <div className="flex items-center gap-2">
@@ -551,6 +607,7 @@ export function Layout() {
         <main className="flex-1 p-6">
           <CertAlertBanner certRisk={certRisk} />
           <RestartRequiredBanner subsystems={pendingRestart} />
+          <ConfigAuthorityBanner authority={authority} />
           <Outlet />
         </main>
         <footer className="px-6 py-2 text-[10px] text-jul-muted">
@@ -573,6 +630,7 @@ export function Layout() {
       </header>
       <CertAlertBanner certRisk={certRisk} />
       <RestartRequiredBanner subsystems={pendingRestart} />
+      <ConfigAuthorityBanner authority={authority} />
       <main className="flex-1 overflow-auto p-6">
         <Outlet />
       </main>

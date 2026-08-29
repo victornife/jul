@@ -47,11 +47,12 @@ type Purger interface {
 type ApplyOperation string
 
 const (
-	ApplyOperationConfigApply ApplyOperation = "config.apply"
-	ApplyOperationPatchApply  ApplyOperation = "config.patch"
-	ApplyOperationLegacyRaw   ApplyOperation = "config.raw"
-	ApplyOperationSettings    ApplyOperation = "config.settings"
-	ApplyOperationRollback    ApplyOperation = "config.rollback"
+	ApplyOperationConfigApply   ApplyOperation = "config.apply"
+	ApplyOperationPatchApply    ApplyOperation = "config.patch"
+	ApplyOperationLegacyRaw     ApplyOperation = "config.raw"
+	ApplyOperationSettings      ApplyOperation = "config.settings"
+	ApplyOperationRollback      ApplyOperation = "config.rollback"
+	ApplyOperationAdoptExternal ApplyOperation = "config.adopt_external"
 )
 
 // ApplyRequestContext carries the authenticated caller from an admin HTTP
@@ -475,6 +476,112 @@ type Deps struct {
 	// WriteConfigRaw/ApplyConfig fakes without a terminal callback) the handlers
 	// keep recording history eagerly so behavior is unchanged.
 	ManagedHistoryActive bool
+
+	// ObserveAuthorityDenied counts one mutating request refused by
+	// denyIfFileOwned (ADR 0019 §15), labeled by the bounded operation name.
+	// Nil disables the metric so context-free and unit-test callers are
+	// unaffected.
+	ObserveAuthorityDenied func(reason string)
+
+	// Authority reports the process's configuration-authority mode, its
+	// source, and its current managed/file-owned state (ADR 0019 §9/§10/§16).
+	// Nil is treated as managed with no drift/inconsistency, so existing tests
+	// and embedding callers that do not wire it are unaffected. Every mutating
+	// admin endpoint consults it before any side effect (§15); the Console
+	// banner and the runtime overview surface it read-only.
+	Authority func() ConfigAuthorityStatus
+
+	// RefreshAuthorityDrift re-assesses managed-baseline drift on demand and
+	// returns the resulting status. It is the "explicit drift/status refresh"
+	// trigger ADR 0019 §12 lists as one of exactly four event-driven
+	// assessment points (watcher event, SIGHUP, before every managed write,
+	// and this one) — deliberately distinct from Authority, which only reads
+	// the last-assessed, possibly-stale status; polling Authority itself must
+	// never substitute for this, or drift detection becomes the polling loop
+	// §12 says does not exist. Nil disables the refresh endpoint (returns
+	// 501); a no-op outside managed authority, matching AssessDriftNow.
+	RefreshAuthorityDrift func() ConfigAuthorityStatus
+
+	// AdoptExternalPreview assesses the current external file against the
+	// managed baseline without any side effect: strict decode, resolve,
+	// validate, lint and lifecycle-classify, and a diff against the baseline
+	// snapshot when one exists (ADR 0019 §14). Nil disables the adopt-preview
+	// endpoint (returns 501).
+	AdoptExternalPreview func() (AdoptPreviewResult, error)
+	// AdoptExternal performs the authenticated adopt-external operation (ADR
+	// 0019 §14): it re-verifies the external file matches observedDigest,
+	// establishes or adopts the managed baseline through T-mark, and — when
+	// the adopted bytes are not already live — submits them through the
+	// dedicated AdoptExternal coordinator entry (§14.3), never through the
+	// ordinary apply path. Nil disables the adopt endpoint (returns 501).
+	AdoptExternal func(ctx ApplyRequestContext, req AdoptExternalRequest) (ConfigApplyResult, error)
+}
+
+// ConfigAuthorityStatus is the wire-safe projection of the process's
+// configuration-authority state (ADR 0019 §9/§10/§16), exposed through
+// Deps.Authority so admin handlers and status responses can reason about it
+// without importing internal/app (which would create an import cycle: app
+// already imports admin for ApplyRequestContext, ConfigApplyResult, etc.).
+type ConfigAuthorityStatus struct {
+	// Mode is "managed" or "file_owned".
+	Mode string `json:"config_authority"`
+	// Source is "explicit", "default", or "no_config_file".
+	Source string `json:"config_authority_source"`
+	// ConfigState is the closed §16 state enum (e.g. "managed_clean",
+	// "managed_drift", "file_owned_desired_ahead").
+	ConfigState string `json:"config_state,omitempty"`
+	// InconsistentReason is set only when ConfigState is
+	// "managed_inconsistent"; the state alone is not actionable.
+	InconsistentReason string `json:"config_inconsistent_reason,omitempty"`
+	// Drift and DriftDetectedAt describe an unresolved managed-mode external
+	// edit. DriftDetectedAt is the zero time when Drift is false.
+	Drift           bool      `json:"drift"`
+	DriftDetectedAt time.Time `json:"drift_detected_at,omitempty"`
+	// BaselineVersion/DiskVersion are canonical versions (never raw bytes or
+	// digests beyond what §13 already bounds); DiskParseError is set only when
+	// the on-disk content does not parse.
+	BaselineVersion string `json:"baseline_version,omitempty"`
+	DiskVersion     string `json:"disk_version,omitempty"`
+	DiskParseError  string `json:"disk_parse_error,omitempty"`
+}
+
+// IsFileOwned reports whether mutating admin endpoints must be refused. A
+// zero-value ConfigAuthorityStatus (Mode == "") is treated as managed, so a
+// caller that never wired Deps.Authority sees unchanged behavior.
+func (a ConfigAuthorityStatus) IsFileOwned() bool {
+	return a.Mode == "file_owned"
+}
+
+// AdoptExternalRequest is the wire body of both the adopt-external preview and
+// apply operations (ADR 0019 §14).
+type AdoptExternalRequest struct {
+	// ObservedDigest is the raw sha256 digest of the external file observed at
+	// preview time. The apply step re-verifies it under the write lock and
+	// conflicts (409 drift_detected) if the file changed since.
+	ObservedDigest string `json:"observed_digest"`
+	// BaseVersion is the managed baseline's canonical version observed at
+	// preview time.
+	BaseVersion string `json:"base_version,omitempty"`
+	// Mode is "hot" or "stage_restart".
+	Mode string `json:"mode,omitempty"`
+	// Confirm must be true on the apply step; adoption without an explicit
+	// confirmation is rejected, because it accepts bytes Jul did not produce.
+	Confirm bool `json:"confirm,omitempty"`
+}
+
+// AdoptPreviewResult is the side-effect-free assessment returned by adopt
+// preview (ADR 0019 §14/§14.1).
+type AdoptPreviewResult struct {
+	OK                    bool              `json:"ok"`
+	Origin                string            `json:"origin"` // drift | no_baseline | inconsistent
+	ObservedDigest        string            `json:"observed_digest"`
+	BaseVersion           string            `json:"base_version,omitempty"`
+	CandidateVersion      string            `json:"candidate_version,omitempty"`
+	RestartRequired       bool              `json:"restart_required"`
+	ValidationErrors      []string          `json:"validation_errors,omitempty"`
+	Lint                  []validationError `json:"lint,omitempty"`
+	Diff                  *ConfigDiff       `json:"diff,omitempty"`
+	DiffUnavailableReason string            `json:"diff_unavailable_reason,omitempty"`
 }
 
 // ReloadSnapshot is the legacy admin-package view of the most recent reload
@@ -927,6 +1034,9 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if s.denyIfFileOwned(w, r, string(ApplyOperationLegacyRaw)) {
+		return
+	}
 	if s.deps.ApplyConfigRaw == nil && s.deps.WriteConfigRaw == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
@@ -1069,6 +1179,9 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost && r.Method != http.MethodPut {
 		w.Header().Set("Allow", "POST, PUT")
 		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.denyIfFileOwned(w, r, string(ApplyOperationSettings)) {
 		return
 	}
 	if s.deps.LoadConfig == nil || (s.deps.ApplyConfig == nil && s.deps.SaveConfig == nil) {

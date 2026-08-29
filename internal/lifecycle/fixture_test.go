@@ -34,6 +34,7 @@ func fullConfig() *config.Config {
 			ErrorLog:              "stderr",
 			LogLevel:              "info",
 			LogFormat:             "text",
+			ConfigAuthority:       "managed",
 			ShutdownTimeout:       config.Duration(30 * time.Second),
 			ReloadTimeout:         config.Duration(10 * time.Second),
 			RedactMinSecretLength: 4,

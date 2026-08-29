@@ -522,4 +522,10 @@ type RuntimeOverview struct {
 	// the Console renders it as an advisory finalization banner distinct from the
 	// reload outcome and from AdminHealth. Nil until the first apply finalizes.
 	ManagedApplyFinalization *ManagedApplyAdvisory `json:"managed_apply_finalization,omitempty"`
+	// Authority reports the process's configuration-authority mode, source,
+	// and current managed/file-owned state (ADR 0019 §9/§10/§16). The Console
+	// banner and every read-only status surface render from this field; write
+	// controls are hidden client-side as a convenience, but the server is what
+	// enforces it (§15).
+	Authority *ConfigAuthorityStatus `json:"authority,omitempty"`
 }

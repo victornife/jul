@@ -473,6 +473,8 @@ Labels fall into three classes by what bounds them:
 | `jul_reload_timeout_total` | `phase` | fixed reload-phase enum |
 | `jul_config_stage_restart_total` | `result` | fixed stage/discard result enum |
 | `jul_config_pending_restart` | — | single series |
+| `jul_config_authority_drift` | — | single series |
+| `jul_config_authority_denied_total` | `reason` | fixed managed-operation enum (never a path or actor) |
 | `jul_managed_apply_finalized_total` | `operation`, `mode`, `outcome`, `restored` | fixed managed-operation/lifecycle enums |
 | `jul_managed_apply_finalization_errors_total` | `component` | fixed finalizer-component enum |
 | `jul_managed_apply_history_total` | `operation`, `result` | fixed managed-operation/history-result enums |
