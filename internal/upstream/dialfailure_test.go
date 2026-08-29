@@ -37,6 +37,27 @@ func TestClassifyDialError(t *testing.T) {
 	}
 }
 
+func TestClassifyAdmissionError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"overloaded", ErrOverloaded, "overloaded"},
+		{"retired", ErrRetired, "shutdown"},
+		{"context canceled", context.Canceled, "shutdown"},
+		{"falls through to dial classification", ErrNoAvailableBackend, "no_backend"},
+		{"falls through, other", errors.New("boom"), "other"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ClassifyAdmissionError(tc.err); got != tc.want {
+				t.Errorf("ClassifyAdmissionError(%v) = %q, want %q", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
 type fakeTimeoutError struct{}
 
 func (fakeTimeoutError) Error() string   { return "fake timeout" }
