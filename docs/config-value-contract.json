@@ -350,6 +350,18 @@
       ]
     },
     {
+      "go_field": "GlobalConfig.ConfigAuthority",
+      "path": "global.config_authority",
+      "kind": "enum",
+      "constraint": "exact lowercase enum; controller_owned is reserved and rejected",
+      "zero_semantics": "omitted resolves to file_owned, a fixed default that is never derived from another field",
+      "active_when": "always",
+      "allowed": [
+        "managed",
+        "file_owned"
+      ]
+    },
+    {
       "go_field": "GlobalConfig.LogFormat",
       "path": "global.log_format",
       "kind": "enum",

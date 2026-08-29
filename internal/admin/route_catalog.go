@@ -239,6 +239,20 @@ var Catalog = []RouteSpec{
 		},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handlePendingRestart) },
 	},
+	// Explicit drift/status refresh (ADR 0019 §12's fourth event-driven
+	// trigger). Read-only with respect to the configuration file — it never
+	// writes it — but POST because it performs an action (a fresh assessment)
+	// rather than returning cached state, unlike GET /api/config/pending-restart.
+	{
+		Pattern: "/api/config/authority/refresh",
+		Methods: []string{http.MethodPost},
+		AnyPermissions: []rbac.Permission{
+			rbac.ConfigRead,
+			rbac.ConfigWrite,
+			rbac.ConfigApply,
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleRefreshAuthorityDrift) },
+	},
 	// Exact-ID managed apply lookup (AC-02). Retrieves the terminal (or
 	// pending) result of a managed apply transaction by its rl_N id. The
 	// secret-free public view is authorized for EITHER status:read OR
@@ -393,6 +407,25 @@ var Catalog = []RouteSpec{
 		Methods:    []string{http.MethodPost},
 		Permission: rbac.ConfigApply,
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleDiscardPendingRestart) },
+	},
+
+	// ── Adopt-external (config:adopt) ─────────────────────────────────────────
+	// A distinct permission from config:apply: accepting bytes Jul did not
+	// produce is a different trust decision from applying a reviewed
+	// candidate (ADR 0019 §14). Preview is side-effect-free but still
+	// requires the same permission — it renders content of a file Jul has
+	// not yet validated or taken responsibility for.
+	{
+		Pattern:    "/api/config/adopt-external/preview",
+		Methods:    []string{http.MethodGet, http.MethodPost},
+		Permission: rbac.ConfigAdopt,
+		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleAdoptExternalPreview) },
+	},
+	{
+		Pattern:    "/api/config/adopt-external",
+		Methods:    []string{http.MethodPost},
+		Permission: rbac.ConfigAdopt,
+		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleAdoptExternal) },
 	},
 
 	// ── History rollback (history:rollback) ───────────────────────────────────

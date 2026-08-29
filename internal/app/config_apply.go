@@ -96,6 +96,30 @@ type ApplyResult struct {
 	// and threaded to the trusted composition-root completion callback. It is
 	// internal finalization provenance, NOT serialized in the apply result.
 	FinalizationError string
+
+	// AuthorityDenied is true when the operation was refused before any side
+	// effect because the process is file_owned (ADR 0019 §15). This is a
+	// defense-in-depth check: the admin HTTP layer normally denies first with
+	// the exact config_authority_read_only shape, but every mutating coordinator
+	// entry enforces it independently so no caller can bypass it.
+	AuthorityDenied bool
+	// Degraded carries bounded, non-content-bearing degradations that do not
+	// change this result's own OK/outcome, following the ordering rule that a
+	// degradation never upgrades or downgrades a terminal outcome (ADR 0019
+	// §33.2).
+	Degraded []DegradedEntry
+	// ConfigState is the closed §16 state enum computed for this operation
+	// (e.g. "managed_clean", "managed_drift"), when authority tracking is wired.
+	ConfigState ConfigState
+	// Origin is set only by AdoptExternal: "drift", "no_baseline", or
+	// "inconsistent" (ADR 0019 §11.2.1/§14.1) — which condition the adoption
+	// resolved.
+	Origin string
+	// AppOutcome carries an app-layer terminal outcome not expressible by
+	// server.ReloadOutcome, currently only "owned_not_serving" (ADR 0019
+	// §33.1): the configuration is owned and persisted but neither serving
+	// nor staged. Empty for every ordinary apply.
+	AppOutcome string
 }
 
 // ApplyInFlightState tracks the current managed apply transaction. It is used
@@ -129,6 +153,16 @@ type ConfigApplyCoordinator struct {
 	// ReadConfigRaw reads the persisted config for baseline/CAS verification.
 	// Nil uses os.ReadFile(Path); tests may inject deterministic failures.
 	ReadConfigRaw func() ([]byte, error)
+
+	// Authority is the process's immutable configuration-authority mode,
+	// established once at startup (ADR 0019 §9/§10). The zero value is
+	// AuthorityManaged, so context-free/unit-test callers that never set it see
+	// today's behavior.
+	Authority ConfigAuthority
+	// ManagedBaseline owns the persisted managed-baseline marker+snapshot and
+	// drift assessment (ADR 0019 §11.2/§12). Nil disables baseline persistence
+	// and drift refusal, so unit tests that do not wire it are unaffected.
+	ManagedBaseline *ManagedBaselineStore
 
 	// RefreshState is called while applyMu is held before any state-dependent
 	// decision. It must reconcile the planned-restart marker with disk and
@@ -223,6 +257,13 @@ type ConfigApplyCoordinator struct {
 // ApplyRaw applies a raw configuration bytes slice. It is the hot-apply entry
 // point for the admin /api/config/apply path.
 func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []byte, mode ApplyMode) (ApplyResult, error) {
+	// ADR 0019 §15: file-owned denial precedes every lock, every read, and every
+	// side effect. This is the defense-in-depth enforcement point; the admin
+	// HTTP layer normally denies first with the exact wire shape.
+	if c.Authority == AuthorityFileOwned {
+		return ApplyResult{OK: false, Mode: mode, AuthorityDenied: true, Message: "Configuration is file-owned; the running server does not write it."}, nil
+	}
+
 	// applyMu serializes applies so only one candidate is in flight at a time.
 	// c.mu protects coordinator state and is not held across the reload wait so
 	// the async finalizer can safely restore without deadlocking.
@@ -264,6 +305,21 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 	}
 	if ctx.AuthGeneration != "" && c.AuthGeneration != nil && c.AuthGeneration() != ctx.AuthGeneration {
 		return ApplyResult{OK: false, Mode: mode, Conflict: true, Message: "Admin authentication changed since this edit was authorized; reload and try again."}, nil
+	}
+
+	// ADR 0019 §11 point 7: managed writes are refused while ownership is not
+	// yet established, while drift exists, or while the baseline is
+	// inconsistent — the same shape as the existing refusal of a hot apply
+	// while a planned restart is pending, and for the same reason: writing
+	// would silently discard something the operator did (or paper over
+	// storage damage this process cannot explain).
+	if msg, blocked := c.managedBaselineBlockMessage(); blocked {
+		return ApplyResult{
+			OK:             false,
+			Mode:           mode,
+			Message:        msg,
+			PendingRestart: c.plannedRestartStatus(),
+		}, nil
 	}
 
 	baselineHint := ctx.Baseline
@@ -518,6 +574,10 @@ func (c *ConfigApplyCoordinator) ApplyConfig(ctx admin.ApplyRequestContext, cfg 
 // marker consistency, disk digest, and live serving version before restoring
 // the backup. On success the watcher echo of the restoration is suppressed.
 func (c *ConfigApplyCoordinator) DiscardPlannedRestart() (ApplyResult, error) {
+	if c.Authority == AuthorityFileOwned {
+		return ApplyResult{OK: false, AuthorityDenied: true, Message: "Configuration is file-owned; the running server does not write it."}, nil
+	}
+
 	// Serialize with applyMu so refresh, discard, and apply cannot interleave.
 	c.applyMu.Lock()
 	defer c.applyMu.Unlock()
@@ -561,11 +621,20 @@ func (c *ConfigApplyCoordinator) DiscardPlannedRestart() (ApplyResult, error) {
 		// Suppress the watcher echo of the restoration write.
 		restoreDigest := sha256.Sum256(restoredBytes)
 		c.suppressWatcher(restoreDigest)
-		return ApplyResult{
+		result := ApplyResult{
 			OK:      true,
 			Mode:    ApplyHot,
 			Message: "Planned restart discarded and previous configuration restored.",
-		}, nil
+		}
+		// ADR 0019 §11.2.3: a verified discard rewinds the baseline to the
+		// restored bytes, the same as a T-write, so the discard is not
+		// mistaken for drift.
+		if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
+			if err := c.ManagedBaseline.CommitMark(restoredBytes, canonicalVersionFromRaw(restoredBytes)); err != nil {
+				result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline could not be rewound after discard"})
+			}
+		}
+		return result, nil
 	}
 
 	// In-memory discard (tests / no config path).
@@ -583,14 +652,89 @@ func (c *ConfigApplyCoordinator) DiscardPlannedRestart() (ApplyResult, error) {
 	}, nil
 }
 
-// refreshStateLocked calls the RefreshState hook if configured. It must be
-// called while applyMu is held. Errors are logged and returned so the caller
-// can fail closed.
+// refreshStateLocked calls the RefreshState hook if configured and then
+// re-assesses managed-baseline drift. It must be called while applyMu is
+// held. Errors are logged and returned so the caller can fail closed.
+//
+// ADR 0019 §11.2.3 layers the two state machines: planned restart reconciles
+// first (via RefreshState), the baseline second, against what that leaves.
 func (c *ConfigApplyCoordinator) refreshStateLocked() error {
-	if c.RefreshState == nil {
+	if c.RefreshState != nil {
+		if err := c.RefreshState(); err != nil {
+			return err
+		}
+	}
+	c.assessManagedDrift()
+	return nil
+}
+
+// assessManagedDrift re-reads the configuration file and updates the managed
+// baseline's drift assessment. It implements the "before every managed
+// write" trigger of ADR 0019 §12's four event-driven assessment points; the
+// same helper backs the explicit AssessDriftNow entry used by the file
+// watcher and SIGHUP. It is a no-op outside managed authority or when no
+// baseline store is wired.
+func (c *ConfigApplyCoordinator) assessManagedDrift() {
+	if c.Authority != AuthorityManaged || c.ManagedBaseline == nil {
+		return
+	}
+	raw, err := c.readConfigRaw()
+	var version, parseErr string
+	if err == nil {
+		if cfg, perr := config.Parse(raw); perr == nil {
+			version = server.CanonicalVersion(cfg)
+		} else {
+			parseErr = perr.Error()
+		}
+	}
+	c.ManagedBaseline.AssessDrift(raw, err, version, parseErr)
+}
+
+// AssessDriftNow acquires applyMu and re-assesses managed-baseline drift. It
+// is the entry point the file watcher and SIGHUP call in managed mode (ADR
+// 0019 §11 point 4/5, §12): both become drift detectors and never enqueue a
+// reload themselves.
+func (c *ConfigApplyCoordinator) AssessDriftNow() {
+	c.applyMu.Lock()
+	defer c.applyMu.Unlock()
+	c.assessManagedDrift()
+}
+
+// managedBaselineBlockMessage reports whether a managed write must be
+// refused because ownership is not yet established, drift is unresolved, or
+// the baseline is inconsistent (ADR 0019 §10/§11 point 7). It must be called
+// after refreshStateLocked so the assessment is current.
+func (c *ConfigApplyCoordinator) managedBaselineBlockMessage() (string, bool) {
+	if c.Authority != AuthorityManaged || c.ManagedBaseline == nil {
+		return "", false
+	}
+	switch st := c.ManagedBaseline.Status(); st.State {
+	case ConfigStateManagedUnadopted:
+		return "Managed configuration has not been adopted yet; adopt the current file before applying changes.", true
+	case ConfigStateManagedDrift:
+		return "Configuration on disk has drifted from the managed baseline; adopt the external file or restore it before applying changes.", true
+	case ConfigStateManagedInconsistent:
+		return fmt.Sprintf("Managed baseline state is inconsistent (%s); resolve it before applying changes.", st.Reason), true
+	default:
+		return "", false
+	}
+}
+
+// rewindOrMarkInconsistent resolves the managed-baseline transaction when a
+// managed write's reload failed and restoration was attempted (T-write's
+// restored arm, ADR 0019 §11.2). When restoration succeeded it rewinds the
+// baseline to the prior bytes; when restoration failed the on-disk state is
+// uncertain, so the baseline is marked inconsistent immediately rather than
+// left clean on the strength of an intention (§11.2.1a).
+func (c *ConfigApplyCoordinator) rewindOrMarkInconsistent(restored bool) *DegradedEntry {
+	if restored {
+		if err := c.ManagedBaseline.RewindWrite(); err != nil {
+			return &DegradedEntry{Kind: DegradedBaselineError, Message: "baseline could not be rewound after restoration"}
+		}
 		return nil
 	}
-	return c.RefreshState()
+	c.ManagedBaseline.MarkInconsistent(ReasonRestorationFailed)
+	return &DegradedEntry{Kind: DegradedBaselineError, Message: "baseline left inconsistent after a failed restoration"}
 }
 
 // newManagedApplyInstanceID returns a 12-hex-character boot-scoped identifier
@@ -797,6 +941,23 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 		}
 		return c.conflictResult(ApplyStageRestart, persistedVersion, desiredVersion, currentVersion), nil
 	}
+	// T-write step 3 (ADR 0019 §11.2.3): the baseline "preparing" marker
+	// follows the planned-restart .bak+prepared marker and precedes the
+	// configuration rename, which is the commit point for both machines. The
+	// prior digest/version come from the managed baseline's own current
+	// record, not from baseRaw — a staged UPDATE's baseRaw is the original
+	// pre-stage bytes, but the baseline already advanced to the first staged
+	// candidate when that stage committed.
+	if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
+		bst := c.ManagedBaseline.Status()
+		if err := c.ManagedBaseline.BeginWrite(bst.BaselineRawSHA256, bst.BaselineCanonicalVersion, sha256Hex(data), persistedVersion); err != nil {
+			c.mu.Unlock()
+			if c.PlannedRestart != nil {
+				_ = c.PlannedRestart.AbortPrepared(previousMarker)
+			}
+			return ApplyResult{OK: false, Mode: ApplyStageRestart, Version: persistedVersion, PersistedVersion: persistedVersion, DesiredVersion: desiredVersion, Message: "Failed to record managed-baseline provenance; nothing was staged."}, fmt.Errorf("%w: begin managed baseline write: %v", admin.ErrConfigStorageUnavailable, err)
+		}
+	}
 	rawDigest := sha256.Sum256(data)
 	if err := atomicfile.Write(c.Path, data, 0o600); err != nil {
 		c.mu.Unlock()
@@ -824,24 +985,45 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 	// before promotion still leaves marker="prepared" with disk==candidate,
 	// which Reconcile promotes; a crash before the candidate write leaves
 	// marker="prepared" with disk==base, which Reconcile cleans up.
+	var stagePromotionDegraded *DegradedEntry
 	if c.PlannedRestart != nil {
 		if err := c.PlannedRestart.PromoteToStagedVerified(data); err != nil {
-			c.mu.Unlock()
 			// An external write in the promotion window (or a state mismatch)
 			// must not be reported as a successful stage. Map the disk-change
 			// races to a conflict so the HTTP layer returns 409; genuine
 			// state/programming errors surface as a storage error.
 			if errors.Is(err, ErrStagedCandidateChanged) {
+				c.mu.Unlock()
 				return c.conflictResult(ApplyStageRestart, persistedVersion, desiredVersion, currentVersion), nil
 			}
-			return ApplyResult{
-				OK:               false,
-				Mode:             ApplyStageRestart,
-				Version:          persistedVersion,
-				PersistedVersion: persistedVersion,
-				DesiredVersion:   desiredVersion,
-				Message:          "Failed to promote staged marker after candidate write: " + err.Error(),
-			}, err
+			// ADR 0019 §11.2.3 row 5: the configuration rename already
+			// committed (step 4) — only the "prepared"->"staged" transition
+			// write itself failed. The stage still succeeds: Reconcile
+			// promotes the still-"prepared" marker at the next start because
+			// the file already matches the candidate, so run it now rather
+			// than reporting a failure a restart would silently complete
+			// anyway. Steps 6-7 (baseline) still run below.
+			if rerr := c.PlannedRestart.Reconcile(); rerr != nil {
+				c.mu.Unlock()
+				return ApplyResult{
+					OK:               false,
+					Mode:             ApplyStageRestart,
+					Version:          persistedVersion,
+					PersistedVersion: persistedVersion,
+					DesiredVersion:   desiredVersion,
+					Message:          "Failed to promote or reconcile the staged marker after candidate write: " + err.Error(),
+				}, err
+			}
+			stagePromotionDegraded = &DegradedEntry{Kind: DegradedStagingError, Message: "planned-restart promotion did not complete synchronously; the stage still converges at the next restart"}
+		}
+	}
+	// Steps 6-7 (ADR 0019 §11.2.3): the baseline snapshot and promotion follow
+	// the planned-restart "staged" promotion, so a failed baseline write can
+	// never be lost to — or block — the outer machine's own guarantee.
+	var stageDegraded *DegradedEntry
+	if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
+		if err := c.ManagedBaseline.CompleteWrite(data, persistedVersion); err != nil {
+			stageDegraded = &DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written"}
 		}
 	}
 	c.mu.Unlock()
@@ -870,6 +1052,12 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 		PendingRestart:        c.plannedRestartStatus(),
 		Message:               msg,
 		StagedRestartIsUpdate: isUpdate,
+	}
+	if stageDegraded != nil {
+		result.Degraded = append(result.Degraded, *stageDegraded)
+	}
+	if stagePromotionDegraded != nil {
+		result.Degraded = append(result.Degraded, *stagePromotionDegraded)
 	}
 	// AC-05: a committed stage (create or update) snapshots the prior on-disk
 	// configuration — the previous serving config for a fresh stage, or the
@@ -1000,6 +1188,22 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		c.mu.Unlock()
 		return c.conflictResult(mode, persistedVersion, desiredVersion, currentVersion), nil
 	}
+	// T-write step 1 (ADR 0019 §11.2): record the baseline transition before
+	// the configuration file changes. A failure here means nothing is
+	// attempted — the config write below never runs.
+	if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
+		if err := c.ManagedBaseline.BeginWrite(sha256Hex(baseline.Raw), baseline.Version, sha256Hex(data), persistedVersion); err != nil {
+			c.mu.Unlock()
+			return ApplyResult{
+				OK:               false,
+				Mode:             mode,
+				Version:          persistedVersion,
+				PersistedVersion: persistedVersion,
+				DesiredVersion:   desiredVersion,
+				Message:          "Failed to record managed-baseline provenance; nothing was changed.",
+			}, fmt.Errorf("%w: begin managed baseline write: %v", admin.ErrConfigStorageUnavailable, err)
+		}
+	}
 	if err := atomicfile.Write(c.Path, data, 0o600); err != nil {
 		c.mu.Unlock()
 		return ApplyResult{
@@ -1040,6 +1244,10 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// not reload. Restore the exact previous bytes and suppress the
 		// restoration echo so the watcher does not loop.
 		restoreErr := c.restorePreviousLocked(baseline.Raw, baseline.Exists, rawDigest)
+		var baselineDegraded *DegradedEntry
+		if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
+			baselineDegraded = c.rewindOrMarkInconsistent(restoreErr == nil)
+		}
 		c.inFlightState = ApplyInFlightNone
 		// Build structured truth with Persisted/Restored/FinalDiskVersion
 		// while still holding the lock so the disk read in withRestorationOutcome
@@ -1071,6 +1279,9 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 			},
 		}
 		terminal = c.withRestorationOutcome(terminal, baseline.Raw, baseline.Exists, rawDigest)
+		if baselineDegraded != nil {
+			terminal.Degraded = append(terminal.Degraded, *baselineDegraded)
+		}
 		// M-05: Move callback after unlock to prevent mutex wedge on panic.
 		c.mu.Unlock()
 		// AC-05: an enqueue failure whose restoration also failed records a
@@ -1120,6 +1331,19 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 			}
 		}
 		terminal := c.buildTerminalResult(mode, persistedVersion, desiredVersion, rr, baseline.Raw, baseline.Exists, rawDigest)
+		// ADR 0019 §11.2.0.1: the baseline transaction terminalizes here — under
+		// c.mu, immediately before the admission gate (inFlightState) is
+		// cleared — so a later apply is never admitted while this one's
+		// baseline is still pending.
+		if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
+			if restoreNeeded {
+				if d := c.rewindOrMarkInconsistent(terminal.Restored); d != nil {
+					terminal.Degraded = append(terminal.Degraded, *d)
+				}
+			} else if err := c.ManagedBaseline.CompleteWrite(data, persistedVersion); err != nil {
+				terminal.Degraded = append(terminal.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written"})
+			}
+		}
 		// #226 / AC-03: every config-path mutation is complete at this point,
 		// including any required restoration and the final disk-state read. Clear
 		// the admission gate while still holding mu, then release the server's

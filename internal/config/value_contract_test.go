@@ -116,6 +116,7 @@ func TestConfigValueContractCoversEveryNumericPublicLeaf(t *testing.T) {
 		"ClientAddressConfig.TrustedProxies", "ClientAuthConfig.Mode",
 		"CompressionConfig.Encoders",
 		"DiscoveryConfig.Type", "GlobalConfig.LogFormat", "GlobalConfig.LogLevel",
+		"GlobalConfig.ConfigAuthority",
 		"GlobalConfig.WorkerThreads", "GRPCTranscodeConfig.StreamMode",
 		"HeaderMatch.Name", "HeaderMatch.Op", "HeaderMatch.Value",
 		"HealthCheckConfig.Type", "MatchConfig.Methods", "MatchConfig.Type",

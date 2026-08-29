@@ -106,6 +106,7 @@ log_format = "json"
 shutdown_timeout = "30s"
 reload_timeout = "10s"
 redact_min_secret_length = 4
+config_authority = "managed"
 ```
 
 | Key | Type | Description |
@@ -117,6 +118,7 @@ redact_min_secret_length = 4
 | `shutdown_timeout` | duration | Grace period to drain in-flight requests on shutdown (also bounds the HTTP/3 drain) |
 | `reload_timeout` | duration | Maximum duration for a configuration reload before it is reported as `timed_out`. Zero or omitted defaults to 10s. The timeout is advisory: the swap still completes, but a warning is logged and the apply response includes `previous_reload.timed_out: true`. The Console surfaces this as a distinct "Applied — reload exceeded the configured timeout" warning so the operator knows to investigate slow reload paths (WAF rule compilation, WASM plugin loading, large config) or raise this value. See [reload-semantics.md](reload-semantics.md) |
 | `redact_min_secret_length` | int | Shortest resolved secret value masked from logs; `0` uses the default (4). Lower it (down to 1) for short secrets, accepting possible masking of incidental log text |
+| `config_authority` | string | Who owns configuration persistence and drift detection: `managed` (Jul.IA owns the file; the Console/API may write it) or `file_owned` (an external file or GitOps pipeline owns it; every mutating admin endpoint is refused). `controller_owned` is reserved and rejected. **Omitted resolves to `file_owned`** — a fixed default that is never derived from `[admin].enabled` or any other field. Restart-required; can only change through `stage_restart`. See [reload-semantics.md](reload-semantics.md#configuration-authority-managed-vs-file-owned) and [deployment.md](deployment.md#configuration-authority) |
 
 The legacy `[global].access_log` / `error_log` values are known no-ops retained for compatibility in the current major version. They emit lint warnings, do not cause a restart, and do not select a sink. Use `[observability.access_log].enabled` and `sinks` for request records; route process stderr through the service supervisor.
 
@@ -136,7 +138,10 @@ candidate.
 The structured patch API supports three process-wide operations:
 
 - `global_set` for `worker_threads`, `log_level`, `log_format`,
-  `shutdown_timeout`, `reload_timeout`, and `redact_min_secret_length`;
+  `shutdown_timeout`, `reload_timeout`, and `redact_min_secret_length`
+  (`config_authority` is intentionally excluded: it changes persistence
+  ownership and may only move through `stage_restart` as a complete
+  candidate, never a sparse hot field);
 - `compression_set` for every field in `[compression]`;
 - `rate_limit_global_set` for `enabled`, `key`, `rate`, `burst`, and
   listener-global `max_conns`.

@@ -100,6 +100,9 @@ func validateGlobalValues(c GlobalConfig) []error {
 	if err := validateOptionalEnum("[global].log_format", c.LogFormat, "text", "json"); err != nil {
 		errs = append(errs, err)
 	}
+	if err := validateConfigAuthority(c.ConfigAuthority); err != nil {
+		errs = append(errs, err)
+	}
 	if err := validateWorkerThreads(c.WorkerThreads); err != nil {
 		errs = append(errs, err)
 	}
@@ -113,6 +116,21 @@ func validateGlobalValues(c GlobalConfig) []error {
 		errs = append(errs, err)
 	}
 	return errs
+}
+
+// validateConfigAuthority rejects any value outside the closed
+// managed/file_owned enum. "controller_owned" gets its own message naming it
+// as reserved rather than the generic "invalid value" text, because it is a
+// real future value rather than a typo (ADR 0019 §9/§36).
+func validateConfigAuthority(value string) error {
+	switch value {
+	case "", "managed", "file_owned":
+		return nil
+	case "controller_owned":
+		return fmt.Errorf("[global].config_authority: %q is reserved for a future release and is not yet implemented; use managed or file_owned", value)
+	default:
+		return fmt.Errorf("[global].config_authority: invalid value %q; expected managed or file_owned", value)
+	}
 }
 
 func validateUpstreamValues(c UpstreamConfig, where string) []error {

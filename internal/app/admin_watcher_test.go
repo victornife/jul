@@ -18,9 +18,11 @@ import (
 )
 
 // TestAdminWriteAndWatcherEcho (R9-14.2) verifies that a configuration applied
-// through the admin API is persisted to disk and picked up by the live runtime,
-// and that a subsequent external write to the same file is detected by the
-// file watcher and also reloaded.
+// through the admin API is persisted to disk and picked up by the live
+// runtime, and that a subsequent external write to the same file is treated
+// as drift rather than adopted (ADR 0019 §11: managed mode's file watcher is
+// a drift detector, not a reload trigger). config_authority is declared
+// explicitly as managed so the admin write path stays enabled.
 func TestAdminWriteAndWatcherEcho(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "server.toml")
@@ -31,6 +33,7 @@ func TestAdminWriteAndWatcherEcho(t *testing.T) {
 	writeConfig := func(returnCode int) {
 		t.Helper()
 		cfg := &config.Config{
+			Global: config.GlobalConfig{ConfigAuthority: "managed"},
 			Admin: config.AdminConfig{
 				Enabled:    true,
 				Listen:     adminAddr,
@@ -55,6 +58,17 @@ func TestAdminWriteAndWatcherEcho(t *testing.T) {
 	}
 
 	writeConfig(200)
+	// Simulate a prior explicit adoption (ADR 0019 §14): a fresh managed boot
+	// with no persisted baseline refuses every write until one occurs. Tests
+	// that only exercise ordinary managed writes pre-seed the baseline
+	// directly instead of driving the adopt-external HTTP flow.
+	seedRaw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read seed for pre-adoption: %v", err)
+	}
+	if err := NewManagedBaselineStore(cfgPath).CommitMark(seedRaw, ""); err != nil {
+		t.Fatalf("pre-adopt managed baseline: %v", err)
+	}
 
 	logBuf := &safeBuffer{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -95,7 +109,8 @@ func TestAdminWriteAndWatcherEcho(t *testing.T) {
 	// can increment the monotonic admin auth generation between authorization
 	// and validation (flaky auth_cas 409).
 	raw201, err := config.Marshal(&config.Config{
-		Admin: config.AdminConfig{Enabled: true, Listen: adminAddr, Token: token, HistoryDir: tmp},
+		Global: config.GlobalConfig{ConfigAuthority: "managed"},
+		Admin:  config.AdminConfig{Enabled: true, Listen: adminAddr, Token: token, HistoryDir: tmp},
 		Servers: []config.ServerConfig{{
 			Listen: trafficAddr,
 			Locations: []config.LocationConfig{{
@@ -137,10 +152,21 @@ func TestAdminWriteAndWatcherEcho(t *testing.T) {
 	}
 
 	// External file write: change return code from 201 to 202, simulating an
-	// operator editing the file directly. The watcher should reload it.
+	// operator editing the file directly. Managed mode's watcher must treat
+	// this as drift and must NOT reload it — the runtime keeps serving 201
+	// (ADR 0019 §11 points 3-4). Give the debounced watcher time to fire and
+	// assert the traffic server never moves off the last managed version.
 	writeConfig(202)
-	if !waitForHTTPStatus(t, trafficURL, 202, 5*time.Second) {
-		t.Fatalf("watcher did not reload externally written config")
+	if waitForHTTPStatus(t, trafficURL, 202, 1500*time.Millisecond) {
+		t.Fatal("managed mode must not adopt an external edit through the watcher")
+	}
+	resp2, err := http.Get(trafficURL)
+	if err != nil {
+		t.Fatalf("get traffic url: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != 201 {
+		t.Fatalf("runtime status = %d, want 201 (still the last managed version)", resp2.StatusCode)
 	}
 
 	cancel()

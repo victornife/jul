@@ -325,12 +325,36 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// Only file-backed sources can be watched; zero-config (in-memory) sources
 	// have no file on disk, so file-watching is skipped for them.
 	var fileWatch <-chan [32]byte
-	if ts, ok := src.(*config.TOMLSource); ok {
-		fileWatch = watchConfig(ctx, ts.Path, log)
+	tomlSrc, hasConfigPath := src.(*config.TOMLSource)
+	if hasConfigPath {
+		fileWatch = watchConfig(ctx, tomlSrc.Path, log)
+	}
+
+	// Authority is resolved once, here, before any writer is wired (ADR 0019
+	// §9.1/Invariant T1). The fixed file_owned default is never derived from
+	// any other field, in particular never from admin.enabled.
+	authority, authoritySource := ResolveConfigAuthority(cfg.Global.ConfigAuthority, hasConfigPath)
+	if authoritySource == AuthoritySourceDefault {
+		log.Info("config_authority not declared; defaulting to file_owned",
+			"config_authority", authority.String(),
+			"hint", `set [global].config_authority = "managed" or "file_owned" to declare it explicitly`)
+	}
+
+	// In managed mode neither the file watcher nor SIGHUP triggers a reload
+	// (ADR 0019 §11 points 4-5): both become drift detectors. The real
+	// channels are drained here and never forwarded into MergeReload; each
+	// event schedules a drift re-assessment instead. assessDriftRequests is
+	// drained once the coordinator exists, later in this function.
+	assessDriftRequests := make(chan struct{}, 1)
+	mergeSigReload, mergeFileWatch := sigReload, fileWatch
+	if authority == AuthorityManaged {
+		mergeSigReload, mergeFileWatch = nil, nil
+		go driftOnlySignalConsumer(ctx, sigReload, assessDriftRequests)
+		go driftOnlyFileConsumer(ctx, fileWatch, assessDriftRequests)
 	}
 	// Merge SIGHUP (when present), config file-watch, and admin-triggered
 	// reloads into a single typed channel.
-	reload := MergeReload(ctx, sigReload, fileWatch, adminReload, &lastAdminDigest)
+	reload := MergeReload(ctx, mergeSigReload, mergeFileWatch, adminReload, &lastAdminDigest)
 
 	// ── Section 3: Preflight ───────────────────────────────────────────────
 	//
@@ -517,6 +541,11 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 		// Single shared store — coordinator and reconciliation use the same instance.
 		sharedStore := NewFilePlannedRestartStore(configPath)
+		// The managed baseline persists ownership across a restart (ADR 0019
+		// §11.2). It is constructed regardless of authority mode so a
+		// file_owned startup can find and clean up artifacts inherited from a
+		// prior managed epoch (§17.2).
+		managedBaseline := NewManagedBaselineStore(configPath)
 
 		// Wire PendingRestartCheck using the startup config snapshot. It reports
 		// which startup-bound subsystems differ between what we were built from
@@ -532,14 +561,29 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 
 		coordinator = &ConfigApplyCoordinator{
-			BaseCtx:        ctx,
-			Path:           configPath,
-			Preflight:      &pf,
-			SubmitReload:   submitReload,
-			LiveSnapshot:   srv.LiveSnapshot,
-			WatchDigest:    &lastAdminDigest,
-			PlannedRestart: sharedStore,
+			BaseCtx:         ctx,
+			Path:            configPath,
+			Preflight:       &pf,
+			SubmitReload:    submitReload,
+			LiveSnapshot:    srv.LiveSnapshot,
+			WatchDigest:     &lastAdminDigest,
+			PlannedRestart:  sharedStore,
+			Authority:       authority,
+			ManagedBaseline: managedBaseline,
 		}
+		// Drain the drift-assessment requests scheduled by the watcher/SIGHUP
+		// consumers now that the coordinator exists to service them.
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-assessDriftRequests:
+					coordinator.AssessDriftNow()
+					metrics.SetConfigAuthorityDrift(managedBaseline.Status().Drift)
+				}
+			}
+		}()
 
 		// Reconcile planned-restart sidecar files after the data plane is live.
 		// Using OnInitialGenerationReady ensures reconciliation fires only after
@@ -554,6 +598,39 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			}
 			// Sync the pending-restart gauge from the now-reconciled shared store.
 			metrics.SetPendingRestart(sharedStore.IsPending())
+
+			// ADR 0019 §11.2.3: the baseline reconciles second, against
+			// whatever the planned-restart reconciliation above left on disk.
+			if authority == AuthorityManaged {
+				diskRaw, diskErr := os.ReadFile(configPath)
+				var diskVersion, diskParseErr string
+				if diskErr == nil {
+					if diskCfg, perr := config.Parse(diskRaw); perr == nil {
+						diskVersion = server.CanonicalVersion(diskCfg)
+					} else {
+						diskParseErr = perr.Error()
+					}
+				}
+				if err := managedBaseline.Reconcile(diskRaw, diskErr, diskVersion, diskParseErr); err != nil {
+					log.Warn("managed-baseline reconciliation warning (manual recovery may be needed)",
+						"error", err,
+						"snapshot", configPath+".managed-baseline.snapshot",
+					)
+				}
+				metrics.SetConfigAuthorityDrift(managedBaseline.Status().Drift)
+			} else {
+				// file_owned mode writes no configuration, ever, except this
+				// one bounded cleanup performed once at startup (§17.2): close
+				// any managed epoch inherited from a prior restart, and remove
+				// any orphan planned-restart backup Reconcile would never
+				// collect on its own.
+				if err := managedBaseline.CloseEpoch(); err != nil {
+					log.Warn("file-owned startup could not remove leftover managed-baseline artifacts (read-only mount?)", "error", err)
+				}
+				if err := sharedStore.RemoveOrphanBackup(); err != nil {
+					log.Warn("file-owned startup could not remove an orphan planned-restart backup", "error", err)
+				}
+			}
 		}
 
 		coordinator.RefreshState = func() error {
@@ -575,6 +652,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 		deps.ApplyConfigRaw = func(ctx admin.ApplyRequestContext, data []byte, mode string) (admin.ConfigApplyResult, error) {
 			res, err := coordinator.ApplyRaw(ctx, data, ApplyMode(mode))
+			metrics.SetConfigAuthorityDrift(managedBaseline.Status().Drift)
 			result := toAdminConfigApplyResult(res)
 			if mode == string(ApplyStageRestart) {
 				result.StagedRestartIsUpdate = res.StagedRestartIsUpdate
@@ -593,6 +671,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 		deps.ApplyConfig = func(ctx admin.ApplyRequestContext, c *config.Config, mode string) (admin.ConfigApplyResult, error) {
 			res, err := coordinator.ApplyConfig(ctx, c, ApplyMode(mode))
+			metrics.SetConfigAuthorityDrift(managedBaseline.Status().Drift)
 			result := toAdminConfigApplyResult(res)
 			if mode == string(ApplyStageRestart) {
 				result.StagedRestartIsUpdate = res.StagedRestartIsUpdate
@@ -619,6 +698,40 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 		deps.PendingRestart = func() *admin.PendingRestartStatus {
 			return coordinator.PlannedRestartStatus()
+		}
+		deps.AdoptExternalPreview = func() (admin.AdoptPreviewResult, error) {
+			a, err := coordinator.AssessAdoptExternal()
+			if err != nil {
+				return admin.AdoptPreviewResult{}, err
+			}
+			out := admin.AdoptPreviewResult{
+				OK:               a.OK,
+				Origin:           a.Origin,
+				ObservedDigest:   a.ObservedDigest,
+				BaseVersion:      a.BaselineVersion,
+				CandidateVersion: a.CandidateVersion,
+				RestartRequired:  a.RestartRequired,
+				ValidationErrors: a.ValidationErrors,
+			}
+			if !a.OK {
+				return out, nil
+			}
+			if a.PreviousRaw == nil {
+				out.DiffUnavailableReason = "no_prior_managed_state"
+				return out, nil
+			}
+			prevCfg, perr := config.Parse(a.PreviousRaw)
+			candCfg, cerr := config.Parse(a.CandidateRaw)
+			if perr == nil && cerr == nil {
+				d := admin.DiffConfigs(prevCfg, candCfg)
+				out.Diff = &d
+			}
+			return out, nil
+		}
+		deps.AdoptExternal = func(ctx admin.ApplyRequestContext, req admin.AdoptExternalRequest) (admin.ConfigApplyResult, error) {
+			res, err := coordinator.AdoptExternal(ctx, req)
+			metrics.SetConfigAuthorityDrift(managedBaseline.Status().Drift)
+			return toAdminConfigApplyResult(res), err
 		}
 		// Keep legacy closures for external callers during the deprecation
 		// window. They pass an empty request context because they are not
@@ -658,6 +771,45 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			return nil
 		}
 	}
+
+	// Authority status is exposed regardless of whether a coordinator exists
+	// (a process with no config file is file_owned/no_config_file, ADR 0019
+	// §9.1.1). It never gates anything itself — the coordinator and the admin
+	// denial gate are the enforcement points — so a nil dependency is safe.
+	deps.Authority = func() admin.ConfigAuthorityStatus {
+		status := admin.ConfigAuthorityStatus{
+			Mode:   authority.String(),
+			Source: string(authoritySource),
+		}
+		if coordinator != nil && coordinator.ManagedBaseline != nil {
+			bst := coordinator.ManagedBaseline.Status()
+			status.ConfigState = string(bst.State)
+			status.InconsistentReason = string(bst.Reason)
+			status.Drift = bst.Drift
+			if !bst.DriftDetectedAt.IsZero() {
+				status.DriftDetectedAt = bst.DriftDetectedAt
+			}
+			status.BaselineVersion = bst.BaselineCanonicalVersion
+			status.DiskVersion = bst.DiskCanonicalVersion
+			status.DiskParseError = bst.DiskParseError
+		}
+		return status
+	}
+	// ADR 0019 §12's fourth event-driven drift trigger: an explicit,
+	// operator- or Console-initiated refresh, distinct from the other three
+	// (watcher, SIGHUP, pre-write CAS) and never invoked by a passive status
+	// poll such as deps.Authority above — doing so would turn drift
+	// detection into the polling loop §12 says does not exist.
+	deps.RefreshAuthorityDrift = func() admin.ConfigAuthorityStatus {
+		if coordinator != nil {
+			coordinator.AssessDriftNow()
+			if coordinator.ManagedBaseline != nil {
+				metrics.SetConfigAuthorityDrift(coordinator.ManagedBaseline.Status().Drift)
+			}
+		}
+		return deps.Authority()
+	}
+	deps.ObserveAuthorityDenied = metrics.ObserveConfigAuthorityDenied
 
 	// H-05: reserve storage and register the LastManagedApply dep before
 	// admin.New copies deps, so the overview can read it. The actual callback
@@ -917,6 +1069,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 // toAdminConfigApplyResult converts an app-layer ApplyResult into the admin
 // API response shape. It is a pure projection: no new policy is added.
 func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
+	var degraded []admin.DegradedEntry
+	for _, d := range r.Degraded {
+		degraded = append(degraded, admin.DegradedEntry{Kind: string(d.Kind), Message: d.Message})
+	}
 	return admin.ConfigApplyResult{
 		ApplyID:               r.ApplyID,
 		OK:                    r.OK,
@@ -941,6 +1097,11 @@ func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
 		StagedRestartIsUpdate: r.StagedRestartIsUpdate,
 		TimedOutPhase:         r.TimedOutPhase,
 		FinalizationError:     r.FinalizationError,
+		AuthorityDenied:       r.AuthorityDenied,
+		Degraded:              degraded,
+		ConfigState:           string(r.ConfigState),
+		Origin:                r.Origin,
+		AppOutcome:            r.AppOutcome,
 	}
 }
 

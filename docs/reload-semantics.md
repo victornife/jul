@@ -36,6 +36,14 @@ triggered three ways:
 **These three paths share the same live reload transaction, but the admin write
 path validates *before* persistence and correlates the result with the request.**
 
+> **This description is the `file_owned` behavior.** Whether SIGHUP and the
+> file watcher adopt an external edit at all is governed by
+> `[global].config_authority` — see
+> ["Configuration authority: managed vs file_owned"](#configuration-authority-managed-vs-file_owned)
+> below. In `managed` mode (not the default) neither SIGHUP nor the watcher
+> triggers a reload; both become drift detectors instead, and an external edit
+> is adopted only through an explicit `POST /api/config/adopt-external`.
+
 The admin write path runs the full preflight (parse, dry-run, bind-probe, and
 all restart-required checks) *before* the file is written. Nothing is saved
 unless the config is validated to build and bind under preflight conditions.
@@ -44,9 +52,9 @@ a late certificate file change, or transient disk errors), the live reload may
 still fail after the file is written; such failures are recorded in the
 structured `ReloadResult` and leave the previous generation authoritative.
 
-SIGHUP and file-watch trigger the same live runtime swap, but they run restart-
-required checks *at swap time* rather than before the file is written. This
-means:
+SIGHUP and file-watch trigger the same live runtime swap **in `file_owned`
+mode**, but they run restart-required checks *at swap time* rather than before
+the file is written. This means:
 
 - Changes to **hot-reloadable** fields (routes, handlers, upstreams,
   compression, rate limiting, etc.) apply exactly as they do through the
@@ -93,6 +101,59 @@ For the strongest guarantees, use the Console or admin API for configuration
 changes. Direct file edits followed by SIGHUP are safe for hot-reloadable
 changes; for restart-required changes they produce a clearly recorded failed
 reload rather than silent mixed state.
+
+## Configuration authority: managed vs file_owned
+
+Jul.IA has exactly one authoritative desired-state writer at a time, declared
+by `[global].config_authority` (ADR 0019):
+
+| Value | Meaning |
+| --- | --- |
+| `managed` | Jul.IA owns the configuration file. Console/API writes are validated and persisted through the coordinator below. An external edit is never silently adopted — it becomes *drift*, resolved only through an explicit, authenticated adoption. |
+| `file_owned` (default) | An external file or GitOps pipeline owns the configuration file. SIGHUP and the file watcher behave exactly as described in this document. Every mutating admin endpoint is refused with `409 config_authority_read_only` before any side effect. |
+
+The field is `restart_required` and can only change through `stage_restart`;
+it cannot be hot-applied, because it moves ownership of persistence, history,
+and drift detection between subsystems wired at startup. **Omitted resolves
+to `file_owned`** — this is a fixed default, never derived from
+`[admin].enabled` or any other field, chosen because a wrong `managed` default
+fails silently (SIGHUP becomes a no-op) while a wrong `file_owned` default
+fails loudly (every write is refused with a named reason). See
+[configuration.md](configuration.md#global) for the
+full field reference and [deployment.md](deployment.md#configuration-authority)
+for the operational implications, migration, and adoption workflow.
+
+**In `managed` mode:**
+
+- The file watcher and SIGHUP no longer trigger a reload. Both re-assess drift
+  — comparing the raw SHA-256 of the file against the digest Jul.IA last
+  persisted — and update the status/Console banner. A watcher event whose
+  digest matches Jul.IA's own last write is still recognized and suppressed
+  exactly as before; anything else becomes drift.
+- Drift is assessed at exactly four event-driven points — never polled: the
+  watcher, SIGHUP, immediately before every managed write, and an explicit
+  `POST /api/config/authority/refresh`. The last of these lets an operator or
+  the Console force an up-to-date drift assessment on demand — for example
+  before deciding whether to adopt — without waiting for one of the other
+  three to fire.
+- Managed writes (`POST /api/config/apply`, the structured patch API, the
+  listener trust-policy patch, `stage_restart`, and history rollback) are
+  refused while drift is unresolved, or before the managed baseline has ever
+  been established (a fresh `managed` boot starts `managed_unadopted`).
+- An unresolved external edit is adopted through
+  `POST /api/config/adopt-external` (preview at
+  `GET /api/config/adopt-external/preview`), which requires the dedicated
+  `config:adopt` permission and full confirmation. Adoption runs the exact
+  same validation/preflight pipeline as any other apply; there is no reduced
+  path for externally-authored bytes.
+- A restart with unresolved drift still **serves** the file — refusing to
+  start would turn a configuration problem into an outage — but the managed
+  baseline does not advance, so the external bytes never become Jul.IA's
+  desired state merely by surviving a restart.
+
+**In `file_owned` mode**, behavior is unchanged from every description in the
+rest of this document: SIGHUP and the watcher adopt external edits exactly as
+they always have, and the admin write paths are disabled.
 
 ## Two states: *applied* vs *serving*
 

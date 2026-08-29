@@ -316,6 +316,56 @@ func MergeReload(ctx context.Context, sigReload <-chan struct{}, fileWatch <-cha
 	return out
 }
 
+// driftOnlySignalConsumer drains sigReload without ever forwarding it into a
+// reload fan-in: in managed authority, SIGHUP becomes a drift detector rather
+// than a reload trigger (ADR 0019 §11 point 5). Each signal schedules one
+// drift re-assessment, coalesced the same way MergeReload coalesces bursts.
+// It returns when in is nil, closed, or ctx is done.
+func driftOnlySignalConsumer(ctx context.Context, in <-chan struct{}, assessRequests chan<- struct{}) {
+	if in == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-in:
+			if !ok {
+				return
+			}
+			select {
+			case assessRequests <- struct{}{}:
+			default:
+			}
+		}
+	}
+}
+
+// driftOnlyFileConsumer is driftOnlySignalConsumer's counterpart for the file
+// watcher: in managed authority the watcher becomes a drift detector and
+// never enqueues a reload (ADR 0019 §11 point 4). It intentionally ignores
+// the reported digest — echo suppression is meaningless once nothing is
+// forwarded, and this consumer's drift assessment re-reads the file itself.
+func driftOnlyFileConsumer(ctx context.Context, in <-chan [32]byte, assessRequests chan<- struct{}) {
+	if in == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-in:
+			if !ok {
+				return
+			}
+			select {
+			case assessRequests <- struct{}{}:
+			default:
+			}
+		}
+	}
+}
+
 // ValidateRuntimeConfig performs the full runtime preflight for a configuration:
 // it clones the config, runs the structural validation, and dry-runs the
 // build-tag-gated subsystems (WAF, auth, compression) so an edit that a lean

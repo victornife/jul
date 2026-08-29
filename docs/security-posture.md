@@ -179,6 +179,56 @@ with `NoNewPrivileges`, `PrivateTmp`, and related hardening.
 
 ---
 
+## Configuration authority (ADR 0019)
+
+`[global].config_authority` is an ownership mechanism, not a defence against
+someone who can already write the configuration file and restart the
+process — that is what filesystem permissions are for, and it is true of
+every file-configured daemon.
+
+- **What it defends:** in `managed` mode, no external edit becomes Jul.IA's
+  desired state without an explicit, authenticated, audited act
+  (`config:adopt`, a distinct permission held by no predefined role except
+  `admin`). Neither the file watcher, SIGHUP, a status read, a reload, a
+  rollback, nor a restart advances the managed baseline on its own.
+- **What it does not defend:** after a restart, a drifted file is *served* —
+  refusing to start would turn a configuration problem into an outage, and
+  the file is the only configuration in existence at that point. The managed
+  baseline does not advance merely from surviving the restart, so ownership
+  is not silently acquired, but the bytes do run. This is a deliberate
+  availability-over-runtime-integrity trade-off, stated here rather than
+  implied.
+- **In `file_owned` mode**, every mutating admin endpoint — including a
+  wildcard `admin` principal — is refused with the same `409
+  config_authority_read_only` error before any side effect (before the
+  request body is parsed, before any temp file, history write, audit
+  mutation record, or lock). The denial is a property of the server's
+  configuration, not of the caller's authorization, which is why it is `409`
+  rather than `403`.
+- **Drift status discloses no configuration content:** digests, canonical
+  versions, timestamps, and a parse-error summary only — never the external
+  bytes, a value, or a resolved secret. A diff of unadopted external content
+  requires `config:adopt` and is only available through the adoption
+  preview.
+- **The managed baseline marker and snapshot** are adjacent sidecar files
+  (`<config>.managed-baseline.json`, `<config>.managed-baseline.snapshot`)
+  written `0o600` with the same atomic-write discipline as the configuration
+  file itself. The snapshot holds the exact last-managed bytes and may
+  therefore contain literal secret material; it is excluded from every
+  export, diagnostic bundle, and history snapshot. A transition to
+  `file_owned` deletes it (and any orphaned planned-restart backup) at the
+  next startup, replacing it with a secret-free tombstone.
+- **Managed mode requires a writable, non-symlinked config path.** A
+  Kubernetes ConfigMap/Secret mount is a symlink farm; `jul lint` reports an
+  error-severity finding if `config_authority` resolves to `managed` over a
+  symlinked path.
+
+See [reload-semantics.md](reload-semantics.md#configuration-authority-managed-vs-file-owned)
+for the full state model and [deployment.md](deployment.md#configuration-authority)
+for the migration.
+
+---
+
 ## Plugin security
 
 WASM plugins run in a wazero sandbox:

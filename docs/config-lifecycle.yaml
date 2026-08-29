@@ -26,6 +26,7 @@ subsystems:
   cache: "The two-tier response cache backend."
   client_address: "The per-listener trusted-proxy policy that derives the canonical client address."
   compression: "Negotiated response compression."
+  config_authority: "Which subsystem owns configuration persistence, history and drift: managed or file_owned."
   cors: "Per-location Cross-Origin Resource Sharing policy and the preflight terminator it turns on."
   discovery: "Dynamic backend discovery for an upstream pool."
   egress: "The outbound-destination allow-list applied to auxiliary fetches."
@@ -75,13 +76,13 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 343
-  schema_leaves: 291
-  registry_entries: 291
-  startup_consumed: 58
+  schema_paths: 344
+  schema_leaves: 292
+  registry_entries: 292
+  startup_consumed: 59
   by_class:
     hot_reload: 219
-    restart_required: 58
+    restart_required: 59
     new_listener_only: 8
     ignored_deprecated: 4
     validation_rejected_reserved: 2
@@ -288,6 +289,11 @@ fields:
     reason: "superseded by observability.access_log; no runtime consumer reads it"
     deprecated: true
     ignored: true
+  - path: "global.config_authority"
+    class: restart_required
+    subsystem: config_authority
+    reason: "authority is resolved once at startup and wires the file watcher, SIGHUP, and the managed baseline before any writer exists; changing it moves ownership of the configuration file and cannot be hot-applied (ADR 0019 §9.2)"
+    startup_consumed: true
   - path: "global.error_log"
     class: ignored_deprecated
     subsystem: error_log

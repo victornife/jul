@@ -207,6 +207,34 @@ type ConfigApplyResult struct {
 	OperationSummaries []patchOperationSummary `json:"operation_summaries,omitempty"`
 	Diff               ConfigDiff              `json:"diff,omitempty"`
 	Lifecycle          *patchLifecycleSummary  `json:"lifecycle,omitempty"`
+
+	// AuthorityDenied is true when the operation was refused because the
+	// process is file_owned (ADR 0019 §15). The HTTP layer normally denies
+	// earlier with the exact config_authority_read_only envelope; this is the
+	// defense-in-depth signal from the coordinator itself.
+	AuthorityDenied bool `json:"authority_denied,omitempty"`
+	// Degraded carries bounded, non-content-bearing degradations that never
+	// upgrade or downgrade this result's own outcome (ADR 0019 §33.2).
+	Degraded []DegradedEntry `json:"degraded,omitempty"`
+	// ConfigState is the closed §16 state enum computed for this operation
+	// (e.g. "managed_clean", "managed_drift"), when authority tracking is
+	// wired.
+	ConfigState string `json:"config_state,omitempty"`
+	// Origin is set only by an adopt-external result: "drift", "no_baseline",
+	// or "inconsistent" (ADR 0019 §11.2.1/§14.1).
+	Origin string `json:"origin,omitempty"`
+	// AppOutcome carries an app-layer terminal outcome not expressible by the
+	// server reload outcome, currently only "owned_not_serving" (ADR 0019
+	// §33.1).
+	AppOutcome string `json:"outcome,omitempty"`
+}
+
+// DegradedEntry is one bounded degradation carried on an apply/adopt result
+// (ADR 0019 §33.2). Message carries only an error class — never a path, a
+// digest, or configuration content.
+type DegradedEntry struct {
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
 }
 
 // ConfigMutationResponse preserves compatibility metadata used by legacy raw,

@@ -196,6 +196,9 @@ func (s *Server) handleHistoryRollback(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
+	if s.denyIfFileOwned(w, r, string(ApplyOperationRollback)) {
+		return
+	}
 	if s.deps.ApplyConfigRaw == nil && s.deps.WriteConfigRaw == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
@@ -371,6 +374,9 @@ func (s *Server) handleConfigHistoryDiff(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if s.denyIfFileOwned(w, r, string(ApplyOperationRollback)) {
 		return
 	}
 	if s.deps.ApplyConfigRaw == nil && s.deps.WriteConfigRaw == nil {

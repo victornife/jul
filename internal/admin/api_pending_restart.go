@@ -42,6 +42,9 @@ func (s *Server) handleDiscardPendingRestart(w http.ResponseWriter, r *http.Requ
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
+	if s.denyIfFileOwned(w, r, "config.stage_restart.discarded") {
+		return
+	}
 	if s.deps.DiscardPendingRestart == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return

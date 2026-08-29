@@ -146,18 +146,29 @@ unit-tested independently of a full process boot.
 4. **Admin deps** — `BuildAdminDeps` wires the Console and admin API, then
    `admin.New` starts the admin listener.
 
+Authority (`[global].config_authority`, ADR 0019) is resolved once during Init,
+before the file watcher/SIGHUP fan-in and the `ConfigApplyCoordinator` are
+wired, so no subsystem observes two possible values. In `managed` mode the
+coordinator also owns a `ManagedBaselineStore` (a persisted marker + snapshot
+adjacent to the config file) that tracks drift and survives a restart; in
+`file_owned` mode the same store performs the one write that mode ever makes
+— closing out any managed epoch it inherited.
+
 Supporting helpers in `internal/app/`:
 
 | File | Responsibility | Tests |
 |------|---------------|-------|
 | `serve.go` | Composition root: four-phase startup, reload loop, process/generation lifetime | Yes (`*_test.go`) |
 | `factory.go` | `HandlerFactory` — per-reload HTTP handler tree construction | Yes (`*_test.go`) |
-| `wiring.go` | Scope keys, upstream indexing, reload channel fan-in, `ValidateRuntimeConfig` | Yes (`*_test.go`) |
+| `wiring.go` | Scope keys, upstream indexing, reload channel fan-in, `ValidateRuntimeConfig`, managed-mode drift-only watcher/SIGHUP consumers | Yes (`*_test.go`) |
 | `admin_deps.go` | Build `admin.Deps` from initialised subsystems (`BuildAdminDeps`, adapters) | Yes (`*_test.go`) |
 | `preflight.go` | Admin write preflight gates (`Preflight.Apply` with `StreamPreflighter` iface) | Yes (`*_test.go`) |
 | `runtime.go` | Process-lifetime subsystems behind their build-tag gates (`RuntimeBuilder`/`Runtime`: tracing, ACME, HTTP/3, stream server) | Yes (`*_test.go`) |
 | `generation.go` | Generational handler teardown (`GenerationResources`: live closers + `poolReg` Begin/Commit/Abort staging) | Yes (`*_test.go`) |
 | `startup_restart.go` | Startup-bound subsystem restart checks (cache, egress, admin, metrics) | Yes (`*_test.go`) |
+| `authority.go` | `ConfigAuthority`/`ConfigState`/`DegradedKind` types and the fixed-default resolution rule (ADR 0019 §9.1) | Yes (`*_test.go`) |
+| `managed_baseline.go` | `ManagedBaselineStore`: the persisted managed-baseline marker+snapshot, T-write/T-mark, drift assessment, recovery, epoch close (ADR 0019 §11.2) | Yes (`managed_baseline_test.go`) |
+| `adopt.go` | `AdoptExternal`/`AssessAdoptExternal`: the adopt-external workflow and its dedicated coordinator entry (ADR 0019 §14) | Yes (`adopt_test.go`) |
 
 Each helper is independently testable and owns a well-defined lifecycle
 responsibility. `serve.go` is the only file that assembles the full runtime;

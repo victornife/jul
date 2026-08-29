@@ -86,6 +86,15 @@ type Metrics struct {
 	reloadTimeouts *prometheus.CounterVec
 	stageRestarts  *prometheus.CounterVec
 	pendingRestart prometheus.Gauge
+	// configAuthorityDrift is 1 when managed authority has detected an
+	// unresolved external edit to the configuration file, 0 otherwise (ADR
+	// 0019 §12/§13). No label carries a path, digest, version, or resource
+	// identifier.
+	configAuthorityDrift prometheus.Gauge
+	// configAuthorityDenied counts a mutating request refused because the
+	// process is file_owned (ADR 0019 §15), labeled by a fixed, bounded reason
+	// drawn from the operation name — never a path, digest, or actor.
+	configAuthorityDenied *prometheus.CounterVec
 	// managedApplyFinalized counts terminal async managed-apply outcomes
 	// (H-05: jul_managed_apply_finalized_total). outcome is the terminal
 	// reload classification; restored is "true", "false", or "n/a".
@@ -355,6 +364,14 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_config_pending_restart",
 			Help: "1 when a managed staged-restart candidate is pending (waiting for process restart); 0 otherwise.",
 		}),
+		configAuthorityDrift: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "jul_config_authority_drift",
+			Help: "1 when managed configuration authority has detected an unresolved external edit to the configuration file; 0 otherwise.",
+		}),
+		configAuthorityDenied: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_config_authority_denied_total",
+			Help: "Mutating configuration requests refused because the process is file_owned, labeled by the bounded operation name.",
+		}, []string{"reason"}),
 		managedApplyFinalized: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_managed_apply_finalized_total",
 			Help: "Terminal async managed-apply outcomes, labeled by operation, mode, outcome and whether restoration succeeded (true/false/n/a).",
@@ -440,6 +457,8 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.reloadTimeouts,
 		m.stageRestarts,
 		m.pendingRestart,
+		m.configAuthorityDrift,
+		m.configAuthorityDenied,
 		m.managedApplyFinalized,
 		m.managedApplyFinalizationErrors,
 		m.managedApplyHistory,
@@ -978,6 +997,26 @@ func (m *Metrics) SetPendingRestart(pending bool) {
 	} else {
 		m.pendingRestart.Set(0)
 	}
+}
+
+// SetConfigAuthorityDrift sets the managed-authority drift gauge (ADR 0019
+// §12/§13). It carries no path, digest, or version — only a boolean.
+func (m *Metrics) SetConfigAuthorityDrift(drift bool) {
+	if drift {
+		m.configAuthorityDrift.Set(1)
+	} else {
+		m.configAuthorityDrift.Set(0)
+	}
+}
+
+// ObserveConfigAuthorityDenied counts one mutating request refused because
+// the process is file_owned (ADR 0019 §15). reason is a bounded operation
+// label (e.g. "config.raw", "config.patch") — never a path or actor.
+func (m *Metrics) ObserveConfigAuthorityDenied(reason string) {
+	if reason == "" {
+		reason = "unknown"
+	}
+	m.configAuthorityDenied.WithLabelValues(reason).Inc()
 }
 
 // hostLabel strips the port so metric cardinality stays bounded by hostname.

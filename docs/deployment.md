@@ -9,6 +9,7 @@
 ## Contents
 
 - [The two shapes](#the-two-shapes)
+- [Configuration authority](#configuration-authority)
 - [Directory layout](#directory-layout)
 - [systemd (Linux)](#systemd-linux)
 - [Docker](#docker)
@@ -27,7 +28,49 @@
 In both shapes the binary runs **unprivileged** and the host filesystem is
 read-only except for a small set of explicitly writable directories.
 
+## Configuration authority
+
+The filesystem shape above (writable vs read-only mount) is a *permission*.
+`[global].config_authority` is the *logical* declaration of who owns the
+file, and it is what the admin API and the file watcher/SIGHUP actually
+consult (ADR 0019). The two line up directly:
+
+| Filesystem shape | `config_authority` | Result |
+| --- | --- | --- |
+| Editable | `managed` | Console/API writes are validated, persisted, and reloaded; an external edit to the mounted file becomes drift, resolved only through an explicit `POST /api/config/adopt-external`. |
+| Read-only | `file_owned` (the default) | Every mutating admin endpoint is refused with `409 config_authority_read_only` before any side effect. SIGHUP and the file watcher behave exactly as before: an external edit — from your provisioning pipeline re-rendering the mount — is validated and adopted live or staged, same as today. |
+
+**`config_authority` defaults to `file_owned` when omitted.** This is a fixed
+default, not derived from `admin.enabled` or any other field. The practical
+consequence: **an Editable deployment that has never declared
+`config_authority` becomes read-only at its next restart** after upgrading to
+a Jul.IA version that implements ADR 0019. The fix is one line:
+
+```toml
+[global]
+config_authority = "managed"
+```
+
+The runtime overview, the Console banner, and every `409
+config_authority_read_only` response name this exact field, so the fix is
+never a mystery. `jul lint` also recommends declaring it explicitly whenever
+`[admin].enabled` is true. See
+[CHANGELOG.md](../CHANGELOG.md) for this as a required migration step and
+[reload-semantics.md](reload-semantics.md#configuration-authority-managed-vs-file-owned)
+for the full managed-mode behavior (drift detection, adoption, refusal
+rules).
+
+A **Read-only** deployment needs no change at all: the default already
+matches its shape, and its existing GitOps/pipeline workflow — re-render the
+mount, `SIGHUP` or let the watcher pick it up — is completely unaffected.
+
+Managed mode additionally requires the config path to be a real, writable,
+non-symlinked file (§11.3): a Kubernetes ConfigMap/Secret mount, which is a
+symlink farm, cannot be `managed` — declare `file_owned` for those and let
+your controller re-render the mount instead.
+
 ## Directory layout
+
 
 The canonical paths (used by the bundled systemd units and Docker image):
 

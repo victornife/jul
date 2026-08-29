@@ -77,6 +77,14 @@ func (d *ConfigDiff) cover(path string) {
 	}
 }
 
+// DiffConfigs is the exported form of diffConfigs, for composition-root
+// callers outside this package (e.g. the adopt-external preview, ADR 0019
+// §14.1) that need the same diff the Console and every other preview path
+// already produce.
+func DiffConfigs(before, after *config.Config) ConfigDiff {
+	return diffConfigs(before, after)
+}
+
 // diffConfigs produces a human-auditable diff between the current running
 // configuration and a draft candidate, explaining operational consequences
 // across servers, locations/routes (action, target, auth, cache, compression,

@@ -10,6 +10,7 @@ log_format = ''
 shutdown_timeout = '0s'
 redact_min_secret_length = 0
 reload_timeout = '0s'
+config_authority = ''
 
 [[servers]]
 name = ''

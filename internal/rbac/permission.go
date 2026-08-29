@@ -33,6 +33,12 @@ const (
 	// privilege-escalation-adjacent change that deserves its own grant and its
 	// own audit category. No predefined role except admin holds it.
 	ConfigTrust Permission = "config:trust"
+	// ConfigAdopt allows adopting an external, unadopted or drifted
+	// configuration file as the managed baseline (ADR 0019 §14). Accepting
+	// bytes Jul did not produce is a different trust decision from applying a
+	// reviewed candidate, so it is a distinct permission held by no predefined
+	// role except admin — the same reasoning behind ConfigTrust.
+	ConfigAdopt Permission = "config:adopt"
 	// HistoryRead allows listing configuration history metadata.
 	HistoryRead Permission = "history:read"
 	// HistoryReadRaw allows reading the raw TOML body of a historical snapshot.
@@ -69,6 +75,7 @@ var catalog = []Permission{
 	ConfigWrite,
 	ConfigApply,
 	ConfigTrust,
+	ConfigAdopt,
 	HistoryRead,
 	HistoryReadRaw,
 	HistoryRollback,
