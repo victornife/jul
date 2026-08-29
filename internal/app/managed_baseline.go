@@ -513,7 +513,7 @@ func (s *ManagedBaselineStore) Reconcile(diskRaw []byte, diskErr error, diskCano
 			// The rename landed; only the snapshot and/or the promotion did
 			// not finish. Repair the snapshot from the verified disk buffer
 			// (which matches "current") if needed, then promote.
-			if !(snapOK && snapMatchesCurrent) {
+			if !snapOK || !snapMatchesCurrent {
 				if err := s.writeSnapshotLocked(diskRaw); err != nil {
 					return inconsistent(ReasonBaselineUnwritable, marker.PriorRawSHA256, marker.PriorCanonicalVersion, err)
 				}
@@ -529,7 +529,7 @@ func (s *ManagedBaselineStore) Reconcile(diskRaw []byte, diskErr error, diskCano
 			return nil
 		}
 		rollBack := func() error {
-			if !(snapOK && snapMatchesPrior) && diskOK && diskMatchesPrior {
+			if (!snapOK || !snapMatchesPrior) && diskOK && diskMatchesPrior {
 				if err := s.writeSnapshotLocked(diskRaw); err != nil {
 					return inconsistent(ReasonBaselineUnwritable, marker.PriorRawSHA256, marker.PriorCanonicalVersion, err)
 				}
@@ -611,11 +611,9 @@ func (s *ManagedBaselineStore) CloseEpoch() error {
 		// Nothing to close.
 		return nil
 	}
-	if marker.State == baselineStateClosed {
-		// Already closed; still worth ensuring the snapshot is gone (the
-		// snapshot has no business surviving next to a tombstone).
-	}
 
+	// Already closed or not, ensuring the snapshot is gone is always worth
+	// doing: it has no business surviving next to a tombstone.
 	lastDigest := marker.CurrentRawSHA256
 	if marker.State == baselineStateClosed {
 		lastDigest = marker.LastRawSHA256

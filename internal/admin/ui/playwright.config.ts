@@ -32,6 +32,10 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 10_000 },
   reporter: process.env.CI ? "github" : "list",
+  // Establishes the managed baseline for the real-server project once, after
+  // its webServer entry is confirmed healthy and before any spec runs; a
+  // no-op for the mocked chromium project. See e2e/global-setup.ts.
+  globalSetup: "./e2e/global-setup.ts",
   // The real-server files share one mutable jul process/config/history store.
   // Run them sequentially so stateful lifecycle tests cannot invalidate each
   // other's pending drafts, snapshots, or live configuration mid-assertion.

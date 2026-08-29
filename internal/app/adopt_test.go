@@ -4,6 +4,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"os"
 	"testing"
@@ -352,6 +353,59 @@ func TestAdoptExternalStageRestartHappyPath(t *testing.T) {
 	snap, err := c.ManagedBaseline.Snapshot()
 	if err != nil || string(snap) != string(candidate) {
 		t.Errorf("baseline snapshot = %q, err=%v, want the adopted candidate", snap, err)
+	}
+}
+
+// TestAdoptAndStageLockedSnapshotWriteFailureDegrades pins §11.2.4 step 6: a
+// failure writing the baseline snapshot after staging is already durable
+// must not unmake it — the marker already commits to the adopted bytes and
+// the configuration file can repair the snapshot later (§11.2.1b). The
+// adoption still succeeds, with a baseline_error degradation. Calls
+// adoptAndStageLocked directly (same package) with an explicit prevRaw so
+// the snapshot path can be occupied by a directory purely to fail the step 6
+// write, without also failing the step 1 read AdoptExternal would otherwise
+// perform from the same path.
+func TestAdoptAndStageLockedSnapshotWriteFailureDegrades(t *testing.T) {
+	seed := validConfigRaw(t, ":8080")
+	candidate := validConfigRaw(t, ":9999")
+	c, path := newStageRestartAdoptFixture(t, seed, candidate)
+
+	if err := os.Remove(path + ".managed-baseline.snapshot"); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove existing snapshot: %v", err)
+	}
+	if err := os.Mkdir(path+".managed-baseline.snapshot", 0o755); err != nil {
+		t.Fatalf("occupy snapshot path: %v", err)
+	}
+
+	cfg := mustParseForTest(t, candidate)
+	pfResult, err := c.Preflight.Apply(context.Background(), cfg, mustParseForTest(t, seed), PreflightStageRestart)
+	if err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	persistedVersion := server.CanonicalVersion(cfg)
+	desiredVersion := server.CanonicalVersion(pfResult.Candidate.Effective)
+	result := &ApplyResult{OK: true}
+
+	if err := c.adoptAndStageLocked("drift", digestHex(seed), seed, candidate, persistedVersion, desiredVersion, pfResult, result); err != nil {
+		t.Fatalf("adoptAndStageLocked: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("a snapshot-write failure must still succeed, got %+v", result)
+	}
+	found := false
+	for _, d := range result.Degraded {
+		if d.Kind == DegradedBaselineError {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("degraded array missing baseline_error: %+v", result.Degraded)
+	}
+	if !c.PlannedRestart.IsPending() {
+		t.Error("the restart must still be staged despite the degradation")
+	}
+	if bst := c.ManagedBaseline.Status(); bst.BaselineRawSHA256 != digestHex(candidate) {
+		t.Error("the baseline marker must still have committed to the adopted bytes")
 	}
 }
 

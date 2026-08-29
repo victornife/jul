@@ -25,6 +25,14 @@ coverage.txt
 *.pid
 *.log
 
+# Managed-authority sidecar artifacts a local `jul serve` run creates next to
+# whatever config file it was pointed at (ADR 0019 §11.2/§17.4) — never meant
+# to be committed alongside a testdata fixture.
+*.managed-baseline.json
+*.managed-baseline.snapshot
+*.pending-restart.json
+*.pending-restart.bak
+
 # OS / editor
 .DS_Store
 *.swp

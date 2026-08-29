@@ -7,6 +7,7 @@ log_format = 'text'
 shutdown_timeout = '30s'
 redact_min_secret_length = 0
 reload_timeout = '10s'
+config_authority = 'managed'
 
 [[servers]]
 name = ''
@@ -381,10 +382,63 @@ plugin = ''
 type = 'prefix'
 path = '/e2e-mutate/'
 
+[[servers]]
+name = ''
+listen = '127.0.0.1:9294'
+server_names = ['localhost']
+proxy_protocol = ''
+h2c = false
+client_max_body_size = '1m'
+read_header_timeout = '10s'
+read_timeout = '0s'
+write_timeout = '0s'
+idle_timeout = '1m0s'
+max_header_bytes = '1m'
+access_log = ''
+error_log = ''
+redirect_https = 0
+plugins = []
+
+[[servers.locations]]
+root = ''
+index = []
+try_files = []
+directory_listing = false
+allow_hidden = false
+cache_control = ''
+proxy_pass = 'http://issue82-phase5-e2e'
+proxy_connect_timeout = '0s'
+proxy_read_timeout = '0s'
+proxy_send_timeout = '0s'
+proxy_retries = 0
+grpc = false
+fastcgi_pass = ''
+uwsgi_pass = ''
+redirect = ''
+return = 0
+deny = false
+rewrites = []
+cache = false
+client_max_body_size = '0'
+require_client_cert = false
+plugins = []
+plugin = ''
+
+[servers.locations.match]
+type = 'prefix'
+path = '/'
+
 [[upstreams]]
 name = 'e2e-pool'
 strategy = 'round_robin'
 servers = ['127.0.0.1:9393']
+max_fails = 0
+fail_timeout = '0s'
+
+[[upstreams]]
+name = 'issue82-phase5-e2e'
+strategy = 'round_robin'
+servers = ['127.0.0.1:9292']
 max_fails = 0
 fail_timeout = '0s'
 
@@ -422,18 +476,18 @@ roles = []
 principals = []
 
 [compression]
-enabled = false
-encoders = []
+enabled = true
+encoders = ['gzip']
 level = 0
-min_size = '0'
-types = []
+min_size = '1'
+types = ['text/*', 'application/json', 'application/javascript', 'application/xml', 'application/wasm', 'image/svg+xml']
 precompressed = false
 
 [rate_limit]
 enabled = false
-key = ''
-rate = 0
-burst = 0
+key = 'ip'
+rate = 1
+burst = 1
 max_conns = 0
 
 [observability]
