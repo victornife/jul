@@ -166,6 +166,13 @@ type PlannedRestartStore struct {
 	stagedAt     time.Time
 	inconsistent bool // set by Reconcile when sidecar state cannot be repaired
 	external     bool // true when an unmanaged external disk/runtime divergence is present
+
+	// testHookAfterStagedMarkerWritten, when non-nil, runs once immediately
+	// after PromoteToStagedVerified durably writes the "staged" marker and
+	// before its post-promotion disk re-read. It exists so a test can
+	// deterministically simulate an external write landing in that exact
+	// window (ADR 0019 §11.2.4.1); always nil in production.
+	testHookAfterStagedMarkerWritten func()
 }
 
 // NewFilePlannedRestartStore creates a PlannedRestartStore backed by sidecar
@@ -712,6 +719,9 @@ func (s *PlannedRestartStore) PromoteToStagedVerified(candidateRaw []byte) error
 	marker.PreviousStagedAt = time.Time{}
 	if err := s.writeMarkerLocked(*marker); err != nil {
 		return fmt.Errorf("planned-restart promote: write staged marker: %w", err)
+	}
+	if s.testHookAfterStagedMarkerWritten != nil {
+		s.testHookAfterStagedMarkerWritten()
 	}
 
 	// Post-promotion disk check: detect a write that landed during the marker

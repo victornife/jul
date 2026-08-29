@@ -375,6 +375,122 @@ func TestAdoptExternalDriftWithDiffAndHistorySnapshot(t *testing.T) {
 	}
 }
 
+// TestAdoptAndStageLockedBackupWriteFailure pins §11.2.4 row 2: if the .bak
+// write itself fails, nothing has happened yet — the operation fails cleanly
+// with a storage error.
+func TestAdoptAndStageLockedBackupWriteFailure(t *testing.T) {
+	seed := validConfigRaw(t, ":8080")
+	candidate := validConfigRaw(t, ":9999")
+	c, path := newStageRestartAdoptFixture(t, seed, candidate)
+	if err := os.Mkdir(path+".pending-restart.bak", 0o755); err != nil {
+		t.Fatalf("occupy backup path: %v", err)
+	}
+
+	cfg := mustParseForTest(t, candidate)
+	pfResult, err := c.Preflight.Apply(context.Background(), cfg, mustParseForTest(t, seed), PreflightStageRestart)
+	if err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	persistedVersion := server.CanonicalVersion(cfg)
+	desiredVersion := server.CanonicalVersion(pfResult.Candidate.Effective)
+	result := &ApplyResult{OK: true}
+
+	if err := c.adoptAndStageLocked("drift", digestHex(seed), seed, candidate, persistedVersion, desiredVersion, pfResult, result); err == nil {
+		t.Fatal("expected a storage error")
+	}
+	if result.OK {
+		t.Fatalf("result = %+v, want OK=false", result)
+	}
+	if bst := c.ManagedBaseline.Status(); bst.BaselineRawSHA256 != digestHex(seed) {
+		t.Error("the baseline must not have committed when nothing was backed up yet")
+	}
+}
+
+// TestAdoptAndStageLockedRow4SnapshotWriteAlsoFails pins that, within row 4's
+// successful-cleanup branch, a further failure writing the baseline snapshot
+// still degrades rather than fails — the marker commit from step 3 stands.
+func TestAdoptAndStageLockedRow4SnapshotWriteAlsoFails(t *testing.T) {
+	seed := validConfigRaw(t, ":8080")
+	candidate := validConfigRaw(t, ":9999")
+	c, path := newStageRestartAdoptFixture(t, seed, candidate)
+	if err := os.Mkdir(path+".pending-restart.json", 0o755); err != nil {
+		t.Fatalf("occupy planned-restart marker path: %v", err)
+	}
+	if err := os.Remove(path + ".managed-baseline.snapshot"); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove existing snapshot: %v", err)
+	}
+	if err := os.Mkdir(path+".managed-baseline.snapshot", 0o755); err != nil {
+		t.Fatalf("occupy snapshot path: %v", err)
+	}
+
+	cfg := mustParseForTest(t, candidate)
+	pfResult, err := c.Preflight.Apply(context.Background(), cfg, mustParseForTest(t, seed), PreflightStageRestart)
+	if err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	persistedVersion := server.CanonicalVersion(cfg)
+	desiredVersion := server.CanonicalVersion(pfResult.Candidate.Effective)
+	result := &ApplyResult{OK: true}
+
+	if err := c.adoptAndStageLocked("drift", digestHex(seed), seed, candidate, persistedVersion, desiredVersion, pfResult, result); err != nil {
+		t.Fatalf("adoptAndStageLocked: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("row 4 must still succeed despite the further snapshot failure, got %+v", result)
+	}
+	kinds := map[DegradedKind]bool{}
+	for _, d := range result.Degraded {
+		kinds[d.Kind] = true
+	}
+	if !kinds[DegradedStagingIncomplete] || !kinds[DegradedBaselineError] {
+		t.Errorf("degraded = %+v, want staging_incomplete and baseline_error", result.Degraded)
+	}
+}
+
+// TestAdoptAndStageLockedMismatchSnapshotWriteAlsoFails pins that, within
+// §11.2.4.1's successful-cleanup branch, a further failure writing the
+// baseline snapshot still degrades rather than fails.
+func TestAdoptAndStageLockedMismatchSnapshotWriteAlsoFails(t *testing.T) {
+	seed := validConfigRaw(t, ":8080")
+	candidate := validConfigRaw(t, ":9999")
+	c, path := newStageRestartAdoptFixture(t, seed, candidate)
+	external := validConfigRaw(t, ":7777")
+	c.PlannedRestart.testHookAfterStagedMarkerWritten = func() {
+		if err := os.WriteFile(path, external, 0o600); err != nil {
+			t.Fatalf("simulate external write during promotion: %v", err)
+		}
+	}
+	if err := os.Remove(path + ".managed-baseline.snapshot"); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove existing snapshot: %v", err)
+	}
+	if err := os.Mkdir(path+".managed-baseline.snapshot", 0o755); err != nil {
+		t.Fatalf("occupy snapshot path: %v", err)
+	}
+
+	cfg := mustParseForTest(t, candidate)
+	pfResult, err := c.Preflight.Apply(context.Background(), cfg, mustParseForTest(t, seed), PreflightStageRestart)
+	if err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	persistedVersion := server.CanonicalVersion(cfg)
+	desiredVersion := server.CanonicalVersion(pfResult.Candidate.Effective)
+	result := &ApplyResult{OK: true}
+
+	if err := c.adoptAndStageLocked("drift", digestHex(seed), seed, candidate, persistedVersion, desiredVersion, pfResult, result); err != nil {
+		t.Fatalf("adoptAndStageLocked: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("the mismatch path must still succeed despite the further snapshot failure, got %+v", result)
+	}
+	kinds := map[DegradedKind]bool{}
+	for _, d := range result.Degraded {
+		kinds[d.Kind] = true
+	}
+	if !kinds[DegradedDriftAfterAdopt] || !kinds[DegradedBaselineError] {
+		t.Errorf("degraded = %+v, want drift_after_adopt and baseline_error", result.Degraded)
+	}
+}
+
 func TestAdoptExternalDigestFenceConflict(t *testing.T) {
 	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
 	c.ManagedBaseline = NewManagedBaselineStore(path)
@@ -677,6 +793,66 @@ func TestAdoptAndStageLockedSnapshotWriteFailureDegrades(t *testing.T) {
 	}
 	if bst := c.ManagedBaseline.Status(); bst.BaselineRawSHA256 != digestHex(candidate) {
 		t.Error("the baseline marker must still have committed to the adopted bytes")
+	}
+}
+
+// TestAdoptAndStageLockedPostPromotionMismatchCleansUp pins ADR 0019
+// §11.2.4.1's post-promotion mismatch row: an external write lands after the
+// planned-restart marker is already durably "staged" but before its
+// post-promotion re-read. A 409 is not available — adoption already
+// committed at step 3 — so the operation still reports success
+// (owned_not_serving, staging_incomplete + drift_after_adopt), with the
+// abandoned staged marker and backup removed rather than trusted, and the
+// external writer's bytes left untouched.
+func TestAdoptAndStageLockedPostPromotionMismatchCleansUp(t *testing.T) {
+	seed := validConfigRaw(t, ":8080")
+	candidate := validConfigRaw(t, ":9999")
+	c, path := newStageRestartAdoptFixture(t, seed, candidate)
+
+	external := validConfigRaw(t, ":7777")
+	c.PlannedRestart.testHookAfterStagedMarkerWritten = func() {
+		if err := os.WriteFile(path, external, 0o600); err != nil {
+			t.Fatalf("simulate external write during promotion: %v", err)
+		}
+	}
+
+	cfg := mustParseForTest(t, candidate)
+	pfResult, err := c.Preflight.Apply(context.Background(), cfg, mustParseForTest(t, seed), PreflightStageRestart)
+	if err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	persistedVersion := server.CanonicalVersion(cfg)
+	desiredVersion := server.CanonicalVersion(pfResult.Candidate.Effective)
+	result := &ApplyResult{OK: true}
+
+	if err := c.adoptAndStageLocked("drift", digestHex(seed), seed, candidate, persistedVersion, desiredVersion, pfResult, result); err != nil {
+		t.Fatalf("adoptAndStageLocked: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("§11.2.4.1: a post-commit mismatch cannot be a 409, want OK=true, got %+v", result)
+	}
+	if result.AppOutcome != "owned_not_serving" {
+		t.Errorf("AppOutcome = %q, want owned_not_serving", result.AppOutcome)
+	}
+	kinds := map[DegradedKind]bool{}
+	for _, d := range result.Degraded {
+		kinds[d.Kind] = true
+	}
+	if !kinds[DegradedStagingIncomplete] || !kinds[DegradedDriftAfterAdopt] {
+		t.Errorf("degraded = %+v, want staging_incomplete and drift_after_adopt", result.Degraded)
+	}
+	if _, err := os.Stat(path + ".pending-restart.json"); !os.IsNotExist(err) {
+		t.Error("the abandoned staged marker must be removed, not trusted")
+	}
+	if _, err := os.Stat(path + ".pending-restart.bak"); !os.IsNotExist(err) {
+		t.Error("the abandoned backup must be removed, not trusted")
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil || string(onDisk) != string(external) {
+		t.Errorf("the external writer's bytes must be left untouched: got %q", onDisk)
+	}
+	if c.PlannedRestart.IsPending() {
+		t.Error("no restart should be reported pending after the cleanup")
 	}
 }
 
