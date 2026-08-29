@@ -550,6 +550,7 @@ func TestAdoptExternalHotModeSnapshotOnlyFailureDegradesNotFails(t *testing.T) {
 	if err := os.Mkdir(path+".managed-baseline.snapshot", 0o755); err != nil {
 		t.Fatalf("occupy snapshot path: %v", err)
 	}
+	done := awaitBaselineWriteRetry(c)
 
 	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Mode: "hot", Confirm: true, ObservedDigest: digestHex(external)})
 	if err != nil {
@@ -558,6 +559,7 @@ func TestAdoptExternalHotModeSnapshotOnlyFailureDegradesNotFails(t *testing.T) {
 	if !res.OK {
 		t.Fatalf("a snapshot-only failure must not fail the adoption (the marker already committed), got %+v", res)
 	}
+	<-done // let the scheduled retry finish before TempDir cleanup runs
 	found := false
 	for _, d := range res.Degraded {
 		if d.Kind == DegradedBaselineError {
@@ -841,6 +843,7 @@ func TestAdoptAndStageLockedRow4SnapshotWriteAlsoFails(t *testing.T) {
 	if err := os.Mkdir(path+".managed-baseline.snapshot", 0o755); err != nil {
 		t.Fatalf("occupy snapshot path: %v", err)
 	}
+	done := awaitBaselineWriteRetry(c)
 
 	cfg := mustParseForTest(t, candidate)
 	pfResult, err := c.Preflight.Apply(context.Background(), cfg, mustParseForTest(t, seed), PreflightStageRestart)
@@ -857,6 +860,7 @@ func TestAdoptAndStageLockedRow4SnapshotWriteAlsoFails(t *testing.T) {
 	if !result.OK {
 		t.Fatalf("row 4 must still succeed despite the further snapshot failure, got %+v", result)
 	}
+	<-done // let the scheduled retry finish before TempDir cleanup runs
 	kinds := map[DegradedKind]bool{}
 	for _, d := range result.Degraded {
 		kinds[d.Kind] = true
@@ -885,6 +889,7 @@ func TestAdoptAndStageLockedMismatchSnapshotWriteAlsoFails(t *testing.T) {
 	if err := os.Mkdir(path+".managed-baseline.snapshot", 0o755); err != nil {
 		t.Fatalf("occupy snapshot path: %v", err)
 	}
+	done := awaitBaselineWriteRetry(c)
 
 	cfg := mustParseForTest(t, candidate)
 	pfResult, err := c.Preflight.Apply(context.Background(), cfg, mustParseForTest(t, seed), PreflightStageRestart)
@@ -901,6 +906,7 @@ func TestAdoptAndStageLockedMismatchSnapshotWriteAlsoFails(t *testing.T) {
 	if !result.OK {
 		t.Fatalf("the mismatch path must still succeed despite the further snapshot failure, got %+v", result)
 	}
+	<-done // let the scheduled retry finish before TempDir cleanup runs
 	kinds := map[DegradedKind]bool{}
 	for _, d := range result.Degraded {
 		kinds[d.Kind] = true
@@ -1185,6 +1191,7 @@ func TestAdoptAndStageLockedSnapshotWriteFailureDegrades(t *testing.T) {
 	if err := os.Mkdir(path+".managed-baseline.snapshot", 0o755); err != nil {
 		t.Fatalf("occupy snapshot path: %v", err)
 	}
+	done := awaitBaselineWriteRetry(c)
 
 	cfg := mustParseForTest(t, candidate)
 	pfResult, err := c.Preflight.Apply(context.Background(), cfg, mustParseForTest(t, seed), PreflightStageRestart)
@@ -1201,6 +1208,7 @@ func TestAdoptAndStageLockedSnapshotWriteFailureDegrades(t *testing.T) {
 	if !result.OK {
 		t.Fatalf("a snapshot-write failure must still succeed, got %+v", result)
 	}
+	<-done // let the scheduled retry finish before TempDir cleanup runs
 	found := false
 	for _, d := range result.Degraded {
 		if d.Kind == DegradedBaselineError {

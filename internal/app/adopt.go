@@ -279,6 +279,7 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 	}
 	if err := c.ManagedBaseline.CommitSnapshotOnly(raw); err != nil {
 		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after adoption"})
+		c.scheduleBaselineWriteRetry(raw, c.ManagedBaseline.CommitSnapshotOnly)
 	}
 
 	// ADR 0019 §14.2/§14.3: the one post-commit read, scoped exclusively to
@@ -454,6 +455,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 		}
 		if snapErr := c.ManagedBaseline.CommitSnapshotOnly(candidateRaw); snapErr != nil {
 			result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after adoption"})
+			c.scheduleBaselineWriteRetry(candidateRaw, c.ManagedBaseline.CommitSnapshotOnly)
 		}
 		c.ManagedBaseline.MarkDesiredAhead()
 		result.AppOutcome = "owned_not_serving"
@@ -481,6 +483,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 			}
 			if snapErr := c.ManagedBaseline.CommitSnapshotOnly(candidateRaw); snapErr != nil {
 				result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after adoption"})
+				c.scheduleBaselineWriteRetry(candidateRaw, c.ManagedBaseline.CommitSnapshotOnly)
 			}
 			result.AppOutcome = "owned_not_serving"
 			result.Degraded = append(result.Degraded,
@@ -510,6 +513,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 	// configuration file can repair it (§11.2.1b).
 	if err := c.ManagedBaseline.CommitSnapshotOnly(candidateRaw); err != nil {
 		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after staging"})
+		c.scheduleBaselineWriteRetry(candidateRaw, c.ManagedBaseline.CommitSnapshotOnly)
 	}
 	return nil
 }

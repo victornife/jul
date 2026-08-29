@@ -386,3 +386,178 @@ func TestFileOwnedConfigStateCleanForValidFileOrNoConfigPath(t *testing.T) {
 		t.Errorf("fileOwnedConfigState() = %v, want file_owned_clean with no config path", state)
 	}
 }
+
+// ─── scheduleBaselineWriteRetry (ADR 0019 §11.2.1a's "one retry") ───────────
+//
+// After a post-commit baseline write failure, the ADR requires exactly one
+// retry: under applyMu, re-verify the configuration still matches the digest
+// the failed write intended to record, abandon if it does not (a later write
+// superseded it), and otherwise retry the write once. A failed or abandoned
+// retry must resolve managed_inconsistent/baseline_unwritable — never leave
+// the stale pre-failure state in place forever, and never resolve
+// managed_clean except through the retry's own success.
+
+func awaitBaselineWriteRetry(c *ConfigApplyCoordinator) <-chan struct{} {
+	done := make(chan struct{})
+	c.afterBaselineWriteRetry = func() { close(done) }
+	return done
+}
+
+func TestScheduleBaselineWriteRetrySucceedsWhenDigestUnchanged(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	committed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, committed, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	done := awaitBaselineWriteRetry(c)
+	commitCalled := false
+	c.scheduleBaselineWriteRetry(committed, func(b []byte) error {
+		commitCalled = true
+		return c.ManagedBaseline.CompleteWrite(b, "v1")
+	})
+	<-done
+
+	if !commitCalled {
+		t.Fatal("an unchanged digest must retry the commit, not abandon it")
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedClean {
+		t.Errorf("state = %v, want managed_clean after a successful retry", st.State)
+	}
+}
+
+func TestScheduleBaselineWriteRetryMarksInconsistentWhenRetryFails(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	committed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, committed, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	done := awaitBaselineWriteRetry(c)
+	c.scheduleBaselineWriteRetry(committed, func(b []byte) error {
+		return errors.New("disk still unwritable")
+	})
+	<-done
+
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonBaselineUnwritable {
+		t.Errorf("state=%v reason=%v, want managed_inconsistent/baseline_unwritable", st.State, st.Reason)
+	}
+}
+
+func TestScheduleBaselineWriteRetryAbandonsOnSupersededDigest(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	committed := validConfigRaw(t, ":8080")
+	// The file on disk no longer holds what the failed write intended to
+	// record — a concurrent apply or restoration already moved it on. A
+	// retry must not record committed's digest over that.
+	superseded := validConfigRaw(t, ":9090")
+	if err := os.WriteFile(path, superseded, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	done := awaitBaselineWriteRetry(c)
+	commitCalled := false
+	c.scheduleBaselineWriteRetry(committed, func(b []byte) error {
+		commitCalled = true
+		return nil
+	})
+	<-done
+
+	if commitCalled {
+		t.Fatal("a superseded digest must abandon the retry without calling commit")
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonBaselineUnwritable {
+		t.Errorf("state=%v reason=%v, want managed_inconsistent/baseline_unwritable", st.State, st.Reason)
+	}
+}
+
+func TestScheduleBaselineWriteRetryAbandonsOnReadError(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	committed := validConfigRaw(t, ":8080")
+	// path is never written, so readConfigRaw fails with os.ErrNotExist.
+
+	done := awaitBaselineWriteRetry(c)
+	commitCalled := false
+	c.scheduleBaselineWriteRetry(committed, func(b []byte) error {
+		commitCalled = true
+		return nil
+	})
+	<-done
+
+	if commitCalled {
+		t.Fatal("a read error must abandon the retry without calling commit")
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonBaselineUnwritable {
+		t.Errorf("state=%v reason=%v, want managed_inconsistent/baseline_unwritable", st.State, st.Reason)
+	}
+}
+
+func TestScheduleBaselineWriteRetryNilBaselineIsNoop(t *testing.T) {
+	c, _ := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	commitCalled := false
+	// Must return synchronously without spawning anything to await.
+	c.scheduleBaselineWriteRetry([]byte("a = 1\n"), func(b []byte) error {
+		commitCalled = true
+		return nil
+	})
+	if commitCalled {
+		t.Error("a nil ManagedBaseline must be a no-op")
+	}
+}
+
+// TestCoordinatorManagedApplyRetriesBaselineWriteAfterSnapshotFailure pins the
+// end-to-end wiring: a hot apply whose CompleteWrite fails still reports its
+// own success unchanged (ADR 0019 §11.2.1a — a post-commit baseline failure
+// never changes the operation's outcome) plus a baseline_error degradation,
+// and the scheduled retry then resolves the baseline once the obstruction is
+// gone.
+func TestCoordinatorManagedApplyRetriesBaselineWriteAfterSnapshotFailure(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	snapshotPath := path + ".managed-baseline.snapshot"
+	if err := os.Remove(snapshotPath); err != nil {
+		t.Fatalf("remove snapshot written by CommitMark: %v", err)
+	}
+	if err := os.Mkdir(snapshotPath, 0o755); err != nil {
+		t.Fatalf("occupy snapshot path: %v", err)
+	}
+
+	done := awaitBaselineWriteRetry(c)
+	newRaw := validConfigRaw(t, ":8081")
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot)
+	if err != nil {
+		t.Fatalf("ApplyRaw error: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("a post-commit baseline failure must not change the apply's own outcome, got %+v", res)
+	}
+	found := false
+	for _, d := range res.Degraded {
+		if d.Kind == DegradedBaselineError {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a baseline_error degradation, got %+v", res.Degraded)
+	}
+
+	// The retry (blocked on applyMu until ApplyRaw released it) still sees
+	// the occupied snapshot path and must mark the baseline inconsistent
+	// rather than leave it silently stale.
+	<-done
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonBaselineUnwritable {
+		t.Errorf("state=%v reason=%v, want managed_inconsistent/baseline_unwritable", st.State, st.Reason)
+	}
+}
+

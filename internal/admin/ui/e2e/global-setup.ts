@@ -30,8 +30,26 @@ export default async function globalSetup(): Promise<void> {
     extraHTTPHeaders: { Authorization: "Bearer jul-e2e-test-token" },
   });
   try {
+    // Adoption binds itself to the preview's observed_digest/base_version
+    // (ADR 0019 §14 step 6); the apply step rejects a request that omits them.
+    const previewRes = await ctx.get("/api/config/adopt-external/preview");
+    if (!previewRes.ok()) {
+      throw new Error(
+        `real-server global setup: adopt-external preview failed: ${String(previewRes.status())} ${await previewRes.text()}`,
+      );
+    }
+    const preview = (await previewRes.json()) as {
+      observed_digest: string;
+      base_version?: string;
+    };
+
     const res = await ctx.post("/api/config/adopt-external", {
-      data: { mode: "hot", confirm: true },
+      data: {
+        mode: "hot",
+        confirm: true,
+        observed_digest: preview.observed_digest,
+        base_version: preview.base_version,
+      },
     });
     if (!res.ok()) {
       throw new Error(

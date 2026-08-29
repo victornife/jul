@@ -229,6 +229,11 @@ type ConfigApplyCoordinator struct {
 	// slow terminal restoration. Production leaves them unset.
 	beforeRestore func()
 	waitMargin    time.Duration
+	// afterBaselineWriteRetry is a deterministic test barrier invoked once
+	// scheduleBaselineWriteRetry's background retry has resolved (committed,
+	// abandoned, or marked inconsistent). Production leaves it nil; tests use
+	// it to await the retry goroutine instead of polling.
+	afterBaselineWriteRetry func()
 
 	// clock is an internal deterministic test seam for time. nil selects the
 	// real wall clock; tests may inject a fakeClock to advance deadlines and
@@ -795,6 +800,44 @@ func (c *ConfigApplyCoordinator) rewindOrMarkInconsistent(restored bool) *Degrad
 	return &DegradedEntry{Kind: DegradedBaselineError, Message: "baseline left inconsistent after a failed restoration"}
 }
 
+// scheduleBaselineWriteRetry performs ADR 0019 §11.2.1a's single required
+// retry after a post-commit baseline write failure (T-write's snapshot/
+// promotion, or T-mark's snapshot-only write). The caller has already
+// recorded the immediate baseline_error degradation and returned its own
+// terminal outcome unchanged, exactly as the ADR requires; this retry never
+// feeds back into that already-recorded result. It runs in its own goroutine
+// because every call site here still holds applyMu for its own transaction,
+// and the retry must acquire applyMu itself, fresh, to observe whatever the
+// state is by the time it actually runs.
+//
+// Under applyMu, it re-reads the configuration and verifies it still matches
+// the digest committedRaw intends to record — the exact check the ADR
+// requires, because a retry that skipped it could record a digest a later
+// write or restoration had already superseded. A mismatch, a read failure, or
+// a failed retry all resolve the same way: managed_inconsistent, reason
+// baseline_unwritable. Recovery never resolves managed_clean on the strength
+// of an intention — only the retry write's own success does that, via
+// commit's normal path.
+func (c *ConfigApplyCoordinator) scheduleBaselineWriteRetry(committedRaw []byte, commit func([]byte) error) {
+	if c.ManagedBaseline == nil {
+		return
+	}
+	intended := sha256Hex(committedRaw)
+	go func() {
+		c.applyMu.Lock()
+		defer c.applyMu.Unlock()
+		current, err := c.readConfigRaw()
+		if err != nil || sha256Hex(current) != intended {
+			c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
+		} else if err := commit(committedRaw); err != nil {
+			c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
+		}
+		if c.afterBaselineWriteRetry != nil {
+			c.afterBaselineWriteRetry()
+		}
+	}()
+}
+
 // newManagedApplyInstanceID returns a 12-hex-character boot-scoped identifier
 // generated once per process. It is correlation metadata, not a cryptographic
 // secret; the fallback only runs if the OS CSPRNG is unavailable.
@@ -1082,6 +1125,7 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 	if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
 		if err := c.ManagedBaseline.CompleteWrite(data, persistedVersion); err != nil {
 			stageDegraded = &DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written"}
+			c.scheduleBaselineWriteRetry(data, func(b []byte) error { return c.ManagedBaseline.CompleteWrite(b, persistedVersion) })
 		}
 	}
 	c.mu.Unlock()
@@ -1400,6 +1444,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 				}
 			} else if err := c.ManagedBaseline.CompleteWrite(data, persistedVersion); err != nil {
 				terminal.Degraded = append(terminal.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written"})
+				c.scheduleBaselineWriteRetry(data, func(b []byte) error { return c.ManagedBaseline.CompleteWrite(b, persistedVersion) })
 			}
 		}
 		// #226 / AC-03: every config-path mutation is complete at this point,
