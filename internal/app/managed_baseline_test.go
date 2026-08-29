@@ -890,5 +890,3 @@ func TestManagedBaselineHasArtifactsVariants(t *testing.T) {
 		t.Error("a surviving snapshot alone must count as an artifact")
 	}
 }
-
-
