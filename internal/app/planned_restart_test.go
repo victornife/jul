@@ -1380,3 +1380,66 @@ func TestRefreshStateCallsDivergenceCheckWhenNotManaged(t *testing.T) {
 		t.Errorf("state = %q, want external_divergence", st.State)
 	}
 }
+
+// ─── RemoveOrphanBackup (ADR 0019 §17.2 file_owned startup cleanup) ──────────
+
+func TestRemoveOrphanBackupNoopWhenMarkerPresent(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+	store := NewFilePlannedRestartStore(configPath)
+	marker := PlannedRestartMarker{
+		Version:       plannedRestartMarkerVersion,
+		State:         plannedRestartStatePrepared,
+		ConfigPath:    configPath,
+		BaseRawSHA256: sha256Hex([]byte("original")),
+	}
+	raw, _ := marshalMarker(marker)
+	if err := os.WriteFile(store.markerPath(), raw, 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	if err := os.WriteFile(store.backupPath(), []byte("original"), 0o600); err != nil {
+		t.Fatalf("write backup: %v", err)
+	}
+
+	if err := store.RemoveOrphanBackup(); err != nil {
+		t.Fatalf("RemoveOrphanBackup: %v", err)
+	}
+	if _, err := os.Stat(store.backupPath()); err != nil {
+		t.Fatalf("backup should survive when a marker still claims it: %v", err)
+	}
+}
+
+func TestRemoveOrphanBackupRemovesBackupWhenNoMarker(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "server.toml")
+	store := NewFilePlannedRestartStore(configPath)
+	if err := os.WriteFile(store.backupPath(), []byte("orphan"), 0o600); err != nil {
+		t.Fatalf("write backup: %v", err)
+	}
+
+	if err := store.RemoveOrphanBackup(); err != nil {
+		t.Fatalf("RemoveOrphanBackup: %v", err)
+	}
+	if _, err := os.Stat(store.backupPath()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("orphan backup should be removed, stat err = %v", err)
+	}
+}
+
+func TestRemoveOrphanBackupNoopWhenNothingExists(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewFilePlannedRestartStore(filepath.Join(tmp, "server.toml"))
+	if err := store.RemoveOrphanBackup(); err != nil {
+		t.Fatalf("RemoveOrphanBackup on clean dir: %v", err)
+	}
+}
+
+func TestRemoveOrphanBackupNilOrInMemoryStoreIsNoop(t *testing.T) {
+	var nilStore *PlannedRestartStore
+	if err := nilStore.RemoveOrphanBackup(); err != nil {
+		t.Fatalf("nil store RemoveOrphanBackup: %v", err)
+	}
+	inMemory := &PlannedRestartStore{}
+	if err := inMemory.RemoveOrphanBackup(); err != nil {
+		t.Fatalf("in-memory store RemoveOrphanBackup: %v", err)
+	}
+}

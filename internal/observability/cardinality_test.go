@@ -221,6 +221,7 @@ func exerciseAllMetrics(m *Metrics) {
 	m.SetConfigAuthorityDrift(true)
 	m.SetConfigAuthorityDrift(false)
 	m.ObserveConfigAuthorityDenied("config.raw")
+	m.ObserveConfigAuthorityDenied("")
 	m.ObserveManagedApplyFinalized("config.apply", "hot", "not_applied", "true")
 	m.ObserveManagedApplyFinalizationError("restoration")
 	m.ObserveManagedApplyHistory("config.apply", "recorded")

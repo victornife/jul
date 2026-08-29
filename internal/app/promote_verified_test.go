@@ -200,3 +200,51 @@ func TestClearStagingArtifactsRemovesStagedArtifacts(t *testing.T) {
 		t.Error("a fresh store must not find a resurrected staged restart")
 	}
 }
+
+// TestClearStagingArtifactsMarkerRemoveFailure exercises the marker-removal
+// error branch: a non-empty directory sitting at the marker's path cannot be
+// removed by os.Remove (it is not empty), so the failure surfaces instead of
+// being silently swallowed.
+func TestClearStagingArtifactsMarkerRemoveFailure(t *testing.T) {
+	store, path, candidate := stagePrepared(t)
+	if err := store.PromoteToStagedVerified(candidate); err != nil {
+		t.Fatalf("promotion: %v", err)
+	}
+	markerPath := path + ".pending-restart.json"
+	if err := os.Remove(markerPath); err != nil {
+		t.Fatalf("remove real marker: %v", err)
+	}
+	if err := os.Mkdir(markerPath, 0o755); err != nil {
+		t.Fatalf("mkdir in place of marker: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(markerPath, "occupant"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("write occupant file: %v", err)
+	}
+
+	if err := store.ClearStagingArtifacts(); err == nil {
+		t.Fatal("expected an error when the marker path is a non-empty directory")
+	}
+}
+
+// TestClearStagingArtifactsBackupRemoveFailure mirrors the marker case for
+// the backup path.
+func TestClearStagingArtifactsBackupRemoveFailure(t *testing.T) {
+	store, path, candidate := stagePrepared(t)
+	if err := store.PromoteToStagedVerified(candidate); err != nil {
+		t.Fatalf("promotion: %v", err)
+	}
+	backupPath := path + ".pending-restart.bak"
+	if err := os.Remove(backupPath); err != nil {
+		t.Fatalf("remove real backup: %v", err)
+	}
+	if err := os.Mkdir(backupPath, 0o755); err != nil {
+		t.Fatalf("mkdir in place of backup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(backupPath, "occupant"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("write occupant file: %v", err)
+	}
+
+	if err := store.ClearStagingArtifacts(); err == nil {
+		t.Fatal("expected an error when the backup path is a non-empty directory")
+	}
+}

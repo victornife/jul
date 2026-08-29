@@ -16,6 +16,25 @@ import (
 	"jul/internal/server"
 )
 
+// TestOriginForBaselineState pins the §11.2.1 origin discriminator directly,
+// including the ConfigStateManagedInconsistent case that a live coordinator
+// path rarely reaches (a caller must already be in the inconsistent state,
+// which itself refuses managed writes).
+func TestOriginForBaselineState(t *testing.T) {
+	cases := map[ConfigState]string{
+		ConfigStateManagedUnadopted:    "no_baseline",
+		ConfigStateManagedInconsistent: "inconsistent",
+		ConfigStateManagedClean:        "drift",
+		ConfigStateManagedDrift:        "drift",
+		ConfigStateManagedDesiredAhead: "drift",
+	}
+	for state, want := range cases {
+		if got := originForBaselineState(state); got != want {
+			t.Errorf("originForBaselineState(%v) = %q, want %q", state, got, want)
+		}
+	}
+}
+
 func TestAdoptExternalNoBaseline(t *testing.T) {
 	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
 	c.ManagedBaseline = NewManagedBaselineStore(path)
@@ -113,6 +132,79 @@ func TestAssessAdoptExternalRestartRequired(t *testing.T) {
 	}
 	if !assessment.RestartRequired {
 		t.Error("expected RestartRequired=true for a restart-bound candidate")
+	}
+}
+
+// TestAssessAdoptExternalReadConfigRawFailure pins that a storage failure
+// reading the external file surfaces as an error rather than a hollow
+// assessment.
+func TestAssessAdoptExternalReadConfigRawFailure(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	c.ReadConfigRaw = func() ([]byte, error) { return nil, errors.New("disk unavailable") }
+
+	if _, err := c.AssessAdoptExternal(); err == nil {
+		t.Fatal("expected an error when the external file cannot be read")
+	}
+}
+
+// TestAssessAdoptExternalPreflightApplyError pins that a preflight failure
+// unrelated to parsing (here, the handler dry-run) is still reported as a
+// side-effect-free, non-OK assessment rather than an error return.
+func TestAssessAdoptExternalPreflightApplyError(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	c.Preflight = &Preflight{
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+			return nil, nil, errors.New("handler build failed")
+		},
+		Stream: &mockStreamPreflighter{},
+	}
+	if err := os.WriteFile(path, validConfigRaw(t, ":8080"), 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	assessment, err := c.AssessAdoptExternal()
+	if err != nil {
+		t.Fatalf("AssessAdoptExternal: %v", err)
+	}
+	if assessment.OK {
+		t.Fatal("a preflight failure must not report OK=true")
+	}
+	if len(assessment.ValidationErrors) == 0 {
+		t.Error("expected a validation error carrying the preflight failure")
+	}
+}
+
+// TestAssessAdoptExternalAbortsPreparedAdmin pins that a non-nil
+// PreparedAdmin artifact built while assessing a preview is always aborted:
+// an assessment is side-effect-free and never installs it.
+func TestAssessAdoptExternalAbortsPreparedAdmin(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	var aborted bool
+	c.Preflight = &Preflight{
+		PrepareAdmin: func(config.AdminConfig) (*server.PreparedCommit, error) {
+			return server.NewPreparedCommit(nil, func() { aborted = true }), nil
+		},
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+			return map[string]http.Handler{}, nil, nil
+		},
+		Stream: &mockStreamPreflighter{},
+	}
+	if err := os.WriteFile(path, validConfigRaw(t, ":8080"), 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	assessment, err := c.AssessAdoptExternal()
+	if err != nil {
+		t.Fatalf("AssessAdoptExternal: %v", err)
+	}
+	if !assessment.OK {
+		t.Fatalf("assessment = %+v, want OK=true", assessment)
+	}
+	if !aborted {
+		t.Fatal("a preview must abort any prepared admin artifact it built")
 	}
 }
 
@@ -304,6 +396,16 @@ func TestAdoptExternalHotReloadNotPublished(t *testing.T) {
 func TestAdoptExternalHotModeCommitMarkFailure(t *testing.T) {
 	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
 	c.ManagedBaseline = NewManagedBaselineStore(path)
+	var aborted bool
+	c.Preflight = &Preflight{
+		PrepareAdmin: func(config.AdminConfig) (*server.PreparedCommit, error) {
+			return server.NewPreparedCommit(nil, func() { aborted = true }), nil
+		},
+		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
+			return map[string]http.Handler{}, nil, nil
+		},
+		Stream: &mockStreamPreflighter{},
+	}
 	external := validConfigRaw(t, ":8080")
 	if err := os.WriteFile(path, external, 0o600); err != nil {
 		t.Fatalf("write external file: %v", err)
@@ -318,6 +420,28 @@ func TestAdoptExternalHotModeCommitMarkFailure(t *testing.T) {
 	}
 	if res.OK {
 		t.Fatalf("result = %+v, want OK=false", res)
+	}
+	if !aborted {
+		t.Fatal("a prepared admin artifact built for a failed adoption must be aborted, not leaked")
+	}
+}
+
+// TestAdoptExternalDefaultsEmptyModeToHot pins that an omitted Mode behaves
+// exactly like "hot" (the zero value of admin.AdoptExternalRequest.Mode).
+func TestAdoptExternalDefaultsEmptyModeToHot(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	external := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{Confirm: true})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if !res.OK || res.Mode != ApplyHot {
+		t.Fatalf("result = %+v, want OK=true Mode=hot for an omitted mode", res)
 	}
 }
 

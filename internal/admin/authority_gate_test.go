@@ -196,6 +196,29 @@ func TestFileOwnedAllowsPreviewAndStatus(t *testing.T) {
 	}
 }
 
+// TestFileOwnedDenialObservesMetricHook pins that a wired
+// ObserveAuthorityDenied hook is invoked with the bounded action label on
+// every denial (ADR 0019 §15); a nil hook (every other test in this file)
+// must not panic.
+func TestFileOwnedDenialObservesMetricHook(t *testing.T) {
+	counters := &authorityGateCounters{}
+	s := newFileOwnedTestServer(t, counters)
+	var observed []string
+	s.deps.ObserveAuthorityDenied = func(reason string) {
+		observed = append(observed, reason)
+	}
+	h := s.routes()
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/raw", bytes.NewReader([]byte(`[[servers]]
+listen = ":9090"
+`))))
+	assertConfigAuthorityDenial(t, rr)
+	if len(observed) != 1 || observed[0] != string(ApplyOperationLegacyRaw) {
+		t.Fatalf("observed = %v, want exactly one config.raw denial", observed)
+	}
+}
+
 func TestRuntimeOverviewSurfacesAuthority(t *testing.T) {
 	counters := &authorityGateCounters{}
 	s := newFileOwnedTestServer(t, counters)
