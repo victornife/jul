@@ -65,8 +65,9 @@ jobs:
         run: |
           python scripts/docs-check.py
           python scripts/test_docs_check.py
-          python scripts/link-check.py
-          python scripts/test_link_check.py
+          test ! -e scripts/link-check.py
+          test ! -e scripts/test_link_check.py
+          echo "Standalone link-check scripts are not present; docs-check.py performs repository Markdown link and anchor validation."
           git diff --check
       - name: remove one-shot bootstrap files
         run: rm .github/issue353_apply.py .github/workflows/issue353-bootstrap.yml
