@@ -281,12 +281,12 @@ func TestAssessmentV2ClassificationUtilities(t *testing.T) {
 	}
 
 	risks := map[string]AssessmentRisk{
-		"auth_basic":   RiskSecurity,
+		"auth_basic":    RiskSecurity,
 		"ssl_protocols": RiskSecurity,
-		"access_log":   RiskObservability,
-		"proxy_cache":  RiskPerformance,
-		"proxy_buffer": RiskPerformance,
-		"proxy_pass":   RiskRouting,
+		"access_log":    RiskObservability,
+		"proxy_cache":   RiskPerformance,
+		"proxy_buffer":  RiskPerformance,
+		"proxy_pass":    RiskRouting,
 	}
 	for name, want := range risks {
 		if got := defaultRisk(name); got != want {
