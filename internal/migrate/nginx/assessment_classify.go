@@ -6,7 +6,6 @@
 package nginx
 
 import (
-	"fmt"
 	"sort"
 	"strconv"
 	"strings"
