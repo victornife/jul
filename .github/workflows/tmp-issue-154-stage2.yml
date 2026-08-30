@@ -25,11 +25,18 @@ jobs:
           set -euo pipefail
           cat .github/tmp/issue154-stage2-*.b64 | tr -d '\n' | base64 --decode > /tmp/issue154-stage2.tgz
           tar -xzf /tmp/issue154-stage2.tgz
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/nginx-migration-e2e.sh")
+          text = path.read_text()
+          old = '--publish "127.0.0.1::${CONTAINER_PORT}"'
+          new = '--publish "127.0.0.1:0:${CONTAINER_PORT}"'
+          if old not in text:
+              raise SystemExit("expected Docker publish expression not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
           chmod +x scripts/nginx-corpus-check.sh scripts/nginx-migration-e2e.sh
           gofmt -w internal/migrate/nginx/corpus/*.go cmd/jul/import_corpus_test.go
-      - name: Show pinned NGINX lane implementation
-        shell: bash
-        run: sed -n '1,260p' scripts/nginx-migration-e2e.sh
       - name: Validate corpus package
         run: go test -tags importer ./internal/migrate/nginx/corpus -count=1
       - name: Validate importer and real Jul E2E
