@@ -166,11 +166,20 @@
         "status": 302,
         "headers": {
           "location": [
+            "http://corpus.test:18080/health"
+          ]
+        }
+      },
+      "jul": {
+        "status": 302,
+        "headers": {
+          "location": [
             "/health"
           ]
         }
       },
-      "expected_verdict": "equivalent_for_asserted_dimensions"
+      "expected_verdict": "expected_difference",
+      "expected_difference_code": "NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT"
     }
   ]
 }
