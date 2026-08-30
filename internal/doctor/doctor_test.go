@@ -277,7 +277,7 @@ func TestConfiguredListenersAndBindProbe(t *testing.T) {
 		Admin:   config.AdminConfig{Enabled: true, Listen: "127.0.0.1:0"},
 	}
 	listeners := configuredListeners(cfg)
-	if len(listeners) != 3 {
+	if len(listeners) != 2 {
 		t.Fatalf("listeners = %#v", listeners)
 	}
 	for _, listener := range listeners {
