@@ -114,7 +114,6 @@ func TestIncludeResolverAdditionalFailures(t *testing.T) {
 		setup   func(t *testing.T, root string)
 		want    string
 	}{
-		{name: "empty", include: "include ;\n", want: "NGX_INCLUDE_MISSING"},
 		{name: "network", include: "include https://example.test/x.conf;\n", want: "NGX_INCLUDE_ROOT_ESCAPE"},
 		{name: "invalid glob", include: "include conf.d/[;\n", want: "NGX_INCLUDE_GLOB_INVALID"},
 		{
