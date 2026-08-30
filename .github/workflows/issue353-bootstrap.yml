@@ -59,6 +59,13 @@ jobs:
               raise SystemExit(f'expected one active-roadmap heading, found {text.count(marker)}')
           path.write_text(text.replace(marker, replacement, 1), encoding='utf-8', newline='\n')
           PY
+      - name: normalize final newlines
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('docs/status.md')
+          path.write_text(path.read_text(encoding='utf-8').rstrip() + '\n', encoding='utf-8', newline='\n')
+          PY
       - name: verify generated contracts
         run: make generated-check
       - name: verify documentation
