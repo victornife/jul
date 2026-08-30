@@ -1,0 +1,142 @@
+name: Resolve PR 355 conflicts
+
+on:
+  push:
+    branches:
+      - "agent/issue-353-docs-reconciliation"
+    paths:
+      - ".github/workflows/resolve-pr355-conflicts.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: resolve-pr355-conflicts
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.2.0
+        with:
+          ref: agent/issue-353-docs-reconciliation
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v5.3.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install documentation dependencies
+        run: python3 -m pip install --disable-pip-version-check PyYAML
+
+      - name: Merge main and resolve the two expected conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+
+          set +e
+          git merge --no-ff --no-commit origin/main
+          merge_status=$?
+          set -e
+
+          conflicts="$(git diff --name-only --diff-filter=U | sort)"
+          expected="$(printf '%s\n' 'CHANGELOG.md' 'docs/nginx-importer.md' | sort)"
+          if [[ "$merge_status" -ne 0 && "$conflicts" != "$expected" ]]; then
+            echo "Unexpected conflict set:" >&2
+            printf '%s\n' "$conflicts" >&2
+            exit 1
+          fi
+
+          if [[ -n "$conflicts" ]]; then
+            git checkout --ours -- CHANGELOG.md docs/nginx-importer.md
+          fi
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          changelog = Path("CHANGELOG.md")
+          changelog_text = changelog.read_text(encoding="utf-8")
+          corpus_entry = (
+              "- **NGINX migration corpus and selected-dimension real E2E (#154):** "
+              "adds a licensed, sanitized fixture contract; exact assessment and candidate "
+              "goldens; real Jul replay; and a digest-pinned, network-isolated NGINX reference "
+              "lane. The first differential finding classifies local `return` redirects as "
+              "approximated because NGINX expands them to absolute URLs by default while Jul "
+              "preserves the relative target.\n"
+          )
+          if corpus_entry not in changelog_text:
+              marker = "### Added\n"
+              if marker not in changelog_text:
+                  raise SystemExit("CHANGELOG.md has no first Added section")
+              changelog_text = changelog_text.replace(marker, marker + corpus_entry, 1)
+              changelog.write_text(changelog_text, encoding="utf-8")
+
+          importer = Path("docs/nginx-importer.md")
+          importer_text = importer.read_text(encoding="utf-8")
+          evidence_section = """## Migration evidence corpus
+
+          The importer is continuously exercised against the versioned, sanitized
+          [NGINX migration compatibility corpus](nginx-migration-corpus.md). The PR core
+          lane checks exact schema-v2 assessment projections, canonical candidate
+          validation, and real-Jul loopback behavior. A separate workflow runs an official
+          NGINX 1.28.3 image pinned by digest and compares only the explicit response
+          dimensions declared by each selected scenario.
+
+          The evidence is deliberately narrower than universal compatibility: fixtures
+          can be supported, approximated, blocking, not executed, or equivalent only for
+          their asserted dimensions. Corpus admission rejects proprietary/user source,
+          private-key material, unsafe request headers, non-loopback replay, symlinks and
+          unbounded files. See the corpus guide for the current category inventory,
+          deferrals, image isolation, and local commands.
+
+          ### Corpus-discovered local redirect boundary
+
+          NGINX expands a local `return 30x /path` target to an absolute
+          `Location` by default, using the request/server authority. Jul preserves
+          `/path`. The importer therefore reports
+          `NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT` as `approximated`, and the corpus
+          records the selected-dimension runtime relationship as
+          `expected_difference` rather than claiming equivalence.
+
+          """
+          if "## Migration evidence corpus" not in importer_text:
+              marker = "## Benchmarks\n"
+              if marker not in importer_text:
+                  raise SystemExit("docs/nginx-importer.md has no Benchmarks section")
+              importer_text = importer_text.replace(marker, evidence_section + marker, 1)
+              importer.write_text(importer_text, encoding="utf-8")
+          PY
+
+          git add CHANGELOG.md docs/nginx-importer.md
+          git rm .github/workflows/resolve-pr355-conflicts.yml
+
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo "Unresolved conflicts remain" >&2
+            git diff --name-only --diff-filter=U >&2
+            exit 1
+          fi
+
+      - name: Verify resolved tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          make generated-check
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+
+      - name: Commit and push resolved merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --short
+          git commit -m "merge: reconcile main into PR 355"
+          git push origin HEAD:agent/issue-353-docs-reconciliation
