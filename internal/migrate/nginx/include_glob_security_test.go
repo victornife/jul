@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -148,7 +149,7 @@ func TestIncludeFailureLegacyReportOrderIsDeterministic(t *testing.T) {
 		parts := make([]string, 0, len(report.Skipped))
 		for _, finding := range report.Skipped {
 			if finding.Name == "include" {
-				parts = append(parts, strings.Join([]string{finding.Name, finding.Reason}, ":"))
+				parts = append(parts, strings.Join([]string{strconv.Itoa(finding.Line), finding.Name, finding.Reason}, ":"))
 			}
 		}
 		got := strings.Join(parts, "|")
