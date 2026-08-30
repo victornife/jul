@@ -217,13 +217,28 @@ func (generator *Generator) prepareArtifact(artifact Artifact, redactValues []st
 
 	if int64(len(artifact.Data)) > generator.limits.MaxArtifactBytes {
 		if strings.HasPrefix(strings.ToLower(artifact.ContentType), "text/") {
-			artifact.Data = append(append([]byte(nil), artifact.Data[:generator.limits.MaxArtifactBytes]...), []byte("\n[truncated by support-bundle artifact limit]\n")...)
+			artifact.Data = truncateTextArtifact(artifact.Data, generator.limits.MaxArtifactBytes)
 			artifact.Truncated = true
 		} else {
 			return Artifact{}, fmt.Errorf("%w: %s", ErrArtifactTooLarge, artifact.Path)
 		}
 	}
 	return artifact, nil
+}
+
+func truncateTextArtifact(data []byte, limit int64) []byte {
+	if limit <= 0 {
+		return nil
+	}
+	marker := []byte("\n[truncated by support-bundle artifact limit]\n")
+	if limit <= int64(len(marker)) {
+		return append([]byte(nil), marker[:int(limit)]...)
+	}
+	prefixBytes := int(limit) - len(marker)
+	out := make([]byte, 0, int(limit))
+	out = append(out, data[:prefixBytes]...)
+	out = append(out, marker...)
+	return out
 }
 
 func safeArtifactPath(value string) (string, error) {
