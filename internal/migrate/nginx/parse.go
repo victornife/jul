@@ -31,6 +31,9 @@ func ImportFile(path string) (*config.Config, *Report, error) {
 		return nil, nil, err
 	}
 	cfg, rep := Translate(src, path)
+	if rep != nil {
+		rep.Assessment = BuildAssessment(src, path, rep)
+	}
 	return cfg, rep, nil
 }
 
