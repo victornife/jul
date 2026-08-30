@@ -229,6 +229,13 @@ type ConfigApplyCoordinator struct {
 	// slow terminal restoration. Production leaves them unset.
 	beforeRestore func()
 	waitMargin    time.Duration
+	// afterRestore is a deterministic test barrier invoked immediately after
+	// restorePreviousLocked returns, on both the synchronous enqueue-failure
+	// path and the async failed-reload path, before the caller decides
+	// clean-vs-inconsistent or reassesses drift. Production leaves it nil;
+	// tests use it to write an external change between the restoration write
+	// and the baseline's own resolution of that restoration.
+	afterRestore func()
 	// beforeBaselineWriteRetry is a deterministic test barrier invoked at the
 	// start of resolveBaselineWriteRetry, before it does any work. Production
 	// leaves it nil; tests use it to hold the retry open and observe that the
@@ -719,9 +726,27 @@ func (c *ConfigApplyCoordinator) assessManagedDrift() {
 // is the entry point the file watcher and SIGHUP call in managed mode (ADR
 // 0019 §11 point 4/5, §12): both become drift detectors and never enqueue a
 // reload themselves.
+//
+// While a managed transaction still owns the config-path mutation gate
+// (inFlightState == waiting), the file on disk may already be this
+// transaction's own in-flight candidate compared against a baseline that
+// has not been updated to match it yet — the watcher's own echo of Jul's
+// write would misreport that as drift, and managed mode's driftOnlyFileConsumer
+// deliberately does not suppress it by digest (a no-op transaction's echo
+// is otherwise indistinguishable from a real external write). Skip the
+// assessment in that window instead: the transaction's own mandatory
+// terminal reassessment (completeWriteAndReassessDrift /
+// rewindWriteAndReassessDrift) is the authoritative check once the baseline
+// is current, so nothing is lost by deferring to it here.
 func (c *ConfigApplyCoordinator) AssessDriftNow() {
 	c.applyMu.Lock()
 	defer c.applyMu.Unlock()
+	c.mu.Lock()
+	inFlight := c.inFlightState == ApplyInFlightWaiting
+	c.mu.Unlock()
+	if inFlight {
+		return
+	}
 	c.assessManagedDrift()
 }
 
@@ -847,16 +872,35 @@ func (c *ConfigApplyCoordinator) completeWriteAndReassessDrift(committedRaw []by
 // restored arm, ADR 0019 §11.2). When restoration succeeded it rewinds the
 // baseline to the prior bytes; when restoration failed the on-disk state is
 // uncertain, so the baseline is marked inconsistent immediately rather than
-// left clean on the strength of an intention (§11.2.1a).
+// left clean on the strength of an intention (§11.2.1a). The caller must
+// pass a verified restored outcome (a fresh disk read compared against the
+// prior bytes), not merely "the restoration write itself did not error" —
+// the latter is not evidence the file still holds those bytes right now.
 func (c *ConfigApplyCoordinator) rewindOrMarkInconsistent(restored bool) *DegradedEntry {
 	if restored {
-		if err := c.ManagedBaseline.RewindWrite(); err != nil {
+		if err := c.rewindWriteAndReassessDrift(); err != nil {
 			return &DegradedEntry{Kind: DegradedBaselineError, Message: "baseline could not be rewound after restoration"}
 		}
 		return nil
 	}
 	c.ManagedBaseline.MarkInconsistent(ReasonRestorationFailed)
 	return &DegradedEntry{Kind: DegradedBaselineError, Message: "baseline left inconsistent after a failed restoration"}
+}
+
+// rewindWriteAndReassessDrift mirrors completeWriteAndReassessDrift for the
+// restoration arm: RewindWrite's own bookkeeping assumes disk holds exactly
+// the restored prior bytes, but neither applyMu nor c.mu holds off an
+// external writer, which can land between the restoration write and this
+// call. Re-reading immediately afterward, from the CURRENT file content
+// rather than the assumption RewindWrite bakes in, lets such a race surface
+// as drift/inconsistency instead of being silently overwritten by
+// RewindWrite's own optimistic managed_clean.
+func (c *ConfigApplyCoordinator) rewindWriteAndReassessDrift() error {
+	if err := c.ManagedBaseline.RewindWrite(); err != nil {
+		return err
+	}
+	c.assessManagedDrift()
+	return nil
 }
 
 // retryBaselineWriteLocked performs ADR 0019 §11.2.1a's single required
@@ -1467,11 +1511,9 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 			c.ManagedBaseline.MarkFailedApply()
 		}
 		restoreErr := c.restorePreviousLocked(baseline.Raw, baseline.Exists, rawDigest)
-		var baselineDegraded *DegradedEntry
-		if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
-			baselineDegraded = c.rewindOrMarkInconsistent(restoreErr == nil)
+		if c.afterRestore != nil {
+			c.afterRestore()
 		}
-		c.inFlightState = ApplyInFlightNone
 		// Build structured truth with Persisted/Restored/FinalDiskVersion
 		// while still holding the lock so the disk read in withRestorationOutcome
 		// is atomic with the restoration. ApplyID is set so the callback can
@@ -1501,7 +1543,17 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 				Error:          err.Error(),
 			},
 		}
+		// Verify restoration by re-reading disk BEFORE the baseline decides
+		// clean vs inconsistent: restoreErr == nil only means the restoration
+		// write itself did not error, not that disk still holds those bytes
+		// at this instant — an external writer can race the restoration
+		// write itself, same as it can race a successful apply's commit.
 		terminal = c.withRestorationOutcome(terminal, baseline.Raw, baseline.Exists, rawDigest)
+		var baselineDegraded *DegradedEntry
+		if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
+			baselineDegraded = c.rewindOrMarkInconsistent(terminal.Restored)
+		}
+		c.inFlightState = ApplyInFlightNone
 		if baselineDegraded != nil {
 			terminal.Degraded = append(terminal.Degraded, *baselineDegraded)
 		}
@@ -1561,6 +1613,9 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 			}
 			if err := c.restorePreviousLocked(baseline.Raw, baseline.Exists, rawDigest); err != nil {
 				c.logRestorationFailure(id, err)
+			}
+			if c.afterRestore != nil {
+				c.afterRestore()
 			}
 		}
 		terminal := c.buildTerminalResult(mode, persistedVersion, desiredVersion, rr, baseline.Raw, baseline.Exists, rawDigest)

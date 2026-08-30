@@ -609,6 +609,147 @@ func TestAdoptFromMarkerMissingDetectsSnapshotChangeBetweenPreviewAndAdoption(t 
 	}
 }
 
+// TestAdoptFromUnparseableSnapshotUsesDigestDerivedBaseVersion pins the fix
+// for the residual left open in the prior round: a retained snapshot that
+// cannot be parsed used to leave base_version empty, indistinguishable from
+// an omitted field. It must instead recover a real, digest-derived token so
+// the CAS still has something to bind to and compare.
+func TestAdoptFromUnparseableSnapshotUsesDigestDerivedBaseVersion(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	if err := os.Remove(path + ".managed-baseline.json"); err != nil {
+		t.Fatalf("remove marker: %v", err)
+	}
+	// Replace the retained snapshot itself with bytes that do not parse as
+	// configuration, simulating a corrupted-but-readable snapshot alongside
+	// the missing marker.
+	garbled := []byte("this is not valid toml {{{")
+	if err := os.WriteFile(path+".managed-baseline.snapshot", garbled, 0o600); err != nil {
+		t.Fatalf("write unparseable snapshot: %v", err)
+	}
+	if err := c.ManagedBaseline.Reconcile(seed, nil, "seed-version", ""); err == nil {
+		t.Fatal("Reconcile: want an error for marker_missing")
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonMarkerMissing {
+		t.Fatalf("precondition: state=%v reason=%v, want managed_inconsistent/marker_missing", st.State, st.Reason)
+	}
+
+	external := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	assessment, err := c.AssessAdoptExternal()
+	if err != nil {
+		t.Fatalf("AssessAdoptExternal: %v", err)
+	}
+	wantVersion := "unparsed:" + sha256Hex(garbled)
+	if assessment.BaselineVersion != wantVersion {
+		t.Errorf("BaselineVersion = %q, want the digest-derived %q", assessment.BaselineVersion, wantVersion)
+	}
+
+	// An omitted/empty base_version against a recoverable (even if
+	// digest-derived, not canonical) version must be rejected, not treated
+	// as a wildcard.
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+		ObservedDigest: assessment.ObservedDigest,
+		BaseVersion:    "",
+		Mode:           "hot",
+		Confirm:        true,
+	})
+	if err != nil {
+		t.Fatalf("AdoptExternal (empty base_version): %v", err)
+	}
+	if res.OK {
+		t.Fatalf("an omitted base_version against an unparseable-but-recoverable snapshot must be rejected, got %+v", res)
+	}
+
+	// Echoing back the exact digest-derived version must succeed.
+	res, err = c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+		ObservedDigest: assessment.ObservedDigest,
+		BaseVersion:    assessment.BaselineVersion,
+		Mode:           "hot",
+		Confirm:        true,
+	})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("adoption bound to the unparseable snapshot's digest-derived version must succeed, got %+v", res)
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedClean {
+		t.Errorf("state = %v, want managed_clean after a successful adoption", st.State)
+	}
+}
+
+// TestAdoptFromUnparseableSnapshotDetectsSnapshotReplacedByAnotherUnparseableSnapshot
+// pins the exact blind spot a plain empty base_version left open: two
+// different unparseable snapshots both report an empty canonical version,
+// so a swap between them was previously invisible to the CAS. The
+// digest-derived fallback must detect it exactly like the parseable case.
+func TestAdoptFromUnparseableSnapshotDetectsSnapshotReplacedByAnotherUnparseableSnapshot(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	if err := os.Remove(path + ".managed-baseline.json"); err != nil {
+		t.Fatalf("remove marker: %v", err)
+	}
+	garbled := []byte("this is not valid toml {{{")
+	if err := os.WriteFile(path+".managed-baseline.snapshot", garbled, 0o600); err != nil {
+		t.Fatalf("write unparseable snapshot: %v", err)
+	}
+	if err := c.ManagedBaseline.Reconcile(seed, nil, "seed-version", ""); err == nil {
+		t.Fatal("Reconcile: want an error for marker_missing")
+	}
+	external := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	assessment, err := c.AssessAdoptExternal()
+	if err != nil {
+		t.Fatalf("AssessAdoptExternal: %v", err)
+	}
+
+	// A different unparseable snapshot replaces the first between preview
+	// and adoption; the external file is untouched, so observed_digest
+	// alone would not catch this.
+	differentGarbled := []byte("still not valid toml ]]]")
+	if err := os.WriteFile(path+".managed-baseline.snapshot", differentGarbled, 0o600); err != nil {
+		t.Fatalf("replace snapshot: %v", err)
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+		ObservedDigest: assessment.ObservedDigest,
+		BaseVersion:    assessment.BaselineVersion,
+		Mode:           "hot",
+		Confirm:        true,
+	})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if res.OK || !res.Conflict {
+		t.Fatalf("a base_version bound to a since-replaced unparseable snapshot must conflict, got %+v", res)
+	}
+	onDisk, _ := os.ReadFile(path)
+	if string(onDisk) != string(external) {
+		t.Error("a refused adoption must not touch the file")
+	}
+}
+
 // TestAdoptExternalRejectsFileOwnedDirectly pins AdoptExternal's own
 // defense-in-depth authority check (distinct from the HTTP-layer
 // denyIfFileOwned gate tested in internal/admin).

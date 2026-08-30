@@ -1033,3 +1033,154 @@ func TestManagedApplyDriftDuringReloadWaitSurvivesTerminalization(t *testing.T) 
 		t.Errorf("disk digest = %q, want J (%q) — drift must reflect the actual current disk content, not an assumption", st.DiskRawSHA256, digestHex(external))
 	}
 }
+
+// TestAssessDriftNowDefersWhileApplyInFlight pins the fix for the watcher-echo
+// issue exposed by releasing applyMu early: while a managed transaction still
+// owns the config-path mutation gate (inFlightState == waiting), disk may
+// hold this transaction's own in-flight candidate compared against a
+// not-yet-updated baseline — assessing here would misreport that as drift
+// even for Jul's own pending write, and driftOnlyFileConsumer does not
+// suppress the watcher's echo of it by digest. AssessDriftNow must skip the
+// assessment in that window and leave the pre-apply status untouched; the
+// transaction's own mandatory terminal reassessment is what resolves it.
+func TestAssessDriftNowDefersWhileApplyInFlight(t *testing.T) {
+	submitCalled := make(chan struct{})
+	proceedReload := make(chan struct{})
+	submit := func(req server.ReloadRequest) error {
+		close(submitCalled)
+		go func() {
+			<-proceedReload
+			req.Result <- server.ReloadResult{
+				ID:             req.ID,
+				Source:         server.ReloadSourceAdmin,
+				Outcome:        server.ReloadAppliedLive,
+				Published:      true,
+				ServingVersion: "v2",
+			}
+		}()
+		return nil
+	}
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, submit)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+
+	newRaw := validConfigRaw(t, ":8081")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot); err != nil {
+			t.Errorf("ApplyRaw error: %v", err)
+		}
+	}()
+
+	<-submitCalled
+
+	// An external write lands while the apply's own transaction still owns
+	// the gate; disk now holds neither the seed baseline nor this apply's
+	// own candidate.
+	external := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("simulate external write: %v", err)
+	}
+
+	c.AssessDriftNow()
+
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedClean || st.Drift {
+		t.Errorf("state = %+v, want the pre-apply managed_clean left untouched — AssessDriftNow must defer while a transaction owns the gate", st)
+	}
+	if st := c.ManagedBaseline.Status(); st.BaselineRawSHA256 != digestHex(seed) {
+		t.Errorf("baseline digest = %q, want the pre-apply seed digest unchanged by a deferred assessment", st.BaselineRawSHA256)
+	}
+
+	close(proceedReload)
+	<-done
+}
+
+// TestManagedApplyRestorationSurvivesExternalWriteRace pins the restoration
+// arm of the same race class completeWriteAndReassessDrift closed on the
+// success arm: an enqueue failure restores the previous bytes P, but an
+// external writer can land between that restoration write and the
+// baseline's own resolution of it — rewindOrMarkInconsistent must decide
+// clean-vs-inconsistent from a verified re-read, and a successful rewind
+// must reassess drift against the CURRENT disk content, not assume the
+// restoration write it just made still holds.
+//
+// Sequence: apply A persists candidate I, its reload enqueue fails,
+// restorePreviousLocked writes P back; before the baseline resolves that
+// restoration, an external writer replaces disk with J. The terminal state
+// must never be managed_clean(P) while disk actually holds J.
+func TestManagedApplyRestorationSurvivesExternalWriteRace(t *testing.T) {
+	submit := func(req server.ReloadRequest) error {
+		return errors.New("simulated enqueue failure")
+	}
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, submit)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+
+	reachedAfterRestore := make(chan struct{})
+	proceed := make(chan struct{})
+	c.afterRestore = func() {
+		close(reachedAfterRestore)
+		<-proceed
+	}
+
+	newRaw := validConfigRaw(t, ":8081")
+	type applyOutcome struct {
+		res ApplyResult
+		err error
+	}
+	done := make(chan applyOutcome, 1)
+	go func() {
+		res, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot)
+		done <- applyOutcome{res, err}
+	}()
+
+	<-reachedAfterRestore
+
+	// At this point restorePreviousLocked has already rewritten disk to P.
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read disk after restoration: %v", err)
+	}
+	if string(onDisk) != string(seed) {
+		t.Fatalf("precondition failed: disk = %q, want restoration to have already written the seed", onDisk)
+	}
+
+	external := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("simulate external write: %v", err)
+	}
+	close(proceed)
+
+	out := <-done
+	if out.err == nil {
+		t.Fatal("ApplyRaw: want the enqueue error surfaced")
+	}
+	if out.res.OK {
+		t.Fatalf("apply must not report success when enqueue failed, got %+v", out.res)
+	}
+
+	st := c.ManagedBaseline.Status()
+	if st.State == ConfigStateManagedClean {
+		t.Fatalf("state = managed_clean, want drift/inconsistent — an external write racing the restoration write must never be reported as a clean match to the restored bytes")
+	}
+	finalOnDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read disk: %v", err)
+	}
+	if string(finalOnDisk) != string(external) {
+		t.Fatalf("disk = %q, want the external write J to remain untouched by restoration bookkeeping", finalOnDisk)
+	}
+}

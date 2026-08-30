@@ -130,8 +130,19 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 		}
 		prevRaw = snap
 		prevCfg, _ = config.Parse(snap)
-		if recoveredBaseVersion == "" && prevCfg != nil {
-			recoveredBaseVersion = server.CanonicalVersion(prevCfg)
+		if recoveredBaseVersion == "" {
+			if prevCfg != nil {
+				recoveredBaseVersion = server.CanonicalVersion(prevCfg)
+			} else {
+				// The retained snapshot itself does not parse: there is no
+				// canonical version to compute, but falling back to "" here
+				// would make it indistinguishable from an omitted field, and
+				// would never detect the snapshot being replaced by a
+				// different unparseable blob between preview and adoption.
+				// A digest-derived, unambiguously-tagged token still gives
+				// the CAS something real to bind to and compare.
+				recoveredBaseVersion = "unparsed:" + sha256Hex(snap)
+			}
 		}
 	}
 
@@ -263,6 +274,11 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 		if recoveredBaseVersion == "" {
 			if snapCfg, perr := config.Parse(snap); perr == nil {
 				recoveredBaseVersion = server.CanonicalVersion(snapCfg)
+			} else {
+				// See AssessAdoptExternal: an unparseable snapshot still gets
+				// a real, digest-derived CAS token rather than degrading to
+				// an empty value indistinguishable from an omitted field.
+				recoveredBaseVersion = "unparsed:" + sha256Hex(snap)
 			}
 		}
 	}
@@ -275,11 +291,13 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 	// always required, because a preview — including a no_baseline one — always
 	// returns one.
 	//
-	// When even the recovered (snapshot-derived) version is unavailable — the
-	// snapshot itself fails to parse — only an empty base_version is accepted,
-	// matching exactly what a genuine preview of this same state reports;
-	// anything else is the same stale-preview conflict the ordinary case
-	// catches.
+	// recoveredBaseVersion is empty here only when origin == "no_baseline"
+	// (nothing to recover a version from in the first place): every
+	// origin != "no_baseline" case above now resolves to a real, non-empty
+	// token — the marker's own version, the snapshot's canonical version, or
+	// (since the snapshot itself may not parse) a digest-derived fallback —
+	// so an empty base_version is never accepted as a wildcard once a prior
+	// managed baseline exists.
 	if origin != "no_baseline" {
 		if recoveredBaseVersion == "" {
 			if req.BaseVersion != "" {
