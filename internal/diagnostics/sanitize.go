@@ -18,13 +18,18 @@ const (
 )
 
 var (
-	secretKeyPattern  = regexp.MustCompile(`(?i)(authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|token|password|passwd|secret|api[-_]?key|private[-_]?key|client[-_]?secret|credential)`)
-	credentialPattern = regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+`)
-	assignmentPattern = regexp.MustCompile(`(?i)\b(token|password|passwd|secret|api[-_]?key|client[-_]?secret)\s*([:=])\s*("[^"]*"|'[^']*'|[^\s,;]+)`)
-	queryPattern      = regexp.MustCompile(`(?i)([?&](?:token|password|passwd|secret|api[-_]?key|client[-_]?secret)=)[^&#\s]+`)
-	cookiePattern     = regexp.MustCompile(`(?i)((?:set-)?cookie\s*[:=]\s*)[^\r\n]+`)
-	userinfoPattern   = regexp.MustCompile(`://[^/\s:@]+:[^/\s@]+@`)
-	privateKeyPattern = regexp.MustCompile(`(?s)-----BEGIN [^-\r\n]*PRIVATE KEY-----.*?-----END [^-\r\n]*PRIVATE KEY-----`)
+	secretKeyPattern    = regexp.MustCompile(`(?i)(authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|token|password|passwd|secret|api[-_]?key|private[-_]?key|client[-_]?secret|credential)`)
+	errorKeyPattern     = regexp.MustCompile(`(?i)^(error|errors|reason|panic|cause)$`)
+	credentialPattern   = regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+`)
+	assignmentPattern   = regexp.MustCompile(`(?i)\b(token|password|passwd|secret|api[-_]?key|client[-_]?secret)\s*([:=])\s*("[^"]*"|'[^']*'|[^\s,;]+)`)
+	queryPattern        = regexp.MustCompile(`(?i)([?&](?:token|password|passwd|secret|api[-_]?key|client[-_]?secret)=)[^&#\s]+`)
+	cookiePattern       = regexp.MustCompile(`(?i)((?:set-)?cookie\s*[:=]\s*)[^\r\n]+`)
+	userinfoPattern     = regexp.MustCompile(`://[^/\s:@]+:[^/\s@]+@`)
+	privateKeyPattern   = regexp.MustCompile(`(?s)-----BEGIN [^-\r\n]*PRIVATE KEY-----.*?-----END [^-\r\n]*PRIVATE KEY-----`)
+	urlPattern          = regexp.MustCompile(`(?i)\b(?:https?|grpc|tcp|udp)://[^\s"'<>]+`)
+	windowsPathPattern  = regexp.MustCompile(`(?i)\b[A-Z]:[\\/](?:[^\\/\s"'():]+[\\/])*[^\\/\s"'():]*`)
+	uncPathPattern      = regexp.MustCompile(`\\\\[^\\\s"'():]+\\[^\\\s"'():]+(?:\\[^\\\s"'():]+)*`)
+	unixPathPattern     = regexp.MustCompile(`(^|[\s"'(=])/(?:[^/\s"'():]+/)*[^/\s"'():]*`)
 )
 
 // SanitizeResult applies structural and string-level redaction to a result.
@@ -84,9 +89,24 @@ func SanitizeString(value string) string {
 	return boundString(value)
 }
 
+// SanitizeErrorString additionally removes complete URLs and absolute paths
+// from operating-system/library errors. Error evidence often embeds configured
+// filesystem or endpoint values even when the calling collector excludes them.
+func SanitizeErrorString(value string) string {
+	value = SanitizeString(value)
+	value = urlPattern.ReplaceAllString(value, "[URL REDACTED]")
+	value = windowsPathPattern.ReplaceAllString(value, "[PATH REDACTED]")
+	value = uncPathPattern.ReplaceAllString(value, "[PATH REDACTED]")
+	value = unixPathPattern.ReplaceAllString(value, `${1}[PATH REDACTED]`)
+	return boundString(value)
+}
+
 func sanitizeValue(key string, value any) any {
 	if secretKeyPattern.MatchString(key) {
 		return redacted
+	}
+	if errorKeyPattern.MatchString(strings.TrimSpace(key)) {
+		return sanitizeErrorValue(value)
 	}
 	switch typed := value.(type) {
 	case nil:
@@ -94,7 +114,7 @@ func sanitizeValue(key string, value any) any {
 	case string:
 		return SanitizeString(typed)
 	case error:
-		return SanitizeString(typed.Error())
+		return SanitizeErrorString(typed.Error())
 	case []string:
 		out := make([]string, len(typed))
 		for i, item := range typed {
@@ -112,6 +132,8 @@ func sanitizeValue(key string, value any) any {
 		for childKey, item := range typed {
 			if secretKeyPattern.MatchString(childKey) {
 				out[childKey] = redacted
+			} else if errorKeyPattern.MatchString(strings.TrimSpace(childKey)) {
+				out[childKey] = SanitizeErrorString(item)
 			} else {
 				out[childKey] = SanitizeString(item)
 			}
@@ -121,6 +143,31 @@ func sanitizeValue(key string, value any) any {
 		out := make(map[string]any, len(typed))
 		for childKey, item := range typed {
 			out[childKey] = sanitizeValue(childKey, item)
+		}
+		return out
+	default:
+		return typed
+	}
+}
+
+func sanitizeErrorValue(value any) any {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case string:
+		return SanitizeErrorString(typed)
+	case error:
+		return SanitizeErrorString(typed.Error())
+	case []string:
+		out := make([]string, len(typed))
+		for i, item := range typed {
+			out[i] = SanitizeErrorString(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = sanitizeErrorValue(item)
 		}
 		return out
 	default:
