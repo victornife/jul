@@ -100,7 +100,16 @@
         "risk": "routing",
         "context": "location",
         "directive": "return",
-        "count": 2
+        "count": 1
+      },
+      {
+        "source": "conf.d/site.conf",
+        "code": "NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT",
+        "class": "approximated",
+        "risk": "routing",
+        "context": "location",
+        "directive": "return",
+        "count": 1
       }
     ]
   },

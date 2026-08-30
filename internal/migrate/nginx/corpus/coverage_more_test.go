@@ -292,12 +292,18 @@ func TestRequestObservationAndComparisonBranches(t *testing.T) {
 	if result := Evaluate(scenario, actual); result.Verdict != VerdictEquivalent {
 		t.Fatalf("hash/redirect comparison = %+v", result)
 	}
+	if result := EvaluateReference(scenario, actual); result.Verdict != VerdictEquivalent {
+		t.Fatalf("reference comparison = %+v", result)
+	}
 	actual.Status = 500
 	actual.Headers.Set("Location", "/wrong")
 	actual.Headers.Set("X-Test", "wrong")
 	actual.Body = []byte("wrong")
 	if result := Evaluate(scenario, actual); result.Verdict != VerdictUnexpected || len(result.Differences) != 4 {
 		t.Fatalf("multi-difference result = %+v", result)
+	}
+	if result := EvaluateReference(scenario, actual); result.Verdict != VerdictUnexpected || len(result.Differences) != 4 {
+		t.Fatalf("reference multi-difference result = %+v", result)
 	}
 
 	for _, verdict := range []Verdict{VerdictNotExecuted, VerdictBlockingSource} {

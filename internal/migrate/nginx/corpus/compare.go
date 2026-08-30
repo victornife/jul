@@ -104,6 +104,22 @@ func ObserveResponse(response *http.Response, maxBody int64) (Observation, error
 	}, nil
 }
 
+// EvaluateReference verifies that a pinned NGINX runtime still matches the
+// reviewed reference side of one scenario. It does not make a Jul-equivalence
+// claim; cross-runtime classification remains Evaluate's responsibility.
+func EvaluateReference(scenario Scenario, actual Observation) Result {
+	if scenario.ExpectedVerdict == VerdictNotExecuted {
+		return Result{Verdict: VerdictNotExecuted}
+	}
+	if scenario.ExpectedVerdict == VerdictBlockingSource {
+		return Result{Verdict: VerdictBlockingSource}
+	}
+	if differences := compareActual(scenario, scenario.Reference, actual); len(differences) > 0 {
+		return Result{Verdict: VerdictUnexpected, Differences: differences}
+	}
+	return Result{Verdict: VerdictEquivalent}
+}
+
 // Evaluate verifies the real Jul observation against its explicit expectation,
 // then classifies the approved reference-vs-Jul relationship.
 func Evaluate(scenario Scenario, actual Observation) Result {

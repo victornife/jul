@@ -226,8 +226,26 @@ func classifyReturn(params []string, serverLevel bool) capability {
 		return capabilityRegistry[capabilityKey{ContextServer, "return"}]
 	}
 	code, err := strconv.Atoi(params[0])
-	if err == nil && len(params) > 1 && (code < 300 || code >= 400) {
-		return approximated("NGX_LOCATION_RETURN_BODY", RiskRouting, "non-redirect response body is dropped")
+	if err == nil {
+		if len(params) > 1 && (code < 300 || code >= 400) {
+			return approximated("NGX_LOCATION_RETURN_BODY", RiskRouting, "non-redirect response body is dropped")
+		}
+		if code >= 300 && code < 400 && len(params) > 1 {
+			return classifyRedirectTarget(params[1])
+		}
+		return capabilityRegistry[capabilityKey{ContextLocation, "return"}]
+	}
+	return classifyRedirectTarget(params[0])
+}
+
+func classifyRedirectTarget(target string) capability {
+	target = strings.TrimSpace(target)
+	if strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "//") {
+		return approximated(
+			"NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT",
+			RiskRouting,
+			"NGINX expands a local redirect to an absolute URL by default while Jul preserves the relative target",
+		)
 	}
 	return capabilityRegistry[capabilityKey{ContextLocation, "return"}]
 }

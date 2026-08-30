@@ -18,15 +18,17 @@ lane:
   context, directive, source catalogue, completeness, and readiness;
 - selected canonical Jul TOML assertions plus authoritative parse/validation;
 - a loopback-only real Jul server replay for supported fixtures;
+- a pinned, isolated official NGINX 1.28.3 reference runtime for the first
+  multi-file core fixture;
 - explicit `equivalent_for_asserted_dimensions`, `expected_difference`,
   `unexpected_difference`, `not_executed`, and `blocking_source` verdicts;
 - supported, approximated, and blocking fixtures in the core lane.
 
-A pinned real-NGINX runner, protocol-heavy lanes, and broader corpus categories
-remain follow-up work within #154. Until that runner lands, a manifest's
-`reference` object is a reviewed NGINX-side expectation, not a captured NGINX
-process response. The real Jul observation must still match the separately
-recorded Jul expectation exactly.
+The pinned reference lane currently executes the multi-file return/header fixture.
+Protocol-heavy lanes and broader corpus categories remain follow-up work within
+#154. For fixtures not yet selected by that lane, `reference` remains a reviewed
+NGINX-side expectation rather than a captured process response. The real Jul
+observation must still match the separately recorded Jul expectation exactly.
 
 ## Corpus admission policy
 
@@ -109,10 +111,58 @@ The assessment golden deliberately ignores human prose. Messages may improve
 without changing the stable finding contract, while any added, removed, or
 reclassified result fails the fixture.
 
+## Pinned NGINX reference lane
+
+The isolated reference lane uses the Docker Official Image
+`nginx:1.28.3-alpine` pinned to the immutable multi-platform index digest
+`sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236`.
+The image is pulled before the test; the running container has:
+
+- an internal-only Docker network with no external route;
+- a loopback-only randomly published host port;
+- a read-only root filesystem and read-only fixture mount;
+- dedicated bounded `tmpfs` mounts for NGINX runtime state;
+- UID/GID 101, all Linux capabilities dropped, and `no-new-privileges`;
+- CPU, memory, and PID limits;
+- deterministic teardown plus bounded image/container/log evidence.
+
+Run it locally with:
+
+```bash
+make nginx-migration-e2e
+```
+
+`scripts/nginx-migration-e2e.sh` reports `not_executed` and exits successfully
+when Docker is absent unless `REQUIRE_NGINX_E2E=1` is set. The Make target and
+CI workflow set that variable, so a missing runtime cannot silently pass the
+required lane. The separate workflow also runs on relevant pull requests,
+weekly, on demand, and after relevant changes reach `main`.
+
+The Go reference test compares the real NGINX response only with the manifest's
+`reference` side. The ordinary real-Jul lane then compares Jul with its declared
+expectation and classifies the approved NGINX-to-Jul relationship. This keeps a
+reference-runtime failure distinct from an importer or Jul-runtime regression.
+
+## Category inventory and explicit deferrals
+
+| Minimum category | Current evidence | Deferred boundary |
+| --- | --- | --- |
+| Core HTTP routing | Multi-file server/listen/name, exact locations, returns, redirects, static response header, alias approximation, dynamic proxy blocker. | Full precedence matrix, rewrite/proxy URI and request predicates expand in later fixtures. |
+| Upstreams and resiliency | Dynamic proxy target blocking is represented. | Weighted pools, health, retries, WebSocket, gRPC and backend TLS need deterministic local backends. |
+| Security | Secret/private-key fixture admission checks and sensitive-header replay rejection are enforced. | TLS, mTLS, auth, ACL, limits, WAF and real-IP behavior need generated certs or dedicated fixtures. |
+| Cache and compression | Explicitly deferred. | Stateful cache/Vary/range behavior needs deterministic setup and reset semantics. |
+| Protocol/application gateways | Explicitly deferred. | FastCGI, uWSGI, gRPC and L4 require protocol-specific local backends and build-tag lanes. |
+| Operations | Include-tree provenance is represented. | Logs, maps, resolver, process settings, zones, Lua and conditional behavior expand as blocking/approximate fixtures. |
+
+A deferral is not a compatibility claim. It identifies the fixture/runtime work
+still required before #154 can close.
+
 ## Running the core lane
 
 ```bash
 scripts/nginx-corpus-check.sh
+# or
+make nginx-corpus-check
 ```
 
 Equivalent direct commands:
@@ -144,3 +194,13 @@ real Jul process starts.
 
 A fixture update is a contract change: review the source, assessment projection,
 candidate assertions, runtime verdict, and licensing/privacy metadata together.
+
+### Corpus-discovered local redirect boundary
+
+NGINX expands a local `return 30x /path` target to an absolute
+`Location` by default, using the request/server authority. Jul preserves
+`/path`. The importer therefore reports
+`NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT` as `approximated`, and the corpus
+records the selected-dimension runtime relationship as
+`expected_difference` rather than claiming equivalence.
+
