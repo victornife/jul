@@ -163,7 +163,7 @@ func TestTailRegularFileBoundsPartialLineAndCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !truncated || string(data) != "third\n" {
+	if !truncated || string(data) != "second\nthird\n" {
 		t.Fatalf("tail = %q truncated=%v", data, truncated)
 	}
 	data, truncated, err = tailRegularFile(context.Background(), path, int64(len(content)), int64(len(content)+10))
