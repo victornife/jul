@@ -87,8 +87,8 @@ func TestCmdImportUnknownSource(t *testing.T) {
 	code, _, errOut := capture(t, func() int {
 		return cmdImport([]string{"apache", "x.conf"})
 	})
-	if code != 1 {
-		t.Errorf("exit = %d, want 1", code)
+	if code != importExitUsage {
+		t.Errorf("exit = %d, want %d", code, importExitUsage)
 	}
 	if !strings.Contains(errOut, "unknown import source") {
 		t.Errorf("expected an unknown-source error:\n%s", errOut)
@@ -99,8 +99,8 @@ func TestCmdImportMissingFile(t *testing.T) {
 	code, _, _ := capture(t, func() int {
 		return cmdImport([]string{"nginx"})
 	})
-	if code != 1 {
-		t.Errorf("exit = %d, want 1", code)
+	if code != importExitUsage {
+		t.Errorf("exit = %d, want %d", code, importExitUsage)
 	}
 }
 

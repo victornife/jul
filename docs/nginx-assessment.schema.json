@@ -1,0 +1,236 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/victornife/jul/blob/main/docs/nginx-assessment.schema.json",
+    "title": "Jul NGINX migration assessment",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "schema_version",
+        "source",
+        "status",
+        "summary",
+        "results",
+        "validation"
+    ],
+    "properties": {
+        "schema_version": {
+            "const": 1
+        },
+        "source": {
+            "type": "string"
+        },
+        "status": {
+            "enum": [
+                "ready_for_review",
+                "manual_action_required",
+                "parse_error",
+                "invalid_candidate"
+            ]
+        },
+        "summary": {
+            "$ref": "#/$defs/summary"
+        },
+        "results": {
+            "type": "array",
+            "items": {
+                "$ref": "#/$defs/result"
+            }
+        },
+        "validation": {
+            "$ref": "#/$defs/validation"
+        }
+    },
+    "$defs": {
+        "summary": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "total",
+                "supported",
+                "approximated",
+                "ignored",
+                "blocking",
+                "informational",
+                "parse_errors",
+                "validation_errors",
+                "ready"
+            ],
+            "properties": {
+                "total": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "supported": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "approximated": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "ignored": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "blocking": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "informational": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "parse_errors": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "validation_errors": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "ready": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "result": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "id",
+                "code",
+                "class",
+                "severity",
+                "risk",
+                "context",
+                "directive",
+                "message"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "pattern": "^result-[0-9]{4,}$"
+                },
+                "code": {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9_]+$"
+                },
+                "class": {
+                    "enum": [
+                        "supported",
+                        "approximated",
+                        "ignored",
+                        "blocking",
+                        "informational",
+                        "parse_error",
+                        "validation_error"
+                    ]
+                },
+                "severity": {
+                    "enum": [
+                        "info",
+                        "warning",
+                        "error"
+                    ]
+                },
+                "risk": {
+                    "enum": [
+                        "security",
+                        "routing",
+                        "availability",
+                        "observability",
+                        "performance",
+                        "operational",
+                        "cosmetic"
+                    ]
+                },
+                "context": {
+                    "enum": [
+                        "main",
+                        "events",
+                        "http",
+                        "server",
+                        "location",
+                        "upstream",
+                        "limit_except",
+                        "stream",
+                        "mail",
+                        "variable_block"
+                    ]
+                },
+                "directive": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "line": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "message": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "target_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                },
+                "synthetic": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "diagnostic": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "severity",
+                "message"
+            ],
+            "properties": {
+                "severity": {
+                    "enum": [
+                        "warning",
+                        "error"
+                    ]
+                },
+                "field": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "validation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "status"
+            ],
+            "properties": {
+                "status": {
+                    "enum": [
+                        "not_run",
+                        "valid",
+                        "invalid"
+                    ]
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/diagnostic"
+                    }
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/diagnostic"
+                    }
+                }
+            }
+        }
+    }
+}
