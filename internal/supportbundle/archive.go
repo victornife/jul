@@ -257,7 +257,7 @@ func rejectSymlinkComponents(target string) error {
 			return nil
 		}
 		if statErr != nil {
-			return fmt.Errorf("inspect support-bundle path component: %w", statErr)
+			return fmt.Errorf("%w: inspect support-bundle path component: %w", ErrUnsafeOutputPath, statErr)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			// macOS exposes system-owned roots such as /var and /tmp through a
