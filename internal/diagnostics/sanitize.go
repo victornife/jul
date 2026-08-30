@@ -4,7 +4,10 @@
 package diagnostics
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 )
@@ -37,6 +40,26 @@ func SanitizeResult(result Result) Result {
 		result.Evidence = clean
 	}
 	return result
+}
+
+// SanitizeJSON parses one JSON value, redacts secret-bearing object keys and
+// common credential forms in string values, and emits deterministic indented
+// JSON. It rejects trailing values instead of silently sanitizing only a prefix.
+func SanitizeJSON(data []byte) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("multiple JSON values")
+		}
+		return nil, err
+	}
+	return json.MarshalIndent(sanitizeValue("", value), "", "  ")
 }
 
 // SanitizeString defensively removes common credential forms from diagnostic
