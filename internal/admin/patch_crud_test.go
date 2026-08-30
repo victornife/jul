@@ -4,8 +4,10 @@
 package admin
 
 import (
+	"errors"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"jul/internal/config"
 )
@@ -249,7 +251,7 @@ func TestApplyPatchLocationAddAcceptsCallerSuppliedRouteID(t *testing.T) {
 		Op: "location_add", Listen: ":8080", ServerNames: []string{"app.example"},
 		Match:   &locationMatch{Type: "prefix", Path: "/api"},
 		Action:  &locationActionPayload{Kind: "deny"},
-		RouteID: "checkout-api",
+		RouteID: sp("checkout-api"),
 	}); err != nil {
 		t.Fatalf("location_add: %v", err)
 	}
@@ -260,13 +262,56 @@ func TestApplyPatchLocationAddAcceptsCallerSuppliedRouteID(t *testing.T) {
 	assertValidCandidate(t, c)
 }
 
+func TestApplyPatchLocationAddCallerSuppliedIDIsNotNormalized(t *testing.T) {
+	// A caller-supplied route_id must reach config.Validate byte-for-byte:
+	// whitespace/case are not silently trimmed or folded into something
+	// legal, they must be rejected as the malformed value they are.
+	c := crudConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_add", Listen: ":8080", ServerNames: []string{"app.example"},
+		Match:   &locationMatch{Type: "prefix", Path: "/api"},
+		Action:  &locationActionPayload{Kind: "deny"},
+		RouteID: sp("abc "),
+	}); err != nil {
+		t.Fatalf("location_add: %v", err)
+	}
+	added := c.Servers[0].Locations[1]
+	if added.RouteID == nil || *added.RouteID != "abc " {
+		t.Fatalf("route_id = %v, want the exact unnormalized bytes %q", added.RouteID, "abc ")
+	}
+	if err := config.Validate(c); err == nil {
+		t.Fatal("expected config.Validate to reject the untrimmed route_id")
+	}
+}
+
+func TestApplyPatchLocationAddRejectsPresentEmptyRouteID(t *testing.T) {
+	// route_id omitted (mint) and route_id = "" (present-empty, invalid) are
+	// different requests and must not collapse onto the same behavior.
+	c := crudConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_add", Listen: ":8080", ServerNames: []string{"app.example"},
+		Match:   &locationMatch{Type: "prefix", Path: "/api"},
+		Action:  &locationActionPayload{Kind: "deny"},
+		RouteID: sp(""),
+	}); err != nil {
+		t.Fatalf("location_add: %v", err)
+	}
+	added := c.Servers[0].Locations[1]
+	if added.RouteID == nil || *added.RouteID != "" {
+		t.Fatalf("route_id = %v, want a present-and-empty pointer", added.RouteID)
+	}
+	if err := config.Validate(c); err == nil {
+		t.Fatal("expected config.Validate to reject a present-and-empty route_id")
+	}
+}
+
 func TestApplyPatchLocationAddRejectsDuplicateRouteID(t *testing.T) {
 	c := crudConfig()
 	if _, err := applyPatch(c, patchRequest{
 		Op: "location_add", Listen: ":8080", ServerNames: []string{"app.example"},
 		Match:   &locationMatch{Type: "prefix", Path: "/api"},
 		Action:  &locationActionPayload{Kind: "deny"},
-		RouteID: "dup-id",
+		RouteID: sp("dup-id"),
 	}); err != nil {
 		t.Fatalf("location_add: %v", err)
 	}
@@ -274,12 +319,31 @@ func TestApplyPatchLocationAddRejectsDuplicateRouteID(t *testing.T) {
 		Op: "location_add", Listen: ":8080", ServerNames: []string{"app.example"},
 		Match:   &locationMatch{Type: "prefix", Path: "/other"},
 		Action:  &locationActionPayload{Kind: "deny"},
-		RouteID: "dup-id",
+		RouteID: sp("dup-id"),
 	}); err != nil {
 		t.Fatalf("location_add: %v", err)
 	}
 	if err := config.Validate(c); err == nil {
 		t.Fatal("expected config.Validate to reject the duplicate route_id")
+	}
+}
+
+func TestApplyPatchLocationAddFailsClosedWhenCSPRNGUnavailable(t *testing.T) {
+	old := routeIDRandReader
+	defer func() { routeIDRandReader = old }()
+	routeIDRandReader = iotest.ErrReader(errors.New("boom"))
+
+	c := crudConfig()
+	_, err := applyPatch(c, patchRequest{
+		Op: "location_add", Listen: ":8080", ServerNames: []string{"app.example"},
+		Match:  &locationMatch{Type: "prefix", Path: "/api"},
+		Action: &locationActionPayload{Kind: "deny"},
+	})
+	if err == nil {
+		t.Fatal("expected location_add to fail when the CSPRNG is unavailable, not mint a weaker id")
+	}
+	if len(c.Servers[0].Locations) != 1 {
+		t.Fatalf("a failed mint must not append a location: got %d", len(c.Servers[0].Locations))
 	}
 }
 

@@ -666,11 +666,19 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 			return "", fmt.Errorf("location_add: a route with match %s %q already exists on server %s", matchType, path, req.Listen)
 		}
 		loc := config.LocationConfig{Match: config.MatchConfig{Type: matchType, Path: path}}
-		routeID := strings.TrimSpace(req.RouteID)
-		if routeID == "" {
-			routeID = mintRouteID()
+		if req.RouteID == nil {
+			minted, err := mintRouteID()
+			if err != nil {
+				return "", fmt.Errorf("location_add: %w", err)
+			}
+			loc.RouteID = &minted
+		} else {
+			// Preserve the caller's bytes exactly: a present-empty string or
+			// any other malformed value is not normalized here, it is left
+			// for config.Validate to reject like any other route_id.
+			id := *req.RouteID
+			loc.RouteID = &id
 		}
-		loc.RouteID = &routeID
 		label, err := setLocationAction(&loc, *req.Action)
 		if err != nil {
 			return "", err
