@@ -134,6 +134,8 @@ func collectDoctor(ctx context.Context, snapshot Snapshot) ([]Artifact, error) {
 		PerCheckTimeout: 0,
 		Product:         snapshot.Product,
 		Version:         snapshot.Version,
+		Commit:          snapshot.Commit,
+		BuildProfile:    snapshot.BuildProfile,
 		Capabilities:    snapshot.Capabilities,
 	})
 	jsonData, err := json.Marshal(report)

@@ -80,7 +80,7 @@ func (s *session) configFileCheck(context.Context) diagnostics.Result {
 	severity := diagnostics.SeverityInfo
 	message := "configuration file is a readable regular file"
 	remediation := ""
-	if info.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		status = diagnostics.StatusWarning
 		severity = diagnostics.SeverityWarning
 		message = "configuration file is readable by group or other users"
@@ -225,7 +225,7 @@ func (s *session) tlsCertificatesCheck(context.Context) diagnostics.Result {
 		return diagnostics.Result{Status: diagnostics.StatusSkipped, Severity: diagnostics.SeverityInfo, Message: "no operator-supplied certificate/key pairs are configured"}
 	}
 	now := time.Now()
-	var valid, expired, expiringSoon, invalid int
+	var valid, expired, notYetValid, expiringSoon, invalid, hostnameMismatches, hostnamesChecked int
 	for _, pair := range pairs {
 		certificate, err := tls.LoadX509KeyPair(pair.Cert, pair.Key)
 		if err != nil || len(certificate.Certificate) == 0 {
@@ -237,33 +237,58 @@ func (s *session) tlsCertificatesCheck(context.Context) diagnostics.Result {
 			invalid++
 			continue
 		}
+		hostnameMismatch := false
+		for _, configuredName := range pair.ServerNames {
+			name := strings.TrimSuffix(strings.TrimSpace(configuredName), ".")
+			if name == "" || name == "_" || strings.Contains(name, "*") {
+				continue
+			}
+			hostnamesChecked++
+			if err := leaf.VerifyHostname(name); err != nil {
+				hostnameMismatches++
+				hostnameMismatch = true
+			}
+		}
 		switch {
+		case now.Before(leaf.NotBefore):
+			notYetValid++
 		case now.After(leaf.NotAfter):
 			expired++
 		case leaf.NotAfter.Sub(now) <= 30*24*time.Hour:
 			expiringSoon++
 		default:
-			valid++
+			if !hostnameMismatch {
+				valid++
+			}
 		}
 	}
 	status := diagnostics.StatusPass
 	severity := diagnostics.SeverityInfo
 	message := fmt.Sprintf("validated %d certificate/key pair(s)", len(pairs))
-	if invalid > 0 || expired > 0 {
+	if invalid > 0 || expired > 0 || notYetValid > 0 || hostnameMismatches > 0 {
 		status = diagnostics.StatusError
 		severity = diagnostics.SeverityError
-		message = "one or more configured certificate/key pairs are invalid or expired"
+		message = "one or more configured certificate/key pairs are invalid, outside their validity period, or do not cover a configured server name"
 	} else if expiringSoon > 0 {
 		status = diagnostics.StatusWarning
 		severity = diagnostics.SeverityWarning
 		message = "one or more configured certificates expire within 30 days"
 	}
 	return diagnostics.Result{
-		Status:      status,
-		Severity:    severity,
-		Message:     message,
-		Evidence:    map[string]any{"pairs": len(pairs), "valid": valid, "expiring_within_30_days": expiringSoon, "expired": expired, "invalid": invalid},
-		Remediation: "replace invalid, mismatched or expiring certificate material and rerun doctor before starting or reloading Jul",
+		Status:   status,
+		Severity: severity,
+		Message:  message,
+		Evidence: map[string]any{
+			"pairs":                   len(pairs),
+			"valid":                   valid,
+			"expiring_within_30_days": expiringSoon,
+			"expired":                 expired,
+			"not_yet_valid":           notYetValid,
+			"invalid":                 invalid,
+			"hostnames_checked":       hostnamesChecked,
+			"hostname_mismatches":     hostnameMismatches,
+		},
+		Remediation: "replace invalid, mismatched, not-yet-valid, expired, or expiring certificate material and rerun doctor before starting or reloading Jul",
 	}
 }
 
@@ -329,14 +354,16 @@ func (s *session) systemRuntimeCheck(context.Context) diagnostics.Result {
 		Severity: diagnostics.SeverityInfo,
 		Message:  "captured safe process and build runtime metadata",
 		Evidence: map[string]any{
-			"product":      s.options.Product,
-			"version":      s.options.Version,
-			"go_version":   runtime.Version(),
-			"goos":         runtime.GOOS,
-			"goarch":       runtime.GOARCH,
-			"num_cpu":      runtime.NumCPU(),
-			"gomaxprocs":   runtime.GOMAXPROCS(0),
-			"capabilities": cloneCapabilities(s.options.Capabilities),
+			"product":       s.options.Product,
+			"version":       s.options.Version,
+			"commit":        s.options.Commit,
+			"build_profile": s.options.BuildProfile,
+			"go_version":    runtime.Version(),
+			"goos":          runtime.GOOS,
+			"goarch":        runtime.GOARCH,
+			"num_cpu":       runtime.NumCPU(),
+			"gomaxprocs":    runtime.GOMAXPROCS(0),
+			"capabilities":  cloneCapabilities(s.options.Capabilities),
 		},
 	}
 }
@@ -478,6 +505,7 @@ func collectConfiguredPaths(cfg *config.Config) []configuredPath {
 			}
 		}
 		for _, location := range server.Locations {
+			add(configuredPath{Kind: "static_root", Path: location.Root, WantDir: true, Input: true})
 			appendBackendTLSPaths(&paths, location.BackendTLS)
 			if location.Auth != nil && location.Auth.Basic != nil {
 				add(configuredPath{Kind: "htpasswd", Path: location.Auth.Basic.File, Input: true, Private: true})
@@ -571,7 +599,7 @@ func inspectConfiguredPath(item configuredPath) (string, diagnostics.Status) {
 	if !item.WantDir && !info.Mode().IsRegular() {
 		return "wrong_type", diagnostics.StatusError
 	}
-	if item.Private && info.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != "windows" && item.Private && info.Mode().Perm()&0o077 != 0 {
 		return "private_mode_too_open", diagnostics.StatusWarning
 	}
 	if item.Input {
@@ -585,45 +613,64 @@ func inspectConfiguredPath(item configuredPath) (string, diagnostics.Status) {
 }
 
 type certificatePair struct {
-	Cert string
-	Key  string
+	Cert        string
+	Key         string
+	ServerNames []string
 }
 
 func collectCertificatePairs(cfg *config.Config) []certificatePair {
 	var pairs []certificatePair
-	add := func(cert, key string) {
-		if cert != "" && key != "" {
-			pairs = append(pairs, certificatePair{Cert: cert, Key: key})
+	byIdentity := map[string]int{}
+	add := func(cert, key string, serverNames []string) {
+		if cert == "" || key == "" {
+			return
 		}
+		identity := filepath.Clean(cert) + "\x00" + filepath.Clean(key)
+		if index, ok := byIdentity[identity]; ok {
+			pairs[index].ServerNames = mergeServerNames(pairs[index].ServerNames, serverNames)
+			return
+		}
+		byIdentity[identity] = len(pairs)
+		pairs = append(pairs, certificatePair{Cert: cert, Key: key, ServerNames: mergeServerNames(nil, serverNames)})
 	}
 	for _, server := range cfg.Servers {
 		if server.TLS != nil && (server.TLS.ACME == nil || !server.TLS.ACME.Enabled) {
-			add(server.TLS.Cert, server.TLS.Key)
+			add(server.TLS.Cert, server.TLS.Key, server.ServerNames)
 		}
 		for _, location := range server.Locations {
 			if location.BackendTLS != nil {
-				add(location.BackendTLS.ClientCert, location.BackendTLS.ClientKey)
+				add(location.BackendTLS.ClientCert, location.BackendTLS.ClientKey, nil)
 			}
 		}
 	}
 	for _, upstream := range cfg.Upstreams {
 		if upstream.BackendTLS != nil {
-			add(upstream.BackendTLS.ClientCert, upstream.BackendTLS.ClientKey)
+			add(upstream.BackendTLS.ClientCert, upstream.BackendTLS.ClientKey, nil)
 		}
 		if upstream.Discovery != nil && upstream.Discovery.Consul != nil && upstream.Discovery.Consul.TLS != nil {
-			add(upstream.Discovery.Consul.TLS.ClientCert, upstream.Discovery.Consul.TLS.ClientKey)
+			add(upstream.Discovery.Consul.TLS.ClientCert, upstream.Discovery.Consul.TLS.ClientKey, nil)
 		}
 	}
-	seen := map[string]struct{}{}
-	out := make([]certificatePair, 0, len(pairs))
-	for _, pair := range pairs {
-		key := filepath.Clean(pair.Cert) + "\x00" + filepath.Clean(pair.Key)
-		if _, ok := seen[key]; ok {
-			continue
+	return pairs
+}
+
+func mergeServerNames(existing, additional []string) []string {
+	seen := make(map[string]struct{}, len(existing)+len(additional))
+	for _, name := range existing {
+		if name != "" {
+			seen[name] = struct{}{}
 		}
-		seen[key] = struct{}{}
-		out = append(out, pair)
 	}
+	for _, name := range additional {
+		if name != "" {
+			seen[name] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
 	return out
 }
 

@@ -68,14 +68,18 @@ func cmdDoctor(args []string) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	metadata := collectBuildMetadata()
+	capabilities := diagnosticCapabilities()
 	report := doctor.Run(ctx, doctor.Options{
 		ConfigPath:      *configPath,
 		CheckNetwork:    *checkNetwork,
 		TotalTimeout:    *totalTimeout,
 		PerCheckTimeout: *perCheckTimeout,
-		Product:         productName,
-		Version:         version,
-		Capabilities:    diagnosticCapabilities(),
+		Product:         metadata.Product,
+		Version:         metadata.Version,
+		Commit:          metadata.Commit,
+		BuildProfile:    diagnosticBuildProfile(capabilities),
+		Capabilities:    capabilities,
 	})
 	var err error
 	if *jsonOutput {
@@ -125,13 +129,15 @@ func cmdSupportBundle(args []string) int {
 	limits.MaxArtifactBytes = *maxArtifactBytes
 	limits.MaxUncompressedBytes = *maxUncompressedBytes
 	limits.MaxCompressedBytes = *maxCompressedBytes
+	metadata := collectBuildMetadata()
 	capabilities := diagnosticCapabilities()
 	generator := supportbundle.NewGenerator(supportbundle.DefaultCollectors(), limits, 1)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	result, err := generator.WriteFile(ctx, *output, supportbundle.Snapshot{
-		Product:      productName,
-		Version:      version,
+		Product:      metadata.Product,
+		Version:      metadata.Version,
+		Commit:       metadata.Commit,
 		BuildProfile: diagnosticBuildProfile(capabilities),
 		ConfigPath:   *configPath,
 		Capabilities: capabilities,
@@ -140,7 +146,7 @@ func cmdSupportBundle(args []string) int {
 		LogTailBytes: *logTailBytes,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %s\n", diagnostics.SanitizeString(err.Error()))
+		fmt.Fprintf(stderr, "error: %s\n", diagnostics.SanitizeErrorString(err.Error()))
 		return 1
 	}
 	if *jsonOutput {
@@ -181,10 +187,19 @@ func diagnosticCapabilities() map[string]bool {
 }
 
 func diagnosticBuildProfile(capabilities map[string]bool) string {
-	for _, enabled := range capabilities {
-		if enabled {
-			return "custom"
-		}
+	keys := []string{"waf", "stream_proxy", "wasm_plugins", "acme", "grpc", "http3", "otel", "console", "brotli", "zstd", "importer", "consul", "kubernetes"}
+	anyEnabled := false
+	allEnabled := true
+	for _, key := range keys {
+		enabled := capabilities[key]
+		anyEnabled = anyEnabled || enabled
+		allEnabled = allEnabled && enabled
+	}
+	if allEnabled {
+		return "full"
+	}
+	if anyEnabled {
+		return "custom"
 	}
 	return "lean"
 }

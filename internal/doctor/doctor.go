@@ -69,12 +69,12 @@ type ConfigMetadata struct {
 	AdminAuthenticated bool            `json:"admin_authenticated"`
 	Servers            int             `json:"servers"`
 	Listeners          int             `json:"listeners"`
-	Routes              int             `json:"routes"`
-	Upstreams           int             `json:"upstreams"`
-	Backends             int             `json:"backends"`
-	Streams              int             `json:"streams"`
-	Plugins              int             `json:"plugins"`
-	Capabilities         map[string]bool `json:"capabilities,omitempty"`
+	Routes             int             `json:"routes"`
+	Upstreams          int             `json:"upstreams"`
+	Backends           int             `json:"backends"`
+	Streams            int             `json:"streams"`
+	Plugins            int             `json:"plugins"`
+	Capabilities       map[string]bool `json:"capabilities,omitempty"`
 }
 
 // SafeConfigMetadata creates the bounded metadata projection.

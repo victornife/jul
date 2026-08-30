@@ -164,7 +164,7 @@ See [docs/secrets.md](secrets.md) for full reference.
 
 ## Diagnostic output and support bundles
 
-`jul doctor` and `jul support-bundle` are explicit, local, read-only operator actions. Neither command uploads data, creates a persistent installation identifier, executes arbitrary commands, or accepts arbitrary filesystem include paths. Default doctor operation is network-free; network-capable preflight and listener probes require `-check-network`.
+`jul doctor` and `jul support-bundle` are explicit local operator actions that do not mutate Jul configuration or live runtime state. Doctor is read-only; support-bundle writes only the requested local archive. Neither command uploads data, creates a persistent installation identifier, executes arbitrary commands, or accepts arbitrary filesystem include paths. Default doctor operation is network-free; network-capable preflight and listener probes require `-check-network`.
 
 Support bundles structurally exclude raw configuration values, private keys, credentials, environment dumps, request/response bodies, and traffic captures. JSON and text artifacts receive a defensive redaction pass, errors are sanitized, archive entries are fixed and traversal-safe, and the output is published owner-only without overwriting an existing path. Optional logs are limited to a bounded tail of the configured Jul access-log file and symbolic links are rejected.
 

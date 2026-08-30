@@ -5,7 +5,7 @@ Jul provides two local, operator-triggered diagnostic commands:
 - `jul doctor` evaluates configuration and local deployment prerequisites.
 - `jul support-bundle` writes a bounded, redacted `tar.gz` archive for offline troubleshooting.
 
-Both commands are read-only by default. They do not upload data, create an installation identifier, start a server, rewrite configuration, change permissions, repair files, or execute arbitrary commands.
+Neither command mutates Jul configuration or live runtime state. `jul doctor` is read-only; `jul support-bundle` writes only the explicitly requested local archive. They do not upload data, create an installation identifier, start a server, rewrite configuration, change deployment permissions, repair files, or execute arbitrary commands.
 
 ## `jul doctor`
 
@@ -43,14 +43,32 @@ The local registry is closed and deterministic. Current checks cover:
 2. strict TOML decoding, including unknown-field rejection;
 3. authoritative semantic validation;
 4. configuration lint and authority/filesystem findings;
-5. configured input/output path existence, type, readability, and sensitive-file permissions without reporting path values;
-6. operator-supplied certificate/key parsing, matching, expiration, and near-expiration;
+5. configured input/output path existence, type, readability, static-root availability, and sensitive-file permissions without reporting path values;
+6. operator-supplied certificate/key parsing, matching, validity windows, concrete configured-name coverage, and near-expiration;
 7. admin-listener exposure and authentication posture;
 8. bounded topology metadata: counts and enabled states only;
 9. safe build and process metadata;
 10. optional runtime preflight and listener bind probes.
 
 Later checks are marked `skipped` when an earlier prerequisite is unavailable. One failure does not hide independent evidence.
+
+### Stable check codes
+
+| Code | Phase | Meaning |
+| --- | --- | --- |
+| `CONFIG_FILE` | configuration | File type, readability, symlink state, size, and platform-appropriate permission guidance. |
+| `CONFIG_PARSE` | configuration | Strict TOML decoding and unknown-field rejection. |
+| `CONFIG_VALIDATE` | configuration | Authoritative semantic validation. |
+| `CONFIG_LINT` | configuration | Lint plus authority/filesystem findings. |
+| `CONFIGURED_PATHS` | deployment | Bounded checks of configured files, directories, and static roots without exposing their values. |
+| `TLS_CERTIFICATES` | security | Certificate/key match, validity window, concrete configured-name coverage, and expiry horizon. |
+| `ADMIN_SECURITY` | security | Listener exposure and presence of a currently usable configured credential. |
+| `CONFIG_TOPOLOGY` | runtime | Counts and enabled-state metadata only. |
+| `SYSTEM_RUNTIME` | runtime | Product, version, commit, build profile, Go, platform, CPU, and capability metadata. |
+| `RUNTIME_PREFLIGHT` | network | Opt-in authoritative runtime preflight. |
+| `LISTENER_BIND` | network | Opt-in immediate-close local TCP/UDP bind probes. |
+
+Later additive checks require new stable codes; existing codes are not repurposed.
 
 ### Result contract
 
