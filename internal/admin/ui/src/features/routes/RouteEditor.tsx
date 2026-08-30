@@ -34,6 +34,7 @@ import {
   serverIdentityFromRoute,
   serverIdentityKey,
   storeRouteIdentity,
+  type LocationIdentity,
   type RouteCreateSpec,
   type ServerIdentity,
   type StoredRouteSelection,
@@ -400,7 +401,8 @@ export function RouteEditor({
 
   function buildPlan(): {
     readonly ops: ConfigPatch[];
-    readonly selection: StoredRouteSelection;
+    readonly server: ServerIdentity;
+    readonly location: LocationIdentity;
   } {
     let server: ServerIdentity;
     let ops: ConfigPatch[];
@@ -419,13 +421,7 @@ export function RouteEditor({
       };
       ops = buildNewServerRouteBatch(routeSpec(draft, server), existingRoutes);
     }
-    return {
-      ops,
-      selection: storeRouteIdentity(server, {
-        matchType: draft.matchType,
-        path: draft.path,
-      }),
-    };
+    return { ops, server, location: { matchType: draft.matchType, path: draft.path } };
   }
 
   let previewOps: ConfigPatch[] = [];
@@ -463,7 +459,10 @@ export function RouteEditor({
 
     const assessment = await batch.preview(plan.ops);
     if (assessment === null) return;
-    onReview?.(plan.selection);
+    // The selection is built from the reviewed base_version, not build time:
+    // an ID-less (v2) selection is revision-bound (ADR 0019 §8), so it must
+    // record the exact revision the operator is looking at.
+    onReview?.(storeRouteIdentity(plan.server, plan.location, assessment.baseVersion ?? ""));
     batch.handoff(assessment);
   }
 

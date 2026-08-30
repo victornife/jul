@@ -1016,6 +1016,28 @@ export function fetchRoutes(): Promise<RouteProjection[]> {
   return api<unknown>("/routes").then((d) => z.array(RouteProjectionSchema).parse(d));
 }
 
+/**
+ * Reads the config revision serving `/api/routes` right now, from its
+ * `X-Jul-Config-Version` response header — the same value a structured patch
+ * preview reports as `base_version`. Used only to detect whether an ID-less
+ * (v2) stored route selection has gone stale (ADR 0019 §8); returns
+ * undefined on any failure, which the caller must treat as "cannot confirm,
+ * fail closed" rather than as "no staged restart" the way
+ * fetchPendingRestart's absent status does.
+ */
+export async function fetchCurrentConfigVersion(): Promise<string | undefined> {
+  const token = authToken.get();
+  const headers = new Headers({ Accept: "application/json" });
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  try {
+    const resp = await fetch("/api/routes", { headers });
+    if (!resp.ok) return undefined;
+    return resp.headers.get("X-Jul-Config-Version") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // ── Route testing (Milestone 2.3) ────────────────────────────────────────────
 
 export interface RouteTestInput {

@@ -190,6 +190,7 @@ describe("RouteEditor ordered batch creation", () => {
       version: 2,
       server: { listen: ":8080", server_names: ["a.example", "b.example"] },
       location: { match_type: "prefix", path: "/api" },
+      base_version: "v1",
     });
     expect(takePendingDraft()).toMatchObject({ kind: "patch", ops });
   });

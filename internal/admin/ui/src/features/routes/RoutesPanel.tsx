@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { fetchRoutes, type RouteProjection, type LocationProjection } from "@/api/client.ts";
+import { fetchCurrentConfigVersion, fetchRoutes, type RouteProjection, type LocationProjection } from "@/api/client.ts";
 import { RouteDetail } from "@/features/routes/RouteDetail.tsx";
 import { RouteEditor, type RouteEditorInitial } from "@/features/routes/RouteEditor.tsx";
 import { RouteTester } from "@/features/routes/RouteTester.tsx";
@@ -289,16 +289,33 @@ export function RoutesPanel() {
     const stored = sessionStorage.getItem(ROUTE_EDITOR_SELECTION_KEY);
     sessionStorage.removeItem(ROUTE_EDITOR_SELECTION_KEY);
     if (stored === null) return;
-    try {
-      const restored = restoreRouteSelection(data, JSON.parse(stored) as unknown);
-      if (restored === null) return;
-      setSelected(restored);
-      const draft = cloneDraft(restored.route, restored.loc);
-      if (draft !== null) setCreating(draft);
-    } catch {
-      // Invalid or obsolete session data fails closed. In particular, a legacy
-      // listen-only selection never falls through to the first sibling vhost.
-    }
+    void (async () => {
+      // An ID-less (v2) stored selection is revision-bound (ADR 0019 §8): it
+      // must be checked against the config revision serving right now, not
+      // silently resolved against whatever now occupies the same
+      // coordinates. A durable (v3) route_id selection ignores this value.
+      let currentBaseVersion: string | undefined;
+      try {
+        currentBaseVersion = await fetchCurrentConfigVersion();
+      } catch {
+        // Unable to confirm the current revision: fail closed below rather
+        // than resolve a revision-bound selection with no revision check.
+      }
+      try {
+        const restored = restoreRouteSelection(
+          data,
+          JSON.parse(stored) as unknown,
+          currentBaseVersion,
+        );
+        if (restored === null) return;
+        setSelected(restored);
+        const draft = cloneDraft(restored.route, restored.loc);
+        if (draft !== null) setCreating(draft);
+      } catch {
+        // Invalid or obsolete session data fails closed. In particular, a legacy
+        // listen-only selection never falls through to the first sibling vhost.
+      }
+    })();
   }, [data]);
 
   const [actionFilter, setActionFilter] = usePersistentState<ActionFilter>(

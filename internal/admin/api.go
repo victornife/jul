@@ -165,6 +165,15 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
 	s.withConfig(func(c *config.Config, w http.ResponseWriter) {
+		// X-Jul-Config-Version reports the same revision identifier a
+		// structured patch preview returns as base_version, so the Console
+		// can detect a revision-bound (ID-less) stored route selection has
+		// gone stale (ADR 0019 §8) without a second, heavier patch-preview
+		// round trip. Best-effort: a marshal failure just omits the header,
+		// it never fails the request routes are actually needed for.
+		if raw, err := config.Marshal(c); err == nil {
+			w.Header().Set("X-Jul-Config-Version", configVersion(raw))
+		}
 		writeJSON(w, http.StatusOK, projectRoutes(c))
 	})(w, r)
 }

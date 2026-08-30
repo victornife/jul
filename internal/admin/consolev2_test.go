@@ -611,6 +611,47 @@ func TestRoutesProjection(t *testing.T) {
 	}
 }
 
+// TestRoutesReportsConfigVersionHeader pins that /api/routes'
+// X-Jul-Config-Version header is the same value a structured patch preview
+// reports as base_version for the same configuration — the Console compares
+// the two to detect a stale (ID-less) stored route selection (ADR 0019 §8).
+func TestRoutesReportsConfigVersionHeader(t *testing.T) {
+	cfg := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":8080",
+		Locations: []config.LocationConfig{
+			{Match: config.MatchConfig{Type: "prefix", Path: "/"}, ProxyPass: "http://127.0.0.1:9000"},
+		},
+	}}}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/routes", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	headerVersion := rr.Header().Get("X-Jul-Config-Version")
+	if headerVersion == "" {
+		t.Fatal("X-Jul-Config-Version header is empty")
+	}
+
+	previewBody, _ := json.Marshal(patchApplyRequest{Ops: []patchRequest{
+		{Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/", Target: "http://127.0.0.1:9001"},
+	}})
+	prr := httptest.NewRecorder()
+	s.routes().ServeHTTP(prr, httptest.NewRequest(http.MethodPost, "/api/config/patch/preview", bytes.NewReader(previewBody)))
+	if prr.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, want 200; body=%s", prr.Code, prr.Body.String())
+	}
+	var preview patchPreviewResponse
+	if err := json.Unmarshal(prr.Body.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if preview.BaseVersion != headerVersion {
+		t.Errorf("preview base_version = %q, want it to match /api/routes' X-Jul-Config-Version %q", preview.BaseVersion, headerVersion)
+	}
+}
+
 func TestRoutesNoLoadConfigReturnsNotLoaded(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{})
 	rr := httptest.NewRecorder()

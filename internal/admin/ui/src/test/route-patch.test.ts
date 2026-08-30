@@ -300,7 +300,7 @@ describe("route selection restoration", () => {
     if (chosen === undefined) throw new Error("expected second virtual-host fixture");
     const location = chosen.locations[0];
     if (location === undefined) throw new Error("expected a location fixture");
-    const stored = storeRouteSelection({ route: chosen, loc: location });
+    const stored = storeRouteSelection({ route: chosen, loc: location }, "v1");
     const restored = restoreRouteSelection(inventory, stored);
     expect(restored?.route.server_names).toEqual(["other.example"]);
     expect(restored?.loc.match).toBe("/other");
@@ -311,11 +311,13 @@ describe("route selection restoration", () => {
       storeRouteIdentity(
         { listen: ":8080", serverNames: ["b.example", "a.example"] },
         { matchType: "exact", path: " /created " },
+        "v1",
       ),
     ).toEqual({
       version: 2,
       server: { listen: ":8080", server_names: ["a.example", "b.example"] },
       location: { match_type: "exact", path: "/created" },
+      base_version: "v1",
     });
   });
 
@@ -340,7 +342,7 @@ describe("route selection restoration", () => {
     const chosen = inventory[1];
     if (chosen === undefined) throw new Error("expected second virtual-host fixture");
     const withID: LocationProjection = { ...location(0, "/other"), route_id: "r-durable" };
-    const stored = storeRouteSelection({ route: chosen, loc: withID });
+    const stored = storeRouteSelection({ route: chosen, loc: withID }, "v1");
     expect(stored).toEqual({ version: 3, route_id: "r-durable" });
   });
 
@@ -370,11 +372,56 @@ describe("route selection restoration", () => {
       storeRouteIdentity(
         { listen: ":8080", serverNames: ["b.example", "a.example"] },
         { matchType: "exact", path: "/created" },
+        "v1",
       ),
     ).toEqual({
       version: 2,
       server: { listen: ":8080", server_names: ["a.example", "b.example"] },
       location: { match_type: "exact", path: "/created" },
+      base_version: "v1",
     });
+  });
+
+  it("resolves a v2 selection when the current revision matches the reviewed one", () => {
+    const stored = storeRouteIdentity(
+      { listen: ":8080", serverNames: ["a.example", "b.example"] },
+      { matchType: "prefix", path: "/" },
+      "v1",
+    );
+    const restored = restoreRouteSelection(inventory, stored, "v1");
+    expect(restored?.route.listen).toBe(":8080");
+  });
+
+  it("fails closed on a v2 selection when the revision has moved (ADR 0019 §8)", () => {
+    const stored = storeRouteIdentity(
+      { listen: ":8080", serverNames: ["a.example", "b.example"] },
+      { matchType: "prefix", path: "/" },
+      "v1",
+    );
+    const restored = restoreRouteSelection(inventory, stored, "v2");
+    expect(restored).toBeNull();
+  });
+
+  it("resolves a v2 selection by coordinates alone when no current version is supplied", () => {
+    const stored = storeRouteIdentity(
+      { listen: ":8080", serverNames: ["a.example", "b.example"] },
+      { matchType: "prefix", path: "/" },
+      "v1",
+    );
+    const restored = restoreRouteSelection(inventory, stored);
+    expect(restored?.route.listen).toBe(":8080");
+  });
+
+  it("fails closed on a v2 selection missing base_version entirely", () => {
+    const restored = restoreRouteSelection(
+      inventory,
+      {
+        version: 2,
+        server: { listen: ":8080", server_names: ["a.example", "b.example"] },
+        location: { match_type: "prefix", path: "/" },
+      },
+      "v1",
+    );
+    expect(restored).toBeNull();
   });
 });

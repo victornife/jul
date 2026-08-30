@@ -69,6 +69,11 @@ export interface StoredRouteSelectionV2 {
     readonly match_type: string;
     readonly path: string;
   };
+  // base_version is the config revision this selection was reviewed against
+  // (ADR 0019 §8: an ID-less link is revision-bound, not durable). Restoring
+  // it against a later revision must be detected rather than silently
+  // resolving the stored coordinates to whatever route now occupies them.
+  readonly base_version: string;
 }
 
 /**
@@ -454,13 +459,17 @@ export function buildServerRemovalBatch(server: ServerIdentity): ConfigPatch[] {
   ];
 }
 
-export function storeRouteSelection(selection: RouteSelection): StoredRouteSelection {
+export function storeRouteSelection(selection: RouteSelection, baseVersion: string): StoredRouteSelection {
   const server = serverIdentityFromRoute(selection.route);
-  return storeRouteIdentity(server, {
-    matchType: selection.loc.type,
-    path: selection.loc.match,
-    ...(selection.loc.route_id ? { routeId: selection.loc.route_id } : {}),
-  });
+  return storeRouteIdentity(
+    server,
+    {
+      matchType: selection.loc.type,
+      path: selection.loc.match,
+      ...(selection.loc.route_id ? { routeId: selection.loc.route_id } : {}),
+    },
+    baseVersion,
+  );
 }
 
 /**
@@ -469,11 +478,14 @@ export function storeRouteSelection(selection: RouteSelection): StoredRouteSelec
  * (ADR 0019 §8): coordinates are not stored at all, so an edit that changes
  * the match, or a reorder, cannot make the stored selection resolve to the
  * wrong route or fail to resolve at all. A route with no route_id falls back
- * to the v2 revision-bound form, exactly as before route_id existed.
+ * to the v2 revision-bound form, which now carries the reviewed base_version
+ * so a later restore can detect the revision has moved instead of silently
+ * resolving to whatever route now occupies the same coordinates.
  */
 export function storeRouteIdentity(
   server: ServerIdentity,
   location: LocationIdentity,
+  baseVersion: string,
 ): StoredRouteSelection {
   if (location.routeId) {
     return { version: 3, route_id: location.routeId };
@@ -485,6 +497,7 @@ export function storeRouteIdentity(
       server_names: canonicalServerNames(server.serverNames),
     },
     location: { match_type: location.matchType, path: location.path.trim() },
+    base_version: baseVersion,
   };
 }
 
@@ -522,11 +535,18 @@ function findByRouteID(routes: readonly RouteProjection[], routeId: string): Rou
  * edit that changed the match or a reorder — a route_id disappearing (the
  * route was removed) fails closed exactly like every other unresolvable
  * form, rather than falling through to a coordinate-based guess. The v2 form
- * and the pre-route_id legacy Selection-shaped value are unchanged.
+ * is revision-bound (ADR 0019 §8): when currentBaseVersion is supplied and
+ * does not match the selection's stored base_version, restoration fails
+ * closed rather than silently resolving the stored coordinates against a
+ * revision they were never reviewed on. A caller with no current version to
+ * compare against (currentBaseVersion omitted) gets the coordinate-only
+ * resolution, unchanged. The pre-route_id legacy Selection-shaped value is
+ * unchanged.
  */
 export function restoreRouteSelection(
   routes: readonly RouteProjection[],
   stored: unknown,
+  currentBaseVersion?: string,
 ): RouteSelection | null {
   const root = objectValue(stored);
   if (!root) return null;
@@ -543,6 +563,10 @@ export function restoreRouteSelection(
     const names = stringArray(server.server_names);
     if (names === null) return null;
     if (typeof location.match_type !== "string" || typeof location.path !== "string") return null;
+    if (typeof root.base_version !== "string") return null;
+    if (currentBaseVersion !== undefined && root.base_version !== currentBaseVersion) {
+      return null;
+    }
 
     const route = findExactServer(routes, { listen: server.listen, serverNames: names });
     if (!route) return null;
