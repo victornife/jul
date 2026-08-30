@@ -1,8 +1,6 @@
 # Upstreams and backend trust
 
-> **Maturity:** the pool itself is GA (see [status.md](status.md)); `backend_tls`
-> is new and its lifecycle is deliberately conservative — see
-> [Reload behaviour](#reload-behaviour).
+> **Maturity and delivery:** the released pool/balancing/health foundation is GA. `backend_tls` and the newer admission/retry/circuit surface are separate merged Beta capabilities on current `main`; #287/#144 retain integrated resilience closure. See [status.md](status.md) and [Reload behaviour](#reload-behaviour).
 
 An `[[upstreams]]` block is a named pool of backends with a balancing strategy,
 passive and optional active health checking, optional dynamic discovery, and —

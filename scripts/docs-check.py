@@ -288,7 +288,7 @@ def check_denylist(path: Path, text: str):
 
 
 def check_feature_status_manifest():
-    """Validate docs/feature-status.yaml: parseable YAML, each doc file exists."""
+    """Validate the canonical maturity/delivery manifest and its human surfaces."""
     try:
         import yaml
     except ModuleNotFoundError:
@@ -296,11 +296,10 @@ def check_feature_status_manifest():
               "pyyaml is required for YAML manifest checks — install with: pip install pyyaml")
         return
 
-    manifest = ROOT / "docs" / "feature-status.yaml"
+    manifest = DOCS / "feature-status.yaml"
     if not manifest.exists():
         error(manifest, 0, "feature-status.yaml is missing from docs/")
         return
-
     try:
         data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
@@ -308,51 +307,67 @@ def check_feature_status_manifest():
         return
     ok("feature-status.yaml parses as valid YAML")
 
-    if not isinstance(data, dict) or "features" not in data:
-        error(manifest, 0, "feature-status.yaml missing required 'features' key")
+    features = data.get("features") if isinstance(data, dict) else None
+    if not isinstance(features, list):
+        error(manifest, 0, "feature-status.yaml missing required 'features' list")
         return
 
-    for entry in data.get("features", []):
-        name = entry.get("name", "?")
-        doc = entry.get("doc", "")
+    allowed_maturity = {"GA", "GA-soak-pending", "Beta", "Alpha", "Deprecated"}
+    allowed_delivery = {"implemented", "merged", "candidate", "released", "soaked"}
+    seen_ids = set()
+    index_path = DOCS / "index.md"
+    index_text = index_path.read_text(encoding="utf-8") if index_path.exists() else ""
+
+    for entry in features:
+        feat_id = str(entry.get("id", "")).strip()
+        name = str(entry.get("name", "?")).strip()
+        maturity = entry.get("maturity")
+        delivery = entry.get("delivery")
+        doc = str(entry.get("doc", "")).strip()
+
+        if not feat_id:
+            error(manifest, 0, f"feature '{name}' has no ID")
+        elif feat_id in seen_ids:
+            error(manifest, 0, f"duplicate feature ID '{feat_id}'")
+        else:
+            seen_ids.add(feat_id)
+
+        if maturity not in allowed_maturity:
+            error(manifest, 0, f"feature {feat_id} has invalid maturity {maturity!r}")
+        if delivery not in allowed_delivery:
+            error(manifest, 0, f"feature {feat_id} has invalid delivery {delivery!r}")
+        if maturity == "GA" and delivery != "soaked":
+            error(manifest, 0, f"feature {feat_id} is GA but delivery is {delivery!r}, not 'soaked'")
+        if maturity == "GA-soak-pending" and delivery != "released":
+            error(manifest, 0, f"feature {feat_id} is GA-soak-pending but delivery is {delivery!r}, not 'released'")
+
         if doc:
             doc_path = DOCS / doc
             if not doc_path.exists():
                 error(manifest, 0, f"feature '{name}' references missing doc: {doc}")
             else:
                 ok(f"feature-status.yaml: doc {doc} exists")
+            if f"]({doc})" not in index_text and f"]({doc}#" not in index_text:
+                error(index_path, 0, f"feature {feat_id} canonical guide '{doc}' is not linked from docs/index.md")
 
-    # Cross-check: every feature in the manifest must appear in docs/status.md
-    # with matching row-level data (maturity, criteria, doc) (R6-11).
+    readme_path = ROOT / "README.md"
+    readme = readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""
+    has_non_ga = any(entry.get("maturity") not in {"GA", "Deprecated"} for entry in features)
+    if has_non_ga and re.search(r"all shipped features are GA|All shipped features meet", readme, re.I):
+        error(readme_path, 0, "README claims every shipped feature is GA while the manifest contains non-GA entries")
+
     status_doc = DOCS / "status.md"
     if not status_doc.exists():
         error(manifest, 0, "docs/status.md is missing for cross-check")
         return
-    status_text = status_doc.read_text(encoding="utf-8")
-    status_rows = _parse_status_md_rows(status_text)
-
-    for entry in data.get("features", []):
-        name = entry.get("name", "?")
+    status_rows = _parse_status_md_rows(status_doc.read_text(encoding="utf-8"))
+    for entry in features:
         feat_id = entry.get("id", "")
-        search_term = re.split(r"[\(\+]", name)[0].strip()
-        if search_term and search_term not in status_text:
-            error(manifest, 0,
-                  f"feature '{name}' from feature-status.yaml not found in docs/status.md — "
-                  f"keep both in sync")
+        row = status_rows.get(feat_id)
+        if row is None:
+            error(manifest, 0, f"feature ID '{feat_id}' ({entry.get('name')}) has no parseable row in docs/status.md")
             continue
-        if feat_id:
-            if feat_id not in status_text:
-                error(manifest, 0,
-                      f"feature ID '{feat_id}' ({name}) not found in docs/status.md — "
-                      f"table row may be missing or ID mismatch")
-                continue
-            row = status_rows.get(feat_id)
-            if row:
-                _compare_feature_row(manifest, entry, row)
-            else:
-                # ID present somewhere but not in a parseable GA/Beta row;
-                # still acceptable, but note it for visibility.
-                ok(f"feature-status.yaml: ID '{feat_id}' present in status.md")
+        _compare_feature_row(manifest, entry, row)
 
 
 def _cell_to_criterion(cell: str):
@@ -368,36 +383,58 @@ def _cell_to_criterion(cell: str):
 
 
 def _parse_status_md_rows(text: str) -> dict[str, dict]:
-    """Parse GA and Beta tables in status.md, returning id -> row data."""
+    """Parse maturity tables in status.md, returning id -> row data."""
     rows: dict[str, dict] = {}
+    maturity = None
     in_table = False
-    header_count = 0
     for line in text.splitlines():
+        if line == "## GA":
+            maturity = "GA"
+            in_table = False
+            continue
+        if line == "## GA — soak pending":
+            maturity = "GA-soak-pending"
+            in_table = False
+            continue
+        if line == "## Beta":
+            maturity = "Beta"
+            in_table = False
+            continue
+        if line == "## Alpha":
+            maturity = "Alpha"
+            in_table = False
+            continue
+        if line == "## Deprecated":
+            maturity = "Deprecated"
+            in_table = False
+            continue
+        if line.startswith("## ") and line not in {
+            "## GA", "## GA — soak pending", "## Beta", "## Alpha", "## Deprecated"
+        }:
+            maturity = None
+            in_table = False
+
         if not line.startswith("|"):
             in_table = False
-            header_count = 0
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
-        if all(re.match(r"^[:\-]+$", c) for c in cells if c):
+        if cells and cells[0] == "Feature" and "Delivery" in cells:
             in_table = True
-            header_count += 1
             continue
-        if not in_table or header_count < 1:
+        if all(re.match(r"^[:\-]+$", c) for c in cells if c):
             continue
-        # Expect Feature, ID, Tag, 1..9, Doc
-        if len(cells) < 13:
+        if not in_table or maturity is None or len(cells) < 14:
             continue
         feat_id = cells[1]
-        if not feat_id or feat_id in ("—", "-", "ID"):
+        if not feat_id or feat_id in {"—", "-", "ID"}:
             continue
         rows[feat_id] = {
             "name": cells[0],
             "tag": cells[2],
-            "criteria": {
-                i: _cell_to_criterion(cells[2 + i])
-                for i in range(1, 10)
-            },
-            "doc": cells[12] if len(cells) > 12 else "",
+            "delivery": cells[3].strip("`"),
+            "maturity": maturity,
+            "criteria": {i: _cell_to_criterion(cells[3 + i]) for i in range(1, 10)},
+            "doc": cells[13],
         }
     return rows
 
@@ -406,32 +443,23 @@ def _compare_feature_row(manifest: Path, entry: dict, row: dict):
     """Compare a feature-status.yaml entry against its status.md table row."""
     feat_id = entry.get("id", "?")
     name = entry.get("name", "?")
+    if entry.get("maturity") != row.get("maturity"):
+        error(manifest, 0, f"feature {feat_id} ({name}) maturity mismatch: YAML={entry.get('maturity')}, status.md={row.get('maturity')}")
+    if entry.get("delivery") != row.get("delivery"):
+        error(manifest, 0, f"feature {feat_id} ({name}) delivery mismatch: YAML={entry.get('delivery')}, status.md={row.get('delivery')}")
+
     yaml_criteria = entry.get("criteria", {})
     row_criteria = row.get("criteria", {})
     for i in range(1, 10):
         yaml_val = yaml_criteria.get(i)
         row_val = row_criteria.get(i)
         if yaml_val != row_val:
-            error(
-                manifest,
-                0,
-                f"feature {feat_id} ({name}) criterion {i} mismatch: "
-                f"YAML={yaml_val}, status.md={row_val}",
-            )
+            error(manifest, 0, f"feature {feat_id} ({name}) criterion {i} mismatch: YAML={yaml_val}, status.md={row_val}")
+
     yaml_doc = entry.get("doc", "")
-    row_doc = row.get("doc", "")
-    if yaml_doc and row_doc:
-        # status.md doc cell is a markdown link like [doc](doc.md); extract target.
-        link_match = re.search(r"\]\(([^)]+)\)", row_doc)
-        if link_match:
-            row_doc_target = link_match.group(1)
-            if row_doc_target != yaml_doc:
-                error(
-                    manifest,
-                    0,
-                    f"feature {feat_id} ({name}) doc mismatch: "
-                    f"YAML={yaml_doc}, status.md={row_doc_target}",
-                )
+    link_match = re.search(r"\]\(([^)]+)\)", row.get("doc", ""))
+    if yaml_doc and (not link_match or link_match.group(1) != yaml_doc):
+        error(manifest, 0, f"feature {feat_id} ({name}) doc mismatch: YAML={yaml_doc}, status.md={link_match.group(1) if link_match else None}")
     ok(f"feature-status.yaml: {feat_id} row data matches status.md")
 
 
@@ -898,6 +926,45 @@ def check_finding_uniqueness():
         ok(f"no conflicting finding statuses in {current_audit.name}")
 
 
+
+def check_readme_go_version():
+    """README may show exact Go patch or deliberately coarser major.minor, never a stale patch."""
+    go_mod = ROOT / "go.mod"
+    readme = ROOT / "README.md"
+    if not go_mod.exists() or not readme.exists():
+        return
+    mod_match = re.search(r"^go\s+(\d+\.\d+(?:\.\d+)?)\s*$", go_mod.read_text(encoding="utf-8"), re.M)
+    readme_match = re.search(r"\*\*Language:\*\* Go (\d+\.\d+(?:\.\d+)?)", readme.read_text(encoding="utf-8"))
+    if not mod_match or not readme_match:
+        error(readme, 0, "could not find Go version in go.mod and README language metadata")
+        return
+    actual = mod_match.group(1).split(".")
+    stated = readme_match.group(1).split(".")
+    if stated[:2] != actual[:2] or (len(stated) == 3 and stated != actual):
+        error(readme, 0, f"README Go version {'.'.join(stated)} disagrees with go.mod {'.'.join(actual)}")
+    else:
+        ok("README Go version is exact or deliberately major.minor")
+
+
+def check_living_doc_headers():
+    """A living document header cannot be older than its own newest changelog row."""
+    version_re = re.compile(r"> Version (\d+\.\d+) · Updated (\d{4}-\d{2}-\d{2})")
+    row_re = re.compile(r"^\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*(\d+\.\d+)\s*\|", re.M)
+    for rel in ("status.md", "roadmap/README.md", "compatibility.md"):
+        path = DOCS / rel
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        header = version_re.search(text)
+        rows = list(row_re.finditer(text))
+        if not header or not rows:
+            continue
+        newest = max(rows, key=lambda m: (m.group(1), _version_key(m.group(2))))
+        if newest.group(1) > header.group(2) or _version_key(newest.group(2)) > _version_key(header.group(1)):
+            error(path, 0, f"header {header.group(1)} / {header.group(2)} is older than changelog {newest.group(2)} / {newest.group(1)}")
+        else:
+            ok(f"{rel} header is current with its changelog")
+
 def main():
     SKIP_DIRS = {"node_modules", "vendor", ".git", "__pycache__", "reviews"}
     md_files = [
@@ -926,6 +993,8 @@ def main():
     check_adr_numbering()
     check_active_roadmap_links()
     check_roadmap_active_ids()
+    check_readme_go_version()
+    check_living_doc_headers()
 
     print()
     print(f"Results: {OK} passed, {FAIL} failed")

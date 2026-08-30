@@ -111,9 +111,7 @@ test fails when a new public scalar is added without an audited disposition.
 
 ## `[global]`
 
-The `[global]` block controls process-wide settings: logging, worker parallelism,
-and the graceful-shutdown deadline. These values apply to the entire server
-instance and are read once at startup.
+The `[global]` block controls process-wide settings. Lifecycle is field-specific: some values are hot, some are startup-bound, and authority changes are deliberately restart-required. The generated [lifecycle reference](generated/config-lifecycle.md) is authoritative; this section explains meaning and workflow rather than duplicating every disposition.
 
 ```toml
 [global]
@@ -184,9 +182,7 @@ the same complete candidate. Mixed hot/restart batches stage the whole
 candidate. A `reload_timeout` change uses the currently serving timeout for that
 transaction and governs later transactions only.
 
-The backend/API operations are available in #80. The Global and Traffic
-Controls form migration is #81; current guided TOML and raw TOML workflows
-remain supported.
+The structured global operations and matching Global/Traffic Controls Console forms are shipped. Guided editors and raw TOML remain supported surfaces over the same server-side validation, lifecycle and apply engine.
 
 ## Configuration apply modes
 

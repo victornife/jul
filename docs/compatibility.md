@@ -1,6 +1,6 @@
 # Jul.IA — compatibility & versioning policy
 
-> Version 1.1 · Updated 2026-08-04
+> Version 1.7 · Updated 2026-08-30
 
 This document defines what "stable" means for Jul.IA and what a **GA** label
 guarantees about a feature's contract. It is the fleet-wide answer to GA
@@ -29,8 +29,7 @@ bump (with a deprecation period, below):
    loading across MINOR/PATCH upgrades.
 2. **CLI** — documented subcommands and flags (`jul`, `-config`, `-check`,
    `-version`, `import`, `lint`, …).
-3. **Admin/Console HTTP API** — documented `/api/*` request/response shapes the
-   Console depends on.
+3. **Supported external Admin API** — only endpoints explicitly classified in a versioned external contract are stable. Existing unversioned Console `/api/*` routes remain internal unless separately listed; #150 owns the first supported `/api/v1` subset.
 4. **Prometheus metric names and labels** — the `jul_*` series documented for the
    feature. Renames/removals are MAJOR; **new** series/labels are MINOR.
 5. **Observable wire behaviour** — documented headers, status codes, and proxy
@@ -137,6 +136,24 @@ the schema. Likewise, a configuration may satisfy both the schema and
 `jul check` while `jul lint` reports an error-severity finding — lint policy
 is never encoded as schema-level invalidity.
 
+## Delivery state and compatibility
+
+Compatibility promises attach to a released contract, not merely to code merged
+on `main`. `implemented`, `merged`, and `candidate` capabilities may be usable
+and documented while remaining Beta and outside the stable GA surface. The
+canonical classification is [`feature-status.yaml`](feature-status.yaml).
+
+The published `v1.32.1-rc.1` is a prerelease, not a stable tag. Later `main`
+changes — including trusted client identity, backend trust, routing/response
+policy, resilience, configuration authority/generated contracts, and NGINX
+assessment/provenance/includes — do not become released compatibility promises
+until an explicit publication and maturity decision says so.
+
+Existing Console routes are implementation surfaces for the embedded UI. This
+policy does not accidentally freeze all of them as an external automation API.
+The supported versioned subset, common errors, auth/RBAC and deprecation rules
+are owned by #150.
+
 ## What it does not cover
 
 - **Beta / Prototype / Alpha features** — still evolving; their config and APIs
@@ -177,6 +194,7 @@ cut at the first GA release.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | 1.7 | Separated released compatibility from merged/candidate delivery and clarified that unversioned Console routes are internal until #150 publishes a supported external API subset. | Existing released GA configuration, CLI, metric and wire contracts remain governed by SemVer. | Issue #353; [status.md](status.md) |
 | 2026-08-19 | 1.6 | Replaced the boolean `healthy` field on backends with a five-state `state` enum (`available`, `circuit_open`, `circuit_half_open`, `health_unhealthy`, `at_capacity`) on `GET /api/apps` and `GET /api/upstreams`, and added a server-computed pool `verdict` (`healthy`/`degraded`/`down`/`unknown`) to `GET /api/apps`. The boolean was fed only by the health checker, so a backend taken out of rotation by the circuit breaker or by a per-backend concurrency cap still reported `healthy` while receiving no traffic — the field said the opposite of what an operator needed during an incident. | The field is still absent when no live status has been observed, and absent still means *unknown*, not *down*. Every other field on both projections keeps its name and type. | #144; [console.md](console.md#upstreams) |
 | 2026-08-19 | 1.5 | The access log gained an `upstream_reason` field, carrying the bounded reason an upstream call failed. It is emitted only when one did, following the same omit-what-adds-nothing rule as `trace_id` and `peer_ip`. | Every existing field keeps its name, type and meaning. The value set is closed, so a backend address, route path or raw error text will never appear in it. | #144; [failure taxonomy](core-http.md#upstream-failure-taxonomy) |
 | 2026-08-19 | 1.4 | `jul_upstream_probes_total` and `jul_upstream_probe_duration_seconds` gained a bounded `source` label (`http`/`stream`). The stream proxy owns its own upstream registry, so an upstream used by both surfaces is probed twice and the two series were previously indistinguishable — an operator saw an unexplained 2×. | Existing queries keep working; only a recording rule that aggregates without `by (source)` will start splitting. Metric names, types and existing labels are unchanged. | #144; `amendedReleasedMetrics` in `internal/observability/metric_contract_test.go` |

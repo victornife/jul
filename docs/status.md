@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.6 · Updated 2026-08-17
+> Version 2.7 · Updated 2026-08-30
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -28,49 +28,53 @@ labelled **GA — soak pending** until its soak run completes.
 
 ### Delivery state vs. maturity
 
-Maturity answers *"how good is this feature?"* A separate axis answers *"where is
-this change in the release pipeline?"* — a feature can be fully implemented and
-tested yet not in a tagged release. Keep the two distinct:
+Maturity answers *how stable and evidence-complete is this capability?* Delivery
+answers *where is this implementation in the publication pipeline?* The axes are
+kept separately in [`feature-status.yaml`](feature-status.yaml):
 
-| Delivery state | Meaning |
+| Delivery | Meaning |
 | --- | --- |
-| **implemented** | Code exists and its tests pass on a working branch. |
-| **merged** | Landed on `main` and listed under `[Unreleased]` in [CHANGELOG.md](../CHANGELOG.md); it is not stable publication. |
-| **candidate** | Frozen in an immutable `vX.Y.Z-rc.N` tag; it may be reviewed as a draft or published as a prerelease, but it is not a stable release. |
-| **released** | Published in a stable tagged `vX.Y.Z` build with cross-compiled artifacts. |
-| **soaked** | The post-GA soak gate ([ADR 0005](adr/0005-soak-post-ga-gate.md)) has passed for the released build. |
-| **audit-closed** | Any reopened audit finding covering it is formally Closed under its recorded rule, including exact-SHA CI and any required independent sign-offs. |
-| **maintainer-certified** | Exact-SHA evidence is recorded by the maintainer and the historical audit is explicitly superseded; this does not claim independent two-human certification. |
+| `implemented` | Code exists on a working branch; not part of `main`. |
+| `merged` | On `main` under `[Unreleased]`; not in a published tag. |
+| `candidate` | Frozen in a published or draft prerelease tag. |
+| `released` | Published in a stable immutable tag. |
+| `soaked` | Released and through the feature's long-running post-GA soak gate. |
 
-A feature is **GA** only when it is *released* **and** *soaked*. "Delivered" on the
-[roadmap](roadmap/README.md) means *merged*, which is not the same as *released*.
-The current independently verified candidate is
-[`v1.32.1-rc.1`](release-candidates/v1.32.1-rc.1.md), frozen at
-`9a936d0cc1bc3f7086f38ca87741d9d09f950e25`; it is published as a
-prerelease and does not change stable-release or long-running-soak status.
+A GA entry must be compatible with `soaked`. A newer additive capability does
+not inherit an older GA row merely because it lives in the same package or guide.
 
-**Current exceptions:**
+### Current product snapshot
 
-- **Egress allow-list (Phase 4)** — frozen in the independently verified,
-  published `v1.32.1-rc.1` prerelease candidate. Treat it as *verified candidate,
-  stable release pending*; the five-minute RC soak is release-path smoke evidence, not
-  long-running GA-soak evidence.
-- **Configuration write/apply/reload subsystem** — implementation remains
-  remediated across workstreams WS01–WS07. Under #130 the historical closure is
-  exact-SHA **maintainer-certified** and historically superseded by the current
-  combined audit. It is intentionally not described as independently
-  `audit-closed`, because the historical two-human sign-off rule was not met. See
-  the [Stage 0/1 programme closure](audit/2026-08-05-stage-0-1-programme-closure.md)
-  and the preserved
-  [configuration-audit closure](audit/old/2026-07-25-configuration-audit-closure.md).
+- **Published checkpoint:** `v1.32.1-rc.1` is an independently verified
+  prerelease candidate at `9a936d0cc1bc3f7086f38ca87741d9d09f950e25`.
+  It is not a stable release.
+- **Current `main`:** contains substantial later work, including cache
+  recertification, closed-world lifecycle authority, structured configuration,
+  trusted client identity, backend trust, routing/response policy,
+  configuration authority/generated contracts, resilience slices, and NGINX
+  assessment/provenance/include traversal. Those additions retain their own
+  delivery and maturity rows below.
+- **Volatile execution state:** lives in
+  [#62](https://github.com/victornife/jul/issues/62). The
+  [roadmap](roadmap/README.md) intentionally keeps only durable portfolio state.
+- **Dated audit disposition:** lives in the
+  [audit register](audit-register.md). Historical audits remain evidence rather
+  than a second current-status source.
 
-### Current audit and release notices
+### Current notices
 
-- **Response cache:** recertified by #134 after the #131/#132/#133 correction programme. The feature retains GA: the integrated source audit found no unresolved P0/P1 cache defect, the behaviour matrix now maps to executable tests, six benchmarks were refreshed, and the focused correctness soak completed with 422,042 requests and zero unexplained errors. See [cache.md](cache.md) and the [2026-08-07 audit record](audit/2026-08-07-cache-recertification.md).
-- **Configuration lifecycle:** strict unknown-field decoding, fail-closed known-value validation, and explicit access-log enablement are verified in `v1.32.1-rc.1`; stable publication remains pending. Closed-world lifecycle authority (#89) is implemented on `main`: the Go registry in `internal/lifecycle/registry.go` classifies every public TOML leaf exactly once, an unregistered path fails closed instead of defaulting to hot reload, and `docs/config-lifecycle.yaml` plus `docs/generated/config-lifecycle.{md,json}` are deterministic mirrors verified by `make generated-check`. Access-log changes remain restart-required until #98, static certificate material until #100, and cache settings until #92/#93.
-- **Prometheus and WAF logging:** the exact `v1.32.0` metric surface is preserved and CI-frozen; additive families and the bounded, path-only WAF warning contract are verified in `v1.32.1-rc.1` and remain stable-release pending.
-- **Recently corrected:** HTTP/3 mTLS parity, exclusive ACME challenge selection and compression `no-transform` are verified in `v1.32.1-rc.1`; stable publication remains a later decision.
+- **Response cache:** #134 completed integrated recertification; the released
+  cache record retains GA.
+- **Trusted client address and backend TLS:** merged Beta capabilities; stable
+  publication and soak are still explicit promotion gates.
+- **Resilience:** admission, retry and circuit implementations are merged; the
+  integrated cross-protocol/soak and full external-contract closure remain in
+  #287/#144 at this baseline.
+- **Routing, configuration authority, generated contracts and NGINX assessment:**
+  merged after the current RC and therefore represented separately from older
+  GA rows.
 
+## GA criteria legend
 ## GA criteria legend
 
 | # | Criterion |
@@ -98,47 +102,70 @@ Cell key: ✅ met · ☐ open · n/a not applicable (no custom parser).
 
 ## GA
 
-All nine criteria met, including the post-GA soak gate in
-[ADR 0005](adr/0005-soak-post-ga-gate.md). A soak failure on a GA feature is a
-release-blocking regression, not a reason to retract the label.
+Released and soaked capabilities that satisfy all applicable GA criteria.
 
-| Feature | ID | Tag | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
-| --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| TLS + automatic HTTPS | Y1-01 | core · `acme` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [tls-acme.md](tls-acme.md) |
-| Authentication (CIDR/Basic/JWT/forward-auth) | Y1-04 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [auth.md](auth.md) |
-| mTLS client auth + `$ssl_client_*` | Y2-07 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [mtls.md](mtls.md) |
-| Web application firewall (WAF) | Y2-06 | `waf` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [waf.md](waf.md) |
-| Rate + connection limiting | Y1-03 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [ratelimit.md](ratelimit.md) |
-| OTel tracing + access-log sinks | Y1-10 | `otel` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | n/a | [otel.md](otel.md) |
-| Response cache (memory + disk) | core-cache | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [cache.md](cache.md) |
-| Core HTTP (static/proxy/FastCGI/vhosts/routing) | — | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [core-http.md](core-http.md) |
-| Configuration reload transaction | reload-tx | core | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |
-| Console (operations cockpit) | Y1-07 · Y2-09 | `console` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
-| Active health checks (HTTP/TCP probes) | Y1-05 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
-| Zero-config + `jul lint` | Y1-08 | core | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [zeroconf.md](zeroconf.md) |
-| NGINX config importer | Y1-09 | `importer` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [nginx-importer.md](nginx-importer.md) |
-| Compression (gzip / Brotli / Zstd) | Y1-02 | `brotli`,`zstd` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [compression.md](compression.md) |
-| HTTP/3 over QUIC | Y1-11 | `http3` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [http3.md](http3.md) |
-| gRPC ↔ JSON transcoding | Y2-01 | `grpc` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [grpc-transcoding.md](grpc-transcoding.md) |
-| Native gRPC passthrough + h2c | Y2-04 | `grpc` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [grpc-proxy.md](grpc-proxy.md) |
-| WASM plugin system | Y2-02 | `wasmplugins` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [plugins.md](plugins.md) |
-| L4 stream proxy | Y2-03 | `stream` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [stream.md](stream.md) |
-| Service discovery / dynamic upstreams | Y2-05 | `consul`,`kubernetes` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [service-discovery.md](service-discovery.md) |
-| Secrets references + log redaction | SEC-1 | `secrets` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [secrets.md](secrets.md) |
-
-Criterion 8 is **n/a** for features whose parsing/validation is delegated to a
-standard or third-party library — see the GA — soak pending section for the
-rationale.
+| Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
+| --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
+| TLS + automatic HTTPS (ACME) | Y1-01 | core · `acme` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [tls-acme.md](tls-acme.md) |
+| Compression (gzip / Brotli / Zstd) | Y1-02 | `brotli` · `zstd` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [compression.md](compression.md) |
+| Rate + connection limiting | Y1-03 | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [ratelimit.md](ratelimit.md) |
+| Authentication (CIDR / Basic / JWT / forward-auth) | Y1-04 | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [auth.md](auth.md) |
+| Active health checks (HTTP / TCP probes) | Y1-05 | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
+| Console (operations cockpit) | Y1-07 | `console` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
+| Zero-config + jul lint | Y1-08 | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [zeroconf.md](zeroconf.md) |
+| NGINX config importer | Y1-09 | `importer` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [nginx-importer.md](nginx-importer.md) |
+| OTel tracing + access-log sinks | Y1-10 | `otel` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | n/a | [otel.md](otel.md) |
+| HTTP/3 over QUIC | Y1-11 | `http3` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [http3.md](http3.md) |
+| gRPC ↔ JSON transcoding | Y2-01 | `grpc` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [grpc-transcoding.md](grpc-transcoding.md) |
+| WASM plugin system | Y2-02 | `wasmplugins` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [plugins.md](plugins.md) |
+| L4 stream proxy | Y2-03 | `stream` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [stream.md](stream.md) |
+| Native gRPC passthrough + h2c | Y2-04 | `grpc` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [grpc-proxy.md](grpc-proxy.md) |
+| Service discovery / dynamic upstreams | Y2-05 | `consul` · `kubernetes` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [service-discovery.md](service-discovery.md) |
+| Web application firewall (WAF) | Y2-06 | `waf` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [waf.md](waf.md) |
+| mTLS client auth | Y2-07 | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [mtls.md](mtls.md) |
+| Secrets references + log redaction | SEC-1 | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [secrets.md](secrets.md) |
+| Response cache (memory + disk) | core-cache | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [cache.md](cache.md) |
+| Core HTTP (static / proxy / FastCGI / vhosts / routing) | core-http | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [core-http.md](core-http.md) |
+| Configuration reload transaction | reload-tx | core | `soaked` | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |
 
 ## GA — soak pending
 
-All shipped features are now **GA**. This table is empty until a new feature
-ships and reaches the post-GA soak gate.
+Released capabilities that satisfy the other GA criteria but still require the
+long-running post-GA soak gate.
 
-| Feature | ID | Tag | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
-| --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| *(none)* | — | — | — | — | — | — | — | — | — | — | — | — |
+| Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
+| --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
+| *(none)* | — | — | — | — | — | — | — | — | — | — | — | — | — |
 
+## Beta
+
+Usable capabilities whose contract, release, soak, or integrated evidence is
+not yet at the GA bar. `merged` and `candidate` are not synonyms for released.
+
+| Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
+| --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
+| Trusted client address (client_address) | CGC-IN | core | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [configuration.md](configuration.md) |
+| Backend TLS trust (backend_tls) | UT-BE | core · `grpc` | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [upstreams.md](upstreams.md) |
+| Auxiliary egress allow-list | SEC-EGRESS | core | `candidate` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [egress.md](egress.md) |
+| Request predicates, response headers, and CORS | CGC-ROUTE | core | `merged` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
+| Upstream resilience (admission, retry, circuit) | CGC-RES | core · `grpc` · `stream` | `merged` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ☐ | [upstreams.md](upstreams.md) |
+| Configuration authority and managed drift | AUTO-AUTH | core · `console` | `merged` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |
+| Generated configuration contracts and route identity | AUTO-CONTRACT | core | `merged` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | n/a | [generated/config-reference.md](generated/config-reference.md) |
+| NGINX migration assessment, provenance, and includes | MIG-ASSESS | `importer` | `merged` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ✅ | [nginx-assessment.md](nginx-assessment.md) |
+
+## Alpha
+
+| Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
+| --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
+| *(none)* | — | — | — | — | — | — | — | — | — | — | — | — | — |
+
+## Deprecated
+
+| Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
+| --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
+| *(none)* | — | — | — | — | — | — | — | — | — | — | — | — | — |
+
+## Soak tracking (post-GA gate)
 ## Soak tracking (post-GA gate)
 
 Criterion 5 for the GA — soak pending features. A soak failure is a
@@ -230,6 +257,7 @@ parsing are the standard library's.
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-08-30 | 2.7 | Reconciled maturity and delivery as separate axes; added explicit post-RC rows for egress, routing/response policy, resilience, configuration authority/generated contracts, and NGINX assessment/provenance/includes; removed stale programme language. | Issue #353; [feature-status.yaml](feature-status.yaml) |
 | 2026-08-17 | 2.6 | Bumped version to keep the status page in sync with the roadmap after reconciling stale #115/#116 status: both ADRs (0016, 0017) are accepted and closed, their unblocked implementation lanes (inbound identity #135→#136→#259, backend trust #137→#138→#139→#140) are complete, and generic resilience (#141-#144) is now READY/unblocked rather than gated. No feature maturity or GA criterion changed. | [roadmap/README.md](roadmap/README.md), Issues #115, #116 |
 | 2026-07-31 | 1.37 | Bumped version to keep the status page in sync with the roadmap after **Phase 4 egress was delivered** (P4-03, #76): rate-limited secret-safe egress block logs, a Console Security documentation link, and the full negative/integration/lifecycle/race test matrix land on top of the P4-01/P4-02 wiring, moving the roadmap Phase 4 row from *in progress* to *delivered*. No feature maturity or GA criteria changed. | [roadmap/README.md](roadmap/README.md), Issue #76 |
 | 2026-07-31 | 1.36 | Bumped version to keep the status page in sync with the roadmap after the Phase 4 egress-coverage reconciliation: the shared `[egress]` allow-list is now injected through every config-driven auxiliary client (ACME/OCSP #74; JWKS/forward-auth, Consul/Kubernetes discovery, WASM `fetch` wiring #75), so the roadmap Phase 4 row moved from *queued* to *in progress* (P4-03 observability/tests remain). No feature maturity or GA criteria changed. | [roadmap/README.md](roadmap/README.md), Issues #74, #75 |
@@ -259,13 +287,3 @@ parsing are the standard library's.
 | 2026-07-11 | 1.32 | **L4 stream proxy soak completed + promotion to GA.** Isolated 8h Linux soak (`TestSoakUDPChurn`) completed with 54,892,354 sends and 0 errors; goroutine/heap growth stayed bounded. Evidence logged in the soak log and status table. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [stream.md](stream.md) |
 | 2026-07-12 | 1.32 | **WASM plugin soak completed + promotion to GA.** Isolated Linux smoke and 8h soak completed with 286/33,428 successful requests and 0 errors; plugin execution remained healthy throughout. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [plugins.md](plugins.md) |
 | 2026-07-13 | 1.32 | **HTTP/3 soak completed + promotion to GA.** Isolated 8h Linux soak completed with 55,302,486 successful requests and 0 failures over QUIC/TLS on `:8443`. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [http3.md](http3.md), [ga-push.md](ga-push.md) |
-
-### Issue #81 delivery note (2026-08-09)
-
-The Global and Traffic Controls console migration is implemented on the typed
-patch/planned-restart foundation from #80/PR #251. The scope deliberately does
-not add `cache_set`, dynamic cache hot swapping, combined `admin_set`, or
-`access_log_set`. Cache stays raw and stage-only; lifecycle remains registry
-owned; exact apply-ID finalization, history, rollback, and staged discard remain
-part of the same configuration workflow. Delivery state must not be promoted
-past *implemented* until the exact final commit passes the full project gates.

@@ -1,6 +1,6 @@
 # NGINX config importer
 
-> Feature ID: **Y1-09** · Build tag: `importer` · Since v1.26
+> Base importer: **Y1-09, GA/soaked** · Assessment/provenance/includes: **MIG-ASSESS, Beta/merged** · Build tag: `importer`
 
 A best-effort migration aid that converts NGINX configuration into Jul.IA TOML.
 Common HTTP, server, location, upstream, TLS, compression, static-file, proxy,

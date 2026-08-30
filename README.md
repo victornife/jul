@@ -19,16 +19,17 @@ operations Console in a single static, dependency-free binary.
 
 - **Binary / module / service name:** `jul`
 - **Product name:** `Jul.IA`
-- **Language:** Go 1.26.5
+- **Language:** Go 1.26
 - **License:** AGPL-3.0
 
-> Current direction and sequencing are governed by the
-> [combined repository audit](docs/audit/combined-audit-2026-08-03.md) and the
-> [master programme](https://github.com/victornife/jul/issues/62). The durable
-> product direction remains in the [vision](docs/vision/), [roadmap](docs/roadmap/),
-> [engineering specs](docs/specs/), and [ADRs](docs/adr/). The permanent
-> OSS/open-core boundary is defined in
-> [ADR 0012](docs/adr/0012-oss-open-core-boundary.md).
+> Current product maturity and delivery are governed by
+> [`docs/feature-status.yaml`](docs/feature-status.yaml) and rendered in
+> [`docs/status.md`](docs/status.md). Volatile execution state lives in the
+> [master programme](https://github.com/victornife/jul/issues/62); the
+> [roadmap](docs/roadmap/) keeps the durable portfolio sequence. Dated audit
+> disposition lives in the [audit register](docs/audit-register.md), while the
+> underlying audits remain historical evidence. The permanent OSS/open-core
+> boundary is defined in [ADR 0012](docs/adr/0012-oss-open-core-boundary.md).
 >
 > New to HTTP, proxies, TLS, caching, or observability? The
 > [concepts appendix](docs/vision/appendix.md) walks through how a request travels
@@ -66,52 +67,37 @@ GraphQL composition and AI remain optional horizons or bounded experiments; none
 is required for the single-node product to remain useful. See the
 [operating model](docs/operating-model.md),
 [Core Gateway Completeness](docs/specs/core-gateway-completeness.md), and
-[roadmap v2.0](docs/roadmap/README.md).
+[roadmap](docs/roadmap/README.md).
 
 ---
 
 ## Feature maturity
 
-The canonical maturity matrix lives in [`docs/status.md`](docs/status.md). At a
-glance:
+Jul.IA tracks **maturity** and **delivery** separately. The canonical machine
+record is [`docs/feature-status.yaml`](docs/feature-status.yaml); the checked
+human view and evidence matrix are in [`docs/status.md`](docs/status.md).
 
-| Maturity | Features |
-|----------|----------|
-| **GA** | Core HTTP, TLS & ACME, Authentication, mTLS, Console, Active health checks, WAF, Rate limiting, Compression, OTel tracing, Response cache, Zero-config + `jul lint`, NGINX importer, HTTP/3, gRPC transcoding + passthrough, Service discovery, Secrets references, WASM plugins, L4 stream proxy |
-| **GA — soak pending** | *(none — all shipped features are GA)* |
+| Classification | Current examples |
+| --- | --- |
+| **GA · soaked** | Core HTTP, released TLS/ACME and mTLS, authentication, cache, compression, rate limiting, health checks, service discovery, released gRPC/L4/WASM/WAF/observability/importer capabilities, Console, secrets, and reload transaction |
+| **Beta · merged/candidate** | Trusted client address, backend TLS trust, auxiliary egress policy, method/header/query routing, response-header policy and CORS, upstream admission/retry/circuit controls, configuration authority/generated contracts, and NGINX assessment/provenance/include traversal |
+| **GA — soak pending** | None at this snapshot |
 
-> **All shipped features meet Jul.IA's nine-criteria GA bar** (conformance
-> matrix, benchmarks, docs, examples, security threat note, fuzzing where
-> applicable, stable config/API contract, and Console surface), including the
-> post-GA soak gate per
-> [ADR 0005](docs/adr/0005-soak-post-ga-gate.md). See
-> [`docs/status.md`](docs/status.md) for the full matrix and per-feature
-> soak-evidence links. A soak failure on a GA feature is a release-blocking
-> regression, not a reason to retract the label.
+A capability merged on `main` is not automatically released or GA. In
+particular, the published `v1.32.1-rc.1` checkpoint is an independently verified
+**prerelease**, while current `main` contains substantial later work. See the
+[release-candidate evidence](docs/release-candidates/v1.32.1-rc.1.md) and the
+[current status matrix](docs/status.md) rather than inferring publication from a
+feature guide.
 
-> **Delivery state ≠ maturity.** "GA" describes the stable released maturity
-> contract. The immutable `v1.32.1-rc.1` tag is an independently verified
-> **published prerelease candidate**, not a stable release: it contains all 12
-> platform/architecture/profile archives, verified checksums and embedded SPDX
-> SBOMs, plus SLSA provenance and SPDX SBOM attestations for every binary. It
-> covers strict unknown- and known-value validation, HTTP/3 mTLS parity,
-> compression `no-transform`, exclusive ACME challenge selection, the frozen
-> Prometheus contract, bounded/redacted WAF request logging, explicit access-log
-> enablement, and dependency/CI fixes. See the
-> [candidate evidence](docs/release-candidates/v1.32.1-rc.1.md). Current `main`
-> has since completed the response-cache correctness programme: the cache
-> retains GA on the strength of the
-> [2026-08-07 recertification](docs/audit/2026-08-07-cache-recertification.md)
-> — source audit, executable behavior matrix, race and protocol evidence,
-> benchmarks and soak. See [`docs/cache.md`](docs/cache.md) and
-> [`docs/status.md`](docs/status.md); the
-> [combined audit](docs/audit/combined-audit-2026-08-03.md) is retained as the
-> dated record that programme closed out.
+The response-cache correction programme is complete: #134 recertified the
+feature and the existing released cache record retains GA. Newer additions keep
+their own rows so they do not inherit that maturity implicitly.
 
-Many features require an opt-in **build tag** (e.g. `grpc`, `acme`,
-`wasmplugins`, `stream`, `http3`, `waf`, `consul`, `kubernetes`). The default
-`lean` binary ships the core GA surface plus core compression (`gzip`). Build
-with `-tags "…"` or download the `full` release profile to enable everything.
+Many features require an opt-in **build tag** (for example `grpc`, `acme`,
+`wasmplugins`, `stream`, `http3`, `waf`, `consul`, or `kubernetes`). The default
+`lean` binary ships the core surface plus gzip. Build with `-tags "..."` or use
+a `full` release artifact to enable all optional capabilities.
 
 ---
 
@@ -123,14 +109,17 @@ with `-tags "…"` or download the `full` release profile to enable everything.
 | **Reverse proxy** | `proxy_pass` to a concrete URL or a named upstream; per-location connect/read/send timeouts; custom upstream headers with variable expansion |
 | **WebSocket & SSE** | Transparent passthrough of `Connection: Upgrade` (HTTP `101`) connections — text and binary frames spliced bidirectionally (Apollo GraphQL subscriptions, Socket.IO) — and `text/event-stream` / chunked responses streamed per write, never buffered (Node/Python SSE) |
 | **Load balancing** | `round_robin`, `weighted_round_robin`, and `least_conn` strategies across an upstream pool |
-| **Health & failover** | Passive health checking (`max_fails` / `fail_timeout`) plus optional active HTTP/TCP probes (`[upstreams.health_check]`), with automatic retry of idempotent requests against healthy backends |
+| **Health & failover** | Released passive/active health checking plus merged Beta resilience controls: bounded admission and pending work, per-backend capacity, retry attempts/deadline/backoff/budget, and an explicit closed/open/half-open circuit model. See [upstreams.md](docs/upstreams.md). |
 | **Service discovery** | Resolve an upstream's backends dynamically and refresh the pool live without a reload (`[upstreams.discovery]`): **DNS** A/AAAA and **DNS SRV** in every build, plus **Consul** and **Kubernetes** EndpointSlices behind the `consul`/`kubernetes` build tags — failed or empty resolves keep the last-good backends |
-| **App gateways** | `fastcgi_pass` (e.g. PHP-FPM) and `uwsgi_pass` (Python/WSGI) with full CGI parameter mapping |
+| **Backend trust** | One normalized `backend_tls` policy for private/system roots, backend client certificates, SNI/verified names, minimum TLS and peer identities across HTTP, native gRPC, transcoding/reflection and active health probes. Merged Beta. |
+| **Upstream resilience** | Pool-scoped admission and retry budget state, location-overridable stateless controls, bounded queueing, protocol-aware lifetime accounting, and one per-backend circuit state machine reused by HTTP, gRPC, FastCGI/uWSGI and L4 TCP. Integrated closure remains tracked separately. |
+| **App gateways** | `fastcgi_pass` and `uwsgi_pass` accept literal targets or named upstream pools and share load balancing, health, failure accounting and admission; TCP and Unix-socket backends are supported. |
 | **gRPC transcoding** | Expose a gRPC service as a RESTful JSON API via `google.api.http` annotations (`grpc_transcode`) — unary and streaming (server/client/bidi, NDJSON or SSE) — from a compiled descriptor set or server reflection, opt-in `grpc` build tag |
 | **gRPC passthrough** | Reverse-proxy **native gRPC** end to end over HTTP/2 (`grpc = true`) — trailers preserved, streaming frames flushed immediately, load balancing and health checks applied — with cleartext **h2c** inbound (`h2c = true`) for clients without TLS, opt-in `grpc` build tag |
-| **Response cache** | Two-tier (in-memory + optional disk overflow) cache with TTL, `stale-while-revalidate`, and admin purge; currently under correctness recertification — see [docs/cache.md](docs/cache.md) |
+| **Response cache** | Recertified two-tier memory/disk cache with shared-cache validation, conservative authenticated reuse, invalidation, TTL/stale controls, conditional requests, and exact/all purge. The released cache record retains GA — see [docs/cache.md](docs/cache.md). |
 | **Compression** | On-the-fly `gzip` (every build) plus `br`/`zstd` codings (via the `brotli`/`zstd` build tags); `Accept-Encoding` negotiation, `Cache-Control: no-transform`, MIME allow-list, size threshold, and precompressed `.br`/`.gz` sidecars |
 | **Rate limiting** | Token-bucket request limiting keyed by client IP, a request header, or a JWT claim, with burst, global or per-location policy, and `429` + `Retry-After`; plus a per-listener concurrent-connection cap |
+| **Trusted client identity** | Per-listener `trusted_proxies` and bounded Forwarded/X-Forwarded-For derivation produce one canonical client address used by CIDR auth, rate limiting, WAF, logs, forwarding and FastCGI. Untrusted assertions are ignored. Merged Beta. |
 | **Access control** | Per-location CIDR allow/deny lists plus one credential method — HTTP Basic (bcrypt `htpasswd`), JWT bearer tokens validated against a JWKS endpoint (asymmetric algorithms only, `none` rejected), or forward-auth to an external service |
 | **WAF** | ModSecurity-compatible web application firewall ([Coraza](https://github.com/corazawaf/coraza)) with the **OWASP Core Rule Set embedded** in the binary (`[waf]`, global or per-location): `block`/`detect` modes, paranoia levels, your own SecLang files or inline rules, request/response body inspection, and a `jul_waf_events_total` metric — opt-in `waf` build tag ([docs/waf.md](docs/waf.md)) |
 | **Secrets references** | Keep credentials out of the config file: any string field accepts `${env:NAME}`, `${file:/path}`, or `${secret:/path}` references resolved at serve time, resolved values are **masked from logs**, and `jul lint` flags literal admin/Consul/Kubernetes tokens — core, no build tag ([docs/secrets.md](docs/secrets.md)) |
@@ -138,15 +127,16 @@ with `-tags "…"` or download the `full` release profile to enable everything.
 | **TLS** | TLS 1.2/1.3 termination per server block, configurable minimum version, optional HTTP→HTTPS redirect |
 | **Automatic HTTPS** | ACME certificate issuance and auto-renewal using the configured exclusive HTTP-01 or TLS-ALPN-01 challenge, with on-disk account/certificate cache — opt-in `acme` build tag |
 | **HTTP/3** | HTTP/3 over QUIC on the same address (UDP), sharing the complete server TLS/mTLS policy and certificate provider, advertised through `Alt-Svc`; static certificate-file changes remain restart-bound — opt-in `http3` build tag |
-| **Routing** | `exact`, `prefix`, and `regex` location matching; regex rewrites with `last`/`break`/`redirect`/`permanent` flags |
+| **Routing & response policy** | Deterministic exact/prefix/regex precedence, method/header/query predicates, rewrites, ordered response-header add/set/remove operations, and bounded CORS/preflight handling. The predicate/response-policy additions are merged Beta capabilities. |
 | **Virtual hosts** | Multiple `server_names` per listener; multiple listen addresses |
 | **Limits & timeouts** | `client_max_body_size`, header size caps, read/write/idle/header timeouts (per-server, location overrides for body size) |
 | **Redirects** | `return`, `redirect`, and `deny` (403) location actions; custom error pages |
-| **Hot reload** | Zero-downtime config reload via SIGHUP, file-watch, or the admin API — invalid configs are rejected and the old config keeps serving |
+| **Configuration lifecycle** | Transactional zero-downtime reload, strict preflight, planned-restart staging, history/rollback, and explicit `managed` versus `file_owned` authority with drift/adoption semantics. Field-level lifecycle truth is generated from the Go registry. |
 | **Observability** | Structured logging (text/JSON), pluggable access-log sinks (file/syslog with rotation), Prometheus metrics, OpenTelemetry tracing, health/readiness probes |
 | **Admin GUI** | Loopback-bound web console with live metrics, upstream/certificate status, config history and rollback, setup and structured editors. Legacy shared-token mode remains available; opt-in local multi-principal RBAC with predefined/custom roles, scoped revocable tokens and per-principal audit attribution is shipped (`console` build tag). External OIDC/SAML/SCIM identity is not shipped. |
 | **Developer experience** | Zero-config `jul run --serve`/`--proxy` (no file needed), `jul lint` best-practice checks with CI-friendly exit codes, and `jul fmt` canonical formatting |
-| **Migration** | `jul import nginx` translates an existing NGINX config to Jul.IA TOML, reporting every directive it could not map — opt-in `importer` build tag |
+| **Generated contracts** | Deterministic JSON Schema, machine metadata, generated field reference and lifecycle reference derive from code-defined authorities; durable `route_id` supports stable route addressability. Merged Beta. |
+| **Migration** | `jul import nginx` can convert supported NGINX constructs and emit deterministic human/JSON assessment with blocking/approximate findings, source provenance, guidance, and opt-in bounded root-confined include traversal — opt-in `importer` build tag. |
 | **WebAssembly plugins** | Sandboxed request middleware and handlers compiled to WASM and run on the embedded [wazero](https://wazero.io) runtime (pure Go, no cgo): per-plugin memory and time limits, panic isolation, capability-gated key/value store, hot-reloadable — opt-in `wasmplugins` build tag |
 | **L4 stream proxy** | TCP and UDP reverse proxying (`[[stream]]`) with load balancing and health checks across an upstream pool, TLS **SNI routing** by host without terminating, and HAProxy **PROXY protocol** v1/v2 (in and out) to preserve the client address — survives hot reload, opt-in `stream` build tag |
 | **Portability** | Single static binary, no runtime dependencies; Windows, Linux, and macOS on amd64/arm64 |

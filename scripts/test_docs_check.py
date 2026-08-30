@@ -518,3 +518,87 @@ if __name__ == "__main__":
     test_lifecycle_passes_on_a_consistent_tree()
     test_lifecycle_generator_check_is_non_mutating_and_names_the_remedy()
     print("OK")
+
+
+# ── Product-truth drift guards (issue #353) ─────────────────────────────────
+
+
+def _write_feature_truth_tree(root: Path, *, readme_claim=False, index_link=True, delivery="merged"):
+    docs = root / "docs"
+    docs.mkdir(parents=True)
+    (docs / "feature.md").write_text("# Feature\n", encoding="utf-8")
+    (docs / "feature-status.yaml").write_text(
+        "version: 2\nupdated: 2026-08-30\nfeatures:\n"
+        "  - id: F-1\n"
+        "    name: Feature one\n"
+        "    tags: [core]\n"
+        "    maturity: Beta\n"
+        f"    delivery: {delivery}\n"
+        "    doc: feature.md\n"
+        "    criteria: {1: true, 2: null, 3: true, 4: false, 5: false, 6: true, 7: true, 8: null, 9: null}\n",
+        encoding="utf-8",
+    )
+    link = "[feature](feature.md)" if index_link else "No feature link"
+    (docs / "index.md").write_text(f"# Index\n\n{link}\n", encoding="utf-8")
+    (docs / "status.md").write_text(
+        "# Status\n\n## Beta\n\n"
+        "| Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |\n"
+        "| --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |\n"
+        f"| Feature one | F-1 | core | `{delivery}` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | n/a | [feature.md](feature.md) |\n",
+        encoding="utf-8",
+    )
+    claim = "All shipped features are GA.\n" if readme_claim else "Maturity is in the manifest.\n"
+    (root / "README.md").write_text(f"# Repo\n\n{claim}", encoding="utf-8")
+
+
+def test_feature_manifest_rejects_readme_all_ga_claim():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_feature_truth_tree(root, readme_claim=True)
+        _, fail = _run_in_tmp(root, docs_check.check_feature_status_manifest)
+        assert fail == 1, f"expected one failure, got {fail}"
+
+
+def test_feature_manifest_requires_index_discoverability():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_feature_truth_tree(root, index_link=False)
+        _, fail = _run_in_tmp(root, docs_check.check_feature_status_manifest)
+        assert fail == 1, f"expected one failure, got {fail}"
+
+
+def test_feature_manifest_compares_delivery_state():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_feature_truth_tree(root, delivery="merged")
+        status = root / "docs" / "status.md"
+        status.write_text(status.read_text(encoding="utf-8").replace("`merged`", "`candidate`"), encoding="utf-8")
+        _, fail = _run_in_tmp(root, docs_check.check_feature_status_manifest)
+        assert fail == 1, f"expected one failure, got {fail}"
+
+
+def test_readme_go_version_accepts_major_minor_and_rejects_stale_patch():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / "go.mod").write_text("module example\n\ngo 1.26.6\n", encoding="utf-8")
+        (root / "README.md").write_text("- **Language:** Go 1.26\n", encoding="utf-8")
+        _, fail = _run_in_tmp(root, docs_check.check_readme_go_version)
+        assert fail == 0, f"expected coarse major.minor to pass, got {fail}"
+        (root / "README.md").write_text("- **Language:** Go 1.26.5\n", encoding="utf-8")
+        _, fail = _run_in_tmp(root, docs_check.check_readme_go_version)
+        assert fail == 1, f"expected stale patch to fail, got {fail}"
+
+
+def test_living_doc_header_detects_newer_changelog():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        docs = root / "docs"
+        docs.mkdir(parents=True)
+        (docs / "compatibility.md").write_text(
+            "# Compatibility\n\n> Version 1.1 · Updated 2026-08-04\n\n"
+            "| Date | Ver | Change |\n| --- | --- | --- |\n"
+            "| 2026-08-19 | 1.6 | Newer |\n",
+            encoding="utf-8",
+        )
+        _, fail = _run_in_tmp(root, docs_check.check_living_doc_headers)
+        assert fail == 1, f"expected stale header failure, got {fail}"

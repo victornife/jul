@@ -1,28 +1,63 @@
 # Jul.IA — Known limitations
 
-This page aggregates both deliberate product limitations and current known
-correctness/contract defects. A historical GA label does not make an open
-regression harmless or already fixed. The
-[combined audit](audit/combined-audit-2026-08-03.md) and linked issues own the
-current remediation state; stable feature guides remain the detailed operational
-references.
+This page separates active defects from deliberate product boundaries,
+merged-but-unreleased constraints, restart-bound/deferred behavior and historical
+corrections. A limitation is not a place to hide a correctness defect, and a
+closed issue must not remain phrased as future work.
 
-## Current defects and recertification work
+## Active correctness or security defects
 
-- **Response cache:** #131/#132/#133 corrected the confirmed implementation defects and #134 completed the integrated source, protocol, race, benchmark and soak recertification. The cache remains GA. The limitations in the dedicated section below are explicit product, performance, conservative or lifecycle constraints; no residual cache correctness exception is being hidden as a limitation.
-- **Access-log lifecycle:** request records can be disabled explicitly, but enablement and sink changes remain restart-required until #98 introduces generation-safe sink replacement.
-- **Lifecycle completeness:** #89 will make every public configuration leaf closed-world and generated/checkable.
-- **Trust boundaries:** canonical trusted-proxy identity and configurable backend peer trust have shipped ([ADR 0016](adr/0016-inbound-identity-and-backend-peer-trust.md)). The remaining boundaries are documented as deferrals with explicit promotion triggers in that record, not as gaps: proxy-aware Admin identity, QUIC and UDP client preservation, and per-tenant policy.
-- **Upstream overload control:** the bounded model decided by [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) is not yet implemented. Until #141–#144 land, the running binary has: no cap on concurrent upstream requests or on physical backend connections (`MaxConnsPerHost` is unset); no retry budget, overall retry deadline or backoff between attempts; no bound on how many requests probe a backend the instant its `fail_timeout` cooldown elapses; no load balancing, health checking or failure accounting for `fastcgi_pass` and `uwsgi_pass`, whose connection count is unbounded; no connection cap on L4 TCP routes (UDP already has `max_udp_sessions`); and no circuit breaker on the forward-auth and JWKS subrequests, which carry a fixed 10s timeout.
-- **Routing and response policy:** [ADR 0018](adr/0018-bounded-route-matching-and-response-policy.md)
-  has shipped in full: request matching by method, header and query parameter (#145), and bounded
-  response-header add/set/remove operations plus CORS (#146). `[servers.locations].headers` still
-  sets headers on the *upstream request*, not the response to the client — use
-  `[[servers.locations.response_headers]]` for that. Typed-patch/Console editing, the importer's
-  method/header/CORS translation, and real-server E2E for the same surfaces have landed (#147);
-  the CORS-plus-cache-variant and CORS-plus-error/auth/WAF combinations remain covered at the Go
-  integration-test level rather than re-derived as real-server E2E — see the importer and E2E
-  entries below.
+No repository-wide P0/P1 defect is being declared by this document at the issue
+#353 baseline. Newly discovered correctness/security findings still pre-empt the
+roadmap and must be tracked in focused issues with tests and disposition.
+
+## Implemented on `main`, not yet stable GA publication
+
+- **Trusted client address (`client_address`):** merged Beta; stable tag and
+  long-running soak promotion remain open.
+- **Backend TLS trust (`backend_tls`):** merged Beta across HTTP, native gRPC,
+  transcoding/reflection and active health probes; stable tag/soak promotion
+  remains open.
+- **Routing and response policy:** method/header/query predicates,
+  response-header operations and CORS are merged after the current RC.
+- **Generic resilience:** admission, retry and circuit implementations are
+  merged; #287/#144 retain the integrated race/fuzz/soak and complete
+  external-contract closure at this baseline.
+- **Configuration authority/generated contracts:** managed/file-owned authority,
+  drift/adoption, route identity, JSON Schema, metadata and generated reference
+  are merged; the supported external API and remote CLI remain #150/#151.
+- **NGINX assessment/provenance/includes:** schema-v2 assessment and bounded
+  source traversal are merged separately from the released base importer GA row.
+- **Auxiliary egress allow-list:** present in `v1.32.1-rc.1`; the prerelease is
+  not a stable publication.
+
+## Deliberate product boundaries
+
+- Single-node operation; no production fleet control plane.
+- No Kubernetes Gateway API controller or service-mesh/xDS control plane.
+- No distributed cache, rate limit, circuit state or global quota.
+- No full NGINX/Envoy/Kong/Caddy/Traefik parity.
+- No automatic migration cutover, one-dimensional compatibility percentage,
+  unsafe traffic replay, phone-home or automatic support upload.
+- No arbitrary expression language or embedded general-purpose scripting in
+  core routing policy.
+
+## Restart-bound or deferred behavior
+
+Field-level lifecycle authority is the Go registry rendered in
+[`generated/config-lifecycle.md`](generated/config-lifecycle.md). Structural or
+unselected transitions may remain restart-required; the complete
+`stage_restart` workflow is an acceptable final product design. Selected future
+candidates include certificate material, admin credentials, access-log sinks,
+selected cache scalars and Alt-Svc advertisement state.
+
+## Historical corrections
+
+The response-cache defects found by the combined audit were corrected by
+#131/#132/#133 and recertified by #134; the cache retains GA. Closed-world
+lifecycle authority (#89), structured configuration (#77–#82), trust, routing,
+authority/generated-contract and NGINX assessment foundations are also complete
+on `main`. Their dated audit records remain evidence, not current defect lists.
 
 ---
 
@@ -176,9 +211,7 @@ references.
   repeat the block. Every consumer takes the resolved policy type, so named
   profiles remain an additive change to resolution rather than a transport
   rewrite; the promotion triggers are recorded in ADR 0016.
-- **Health probes verify against the system roots only.** An `https` pool behind
-  a private CA is reported unhealthy until probes consume the resolved policy;
-  `jul lint` warns about the combination.
+- **Health probes use the pool-level resolved policy.** A route-level override cannot govern a shared pool probe; put the roots and client identity required by the probe on the upstream.
 - **`insecure_skip_verify` disables verification, not encryption.** It exists as
   an emergency path: `jul lint` fails on it, the server warns once per backend
   at startup, and it cannot be combined with `peer_identities` or a non-system
