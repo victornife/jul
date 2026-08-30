@@ -71,6 +71,21 @@ export interface StoredRouteSelectionV2 {
   };
 }
 
+/**
+ * The durable form (ADR 0019 §8): a route_id alone, resolved against every
+ * server's every location regardless of listen, host set, match, or
+ * declaration order. This is what makes a stored selection or a Console deep
+ * link survive an edit, a reorder, or a reload — a v2 selection cannot,
+ * because it is bound to coordinates that a durable identity is specifically
+ * meant to outlive.
+ */
+export interface StoredRouteSelectionV3 {
+  readonly version: 3;
+  readonly route_id: string;
+}
+
+export type StoredRouteSelection = StoredRouteSelectionV2 | StoredRouteSelectionV3;
+
 export class RoutePatchValidationError extends Error {
   constructor(public readonly issues: readonly string[]) {
     super(issues.join(" "));
@@ -439,19 +454,30 @@ export function buildServerRemovalBatch(server: ServerIdentity): ConfigPatch[] {
   ];
 }
 
-export function storeRouteSelection(selection: RouteSelection): StoredRouteSelectionV2 {
+export function storeRouteSelection(selection: RouteSelection): StoredRouteSelection {
   const server = serverIdentityFromRoute(selection.route);
   return storeRouteIdentity(server, {
     matchType: selection.loc.type,
     path: selection.loc.match,
+    ...(selection.loc.route_id ? { routeId: selection.loc.route_id } : {}),
   });
 }
 
-/** Store an exact target identity for post-preview/post-mutation restoration. */
+/**
+ * Store an exact target identity for post-preview/post-mutation restoration.
+ * A route carrying a durable route_id is stored in the v3 durable form
+ * (ADR 0019 §8): coordinates are not stored at all, so an edit that changes
+ * the match, or a reorder, cannot make the stored selection resolve to the
+ * wrong route or fail to resolve at all. A route with no route_id falls back
+ * to the v2 revision-bound form, exactly as before route_id existed.
+ */
 export function storeRouteIdentity(
   server: ServerIdentity,
   location: LocationIdentity,
-): StoredRouteSelectionV2 {
+): StoredRouteSelection {
+  if (location.routeId) {
+    return { version: 3, route_id: location.routeId };
+  }
   return {
     version: 2,
     server: {
@@ -480,10 +506,23 @@ function findLocation(
   return matches.length === 1 ? (matches[0] ?? null) : null;
 }
 
+/** Find the one route/location pair carrying routeId, across every server. */
+function findByRouteID(routes: readonly RouteProjection[], routeId: string): RouteSelection | null {
+  for (const route of routes) {
+    for (const loc of route.locations) {
+      if (loc.route_id === routeId) return { route, loc };
+    }
+  }
+  return null;
+}
+
 /**
- * Restore the current v2 shape and the previous Selection-shaped value. A
- * listen-only legacy value is migrated only when that listen is unambiguous;
- * otherwise it fails closed rather than selecting a sibling virtual host.
+ * Restore a stored selection. The v3 durable form (a route_id alone) is
+ * resolved against every route regardless of coordinates, so it survives an
+ * edit that changed the match or a reorder — a route_id disappearing (the
+ * route was removed) fails closed exactly like every other unresolvable
+ * form, rather than falling through to a coordinate-based guess. The v2 form
+ * and the pre-route_id legacy Selection-shaped value are unchanged.
  */
 export function restoreRouteSelection(
   routes: readonly RouteProjection[],
@@ -491,6 +530,10 @@ export function restoreRouteSelection(
 ): RouteSelection | null {
   const root = objectValue(stored);
   if (!root) return null;
+
+  if (root.version === 3) {
+    return typeof root.route_id === "string" ? findByRouteID(routes, root.route_id) : null;
+  }
 
   if (root.version === 2) {
     const server = objectValue(root.server);

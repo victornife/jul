@@ -335,4 +335,46 @@ describe("route selection restoration", () => {
     });
     expect(restored).toBeNull();
   });
+
+  it("stores a route with a durable route_id in the v3 durable form, not v2 coordinates", () => {
+    const chosen = inventory[1];
+    if (chosen === undefined) throw new Error("expected second virtual-host fixture");
+    const withID: LocationProjection = { ...location(0, "/other"), route_id: "r-durable" };
+    const stored = storeRouteSelection({ route: chosen, loc: withID });
+    expect(stored).toEqual({ version: 3, route_id: "r-durable" });
+  });
+
+  it("resolves the v3 durable form across any server/match, unlike v2", () => {
+    const withID: LocationProjection = { ...location(0, "/other"), route_id: "r-durable" };
+    const routes = [route(":8080", ["other.example"], [withID])];
+    const restored = restoreRouteSelection(routes, { version: 3, route_id: "r-durable" });
+    expect(restored?.loc.match).toBe("/other");
+
+    // The durable form still resolves after the route's own coordinates
+    // change, which a v2 (coordinates-based) selection could never do.
+    const moved = [
+      route(":9090", ["renamed.example"], [{ ...location(0, "/moved"), route_id: "r-durable" }]),
+    ];
+    const restoredAfterMove = restoreRouteSelection(moved, { version: 3, route_id: "r-durable" });
+    expect(restoredAfterMove?.loc.match).toBe("/moved");
+    expect(restoredAfterMove?.route.listen).toBe(":9090");
+  });
+
+  it("fails closed when a durable route_id no longer exists, never guessing a different route", () => {
+    const restored = restoreRouteSelection(inventory, { version: 3, route_id: "r-deleted" });
+    expect(restored).toBeNull();
+  });
+
+  it("falls back to the v2 revision-bound form for a route with no route_id", () => {
+    expect(
+      storeRouteIdentity(
+        { listen: ":8080", serverNames: ["b.example", "a.example"] },
+        { matchType: "exact", path: "/created" },
+      ),
+    ).toEqual({
+      version: 2,
+      server: { listen: ":8080", server_names: ["a.example", "b.example"] },
+      location: { match_type: "exact", path: "/created" },
+    });
+  });
 });

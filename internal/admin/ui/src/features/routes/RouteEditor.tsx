@@ -36,7 +36,7 @@ import {
   storeRouteIdentity,
   type RouteCreateSpec,
   type ServerIdentity,
-  type StoredRouteSelectionV2,
+  type StoredRouteSelection,
   type StructuredRouteAction,
 } from "@/lib/routePatch.ts";
 import { describePatchBatchError, useRunPatchBatch } from "@/lib/useRunPatchBatch.ts";
@@ -336,7 +336,7 @@ export interface RouteEditorProps {
   readonly initial?: RouteEditorInitial | undefined;
   readonly existingRoutes?: RouteProjection[] | undefined;
   /** Called immediately before the completed preview handoff navigates to ConfigPanel. */
-  readonly onReview?: ((selection: StoredRouteSelectionV2) => void) | undefined;
+  readonly onReview?: ((selection: StoredRouteSelection) => void) | undefined;
   readonly closeLabel?: string | undefined;
   readonly onClose: () => void;
 }
@@ -400,7 +400,7 @@ export function RouteEditor({
 
   function buildPlan(): {
     readonly ops: ConfigPatch[];
-    readonly selection: StoredRouteSelectionV2;
+    readonly selection: StoredRouteSelection;
   } {
     let server: ServerIdentity;
     let ops: ConfigPatch[];
