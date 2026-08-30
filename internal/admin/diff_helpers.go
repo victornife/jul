@@ -309,12 +309,33 @@ func diffLocations(server string, before, after []config.LocationConfig, beforeG
 	// separately flag it.
 	d.cover("servers.*.locations.*.route_id")
 	afterPairs, removedPairs := correlateLocations(before, after)
+
+	// Collect the ID-less unmatched adds/removes up front so each side can
+	// check the other for a plausible same-coordinates counterpart when
+	// deciding whether to admit the relationship is unproven (ADR 0019 §7:
+	// "uncorrelated (no route_id)").
+	var addedNoID, removedNoID []*config.LocationConfig
+	for _, p := range afterPairs {
+		if p.before == nil && routeID(p.after) == "" {
+			addedNoID = append(addedNoID, p.after)
+		}
+	}
+	for _, p := range removedPairs {
+		if routeID(p.before) == "" {
+			removedNoID = append(removedNoID, p.before)
+		}
+	}
+
 	for _, p := range afterPairs {
 		a := p.after
 		label := locationLabel(a)
 		name := server + " " + label
 		if p.before == nil {
-			d.add(DiffEntry{Kind: "location", Name: name, After: locationAction(a) + " → " + orNone(locationTarget(a)), Detail: "Add route " + label + " on " + server}, "route "+name)
+			detail := "Add route " + label + " on " + server
+			if note := addedRouteIdentityNote(a, before, removedNoID); note != "" {
+				detail += " (" + note + ")"
+			}
+			d.add(DiffEntry{Kind: "location", Name: name, After: locationAction(a) + " → " + orNone(locationTarget(a)), Detail: detail}, "route "+name)
 			continue
 		}
 		diffLocationFields(server, label, p.before, a, beforeGlobWAF, afterGlobWAF, d)
@@ -323,7 +344,11 @@ func diffLocations(server string, before, after []config.LocationConfig, beforeG
 		b := p.before
 		label := locationLabel(b)
 		name := server + " " + label
-		d.del(DiffEntry{Kind: "location", Name: name, Before: locationAction(b) + " → " + orNone(locationTarget(b)), Detail: "Remove route " + label + " on " + server}, "route "+name)
+		detail := "Remove route " + label + " on " + server
+		if note := removedRouteIdentityNote(b, after, addedNoID); note != "" {
+			detail += " (" + note + ")"
+		}
+		d.del(DiffEntry{Kind: "location", Name: name, Before: locationAction(b) + " → " + orNone(locationTarget(b)), Detail: detail}, "route "+name)
 		// Editing a predicate re-keys the route, so it renders as a removal
 		// plus an addition. Warning that traffic will stop being handled would
 		// be false whenever another route still covers the same coordinates.
@@ -331,6 +356,71 @@ func diffLocations(server string, before, after []config.LocationConfig, beforeG
 			d.warn("Removing route %s on %s will stop matching requests from being handled by it.", label, server)
 		}
 	}
+}
+
+// fingerprintPeer returns the location in candidates sharing target's exact
+// match-type+path+predicate fingerprint, or nil. It is used only to explain
+// an otherwise-uncorrelated add/remove pair — it never itself decides
+// correlation, which is correlateLocations' job alone.
+func fingerprintPeer(target *config.LocationConfig, candidates []config.LocationConfig) *config.LocationConfig {
+	key := locationKey(target)
+	for i := range candidates {
+		if locationKey(&candidates[i]) == key {
+			return &candidates[i]
+		}
+	}
+	return nil
+}
+
+// addedRouteIdentityNote explains, when it can, why an added route was not
+// correlated with anything in the previous revision (ADR 0019 §7). It never
+// asserts a relationship route_id itself does not establish — an add with no
+// plausible counterpart gets no note at all.
+func addedRouteIdentityNote(a *config.LocationConfig, before []config.LocationConfig, removedNoID []*config.LocationConfig) string {
+	if id := routeID(a); id != "" {
+		peer := fingerprintPeer(a, before)
+		if peer == nil {
+			return ""
+		}
+		if routeID(peer) == "" {
+			return "route_id introduced on an existing route"
+		}
+		return "route_id changed"
+	}
+	// No route_id on the added side: only admit the ambiguity when a
+	// same-coordinates removed route exists to be confused with — a
+	// same-fingerprint match would already have been correlated by
+	// correlateLocations' fallback, so reaching here with a coordinates match
+	// means the predicates changed.
+	want := locationCoordinates(a)
+	for _, r := range removedNoID {
+		if locationCoordinates(r) == want {
+			return "uncorrelated (no route_id)"
+		}
+	}
+	return ""
+}
+
+// removedRouteIdentityNote is addedRouteIdentityNote's mirror for a removed
+// route.
+func removedRouteIdentityNote(b *config.LocationConfig, after []config.LocationConfig, addedNoID []*config.LocationConfig) string {
+	if id := routeID(b); id != "" {
+		peer := fingerprintPeer(b, after)
+		if peer == nil {
+			return ""
+		}
+		if routeID(peer) == "" {
+			return "route_id removed"
+		}
+		return "route_id changed"
+	}
+	want := locationCoordinates(b)
+	for _, a := range addedNoID {
+		if locationCoordinates(a) == want {
+			return "uncorrelated (no route_id)"
+		}
+	}
+	return ""
 }
 
 // coordinatesStillPresent reports whether any location in the new revision keeps

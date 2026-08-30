@@ -28,6 +28,20 @@ func patchBatchResourceIDs(summaries []patchOperationSummary) string {
 	return strings.Join(ids, ",")
 }
 
+// patchBatchSelectors is patchBatchResourceIDs' counterpart for Selector: it
+// joins every op's revision-scoped selector, populated only when that same
+// op had no ResourceID, so an ID-less route's audit trail still names which
+// route was touched.
+func patchBatchSelectors(summaries []patchOperationSummary) string {
+	var selectors []string
+	for _, s := range summaries {
+		if s.Selector != "" {
+			selectors = append(selectors, s.Selector)
+		}
+	}
+	return strings.Join(selectors, ",")
+}
+
 // patchBatchBaseline binds an execution to one authoritative editable
 // configuration, one effective serving configuration, and one live-listener
 // snapshot. Every field is immutable input to executePatchBatch.
@@ -45,10 +59,18 @@ type patchOperationSummary struct {
 	OpIndex int    `json:"op_index"`
 	Op      string `json:"op"`
 	Summary string `json:"summary"`
-	// ResourceID is the durable route_id a location_add op created (whether
-	// caller-supplied or minted). It is empty for every other op: an
-	// existing route's route_id never changes as a side effect of a patch.
+	// ResourceID is the route_id the op's target route carries — whether a
+	// location_add op created it (caller-supplied or minted) or an existing
+	// identified route's op simply reports the identity it already had. A
+	// route's route_id never changes as a side effect of any op.
 	ResourceID string `json:"resource_id,omitempty"`
+	// Selector is the revision-scoped selector (listen, server_names,
+	// match_type, path, match_ordinal) for a route-targeting op whose target
+	// has no route_id — populated only when ResourceID is empty, so an audit
+	// event for an ID-less route still carries a stable, non-value-bearing
+	// reference to which route it was, per ADR 0019 §7. Never carries
+	// predicate/header/query values.
+	Selector string `json:"selector,omitempty"`
 }
 
 // patchBatchExecution is the complete side-effect-free result shared by the
@@ -216,6 +238,12 @@ func executePatchBatch(
 		if err := ctx.Err(); err != nil {
 			return out, &patchCandidateError{Err: err}
 		}
+		// Route-targeting ops (everything except location_add, which has no
+		// target until it runs) are resolved against the *pre-op* candidate:
+		// route_id is immutable outside minting, so this is a stable identity
+		// even for an op like location_remove or location_set_match, whose
+		// own effect would make the target unresolvable afterward.
+		preOpIdentity := resolveRouteAuditIdentity(candidateConfig, op.locationTarget())
 		summary, applyErr := applyPatch(candidateConfig, op)
 		if applyErr != nil {
 			return out, &patchOperationError{OpIndex: i, Op: op.Op, Err: applyErr}
@@ -225,12 +253,13 @@ func executePatchBatch(
 			Op:      op.Op,
 			Summary: summary,
 		}
-		if op.Op == "location_add" {
+		switch {
+		case op.Op == "location_add":
 			if srv, err := findServerByNames(candidateConfig, op.Listen, op.ServerNames); err == nil && len(srv.Locations) > 0 {
-				if id := srv.Locations[len(srv.Locations)-1].RouteID; id != nil {
-					opSummary.ResourceID = *id
-				}
+				opSummary.ResourceID, opSummary.Selector = auditIdentityOf(op.Listen, op.ServerNames, &srv.Locations[len(srv.Locations)-1])
 			}
+		case preOpIdentity != (routeAuditIdentity{}):
+			opSummary.ResourceID, opSummary.Selector = preOpIdentity.ResourceID, preOpIdentity.Selector
 		}
 		operationSummaries = append(operationSummaries, opSummary)
 	}

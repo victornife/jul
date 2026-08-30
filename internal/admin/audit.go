@@ -44,9 +44,18 @@ type AuditEvent struct {
 	// have their own fields elsewhere; a single event may touch more than
 	// one resource, in which case this is a comma-separated list.
 	ResourceID string `json:"resource_id,omitempty"`
-	Result     string `json:"result"`           // success | failure
-	Detail     string `json:"detail,omitempty"` // short, redacted description
-	SourceIP   string `json:"source_ip,omitempty"`
+	// Selector carries a revision-scoped route selector (ADR 0018 §14:
+	// listen, server_names, match_type, path, match_ordinal) for a
+	// route-targeting operation whose target has no durable route_id —
+	// populated only when ResourceID is empty for that same route, so a
+	// route without an ID is still auditable by coordinates rather than
+	// leaving the event silent about which route was touched. Like
+	// ResourceID, more than one entry is comma-separated; it never carries a
+	// predicate/header/query value.
+	Selector string `json:"selector,omitempty"`
+	Result   string `json:"result"`           // success | failure
+	Detail   string `json:"detail,omitempty"` // short, redacted description
+	SourceIP string `json:"source_ip,omitempty"`
 }
 
 // auditLog is a fixed-size ring buffer of audit events with a monotonic id and
@@ -257,6 +266,13 @@ func (s *Server) recordAudit(r *http.Request, operation, resource, result, detai
 // (ADR 0019 §4/§5), for events that touch one or more identified resources
 // (e.g. a location_add that minted a route_id).
 func (s *Server) recordAuditResource(r *http.Request, operation, resource, resourceID, result, detail string) {
+	s.recordAuditResourceSelector(r, operation, resource, resourceID, "", result, detail)
+}
+
+// recordAuditResourceSelector is recordAuditResource with an additional
+// revision-scoped Selector (ADR 0018 §14), for a route-targeting event whose
+// target has no durable route_id.
+func (s *Server) recordAuditResourceSelector(r *http.Request, operation, resource, resourceID, selector, result, detail string) {
 	if s.audit == nil {
 		return
 	}
@@ -272,6 +288,7 @@ func (s *Server) recordAuditResource(r *http.Request, operation, resource, resou
 		Operation:  operation,
 		Resource:   resource,
 		ResourceID: resourceID,
+		Selector:   selector,
 		Result:     result,
 		Detail:     detail,
 		SourceIP:   adminClientIP(r),
