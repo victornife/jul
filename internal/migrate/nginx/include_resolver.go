@@ -26,6 +26,8 @@ const (
 	defaultMaxIncludeGlobMatches = 1024
 )
 
+var errIncludeNotDirectory = errors.New("include path component is not a directory")
+
 // IncludeLimits bounds every filesystem and parser resource consumed by one
 // include traversal. Zero values select the conservative defaults.
 type IncludeLimits struct {
@@ -187,7 +189,10 @@ func (t *resolvedSourceTree) confinedPath(path string) (string, string, error) {
 	}
 	lexicalPath = filepath.Clean(lexicalPath)
 	if !pathWithinRoot(t.lexicalRoot, lexicalPath) {
-		return "", "", fmt.Errorf("source path escapes assessment root")
+		return "", "", &includeTraversalError{
+			Code:    "NGX_INCLUDE_ROOT_ESCAPE",
+			Message: "included source escapes the configured assessment root",
+		}
 	}
 	evaluatedPath, err := filepath.EvalSymlinks(lexicalPath)
 	if err != nil {
@@ -199,7 +204,10 @@ func (t *resolvedSourceTree) confinedPath(path string) (string, string, error) {
 	}
 	evaluatedPath = filepath.Clean(evaluatedPath)
 	if !pathWithinRoot(t.evaluatedRoot, evaluatedPath) {
-		return lexicalPath, evaluatedPath, fmt.Errorf("source symlink escapes assessment root")
+		return lexicalPath, evaluatedPath, &includeTraversalError{
+			Code:    "NGX_INCLUDE_SYMLINK_ESCAPE",
+			Message: "included source symlink escapes the configured assessment root",
+		}
 	}
 	return lexicalPath, evaluatedPath, nil
 }
@@ -212,15 +220,130 @@ func pathWithinRoot(root, path string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+// safeGlob expands one include pattern without allowing filepath.Glob to walk
+// through an unchecked symlinked directory. Every directory component is
+// confined and evaluated before its entries are read.
+func (t *resolvedSourceTree) safeGlob(pattern string) ([]string, error) {
+	if !pathWithinRoot(t.lexicalRoot, pattern) {
+		return nil, &includeTraversalError{
+			Code:    "NGX_INCLUDE_ROOT_ESCAPE",
+			Message: "include path escapes the configured assessment root",
+		}
+	}
+	rel, err := filepath.Rel(t.lexicalRoot, pattern)
+	if err != nil || filepath.IsAbs(rel) {
+		return nil, &includeTraversalError{
+			Code:    "NGX_INCLUDE_ROOT_ESCAPE",
+			Message: "include path escapes the configured assessment root",
+		}
+	}
+	parts := strings.Split(filepath.Clean(rel), string(filepath.Separator))
+	candidates := []string{t.lexicalRoot}
+	for index, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		last := index == len(parts)-1
+		hasMeta := strings.ContainsAny(part, "*?[")
+		if hasMeta {
+			if _, err := filepath.Match(part, ""); err != nil {
+				return nil, err
+			}
+		}
+		next := make([]string, 0)
+		for _, base := range candidates {
+			if !hasMeta {
+				candidate := filepath.Join(base, part)
+				if !last {
+					if _, err := t.safeDirectory(candidate); err != nil {
+						if errors.Is(err, os.ErrNotExist) || errors.Is(err, errIncludeNotDirectory) {
+							continue
+						}
+						return nil, err
+					}
+				} else if _, err := os.Lstat(candidate); err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						continue
+					}
+					return nil, err
+				}
+				next = append(next, candidate)
+				continue
+			}
+
+			evaluatedBase, err := t.safeDirectory(base)
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) || errors.Is(err, errIncludeNotDirectory) {
+					continue
+				}
+				return nil, err
+			}
+			entries, err := os.ReadDir(evaluatedBase)
+			if err != nil {
+				return nil, err
+			}
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), ".") && !strings.HasPrefix(part, ".") {
+					continue
+				}
+				matched, err := filepath.Match(part, entry.Name())
+				if err != nil {
+					return nil, err
+				}
+				if !matched {
+					continue
+				}
+				candidate := filepath.Join(base, entry.Name())
+				if !last {
+					if _, err := t.safeDirectory(candidate); err != nil {
+						if errors.Is(err, os.ErrNotExist) || errors.Is(err, errIncludeNotDirectory) {
+							continue
+						}
+						return nil, err
+					}
+				}
+				next = append(next, candidate)
+				if len(next) > t.limits.MaxGlobMatches {
+					return nil, &includeTraversalError{
+						Code:    "NGX_INCLUDE_FILE_LIMIT",
+						Message: "include glob-match limit reached",
+					}
+				}
+			}
+		}
+		candidates = next
+		if len(candidates) == 0 {
+			break
+		}
+	}
+	sort.Strings(candidates)
+	return candidates, nil
+}
+
+func (t *resolvedSourceTree) safeDirectory(path string) (string, error) {
+	_, evaluatedPath, err := t.confinedPath(path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(evaluatedPath)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", errIncludeNotDirectory
+	}
+	return evaluatedPath, nil
+}
+
 func (t *resolvedSourceTree) readParseRegister(lexicalPath, evaluatedPath, parentID string, includeLine int, root bool) (*ngx.Config, AssessmentSource, error) {
-	if !root && t.filesRead >= t.limits.MaxFiles {
+	if t.filesRead >= t.limits.MaxFiles {
 		return nil, AssessmentSource{}, &includeTraversalError{Code: "NGX_INCLUDE_FILE_LIMIT", Message: "include file-count limit reached"}
 	}
 	data, err := readBoundedSource(evaluatedPath, t.limits.MaxFileBytes)
 	if err != nil {
 		return nil, AssessmentSource{}, err
 	}
-	if !root && t.totalBytes+int64(len(data)) > t.limits.MaxTotalBytes {
+	if t.totalBytes+int64(len(data)) > t.limits.MaxTotalBytes {
 		return nil, AssessmentSource{}, &includeTraversalError{Code: "NGX_INCLUDE_BYTE_LIMIT", Message: "include total-byte limit reached"}
 	}
 	source, err := t.catalog.register(lexicalPath, parentID, includeLine, data)
@@ -418,21 +541,12 @@ func (t *resolvedSourceTree) resolveInclude(include *ngx.Include, includingPath 
 		return nil
 	}
 
-	matches, err := filepath.Glob(pattern)
+	matches, err := t.safeGlob(pattern)
 	if err != nil {
-		t.recordIncludeFailure(include, "NGX_INCLUDE_GLOB_INVALID", "include glob is invalid", nil)
+		code, message := classifyIncludeGlobError(err)
+		t.recordIncludeFailure(include, code, message, nil)
 		return nil
 	}
-	hasGlob := strings.ContainsAny(pattern, "*?[")
-	filtered := matches[:0]
-	for _, match := range matches {
-		if hasGlob && strings.HasPrefix(filepath.Base(filepath.Clean(match)), ".") {
-			continue
-		}
-		filtered = append(filtered, match)
-	}
-	matches = filtered
-	sort.Strings(matches)
 	if len(matches) == 0 {
 		t.recordIncludeFailure(include, "NGX_INCLUDE_MISSING", "include matched no readable source file", nil)
 		return nil
@@ -449,15 +563,7 @@ func (t *resolvedSourceTree) resolveInclude(include *ngx.Include, includingPath 
 	for _, match := range matches {
 		lexicalPath, evaluatedPath, err := t.confinedPath(match)
 		if err != nil {
-			code := "NGX_INCLUDE_UNREADABLE"
-			message := "included source could not be read"
-			if strings.Contains(err.Error(), "symlink escapes") {
-				code, message = "NGX_INCLUDE_SYMLINK_ESCAPE", "included source symlink escapes the configured assessment root"
-			} else if strings.Contains(err.Error(), "escapes assessment root") {
-				code, message = "NGX_INCLUDE_ROOT_ESCAPE", "included source escapes the configured assessment root"
-			} else if errors.Is(err, os.ErrNotExist) {
-				code, message = "NGX_INCLUDE_MISSING", "included source does not exist"
-			}
+			code, message := classifyIncludeReadError(err)
 			if firstFailure == nil {
 				firstFailure = &includeTraversalError{Code: code, Message: message}
 			}
@@ -501,6 +607,13 @@ func (t *resolvedSourceTree) resolveInclude(include *ngx.Include, includingPath 
 	return inserted
 }
 
+func classifyIncludeGlobError(err error) (string, string) {
+	if errors.Is(err, filepath.ErrBadPattern) {
+		return "NGX_INCLUDE_GLOB_INVALID", "include glob is invalid"
+	}
+	return classifyIncludeReadError(err)
+}
+
 func classifyIncludeReadError(err error) (string, string) {
 	var traversalErr *includeTraversalError
 	if errors.As(err, &traversalErr) {
@@ -525,6 +638,13 @@ func (t *resolvedSourceTree) recordIncludeFailure(include ngx.IDirective, code, 
 	}
 }
 
+type includeReportFailure struct {
+	sourceID string
+	line     int
+	code     string
+	message  string
+}
+
 func (t *resolvedSourceTree) applyTranslationReport(report *Report) {
 	if t == nil || report == nil {
 		return
@@ -537,10 +657,36 @@ func (t *resolvedSourceTree) applyTranslationReport(report *Report) {
 		filtered = append(filtered, finding)
 	}
 	report.Skipped = filtered
+
+	failures := make([]includeReportFailure, 0, len(t.includeResolution))
 	for directive, outcome := range t.includeResolution {
 		if outcome.Code == "NGX_INCLUDE_RESOLVED" {
 			continue
 		}
-		report.skipNamed("include", directive.GetLine(), outcome.Message)
+		sourceID := t.rootSource.ID
+		if source, ok := t.directiveSources[directive]; ok && source.ID != "" {
+			sourceID = source.ID
+		}
+		failures = append(failures, includeReportFailure{
+			sourceID: sourceID,
+			line:     directive.GetLine(),
+			code:     outcome.Code,
+			message:  outcome.Message,
+		})
+	}
+	sort.SliceStable(failures, func(i, j int) bool {
+		if failures[i].sourceID != failures[j].sourceID {
+			return failures[i].sourceID < failures[j].sourceID
+		}
+		if failures[i].line != failures[j].line {
+			return failures[i].line < failures[j].line
+		}
+		if failures[i].code != failures[j].code {
+			return failures[i].code < failures[j].code
+		}
+		return failures[i].message < failures[j].message
+	})
+	for _, failure := range failures {
+		report.skipNamed("include", failure.line, failure.message)
 	}
 }
