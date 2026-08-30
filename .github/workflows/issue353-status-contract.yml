@@ -1,0 +1,143 @@
+name: Issue 353 status contract cleanup
+
+on:
+  push:
+    branches:
+      - agent/issue-353-docs-reconciliation
+    paths:
+      - .github/workflows/issue353-status-contract.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/issue-353-docs-reconciliation
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: install documentation dependency
+        run: python3 -m pip install --disable-pip-version-check pyyaml
+      - name: reconcile status sections and audit pointers
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          status = Path('docs/status.md')
+          text = status.read_text(encoding='utf-8')
+
+          old_pointer = '''> For the current evidence-based assessment, release blockers and
+          implementation sequence, see the
+          [2026-08-03 combined repository audit](audit/combined-audit-2026-08-03.md),
+          [`docs/audit-register.md`](audit-register.md), and master programme #62. Older
+          audits remain historical evidence.
+          '''
+          old_pointer = '\n'.join(line[10:] if line.startswith('          ') else line for line in old_pointer.splitlines()) + '\n'
+          new_pointer = '''> Current maturity and delivery live in this page and
+          > [`feature-status.yaml`](feature-status.yaml). Volatile issue sequencing lives
+          > in [#62](https://github.com/victornife/jul/issues/62), and dated audit
+          > disposition lives in the [audit register](audit-register.md). The
+          > [2026-08-03 combined audit](audit/combined-audit-2026-08-03.md) remains a
+          > preserved programme-opening baseline, not a second current-status source.
+          '''
+          new_pointer = '\n'.join(line[10:] if line.startswith('          ') else line for line in new_pointer.splitlines()) + '\n'
+          if text.count(old_pointer) != 1:
+              raise SystemExit(f'expected one stale status audit pointer, found {text.count(old_pointer)}')
+          text = text.replace(old_pointer, new_pointer, 1)
+
+          start = '## Recently shipped continuous panels\n'
+          end = '## Changelog\n'
+          start_at = text.find(start)
+          end_at = text.find(end, start_at + len(start))
+          if start_at < 0 or end_at < 0:
+              raise SystemExit('legacy status block markers not found')
+          text = text[:start_at] + text[end_at:]
+          status.write_text(text.rstrip() + '\n', encoding='utf-8', newline='\n')
+
+          checker = Path('scripts/docs-check.py')
+          text = checker.read_text(encoding='utf-8')
+          old = '''    if len(headings) == len(set(headings)):
+                  ok("status.md headings are unique")
+          '''
+          old = '\n'.join(line[10:] if line.startswith('          ') else line for line in old.splitlines())
+          new = '''    required = {
+                  "GA", "GA — soak pending", "Beta", "Alpha", "Deprecated",
+                  "Soak tracking (post-GA gate)", "Changelog",
+              }
+              declared = {title for level, title in headings if level == 2}
+              for title in sorted(required - declared):
+                  error(path, 0, f"missing canonical status section: {title}")
+              forbidden = {
+                  "Beta (shipped; remaining GA gaps)",
+                  "Recently shipped continuous panels",
+              }
+              for title in sorted(forbidden & declared):
+                  error(path, 0, f"legacy status section remains: {title}")
+              if required <= declared and not (forbidden & declared):
+                  ok("status.md canonical sections are complete")
+          '''
+          new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines())
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one status heading success block, found {text.count(old)}')
+          checker.write_text(text.replace(old, new, 1), encoding='utf-8', newline='\n')
+
+          tests = Path('scripts/test_docs_check.py')
+          text = tests.read_text(encoding='utf-8')
+          addition = '''
+
+          def test_status_heading_contract_rejects_legacy_beta_section():
+              with tempfile.TemporaryDirectory() as tmpdir:
+                  root = Path(tmpdir)
+                  docs = root / "docs"
+                  docs.mkdir(parents=True)
+                  (docs / "status.md").write_text(
+                      "# Status\n\n## GA\n\n## GA — soak pending\n\n## Beta\n\n"
+                      "## Alpha\n\n## Deprecated\n\n## Soak tracking (post-GA gate)\n\n"
+                      "## Beta (shipped; remaining GA gaps)\n\n## Changelog\n",
+                      encoding="utf-8",
+                  )
+                  _, fail = _run_in_tmp(root, docs_check.check_status_heading_uniqueness)
+                  assert fail == 1, f"expected one legacy-section failure, got {fail}"
+          '''
+          addition = '\n'.join(line[10:] if line.startswith('          ') else line for line in addition.splitlines())
+          if 'def test_status_heading_contract_rejects_legacy_beta_section():' not in text:
+              runner = '''    test_status_heading_uniqueness_rejects_duplicate_anchor()
+              print("OK")
+          '''
+              runner = '\n'.join(line[10:] if line.startswith('          ') else line for line in runner.splitlines())
+              replacement = '''    test_status_heading_uniqueness_rejects_duplicate_anchor()
+              test_status_heading_contract_rejects_legacy_beta_section()
+              print("OK")
+          '''
+              replacement = '\n'.join(line[10:] if line.startswith('          ') else line for line in replacement.splitlines())
+              if text.count(runner) != 1:
+                  raise SystemExit(f'expected one final runner tail, found {text.count(runner)}')
+              text = text.replace(runner, replacement, 1).rstrip() + addition + '\n'
+              # Keep the executable runner last, after every test definition.
+              main_at = text.rfind('\nif __name__ == "__main__":\n')
+              legacy_at = text.find('\ndef test_status_heading_contract_rejects_legacy_beta_section():\n')
+              if main_at < 0 or legacy_at < 0 or legacy_at > main_at:
+                  raise SystemExit('new status contract test was not placed before the final runner')
+          tests.write_text(text, encoding='utf-8', newline='\n')
+          PY
+      - name: verify documentation
+        run: |
+          make generated-check
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          git diff --check
+      - name: remove one-shot workflow and commit
+        run: |
+          rm .github/workflows/issue353-status-contract.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(docs): keep one canonical status model"
+          git push origin HEAD:agent/issue-353-docs-reconciliation
