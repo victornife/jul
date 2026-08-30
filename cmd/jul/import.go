@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"jul/internal/atomicfile"
@@ -33,7 +34,7 @@ const (
 //	jul import nginx [--input nginx.conf] [--output jul.toml]
 //	jul import nginx --assess [--source-order] nginx.conf
 //	jul import nginx --json [--path-style relative|absolute] nginx.conf
-//	jul import nginx --report assessment.json -o jul.toml nginx.conf
+//	jul import nginx --follow-includes [--root DIR] --report assessment.json nginx.conf
 //
 // Exit codes are stable for automation: 0 success, 1 internal error, 2 usage,
 // 3 blocking/strict findings, 4 NGINX parse error, 5 generated-candidate
@@ -61,6 +62,15 @@ func cmdImport(args []string) int {
 	jsonOut := fs.Bool("json", false, "emit only the versioned JSON assessment to stdout")
 	pathStyleRaw := fs.String("path-style", "relative", "render assessment source paths as relative or absolute")
 	sourceOrder := fs.Bool("source-order", false, "render the human assessment in source order (requires --assess)")
+	followIncludes := fs.Bool("follow-includes", false, "resolve includes under a bounded assessment root")
+	rootPath := fs.String("root", "", "confine include traversal to this directory (default: input file directory)")
+	includeRootPath := fs.String("include-root", "", "alias of --root")
+	defaults := nginx.DefaultIncludeLimits()
+	maxIncludeDepth := fs.Int("max-include-depth", defaults.MaxDepth, "maximum nested include depth")
+	maxIncludeFiles := fs.Int("max-include-files", defaults.MaxFiles, "maximum source files, including the root file")
+	maxIncludeFileBytes := fs.Int64("max-include-file-bytes", defaults.MaxFileBytes, "maximum bytes read from one source file")
+	maxIncludeTotalBytes := fs.Int64("max-include-total-bytes", defaults.MaxTotalBytes, "maximum bytes read across the source tree")
+	maxIncludeGlobMatches := fs.Int("max-include-glob-matches", defaults.MaxGlobMatches, "maximum files matched by one include glob")
 	if err := fs.Parse(args[1:]); err != nil {
 		return importExitUsage
 	}
@@ -74,7 +84,32 @@ func cmdImport(args []string) int {
 		fmt.Fprintln(stderr, "error: --source-order requires --assess because JSON result order is already deterministic")
 		return importExitUsage
 	}
+	includeRoot, err := resolveIncludeRootFlags(*rootPath, *includeRootPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return importExitUsage
+	}
+	if !*followIncludes && includeRoot != "" {
+		fmt.Fprintln(stderr, "error: --root/--include-root requires --follow-includes")
+		return importExitUsage
+	}
+	if *maxIncludeDepth < 1 || *maxIncludeFiles < 1 || *maxIncludeFileBytes < 1 || *maxIncludeTotalBytes < 1 || *maxIncludeGlobMatches < 1 {
+		fmt.Fprintln(stderr, "error: include limits must be positive")
+		return importExitUsage
+	}
 	assessmentOptions := nginx.AssessmentOptions{PathStyle: pathStyle}
+	importOptions := nginx.ImportOptions{
+		Assessment:     assessmentOptions,
+		FollowIncludes: *followIncludes,
+		IncludeRoot:    includeRoot,
+		IncludeLimits: nginx.IncludeLimits{
+			MaxDepth:       *maxIncludeDepth,
+			MaxFiles:       *maxIncludeFiles,
+			MaxFileBytes:   *maxIncludeFileBytes,
+			MaxTotalBytes:  *maxIncludeTotalBytes,
+			MaxGlobMatches: *maxIncludeGlobMatches,
+		},
+	}
 
 	inPath, err := resolveImportInput(*inputPath, fs.Args())
 	if err != nil {
@@ -87,7 +122,7 @@ func cmdImport(args []string) int {
 	}
 	assessmentRequested := *assess || *jsonOut || *reportPath != ""
 
-	cfg, report, err := nginx.ImportFileWithOptions(inPath, assessmentOptions)
+	cfg, report, err := nginx.ImportFileWithImportOptions(inPath, importOptions)
 	if err != nil {
 		code, class, findingCode, message := classifyImportReadError(err)
 		assessment := nginx.FailureAssessmentWithOptions(inPath, class, findingCode, message, assessmentOptions)
@@ -150,7 +185,7 @@ func cmdImport(args []string) int {
 		return importAssessmentExit(assessment, *strict, warns)
 	}
 	if *assess {
-		fmt.Fprint(stdout, assessment.Human())
+		fmt.Fprint(stdout, assessment.HumanWithSourcePolicy())
 		return importAssessmentExit(assessment, *strict, warns)
 	}
 
@@ -164,6 +199,10 @@ func cmdImport(args []string) int {
 	if len(verrs) > 0 {
 		fmt.Fprintf(stderr, "\nerror: the translated config has %d validation error(s); not written\n", len(verrs))
 		return importExitValidation
+	}
+	if assessment.SourcePolicy.FollowInclude && !assessment.SourcePolicy.Complete {
+		fmt.Fprintln(stderr, "error: include traversal was incomplete; generated config was not written")
+		return importExitFindings
 	}
 
 	// Preserve the existing generated TOML byte contract: assessment metadata is
@@ -197,6 +236,29 @@ func cmdImport(args []string) int {
 		return importExitFindings
 	}
 	return importExitOK
+}
+
+func resolveIncludeRootFlags(rootPath, includeRootPath string) (string, error) {
+	rootPath = strings.TrimSpace(rootPath)
+	includeRootPath = strings.TrimSpace(includeRootPath)
+	if rootPath == "" {
+		return includeRootPath, nil
+	}
+	if includeRootPath == "" {
+		return rootPath, nil
+	}
+	left, err := filepath.Abs(rootPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve --root: %w", err)
+	}
+	right, err := filepath.Abs(includeRootPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve --include-root: %w", err)
+	}
+	if filepath.Clean(left) != filepath.Clean(right) {
+		return "", fmt.Errorf("--root and --include-root must name the same directory when both are provided")
+	}
+	return rootPath, nil
 }
 
 func resolveImportInput(flagPath string, positional []string) (string, error) {
@@ -251,7 +313,7 @@ func emitImportAssessment(assessment *nginx.Assessment, human, jsonOut bool, rep
 		return writeAssessment(stdout, assessment)
 	}
 	if human {
-		fmt.Fprint(stdout, assessment.Human())
+		fmt.Fprint(stdout, assessment.HumanWithSourcePolicy())
 	}
 	return nil
 }

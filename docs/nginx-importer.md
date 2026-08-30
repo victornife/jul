@@ -2,326 +2,298 @@
 
 > Feature ID: **Y1-09** · Build tag: `importer` · Since v1.26
 
-A best-effort migration aid that converts an NGINX configuration into a Jul.IA
-configuration. Common directives (`http`, `server`, `location`, `listen`,
-`server_name`, `root`, `index`, `proxy_pass`, `upstream`, `return`, `rewrite`,
-`ssl_*`, `gzip`) are translated into equivalent TOML structures. Every parsed
-directive also receives a deterministic migration-assessment result, so an
-operator can locate, understand, and remediate unsupported or approximate
-behavior rather than have it silently dropped.
+A best-effort migration aid that converts NGINX configuration into Jul.IA TOML.
+Common HTTP, server, location, upstream, TLS, compression, static-file, proxy,
+redirect, rewrite, response-header, CORS, and trusted-client-address constructs
+are translated. Every parsed directive also receives a deterministic migration
+assessment result so unsupported or approximate behavior is never silently
+lost.
+
+Generated TOML is a draft, not a cutover certificate. Review every blocking and
+approximate result and validate the candidate before deployment.
 
 ## Usage
 
 ```bash
 go build -tags importer ./cmd/jul
 
-# Generate Jul TOML.
+# Generate Jul TOML from one root file. Includes are not followed implicitly.
 jul import nginx -o jul.toml /etc/nginx/nginx.conf
 
-# Produce a human assessment without writing generated configuration.
+# Human or JSON assessment only.
 jul import nginx --assess /etc/nginx/nginx.conf
+jul import nginx --json /etc/nginx/nginx.conf
 
-# Navigate findings in source order.
-jul import nginx --assess --source-order /etc/nginx/nginx.conf
-
-# Produce the versioned JSON assessment with portable relative paths.
-jul import nginx --json --path-style relative /etc/nginx/nginx.conf
-
-# Generate TOML and write the assessment beside it.
+# Follow a real multi-file estate under an explicit root.
 jul import nginx \
+  --assess \
+  --follow-includes \
+  --root /etc/nginx \
+  /etc/nginx/nginx.conf
+
+# Generate TOML and a machine report when the complete tree is safe to read.
+jul import nginx \
+  --follow-includes \
+  --include-root /etc/nginx \
   --input /etc/nginx/nginx.conf \
   --output jul.toml \
   --report migration-assessment.json
 ```
 
-The conversion command prints a console summary of skipped directives (stderr)
-and writes generated TOML to stdout or the `-o` file. The header of the
-generated file remains a legacy TODO comment block so existing conversion
-workflows and output goldens stay compatible.
+`--root` and `--include-root` are aliases. `--input` is an alternative to the
+positional source path and `--output` is an alias for `-o`. Relative source
+paths are the default; `--path-style absolute` is an explicit local-only choice.
+`--source-order` changes only human assessment navigation.
 
-The assessment is the authoritative migration-evidence surface. Schema version
-2 records a source catalogue, safe path policy, start/end coordinates, bounded
-context paths, stable result IDs, structured Jul target mappings, and stable
-remediation codes. Relative paths are the default; absolute paths require
-`--path-style absolute`. Human and JSON output share one redaction path. See
-[NGINX migration assessment](nginx-assessment.md), the
-[JSON Schema](nginx-assessment.schema.json), and the
-[example report](nginx-assessment.example.json).
+The conversion command writes generated TOML to stdout or `-o` and prints the
+legacy skipped-directive summary to stderr. The generated file's TODO header is
+retained for compatibility. The versioned assessment is the authoritative
+migration-evidence surface. See [NGINX migration
+assessment](nginx-assessment.md), its [JSON
+Schema](nginx-assessment.schema.json), and the [multi-file example
+report](nginx-assessment.example.json).
+
+## Include security
+
+The default remains single-file and non-surprising: without
+`--follow-includes`, Jul reads only the supplied root file and reports each
+`include` as blocking. No hidden filesystem traversal occurs.
+
+When traversal is enabled, Jul owns source discovery. `gonginx` parses one
+already-bounded file at a time; its own include parser is not used.
+
+### Root policy
+
+- The assessment root defaults to the input file's directory.
+- Relative includes resolve from the including file's directory.
+- Absolute includes are accepted only when they remain inside the configured
+  root.
+- Jul checks both the cleaned lexical path and the evaluated symlink target.
+- `..` escape, drive/UNC escape, and symlink escape fail closed.
+- Network URLs, shell expansion, arbitrary directory crawling, and unrestricted
+  host-root traversal are not supported.
+- Reports use relative `/`-separated display paths by default and never expose
+  an escaped host root in error text.
+
+### Matching and order
+
+Explicit files, standard filesystem globs, nested includes, and repeated
+non-cyclic includes are supported. Glob matches are sorted deterministically.
+Hidden files are excluded from wildcard matches. An invalid or unmatched glob
+is blocking because the assessed source tree would otherwise be incomplete.
+Repeated includes remain separate source instances with separate ancestry and
+result IDs; they are not silently deduplicated.
+
+Included directives are inserted at the include point before the existing
+translator/classifier runs. A fragment included inside `http`, `server`,
+`location`, or `upstream` keeps that context.
+
+### Resource limits
+
+| Flag | Default |
+| --- | ---: |
+| `--max-include-depth` | `16` |
+| `--max-include-files` | `256` |
+| `--max-include-file-bytes` | `4194304` |
+| `--max-include-total-bytes` | `33554432` |
+| `--max-include-glob-matches` | `1024` |
+
+All values must be positive. A missing/unreadable source, malformed glob,
+cycle, parse error, root/symlink escape, or limit breach produces a stable
+blocking `NGX_INCLUDE_*` result at the responsible include. The report lists
+sources already read and sets `source_policy.complete = false`. A followed but
+incomplete tree never writes generated TOML.
 
 ## Directive support matrix
 
-The translator walks the nginx directive tree top-down. Directives are grouped
-by the scope they appear in. A ✅ means full translation; ⚠️ means a lossy or
-approximate mapping; ❌ means the directive requires manual porting. Every status
-is represented explicitly in the assessment even when the legacy generated
-TOML header remains terse.
+The translator walks the assembled directive tree top-down. ✅ is direct
+translation, ⚠️ is approximate or conditionally supported, ❌ requires manual
+porting, and **ignored** means the source controls the NGINX process rather than
+the Jul request path.
 
 ### Top-level (`main` context)
 
 | Directive | Status | Notes |
 | --- | --- | --- |
-| `http` | ✅ | Recursively translated; only one block is allowed (multiple render as separate servers in the output) |
-| `stream` | ❌ | Reported; no L4 stream proxy translation today |
-| `mail` | ❌ | Reported |
-| `include` | ❌ | Blocking in the current single-file tranche; the root-file span and remediation code are reported, but no included file is read implicitly |
-| `events`, `worker_processes`, `worker_rlimit_nofile`, `pid`, `user`, `daemon`, `master_process`, `load_module`, `pcre_jit`, `error_log` | ignored | Process-level directives with no per-server Jul.IA equivalent; explicit assessment results record that they have no generated effect |
+| `http` | ✅ | Recursively translated. |
+| `include` | ⚠️ | Blocking by default; informational after complete bounded expansion. |
+| `stream`, `mail` | ❌ | No stream/mail translation today. |
+| `events`, `worker_processes`, `worker_rlimit_nofile`, `pid`, `user`, `daemon`, `master_process`, `load_module`, `pcre_jit`, `error_log` | ignored | Explicit assessment results, no generated effect. |
 
 ### `http` block
 
 | Directive | Status | Notes |
 | --- | --- | --- |
-| `server` | ✅ | Translated to `[[servers]]` |
-| `upstream` | ✅ | Translated to `[[upstreams]]`; supports `round_robin`, `least_conn`, and `weighted_round_robin` |
-| `gzip` | ✅ | `gzip on` → `[compression] enabled = true` |
-| `set_real_ip_from`, `real_ip_header`, `real_ip_recursive` | ⚠️ | Translated to `[servers.client_address]` and inherited by every server block — see [realip](#realip-set_real_ip_from--real_ip_header) |
-| `include` | ❌ | Blocking; bounded include traversal is not part of the current single-file implementation |
-| `map`, `geo`, `split_clients` | ❌ | Reported with manual conditional-routing guidance |
+| `server` | ✅ | Translated to `[[servers]]`. |
+| `upstream` | ✅ | Translated to `[[upstreams]]`. |
+| `gzip` | ✅ | `gzip on` enables compression. |
+| `set_real_ip_from`, `real_ip_header`, `real_ip_recursive` | ⚠️ | Maps to listener-scoped client-address policy; see [realip](#realip-set_real_ip_from--real_ip_header). |
+| `include` | ⚠️ | Expanded only through the bounded resolver above. |
+| `map`, `geo`, `split_clients` | ❌ | Variable-driven behavior requires manual design. |
 
 ### `server` block
 
 | Directive | Status | Notes |
 | --- | --- | --- |
-| `listen` | ✅ | Normalises bare ports (`80` → `:80`), wildcards (`*:80` → `:80`), IPv6-any (`[::]:80` → `:80`). TLS flag inferred. Unix sockets are reported. Only the first `listen` per server is kept; extras are noted. |
-| `server_name` | ✅ | The `_` catch-all pseudo-name is dropped; all other names are kept |
-| `root` | ✅ | Applied to the server; a synthetic `/` location is created when no location already matches root |
-| `index` | ✅ | Inherited into the synthetic `/` location |
-| `location` | ✅ | See location table below |
-| `ssl_certificate` | ✅ | → `servers.tls.cert` |
-| `ssl_certificate_key` | ✅ | → `servers.tls.key` |
-| `ssl_protocols` | ⚠️ | Mapped to `tls.min_version` (`1.2` or `1.3`). Legacy protocols (`TLSv1`, `TLSv1.1`) raise the floor to `1.2` with a note. |
-| `return` | ⚠️ | Synthesises a catch-all `/` location. Jul.IA evaluates locations before return, so order may differ from nginx; a note is emitted. |
-| `set_real_ip_from`, `real_ip_header`, `real_ip_recursive` | ⚠️ | Translated to `[servers.client_address]` — see [realip](#realip-set_real_ip_from--real_ip_header) |
-| `if`, `rewrite` | ❌ | Reported at server level with source provenance and guidance |
+| `listen` | ✅ | Normalizes bare ports, wildcards, and IPv6-any; TLS flag inferred. Only the first listen is retained. |
+| `server_name` | ✅ | `_` is dropped; other names are retained. |
+| `root`, `index` | ✅ | Applied to the server or synthesized `/` location. |
+| `location` | ✅ | See the location table. |
+| `ssl_certificate`, `ssl_certificate_key` | ✅ | Map to server TLS fields. |
+| `ssl_protocols` | ⚠️ | Maps to a minimum version; legacy versions raise the floor to TLS 1.2. |
+| `return` | ⚠️ | Synthesizes `/`; NGINX server-level precedence differs. |
+| `set_real_ip_from`, `real_ip_header`, `real_ip_recursive` | ⚠️ | See [realip](#realip-set_real_ip_from--real_ip_header). |
+| `if`, server-level `rewrite` | ❌ | Reported with provenance and guidance. |
+| `include` | ⚠️ | Expanded in server context only through the bounded resolver. |
 
 ### `location` block
 
 | Directive | Status | Notes |
 | --- | --- | --- |
-| `proxy_pass` | ✅ | Bare host receives `http://` scheme. Trailing slash is dropped with a note (nginx rewrites the matched prefix; Jul.IA does not). |
-| `fastcgi_pass` | ✅ | → `fastcgi_pass` |
-| `root` | ✅ | Overrides inherited server root |
-| `alias` | ⚠️ | Mapped to `root` with a note; path semantics differ slightly |
-| `index` | ✅ | Overrides inherited server index |
-| `try_files` | ✅ | → `try_files` (string slice) |
-| `return` | ✅ | Numeric codes map directly; `return <url>` maps to `return = 302` + `redirect`. Response body text is dropped with a note. |
-| `rewrite` | ✅ | `pattern`, `replacement`, and `flag` (`last`/`break`/`redirect`/`permanent`) are preserved; unknown flags are noted |
-| `limit_except` | ⚠️ | `limit_except METHODS { deny all; }` or `{ return 403; }` maps to `match.methods`, with a note about the 403-vs-404 difference below. Any other body is reported, never guessed. |
-| `add_header` | ⚠️ | `NAME VALUE always;` with a static (non-variable) value maps to `response_headers` or, for `Access-Control-*` names, to `[cors]`. Without `always`, or with a value referencing an nginx variable, it is reported instead. See below. |
-| `if` | ❌ | Reported with source coordinates, context and a reason; never silently converted |
+| `proxy_pass` | ✅ | Bare hosts gain `http://`; a trailing URI slash is dropped with an approximation finding. |
+| `fastcgi_pass` | ✅ | Maps directly. |
+| `root`, `index`, `try_files` | ✅ | Preserve location overrides. |
+| `alias` | ⚠️ | Maps to `root`; NGINX prefix-stripping semantics differ. |
+| `return` | ✅ | Status and redirect preserved; response body text is not. |
+| `rewrite` | ✅ | Pattern, replacement, and recognized flags are preserved. |
+| `limit_except` | ⚠️ | Only the narrow denial form maps to `match.methods`; excluded requests may become a 404 rather than NGINX's 403. |
+| `add_header` | ⚠️ | Static `NAME VALUE always;` maps to response-header/CORS policy. Missing `always` or variable values are blocking. |
+| `if` | ❌ | Never guessed or silently converted. |
+| `include` | ⚠️ | Expanded at the location include point through the bounded resolver. |
 
-> `match.methods` can now express a method constraint (see
-> [Request predicates](configuration.md#request-predicates)), and `limit_except`
-> is translated for its one idiomatic, unambiguous shape:
-> `limit_except METHODS { deny all; }` or `{ return 403; }`, with no other
-> directive in the block. That shape means "requests using any other method are
-> denied," which maps cleanly onto `match.methods = [METHODS]` — a request using
-> a different method simply does not match this location. The mapping is not
-> perfect: nginx returns 403 for the excluded methods, while Jul.IA makes the
-> route not match them at all (typically a 404, or whichever other location
-> covers the path), so a note flags the difference for review. Any other body
-> inside `limit_except` — a directive meant to apply only to the *excluded*
-> methods, rather than a bare denial — has no single-location equivalent in
-> Jul.IA's model and is reported instead of guessed.
->
-> `[[servers.locations.response_headers]]` and `[servers.locations.cors]` can
-> express response-header and CORS policy (see
-> [Response headers and CORS](configuration.md#response-headers-and-cors)), and
-> `add_header` is translated only for cases that are actually equivalent. Plain
-> `add_header` without `always` does not apply to nginx's own 4xx/5xx responses,
-> while Jul's operations always apply. Translating that case would silently
-> widen where the header appears on an error path, so it remains blocking.
-> `add_header NAME VALUE always;` is translated unless `VALUE` references an
-> nginx variable such as `$http_origin` or `$request_id`; Jul values are static,
-> so a variable reference is never misrepresented as a literal.
->
-> A location whose only CORS-relevant directives are always-flagged, static
-> `add_header Access-Control-*` lines is translated into
-> `[servers.locations.cors]`: `Allow-Origin` maps to `allowed_origins`,
-> `Allow-Methods`/`Allow-Headers`/`Expose-Headers` split on commas into lists,
-> and `Allow-Credentials`/`Max-Age` map directly. Any CORS header gated by `if`
-> or reflecting a variable is reported instead. A source combining
-> `Access-Control-Allow-Origin "*"` with
-> `Access-Control-Allow-Credentials "true"` is also reported rather than emitted
-> as a block that would fail Jul validation.
+`limit_except METHODS { deny all; }` and the equivalent `{ return 403; }`
+map to `match.methods` only when the block contains no other behavior. Jul makes
+an excluded method fail route matching instead of returning NGINX's explicit
+403, so the result remains approximate.
+
+Static `add_header ... always` forms map to ordinary ordered response-header
+operations. Static `Access-Control-*` forms can build Jul's CORS block. Jul does
+not translate a non-`always` header because that would widen its appearance on
+error responses. Variable-derived header values, conditional CORS, invalid
+max-age, and wildcard-origin-plus-credentials remain blocking.
 
 ### `upstream` block
 
 | Directive | Status | Notes |
 | --- | --- | --- |
-| `server` | ✅ | Address and `weight=N` preserved. `down` flag omits the server with a note. Other flags (`backup`, `max_fails`, …) are ignored (not reported). |
-| `least_conn` | ✅ | → `strategy = "least_conn"` |
-| `ip_hash`, `hash`, `random` | ⚠️ | Falls back to `round_robin` with a note |
-| `keepalive`, `keepalive_timeout`, `keepalive_requests`, `zone` | ignored | Connection-pool tuning; safe to drop |
+| `server` | ✅ | Address and weight preserved; `down` omits the member with a finding. |
+| `least_conn` | ✅ | Maps to `least_conn`. |
+| `ip_hash`, `hash`, `random` | ⚠️ | Falls back to round robin with review guidance. |
+| `keepalive`, `keepalive_timeout`, `keepalive_requests`, `zone` | ignored | Connection-pool/process tuning. |
+| `include` | ⚠️ | Expanded in upstream context through the bounded resolver. |
 
 ### Location modifiers
 
-| Modifier | Jul.IA `match.type` | Notes |
+| Modifier | Jul `match.type` | Notes |
 | --- | --- | --- |
-| (none) | `prefix` | |
-| `=` | `exact` | |
-| `^~` | `prefix` | Nginx priority difference is approximated |
-| `~` | `regex` | |
-| `~*` | `regex` | Case-insensitivity is **not** preserved; noted |
+| none | `prefix` | Direct. |
+| `=` | `exact` | Direct. |
+| `^~` | `prefix` | NGINX priority nuance is approximate. |
+| `~` | `regex` | Direct regex form. |
+| `~*` | `regex` | Case-insensitivity is not preserved. |
 
 ### realip (`set_real_ip_from` / `real_ip_header`)
 
-nginx's realip module and Jul's
+NGINX realip and Jul's
 [`[servers.client_address]`](configuration.md#client-address-and-trusted-proxies)
-express the same idea — which proxies may assert a client address — so the
-mapping is direct. Jul's `$remote_addr` is the derived client and
-`$realip_remote_addr` is the socket peer, exactly as in nginx with realip
-configured, so `proxy_set_header X-Real-IP $remote_addr` and
-`X-Forwarded-For $proxy_add_x_forwarded_for` keep their meaning.
+express a trusted-proxy boundary.
 
-| nginx | Jul.IA |
+| NGINX | Jul |
 | --- | --- |
 | `set_real_ip_from <cidr\|address>` | appended to `client_address.trusted_proxies` |
 | `real_ip_header X-Forwarded-For` | `forwarded_headers = ["x-forwarded-for"]` |
 | `real_ip_header Forwarded` | `forwarded_headers = ["forwarded"]` |
-| `real_ip_header X-Real-IP` (nginx's default) | **not supported** — reported |
-| `real_ip_header proxy_protocol` | **not supported** — reported |
-| `real_ip_recursive on` | already the default: the chain is always evaluated right to left |
-| `real_ip_recursive off` | **not supported** — reported |
+| `real_ip_header X-Real-IP` | blocking; a single unchained value is unsupported |
+| `real_ip_header proxy_protocol` | blocking |
+| `real_ip_recursive on` | Jul already evaluates right to left |
+| `real_ip_recursive off` | blocking |
 
-Four behaviours are worth knowing before importing:
+An unsupported form emits no trust policy. `set_real_ip_from` without an
+explicit supported header is blocking because NGINX defaults to `X-Real-IP`.
+Jul scopes the policy to the listen address, so virtual hosts sharing a listener
+must agree. A source with no realip directives never gains trust.
 
-1. **An unsupported form emits no policy at all.** If any realip directive in a
-   scope cannot be expressed, the importer reports it and writes no
-   `[servers.client_address]` block rather than substituting a different rule.
-   A migrated server then keeps peer-only identity, which is the safe outcome.
-2. **`real_ip_header` defaults to `X-Real-IP` in nginx**, which Jul does not
-   support because a single address carries no chain to evaluate against a trust
-   boundary. A config with `set_real_ip_from` but no `real_ip_header` is
-   therefore reported, not silently translated to `X-Forwarded-For`.
-3. **The policy is hoisted to the listen address.** Jul derives the client
-   address before the `Host` header selects a server block, so one address has
-   one policy. A policy on any block is applied to every block on that address
-   and the hoist is noted. If two blocks on one address declare different realip
-   policies, neither is emitted and the conflict is reported.
-4. **A source without realip never gains trust.** No policy is invented.
-
-Outbound emission differs in one documented way: nginx's
-`$proxy_add_x_forwarded_for` appends to the inbound chain, while Jul rebuilds it
-as `<canonical client>, <direct peer>`. For a single proxy the result is
-identical; for a longer chain Jul drops intermediate trusted hops deliberately
-(see [core-http.md](core-http.md#forwarded-headers-to-the-backend)).
+Jul rebuilds outbound `X-Forwarded-For` as canonical client plus direct peer.
+For one proxy this matches NGINX; for longer chains intermediate trusted hops are
+intentionally dropped. See [forwarded headers to the
+backend](core-http.md#forwarded-headers-to-the-backend).
 
 ## Known limitations
 
-1. **`include` is not followed in the current single-file tranche.** The
-   assessment reads only the supplied root file, records each `include` as a
-   blocking finding with exact root-file provenance, and reports
-   `source_policy.follow_includes = false`. Do not import snippets independently
-   and assume concatenation preserves NGINX include context, ancestry, or order.
-   Root-confined traversal, deterministic globs, cycle detection, symlink
-   protection, and byte/file/depth limits are a separate implementation tranche.
-
-2. **`stream` / `mail` modules are skipped.** No L4 or mail proxy translation
-   exists today.
-
-3. **`map`, `geo`, `split_clients` are skipped.** Variable-driven routing logic
-   cannot be represented directly; port it into Jul.IA middleware or upstream
-   selectors.
-
-4. **`if` and unsupported rewrite control flow are skipped.** Complex control
-   flow must be rewritten using Jul.IA matches, rewrites, redirects, or
-   middleware.
-
-5. **Per-virtual-host realip policies cannot be represented.** Jul scopes the
-   trusted-proxy policy to the listen address, so a source config whose server
-   blocks on one port disagree about `set_real_ip_from` is reported instead of
-   translated. Reconcile the policies or split the listeners before importing.
-
-6. **Named locations (`@fallback`) are skipped.** Error-page/named-location
-   chains have no equivalent.
-
-7. **One listen per server.** Jul.IA `[[servers]]` binds a single address. Extra
-   `listen` directives are dropped with an approximate finding.
-
-8. **Trailing-slash `proxy_pass` semantics differ.** Nginx strips the matched
-   location prefix when the target has a trailing slash; Jul.IA does not. The
-   importer drops the slash and asks the operator to verify backend paths.
-
-9. **Alias semantics are approximate.** `alias` maps to `root`; the path-prefix
-   stripping that nginx performs is not replicated.
-
-10. **Server-level `return` precedence differs.** Nginx evaluates a server-level
-    `return` before locations; Jul.IA routes through locations first. A catch-all
-    `/` location is synthesised and the difference is reported.
+1. **Traversal is explicit, not automatic.** A default import remains
+   single-file. Complete multi-file migration requires `--follow-includes` and a
+   root that contains every required source. NGINX deployments that intentionally
+   include files outside one root must first be staged into a bounded assessment
+   tree; there is no unsafe host-root bypass.
+2. **No network includes or arbitrary filesystem crawl.** Only explicit files
+   and globs are followed.
+3. **`stream` and `mail` are not translated.**
+4. **`map`, `geo`, and `split_clients` require manual design.**
+5. **Complex `if` and unsupported rewrite control flow require manual design.**
+6. **Per-virtual-host realip policies cannot be represented on one listener.**
+7. **Named locations such as `@fallback` are not translated.**
+8. **One listen address per Jul server.** Extra NGINX listens are approximate.
+9. **Trailing-slash `proxy_pass`, `alias`, and server-level `return` have
+   documented semantic differences.**
+10. **Source formatting/comments are not preserved.** Provenance belongs to the
+    report, not generated TOML.
 
 ## Benchmarks
 
-Run with `go test -tags importer -bench=. ./internal/migrate/nginx/`.
+Run:
 
-| Benchmark | Input | ns/op | allocs/op |
-| --- | --- | --- | --- |
-| `BenchmarkParse` | Full representative config (2 servers, 1 upstream, 9 locations, gzip, TLS, stream block) | ~45 000 | ~280 |
-| `BenchmarkTranslate` | Same config | ~6 500 | ~40 |
+```bash
+go test -tags importer -bench=. ./internal/migrate/nginx/
+```
 
-Translation is ~7× faster than parsing and allocates ~6× less, because the tree
-is already materialised. All exported paths (`ImportFile` → `parseFile` →
-`Translate` → `config.Marshal`) recover from panics so a malformed input never
-crashes the tool.
+The established single-file parse/translate benchmarks remain the baseline.
+Include traversal adds bounded filesystem reads and one parse per source; it
+performs no network work. Resource limits prevent a representative tree from
+turning into unbounded memory, file-descriptor, or parser work.
 
 ## Threat note
 
-The importer is a **dev-time / migration-time** tool; it does not run inside the
-server request path, but it processes untrusted files and produces configuration
-that the server may later load.
+The importer is a migration-time tool, but it processes untrusted files.
 
-1. **Malicious nginx.conf → crash / DoS.** A crafted config may panic the
-   third-party parser (`gonginx`). `parseFile` and `parseString` recover and
-   convert panics into errors, so the CLI exits cleanly.
-
-2. **Path traversal in `ssl_certificate` / `root` / `proxy_pass`.** The importer
-   copies generated-config paths according to existing translation behavior; it
-   does not prove that a path is safe to load. Review generated TOML before use.
-
-3. **Credential leakage in generated configuration.** A source target may carry
-   embedded credentials that must not be committed to VCS. The schema v2
-   assessment redacts such values, but that does not remove them from an
-   explicitly generated configuration where the translation itself preserves
-   them.
-
-4. **Legacy TODO header versus assessment output.** The legacy generated-TOML
-   TODO header is retained for output compatibility and may contain more source
-   detail than the assessment. Human and JSON assessment output instead use one
-   bounded redaction function for headers, URL userinfo, credential/private-key
-   paths, include arguments, variables, and Lua/snippet content. Prefer the
-   assessment for sharing and automation, and review generated TOML separately.
-
-5. **Translation correctness gaps lead to runtime misconfiguration.** Treat the
-   generated TOML as a draft. Resolve every blocking/approximate finding and run
-   Jul's authoritative validation before deployment.
-
-6. **The importer build tag keeps the nginx-parser dependency out of the default
-   binary, but the tagged binary still links the parser library.** Keep the
-   tagged binary on a trusted build host.
+1. Parser panics are recovered and converted into errors.
+2. Include reads are root-confined lexically and after symlink evaluation.
+3. Cycles and file/depth/byte/glob expansion are bounded.
+4. Included files must be regular files; no arbitrary device/directory read is
+   accepted.
+5. Assessment summaries redact include arguments, Authorization/cookie/token
+   headers, URL credentials, key/credential paths, variables, maps, Lua, and
+   snippets.
+6. Generated TOML is separate from the redacted report and must be reviewed for
+   source values intentionally preserved by translation.
+7. Paths copied into generated configuration are not proof that deployment-time
+   filesystem access is safe.
+8. A followed incomplete tree or invalid Jul candidate is never written.
+9. The `importer` build tag keeps `gonginx` out of the lean default binary; use
+   the tagged binary on a trusted migration host.
 
 ## Runnable example
 
-`examples/migrate/nginx.conf` is a representative NGINX config (gzip, TLS,
-upstream pool with weights, static and proxy servers, and a stream block that is
-reported). Import it with:
+`examples/migrate/nginx.conf` is the existing representative root fixture.
+Import it with:
 
 ```bash
 go run -tags importer ./cmd/jul import nginx -o jul.toml examples/migrate/nginx.conf
 ```
 
-The expected output (`jul.toml`) is provided as `examples/migrate/imported.toml`
-so users can diff against it. Use `--json` or `--assess` to inspect the migration
-evidence without changing that generated-TOML golden.
+For a multi-file estate, place the root and included files below one directory
+and add `--follow-includes --root <directory>`. Use `--json` or `--assess` to
+inspect evidence before writing a candidate.
 
 ## GA status
 
 | Criterion | Status | Evidence |
 | --- | --- | --- |
-| 1 — Conformance / behaviour matrix | ✅ | Directive-support matrix above plus schema v2 result taxonomy/provenance |
-| 2 — Published benchmark numbers | ✅ | `BenchmarkParse` / `BenchmarkTranslate` in `internal/migrate/nginx/bench_test.go` |
-| 3 — Known-limitations list | ✅ | 10-item limitation list above |
-| 4 — Semver-guarded config/API contract | ✅ | v1 config freeze and versioned assessment schema |
-| 5 — Long-running soak test | ✅ | validated via `test-nginx-importer.ps1` 2026-07-06 — [evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) |
-| 6 — Runnable example + docs | ✅ | `examples/migrate/nginx.conf`, `imported.toml`, assessment schema/example, and this guide |
-| 7 — Security / threat note | ✅ | 6-row threat note above |
-| 8 — Fuzzing where parsing is involved | ✅ | `FuzzTranslate` in `internal/migrate/nginx/fuzz_test.go` (parse + translate + marshal round-trip) |
-| 9 — Self-explanatory Console surface | ✅ | CLI-only tool; operable from `jul import nginx --help` |
+| Conformance/behavior matrix | ✅ | Matrix above and schema-v2 result taxonomy. |
+| Published benchmark baseline | ✅ | Existing parse/translate benchmarks. |
+| Known limitations | ✅ | Explicit list above. |
+| Versioned contract | ✅ | Assessment schema version 2. |
+| Soak evidence | ✅ | [Soak evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts). |
+| Runnable example and docs | ✅ | Example, schema, sample report, and this guide. |
+| Security/threat model | ✅ | Root/symlink/bounds/redaction note above. |
+| Fuzzing | ✅ | `FuzzTranslate` covers parse, translate, and marshal round trip. |
+| Operable surface | ✅ | `jul import nginx --help` and deterministic human/JSON output. |

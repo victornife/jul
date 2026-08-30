@@ -29,8 +29,8 @@ func ImportFile(path string) (*config.Config, *Report, error) {
 	return ImportFileWithOptions(path, AssessmentOptions{})
 }
 
-// ImportFileWithOptions performs the same translation while allowing the
-// assessment's shareable path representation to be selected explicitly.
+// ImportFileWithOptions performs the legacy single-file translation while
+// allowing the assessment's shareable path representation to be selected.
 func ImportFileWithOptions(path string, options AssessmentOptions) (*config.Config, *Report, error) {
 	src, err := parseFile(path)
 	if err != nil {
@@ -39,6 +39,23 @@ func ImportFileWithOptions(path string, options AssessmentOptions) (*config.Conf
 	cfg, rep := Translate(src, path)
 	if rep != nil {
 		rep.Assessment = BuildAssessmentWithOptions(src, path, rep, options)
+	}
+	return cfg, rep, nil
+}
+
+// ImportFileWithImportOptions performs an explicitly bounded source-tree
+// assessment. Include traversal is disabled unless FollowIncludes is true, but
+// the root/source policy and incomplete-tree result remain deterministic in
+// both modes.
+func ImportFileWithImportOptions(path string, options ImportOptions) (*config.Config, *Report, error) {
+	tree, err := resolveSourceTree(path, options)
+	if err != nil {
+		return nil, nil, err
+	}
+	cfg, rep := Translate(tree.root, path)
+	if rep != nil {
+		tree.applyTranslationReport(rep)
+		rep.Assessment = buildAssessmentForResolvedTree(tree.root, path, rep, options.Assessment, tree)
 	}
 	return cfg, rep, nil
 }
