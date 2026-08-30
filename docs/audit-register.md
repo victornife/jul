@@ -1,31 +1,43 @@
 # Audit Register
 
-This page identifies the current authoritative audit and preserves the evidence register for earlier audit rounds. It is a lightweight compliance artifact for reviewers and releases; issue status alone is not closure evidence.
+This page identifies the current audit disposition and preserves earlier audit
+evidence. Issue closure alone is not audit evidence, and a dated audit is not a
+live issue tracker.
 
-## Current authoritative audit
+## Current authoritative records
 
-| Audit | Source baseline | Role | Current status | Programme |
-|---|---|---|---|---|
-| [2026-08-07 response-cache recertification](audit/2026-08-07-cache-recertification.md) | post-#131/#132/#133 merged cache tree | Current response-cache conformance and GA evidence | Complete; GA retained, closure evidence recorded in #107/#134 | #107, #134 |
-| [2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md) | `66c71b2d48f578a770d5c6e5d86a0e5a9dcada9a` | Current implementation and planning baseline | Active planning baseline; cache correctness, lifecycle authority (#89), and structured configuration (#77 → #78 → #79 → #80 → #81 → #82) are complete; #115 is READY / NEXT and not started | #62, #107-#162 |
-| [2026-07-31 full repository audit](audit/2026-07-31-full-repository-audit.md) | `e8865615` plus recorded remediation commits | Historical audit and remediation evidence | Historical; exact-SHA maintainer-certified and superseded under #130, not independently two-human certified | #130 |
+| Record | Source baseline | Current role | Disposition |
+| --- | --- | --- | --- |
+| [2026-08-07 response-cache recertification](audit/2026-08-07-cache-recertification.md) | Post-#131/#132/#133 cache tree | Current cache conformance and retained-GA evidence | Complete; #107/#134 closed |
+| [2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md) | `66c71b2c...` | Dated programme-opening audit and historical finding source | Superseded for current issue state by #62 and later implementation evidence; not rewritten retrospectively |
+| [Stage 0/1 programme closure](audit/2026-08-05-stage-0-1-programme-closure.md) | `0de8541e...` | Exact-SHA programme-foundation disposition | Complete, with residuals transferred explicitly |
+| [2026-07-31 full repository audit](audit/2026-07-31-full-repository-audit.md) | `e8865615` plus recorded remediations | Historical audit and remediation evidence | Maintainer-certified and superseded under #130; no independent two-human certification claimed |
 
-The current combined audit does not rewrite the historical record. It supersedes the July audit for current prioritisation, sequencing, capability truth and implementation planning. The [Stage 0/1 programme closure](audit/2026-08-05-stage-0-1-programme-closure.md) records the exact disposition, residual transfers and branch-cleanup gate. Current issue-level sequencing remains owned by #62 and the roadmap.
+## Current programme disposition
 
-## Current programme gates
+- Cache correctness/recertification, closed-world lifecycle authority and
+  structured configuration Phase 5 are complete.
+- ADRs 0016–0019 are accepted. Canonical client identity, backend trust,
+  routing/response policy, configuration authority and generated contracts are
+  implemented on `main`.
+- Those post-RC capabilities keep their own maturity and delivery rows in
+  [status.md](status.md); implementation does not imply stable publication or GA.
+- Generic resilience implementations are substantially merged, while #287/#144
+  retain integrated evidence/external-contract closure at the issue #353
+  baseline.
+- NGINX assessment, provenance and bounded include traversal are merged;
+  compatibility-corpus and later diagnostics work continue separately.
+- The versioned supported external Admin API and remote CLI remain #150/#151.
+- Selected runtime dynamics, support bundle, `jul doctor` and the bounded AI
+  experiment remain later portfolio decisions.
 
-- Completed programme truth and correction tranche: #114, #119, #120-#127 and #130.
-- Non-blocking quality foundation: #129.
-- Cache correctness programme: #107 and #131-#134 complete; #92 is separately gated by #89/#90 and #93 remains draft/gated.
-- Lifecycle authority: #89 implemented — the Go registry classifies every public TOML leaf exactly once, unknown paths fail closed, and the YAML/Markdown/JSON mirrors are generated and drift-gated by `make generated-check`. #128 consumes the same metadata for semantic cross-artifact checks.
-- Structured configuration Phase 5: #77 → #78 → #79 → #80 → #81 → #82 complete. Phase 5 closure does not imply universal hot reload or start Stage 6.
-- Core Gateway Completeness decisions: #115 → #116 → #117 → #118 are the next serial architecture-decision sequence; #115 is READY / NEXT and not started.
-- Core implementation: #135-#151 remains gated by the governing architecture decisions.
-- Selected runtime dynamics: #88-#106 and #157-#161.
-- Migration/diagnostics: #112 and #152-#156.
-- Bounded experiment: #113 and #162; AI remains gated and is not an automatic continuation from Phase 5.
+Volatile issue-level sequencing is owned by
+[#62](https://github.com/victornife/jul/issues/62). Feature maturity/delivery is
+owned by [`feature-status.yaml`](feature-status.yaml). The
+[roadmap](roadmap/README.md) records only durable portfolio order.
 
-A release closure entry must record the exact SHA, commands actually run, CI runs, unavailable lanes and residual risk.
+A release closure entry must identify the exact SHA, commands actually run,
+workflow evidence, unavailable lanes and residual risk.
 
 ---
 

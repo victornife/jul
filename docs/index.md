@@ -1,111 +1,148 @@
 # Jul.IA documentation
 
-Welcome to the Jul.IA documentation. Jul.IA is an NGINX-inspired HTTP edge
-server written in Go, configured through TOML, and shipped as a single static
-binary.
+Welcome to the Jul.IA documentation. Jul.IA is a standalone edge and protocol
+gateway written in Go, configured through TOML, and shipped as a static binary.
 
-## Current audit and programme
+## Start with product truth
 
-- **[2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md)** — Current source of truth for repository health, confirmed defects, architecture decisions and implementation sequencing.
-- **[Audit register](audit-register.md)** — Current audit pointer plus historical findings, fixes, tests and closure evidence.
-- **[Stage 0/1 programme closure](audit/2026-08-05-stage-0-1-programme-closure.md)** — Exact-SHA maintainer certification, historical-audit disposition, residual transfers and the gate before #131.
-- **[Master implementation tracker](https://github.com/victornife/jul/issues/62)** — Current staged execution programme and decision register.
-- **[Project operating model](operating-model.md)** — Durable portfolio, execution, evidence and experiment rules.
-- **[Core Gateway Completeness](specs/core-gateway-completeness.md)** — Bounded standalone-product completion contract.
-- **[2026-07-31 full repository audit](audit/2026-07-31-full-repository-audit.md)** — Preserved historical audit and remediation evidence; no longer the active implementation plan.
+- **[Feature status and evidence](status.md)** — canonical human view of maturity
+  and delivery; generated from/checkable against
+  [`feature-status.yaml`](feature-status.yaml).
+- **[Programme tracker #62](https://github.com/victornife/jul/issues/62)** —
+  current issue-level execution state.
+- **[Roadmap](roadmap/README.md)** — durable portfolio order, deliberately not a
+  second issue tracker.
+- **[Audit register](audit-register.md)** — current disposition of dated audits
+  and historical evidence.
+- **[Known limitations](known-limitations.md)** — active defects, deliberate
+  limits, merged/unreleased constraints and restart-bound/deferred behavior.
 
-## Choose your path
+## New to Jul.IA?
 
-### New to Jul.IA?
-- **[README](../README.md)** — What Jul.IA is, what it can do, and how to install it.
-- **[Getting started](getting-started.md)** — Your first server: zero-config mode, a static site, a reverse proxy, and TLS.
-- **[Configuration reference](configuration.md)** — Every config key, type, default, and validation rule, with examples.
-- **[Generated configuration contract](generated/config-reference.md)** — Exhaustive, generated field-by-field reference; also available as [JSON Schema](generated/config.schema.json) and [machine metadata](generated/config-metadata.json), keyed by canonical path.
-- **[Configuration value contract](config-value-contract.json)** — Machine-readable enum, grammar, bound, activation, and zero-semantics inventory used by drift tests.
-- **[Troubleshooting](troubleshooting.md)** — Common first-run and operational issues and their fixes.
-- **[Concepts appendix](vision/appendix.md)** — New to HTTP, proxies, TLS, caching, or observability? Start here.
+- **[README](../README.md)** — product scope, installation and capability
+  overview.
+- **[Getting started](getting-started.md)** — zero-config, static, proxy and TLS
+  examples.
+- **[Configuration concepts](configuration.md)** — human-authored structure,
+  examples, trade-offs and workflows.
+- **[Generated configuration reference](generated/config-reference.md)** —
+  exhaustive field-level types, defaults, lifecycle, capabilities and values.
+- **[JSON Schema](generated/config.schema.json)** and
+  **[machine metadata](generated/config-metadata.json)** — generated machine
+  contracts; runtime validation remains authoritative.
+- **[Troubleshooting](troubleshooting.md)** — common first-run and operational
+  problems.
+- **[Concepts appendix](vision/appendix.md)** — HTTP, proxy, TLS, caching and
+  observability foundations.
 
-### Evaluating or operating?
-- **[Feature status & GA matrix](status.md)** — What is GA, what is Beta, and what the maturity bar means. Read it together with the current audit.
-- **[Known limitations](known-limitations.md)** — Documented gaps and current correction notices.
-- **[Deployment guide](deployment.md)** — systemd, Windows service, Docker, and log rotation.
-- **[Observability](observability.md)** — Metrics, tracing, logging, health checks, and the admin API.
-- **[Diagnostics and support bundles](diagnostics.md)** — Read-only `jul doctor`, bounded local support bundles, result schemas, privacy limits, and sharing guidance.
-- **[Prometheus metric contract](metrics-contract.json)** — Machine-readable names, types, help strings, labels, and released/additive state.
-- **[Reload semantics](reload-semantics.md)** — What reloads safely, what needs a restart, and how zero-downtime reload works.
-- **[Security model](../SECURITY.md)** — Threat model, hardening defaults, and per-feature security notes.
-- **[Security posture](security-posture.md)** — Admin auth model, current limits, shipped local RBAC, and production hardening checklist.
-- **[Security testing gates](security-testing.md)** — Dedicated RBAC/WAF/WASM negative matrices, package floors, exact baselines, and local commands.
-- **[Troubleshooting](troubleshooting.md)** — Common issues and how to resolve them.
+## Operating and evaluating
 
-### Feature deep-dives
-| Feature | Document |
-|---------|----------|
-| Authentication | [docs/auth.md](auth.md) |
-| Response cache | [docs/cache.md](cache.md) |
-| Diagnostics | [docs/diagnostics.md](diagnostics.md) |
-| Web console | [docs/console.md](console.md) |
-| gRPC passthrough | [docs/grpc-proxy.md](grpc-proxy.md) |
-| gRPC-JSON transcoding | [docs/grpc-transcoding.md](grpc-transcoding.md) |
-| Health checks | [docs/health.md](health.md) |
-| Mutual TLS | [docs/mtls.md](mtls.md) |
-| WASM plugins | [docs/plugins.md](plugins.md) |
-| Secrets resolution | [docs/secrets.md](secrets.md) |
-| Service discovery | [docs/service-discovery.md](service-discovery.md) |
-| L4 stream proxy | [docs/stream-proxy.md](stream-proxy.md) |
-| TLS + ACME | [docs/tls-acme.md](tls-acme.md) |
-| WAF | [docs/waf.md](waf.md) |
+- **[Deployment](deployment.md)** — systemd, Windows service, Docker and log
+  rotation.
+- **[Reload, staging, authority and rollback](reload-semantics.md)** —
+  transactional reload, planned restart, managed/file-owned authority and
+  generation lifetimes.
+- **[Generated lifecycle reference](generated/config-lifecycle.md)** and
+  **[machine lifecycle metadata](generated/config-lifecycle.json)** — exhaustive
+  field-level lifecycle truth from the Go registry.
+- **[Observability](observability.md)** — logs, metrics, tracing, probes and
+  runtime surfaces.
+- **[Diagnostics and support bundles](diagnostics.md)** — deterministic local checks, bounded archives, privacy limits, and review-before-sharing guidance.
+- **[Prometheus contract](metrics-contract.json)** — metric names, types, labels
+  and release state.
+- **[Security model](../SECURITY.md)** and **[security posture](security-posture.md)**
+  — threat boundaries and production hardening.
+- **[Compatibility policy](compatibility.md)** — SemVer, deprecation and stable
+  contract boundaries.
+- **[Release process](release.md)** and **[soak evidence](soak-evidence.md)**.
 
-### Extending and contributing
-- **[Project layout](architecture.md)** — How the repository is organized.
-- **[ADRs](adr/)** — Architecture Decision Records for durable design choices.
-- **[Reviews & decision log](reviews/)** — Dated architecture reviews, product direction changes, and historical audit findings.
-- **[Engineering specs](specs/)** — Detailed feature and implementation specifications.
-- **[Roadmap v2.0](roadmap/README.md)** & **[Vision](vision/README.md)** — Current portfolio and durable direction; #62 owns issue-level sequencing.
-- **[Release process](release.md)** — How releases are cut, versioned, and signed.
-- **[Soak evidence log](soak-evidence.md)** — Dated soak runs and where CI/release soak artifacts are published.
-- **[Changelog](../CHANGELOG.md)** — Release history.
+## Feature guides
 
-## Build tags quick reference
+| Capability | Canonical guide | Status |
+| --- | --- | --- |
+| TLS + automatic HTTPS (ACME) | [tls-acme.md](tls-acme.md) | `GA` / `soaked` |
+| Compression (gzip / Brotli / Zstd) | [compression.md](compression.md) | `GA` / `soaked` |
+| Rate + connection limiting | [ratelimit.md](ratelimit.md) | `GA` / `soaked` |
+| Authentication (CIDR / Basic / JWT / forward-auth) | [auth.md](auth.md) | `GA` / `soaked` |
+| Active health checks (HTTP / TCP probes) | [health.md](health.md) | `GA` / `soaked` |
+| Console (operations cockpit) | [console.md](console.md) | `GA` / `soaked` |
+| Zero-config + jul lint | [zeroconf.md](zeroconf.md) | `GA` / `soaked` |
+| NGINX config importer | [nginx-importer.md](nginx-importer.md) | `GA` / `soaked` |
+| OTel tracing + access-log sinks | [otel.md](otel.md) | `GA` / `soaked` |
+| HTTP/3 over QUIC | [http3.md](http3.md) | `GA` / `soaked` |
+| gRPC ↔ JSON transcoding | [grpc-transcoding.md](grpc-transcoding.md) | `GA` / `soaked` |
+| WASM plugin system | [plugins.md](plugins.md) | `GA` / `soaked` |
+| L4 stream proxy | [stream.md](stream.md) | `GA` / `soaked` |
+| Native gRPC passthrough + h2c | [grpc-proxy.md](grpc-proxy.md) | `GA` / `soaked` |
+| Service discovery / dynamic upstreams | [service-discovery.md](service-discovery.md) | `GA` / `soaked` |
+| Web application firewall (WAF) | [waf.md](waf.md) | `GA` / `soaked` |
+| mTLS client auth | [mtls.md](mtls.md) | `GA` / `soaked` |
+| Secrets references + log redaction | [secrets.md](secrets.md) | `GA` / `soaked` |
+| Response cache (memory + disk) | [cache.md](cache.md) | `GA` / `soaked` |
+| Core HTTP (static / proxy / FastCGI / vhosts / routing) | [core-http.md](core-http.md) | `GA` / `soaked` |
+| Configuration reload transaction | [reload-semantics.md](reload-semantics.md) | `GA` / `soaked` |
+| Trusted client address (client_address) | [configuration.md](configuration.md) | `Beta` / `merged` |
+| Backend TLS trust (backend_tls) | [upstreams.md](upstreams.md) | `Beta` / `merged` |
+| Auxiliary egress allow-list | [egress.md](egress.md) | `Beta` / `candidate` |
+| Request predicates, response headers, and CORS | [core-http.md](core-http.md) | `Beta` / `merged` |
+| Upstream resilience (admission, retry, circuit) | [upstreams.md](upstreams.md) | `Beta` / `merged` |
+| Configuration authority and managed drift | [reload-semantics.md](reload-semantics.md) | `Beta` / `merged` |
+| Generated configuration contracts and route identity | [generated/config-reference.md](generated/config-reference.md) | `Beta` / `merged` |
+| NGINX migration assessment, provenance, and includes | [nginx-assessment.md](nginx-assessment.md) | `Beta` / `merged` |
+| Local diagnostics and support bundles | [diagnostics.md](diagnostics.md) | `Beta` / `merged` |
 
-Jul.IA optional features are compiled behind Go build tags:
+Some capabilities share a canonical guide because they compose one subsystem.
+The status manifest still gives each additive capability its own maturity and
+delivery row where inheriting an older GA label would be misleading.
 
-| Tag | Feature |
-|-----|---------|
-| `acme` | Automatic HTTPS (Let's Encrypt) |
-| `brotli` | Brotli compression |
-| `console` | Admin web console |
-| `consul` | Consul service discovery |
-| `grpc` | gRPC passthrough + transcoding |
+## Migration and automation
+
+- **[NGINX importer](nginx-importer.md)** — translation boundary and supported
+  constructs.
+- **[NGINX migration assessment](nginx-assessment.md)** — schema-v2 findings,
+  provenance, guidance and bounded include traversal.
+- **[Configuration authority](reload-semantics.md#configuration-authority-managed-vs-file-owned)**
+  — one writer at a time.
+- **Generated external API:** not yet the stable contract. Existing Console
+  routes remain internal unless explicitly classified by #150.
+
+## Architecture and contribution
+
+- **[Project layout and architecture](architecture.md)**.
+- **[ADRs](adr/README.md)** — durable design decisions.
+- **[Core Gateway Completeness](specs/core-gateway-completeness.md)** — approved
+  standalone-product boundary.
+- **[Operating model](operating-model.md)** — portfolio, evidence, WIP and
+  experiment rules.
+- **[Engineering specs](specs/)** and **[vision](vision/README.md)**.
+- **[Contributing](../CONTRIBUTING.md)** and **[changelog](../CHANGELOG.md)**.
+
+## Build tags
+
+| Tag | Capability |
+| --- | --- |
+| `acme` | Automatic HTTPS |
+| `brotli` / `zstd` | Optional compression encoders |
+| `console` | Embedded operations Console |
+| `consul` / `kubernetes` | Optional discovery providers |
+| `grpc` | Native gRPC and transcoding |
 | `http3` | HTTP/3 over QUIC |
-| `importer` | NGINX config migration |
-| `kubernetes` | Kubernetes EndpointSlice discovery |
+| `importer` | NGINX migration tooling |
 | `otel` | OpenTelemetry tracing |
 | `stream` | L4 TCP/UDP proxy |
-| `waf` | Web Application Firewall (Coraza) |
-| `wasmplugins` | WebAssembly plugin runtime |
-| `zstd` | Zstd compression |
+| `waf` | Coraza WAF |
+| `wasmplugins` | WASM runtime |
 
-Default binaries are **lean** (no tags). Build a **full** binary with:
+The default binary is lean. The full profile uses the tag list maintained in CI,
+release workflows and the Makefile.
 
-```bash
-go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul ./cmd/jul
-```
+## Documentation contract
 
-## Documentation conventions
+Runtime behavior and generated contracts outrank prose. `feature-status.yaml`
+owns maturity/delivery, #62 owns volatile execution, the roadmap owns durable
+sequence, feature guides own operation and limitations, and the audit register
+owns current audit disposition. Historical audits retain their original claims
+and dates.
 
-- **Code blocks** labelled `toml` are valid configuration examples unless a nearby correction notice states otherwise.
-- **Build-tag notes** appear under feature headings and in feature docs.
-- **Defaults** are shown as `default value` in reference tables.
-- **Cross-links** use relative paths so they work both on GitHub and when rendered by the Console.
-- **Current defects** link to their remediation issues and are not described as shipped future behavior.
-- **Historical documents** keep their original evidence and carry an explicit historical relationship to the current audit.
-
-## Status of this documentation
-
-Current runtime behavior, executable tests, the combined audit, accepted ADRs,
-and canonical feature/operational guides form the documentation contract. Open
-correction notices live in their owning documents and linked issues rather than
-in a separate temporary ledger. Historical GA-push and year-horizon material is
-context, not the active execution sequence. Please open an issue or PR whenever
-a document and current behavior disagree.
+Open an issue or pull request when those sources disagree; do not create another
+parallel status registry.

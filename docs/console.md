@@ -1,5 +1,7 @@
 # Jul.IA Console
 
+> **Maturity and API boundary:** the released embedded Console foundation is GA. Newer authority, route-policy and resilience panels on current `main` retain their own maturity rows. Existing unversioned `/api/*` routes are Console-internal unless #150 explicitly publishes them in the supported external `/api/v1` contract.
+
 The Console is a loopback-bound web control plane for operating a running
 Jul.IA server: a live metrics dashboard, a runtime-status overview of which
 capabilities are active, upstream health, certificate inventory, safe

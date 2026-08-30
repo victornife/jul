@@ -1,8 +1,6 @@
 # Core HTTP
 
-> **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md)). TLS termination
-> is documented in [tls-acme.md](tls-acme.md); client certificates in
-> [mtls.md](mtls.md).
+> **Maturity and delivery:** the released Core HTTP foundation is GA. Method/header/query predicates, response-header policy/CORS, and the newer resilience taxonomy are additive merged Beta contracts and do not inherit the base row automatically. See [status.md](status.md). TLS termination is documented in [tls-acme.md](tls-acme.md); client certificates in [mtls.md](mtls.md).
 
 Core HTTP is the foundation every other Jul.IA feature builds on: it accepts a
 connection, picks a virtual host by `Host` header, matches a location by path,

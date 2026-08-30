@@ -1,368 +1,164 @@
 # Jul.IA — Roadmap
 
-> Version 2.6 · Updated 2026-08-17
+> Version 2.7 · Updated 2026-08-30
 >
-> This v2.0 roadmap replaces the previous fixed Phase 5 → AI → horizon sequence
-> with a portfolio model. Delivered feature maturity remains authoritative in the
-> [status matrix](../status.md); #62 owns issue-level execution.
+> This roadmap owns the **durable portfolio sequence**. It deliberately does
+> not duplicate volatile READY/NEXT/blocked issue state. The current issue-level
+> execution tracker is [#62](https://github.com/victornife/jul/issues/62), while
+> feature maturity and delivery live in [status.md](../status.md).
 
-This roadmap translates the [vision](../vision/),
-[ADR 0013](../adr/0013-project-operating-model-and-completeness.md),
-[ADR 0014](../adr/0014-operability-surfaces.md), and
-[Core Gateway Completeness](../specs/core-gateway-completeness.md) into the current
-execution portfolio. #62 is the detailed issue-level programme tracker.
+Jul.IA's active objective is a coherent, production-quality standalone
+single-node edge and protocol gateway. Correctness and security may interrupt
+any later investment. Distributed control planes and category expansion remain
+separate decisions rather than implicit completion requirements.
 
-The roadmap is not a promise to implement every open issue. An issue may be
-ready, draft, gated, selected, deferred, deliberately restart-bound, or complete.
+## Sources of truth
+
+| Question | Authority |
+| --- | --- |
+| What does the binary do? | Runtime code, tests, and generated configuration/lifecycle contracts |
+| What is GA, Beta, merged, candidate, released, or soaked? | [Feature status](../status.md) and [`feature-status.yaml`](../feature-status.yaml) |
+| What is being worked on now? | [Programme tracker #62](https://github.com/victornife/jul/issues/62) |
+| What is the durable order of investment? | This roadmap |
+| Which dated audit is current or superseded? | [Audit register](../audit-register.md) |
 
 ## Portfolio lanes
 
-| Lane | Objective | Entry rule | Current emphasis |
-| --- | --- | --- | --- |
-| **Correctness and security** | Restore current documented, protocol, security, lifecycle, and compatibility contracts | Evidence and severity | Preserve the certified cache, lifecycle, and structured-configuration baseline while architecture decisions proceed |
-| **Core Gateway Completeness** | Close material gaps inside the standalone gateway boundary | Architecture and product integrity | Trust boundaries, backend TLS/mTLS, resilience, routing policy, automation contracts |
-| **Operational enhancement** | Improve long-running operation without redefining the core | Value × leverage ÷ permanent complexity | Selected hot reload, diagnostics, recovery, migration assessment |
-| **Technical experiment** | Explore a new category through a bounded, removable tranche | Hypothesis, prerequisites, budget, evidence, exit decision | AI Gateway candidate only after generic trust/resilience decisions and an explicit portfolio decision |
-| **Vision horizon** | Preserve possible large future categories | Separate activation decision | Fleet, Kubernetes controller, distributed state, Cloud, mesh, GSLB, GraphQL composition |
+| Lane | Objective | Decision rule |
+| --- | --- | --- |
+| **Correctness and security** | Correct unsafe, misleading, protocol-invalid, or lifecycle-invalid behavior | May pre-empt every other lane |
+| **Core Gateway Completeness** | Close material gaps inside the standalone gateway boundary | Architecture and product integrity, not feature-count parity |
+| **Operational enhancement** | Improve long-running operation and recovery | Value and leverage must justify permanent complexity |
+| **Migration and diagnostics** | Make adoption, evidence and support safer | No compatibility percentage, silent approximation, phone-home, or unsafe replay |
+| **Technical experiment** | Test one bounded category hypothesis | Explicit entry gate, time box, and promote/freeze/extract/remove/defer decision |
+| **Vision horizon** | Preserve possible distributed or category-expansion futures | Requires a separate activation decision |
 
 ## Current execution sequence
 
-Implementation remains serial around shared architecture even though the
-portfolio has parallel lanes.
+The durable current sequence is summarized in the active operating roadmap below. Exact issue-level status remains in #62.
 
-| Stage | Focus | Exit criteria | Status |
-| --- | --- | --- | --- |
-| **0 — Programme and truth** | Combined audit, current product truth, operating model and historical-audit disposition | One audit, one tracker, canonical docs synchronized | ✅ reconciled; #114/#119/#130 closed |
-| **1 — Immediate non-cache correctness** | Strict configuration, HTTP/3 mTLS, ACME, compression, access logs, metrics and WAF contracts | No known non-cache P0; selected P1 corrections documented and tested | ✅ verified in `v1.32.1-rc.1`; #129 remains a non-blocking quality track |
-| **2 — Cache correctness** | Generation-owned revalidation, immutable entries, HTTP semantics, upgrade transparency, recertification | Race-clean, protocol-safe, truthful conformance matrix | ✅ complete: #131, #133 and #132 merged; #134 recertification closed #107; the cache retains GA |
-| **3 — Lifecycle authority** | Closed-world field inventory, Go registry authority, generated/checkable mirrors | Every field classified exactly once; no unknown path defaults to hot | ✅ complete: #89 |
-| **4 — Structured configuration Phase 5** | Batch preview, entity CRUD, global operations, Console migration, E2E | Preview/apply share one executor and authoritative lifecycle data | ✅ complete: #77 → #78 → #79 → #80 → #81 → #82 |
-| **5 — Core architecture decisions** | Trust, resilience, routing, configuration authority/automation | ADRs merge and downstream drafts become implementation-ready | ✅ complete: #115 (ADR 0016), #116 (ADR 0017), #117 (ADR 0018) and #118 (ADR 0019) are accepted |
-| **6 — Core implementation** | Canonical client identity, backend trust, generic resilience, routing policy, schema/API/CLI | Standalone completeness gaps closed with protocol/operational evidence | ▶ in progress: canonical client identity (#135 → #136 → #259) and backend trust (#137 → #138 → #139 → #140) complete; generic resilience (#141-#144) unblocked and next; routing/automation gated by #117/#118 |
-| **7 — Selected runtime dynamics** | Value-ranked certificate, credential, logging, sink, cache-policy, and Alt-Svc transitions | Selected settings are safely dynamic; structural settings retain planned restart | ⬜ planned |
-| **8 — Migration and diagnostics** | NGINX assessment, provenance, compatibility corpus, support bundle, `jul doctor` | Operator-safe evidence and recovery workflows | ⬜ planned |
-| **9 — One bounded experiment** | AI Gateway or another explicitly approved category | Promote, continue experimental, freeze, extract, remove, or defer | 🔒 gated |
-| **10 — Integrated closure** | Exact-SHA audit, protocol matrix, failure injection, E2E, soak, compatibility and release evidence | No unsupported claims or unresolved selected work | ⬜ planned |
+## Active operating roadmap
 
-### Tracker-numbering crosswalk
+| Stage | Durable focus | Current snapshot |
+| --- | --- | --- |
+| **0 — Programme and product truth** | One tracker, audit disposition, operating model and product boundary | Complete; this issue reconciles later documentation drift |
+| **1 — Correctness foundation** | Strict config, protocol/security corrections, cache recertification and quality gates | Complete for the selected tranche; new defects still interrupt later stages |
+| **2 — Lifecycle and structured configuration** | Closed-world lifecycle authority, transactional apply/stage/rollback, typed workflows | Complete |
+| **3 — Trust boundaries** | Canonical client identity and consistent backend TLS/mTLS identity | Implemented on `main`; represented as merged Beta capabilities |
+| **4 — Routing and response policy** | Method/header/query predicates, response headers, CORS and typed operation surfaces | Implemented on `main`; represented separately from the older Core HTTP GA row |
+| **5 — Generic resilience** | Admission, queue/connection bounds, retry budget/deadline/backoff, circuit state and bounded operations evidence | Core implementations are merged; integrated cross-protocol/soak and complete external-contract closure remain under #287/#144 at this baseline |
+| **6 — Configuration authority and automation** | Managed/file-owned authority, generated contracts, supported external API, thin remote CLI | Authority and generated contracts are merged; external OpenAPI #150 and CLI #151 remain separate gates |
+| **7 — Selected runtime dynamics** | High-value certificate, credential, logging, sink, cache-policy and Alt-Svc transitions | Planned and value-ranked; universal hot reload is not a requirement |
+| **8 — Migration and diagnostics** | NGINX assessment/provenance/includes, compatibility corpus, support bundle and `jul doctor` | Assessment/provenance/includes are merged; corpus work has started; support bundle and doctor remain later work |
+| **9 — One bounded experiment** | AI Gateway or another explicitly approved category | Gated; not an automatic continuation of core work |
+| **10 — Integrated closure** | Fresh exact-SHA audit, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Planned after the selected programme |
 
-The roadmap deliberately consolidates the more granular numbering in #62:
+For exact issue state, child decomposition, active pull requests and sequencing,
+read #62. This table changes only when the durable portfolio boundary or stage
+outcome changes.
 
-- roadmap Stage 0 = #62 Stage 0 programme reconciliation plus Stage 1 audit/documentation truth;
-- roadmap Stage 1 = the completed #62 Stage 2 non-cache correctness tranche;
-- roadmap Stage 2 = #62 Stage 3 cache correctness and recertification (complete);
-- roadmap Stage 3 = #62 lifecycle authority (#89), complete;
-- roadmap Stage 4 = #62 structured configuration Phase 5 (#77 → #78 → #79 → #80 → #81 → #82), complete;
-- roadmap Stage 5 = the #62 core architecture-decision stage, ordered #115 → #116 → #117 → #118; #115 and #116 are accepted and closed, #117 is next.
+## Current programme boundary
 
-This avoids two competing execution models. #62 owns issue-level status;
-this roadmap owns the durable portfolio sequence.
+### Complete foundations
 
-## Immediate critical path
+- The selected cache correction and recertification programme is complete; the
+  response cache retains GA.
+- Closed-world lifecycle classification and generated lifecycle mirrors are
+  complete.
+- Structured configuration Phase 5 is complete.
+- ADRs 0016–0019 define trust, resilience, routing/response policy, authority,
+  generated contracts and resource identity.
+- Canonical inbound identity, backend trust, routing/response policy,
+  configuration authority and generated configuration contracts are implemented
+  on `main`.
 
-```text
-#165/#166 — product truth, operating model and completeness boundary (complete)
-    ↓
-#123/#124/#126/#127 — selected correction tranche (complete)
-    ↓
-v1.32.1-rc.1 — independently verified published prerelease (complete; not stable)
-    ↓
-#131 → #133 → #132 → #134 — cache correctness and recertification (complete; #107 closed)
-    ↓
-#89 — closed-world lifecycle authority (complete)
-    ↓
-#77 → #78 → #79 → #80 → #81 → #82 — structured configuration Phase 5 (complete)
-    ↓
-#115 → #116 → #117 → #118 — core architecture decisions (#115/#116 accepted and closed; #117 READY / NEXT, not started)
-    ↓
-selected core implementations: inbound identity and backend trust already complete under #115; generic resilience (#141 → #142 → #143 → #144) unblocked under #116; routing/automation gated by #117/#118
-```
+### Active or incomplete closure
 
-The selected correction tranche and its published `v1.32.1-rc.1`
-prerelease checkpoint are complete and independently verified. The cache
-correctness programme is complete and #107 is closed: the response cache retains
-GA on the strength of the 2026-08-07 recertification. Closed-world lifecycle
-authority (#89), the shared atomic patch assessment (#77), typed Route workflows
-(#78), typed App/upstream workflows (#79), sparse global operations (#80), the
-Global and Traffic Controls Console migration (#81), and the Phase 5 closure
-work (#82) are complete. #115 and #116 are accepted and closed: their
-implementation lanes — inbound identity (#135 → #136 → #259) and backend trust
-(#137 → #138 → #139 → #140) — are complete, and generic resilience
-(#141 → #142 → #143 → #144) is unblocked. **The architecture-decision sequence is
-complete**: #117 (ADR 0018, routing and response policy) and #118 (ADR 0019,
-configuration authority, generated contracts and resource identity) are both
-accepted and closed. `[DRAFT]` is removed from #147, #148, #149, #150 and #151.
-
-Three of those are **READY and unblocked** — #147 (routing policy completion),
-#148 (authority modes) and #149 (generated artifacts). Two keep a
-**hard-predecessor block** rather than a draft gate, because their contracts are
-fixed but their prerequisites are not built: #150 is blocked on #148, and #151 on
-#150 and on #336 (admin listener TLS and optional mTLS), which is itself
-sequenced behind #100 so it consumes the existing certificate-provider seam
-rather than introducing a second one. Shared edits to routing policy,
-configuration authority or automation are no longer gated by a pending decision;
-they are gated only by the WIP limits in §4 of the operating model.
-
-Phase 5 closure does not authorize universal hot reload, does not imply dynamic
-cache backend replacement, and does not automatically continue into an AI
-Gateway. Correctness or security findings may still interrupt later work.
-
-## Correctness and security backlog
-
-### Completed in the current correction tranche
-
-- Strict rejection of unknown TOML fields with the documented `server_name` compatibility alias.
-- Complete server-level mTLS parity on HTTP/3.
-- Exclusive ACME HTTP-01 versus TLS-ALPN-01 challenge selection.
-- `Cache-Control: no-transform` enforcement in dynamic compression.
-- Deterministic HTTP/3 UDP preflight testing on Windows.
-- Deterministic reload/apply deadline tests through an injected clock/timer seam, with race-scaled integration margins and explicit timer-registration synchronization (#185, #219, #220, #222).
-- Frontend dependency and CodeQL reflected-output hardening.
-- Exact `v1.32.0` Prometheus contract reconstruction, additive-current inventory, and CI drift protection (#126).
-- Fail-closed enum, worker, duration, size, status, and scalar validation with a machine-readable value contract (#123).
-- Path-only, bounded WAF matched-request logging with query and macro-expanded request data omitted (#127).
-- Explicit access-log enablement with restart-truthful sinks and deprecated legacy-field handling (#124).
-- Cache concurrency, lifecycle, protocol and HTTP conformance restored, with an integrated source audit, executable behavior matrix, race/protocol evidence, benchmarks and soak (#131, #133, #132, #134; epic #107 closed).
-- Closed-world lifecycle authority (#89) and the complete structured-configuration sequence #77 → #78 → #79 → #80 → #81 → #82.
-
-### Remaining immediate correctness
-
-No Phase 5 correctness item remains open. Preserve the certified cache,
-lifecycle, and structured-configuration baseline while #117 → #118 proceed
-through their remaining architecture decisions. Any newly discovered
-correctness or security defect may pre-empt that sequence and must be handled
-on its own focused correction path.
-
-### Required quality foundation
-
-- Preserve a fully green required CI baseline.
-- Add semantic drift guards for schema, defaults, lifecycle, metrics, and claims.
-- Add focused security-package coverage and negative-test gates.
-- Preserve #130's exact-SHA maintainer certification and historical-supersession record; no independent two-human certification is claimed.
+- New post-RC capabilities are not promoted through older GA rows; their
+  maturity and delivery remain explicit in [status.md](../status.md).
+- Resilience still requires the remaining integrated evidence/external-contract
+  closure tracked by #287/#144.
+- The supported versioned external Admin API and remote CLI remain #150/#151;
+  current Console routes are not automatically the stable external contract.
+- NGINX compatibility corpus and selected-dimension E2E continue after the
+  assessment/provenance/include foundation.
 
 ## Release-candidate checkpoint
 
-The immutable **`v1.32.1-rc.1`** checkpoint is complete at
-`9a936d0cc1bc3f7086f38ca87741d9d09f950e25`. Its exact-main CI, release-ref
-preflight, full-tag gate, five-minute soak-smoke, 12-cell lean/full matrix,
-checksums, embedded SPDX SBOMs, and all provenance/SBOM attestations passed. The
-GitHub Release is published as a prerelease; see the
-[candidate evidence](../release-candidates/v1.32.1-rc.1.md). Stable publication
-remains a later explicit decision. The response-cache correctness programme,
-closed-world lifecycle authority, and the full #77 → #82 structured-configuration
-programme have since completed on `main`. #115 is accepted as
-[ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md) and #116 is
-accepted as [ADR 0017](../adr/0017-upstream-resilience-and-overload-control.md).
-The two implementation lanes #115 unblocked are complete: the inbound lane
-#135 → #136 → #259 and the backend lane #137 → #138 → #139 → #140. The next
-programme stage is #117 → #118, plus the now-unblocked generic-resilience
-implementation lane (#141 → #142 → #143 → #144) under #116.
+`v1.32.1-rc.1` is an immutable published prerelease at
+`9a936d0cc1bc3f7086f38ca87741d9d09f950e25`. Its release-path checks, platform
+matrix, checksums, embedded SBOMs and attestations are recorded in the
+[candidate evidence](../release-candidates/v1.32.1-rc.1.md).
 
-## Core Gateway Completeness backlog
+Current `main` is intentionally ahead of that checkpoint. A later stable tag is
+a separate publication decision and must reconcile the changelog, status,
+security posture, limitations and exact artifacts for that SHA.
 
-### Inbound identity
+## Core Gateway Completeness boundary
 
-Decided by [ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md);
-implemented as #135 → #136 → #259.
+The standalone product includes:
 
-- ~~Per-listener trusted proxy CIDRs~~ — delivered by #135 as
-  `[servers.client_address].trusted_proxies`, scoped per listen address and
-  enforced identical across server blocks sharing a `listen`.
-- ~~Standards-aware `Forwarded` and X-Forwarded-For processing~~ — delivered by
-  #135, fail-closed and fuzz-tested, with no chain merging.
-- ~~Right-to-left trusted-hop evaluation~~ — delivered by #135.
-- ~~One canonical effective client identity used by auth, rate limiting, WAF,
-  access logs, diagnostics, and upstream forwarding~~ — derived and published by
-  #135, adopted by every consumer in #136, and closed out by #259 with the
-  listener-granularity API, the Console editor, the NGINX realip import and the
-  multi-proxy H1/H2/H3 end-to-end coverage.
+- HTTP/1.1, HTTP/2/h2c, HTTP/3, TLS/mTLS, gRPC and optional L4 proxying;
+- deterministic request routing and bounded response policy;
+- trusted client identity and backend peer identity;
+- balancing, health, discovery and generic resilience;
+- security policy, secrets and auxiliary egress controls;
+- strict configuration, lifecycle, apply, stage, rollback and history;
+- generated configuration contracts and supported automation surfaces;
+- observability, diagnostics and operational recovery;
+- explicit NGINX migration assessment;
+- bounded WASM extensibility and supported release profiles.
 
-Inbound identity is complete. The capability ships as **Beta** (see
-[status.md](../status.md)): it is merged but not yet tagged, released or soaked,
-so the post-GA soak gate is open by definition.
+The following remain outside the core boundary unless a later ADR changes it:
+production fleet control plane, Kubernetes Gateway API controller, distributed
+cache/rate limiting, hosted cloud, service mesh, GSLB/CDN, GraphQL composition,
+AI Gateway, and full parity with NGINX/Envoy/Kong/Caddy/Traefik.
 
-### Backend transport trust
+## Selected runtime dynamics
 
-Decided by [ADR 0016](../adr/0016-inbound-identity-and-backend-peer-trust.md);
-implemented as #137 → #138 and #139 (both required) → #140.
+The product may finish with many fields deliberately restart-required. Selected
+runtime changes must reuse the existing transactional preparation/publication
+and resource-lifetime models rather than introducing a universal callback
+framework. Current candidates include certificate material, admin credentials,
+access-log sinks, selected cache scalars and Alt-Svc advertisement state.
 
-- ~~One normalized backend TLS policy supporting private roots, client
-  certificates, SNI, minimum version, and peer identity constraints~~ —
-  delivered by #137 as `backend_tls` plus `internal/backendtls`, with an
-  explicit `ca_mode` enum and prefixed `peer_identities`.
-- ~~Equivalent enforcement across HTTP proxy, native gRPC, transcoding, active
-  health checks, and discovery-backed targets~~ — delivered by #138 (HTTP
-  transports), #139 (native gRPC and transcoding) and #140 (health probes, the
-  status surface and the `hot_reload` reclassification the wiring earned).
-- Named reusable TLS profiles remain a follow-up only if representative
-  configurations demonstrate sufficient repetition. Every consumer accepts only
-  the resolved policy type, so adding them changes resolution, not transports.
+A complete and truthful `stage_restart` path is an acceptable final design for
+unselected or structural transitions.
 
-Backend transport trust is complete. The capability ships as **Beta** (see
-[status.md](../status.md)): merged but not yet tagged, released or soaked.
+## Migration and diagnostics
 
-### Generic resilience
+The migration lane is evidence-oriented:
 
-Decided by [ADR 0017](../adr/0017-upstream-resilience-and-overload-control.md);
-implemented as #141 → #142 → #143 → #144, in this order:
+- deterministic per-directive assessment rather than a compatibility score;
+- source provenance and bounded root-confined include traversal;
+- a sanitized, licensed corpus with selected-dimension comparison;
+- no automatic production cutover or unsafe traffic replay;
+- support bundles and diagnostics that are explicit, bounded and secret-safe;
+- no phone-home or automatic upload.
 
-1. active-request, pending-request, connection, and concurrency limits (#141);
-2. retry budget, attempt deadline, backoff, jitter, and replayability rules (#142);
-3. a simple closed/open/half-open circuit breaker, reusing the existing
-   `max_fails`/`fail_timeout` passive-health mechanism rather than introducing
-   parallel `circuit_failures`/`circuit_open_for` names (#143);
-4. outlier ejection only after evidence justifies additional state (deferred
-   from #143's initial scope);
-5. bounded metrics, API/Console surfaces, deterministic fault injection, E2E,
-   benchmarks and soak (#144).
+## Experiment governance
 
-`[DRAFT]` was removed from all four issues once #116 was accepted; they are
-now **READY**, unblocked, and not yet started. These primitives must be reused
-by future AI/provider routing rather than reimplemented in a category-specific
-subsystem.
+At most one major category-expansion experiment is active. It must declare its
+hypothesis, prerequisites, dependency/binary budget, test strategy, time box and
+exit decision. Generic trust, resilience, streaming ownership, secrets and
+observability must be reused rather than duplicated inside the experiment.
 
-### Routing and response policy
+## Completion evidence
 
-Core selected scope:
+The selected programme closes only with:
 
-- method matching;
-- header presence/exact/regex matching;
-- query presence/exact matching;
-- response-header add/set/remove;
-- bounded CORS policy and correct preflight behavior.
+- a fresh exact-SHA source and documentation audit;
+- consistent feature maturity/delivery records;
+- lean/full/build-tag and cross-platform verification;
+- real H1/H2/h2c/H3/TLS/mTLS/gRPC/L4 protocol suites;
+- failure-boundary, race/leak, browser E2E and long-running soak evidence;
+- bounded-label, secret/privacy and compatibility review;
+- release notes, residual limitations and an explicit publication decision.
 
-Explicitly deferred:
+## Historical relationship
 
-- arbitrary expression language;
-- embedded scripting;
-- general policy DSL;
-- mirroring/canary automation.
-
-### Configuration authority and automation
-
-- `managed` and `file_owned` authority modes.
-- Explicit drift and authority-switch behavior.
-- Generated JSON Schema, lifecycle/capability metadata, and factual reference.
-- Versioned external OpenAPI.
-- Thin remote CLI for plan, diff, apply, stage, status, rollback, export, and diagnostics.
-
-## Operational enhancement portfolio
-
-### Selected runtime-dynamics tranche
-
-- Closed-world lifecycle authority.
-- Static certificate/key rotation.
-- Admin authentication snapshot rotation.
-- Global log format and metrics Host-label mode.
-- Access-log enablement and sink generations.
-- Cache scalar policy/capacity after cache correctness.
-- Alt-Svc max-age and clear semantics.
-
-### Candidate after complexity review
-
-- Console mode and plugin-upload policy.
-- Admin request/SSE limits.
-- Durable audit sink.
-
-### Gated or retained restart by default
-
-- Cache backend/path replacement.
-- Dynamic egress across every client and connection pool.
-- History backend relocation.
-- Admin listener enable/address changes.
-- Global tracing-provider replacement.
-- Dynamic TLS/mTLS connection epochs.
-- HTTP/3 listener activation/deactivation.
-- Dynamic ACME manager/account/issuer/cache transitions.
-- Retained-address plaintext↔TLS and h2c mode transitions.
-
-A complete planned-restart workflow is an acceptable final contract for these
-settings. The programme does not measure success by the percentage of fields
-made hot.
-
-## Migration and operational evidence
-
-- Evolve the NGINX importer into an assessor with source provenance and
-  supported/approximate/ignored/blocking classifications.
-- Add a representative compatibility corpus and real migration E2E.
-- Add an operator-triggered, secret-safe support bundle.
-- Add `jul doctor` for configuration, filesystem, listener, TLS, build-profile,
-  pending-restart, and upstream diagnostics.
-- Preserve the no-phone-home policy.
-
-## Technical experiments
-
-### AI Gateway candidate
-
-AI is not the automatic next phase. Its issue remains `[DRAFT]` until backend
-trust and generic resilience decisions are accepted, streaming ownership is
-reviewed, provider credentials use the normal secret model, metrics are bounded,
-and dependency/binary-size budgets are fixed.
-
-The first tranche is limited to an OpenAI-compatible front door, two or three
-providers, streaming, model routing, bounded fallback, and token/cost metrics
-using existing auth, egress, transport trust, and observability.
-
-Semantic cache, broad guardrails, autonomous configuration, complex tenant
-billing, and a large provider catalogue are excluded initially.
-
-### Other horizons
-
-Fleet, Kubernetes/Gateway API, GraphQL composition, Cloud, mesh, GSLB, and
-distributed state remain concept horizons. They require separate decisions and
-do not define current core completeness.
-
-## Delivered history
-
-Year 1 and Year 2 capabilities are shipped; exact maturity, GA evidence, build
-tags, and feature documentation are maintained in:
-
-- [Feature status and GA matrix](../status.md)
-- [Machine-readable feature manifest](../feature-status.yaml)
-- [Year 1 specification](../specs/year-1.md)
-- [Year 2 specification](../specs/year-2.md)
-- [Soak evidence](../soak-evidence.md)
-- [Changelog](../../CHANGELOG.md)
-
-Historical Phase 1–4 delivery remains recorded in #62 and checked-in handoff
-reviews. This roadmap intentionally does not duplicate every closed issue.
-
-## Historical roadmap
-
-The previous v1.37 five-year roadmap remains available through Git history and
-the Year 1–5 specifications. Delivered maturity stays authoritative in the
-[status matrix](../status.md), [machine-readable feature manifest](../feature-status.yaml),
-soak evidence and release history. This document now focuses on active portfolio
-and sequencing rather than duplicating every delivered feature row.
-
-## Maintenance
-
-When work changes state:
-
-1. update #62 and the relevant epic;
-2. update this roadmap only when portfolio, sequence, or category changes;
-3. update ADRs when a durable decision changes;
-4. update the governing spec before downstream issues lose `[DRAFT]`;
-5. update feature status only when shipped maturity/evidence changes;
-6. update documentation and changelog in the same PR as behavior.
-
-## Decision references
-
-- [ADR 0003 — Maturity and GA](../adr/0003-maturity-and-ga.md)
-- [ADR 0004 — Console invariants](../adr/0004-console-ui-invariants.md)
-- [ADR 0012 — OSS/open-core boundary](../adr/0012-oss-open-core-boundary.md)
-- [ADR 0013 — Operating model and completeness](../adr/0013-project-operating-model-and-completeness.md)
-- [ADR 0014 — Appropriate operability surfaces](../adr/0014-operability-surfaces.md)
-- [Operating model](../operating-model.md)
-- [Core Gateway Completeness](../specs/core-gateway-completeness.md)
-- [Combined audit](../audit/combined-audit-2026-08-03.md)
-
-### P5-05 / issue #81 delivered boundary
-
-P5-05 migrated Global, Compression, global Rate Limit, and adjacent server
-Limits to sparse typed patches, and made the existing complete cache table
-stage-only with pinned raw handoff safety. The delivered boundary remains
-explicit: no `cache_set`, no dynamic cache hot swap, no combined `admin_set`,
-and no `access_log_set` were implied by #81. The exact implementation and closure
-evidence remains in #81/#82 and PR #255; this historical boundary does not
-start or authorize any Stage 6 work.
+Earlier phase-by-phase roadmaps, audit findings and delivery notes remain in Git
+history, issue comments, the changelog and dated audit records. They are
+historical evidence, not a second active roadmap. When current issue-level state
+changes, update #62; update this document only when the durable portfolio or a
+stage outcome changes.
