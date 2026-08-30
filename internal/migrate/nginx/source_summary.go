@@ -82,12 +82,18 @@ func sensitiveHeaderName(name string) bool {
 
 func redactURLUserinfo(raw string) string {
 	raw = sanitizeSummaryToken(raw)
+	scheme := strings.Index(raw, "://")
+	if scheme < 0 {
+		// A non-hierarchical or bare target is not useful enough to justify
+		// echoing it. In particular, url.Parse treats strings such as
+		// "user:password@host" as an opaque URI and would otherwise preserve
+		// credential-looking data verbatim.
+		return "<target-omitted>"
+	}
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" {
-		if at := strings.LastIndex(raw, "@"); at >= 0 {
-			if scheme := strings.Index(raw, "://"); scheme >= 0 && scheme < at {
-				return raw[:scheme+3] + "<redacted-userinfo>@" + raw[at+1:]
-			}
+	if err != nil {
+		if at := strings.LastIndex(raw, "@"); at > scheme+3 {
+			return raw[:scheme+3] + "<redacted-userinfo>@" + raw[at+1:]
 		}
 		return "<target-omitted>"
 	}
