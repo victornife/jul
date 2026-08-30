@@ -4,9 +4,12 @@ on:
   pull_request:
     paths:
       - '.github/workflows/nginx-migration-e2e.yml'
+      - 'CHANGELOG.md'
+      - 'Makefile'
       - 'cmd/jul/import_corpus_test.go'
+      - 'docs/nginx-importer.md'
       - 'docs/nginx-migration-corpus.md'
-      - 'internal/migrate/nginx/corpus/**'
+      - 'internal/migrate/nginx/**'
       - 'scripts/nginx-corpus-check.sh'
       - 'scripts/nginx-migration-e2e.sh'
       - 'testdata/nginx-corpus/**'
@@ -17,9 +20,12 @@ on:
       - main
     paths:
       - '.github/workflows/nginx-migration-e2e.yml'
+      - 'CHANGELOG.md'
+      - 'Makefile'
       - 'cmd/jul/import_corpus_test.go'
+      - 'docs/nginx-importer.md'
       - 'docs/nginx-migration-corpus.md'
-      - 'internal/migrate/nginx/corpus/**'
+      - 'internal/migrate/nginx/**'
       - 'scripts/nginx-corpus-check.sh'
       - 'scripts/nginx-migration-e2e.sh'
       - 'testdata/nginx-corpus/**'
