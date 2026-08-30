@@ -108,6 +108,11 @@ jobs:
           '''
           addition = '\n'.join(line[10:] if line.startswith('          ') else line for line in addition.splitlines())
           if 'def test_status_heading_contract_rejects_legacy_beta_section():' not in text:
+              main_marker = '\nif __name__ == "__main__":\n'
+              main_at = text.rfind(main_marker)
+              if main_at < 0:
+                  raise SystemExit('final test runner marker not found')
+              text = text[:main_at] + addition + text[main_at:]
               runner = '''    test_status_heading_uniqueness_rejects_duplicate_anchor()
               print("OK")
           '''
@@ -119,12 +124,7 @@ jobs:
               replacement = '\n'.join(line[10:] if line.startswith('          ') else line for line in replacement.splitlines())
               if text.count(runner) != 1:
                   raise SystemExit(f'expected one final runner tail, found {text.count(runner)}')
-              text = text.replace(runner, replacement, 1).rstrip() + addition + '\n'
-              # Keep the executable runner last, after every test definition.
-              main_at = text.rfind('\nif __name__ == "__main__":\n')
-              legacy_at = text.find('\ndef test_status_heading_contract_rejects_legacy_beta_section():\n')
-              if main_at < 0 or legacy_at < 0 or legacy_at > main_at:
-                  raise SystemExit('new status contract test was not placed before the final runner')
+              text = text.replace(runner, replacement, 1)
           tests.write_text(text, encoding='utf-8', newline='\n')
           PY
       - name: verify documentation
