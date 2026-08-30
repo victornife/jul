@@ -24,15 +24,21 @@ import (
 
 // ImportFile parses an nginx configuration file and translates it into a Jul.IA
 // configuration, returning the result along with a Report of everything that
-// could not be translated. It is the single entry point used by the CLI.
+// could not be translated. It preserves the original relative-path behavior.
 func ImportFile(path string) (*config.Config, *Report, error) {
+	return ImportFileWithOptions(path, AssessmentOptions{})
+}
+
+// ImportFileWithOptions performs the same translation while allowing the
+// assessment's shareable path representation to be selected explicitly.
+func ImportFileWithOptions(path string, options AssessmentOptions) (*config.Config, *Report, error) {
 	src, err := parseFile(path)
 	if err != nil {
 		return nil, nil, err
 	}
 	cfg, rep := Translate(src, path)
 	if rep != nil {
-		rep.Assessment = BuildAssessment(src, path, rep)
+		rep.Assessment = BuildAssessmentWithOptions(src, path, rep, options)
 	}
 	return cfg, rep, nil
 }

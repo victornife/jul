@@ -97,6 +97,14 @@ var guidanceCatalog = map[string]AssessmentGuidance{
 		Docs:        "nginx-importer#candidate-validation",
 		Blocking:    true,
 	},
+	"GUIDE_MANUAL_REVIEW": {
+		Code:        "GUIDE_MANUAL_REVIEW",
+		Title:       "Review this semantic difference manually",
+		Action:      "Inspect the source location, compare the intended NGINX behavior with the generated Jul target, and configure or test the missing behavior before cutover.",
+		Consequence: "The importer cannot prove that this source construct is represented with equivalent behavior.",
+		Docs:        "nginx-assessment#guidance-and-manual-action",
+		Blocking:    true,
+	},
 }
 
 func lookupAssessmentGuidance(code string) (AssessmentGuidance, bool) {

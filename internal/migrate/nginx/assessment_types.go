@@ -17,7 +17,7 @@ import (
 )
 
 // AssessmentSchemaVersion is the machine-readable NGINX assessment contract.
-const AssessmentSchemaVersion = 1
+const AssessmentSchemaVersion = 2
 
 // AssessmentClass is the bounded translation result for one source directive.
 type AssessmentClass string
@@ -72,17 +72,22 @@ const (
 
 // AssessmentResult is one stable, secret-safe result for a parsed directive.
 type AssessmentResult struct {
-	ID          string             `json:"id"`
-	Code        string             `json:"code"`
-	Class       AssessmentClass    `json:"class"`
-	Severity    AssessmentSeverity `json:"severity"`
-	Risk        AssessmentRisk     `json:"risk"`
-	Context     AssessmentContext  `json:"context"`
-	Directive   string             `json:"directive"`
-	Line        int                `json:"line,omitempty"`
-	Message     string             `json:"message"`
-	TargetPaths []string           `json:"target_paths,omitempty"`
-	Synthetic   bool               `json:"synthetic,omitempty"`
+	ID               string                    `json:"id"`
+	Code             string                    `json:"code"`
+	Class            AssessmentClass           `json:"class"`
+	Severity         AssessmentSeverity        `json:"severity"`
+	Risk             AssessmentRisk            `json:"risk"`
+	Context          AssessmentContext         `json:"context"`
+	Directive        string                    `json:"directive"`
+	Line             int                       `json:"line,omitempty"`
+	Message          string                    `json:"message"`
+	TargetPaths      []string                  `json:"target_paths,omitempty"`
+	Provenance       *AssessmentProvenance     `json:"provenance,omitempty"`
+	TargetMappings   []AssessmentTargetMapping `json:"target_mappings,omitempty"`
+	GuidanceCodes    []string                  `json:"guidance_codes,omitempty"`
+	RelatedResultIDs []string                  `json:"related_result_ids,omitempty"`
+	Synthetic        bool                      `json:"synthetic,omitempty"`
+	Scope            string                    `json:"scope,omitempty"`
 }
 
 // AssessmentSummary contains fixed fields rather than a map so JSON is stable.
@@ -114,19 +119,31 @@ type AssessmentValidation struct {
 
 // Assessment is the versioned human- and machine-readable migration report.
 type Assessment struct {
-	SchemaVersion int                  `json:"schema_version"`
-	Source        string               `json:"source"`
-	Status        string               `json:"status"`
-	Summary       AssessmentSummary    `json:"summary"`
-	Results       []AssessmentResult   `json:"results"`
-	Validation    AssessmentValidation `json:"validation"`
+	SchemaVersion int                    `json:"schema_version"`
+	Source        string                 `json:"source"`
+	SourcePolicy  AssessmentSourcePolicy `json:"source_policy"`
+	Sources       []AssessmentSource     `json:"sources"`
+	Status        string                 `json:"status"`
+	Summary       AssessmentSummary      `json:"summary"`
+	Results       []AssessmentResult     `json:"results"`
+	Guidance      []AssessmentGuidance   `json:"guidance,omitempty"`
+	Validation    AssessmentValidation   `json:"validation"`
+	sourceOrder   bool
 }
 
-// BuildAssessment walks every parsed directive once and applies the registry.
-func BuildAssessment(src *ngx.Config, source string, rep *Report) (a *Assessment) {
+// BuildAssessment walks every parsed directive once and applies the registry
+// using the default relative-path policy.
+func BuildAssessment(src *ngx.Config, source string, rep *Report) *Assessment {
+	return BuildAssessmentWithOptions(src, source, rep, AssessmentOptions{})
+}
+
+// BuildAssessmentWithOptions adds shareable source metadata without changing
+// classification or generated Jul configuration behavior.
+func BuildAssessmentWithOptions(src *ngx.Config, source string, rep *Report, options AssessmentOptions) (a *Assessment) {
+	options = normalizedAssessmentOptions(options)
 	defer func() {
 		if r := recover(); r != nil {
-			a = FailureAssessment(source, AssessmentValidationError, "NGX_ASSESSMENT_INTERNAL", "assessment could not be completed for the parsed directive tree")
+			a = FailureAssessmentWithOptions(source, AssessmentValidationError, "NGX_ASSESSMENT_INTERNAL", "assessment could not be completed for the parsed directive tree", options)
 		}
 	}()
 	a = &Assessment{
@@ -139,27 +156,41 @@ func BuildAssessment(src *ngx.Config, source string, rep *Report) (a *Assessment
 		w.walk(ContextMain, d, walkFacts{})
 	}
 	w.addTranslationSynthetic(rep)
+	decorateAssessment(src, source, a, options)
 	a.finalize()
 	return a
 }
 
 // FailureAssessment returns a safe report for failures before translation.
 func FailureAssessment(source string, class AssessmentClass, code, message string) *Assessment {
+	return FailureAssessmentWithOptions(source, class, code, message, AssessmentOptions{})
+}
+
+// FailureAssessmentWithOptions preserves the safe path policy even when the
+// source cannot be parsed or read.
+func FailureAssessmentWithOptions(source string, class AssessmentClass, code, message string, options AssessmentOptions) *Assessment {
+	options = normalizedAssessmentOptions(options)
+	policy, rootSource, _ := rootAssessmentSource(source, options.PathStyle)
+	result := AssessmentResult{
+		Code:      code,
+		Class:     class,
+		Severity:  AssessmentError,
+		Risk:      RiskOperational,
+		Context:   ContextMain,
+		Directive: "<input>",
+		Message:   message,
+		Synthetic: true,
+		Scope:     "global",
+	}
+	result.Provenance = fallbackProvenance(result, rootSource)
+	result.GuidanceCodes = guidanceCodesForResult(result)
 	a := &Assessment{
 		SchemaVersion: AssessmentSchemaVersion,
-		Source:        source,
+		Source:        rootSource.DisplayPath,
+		SourcePolicy:  policy,
+		Sources:       []AssessmentSource{rootSource},
 		Validation:    AssessmentValidation{Status: "not_run"},
-		Results: []AssessmentResult{{
-			ID:        "result-0001",
-			Code:      code,
-			Class:     class,
-			Severity:  AssessmentError,
-			Risk:      RiskOperational,
-			Context:   ContextMain,
-			Directive: "<input>",
-			Message:   message,
-			Synthetic: true,
-		}},
+		Results:       []AssessmentResult{result},
 	}
 	a.finalize()
 	return a
@@ -181,14 +212,16 @@ func (a *Assessment) SetValidation(verrs []error, warnings []config.Diagnostic) 
 			Message:  "generated Jul configuration failed authoritative validation",
 		})
 		a.Results = append(a.Results, AssessmentResult{
-			Code:      "JUL_CANDIDATE_VALIDATION",
-			Class:     AssessmentValidationError,
-			Severity:  AssessmentError,
-			Risk:      RiskOperational,
-			Context:   ContextMain,
-			Directive: "<generated-candidate>",
-			Message:   "generated Jul configuration failed authoritative validation",
-			Synthetic: true,
+			Code:          "JUL_CANDIDATE_VALIDATION",
+			Class:         AssessmentValidationError,
+			Severity:      AssessmentError,
+			Risk:          RiskOperational,
+			Context:       ContextMain,
+			Directive:     "<generated-candidate>",
+			Message:       "generated Jul configuration failed authoritative validation",
+			Synthetic:     true,
+			Scope:         "global",
+			GuidanceCodes: []string{"GUIDE_CANDIDATE_VALIDATION"},
 		})
 	}
 	for _, d := range warnings {
@@ -201,8 +234,15 @@ func (a *Assessment) SetValidation(verrs []error, warnings []config.Diagnostic) 
 	if len(a.Validation.Errors) > 0 {
 		a.Validation.Status = "invalid"
 	}
-	a.resequence()
 	a.finalize()
+}
+
+// SetSourceOrder selects source navigation for the human renderer. JSON result
+// order remains deterministic source traversal order regardless of this flag.
+func (a *Assessment) SetSourceOrder(enabled bool) {
+	if a != nil {
+		a.sourceOrder = enabled
+	}
 }
 
 // JSON returns deterministic indented JSON with a trailing newline.
@@ -217,39 +257,40 @@ func (a *Assessment) JSON() ([]byte, error) {
 	return append(out, '\n'), nil
 }
 
-// Human returns a deterministic report with blocking findings first.
+// Human returns a deterministic report with blocking findings first unless
+// source-order navigation was selected explicitly.
 func (a *Assessment) Human() string {
 	if a == nil {
 		return ""
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "NGINX migration assessment: %s\n", a.Source)
+	fmt.Fprintf(&b, "schema: %d\n", a.SchemaVersion)
+	fmt.Fprintf(&b, "source policy: %s paths, includes disabled\n", a.SourcePolicy.PathStyle)
 	fmt.Fprintf(&b, "status: %s\n", a.Status)
 	fmt.Fprintf(&b, "results: %d supported, %d approximated, %d ignored, %d blocking, %d informational\n",
 		a.Summary.Supported, a.Summary.Approximated, a.Summary.Ignored, a.Summary.Blocking, a.Summary.Informational)
 
-	ordered := append([]AssessmentResult(nil), a.Results...)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		pi, pj := resultPriority(ordered[i].Class), resultPriority(ordered[j].Class)
-		if pi != pj {
-			return pi < pj
+	ordered := a.orderedHumanResults()
+	if a.sourceOrder {
+		b.WriteString("\nSOURCE ORDER:\n")
+		for _, result := range ordered {
+			writeHumanResult(&b, result, true)
 		}
-		if ordered[i].Line != ordered[j].Line {
-			return ordered[i].Line < ordered[j].Line
+	} else {
+		last := AssessmentClass("")
+		for _, result := range ordered {
+			if result.Class != last {
+				fmt.Fprintf(&b, "\n%s:\n", strings.ToUpper(string(result.Class)))
+				last = result.Class
+			}
+			writeHumanResult(&b, result, false)
 		}
-		return ordered[i].ID < ordered[j].ID
-	})
-	last := AssessmentClass("")
-	for _, r := range ordered {
-		if r.Class != last {
-			fmt.Fprintf(&b, "\n%s:\n", strings.ToUpper(string(r.Class)))
-			last = r.Class
-		}
-		where := r.Context
-		if r.Line > 0 {
-			fmt.Fprintf(&b, "  line %d [%s] %s (%s): %s\n", r.Line, where, r.Directive, r.Code, r.Message)
-		} else {
-			fmt.Fprintf(&b, "  [%s] %s (%s): %s\n", where, r.Directive, r.Code, r.Message)
+	}
+	if len(a.Guidance) > 0 {
+		b.WriteString("\nGUIDANCE:\n")
+		for _, guidance := range a.Guidance {
+			fmt.Fprintf(&b, "  %s — %s: %s\n", guidance.Code, guidance.Title, guidance.Action)
 		}
 	}
 	if a.Validation.Status != "not_run" {
@@ -262,6 +303,96 @@ func (a *Assessment) Human() string {
 	return b.String()
 }
 
+func (a *Assessment) orderedHumanResults() []AssessmentResult {
+	ordered := append([]AssessmentResult(nil), a.Results...)
+	sourceRank := make(map[string]int, len(a.Sources))
+	for i, source := range a.Sources {
+		sourceRank[source.ID] = i
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if !a.sourceOrder {
+			pi, pj := resultPriority(ordered[i].Class), resultPriority(ordered[j].Class)
+			if pi != pj {
+				return pi < pj
+			}
+		}
+		si, li, ci := resultSourcePosition(ordered[i], sourceRank)
+		sj, lj, cj := resultSourcePosition(ordered[j], sourceRank)
+		if si != sj {
+			return si < sj
+		}
+		if li != lj {
+			return li < lj
+		}
+		if ci != cj {
+			return ci < cj
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
+	return ordered
+}
+
+func resultSourcePosition(result AssessmentResult, sourceRank map[string]int) (int, int, int) {
+	if result.Provenance != nil {
+		rank, ok := sourceRank[result.Provenance.SourceID]
+		if !ok {
+			rank = len(sourceRank) + 1
+		}
+		return rank, result.Provenance.Start.Line, result.Provenance.Start.Column
+	}
+	return len(sourceRank) + 2, result.Line, 0
+}
+
+func writeHumanResult(b *strings.Builder, result AssessmentResult, includeClass bool) {
+	location := resultLocation(result)
+	contextPath := string(result.Context)
+	if result.Provenance != nil && result.Provenance.ContextPath != "" {
+		contextPath = result.Provenance.ContextPath
+	}
+	if includeClass {
+		fmt.Fprintf(b, "  %s [%s/%s] %s (%s): %s\n", location, result.Class, contextPath, result.Directive, result.Code, result.Message)
+	} else {
+		fmt.Fprintf(b, "  %s [%s] %s (%s): %s\n", location, contextPath, result.Directive, result.Code, result.Message)
+	}
+	if targets := resultMappedPaths(result); len(targets) > 0 {
+		fmt.Fprintf(b, "    targets: %s\n", strings.Join(targets, ", "))
+	}
+	if len(result.GuidanceCodes) > 0 {
+		fmt.Fprintf(b, "    guidance: %s\n", strings.Join(result.GuidanceCodes, ", "))
+	}
+	if len(result.RelatedResultIDs) > 0 {
+		fmt.Fprintf(b, "    related: %s\n", strings.Join(result.RelatedResultIDs, ", "))
+	}
+}
+
+func resultLocation(result AssessmentResult) string {
+	if result.Provenance == nil {
+		if result.Line > 0 {
+			return fmt.Sprintf("line %d", result.Line)
+		}
+		return "global"
+	}
+	location := result.Provenance.DisplayPath
+	if result.Provenance.Start.Line > 0 {
+		location += fmt.Sprintf(":%d", result.Provenance.Start.Line)
+		if result.Provenance.Start.Column > 0 {
+			location += fmt.Sprintf(":%d", result.Provenance.Start.Column)
+		}
+	}
+	return location
+}
+
+func resultMappedPaths(result AssessmentResult) []string {
+	var paths []string
+	for _, mapping := range result.TargetMappings {
+		paths = append(paths, mapping.Paths...)
+	}
+	if len(paths) == 0 {
+		paths = append(paths, result.TargetPaths...)
+	}
+	return uniqueSortedStrings(paths)
+}
+
 // HasWarnings reports findings that strict mode treats as non-clean.
 func (a *Assessment) HasWarnings() bool {
 	return a != nil && (a.Summary.Approximated > 0 || a.Summary.Ignored > 0 || a.Summary.Blocking > 0)
@@ -272,9 +403,28 @@ func (a *Assessment) HasBlocking() bool {
 	return a != nil && (a.Summary.Blocking > 0 || a.Summary.ParseErrors > 0 || a.Summary.ValidationErrors > 0)
 }
 
-func (a *Assessment) resequence() {
+func (a *Assessment) assignMissingResultIDs() {
+	if a == nil {
+		return
+	}
+	syntheticOrdinal := 0
+	unmatchedOrdinal := 0
+	seen := map[string]int{}
 	for i := range a.Results {
-		a.Results[i].ID = fmt.Sprintf("result-%04d", i+1)
+		result := &a.Results[i]
+		if result.ID == "" {
+			if result.Synthetic {
+				syntheticOrdinal++
+				result.ID = fmt.Sprintf("result-synthetic-%04d", syntheticOrdinal)
+			} else {
+				unmatchedOrdinal++
+				result.ID = fmt.Sprintf("result-unmatched-%04d", unmatchedOrdinal)
+			}
+		}
+		seen[result.ID]++
+		if seen[result.ID] > 1 {
+			result.ID = fmt.Sprintf("%s-%02d", result.ID, seen[result.ID])
+		}
 	}
 }
 
@@ -282,35 +432,36 @@ func (a *Assessment) finalize() {
 	if a == nil {
 		return
 	}
-	a.resequence()
-	var s AssessmentSummary
-	for _, r := range a.Results {
-		s.Total++
-		switch r.Class {
+	a.assignMissingResultIDs()
+	a.refreshGuidance()
+	var summary AssessmentSummary
+	for _, result := range a.Results {
+		summary.Total++
+		switch result.Class {
 		case AssessmentSupported:
-			s.Supported++
+			summary.Supported++
 		case AssessmentApproximated:
-			s.Approximated++
+			summary.Approximated++
 		case AssessmentIgnored:
-			s.Ignored++
+			summary.Ignored++
 		case AssessmentBlocking:
-			s.Blocking++
+			summary.Blocking++
 		case AssessmentInformational:
-			s.Informational++
+			summary.Informational++
 		case AssessmentParseError:
-			s.ParseErrors++
+			summary.ParseErrors++
 		case AssessmentValidationError:
-			s.ValidationErrors++
+			summary.ValidationErrors++
 		}
 	}
-	s.Ready = s.Blocking == 0 && s.ParseErrors == 0 && s.ValidationErrors == 0
-	a.Summary = s
+	summary.Ready = summary.Blocking == 0 && summary.ParseErrors == 0 && summary.ValidationErrors == 0
+	a.Summary = summary
 	switch {
-	case s.ParseErrors > 0:
+	case summary.ParseErrors > 0:
 		a.Status = "parse_error"
-	case s.ValidationErrors > 0:
+	case summary.ValidationErrors > 0:
 		a.Status = "invalid_candidate"
-	case s.Blocking > 0:
+	case summary.Blocking > 0:
 		a.Status = "manual_action_required"
 	default:
 		a.Status = "ready_for_review"
