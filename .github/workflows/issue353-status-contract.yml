@@ -61,46 +61,46 @@ jobs:
           checker = Path('scripts/docs-check.py')
           text = checker.read_text(encoding='utf-8')
           old = '    if len(headings) == len(set(headings)):\n        ok("status.md headings are unique")'
-          new = '''    required = {
-              "GA", "GA — soak pending", "Beta", "Alpha", "Deprecated",
-              "Soak tracking (post-GA gate)", "Changelog",
-          }
-          declared = {title for level, title in headings if level == 2}
-          for title in sorted(required - declared):
-              error(path, 0, f"missing canonical status section: {title}")
-          forbidden = {
-              "Beta (shipped; remaining GA gaps)",
-              "Recently shipped continuous panels",
-          }
-          for title in sorted(forbidden & declared):
-              error(path, 0, f"legacy status section remains: {title}")
-          if required <= declared and not (forbidden & declared):
-              ok("status.md canonical sections are complete")'''
-          new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines())
+          new = (
+              '    required = {\n'
+              '        "GA", "GA — soak pending", "Beta", "Alpha", "Deprecated",\n'
+              '        "Soak tracking (post-GA gate)", "Changelog",\n'
+              '    }\n'
+              '    declared = {title for level, title in headings if level == 2}\n'
+              '    for title in sorted(required - declared):\n'
+              '        error(path, 0, f"missing canonical status section: {title}")\n'
+              '    forbidden = {\n'
+              '        "Beta (shipped; remaining GA gaps)",\n'
+              '        "Recently shipped continuous panels",\n'
+              '    }\n'
+              '    for title in sorted(forbidden & declared):\n'
+              '        error(path, 0, f"legacy status section remains: {title}")\n'
+              '    if required <= declared and not (forbidden & declared):\n'
+              '        ok("status.md canonical sections are complete")'
+          )
           if text.count(old) != 1:
               raise SystemExit(f'expected one status heading success block, found {text.count(old)}')
-          text = text.replace(old, new.rstrip() + '\n\n', 1)
+          text = text.replace(old, new + '\n\n', 1)
           checker.write_text(text, encoding='utf-8', newline='\n')
 
           tests = Path('scripts/test_docs_check.py')
           text = tests.read_text(encoding='utf-8')
           addition = '''
 
-          def test_status_heading_contract_rejects_legacy_beta_section():
-              with tempfile.TemporaryDirectory() as tmpdir:
-                  root = Path(tmpdir)
-                  docs = root / "docs"
-                  docs.mkdir(parents=True)
-                  (docs / "status.md").write_text(
-                      "# Status\n\n## GA\n\n## GA — soak pending\n\n## Beta\n\n"
-                      "## Alpha\n\n## Deprecated\n\n## Soak tracking (post-GA gate)\n\n"
-                      "## Beta (shipped; remaining GA gaps)\n\n## Changelog\n",
-                      encoding="utf-8",
-                  )
-                  _, fail = _run_in_tmp(root, docs_check.check_status_heading_uniqueness)
-                  assert fail == 1, f"expected one legacy-section failure, got {fail}"
-          '''
-          addition = '\n'.join(line[10:] if line.startswith('          ') else line for line in addition.splitlines())
+def test_status_heading_contract_rejects_legacy_beta_section():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        docs = root / "docs"
+        docs.mkdir(parents=True)
+        (docs / "status.md").write_text(
+            "# Status\n\n## GA\n\n## GA — soak pending\n\n## Beta\n\n"
+            "## Alpha\n\n## Deprecated\n\n## Soak tracking (post-GA gate)\n\n"
+            "## Beta (shipped; remaining GA gaps)\n\n## Changelog\n",
+            encoding="utf-8",
+        )
+        _, fail = _run_in_tmp(root, docs_check.check_status_heading_uniqueness)
+        assert fail == 1, f"expected one legacy-section failure, got {fail}"
+'''
           if 'def test_status_heading_contract_rejects_legacy_beta_section():' not in text:
               main_marker = '\nif __name__ == "__main__":\n'
               main_at = text.rfind(main_marker)
@@ -126,41 +126,40 @@ jobs:
           prefix = text.split(marker, 1)[0].rstrip()
           replacement = '''
 
-          ## Maturity and delivery
+## Maturity and delivery
 
-          This guide documents the current `main` surface, which is broader than
-          the released base importer. The two contracts are deliberately separate:
+This guide documents the current `main` surface, which is broader than
+the released base importer. The two contracts are deliberately separate:
 
-          ### Base importer — Y1-09 (`GA` / `soaked`)
+### Base importer — Y1-09 (`GA` / `soaked`)
 
-          The released GA record covers the single-file conversion contract and the
-          evidence that existed in the released line. The current support matrix above
-          also contains later additive mappings; those do **not** retroactively widen
-          the released GA contract.
+The released GA record covers the single-file conversion contract and the
+evidence that existed in the released line. The current support matrix above
+also contains later additive mappings; those do **not** retroactively widen
+the released GA contract.
 
-          | Criterion | Released base evidence |
-          | --- | --- |
-          | Translation behavior | Deterministic single-file parse/translate path and its released golden output. |
-          | Performance | Published parse and translate benchmark baselines. |
-          | Limitations | Explicit unsupported-directive and semantic-difference list; no full NGINX emulation claim. |
-          | Compatibility | The documented conversion CLI and generated Jul configuration behavior are governed by [compatibility.md](compatibility.md). |
-          | Soak / validation | [Released importer validation evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts). |
-          | Runnable example | `examples/migrate/nginx.conf` through ordinary conversion mode. |
-          | Security | Parser failure containment, secret-safe diagnostics, and use on a trusted migration host. |
-          | Fuzzing | `FuzzTranslate` covers parse, translate, and marshal round trip. |
-          | Operable surface | `jul import nginx -o <file> <nginx.conf>`. |
+| Criterion | Released base evidence |
+| --- | --- |
+| Translation behavior | Deterministic single-file parse/translate path and its released golden output. |
+| Performance | Published parse and translate benchmark baselines. |
+| Limitations | Explicit unsupported-directive and semantic-difference list; no full NGINX emulation claim. |
+| Compatibility | The documented conversion CLI and generated Jul configuration behavior are governed by [compatibility.md](compatibility.md). |
+| Soak / validation | [Released importer validation evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts). |
+| Runnable example | `examples/migrate/nginx.conf` through ordinary conversion mode. |
+| Security | Parser failure containment, secret-safe diagnostics, and use on a trusted migration host. |
+| Fuzzing | `FuzzTranslate` covers parse, translate, and marshal round trip. |
+| Operable surface | `jul import nginx -o <file> <nginx.conf>`. |
 
-          ### Assessment, provenance, and includes — MIG-ASSESS (`Beta` / `merged`)
+### Assessment, provenance, and includes — MIG-ASSESS (`Beta` / `merged`)
 
-          Schema-v2 human/JSON assessment, stable findings and guidance, source spans,
-          target mappings, and bounded root-confined include traversal are merged on
-          current `main`. They are not contained in the older released GA record and
-          have not completed a separate stable-release and long-running-soak promotion.
-          Their machine contract and operating boundary are documented in
-          [nginx-assessment.md](nginx-assessment.md) and tracked explicitly in
-          [status.md](status.md).
-          '''
-          replacement = '\n'.join(line[10:] if line.startswith('          ') else line for line in replacement.splitlines())
+Schema-v2 human/JSON assessment, stable findings and guidance, source spans,
+target mappings, and bounded root-confined include traversal are merged on
+current `main`. They are not contained in the older released GA record and
+have not completed a separate stable-release and long-running-soak promotion.
+Their machine contract and operating boundary are documented in
+[nginx-assessment.md](nginx-assessment.md) and tracked explicitly in
+[status.md](status.md).
+'''
           importer.write_text(prefix + replacement.rstrip() + '\n', encoding='utf-8', newline='\n')
           PY
       - name: verify documentation
