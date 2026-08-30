@@ -4,6 +4,12 @@ Common first-run and operational issues, with the fastest path to a fix. For a
 full config reference see [configuration.md](configuration.md); to validate a
 config before starting use `jul check` / `jul lint`.
 
+## Start with deterministic diagnostics
+
+Run `jul doctor -config server.toml` before changing a deployment. It reports strict parsing, semantic validation, lint, configured-path and certificate problems, admin exposure, and bounded topology without modifying the system or performing network checks by default. Add `-check-network` only when you deliberately want runtime preflight and immediate-close local bind probes.
+
+When a problem needs to be shared, create `jul support-bundle -config server.toml -output jul-support.tar.gz`. The archive is local, bounded, owner-only, and never uploaded automatically. Add `-include-logs` only after reviewing the configured access-log sensitivity. Always inspect the archive before sharing it. See [diagnostics.md](diagnostics.md) for the result codes, archive inventory, limits, and privacy model.
+
 ## Startup
 
 ### `error: no configuration file at "server.toml"`

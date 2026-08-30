@@ -563,3 +563,22 @@ features:
     9: true
   notes: 'Schema-v2 assessment, source provenance and bounded include traversal are merged through #152/#153. The released
     Y1-09 importer GA record remains separate.'
+- id: OPS-DIAG
+  name: Local diagnostics and support bundles
+  tags:
+  - core
+  maturity: Beta
+  delivery: merged
+  doc: diagnostics.md
+  criteria:
+    1: true
+    2: null
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: null
+    9: null
+  notes: 'Local `jul doctor` and operator-triggered support bundles are merged through #155/#156. They are versioned,
+    bounded, secret-safe and network-free by default. Stable remote API/CLI exposure remains separate work under #150/#151.'

@@ -47,6 +47,7 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
   field-level lifecycle truth from the Go registry.
 - **[Observability](observability.md)** — logs, metrics, tracing, probes and
   runtime surfaces.
+- **[Diagnostics and support bundles](diagnostics.md)** — deterministic local checks, bounded archives, privacy limits, and review-before-sharing guidance.
 - **[Prometheus contract](metrics-contract.json)** — metric names, types, labels
   and release state.
 - **[Security model](../SECURITY.md)** and **[security posture](security-posture.md)**
@@ -88,6 +89,7 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 | Configuration authority and managed drift | [reload-semantics.md](reload-semantics.md) | `Beta` / `merged` |
 | Generated configuration contracts and route identity | [generated/config-reference.md](generated/config-reference.md) | `Beta` / `merged` |
 | NGINX migration assessment, provenance, and includes | [nginx-assessment.md](nginx-assessment.md) | `Beta` / `merged` |
+| Local diagnostics and support bundles | [diagnostics.md](diagnostics.md) | `Beta` / `merged` |
 
 Some capabilities share a canonical guide because they compose one subsystem.
 The status manifest still gives each additive capability its own maturity and

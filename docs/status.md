@@ -52,8 +52,9 @@ not inherit an older GA row merely because it lives in the same package or guide
 - **Current `main`:** contains substantial later work, including cache
   recertification, closed-world lifecycle authority, structured configuration,
   trusted client identity, backend trust, routing/response policy,
-  configuration authority/generated contracts, resilience slices, and NGINX
-  assessment/provenance/include traversal. Those additions retain their own
+  configuration authority/generated contracts, resilience slices, NGINX
+  assessment/provenance/include traversal, and local diagnostics/support bundles.
+  Those additions retain their own
   delivery and maturity rows below.
 - **Volatile execution state:** lives in
   [#62](https://github.com/victornife/jul/issues/62). The
@@ -74,6 +75,7 @@ not inherit an older GA row merely because it lives in the same package or guide
 - **Routing, configuration authority, generated contracts and NGINX assessment:**
   merged after the current RC and therefore represented separately from older
   GA rows.
+- **Local diagnostics and support bundles:** merged Beta capability; stable remote API and remote CLI exposure remain #150/#151.
 
 ## GA criteria legend
 
@@ -152,6 +154,7 @@ not yet at the GA bar. `merged` and `candidate` are not synonyms for released.
 | Configuration authority and managed drift | AUTO-AUTH | core · `console` | `merged` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |
 | Generated configuration contracts and route identity | AUTO-CONTRACT | core | `merged` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | n/a | [generated/config-reference.md](generated/config-reference.md) |
 | NGINX migration assessment, provenance, and includes | MIG-ASSESS | `importer` | `merged` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ✅ | [nginx-assessment.md](nginx-assessment.md) |
+| Local diagnostics and support bundles | OPS-DIAG | core | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [diagnostics.md](diagnostics.md) |
 
 ## Alpha
 

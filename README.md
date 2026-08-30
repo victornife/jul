@@ -133,6 +133,7 @@ a `full` release artifact to enable all optional capabilities.
 | **Redirects** | `return`, `redirect`, and `deny` (403) location actions; custom error pages |
 | **Configuration lifecycle** | Transactional zero-downtime reload, strict preflight, planned-restart staging, history/rollback, and explicit `managed` versus `file_owned` authority with drift/adoption semantics. Field-level lifecycle truth is generated from the Go registry. |
 | **Observability** | Structured logging (text/JSON), pluggable access-log sinks (file/syslog with rotation), Prometheus metrics, OpenTelemetry tracing, health/readiness probes |
+| **Diagnostics** | Read-only `jul doctor` checks with deterministic human/JSON output, plus operator-triggered, bounded, secret-safe local support bundles with no automatic upload ([docs/diagnostics.md](docs/diagnostics.md)) |
 | **Admin GUI** | Loopback-bound web console with live metrics, upstream/certificate status, config history and rollback, setup and structured editors. Legacy shared-token mode remains available; opt-in local multi-principal RBAC with predefined/custom roles, scoped revocable tokens and per-principal audit attribution is shipped (`console` build tag). External OIDC/SAML/SCIM identity is not shipped. |
 | **Developer experience** | Zero-config `jul run --serve`/`--proxy` (no file needed), `jul lint` best-practice checks with CI-friendly exit codes, and `jul fmt` canonical formatting |
 | **Generated contracts** | Deterministic JSON Schema, machine metadata, generated field reference and lifecycle reference derive from code-defined authorities; durable `route_id` supports stable route addressability. Merged Beta. |
@@ -234,6 +235,10 @@ Print the version:
 jul [flags]                                   run the server (default)
 jul serve [-config f]                         run the server (explicit form)
 jul check [-config f] [-json] [-quiet]        full runtime preflight check
+jul doctor [-config f] [-json] [-strict] [-check-network]
+                                              run read-only local diagnostics
+jul support-bundle [-config f] [-output file] [-json] [-include-logs]
+                                              write a bounded local diagnostic archive
 jul healthcheck [-config f] [-addr h:p | -url u] [-ready] [-timeout d] [-json] [-quiet]
                                               probe a running server's health endpoint
 jul lint [-config f] [-strict] [-json] [-quiet]
@@ -269,6 +274,28 @@ jul check -config server.toml -json   # machine-readable output
 Exit codes: `0` ok, `1` validation or runtime error.  The legacy `--check` flag
 on the default command (`jul -check`) is equivalent but `jul check` is the
 canonical subcommand.
+
+### `jul doctor`
+
+Runs deterministic, read-only checks for strict configuration parsing, semantic validation, configured files and certificates, admin exposure, bounded topology, and process/build state. The default run is network-free; `-check-network` explicitly enables bounded runtime preflight and immediate-close listener bind probes. Use `-json` for the versioned machine contract and `-strict` to make warnings fail CI.
+
+```bash
+jul doctor -config server.toml
+jul doctor -config server.toml -json -strict
+```
+
+Exit codes: `0` no errors, `1` one or more diagnostic errors, and `2` invalid usage or warnings under `-strict`. See [docs/diagnostics.md](docs/diagnostics.md).
+
+### `jul support-bundle`
+
+Creates an owner-only, bounded `tar.gz` containing a versioned manifest, safe build/configuration metadata, and the in-process `jul doctor` report. It never uploads automatically, never accepts arbitrary include paths, and excludes raw configuration, private keys, environment dumps, request/response bodies, and traffic captures. Logs are opt-in and limited to a bounded tail of the configured Jul access-log file.
+
+```bash
+jul support-bundle -config server.toml -output jul-support.tar.gz
+jul support-bundle -config server.toml -include-logs -json
+```
+
+Review every bundle before sharing it. See [docs/diagnostics.md](docs/diagnostics.md) for archive layout, limits, privacy guarantees, and limitations.
 
 ### `jul healthcheck`
 
