@@ -25,6 +25,193 @@ jobs:
           set -euo pipefail
           cat .github/tmp/issue154-stage2-*.b64 | tr -d '\n' | base64 --decode > /tmp/issue154-stage2.tgz
           tar -xzf /tmp/issue154-stage2.tgz
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          classifier = Path("internal/migrate/nginx/assessment_classify.go")
+          text = classifier.read_text()
+          old = '''func classifyReturn(params []string, serverLevel bool) capability {
+          \tif len(params) == 0 {
+          \t\treturn blocking("NGX_RETURN_MALFORMED", RiskRouting, "return directive has no status or target")
+          \t}
+          \tif serverLevel {
+          \t\treturn capabilityRegistry[capabilityKey{ContextServer, "return"}]
+          \t}
+          \tcode, err := strconv.Atoi(params[0])
+          \tif err == nil && len(params) > 1 && (code < 300 || code >= 400) {
+          \t\treturn approximated("NGX_LOCATION_RETURN_BODY", RiskRouting, "non-redirect response body is dropped")
+          \t}
+          \treturn capabilityRegistry[capabilityKey{ContextLocation, "return"}]
+          }
+          '''
+          new = '''func classifyReturn(params []string, serverLevel bool) capability {
+          \tif len(params) == 0 {
+          \t\treturn blocking("NGX_RETURN_MALFORMED", RiskRouting, "return directive has no status or target")
+          \t}
+          \tif serverLevel {
+          \t\treturn capabilityRegistry[capabilityKey{ContextServer, "return"}]
+          \t}
+          \tcode, err := strconv.Atoi(params[0])
+          \tif err == nil {
+          \t\tif len(params) > 1 && (code < 300 || code >= 400) {
+          \t\t\treturn approximated("NGX_LOCATION_RETURN_BODY", RiskRouting, "non-redirect response body is dropped")
+          \t\t}
+          \t\tif code >= 300 && code < 400 && len(params) > 1 {
+          \t\t\treturn classifyRedirectTarget(params[1])
+          \t\t}
+          \t\treturn capabilityRegistry[capabilityKey{ContextLocation, "return"}]
+          \t}
+          \treturn classifyRedirectTarget(params[0])
+          }
+
+          func classifyRedirectTarget(target string) capability {
+          \ttarget = strings.TrimSpace(target)
+          \tlower := strings.ToLower(target)
+          \tif strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+          \t\treturn capabilityRegistry[capabilityKey{ContextLocation, "return"}]
+          \t}
+          \treturn approximated(
+          \t\t"NGX_LOCATION_RETURN_RELATIVE",
+          \t\tRiskRouting,
+          \t\t"NGINX expands a local redirect to an absolute URL by default while Jul preserves the relative target",
+          \t)
+          }
+          '''
+          if old not in text:
+              raise SystemExit("classifyReturn implementation did not match expected baseline")
+          classifier.write_text(text.replace(old, new, 1))
+
+          manifest_path = Path("testdata/nginx-corpus/core-multifile-return/manifest.json")
+          manifest = json.loads(manifest_path.read_text())
+          results = manifest["expected_assessment"]["results"]
+          replacement = []
+          replaced = False
+          for result in results:
+              if result.get("code") == "NGX_LOCATION_RETURN" and result.get("count") == 2:
+                  supported = dict(result)
+                  supported["count"] = 1
+                  replacement.append(supported)
+                  approximate = dict(result)
+                  approximate.update({
+                      "code": "NGX_LOCATION_RETURN_RELATIVE",
+                      "class": "approximated",
+                      "count": 1,
+                  })
+                  replacement.append(approximate)
+                  replaced = True
+              else:
+                  replacement.append(result)
+          if not replaced:
+              raise SystemExit("return assessment golden did not match expected baseline")
+          manifest["expected_assessment"]["results"] = replacement
+          for scenario in manifest["scenarios"]:
+              if scenario["id"] != "relative-redirect":
+                  continue
+              scenario["reference"]["headers"]["location"] = ["http://corpus.test:18080/health"]
+              scenario["jul"] = {
+                  "status": 302,
+                  "headers": {"location": ["/health"]},
+              }
+              scenario["expected_verdict"] = "expected_difference"
+              scenario["expected_difference_code"] = "NGX_LOCATION_RETURN_RELATIVE"
+              break
+          else:
+              raise SystemExit("relative-redirect scenario not found")
+          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+
+          changelog = Path("CHANGELOG.md")
+          changelog_text = changelog.read_text()
+          entry = (
+              "- **NGINX migration corpus and selected-dimension real E2E (#154):** "
+              "adds a licensed, sanitized fixture contract; exact assessment/candidate goldens; "
+              "real Jul replay; and a digest-pinned, network-isolated NGINX reference lane. The "
+              "first differential finding now classifies local `return` redirects as approximated "
+              "because NGINX expands them to absolute URLs by default while Jul preserves the "
+              "relative target.\n"
+          )
+          marker = "### Added\n"
+          if entry not in changelog_text:
+              if marker not in changelog_text:
+                  raise SystemExit("CHANGELOG Added section not found")
+              changelog.write_text(changelog_text.replace(marker, marker + entry, 1))
+
+          for docs_path in (Path("docs/nginx-migration-corpus.md"), Path("docs/nginx-importer.md")):
+              docs = docs_path.read_text()
+              note = '''
+
+          ### Corpus-discovered relative redirect boundary
+
+          NGINX expands a local `return 30x /path` target to an absolute `Location`
+          by default, using the request/server authority. Jul preserves `/path`.
+          The importer therefore reports `NGX_LOCATION_RETURN_RELATIVE` as
+          `approximated`, and the corpus records the selected-dimension runtime
+          relationship as `expected_difference` rather than claiming equivalence.
+          '''
+              if "NGX_LOCATION_RETURN_RELATIVE" not in docs:
+                  docs_path.write_text(docs.rstrip() + note + "\n")
+          PY
+
+          cat > internal/migrate/nginx/assessment_return_redirect_test.go <<'GO'
+          // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+          // SPDX-License-Identifier: agpl
+
+          //go:build importer
+
+          package nginx
+
+          import "testing"
+
+          func TestClassifyReturnRedirectTargets(t *testing.T) {
+          \ttests := []struct {
+          \t\tname      string
+          \t\tparams    []string
+          \t\twantCode  string
+          \t\twantClass AssessmentClass
+          \t}{
+          \t\t{
+          \t\t\tname:      "numeric relative redirect",
+          \t\t\tparams:    []string{"302", "/health"},
+          \t\t\twantCode:  "NGX_LOCATION_RETURN_RELATIVE",
+          \t\t\twantClass: AssessmentApproximated,
+          \t\t},
+          \t\t{
+          \t\t\tname:      "implicit relative redirect",
+          \t\t\tparams:    []string{"/health"},
+          \t\t\twantCode:  "NGX_LOCATION_RETURN_RELATIVE",
+          \t\t\twantClass: AssessmentApproximated,
+          \t\t},
+          \t\t{
+          \t\t\tname:      "absolute http redirect",
+          \t\t\tparams:    []string{"301", "http://example.test/next"},
+          \t\t\twantCode:  "NGX_LOCATION_RETURN",
+          \t\t\twantClass: AssessmentSupported,
+          \t\t},
+          \t\t{
+          \t\t\tname:      "absolute https redirect",
+          \t\t\tparams:    []string{"https://example.test/next"},
+          \t\t\twantCode:  "NGX_LOCATION_RETURN",
+          \t\t\twantClass: AssessmentSupported,
+          \t\t},
+          \t\t{
+          \t\t\tname:      "non redirect body",
+          \t\t\tparams:    []string{"200", "ok"},
+          \t\t\twantCode:  "NGX_LOCATION_RETURN_BODY",
+          \t\t\twantClass: AssessmentApproximated,
+          \t\t},
+          \t}
+          \tfor _, test := range tests {
+          \t\tt.Run(test.name, func(t *testing.T) {
+          \t\t\tgot := classifyReturn(test.params, false)
+          \t\t\tif got.code != test.wantCode || got.class != test.wantClass {
+          \t\t\t\tt.Fatalf("classifyReturn(%q) = %s/%s, want %s/%s", test.params, got.code, got.class, test.wantCode, test.wantClass)
+          \t\t\t}
+          \t\t})
+          \t}
+          }
+          GO
+
           cat > scripts/nginx-migration-e2e.sh <<'SCRIPT'
           #!/usr/bin/env bash
           # Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
@@ -190,12 +377,13 @@ jobs:
               -count=1 \
               -v
 
-          echo "equivalent_for_asserted_dimensions: ${FIXTURE_ID}" | tee "${ARTIFACT_DIR}/result.txt"
+          echo "expected_difference: ${FIXTURE_ID}/relative-redirect NGX_LOCATION_RETURN_RELATIVE" | tee "${ARTIFACT_DIR}/result.txt"
           SCRIPT
+
           chmod +x scripts/nginx-corpus-check.sh scripts/nginx-migration-e2e.sh
-          gofmt -w internal/migrate/nginx/corpus/*.go cmd/jul/import_corpus_test.go
-      - name: Validate corpus package
-        run: go test -tags importer ./internal/migrate/nginx/corpus -count=1
+          gofmt -w internal/migrate/nginx/corpus/*.go internal/migrate/nginx/assessment_return_redirect_test.go cmd/jul/import_corpus_test.go
+      - name: Validate importer and corpus packages
+        run: go test -tags importer ./internal/migrate/nginx ./internal/migrate/nginx/corpus -count=1
       - name: Validate importer and real Jul E2E
         run: go test -tags importer ./cmd/jul -run '^TestNGINXCorpusAssessmentCandidateAndRealJul$' -count=1 -v
       - name: Validate pinned NGINX reference lane
@@ -208,7 +396,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/docs-check.py
-          test -z "$(gofmt -l internal/migrate/nginx/corpus cmd/jul/import_corpus_test.go)"
+          test -z "$(gofmt -l internal/migrate/nginx/corpus internal/migrate/nginx/assessment_classify.go internal/migrate/nginx/assessment_return_redirect_test.go cmd/jul/import_corpus_test.go)"
       - name: Commit validated implementation
         shell: bash
         run: |
@@ -218,11 +406,15 @@ jobs:
           git rm .github/workflows/tmp-issue-154-stage2.yml .github/tmp/issue154-stage2-*.b64
           git add \
             .github/workflows/nginx-migration-e2e.yml \
+            CHANGELOG.md \
             Makefile \
             docs/nginx-migration-corpus.md \
             docs/nginx-importer.md \
+            internal/migrate/nginx/assessment_classify.go \
+            internal/migrate/nginx/assessment_return_redirect_test.go \
             internal/migrate/nginx/corpus \
             scripts/nginx-migration-e2e.sh \
-            testdata/nginx-corpus/README.md
-          git commit -m "test(importer): add pinned NGINX reference lane (#154)"
+            testdata/nginx-corpus/README.md \
+            testdata/nginx-corpus/core-multifile-return/manifest.json
+          git commit -m "test(importer): add corpus E2E and classify relative redirects (#154)"
           git push origin HEAD:agent/issue-154-nginx-corpus-e2e
