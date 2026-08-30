@@ -1,4 +1,4 @@
-name: One-shot merge-main conflict probe
+name: One-shot merge reconciled main
 
 on:
   push:
@@ -6,28 +6,130 @@ on:
     paths: [.github/workflows/merge-main-probe.yml]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  probe:
+  merge:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: agent/ops-diagnostics-foundation
           fetch-depth: 0
-      - name: Probe merge
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Merge and reconcile documentation
         shell: bash
         run: |
-          set -u
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
-          if git merge --no-commit --no-ff origin/main; then
-            echo "MERGE_CLEAN"
-            git merge --abort || true
-          else
-            echo "MERGE_CONFLICTS"
-            git diff --name-only --diff-filter=U
-            exit 1
+
+          set +e
+          git merge --no-commit --no-ff origin/main
+          merge_status=$?
+          set -e
+
+          if [ "$merge_status" -ne 0 ]; then
+            conflicts=$(git diff --name-only --diff-filter=U)
+            printf 'Conflicts:\n%s\n' "$conflicts"
+            expected=$(printf 'CHANGELOG.md\ndocs/index.md')
+            if [ "$conflicts" != "$expected" ]; then
+              echo "Unexpected merge conflicts; refusing automatic resolution."
+              exit 1
+            fi
+            git checkout --theirs CHANGELOG.md docs/index.md
+            git add CHANGELOG.md docs/index.md
           fi
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          changelog = Path("CHANGELOG.md")
+          text = changelog.read_text()
+          entry = '- **Deterministic local diagnostics and secret-safe support bundles (#155, #156):** added `jul doctor` with stable human/JSON results, read-only network-free defaults, strict/semantic/lint/path/certificate/admin/topology checks, optional bounded runtime and listener probes, and documented exit codes. Added `jul support-bundle`, which invokes doctor in-process and writes a versioned, owner-only, bounded `tar.gz` with fixed collectors, per-artifact SHA-256 checksums, partial-failure reporting, cancellation, path/symlink/no-overwrite protections, and no phone-home or automatic upload. Raw configuration, private keys, environment dumps, traffic and request/response bodies are excluded; optional logs are limited to the configured access-log tail and receive defensive redaction. New CI gates independently require at least 85% coverage for `internal/diagnostics`, `internal/doctor`, and `internal/supportbundle`, plus full-tag race tests. See [docs/diagnostics.md](docs/diagnostics.md).\n'
+          if entry not in text:
+              marker = "### Added\n"
+              if marker not in text:
+                  raise SystemExit("CHANGELOG Added section not found")
+              text = text.replace(marker, marker + entry, 1)
+              changelog.write_text(text)
+
+          index = Path("docs/index.md")
+          text = index.read_text()
+          operating_marker = "- **[Observability](observability.md)** — logs, metrics, tracing, probes and\n  runtime surfaces.\n"
+          operating_entry = "- **[Diagnostics and support bundles](diagnostics.md)** — deterministic local checks, bounded archives, privacy limits, and review-before-sharing guidance.\n"
+          if operating_entry not in text:
+              if operating_marker not in text:
+                  raise SystemExit("docs/index.md operating marker not found")
+              text = text.replace(operating_marker, operating_marker + operating_entry, 1)
+          feature_marker = "| NGINX migration assessment, provenance, and includes | [nginx-assessment.md](nginx-assessment.md) | `Beta` / `merged` |\n"
+          feature_entry = "| Local diagnostics and support bundles | [diagnostics.md](diagnostics.md) | `Beta` / `merged` |\n"
+          if feature_entry not in text:
+              if feature_marker not in text:
+                  raise SystemExit("docs/index.md feature marker not found")
+              text = text.replace(feature_marker, feature_marker + feature_entry, 1)
+          index.write_text(text)
+
+          manifest = Path("docs/feature-status.yaml")
+          text = manifest.read_text()
+          if "- id: OPS-DIAG\n" not in text:
+              entry = '''
+          - id: OPS-DIAG
+            name: Local diagnostics and support bundles
+            tags:
+            - core
+            maturity: Beta
+            delivery: merged
+            doc: diagnostics.md
+            criteria:
+              1: true
+              2: null
+              3: true
+              4: true
+              5: false
+              6: true
+              7: true
+              8: null
+              9: null
+            notes: 'Local `jul doctor` and operator-triggered support bundles are merged through #155/#156. They are versioned,
+              bounded, secret-safe and network-free by default. Stable remote API/CLI exposure remains separate work under #150/#151.'
+          '''
+              manifest.write_text(text.rstrip() + "\n" + entry.lstrip())
+
+          status = Path("docs/status.md")
+          text = status.read_text()
+          row_marker = "| NGINX migration assessment, provenance, and includes | MIG-ASSESS | `importer` | `merged` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ✅ | [nginx-assessment.md](nginx-assessment.md) |\n"
+          row = "| Local diagnostics and support bundles | OPS-DIAG | core | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [diagnostics.md](diagnostics.md) |\n"
+          if row not in text:
+              if row_marker not in text:
+                  raise SystemExit("docs/status.md Beta row marker not found")
+              text = text.replace(row_marker, row_marker + row, 1)
+          snapshot_marker = "  configuration authority/generated contracts, resilience slices, and NGINX\n  assessment/provenance/include traversal. Those additions retain their own\n"
+          snapshot_replacement = "  configuration authority/generated contracts, resilience slices, NGINX\n  assessment/provenance/include traversal, and local diagnostics/support bundles.\n  Those additions retain their own\n"
+          if snapshot_marker in text:
+              text = text.replace(snapshot_marker, snapshot_replacement, 1)
+          notice_marker = "- **Routing, configuration authority, generated contracts and NGINX assessment:**\n  merged after the current RC and therefore represented separately from older\n  GA rows.\n"
+          notice = "- **Local diagnostics and support bundles:** merged Beta capability; stable remote API and remote CLI exposure remain #150/#151.\n"
+          if notice not in text:
+              if notice_marker not in text:
+                  raise SystemExit("docs/status.md notices marker not found")
+              text = text.replace(notice_marker, notice_marker + notice, 1)
+          status.write_text(text)
+
+          readme = Path("README.md").read_text()
+          for required in ("jul doctor", "jul support-bundle", "docs/diagnostics.md"):
+              if required not in readme:
+                  raise SystemExit(f"README lost diagnostics content: {required}")
+          PY
+
+          git rm .github/workflows/merge-main-probe.yml
+          git add CHANGELOG.md README.md docs/index.md docs/feature-status.yaml docs/status.md
+          go test ./internal/diagnostics ./internal/doctor ./internal/supportbundle ./cmd/jul
+          python3 scripts/docs-check.py
+          test -z "$(gofmt -l internal/diagnostics internal/doctor internal/supportbundle cmd/jul)"
+          git commit -m "Merge main into agent/ops-diagnostics-foundation"
+          git push origin HEAD:agent/ops-diagnostics-foundation
