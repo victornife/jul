@@ -6,8 +6,10 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 
 	"jul/internal/atomicfile"
@@ -15,71 +17,127 @@ import (
 	"jul/internal/migrate/nginx"
 )
 
-// cmdImport translates a foreign configuration into a Jul.IA TOML config.
-// Currently the only supported source is nginx:
+const (
+	importExitOK         = 0
+	importExitInternal   = 1
+	importExitUsage      = 2
+	importExitFindings   = 3
+	importExitParse      = 4
+	importExitValidation = 5
+	importExitIO         = 6
+)
+
+// cmdImport translates or assesses a foreign configuration. The NGINX command
+// keeps the original positional/-o grammar and adds explicit assessment modes:
 //
-//	jul import nginx [-o out.toml] [-strict] <nginx.conf>
+//	jul import nginx [--input nginx.conf] [--output jul.toml]
+//	jul import nginx --assess nginx.conf
+//	jul import nginx --json nginx.conf
+//	jul import nginx --report assessment.json -o jul.toml nginx.conf
 //
-// The translated config is re-parsed and validated (applying defaults, exactly
-// as the server would) before it is emitted, so the output is known to load. A
-// report of untranslated directives is written to stderr and embedded as a
-// comment header in the output. Exit codes: 0 = ok, 1 = parse/translate error or
-// invalid output, 2 = warnings present under -strict.
+// Exit codes are stable for automation: 0 success, 1 internal error, 2 usage,
+// 3 blocking/strict findings, 4 NGINX parse error, 5 generated-candidate
+// validation error, and 6 file I/O error.
 func cmdImport(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "error: missing import source; usage: jul import nginx [-o out.toml] [-strict] <nginx.conf>")
-		return 1
+		fmt.Fprintln(stderr, "error: missing import source; usage: jul import nginx [options] <nginx.conf>")
+		return importExitUsage
 	}
 	source := args[0]
 	if source != "nginx" {
 		fmt.Fprintf(stderr, "error: unknown import source %q; supported sources: nginx\n", source)
-		return 1
+		return importExitUsage
 	}
 
 	fs := flag.NewFlagSet("import nginx", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	outPath := fs.String("o", "", "write the generated config to this file (default: stdout)")
-	strict := fs.Bool("strict", false, "exit non-zero when the generated config has warnings")
+	var outPath string
+	fs.StringVar(&outPath, "o", "", "write the generated config to this file (default: stdout)")
+	fs.StringVar(&outPath, "output", "", "write the generated config to this file (alias of -o)")
+	inputPath := fs.String("input", "", "path to the NGINX configuration file (alternative to the positional argument)")
+	strict := fs.Bool("strict", false, "exit 3 when approximated, ignored, blocking, or Jul lint findings exist")
+	assess := fs.Bool("assess", false, "emit a human migration assessment without writing generated config")
+	reportPath := fs.String("report", "", "write the versioned JSON assessment to this file")
+	jsonOut := fs.Bool("json", false, "emit only the versioned JSON assessment to stdout")
 	if err := fs.Parse(args[1:]); err != nil {
-		return 2
+		return importExitUsage
 	}
-	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "error: provide exactly one nginx configuration file to import")
-		return 1
+
+	inPath, err := resolveImportInput(*inputPath, fs.Args())
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return importExitUsage
 	}
-	inPath := fs.Arg(0)
+	if err := validateImportOutputs(outPath, *reportPath, *assess, *jsonOut); err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return importExitUsage
+	}
+	assessmentRequested := *assess || *jsonOut || *reportPath != ""
 
 	cfg, report, err := nginx.ImportFile(inPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 1
+		code, class, findingCode, message := classifyImportReadError(err)
+		assessment := nginx.FailureAssessment(inPath, class, findingCode, message)
+		if emitErr := emitImportAssessment(assessment, *assess, *jsonOut, *reportPath); emitErr != nil {
+			fmt.Fprintf(stderr, "error: %v\n", emitErr)
+			return importExitIO
+		}
+		if !assessmentRequested {
+			fmt.Fprintf(stderr, "error: %s\n", message)
+		}
+		return code
+	}
+	if report == nil {
+		fmt.Fprintln(stderr, "error: importer returned no migration report")
+		return importExitInternal
+	}
+	assessment := report.Assessment
+	if assessment == nil {
+		assessment = nginx.FailureAssessment(inPath, nginx.AssessmentValidationError, "NGX_ASSESSMENT_MISSING", "migration assessment was not produced")
+		report.Assessment = assessment
 	}
 
 	toml, err := config.Marshal(cfg)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: could not marshal the translated config: %v\n", err)
-		return 1
+		fmt.Fprintln(stderr, "error: could not marshal the translated config")
+		return importExitInternal
 	}
 
-	// Re-parse and validate the output exactly as the server would, so we never
-	// emit a config that will not load. Defaults are applied on Parse.
+	// Re-parse and validate the output exactly as the server would. Assessment
+	// mode is read-only, but still runs this authoritative candidate check.
 	loaded, perr := config.Parse(toml)
 	if perr != nil {
-		fmt.Fprintf(stderr, "error: the translated config did not round-trip: %v\n", perr)
-		return 1
+		assessment.SetValidation([]error{perr}, nil)
+		if emitErr := emitImportAssessment(assessment, *assess, *jsonOut, *reportPath); emitErr != nil {
+			fmt.Fprintf(stderr, "error: %v\n", emitErr)
+			return importExitIO
+		}
+		if !assessmentRequested {
+			fmt.Fprintln(stderr, "error: translated config did not round-trip; not written")
+		}
+		return importExitValidation
 	}
 	verrs := flattenErrors(config.Validate(loaded))
 	warns := config.Lint(loaded)
+	assessment.SetValidation(verrs, warns)
 
-	// Compose the final document: comment header + TOML body.
-	var body strings.Builder
-	body.WriteString(report.Header())
-	if !strings.HasSuffix(report.Header(), "\n") {
-		body.WriteByte('\n')
+	if *reportPath != "" {
+		if err := writeAssessmentFile(*reportPath, assessment); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return importExitIO
+		}
 	}
-	body.WriteByte('\n')
-	body.Write(toml)
-	out := []byte(body.String())
+	if *jsonOut {
+		if err := writeAssessment(stdout, assessment); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return importExitInternal
+		}
+		return importAssessmentExit(assessment, *strict, warns)
+	}
+	if *assess {
+		fmt.Fprint(stdout, assessment.Human())
+		return importAssessmentExit(assessment, *strict, warns)
+	}
 
 	color := wantColor(stderr)
 	for _, e := range verrs {
@@ -88,26 +146,135 @@ func cmdImport(args []string) int {
 	for _, d := range warns {
 		printDiagnostic(stderr, d, color)
 	}
-
 	if len(verrs) > 0 {
 		fmt.Fprintf(stderr, "\nerror: the translated config has %d validation error(s); not written\n", len(verrs))
-		return 1
+		return importExitValidation
 	}
 
-	if *outPath != "" {
-		if err := atomicfile.Write(*outPath, out, 0o600); err != nil {
+	// Preserve the existing generated TOML byte contract: assessment metadata is
+	// separate and the legacy comment header remains unchanged.
+	header := report.Header()
+	var body strings.Builder
+	body.WriteString(header)
+	if !strings.HasSuffix(header, "\n") {
+		body.WriteByte('\n')
+	}
+	body.WriteByte('\n')
+	body.Write(toml)
+	out := []byte(body.String())
+
+	if outPath != "" {
+		if err := atomicfile.Write(outPath, out, 0o600); err != nil {
 			fmt.Fprintf(stderr, "error: %v\n", err)
-			return 1
+			return importExitIO
 		}
-		fmt.Fprintf(stderr, "wrote %s\n", *outPath)
+		fmt.Fprintf(stderr, "wrote %s\n", outPath)
 	} else {
 		_, _ = stdout.Write(out)
 	}
 
 	fmt.Fprintln(stderr)
 	fmt.Fprint(stderr, report.Summary())
-	if *strict && len(warns) > 0 {
-		return 2
+	if assessmentRequested && assessment.HasBlocking() {
+		return importExitFindings
 	}
-	return 0
+	if *strict && (assessment.HasWarnings() || len(warns) > 0) {
+		return importExitFindings
+	}
+	return importExitOK
+}
+
+func resolveImportInput(flagPath string, positional []string) (string, error) {
+	switch {
+	case flagPath != "" && len(positional) > 0:
+		return "", fmt.Errorf("use either --input or one positional NGINX file, not both")
+	case flagPath != "":
+		return flagPath, nil
+	case len(positional) == 1:
+		return positional[0], nil
+	case len(positional) == 0:
+		return "", fmt.Errorf("provide one NGINX configuration file with --input or as a positional argument")
+	default:
+		return "", fmt.Errorf("provide exactly one NGINX configuration file")
+	}
+}
+
+func validateImportOutputs(outPath, reportPath string, assess, jsonOut bool) error {
+	if jsonOut && assess {
+		return fmt.Errorf("--json and --assess are alternative stdout formats")
+	}
+	if (jsonOut || assess) && outPath != "" {
+		return fmt.Errorf("assessment-only mode does not write generated config; remove --output/-o")
+	}
+	if jsonOut && reportPath != "" {
+		return fmt.Errorf("--json already writes the assessment to stdout; remove --report")
+	}
+	if reportPath == "-" {
+		return fmt.Errorf("use --json for an assessment on stdout; --report requires a file path")
+	}
+	if outPath != "" && reportPath != "" && outPath == reportPath {
+		return fmt.Errorf("generated config and assessment report must use different paths")
+	}
+	return nil
+}
+
+func classifyImportReadError(err error) (int, nginx.AssessmentClass, string, string) {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return importExitIO, nginx.AssessmentParseError, "NGX_INPUT_IO", "NGINX configuration could not be read"
+	}
+	return importExitParse, nginx.AssessmentParseError, "NGX_PARSE_ERROR", "NGINX configuration could not be parsed"
+}
+
+func emitImportAssessment(assessment *nginx.Assessment, human, jsonOut bool, reportPath string) error {
+	if reportPath != "" {
+		if err := writeAssessmentFile(reportPath, assessment); err != nil {
+			return err
+		}
+	}
+	if jsonOut {
+		return writeAssessment(stdout, assessment)
+	}
+	if human {
+		fmt.Fprint(stdout, assessment.Human())
+	}
+	return nil
+}
+
+func writeAssessmentFile(path string, assessment *nginx.Assessment) error {
+	data, err := assessment.JSON()
+	if err != nil {
+		return fmt.Errorf("encode assessment: %w", err)
+	}
+	if err := atomicfile.Write(path, data, 0o600); err != nil {
+		return fmt.Errorf("write assessment %s: %w", path, err)
+	}
+	return nil
+}
+
+func writeAssessment(w interface{ Write([]byte) (int, error) }, assessment *nginx.Assessment) error {
+	data, err := assessment.JSON()
+	if err != nil {
+		return fmt.Errorf("encode assessment: %w", err)
+	}
+	if _, err := w.Write(data); err != nil {
+		return fmt.Errorf("write assessment: %w", err)
+	}
+	return nil
+}
+
+func importAssessmentExit(assessment *nginx.Assessment, strict bool, warnings []config.Diagnostic) int {
+	if assessment == nil {
+		return importExitInternal
+	}
+	if assessment.Summary.ValidationErrors > 0 || assessment.Validation.Status == "invalid" {
+		return importExitValidation
+	}
+	if assessment.HasBlocking() {
+		return importExitFindings
+	}
+	if strict && (assessment.HasWarnings() || len(warnings) > 0) {
+		return importExitFindings
+	}
+	return importExitOK
 }

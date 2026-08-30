@@ -25,12 +25,13 @@ type Finding struct {
 // attention. It is never silent — every directive the translator did not map is
 // captured in Skipped, and every lossy mapping is captured in Notes.
 type Report struct {
-	Source    string
-	Servers   int
-	Upstreams int
-	Locations int
-	Skipped   []Finding
-	Notes     []string
+	Source     string
+	Servers    int
+	Upstreams  int
+	Locations  int
+	Skipped    []Finding
+	Notes      []string
+	Assessment *Assessment
 }
 
 // skip records an unsupported directive from the parse tree.
