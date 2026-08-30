@@ -238,6 +238,22 @@ backend](core-http.md#forwarded-headers-to-the-backend).
 10. **Source formatting/comments are not preserved.** Provenance belongs to the
     report, not generated TOML.
 
+## Migration evidence corpus
+
+The importer is continuously exercised against the versioned, sanitized
+[NGINX migration compatibility corpus](nginx-migration-corpus.md). The PR core
+lane checks exact schema-v2 assessment projections, canonical candidate
+validation, and real-Jul loopback behavior. A separate workflow runs an official
+NGINX 1.28.3 image pinned by digest and compares only the explicit response
+dimensions declared by each selected scenario.
+
+The evidence is deliberately narrower than universal compatibility: fixtures
+can be supported, approximated, blocking, not executed, or equivalent only for
+their asserted dimensions. Corpus admission rejects proprietary/user source,
+private-key material, unsafe request headers, non-loopback replay, symlinks and
+unbounded files. See the corpus guide for the current category inventory,
+deferrals, image isolation, and local commands.
+
 ## Benchmarks
 
 Run:
@@ -297,3 +313,13 @@ inspect evidence before writing a candidate.
 | Security/threat model | ✅ | Root/symlink/bounds/redaction note above. |
 | Fuzzing | ✅ | `FuzzTranslate` covers parse, translate, and marshal round trip. |
 | Operable surface | ✅ | `jul import nginx --help` and deterministic human/JSON output. |
+
+### Corpus-discovered local redirect boundary
+
+NGINX expands a local `return 30x /path` target to an absolute
+`Location` by default, using the request/server authority. Jul preserves
+`/path`. The importer therefore reports
+`NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT` as `approximated`, and the corpus
+records the selected-dimension runtime relationship as
+`expected_difference` rather than claiming equivalence.
+
