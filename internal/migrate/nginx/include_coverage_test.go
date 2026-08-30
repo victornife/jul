@@ -87,8 +87,8 @@ func TestIncludeTraversalErrorAndClassification(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		err     error
+		name     string
+		err      error
 		wantCode string
 	}{
 		{"typed", limitErr, "NGX_INCLUDE_FILE_LIMIT"},
@@ -195,12 +195,12 @@ func TestResolvedTreePolicyAndTranslationReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	tree := &resolvedSourceTree{
-		catalog:        catalog,
-		limits:         IncludeLimits{MaxDepth: 1, MaxFiles: 2, MaxFileBytes: 3, MaxTotalBytes: 4, MaxGlobMatches: 5},
-		followIncludes: true,
-		complete:       false,
-		filesRead:      2,
-		totalBytes:     4,
+		catalog:           catalog,
+		limits:            IncludeLimits{MaxDepth: 1, MaxFiles: 2, MaxFileBytes: 3, MaxTotalBytes: 4, MaxGlobMatches: 5},
+		followIncludes:    true,
+		complete:          false,
+		filesRead:         2,
+		totalBytes:        4,
 		includeResolution: map[ngx.IDirective]includeResolution{},
 	}
 	policy := tree.policy()
@@ -208,7 +208,7 @@ func TestResolvedTreePolicyAndTranslationReport(t *testing.T) {
 		t.Fatalf("policy = %+v", policy)
 	}
 
-	include := &ngx.Include{Directive: ngx.Directive{Name: "include", Line: 7}}
+	include := &ngx.Include{Directive: &ngx.Directive{Name: "include", Line: 7}}
 	tree.includeResolution[include] = includeResolution{Code: "NGX_INCLUDE_CYCLE", Message: "cycle"}
 	report := &Report{Skipped: []Finding{
 		{Line: 7, Name: "include", Reason: "include not followed (unsupported)"},
