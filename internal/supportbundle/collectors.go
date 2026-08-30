@@ -258,6 +258,9 @@ func tailRegularFile(ctx context.Context, path string, limit int64) ([]byte, boo
 func openVerifiedRegularFile(path string) (*os.File, os.FileInfo, error) {
 	cleanPath := filepath.Clean(path)
 	if err := rejectSymlinkComponents(cleanPath); err != nil {
+		if strings.Contains(err.Error(), "symbolic-link component") {
+			return nil, nil, fmt.Errorf("configured access log path contains a symbolic link; refusing to follow it")
+		}
 		return nil, nil, fmt.Errorf("configured access log path is unsafe: %w", err)
 	}
 	before, err := os.Lstat(cleanPath)
