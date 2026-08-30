@@ -84,6 +84,24 @@ jobs:
 
           tests = Path('scripts/test_docs_check.py')
           text = tests.read_text(encoding='utf-8')
+          old_fixture = (
+              '        (docs / "status.md").write_text(\n'
+              '            "# Status\\n\\n## Repeated\\n\\nText.\\n\\n## Repeated\\n",\n'
+              '            encoding="utf-8",\n'
+              '        )\n'
+          )
+          new_fixture = (
+              '        (docs / "status.md").write_text(\n'
+              '            "# Status\\n\\n## GA\\n\\n## GA — soak pending\\n\\n## Beta\\n\\n"\n'
+              '            "## Alpha\\n\\n## Deprecated\\n\\n## Soak tracking (post-GA gate)\\n\\n"\n'
+              '            "## Repeated\\n\\nText.\\n\\n## Repeated\\n\\n## Changelog\\n",\n'
+              '            encoding="utf-8",\n'
+              '        )\n'
+          )
+          if text.count(old_fixture) != 1:
+              raise SystemExit(f'expected one duplicate-heading fixture, found {text.count(old_fixture)}')
+          text = text.replace(old_fixture, new_fixture, 1)
+
           test_name = 'test_status_heading_contract_rejects_legacy_beta_section'
           addition = (
               '\n\n'
