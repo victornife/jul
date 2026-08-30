@@ -138,6 +138,14 @@ func cmdLint(args []string) int {
 	// configuration that disables backend verification should not reach
 	// production by accident. -quiet suppresses warnings only, as its help says.
 	diags := config.Lint(cfg)
+	// ADR 0019 §11.3: managed mode requires a writable, non-symlinked config
+	// path. This is a property of the machine, not the configuration document,
+	// so it is checked here (where the real path is known) rather than inside
+	// config.Lint.
+	hasConfigPath := *configPath != ""
+	authority, _ := app.ResolveConfigAuthority(cfg.Global.ConfigAuthority, hasConfigPath)
+	diags = append(diags, app.CheckManagedFilesystem(*configPath, authority)...)
+	diags = append(diags, app.CheckFileOwnedArtifacts(*configPath, authority)...)
 	var lintErrs, warns []config.Diagnostic
 	for _, d := range diags {
 		if d.Severity == config.SeverityError {

@@ -229,6 +229,31 @@ type ConfigApplyCoordinator struct {
 	// slow terminal restoration. Production leaves them unset.
 	beforeRestore func()
 	waitMargin    time.Duration
+	// afterRestore is a deterministic test barrier invoked immediately after
+	// restorePreviousLocked returns, on both the synchronous enqueue-failure
+	// path and the async failed-reload path, before the caller decides
+	// clean-vs-inconsistent or reassesses drift. Production leaves it nil;
+	// tests use it to write an external change between the restoration write
+	// and the baseline's own resolution of that restoration.
+	afterRestore func()
+	// beforeGateClears is a deterministic test barrier invoked immediately
+	// before inFlightState clears, on both the synchronous enqueue-failure
+	// path and the async finalizer, after any baseline resolution/retry has
+	// already run. Production leaves it nil; tests use it to simulate a
+	// watcher event landing in the narrow window between the transaction's
+	// own terminal drift reassessment and the gate actually reopening.
+	beforeGateClears func()
+	// beforeBaselineWriteRetry is a deterministic test barrier invoked at the
+	// start of resolveBaselineWriteRetry, before it does any work. Production
+	// leaves it nil; tests use it to hold the retry open and observe that the
+	// admission gate (inFlightState) still refuses a concurrent hot apply for
+	// as long as the retry is unresolved (ADR 0019 §11.2.0.1).
+	beforeBaselineWriteRetry func()
+	// afterBaselineWriteRetry is a deterministic test barrier invoked once
+	// resolveBaselineWriteRetry has resolved (committed, abandoned, or marked
+	// inconsistent). Production leaves it nil; tests use it to await the
+	// retry instead of polling.
+	afterBaselineWriteRetry func()
 
 	// clock is an internal deterministic test seam for time. nil selects the
 	// real wall clock; tests may inject a fakeClock to advance deadlines and
@@ -252,6 +277,13 @@ type ConfigApplyCoordinator struct {
 	// inFlightState tracks whether a managed apply transaction still owns the
 	// config-path mutation/restoration gate. It is protected by mu.
 	inFlightState ApplyInFlightState
+	// driftAssessmentPending is set by AssessDriftNow when a watcher/SIGHUP
+	// event arrives while inFlightState is waiting and is deferred rather than
+	// evaluated (see AssessDriftNow). It is protected by mu and drained by
+	// drainPendingDriftAssessment once the gate clears, so a real external
+	// write landing after the transaction's own terminal reassessment but
+	// before the gate clears is not lost until an unrelated later trigger.
+	driftAssessmentPending bool
 }
 
 // ApplyRaw applies a raw configuration bytes slice. It is the hot-apply entry
@@ -266,9 +298,23 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 
 	// applyMu serializes applies so only one candidate is in flight at a time.
 	// c.mu protects coordinator state and is not held across the reload wait so
-	// the async finalizer can safely restore without deadlocking.
+	// the async finalizer can safely restore without deadlocking. For the
+	// hot-apply path specifically, applyMu itself is released once the
+	// candidate is persisted and the reload is enqueued (see applyMuHeld
+	// below) — inFlightState, not applyMu, is what continues to admit-refuse
+	// a later apply for the rest of this transaction's lifetime, including
+	// its baseline retry. Releasing applyMu there rather than only at
+	// function return is what lets the finalizer resolve that retry under
+	// applyMu itself without deadlocking against this call's own wait below
+	// (ADR 0015 §4 / #226: the mutation gate and terminal publication must
+	// not depend on each other for release).
 	c.applyMu.Lock()
-	defer c.applyMu.Unlock()
+	applyMuHeld := true
+	defer func() {
+		if applyMuHeld {
+			c.applyMu.Unlock()
+		}
+	}()
 
 	if mode == "" {
 		mode = ApplyHot
@@ -447,7 +493,7 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 		return result, nil
 	}
 
-	return c.applyCandidate(ctx, id, data, pfResult.Candidate, pfResult.PreparedAdmin, baseline, mode)
+	return c.applyCandidate(ctx, id, data, pfResult.Candidate, pfResult.PreparedAdmin, baseline, mode, &applyMuHeld)
 }
 
 // servingReloadTimeout returns the transaction deadline budget for AC-08. It is
@@ -694,10 +740,51 @@ func (c *ConfigApplyCoordinator) assessManagedDrift() {
 // is the entry point the file watcher and SIGHUP call in managed mode (ADR
 // 0019 §11 point 4/5, §12): both become drift detectors and never enqueue a
 // reload themselves.
+//
+// While a managed transaction still owns the config-path mutation gate
+// (inFlightState == waiting), the file on disk may already be this
+// transaction's own in-flight candidate compared against a baseline that
+// has not been updated to match it yet — the watcher's own echo of Jul's
+// write would misreport that as drift, and managed mode's driftOnlyFileConsumer
+// deliberately does not suppress it by digest (a no-op transaction's echo
+// is otherwise indistinguishable from a real external write). Skip the
+// assessment in that window instead: the transaction's own mandatory
+// terminal reassessment (completeWriteAndReassessDrift /
+// rewindWriteAndReassessDrift) is the authoritative check once the baseline
+// is current, so nothing is lost by deferring to it here.
 func (c *ConfigApplyCoordinator) AssessDriftNow() {
 	c.applyMu.Lock()
 	defer c.applyMu.Unlock()
+	c.mu.Lock()
+	inFlight := c.inFlightState == ApplyInFlightWaiting
+	if inFlight {
+		// Remember that an assessment was deferred, so drainPendingDriftAssessment
+		// re-checks once the gate clears rather than losing this event entirely —
+		// a real external write can still land after the transaction's own
+		// terminal reassessment but before inFlightState clears.
+		c.driftAssessmentPending = true
+	}
+	c.mu.Unlock()
+	if inFlight {
+		return
+	}
 	c.assessManagedDrift()
+}
+
+// drainPendingDriftAssessment re-runs the drift assessment once more if
+// AssessDriftNow deferred one while this transaction owned inFlightState.
+// Called immediately after every point that clears inFlightState, outside
+// mu (assessManagedDrift needs only ManagedBaselineStore's own locking), so
+// a watcher/SIGHUP event that arrived during the transaction's window is not
+// silently dropped once the gate reopens.
+func (c *ConfigApplyCoordinator) drainPendingDriftAssessment() {
+	c.mu.Lock()
+	pending := c.driftAssessmentPending
+	c.driftAssessmentPending = false
+	c.mu.Unlock()
+	if pending {
+		c.assessManagedDrift()
+	}
 }
 
 // managedBaselineBlockMessage reports whether a managed write must be
@@ -720,21 +807,232 @@ func (c *ConfigApplyCoordinator) managedBaselineBlockMessage() (string, bool) {
 	}
 }
 
+// currentConfigState computes the single authoritative ADR 0019 §16
+// config_state enum for the coordinator's current authority. It is the one
+// place this value is computed; every surface (status, apply/adopt results,
+// the CLI --json object) reads it from here rather than re-deriving it —
+// otherwise a file-owned process could leak a managed_* value from the
+// ManagedBaselineStore that is constructed regardless of authority (purely
+// so a file_owned startup can find and clean up artifacts a prior managed
+// epoch left behind), and a managed process with a durable staged restart
+// would report managed_clean, because the baseline itself already advanced
+// to the staged candidate and is not drift (ADR 0019 §11.2.3).
+//
+// managed_drift and managed_inconsistent always win over a durable staged
+// restart, never the reverse: both name a condition §12/§11.2.1 requires to
+// be reported and alertable, and a planned-restart marker being present says
+// nothing about whether the file has since drifted out from under it — an
+// external writer does not consult PlannedRestart before editing the file.
+// Masking that behind managed_pending_restart would hide exactly the
+// condition an operator most needs to see. Only once neither applies does a
+// durable staged restart take priority over the baseline's other states
+// (managed_clean, managed_desired_ahead, managed_unadopted): §16's table
+// defines managed_pending_restart for "a staged restart is durable"
+// regardless of what the baseline separately shows in those cases.
+func (c *ConfigApplyCoordinator) currentConfigState() (ConfigState, ManagedInconsistentReason) {
+	if c.Authority == AuthorityFileOwned {
+		return c.fileOwnedConfigState(), ""
+	}
+	if c.ManagedBaseline == nil {
+		return "", ""
+	}
+	bst := c.ManagedBaseline.Status()
+	if bst.State == ConfigStateManagedDrift || bst.State == ConfigStateManagedInconsistent {
+		return bst.State, bst.Reason
+	}
+	if c.PlannedRestart != nil && c.PlannedRestart.IsPending() {
+		return ConfigStateManagedPendingRestart, ""
+	}
+	return bst.State, bst.Reason
+}
+
+// fileOwnedConfigState computes the file_owned half of ADR 0019 §16's state
+// model, entirely independent of any ManagedBaselineStore artifacts a prior
+// managed epoch may have left behind. file_owned_desired_ahead reuses the
+// same external-divergence signal PendingRestartCheck already maintains for
+// a restart-required edit that is not yet live; file_owned_invalid is a
+// current file that fails validation — parsing is necessary but not
+// sufficient, since config.Parse performs no semantic validation of its own
+// and a syntactically well-formed file can still fail config.Validate (e.g.
+// an unresolvable upstream reference) — file_owned_clean is everything else,
+// including a process with no configuration file at all (ADR 0019 §9.1.1).
+func (c *ConfigApplyCoordinator) fileOwnedConfigState() ConfigState {
+	if c.PlannedRestart != nil {
+		if st := c.PlannedRestart.State(); st.State == PlannedRestartStateExternalDivergence {
+			return ConfigStateFileOwnedDesiredAhead
+		}
+	}
+	if c.Path == "" {
+		return ConfigStateFileOwnedClean
+	}
+	raw, err := c.readConfigRaw()
+	if err != nil {
+		// A read failure says nothing about the content's validity; report
+		// the least-alarming state rather than asserting invalidity we did
+		// not observe.
+		return ConfigStateFileOwnedClean
+	}
+	cfg, perr := config.Parse(raw)
+	if perr != nil {
+		return ConfigStateFileOwnedInvalid
+	}
+	if verr := config.Validate(cfg); verr != nil {
+		return ConfigStateFileOwnedInvalid
+	}
+	return ConfigStateFileOwnedClean
+}
+
+// completeWriteAndReassessDrift wraps ManagedBaselineStore.CompleteWrite with
+// an immediate re-read of the actual disk file. CompleteWrite assumes disk
+// holds exactly committedRaw — the bytes this transaction wrote — but an
+// external writer does not take applyMu and can land between the write and
+// this call, or (on the async hot-apply path, where applyMu is released once
+// the candidate is persisted and the reload is enqueued) any time during the
+// whole reload wait. Re-assessing immediately afterward, from the CURRENT
+// file content rather than the assumption CompleteWrite bakes in, is what
+// lets such a race surface as managed_drift(committedRaw, disk) instead of
+// being silently overwritten by CompleteWrite's own optimistic
+// managed_clean — an external write racing the transaction is exactly what
+// ADR 0019 §12's drift detection exists to catch, not something admission
+// alone can prevent, since it never gated external writers in the first
+// place.
+func (c *ConfigApplyCoordinator) completeWriteAndReassessDrift(committedRaw []byte, canonicalVersion string) error {
+	if err := c.ManagedBaseline.CompleteWrite(committedRaw, canonicalVersion); err != nil {
+		return err
+	}
+	c.assessManagedDrift()
+	return nil
+}
+
 // rewindOrMarkInconsistent resolves the managed-baseline transaction when a
 // managed write's reload failed and restoration was attempted (T-write's
 // restored arm, ADR 0019 §11.2). When restoration succeeded it rewinds the
 // baseline to the prior bytes; when restoration failed the on-disk state is
 // uncertain, so the baseline is marked inconsistent immediately rather than
-// left clean on the strength of an intention (§11.2.1a).
+// left clean on the strength of an intention (§11.2.1a). The caller must
+// pass a verified restored outcome (a fresh disk read compared against the
+// prior bytes), not merely "the restoration write itself did not error" —
+// the latter is not evidence the file still holds those bytes right now.
 func (c *ConfigApplyCoordinator) rewindOrMarkInconsistent(restored bool) *DegradedEntry {
 	if restored {
-		if err := c.ManagedBaseline.RewindWrite(); err != nil {
+		if err := c.rewindWriteAndReassessDrift(); err != nil {
 			return &DegradedEntry{Kind: DegradedBaselineError, Message: "baseline could not be rewound after restoration"}
 		}
 		return nil
 	}
 	c.ManagedBaseline.MarkInconsistent(ReasonRestorationFailed)
 	return &DegradedEntry{Kind: DegradedBaselineError, Message: "baseline left inconsistent after a failed restoration"}
+}
+
+// rewindWriteAndReassessDrift mirrors completeWriteAndReassessDrift for the
+// restoration arm: RewindWrite's own bookkeeping assumes disk holds exactly
+// the restored prior bytes, but neither applyMu nor c.mu holds off an
+// external writer, which can land between the restoration write and this
+// call. Re-reading immediately afterward, from the CURRENT file content
+// rather than the assumption RewindWrite bakes in, lets such a race surface
+// as drift/inconsistency instead of being silently overwritten by
+// RewindWrite's own optimistic managed_clean.
+func (c *ConfigApplyCoordinator) rewindWriteAndReassessDrift() error {
+	if err := c.ManagedBaseline.RewindWrite(); err != nil {
+		return err
+	}
+	c.assessManagedDrift()
+	return nil
+}
+
+// retryBaselineWriteLocked performs ADR 0019 §11.2.1a's single required
+// retry after a post-commit baseline write failure, for callers that already
+// hold applyMu for their own transaction (T-mark's adoption commit and
+// T-write's stage_restart commit both do — unlike the hot-apply finalizer,
+// neither detaches into another goroutine before returning). Running the
+// retry inline, under the same applyMu hold, keeps it inside the same
+// admission-gate-held critical section §11.2.0.1 requires: no later
+// transaction can be admitted, contend with this retry over the same digest,
+// or observe a window where the retry's own eventual outcome is still
+// pending.
+//
+// It re-reads the configuration and verifies it still matches the digest
+// committedRaw intends to record — the exact check the ADR requires, because
+// a retry that skipped it could record a digest a restoration had already
+// superseded. A mismatch, a read failure, or a failed retry all resolve the
+// same way: managed_inconsistent, reason baseline_unwritable. Recovery never
+// resolves managed_clean on the strength of an intention — only the retry
+// write's own success does that, via commit's normal path.
+func (c *ConfigApplyCoordinator) retryBaselineWriteLocked(committedRaw []byte, commit func([]byte) error) {
+	if c.ManagedBaseline == nil {
+		return
+	}
+	current, err := c.readConfigRaw()
+	if err != nil || sha256Hex(current) != sha256Hex(committedRaw) {
+		c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
+		return
+	}
+	if err := commit(committedRaw); err != nil {
+		c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
+	}
+}
+
+// resolveBaselineWriteRetry is retryBaselineWriteLocked's counterpart for
+// the one call site that cannot run it inline: the hot-apply finalizer's
+// initial CompleteWrite failure happens in its own goroutine, and by that
+// point the ApplyRaw call that spawned it may already have returned on a
+// timeout and released applyMu — so the retry cannot assume applyMu is
+// already held, and re-entering it there would deadlock if it were.
+//
+// ADR 0019 §11.2.0.1 requires the admission gate to stay closed until this
+// retry reaches its terminal state, exactly like the initial write. The
+// caller enforces that: it must call this only after the finalizer's own
+// terminal-result delivery (so a synchronously-waiting ApplyRaw call has
+// already returned and dropped applyMu, rather than deadlocking against
+// it), and it must not clear inFlightState until this call returns — that
+// is what keeps a later hot apply from being admitted while this retry is
+// still pending, closing the exact race an earlier version of this fix
+// left open (a stale retry losing the race for applyMu to a later,
+// fully-successful apply and wrongly regressing it to
+// managed_inconsistent).
+//
+// It takes applyMu itself, re-reads the configuration, and verifies it
+// still matches the digest committedRaw intends to record. A mismatch is
+// not automatically this retry's failure to detect: while inFlightState
+// blocks a later ordinary apply, it does not gate adoption or
+// stage_restart, so the mismatch may be a later, independent transaction
+// that already established its own valid baseline for whatever the file
+// now holds — in which case the system is already consistent, and
+// recording managed_inconsistent would wrongly regress that newer
+// successful commit. Abandoning silently when the current baseline
+// already names the current file's digest closes that hole. Any other
+// mismatch, a read failure, or a failed retry all resolve the same way:
+// managed_inconsistent, reason baseline_unwritable.
+func (c *ConfigApplyCoordinator) resolveBaselineWriteRetry(committedRaw []byte, commit func([]byte) error) {
+	if c.ManagedBaseline == nil {
+		return
+	}
+	if c.beforeBaselineWriteRetry != nil {
+		c.beforeBaselineWriteRetry()
+	}
+	intended := sha256Hex(committedRaw)
+	c.applyMu.Lock()
+	defer c.applyMu.Unlock()
+	raw, err := c.readConfigRaw()
+	var currentDigest string
+	if err == nil {
+		currentDigest = sha256Hex(raw)
+	}
+	switch {
+	case err != nil:
+		c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
+	case currentDigest != intended:
+		if bst := c.ManagedBaseline.Status(); bst.BaselineRawSHA256 != currentDigest {
+			c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
+		}
+	default:
+		if err := commit(committedRaw); err != nil {
+			c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
+		}
+	}
+	if c.afterBaselineWriteRetry != nil {
+		c.afterBaselineWriteRetry()
+	}
 }
 
 // newManagedApplyInstanceID returns a 12-hex-character boot-scoped identifier
@@ -1022,8 +1320,11 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 	// never be lost to — or block — the outer machine's own guarantee.
 	var stageDegraded *DegradedEntry
 	if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
-		if err := c.ManagedBaseline.CompleteWrite(data, persistedVersion); err != nil {
+		if err := c.completeWriteAndReassessDrift(data, persistedVersion); err != nil {
 			stageDegraded = &DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written"}
+			// ApplyRaw still holds applyMu for this whole call, so the retry
+			// runs inline rather than racing a later apply for it.
+			c.retryBaselineWriteLocked(data, func(b []byte) error { return c.completeWriteAndReassessDrift(b, persistedVersion) })
 		}
 	}
 	c.mu.Unlock()
@@ -1111,7 +1412,7 @@ func (c *ConfigApplyCoordinator) plannedRestartStatus() *admin.PendingRestartSta
 	return res
 }
 
-func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext, id string, data []byte, candidate *config.Candidate, preparedAdmin *server.PreparedCommit, baseline admin.MutationBaseline, mode ApplyMode) (ApplyResult, error) {
+func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext, id string, data []byte, candidate *config.Candidate, preparedAdmin *server.PreparedCommit, baseline admin.MutationBaseline, mode ApplyMode, applyMuHeld *bool) (ApplyResult, error) {
 	preparedOwned := preparedAdmin != nil
 	defer func() {
 		if preparedOwned {
@@ -1243,12 +1544,13 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// Enqueue failed: the candidate file is on disk but the runtime will
 		// not reload. Restore the exact previous bytes and suppress the
 		// restoration echo so the watcher does not loop.
-		restoreErr := c.restorePreviousLocked(baseline.Raw, baseline.Exists, rawDigest)
-		var baselineDegraded *DegradedEntry
 		if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
-			baselineDegraded = c.rewindOrMarkInconsistent(restoreErr == nil)
+			c.ManagedBaseline.MarkFailedApply()
 		}
-		c.inFlightState = ApplyInFlightNone
+		restoreErr := c.restorePreviousLocked(baseline.Raw, baseline.Exists, rawDigest)
+		if c.afterRestore != nil {
+			c.afterRestore()
+		}
 		// Build structured truth with Persisted/Restored/FinalDiskVersion
 		// while still holding the lock so the disk read in withRestorationOutcome
 		// is atomic with the restoration. ApplyID is set so the callback can
@@ -1278,12 +1580,31 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 				Error:          err.Error(),
 			},
 		}
+		// Verify restoration by re-reading disk BEFORE the baseline decides
+		// clean vs inconsistent: restoreErr == nil only means the restoration
+		// write itself did not error, not that disk still holds those bytes
+		// at this instant — an external writer can race the restoration
+		// write itself, same as it can race a successful apply's commit.
 		terminal = c.withRestorationOutcome(terminal, baseline.Raw, baseline.Exists, rawDigest)
+		var baselineDegraded *DegradedEntry
+		if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
+			baselineDegraded = c.rewindOrMarkInconsistent(terminal.Restored)
+		}
 		if baselineDegraded != nil {
 			terminal.Degraded = append(terminal.Degraded, *baselineDegraded)
 		}
 		// M-05: Move callback after unlock to prevent mutex wedge on panic.
 		c.mu.Unlock()
+		// beforeGateClears fires with mu released: a test barrier that blocks
+		// here must not hold mu, or a concurrent AssessDriftNow (which also
+		// takes mu) would deadlock against it.
+		if c.beforeGateClears != nil {
+			c.beforeGateClears()
+		}
+		c.mu.Lock()
+		c.inFlightState = ApplyInFlightNone
+		c.mu.Unlock()
+		c.drainPendingDriftAssessment()
 		// AC-05: an enqueue failure whose restoration also failed records a
 		// recovery snapshot; a clean restoration records nothing. Recorded
 		// through the single terminal completion helper outside c.mu.
@@ -1292,6 +1613,13 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	}
 	preparedOwned = false // the server reload plan now owns commit/abort
 	c.mu.Unlock()
+	// The candidate is persisted and the reload is enqueued: release applyMu
+	// here rather than at function return (see the comment where it was
+	// acquired, in ApplyRaw). inFlightState — already ApplyInFlightWaiting —
+	// is what continues to refuse a later apply for the rest of this
+	// transaction, including the async finalizer's baseline retry below.
+	*applyMuHeld = false
+	c.applyMu.Unlock()
 
 	// AC-02: register the exact-ID pending ledger record now that the candidate
 	// is persisted and the reload is enqueued, but BEFORE the synchronous path
@@ -1323,41 +1651,75 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		restoreNeeded := !rr.Published && rr.Outcome != server.ReloadAppliedLive && rr.Outcome != server.ReloadAppliedDegraded
 		c.mu.Lock()
 		if restoreNeeded {
+			if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
+				c.ManagedBaseline.MarkFailedApply()
+			}
 			if c.beforeRestore != nil {
 				c.beforeRestore()
 			}
 			if err := c.restorePreviousLocked(baseline.Raw, baseline.Exists, rawDigest); err != nil {
 				c.logRestorationFailure(id, err)
 			}
+			if c.afterRestore != nil {
+				c.afterRestore()
+			}
 		}
 		terminal := c.buildTerminalResult(mode, persistedVersion, desiredVersion, rr, baseline.Raw, baseline.Exists, rawDigest)
-		// ADR 0019 §11.2.0.1: the baseline transaction terminalizes here — under
-		// c.mu, immediately before the admission gate (inFlightState) is
-		// cleared — so a later apply is never admitted while this one's
-		// baseline is still pending.
+		// ADR 0019 §11.2.0.1: the baseline transaction terminalizes here,
+		// before the admission gate (inFlightState) is cleared, so a later
+		// apply is never admitted while this one's baseline is still
+		// pending. A post-commit write failure needs a retry (§11.2.1a); it
+		// cannot run inline here because it takes applyMu itself (freed
+		// above once the candidate was persisted and the reload enqueued —
+		// see ApplyRaw), and this goroutine still holds c.mu, which would
+		// invert the lock order every other applyMu-then-c.mu caller uses.
+		// c.mu is released below, before the retry runs, precisely to avoid
+		// that.
+		needsBaselineRetry := false
 		if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
 			if restoreNeeded {
 				if d := c.rewindOrMarkInconsistent(terminal.Restored); d != nil {
 					terminal.Degraded = append(terminal.Degraded, *d)
 				}
-			} else if err := c.ManagedBaseline.CompleteWrite(data, persistedVersion); err != nil {
+			} else if err := c.completeWriteAndReassessDrift(data, persistedVersion); err != nil {
 				terminal.Degraded = append(terminal.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written"})
+				needsBaselineRetry = true
 			}
 		}
-		// #226 / AC-03: every config-path mutation is complete at this point,
-		// including any required restoration and the final disk-state read. Clear
-		// the admission gate while still holding mu, then release the server's
-		// reload-serialization gate before any completion callback can publish a
-		// terminal ledger record. Therefore a client that observes terminal state
-		// can immediately submit the next valid apply; it can never see terminal
-		// truth while the coordinator still reports the prior apply as in flight.
+		c.mu.Unlock()
+
+		// ADR 0015 §4 / #226 requires the mutation gate to clear and the
+		// terminal result to publish only after the config-path mutation is
+		// fully resolved — a baseline retry is part of that mutation, not a
+		// side effect of reporting it, so it must resolve here, before
+		// either. inFlightState is still ApplyInFlightWaiting throughout
+		// this call, so a later ordinary apply is refused as in flight for
+		// the whole of it; AdoptExternal checks the same flag for the same
+		// reason, since applyMu alone no longer serializes this window.
+		if needsBaselineRetry {
+			c.resolveBaselineWriteRetry(data, func(b []byte) error { return c.completeWriteAndReassessDrift(b, persistedVersion) })
+		}
+
+		// #226 / AC-03: every config-path mutation — including any baseline
+		// retry — is complete at this point. Clear the admission gate, then
+		// release the server's reload-serialization gate, before any
+		// completion callback can publish a terminal ledger record.
 		//
 		// The non-config terminal side effects remain exactly-once and ordered:
 		// completeManagedApply serializes history/audit/metrics/ledger work with
 		// finalizeMu. A later apply may start while that work finishes, but its own
 		// terminal publication queues behind this finalizer.
+		//
+		// beforeGateClears fires with mu released: a test barrier that blocks
+		// here must not hold mu, or a concurrent AssessDriftNow (which also
+		// takes mu) would deadlock against it.
+		if c.beforeGateClears != nil {
+			c.beforeGateClears()
+		}
+		c.mu.Lock()
 		c.inFlightState = ApplyInFlightNone
 		c.mu.Unlock()
+		c.drainPendingDriftAssessment()
 		close(finalizedCh)
 		// Carry any post-persistence pending-registration failure into the
 		// terminal finalization provenance so it is surfaced through the
@@ -1502,6 +1864,11 @@ func (c *ConfigApplyCoordinator) completeManagedApply(reqCtx admin.ApplyRequestC
 	// releases the config mutation gate before terminal publication.
 	c.finalizeMu.Lock()
 	defer c.finalizeMu.Unlock()
+
+	// ADR 0019 §16: config_state is computed once, here — the single point
+	// every managed apply/adopt path funnels through at terminalization —
+	// rather than re-derived independently by each surface.
+	result.ConfigState, _ = c.currentConfigState()
 
 	fin := c.notifyManagedApplyComplete(admin.ManagedApplyCompletion{
 		Context:     reqCtx,

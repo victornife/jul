@@ -339,6 +339,18 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			"config_authority", authority.String(),
 			"hint", `set [global].config_authority = "managed" or "file_owned" to declare it explicitly`)
 	}
+	// ADR 0019 §11.3: managed mode requires a writable, non-symlinked config
+	// path. Reported rather than fatal — the process still runs, serves
+	// traffic, and reports the mode; only managed writes will fail.
+	if hasConfigPath {
+		for _, d := range CheckManagedFilesystem(tomlSrc.Path, authority) {
+			if d.Severity == config.SeverityError {
+				log.Error("managed configuration path is unsuitable", "message", d.Message, "hint", d.Hint)
+			} else {
+				log.Warn("managed configuration path may be unsuitable", "message", d.Message, "hint", d.Hint)
+			}
+		}
+	}
 
 	// In managed mode neither the file watcher nor SIGHUP triggers a reload
 	// (ADR 0019 §11 points 4-5): both become drift detectors. The real
@@ -623,12 +635,15 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				// one bounded cleanup performed once at startup (§17.2): close
 				// any managed epoch inherited from a prior restart, and remove
 				// any orphan planned-restart backup Reconcile would never
-				// collect on its own.
-				if err := managedBaseline.CloseEpoch(); err != nil {
+				// collect on its own. RemoveOrphanBackup is threaded through
+				// as the step-2 callback so CloseEpoch runs the two
+				// secret-bearing removals (snapshot, then orphan backup)
+				// strictly before the safe tombstone write.
+				hadManagedArtifacts := managedBaseline.HasArtifacts()
+				if err := managedBaseline.CloseEpoch(sharedStore.RemoveOrphanBackup); err != nil {
 					log.Warn("file-owned startup could not remove leftover managed-baseline artifacts (read-only mount?)", "error", err)
-				}
-				if err := sharedStore.RemoveOrphanBackup(); err != nil {
-					log.Warn("file-owned startup could not remove an orphan planned-restart backup", "error", err)
+				} else if hadManagedArtifacts {
+					log.Info("file-owned startup closed a leftover managed-baseline epoch", "config", configPath)
 				}
 			}
 		}
@@ -704,29 +719,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if err != nil {
 				return admin.AdoptPreviewResult{}, err
 			}
-			out := admin.AdoptPreviewResult{
-				OK:               a.OK,
-				Origin:           a.Origin,
-				ObservedDigest:   a.ObservedDigest,
-				BaseVersion:      a.BaselineVersion,
-				CandidateVersion: a.CandidateVersion,
-				RestartRequired:  a.RestartRequired,
-				ValidationErrors: a.ValidationErrors,
-			}
-			if !a.OK {
-				return out, nil
-			}
-			if a.PreviousRaw == nil {
-				out.DiffUnavailableReason = "no_prior_managed_state"
-				return out, nil
-			}
-			prevCfg, perr := config.Parse(a.PreviousRaw)
-			candCfg, cerr := config.Parse(a.CandidateRaw)
-			if perr == nil && cerr == nil {
-				d := admin.DiffConfigs(prevCfg, candCfg)
-				out.Diff = &d
-			}
-			return out, nil
+			return toAdminAdoptPreviewResult(a), nil
 		}
 		deps.AdoptExternal = func(ctx admin.ApplyRequestContext, req admin.AdoptExternalRequest) (admin.ConfigApplyResult, error) {
 			res, err := coordinator.AdoptExternal(ctx, req)
@@ -781,10 +774,17 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			Mode:   authority.String(),
 			Source: string(authoritySource),
 		}
-		if coordinator != nil && coordinator.ManagedBaseline != nil {
+		if coordinator != nil {
+			state, reason := coordinator.currentConfigState()
+			status.ConfigState = string(state)
+			status.InconsistentReason = string(reason)
+		}
+		// Drift/version/digest fields are managed-mode baseline evidence.
+		// Gating them on authority (not just a nil coordinator) keeps a
+		// file_owned process from surfacing artifacts a prior managed epoch
+		// left behind, matching config_state's own no-leak requirement.
+		if coordinator != nil && authority == AuthorityManaged && coordinator.ManagedBaseline != nil {
 			bst := coordinator.ManagedBaseline.Status()
-			status.ConfigState = string(bst.State)
-			status.InconsistentReason = string(bst.Reason)
 			status.Drift = bst.Drift
 			if !bst.DriftDetectedAt.IsZero() {
 				status.DriftDetectedAt = bst.DriftDetectedAt
@@ -792,6 +792,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			status.BaselineVersion = bst.BaselineCanonicalVersion
 			status.DiskVersion = bst.DiskCanonicalVersion
 			status.DiskParseError = bst.DiskParseError
+			status.DiskRawDigest = truncatedDigest(bst.DiskRawSHA256)
 		}
 		return status
 	}
@@ -1103,6 +1104,46 @@ func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
 		Origin:                r.Origin,
 		AppOutcome:            r.AppOutcome,
 	}
+}
+
+// toAdminAdoptPreviewResult converts an app-layer adoption assessment into
+// the admin API preview response shape, including parsing the diff itself
+// (the assessment carries only raw buffers). It is a pure projection: no
+// new policy is added.
+func toAdminAdoptPreviewResult(a AdoptExternalAssessment) admin.AdoptPreviewResult {
+	out := admin.AdoptPreviewResult{
+		OK:                 a.OK,
+		Origin:             a.Origin,
+		InconsistentReason: string(a.InconsistentReason),
+		ObservedDigest:     a.ObservedDigest,
+		BaseVersion:        a.BaselineVersion,
+		CandidateVersion:   a.CandidateVersion,
+		RestartRequired:    a.RestartRequired,
+		ValidationErrors:   a.ValidationErrors,
+	}
+	if !a.OK {
+		return out
+	}
+	if a.PreviousRaw == nil {
+		// ADR 0019 §14.1: origin inconsistent means the diff is unavailable
+		// because the prior snapshot is damaged, not because no prior
+		// baseline ever existed — reporting no_prior_managed_state here
+		// would contradict the inconsistent_reason already carried on the
+		// same response.
+		if a.Origin == "inconsistent" {
+			out.DiffUnavailableReason = out.InconsistentReason
+		} else {
+			out.DiffUnavailableReason = "no_prior_managed_state"
+		}
+		return out
+	}
+	prevCfg, perr := config.Parse(a.PreviousRaw)
+	candCfg, cerr := config.Parse(a.CandidateRaw)
+	if perr == nil && cerr == nil {
+		d := admin.DiffConfigs(prevCfg, candCfg)
+		out.Diff = &d
+	}
+	return out
 }
 
 // buildRBACPolicy constructs an rbac.Policy from the already-secrets-expanded

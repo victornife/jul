@@ -501,6 +501,9 @@ function ConfigAuthorityBanner({ authority }: { readonly authority: ConfigAuthor
 	} else if (authority.config_state === "managed_inconsistent") {
 		text = `Managed baseline is inconsistent (${authority.config_inconsistent_reason ?? "unknown reason"}) — writes are refused; investigate before proceeding.`;
 		tone = "bg-jul-danger/15 text-jul-danger border-jul-danger/40";
+	} else if (authority.config_state === "managed_desired_ahead") {
+		text = "The managed configuration is owned and saved, but the running server is not yet serving it — restart to converge, or re-stage.";
+		tone = "bg-jul-warning/15 text-jul-warning border-jul-warning/40";
 	} else {
 		return null;
 	}

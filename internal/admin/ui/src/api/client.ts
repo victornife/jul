@@ -421,6 +421,7 @@ export const ConfigAuthoritySchema = z.object({
   baseline_version: z.string().optional(),
   disk_version: z.string().optional(),
   disk_parse_error: z.string().optional(),
+  disk_raw_digest: z.string().optional(),
 });
 export type ConfigAuthority = z.infer<typeof ConfigAuthoritySchema>;
 

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"os"
 
 	"jul/internal/admin"
 	"jul/internal/config"
@@ -20,15 +21,16 @@ import (
 // PreviousRaw is nil when Origin is "no_baseline", so a caller never renders
 // an empty diff where none is knowable.
 type AdoptExternalAssessment struct {
-	OK               bool
-	Origin           string // drift | no_baseline | inconsistent
-	ObservedDigest   string
-	BaselineVersion  string
-	CandidateRaw     []byte
-	CandidateVersion string
-	PreviousRaw      []byte
-	RestartRequired  bool
-	ValidationErrors []string
+	OK                 bool
+	Origin             string                    // drift | no_baseline | inconsistent
+	InconsistentReason ManagedInconsistentReason // set only when Origin == "inconsistent"
+	ObservedDigest     string
+	BaselineVersion    string
+	CandidateRaw       []byte
+	CandidateVersion   string
+	PreviousRaw        []byte
+	RestartRequired    bool
+	ValidationErrors   []string
 }
 
 // originForBaselineState maps a managed-baseline state to the §11.2.1 origin
@@ -48,11 +50,41 @@ func originForBaselineState(state ConfigState) string {
 	}
 }
 
+// verifyRetainedSnapshot reads the managed baseline's snapshot and verifies
+// it against the marker's own digest (ADR 0019 §14 step 5) before any caller
+// trusts it as the previous managed configuration. Snapshot() only reads
+// bytes; it performs no verification of its own, and adoptAndStageLocked's
+// digest check on prevRaw must not be the only place a corrupted-but-
+// readable snapshot is caught — the preview and hot-adoption paths read the
+// same snapshot and must be equally suspicious of it, since a wrong-but-
+// readable snapshot would otherwise silently produce the wrong diff, the
+// wrong history entry, and the wrong lifecycle classification.
+//
+// A missing snapshot and an unreadable one are reported with the distinct
+// ADR-defined reasons (§11.2.1's table lists both), not collapsed into one.
+func (c *ConfigApplyCoordinator) verifyRetainedSnapshot(bst BaselineStatus) ([]byte, ManagedInconsistentReason, error) {
+	snap, serr := c.ManagedBaseline.Snapshot()
+	if serr != nil {
+		reason := ReasonSnapshotUnreadable
+		if errors.Is(serr, os.ErrNotExist) {
+			reason = ReasonSnapshotMissing
+		}
+		return nil, reason, serr
+	}
+	if bst.BaselineRawSHA256 != "" && sha256Hex(snap) != bst.BaselineRawSHA256 {
+		return nil, ReasonSnapshotDigestMismatch, fmt.Errorf("snapshot digest does not match the recorded baseline")
+	}
+	return snap, "", nil
+}
+
 // AssessAdoptExternal reads the current external file and assesses it
 // against the managed baseline without any side effect: strict decode,
 // lifecycle classification (to report RestartRequired without rejecting),
 // and the origin the operation would resolve. It never writes the marker,
-// the snapshot, or the configuration file.
+// the snapshot, or the configuration file, and it never mutates the
+// in-memory baseline status either (ADR 0019 §14: preview is side-effect-
+// free) — a damaged baseline is reported through the assessment's own
+// fields, never by calling MarkInconsistent.
 func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment, error) {
 	if c.Authority != AuthorityManaged || c.ManagedBaseline == nil {
 		return AdoptExternalAssessment{}, errors.New("adoption is only available in managed mode")
@@ -65,23 +97,61 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 	bst := c.ManagedBaseline.Status()
 	origin := originForBaselineState(bst.State)
 
+	// ADR 0019 §14 step 5: read and verify the retained snapshot up front, so
+	// every return below reports a consistent BaselineVersion. Some
+	// managed_inconsistent reasons (marker_missing, marker_unreadable,
+	// cleanup_incomplete) have no marker to recover a canonical version
+	// from — BaselineCanonicalVersion is itself "" — yet the snapshot itself
+	// is exactly why the state is marker_missing rather than
+	// managed_unadopted. Reporting the snapshot's own canonical version
+	// there gives a later adoption request a real, non-empty base_version to
+	// bind to instead of an empty wildcard.
+	var prevRaw []byte
+	var prevCfg *config.Config
+	recoveredBaseVersion := bst.BaselineCanonicalVersion
+	inconsistentReason := bst.Reason
+	if origin != "no_baseline" {
+		snap, reason, serr := c.verifyRetainedSnapshot(bst)
+		if serr != nil {
+			// ADR 0019 §14.1: an inconsistent origin is "attempted; degraded
+			// if the snapshot is unreadable" — not unavailable. A damaged
+			// prior snapshot means the diff and history are unavailable, not
+			// that adoption itself is; the preview must reach the same
+			// OK=true conclusion the actual hot-adoption commit does, or a
+			// client would see a preview saying "cannot adopt" contradicted
+			// by a commit that then succeeds. prevRaw/prevCfg stay nil so
+			// the diff stays absent below.
+			origin = "inconsistent"
+			inconsistentReason = reason
+		} else {
+			prevRaw = snap
+			prevCfg, _ = config.Parse(snap)
+			if recoveredBaseVersion == "" {
+				if prevCfg != nil {
+					recoveredBaseVersion = server.CanonicalVersion(prevCfg)
+				} else {
+					// The retained snapshot itself does not parse: there is no
+					// canonical version to compute, but falling back to "" here
+					// would make it indistinguishable from an omitted field, and
+					// would never detect the snapshot being replaced by a
+					// different unparseable blob between preview and adoption.
+					// A digest-derived, unambiguously-tagged token still gives
+					// the CAS something real to bind to and compare.
+					recoveredBaseVersion = "unparsed:" + sha256Hex(snap)
+				}
+			}
+		}
+	}
+
 	cfg, perr := config.Parse(raw)
 	if perr != nil {
 		return AdoptExternalAssessment{
-			Origin:           origin,
-			ObservedDigest:   digest,
-			BaselineVersion:  bst.BaselineCanonicalVersion,
-			ValidationErrors: []string{perr.Error()},
+			Origin:             origin,
+			InconsistentReason: inconsistentReason,
+			ObservedDigest:     digest,
+			BaselineVersion:    recoveredBaseVersion,
+			ValidationErrors:   []string{perr.Error()},
 		}, nil
-	}
-
-	var prevRaw []byte
-	var prevCfg *config.Config
-	if origin != "no_baseline" {
-		if snap, serr := c.ManagedBaseline.Snapshot(); serr == nil {
-			prevRaw = snap
-			prevCfg, _ = config.Parse(snap)
-		}
 	}
 
 	// PreflightStageRestart classifies restart-required changes instead of
@@ -92,10 +162,11 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 	pfResult, err := c.Preflight.Apply(context.Background(), cfg, prevCfg, PreflightStageRestart)
 	if err != nil {
 		return AdoptExternalAssessment{
-			Origin:           origin,
-			ObservedDigest:   digest,
-			BaselineVersion:  bst.BaselineCanonicalVersion,
-			ValidationErrors: []string{err.Error()},
+			Origin:             origin,
+			InconsistentReason: inconsistentReason,
+			ObservedDigest:     digest,
+			BaselineVersion:    recoveredBaseVersion,
+			ValidationErrors:   []string{err.Error()},
 		}, nil
 	}
 	restartRequired := false
@@ -110,14 +181,15 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 	}
 
 	return AdoptExternalAssessment{
-		OK:               true,
-		Origin:           origin,
-		ObservedDigest:   digest,
-		BaselineVersion:  bst.BaselineCanonicalVersion,
-		CandidateRaw:     raw,
-		CandidateVersion: server.CanonicalVersion(cfg),
-		PreviousRaw:      prevRaw,
-		RestartRequired:  restartRequired,
+		OK:                 true,
+		Origin:             origin,
+		InconsistentReason: inconsistentReason,
+		ObservedDigest:     digest,
+		BaselineVersion:    recoveredBaseVersion,
+		CandidateRaw:       raw,
+		CandidateVersion:   server.CanonicalVersion(cfg),
+		PreviousRaw:        prevRaw,
+		RestartRequired:    restartRequired,
 	}, nil
 }
 
@@ -145,6 +217,23 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 	c.applyMu.Lock()
 	defer c.applyMu.Unlock()
 
+	// A hot apply releases applyMu once its candidate is persisted and its
+	// reload is enqueued, relying on inFlightState — not applyMu — to refuse
+	// a later apply for the rest of its transaction, including its baseline
+	// retry (ADR 0019 §11.2.0.1). Adoption must check the same flag, or it
+	// could commit a T-mark against bytes a still-resolving hot apply just
+	// wrote, racing that apply's own baseline resolution.
+	c.mu.Lock()
+	inFlight := c.inFlightState == ApplyInFlightWaiting
+	c.mu.Unlock()
+	if inFlight {
+		return ApplyResult{
+			OK:      false,
+			Mode:    mode,
+			Message: "A previous apply is still in flight; wait for it to complete or check the runtime overview for status.",
+		}, nil
+	}
+
 	// ADR 0019 §14.1: reject while a planned restart is pending rather than
 	// silently discarding a staged, previewed candidate.
 	if c.PlannedRestart != nil && c.PlannedRestart.IsPending() {
@@ -157,8 +246,87 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 	}
 
 	bst := c.ManagedBaseline.Status()
-	if req.BaseVersion != "" && bst.BaselineCanonicalVersion != "" && req.BaseVersion != bst.BaselineCanonicalVersion {
-		return ApplyResult{OK: false, Mode: mode, Conflict: true, Message: "The managed baseline changed since this adoption was previewed; re-preview and try again."}, nil
+	origin := originForBaselineState(bst.State)
+
+	// ADR 0019 §14 step 5: read and verify the retained snapshot before
+	// binding anything to it. Done here, ahead of the base_version check,
+	// because some managed_inconsistent reasons (marker_missing,
+	// marker_unreadable, cleanup_incomplete) have no marker to recover a
+	// canonical version from — BaselineCanonicalVersion is itself "" — yet
+	// the snapshot itself is exactly why the state is marker_missing rather
+	// than managed_unadopted. Binding to the snapshot's own canonical
+	// version there gives base_version a real, non-empty value to check
+	// against instead of degrading the CAS into an unconditional wildcard.
+	var prevRaw []byte
+	recoveredBaseVersion := bst.BaselineCanonicalVersion
+	if origin != "no_baseline" {
+		snap, reason, serr := c.verifyRetainedSnapshot(bst)
+		if serr != nil {
+			// ADR 0019 §14.1: managed_inconsistent (including a damaged prior
+			// snapshot — snapshot_missing, snapshot_unreadable,
+			// snapshot_digest_mismatch) already blocks ordinary managed
+			// writes; adoption is the designated recovery path out of it and
+			// must not also refuse, or these states become unrecoverable
+			// without manual sidecar surgery. stage_restart is the one
+			// exception (§11.2.4): it needs a trustworthy P to construct a
+			// safe .bak/discard, so it alone still refuses here.
+			if mode == ApplyStageRestart {
+				c.ManagedBaseline.MarkInconsistent(reason)
+				return ApplyResult{OK: false, Mode: mode, Message: "The managed baseline snapshot could not be verified; nothing was staged."}, fmt.Errorf("%w: verify managed baseline snapshot: %v", admin.ErrConfigStorageUnavailable, serr)
+			}
+			// Report the origin this really is regardless of what bst.State
+			// happened to say before this check (mirrors AssessAdoptExternal,
+			// which makes the same override in its own returned assessment).
+			// prevRaw stays nil: the diff and any prior-state history become
+			// unavailable, not wrong. recoveredBaseVersion already carries
+			// the marker's own version when one exists (computed above, from
+			// bst.BaselineCanonicalVersion before this snapshot check), so
+			// the CAS below still binds to something real whenever the
+			// marker itself is intact.
+			origin = "inconsistent"
+		} else {
+			prevRaw = snap
+			if recoveredBaseVersion == "" {
+				if snapCfg, perr := config.Parse(snap); perr == nil {
+					recoveredBaseVersion = server.CanonicalVersion(snapCfg)
+				} else {
+					// See AssessAdoptExternal: an unparseable snapshot still gets
+					// a real, digest-derived CAS token rather than degrading to
+					// an empty value indistinguishable from an omitted field.
+					recoveredBaseVersion = "unparsed:" + sha256Hex(snap)
+				}
+			}
+		}
+	}
+
+	// ADR 0019 §14 step 6: adoption binds itself to BOTH the observed external
+	// digest and the managed baseline version observed at preview time — an
+	// omitted field must never silently disable the CAS it exists to enforce.
+	// base_version has nothing to bind to when no baseline exists yet, so it is
+	// required only when one does (origin != "no_baseline"); observed_digest is
+	// always required, because a preview — including a no_baseline one — always
+	// returns one.
+	//
+	// recoveredBaseVersion is empty here only when origin == "no_baseline"
+	// (nothing to recover a version from in the first place): every
+	// origin != "no_baseline" case above now resolves to a real, non-empty
+	// token — the marker's own version, the snapshot's canonical version, or
+	// (since the snapshot itself may not parse) a digest-derived fallback —
+	// so an empty base_version is never accepted as a wildcard once a prior
+	// managed baseline exists.
+	if origin != "no_baseline" {
+		if recoveredBaseVersion == "" {
+			if req.BaseVersion != "" {
+				return ApplyResult{OK: false, Mode: mode, Conflict: true, Message: "The managed baseline changed since this adoption was previewed; re-preview and try again."}, nil
+			}
+		} else {
+			if req.BaseVersion == "" {
+				return ApplyResult{OK: false, Mode: mode, Message: "A managed baseline exists; base_version from the preview is required to adopt."}, nil
+			}
+			if req.BaseVersion != recoveredBaseVersion {
+				return ApplyResult{OK: false, Mode: mode, Conflict: true, Message: "The managed baseline changed since this adoption was previewed; re-preview and try again."}, nil
+			}
+		}
 	}
 
 	// §14 step 8 / §14.2: the digest fence. This read produces the buffer the
@@ -168,7 +336,10 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 		return ApplyResult{OK: false, Mode: mode, Message: "Failed to read the external configuration file."}, fmt.Errorf("%w: read external file for adoption: %v", admin.ErrConfigStorageUnavailable, err)
 	}
 	observed := sha256Hex(raw)
-	if req.ObservedDigest != "" && observed != req.ObservedDigest {
+	if req.ObservedDigest == "" {
+		return ApplyResult{OK: false, Mode: mode, Message: "observed_digest from the preview is required to adopt."}, nil
+	}
+	if observed != req.ObservedDigest {
 		return ApplyResult{OK: false, Mode: mode, Conflict: true, Message: "The external file changed since it was previewed; re-preview and try again."}, nil
 	}
 
@@ -177,11 +348,6 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 		return ApplyResult{OK: false, Mode: mode, Message: "The external configuration could not be parsed.", ValidationErrors: []string{perr.Error()}}, nil
 	}
 
-	origin := originForBaselineState(bst.State)
-	var prevRaw []byte
-	if origin != "no_baseline" {
-		prevRaw, _ = c.ManagedBaseline.Snapshot()
-	}
 	var prevCfg *config.Config
 	if len(prevRaw) > 0 {
 		prevCfg, _ = config.Parse(prevRaw)
@@ -234,9 +400,42 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 	}
 
 	// Hot adoption: T-mark commits the baseline first — no configuration is
-	// written, so nothing can require rolling back.
-	if err := c.ManagedBaseline.CommitMark(raw, persistedVersion); err != nil {
-		return ApplyResult{OK: false, Mode: mode, Message: "Failed to record the adopted baseline; nothing was changed."}, fmt.Errorf("%w: commit managed baseline: %v", admin.ErrConfigStorageUnavailable, err)
+	// written, so nothing can require rolling back. The marker write is the
+	// commit point (ADR 0019 §11.2.1a): its failure means the operation never
+	// happened and the prior baseline is intact. A snapshot-only failure is
+	// different — the marker already committed, so the adoption succeeded and
+	// only its provenance degraded (§33.2's baseline_error), which is why the
+	// two writes are split rather than made through the combined CommitMark.
+	if err := c.ManagedBaseline.CommitMarkerOnly(raw, persistedVersion); err != nil {
+		return ApplyResult{OK: false, Mode: mode, Message: "Failed to record the adopted baseline; nothing was changed."}, fmt.Errorf("%w: commit managed baseline marker: %v", admin.ErrConfigStorageUnavailable, err)
+	}
+	if err := c.ManagedBaseline.CommitSnapshotOnly(raw); err != nil {
+		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after adoption"})
+		c.retryBaselineWriteLocked(raw, c.ManagedBaseline.CommitSnapshotOnly)
+	}
+
+	// ADR 0019 §14.2/§14.3: the one post-commit read, scoped exclusively to
+	// drift assessment — it is never transaction input. It distinguishes an
+	// external write ordered after the fence (adoption still succeeded; the
+	// file has already drifted again) from a read failure (adoption still
+	// succeeded; drift assessment is deferred to the next §12 trigger). It
+	// never feeds the snapshot, the marker, the history snapshot, or the
+	// reload below, all of which use the buffers already retained.
+	postCommitRaw, postCommitErr := c.readConfigRaw()
+	driftDetectedPostCommit := false
+	switch {
+	case postCommitErr != nil:
+		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedDriftUnknown, Message: "the configuration could not be re-read after adoption; drift assessment deferred"})
+	case sha256Hex(postCommitRaw) != observed:
+		var postVersion, postParseErr string
+		if pcfg, perr := config.Parse(postCommitRaw); perr == nil {
+			postVersion = server.CanonicalVersion(pcfg)
+		} else {
+			postParseErr = perr.Error()
+		}
+		c.ManagedBaseline.AssessDrift(postCommitRaw, nil, postVersion, postParseErr)
+		driftDetectedPostCommit = true
+		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedDriftAfterAdopt, Message: "the file no longer matches the adopted candidate"})
 	}
 
 	liveVersion := ""
@@ -266,8 +465,13 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 	if err := c.SubmitReload(req2); err != nil {
 		// ADR 0019 §14 step 10: a reload that cannot even be enqueued does not
 		// fail the adoption — the bytes are owned, and nothing was written
-		// that could be restored. The process enters managed_desired_ahead.
-		c.ManagedBaseline.MarkDesiredAhead()
+		// that could be restored. The process enters managed_desired_ahead,
+		// unless the post-commit fence already found the file drifted again —
+		// that is strictly more urgent than desired_ahead and must not be
+		// silently overwritten by an unrelated reload-enqueue failure.
+		if !driftDetectedPostCommit {
+			c.ManagedBaseline.MarkDesiredAhead()
+		}
 		result.AppOutcome = "owned_not_serving"
 		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedStagingIncomplete, Message: "reload could not be enqueued after adoption"})
 		result.Message = "External configuration adopted, but the live reload could not be enqueued; a restart will converge it."
@@ -286,7 +490,9 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 		// ADR 0019 §14 step 10: a reload that does not take does not fail the
 		// adoption either, and is specifically NOT not_applied — nothing was
 		// written that needs restoring.
-		c.ManagedBaseline.MarkDesiredAhead()
+		if !driftDetectedPostCommit {
+			c.ManagedBaseline.MarkDesiredAhead()
+		}
 		result.AppOutcome = "owned_not_serving"
 		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedStagingIncomplete, Message: "adoption committed but the live reload did not take"})
 		result.Message = "External configuration adopted, but the live reload did not take; a restart will converge it."
@@ -381,6 +587,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 		}
 		if snapErr := c.ManagedBaseline.CommitSnapshotOnly(candidateRaw); snapErr != nil {
 			result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after adoption"})
+			c.retryBaselineWriteLocked(candidateRaw, c.ManagedBaseline.CommitSnapshotOnly)
 		}
 		c.ManagedBaseline.MarkDesiredAhead()
 		result.AppOutcome = "owned_not_serving"
@@ -408,7 +615,14 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 			}
 			if snapErr := c.ManagedBaseline.CommitSnapshotOnly(candidateRaw); snapErr != nil {
 				result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after adoption"})
+				c.retryBaselineWriteLocked(candidateRaw, c.ManagedBaseline.CommitSnapshotOnly)
 			}
+			// The file is already known to no longer match the just-committed
+			// baseline (that is what this branch means) — assess drift now
+			// rather than leaving config_state reporting managed_clean until
+			// an unrelated later trigger catches up. A no-op if a more severe
+			// managed_inconsistent was just recorded above.
+			c.assessManagedDrift()
 			result.AppOutcome = "owned_not_serving"
 			result.Degraded = append(result.Degraded,
 				DegradedEntry{Kind: DegradedStagingIncomplete, Message: "the external file changed while staging the adoption"},
@@ -437,6 +651,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 	// configuration file can repair it (§11.2.1b).
 	if err := c.ManagedBaseline.CommitSnapshotOnly(candidateRaw); err != nil {
 		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after staging"})
+		c.retryBaselineWriteLocked(candidateRaw, c.ManagedBaseline.CommitSnapshotOnly)
 	}
 	return nil
 }

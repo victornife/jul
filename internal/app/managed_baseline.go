@@ -229,8 +229,13 @@ func (s *ManagedBaselineStore) CompleteWrite(committedRaw []byte, canonicalVersi
 // take effect (a pre-Publish restoration put the previous bytes back), so the
 // marker returns to naming the prior digest/version. The snapshot already
 // holds the prior bytes — CompleteWrite never ran — so no snapshot write is
-// needed. It is a no-op (not an error) when no "preparing" marker is found,
-// so a restoration path that races a concurrent repair does not fail loudly.
+// needed. It is a no-op (not an error) only when no "preparing" marker is
+// found, so a restoration path that races a concurrent repair does not fail
+// loudly. A genuine read failure (I/O error, corrupt JSON) is a different
+// thing entirely — an unreadable marker is not evidence that nothing needs
+// rewinding, and swallowing it here would report a successful rewind (no
+// degraded entry) while the on-disk marker still reads whatever it read
+// before, which no later trigger would ever revisit.
 func (s *ManagedBaselineStore) RewindWrite() error {
 	if s == nil || s.ConfigPath == "" {
 		return nil
@@ -239,7 +244,10 @@ func (s *ManagedBaselineStore) RewindWrite() error {
 	defer s.mu.Unlock()
 
 	marker, err := s.loadMarkerLocked()
-	if err != nil || marker == nil || marker.State != baselineStatePreparing {
+	if err != nil {
+		return fmt.Errorf("managed baseline: read marker before rewind: %w", err)
+	}
+	if marker == nil || marker.State != baselineStatePreparing {
 		return nil
 	}
 	if err := s.writeMarkerLocked(ManagedBaselineMarker{
@@ -351,13 +359,23 @@ func (s *ManagedBaselineStore) Snapshot() ([]byte, error) {
 // set). It never re-reads the path itself. It is a no-op when no managed
 // baseline has been established or the store is inconsistent — drift is only
 // meaningful relative to a trustworthy baseline.
+//
+// managed_desired_ahead is a live entry state, not only managed_clean and
+// managed_drift (ADR 0019 §10's state diagram has an explicit
+// managed_desired_ahead -> managed_drift edge for "external write after
+// adoption"): the file and baseline agree on entry, but the runtime is
+// simply behind, so a later external edit must still be caught. A match
+// found while already managed_desired_ahead leaves that state alone rather
+// than collapsing it to managed_clean — AssessDrift observes only the
+// baseline-vs-disk dimension, never the runtime-serving one, so it must not
+// assert a convergence it cannot see.
 func (s *ManagedBaselineStore) AssessDrift(diskRaw []byte, diskErr error, diskCanonicalVersion, diskParseError string) {
 	if s == nil || s.ConfigPath == "" {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.status.State != ConfigStateManagedClean && s.status.State != ConfigStateManagedDrift {
+	if s.status.State != ConfigStateManagedClean && s.status.State != ConfigStateManagedDrift && s.status.State != ConfigStateManagedDesiredAhead {
 		return
 	}
 
@@ -374,7 +392,9 @@ func (s *ManagedBaselineStore) AssessDrift(diskRaw []byte, diskErr error, diskCa
 	}
 
 	if diskErr == nil && diskDigest == s.status.BaselineRawSHA256 {
-		s.status.State = ConfigStateManagedClean
+		if s.status.State != ConfigStateManagedDesiredAhead {
+			s.status.State = ConfigStateManagedClean
+		}
 		s.status.Drift = false
 		s.status.DriftDetectedAt = time.Time{}
 		return
@@ -590,38 +610,73 @@ func (s *ManagedBaselineStore) Reconcile(diskRaw []byte, diskErr error, diskCano
 	return inconsistent(ReasonMarkerUnreadable, "", "", fmt.Errorf("unknown managed-baseline marker state %q", marker.State))
 }
 
-// CloseEpoch performs the one write file_owned mode ever makes (ADR 0019
-// §17.2): it deletes the secret-bearing snapshot first, then replaces any
-// live marker with a state-only, secret-free tombstone. It is idempotent and
-// safe to call on every file_owned startup, including when no managed
-// artifacts exist. A failure (e.g. a read-only mount) is returned so the
-// caller can warn and report a lint finding rather than fail startup.
-func (s *ManagedBaselineStore) CloseEpoch() error {
+// CloseEpoch performs the writes file_owned mode ever makes (ADR 0019
+// §17.2), in the exact order the ADR requires: (1) delete the secret-bearing
+// snapshot, (2) remove any orphan planned-restart backup via
+// removeOrphanArtifacts, (3) replace the marker with a state-only,
+// secret-free tombstone. Both secret-bearing artifacts are gone before the
+// safe tombstone is ever written, so a failure partway through leaves the
+// safe artifact behind rather than a secret-bearing one — which is why the
+// tombstone write (3) must never run before removeOrphanArtifacts (2)
+// returns successfully.
+//
+// removeOrphanArtifacts is called only when a marker or snapshot was found
+// (there is an epoch to close); it is typically
+// PlannedRestartStore.RemoveOrphanBackup, kept out of this package to avoid
+// coupling the baseline store to the planned-restart store's type. A nil
+// callback is a no-op step 2, so existing tests that only exercise the
+// baseline's own two artifacts pass unchanged.
+//
+// It is idempotent and safe to call on every file_owned startup, including
+// when no managed artifacts exist. A failure (e.g. a read-only mount) is
+// returned so the caller can warn and report a lint finding rather than fail
+// startup.
+func (s *ManagedBaselineStore) CloseEpoch(removeOrphanArtifacts func() error) error {
 	if s == nil || s.ConfigPath == "" {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Step 1: the snapshot is secret-bearing and is removed unconditionally,
+	// before the marker is even read — a marker that cannot be decoded must
+	// never block removal of the secret-bearing artifacts this ordering
+	// exists to guarantee. An orphan snapshot with no marker at all is a
+	// reachable, ADR-anticipated state (§11.2.1b's "absent marker, present
+	// snapshot" row), and it must not outlive a missing marker just because
+	// there is nothing left to tombstone.
+	if err := os.Remove(s.snapshotPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("managed baseline: remove snapshot: %w", err)
+	}
+
+	// Step 2, strictly before step 3: a failure here must leave the tombstone
+	// unwritten, so a crash or storage failure never reports "closed" while a
+	// secret-bearing backup still survives.
+	if removeOrphanArtifacts != nil {
+		if err := removeOrphanArtifacts(); err != nil {
+			return fmt.Errorf("managed baseline: remove orphan planned-restart backup: %w", err)
+		}
+	}
+
+	// Step 3: the marker is read only now, after both secret-bearing
+	// artifacts are already gone — an unreadable marker is materially less
+	// serious than retaining configuration bytes past a file_owned handoff,
+	// and must not prevent the removals above.
 	marker, err := s.loadMarkerLocked()
 	if err != nil {
 		return fmt.Errorf("managed baseline: read marker before closing epoch: %w", err)
 	}
 	if marker == nil {
-		// Nothing to close.
 		return nil
 	}
 
-	// Already closed or not, ensuring the snapshot is gone is always worth
-	// doing: it has no business surviving next to a tombstone.
+	// Already closed or not, the digest the tombstone should carry is the
+	// same either way.
 	lastDigest := marker.CurrentRawSHA256
 	if marker.State == baselineStateClosed {
 		lastDigest = marker.LastRawSHA256
 	}
 
-	if err := os.Remove(s.snapshotPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("managed baseline: remove snapshot: %w", err)
-	}
 	if err := s.writeMarkerLocked(ManagedBaselineMarker{
 		State:         baselineStateClosed,
 		ClosedAt:      time.Now().UTC(),
@@ -667,19 +722,48 @@ func (s *ManagedBaselineStore) MarkInconsistent(reason ManagedInconsistentReason
 	s.status.Reason = reason
 }
 
+// MarkFailedApply transitions to managed_failed_apply (ADR 0019 §10/§16): a
+// T-write committed and its reload did not apply. It is the transient state
+// between that commit and the restoration decision that resolves it moments
+// later — RewindWrite on a successful restoration, or
+// MarkInconsistent(ReasonRestorationFailed) otherwise — and exists so a
+// status read concurrent with that window observes managed_failed_apply
+// rather than the stale state from before the failed apply started. It
+// touches neither the marker nor the snapshot on disk.
+func (s *ManagedBaselineStore) MarkFailedApply() {
+	if s == nil || s.ConfigPath == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status.State = ConfigStateManagedFailedApply
+	s.status.Reason = ""
+}
+
 // MarkDesiredAhead transitions to managed_desired_ahead (ADR 0019 §11.2.5):
 // the baseline and file are coherent — this call does not touch either — but
 // the runtime is behind and nothing is staged. Managed writes remain allowed
 // in this state; only a restart or an explicit re-stage converges it. It is
 // reached only from a caller that has already confirmed the baseline itself
 // is correct (e.g. after AdoptExternal commits but the hot reload does not
-// take), so it does not re-verify Status().
+// take), so it does not re-verify the disk/marker itself.
+//
+// It never downgrades an existing managed_inconsistent or managed_drift: a
+// caller can reach here after a baseline write already failed its retry
+// (managed_inconsistent, managed writes refused) and only then discover its
+// own reload could not be enqueued or did not take — desired_ahead would
+// silently reopen writes a still-broken durable baseline must keep refused.
+// A no-op call also leaves Reason untouched, so a state this guard blocks
+// never carries a stale reason forward either.
 func (s *ManagedBaselineStore) MarkDesiredAhead() {
 	if s == nil || s.ConfigPath == "" {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.status.State == ConfigStateManagedInconsistent || s.status.State == ConfigStateManagedDrift {
+		return
+	}
 	s.status.State = ConfigStateManagedDesiredAhead
 	s.status.Drift = false
 	s.status.DriftDetectedAt = time.Time{}

@@ -543,6 +543,12 @@ type ConfigAuthorityStatus struct {
 	BaselineVersion string `json:"baseline_version,omitempty"`
 	DiskVersion     string `json:"disk_version,omitempty"`
 	DiskParseError  string `json:"disk_parse_error,omitempty"`
+	// DiskRawDigest is the on-disk raw sha256 digest, truncated to the same
+	// 16 hex characters CanonicalVersion uses (ADR 0019 §13) — bounded
+	// evidence that the file is (or is not) a byte-for-byte match for the
+	// baseline, never the bytes themselves. Set only when the disk could be
+	// read; empty on a disk read error.
+	DiskRawDigest string `json:"disk_raw_digest,omitempty"`
 }
 
 // IsFileOwned reports whether mutating admin endpoints must be refused. A
@@ -572,8 +578,12 @@ type AdoptExternalRequest struct {
 // AdoptPreviewResult is the side-effect-free assessment returned by adopt
 // preview (ADR 0019 §14/§14.1).
 type AdoptPreviewResult struct {
-	OK                    bool              `json:"ok"`
-	Origin                string            `json:"origin"` // drift | no_baseline | inconsistent
+	OK     bool   `json:"ok"`
+	Origin string `json:"origin"` // drift | no_baseline | inconsistent
+	// InconsistentReason is the bounded ADR 0019 §11.2.1 reason accompanying
+	// Origin == "inconsistent" (e.g. "marker_missing", "snapshot_unreadable").
+	// Empty for every other origin.
+	InconsistentReason    string            `json:"inconsistent_reason,omitempty"`
 	ObservedDigest        string            `json:"observed_digest"`
 	BaseVersion           string            `json:"base_version,omitempty"`
 	CandidateVersion      string            `json:"candidate_version,omitempty"`
