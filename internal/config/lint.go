@@ -29,13 +29,21 @@ const (
 	SeverityWarning Severity = iota
 	// SeverityError marks a finding that makes the configuration invalid.
 	SeverityError
+	// SeverityInfo marks a purely informational suggestion: nothing about
+	// the configuration is risky or worth reconsidering, but an operator may
+	// want to know about it. Used sparingly — today only for a managed-mode
+	// route with no durable route_id (ADR 0019 §4.13).
+	SeverityInfo
 )
 
-// String returns the lowercase label for a severity ("warning" or "error").
+// String returns the lowercase label for a severity ("info", "warning", or
+// "error").
 func (s Severity) String() string {
 	switch s {
 	case SeverityError:
 		return "error"
+	case SeverityInfo:
+		return "info"
 	default:
 		return "warning"
 	}
@@ -109,6 +117,19 @@ func Lint(c *Config) []Diagnostic {
 					Field:    fmt.Sprintf("servers[%d].locations[%d]", i, j),
 					Message:  "directory_listing is enabled; it exposes file names to clients",
 					Hint:     "disable directory_listing in production unless a browsable index is intended",
+				})
+			}
+			// A route with no durable route_id is fully functional (ADR
+			// 0019 §4.13); this is a suggestion, not a warning, and is
+			// scoped to managed mode only — in file_owned mode Jul does not
+			// own the file and must not nag an operator to edit a document
+			// it never writes to.
+			if c.Global.ConfigAuthority == "managed" && loc.RouteID == nil {
+				diags = append(diags, Diagnostic{
+					Severity: SeverityInfo,
+					Field:    fmt.Sprintf("servers[%d].locations[%d]", i, j),
+					Message:  "route has no durable route_id",
+					Hint:     `add route_id = "..." for a stable identity across edits (diff/audit correlation, Console deep links, and the /api/v1/routes/{route_id} API — ADR 0019 §4)`,
 				})
 			}
 		}

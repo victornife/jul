@@ -182,6 +182,9 @@ func TestSeverityString(t *testing.T) {
 	if SeverityError.String() != "error" {
 		t.Errorf("error = %q", SeverityError.String())
 	}
+	if SeverityInfo.String() != "info" {
+		t.Errorf("info = %q", SeverityInfo.String())
+	}
 }
 
 func TestLintDeprecatedLogDestinationFields(t *testing.T) {

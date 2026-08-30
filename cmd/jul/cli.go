@@ -396,8 +396,11 @@ func printDiagnostic(w io.Writer, d config.Diagnostic, color bool) {
 	label := d.Severity.String()
 	if color {
 		c := "\x1b[33m" // yellow for warnings
-		if d.Severity == config.SeverityError {
+		switch d.Severity {
+		case config.SeverityError:
 			c = "\x1b[31m" // red for errors
+		case config.SeverityInfo:
+			c = "\x1b[36m" // cyan for informational suggestions
 		}
 		label = c + label + "\x1b[0m"
 	}
