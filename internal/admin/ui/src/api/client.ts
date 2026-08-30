@@ -566,6 +566,12 @@ export const LocationProjectionSchema = z.object({
   // valid; absent means "treat as 0", the same as an omitted patch ordinal
   // means "there must be exactly one".
   match_ordinal: z.number().optional(),
+  // route_id is the route's durable identity (ADR 0019 §4), present only
+  // when the route has one. Unlike match_ordinal, it is stable across
+  // revisions; the Console must not derive its own correlation from
+  // match_ordinal/predicates when this is present — it is server-computed
+  // and simply consumed.
+  route_id: z.string().optional(),
   // predicates summarises the route's method/header/query predicates so two
   // routes sharing a path are distinguishable in a list. Values are omitted
   // deliberately; names and operations are enough to tell them apart.

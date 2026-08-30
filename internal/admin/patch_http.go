@@ -515,7 +515,7 @@ func (s *Server) applyPatchOps(w http.ResponseWriter, r *http.Request, params pa
 		if !s.deps.ManagedHistoryActive {
 			s.recordHistory(prev)
 		}
-		s.recordAudit(r, params.auditAction, "config", "success", execution.summaryText())
+		s.recordAuditResource(r, params.auditAction, "config", patchBatchResourceIDs(execution.OperationSummaries), "success", execution.summaryText())
 		s.emit("config", "apply", "info", "Structured patch validated and saved.")
 	}
 

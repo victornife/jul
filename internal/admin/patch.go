@@ -666,6 +666,11 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 			return "", fmt.Errorf("location_add: a route with match %s %q already exists on server %s", matchType, path, req.Listen)
 		}
 		loc := config.LocationConfig{Match: config.MatchConfig{Type: matchType, Path: path}}
+		routeID := strings.TrimSpace(req.RouteID)
+		if routeID == "" {
+			routeID = mintRouteID()
+		}
+		loc.RouteID = &routeID
 		label, err := setLocationAction(&loc, *req.Action)
 		if err != nil {
 			return "", err

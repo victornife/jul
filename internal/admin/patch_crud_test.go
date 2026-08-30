@@ -209,6 +209,103 @@ func TestApplyPatchLocationAddServerNotFound(t *testing.T) {
 	}
 }
 
+func TestApplyPatchLocationAddMintsRouteIDWhenOmitted(t *testing.T) {
+	c := crudConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_add", Listen: ":8080", ServerNames: []string{"app.example"},
+		Match:  &locationMatch{Type: "prefix", Path: "/api"},
+		Action: &locationActionPayload{Kind: "deny"},
+	}); err != nil {
+		t.Fatalf("location_add: %v", err)
+	}
+	added := c.Servers[0].Locations[1]
+	if added.RouteID == nil || *added.RouteID == "" {
+		t.Fatal("location_add should mint a non-empty route_id when omitted")
+	}
+	if !strings.HasPrefix(*added.RouteID, "r-") {
+		t.Errorf("minted route_id = %q, want an \"r-\" prefix", *added.RouteID)
+	}
+	assertValidCandidate(t, c)
+
+	// Minting must be non-deterministic across calls (CSPRNG-backed, not a
+	// counter), otherwise two location_add calls in the same process could
+	// collide.
+	c2 := crudConfig()
+	if _, err := applyPatch(c2, patchRequest{
+		Op: "location_add", Listen: ":8080", ServerNames: []string{"app.example"},
+		Match:  &locationMatch{Type: "prefix", Path: "/api"},
+		Action: &locationActionPayload{Kind: "deny"},
+	}); err != nil {
+		t.Fatalf("location_add: %v", err)
+	}
+	if *c2.Servers[0].Locations[1].RouteID == *added.RouteID {
+		t.Error("two location_add calls minted the same route_id")
+	}
+}
+
+func TestApplyPatchLocationAddAcceptsCallerSuppliedRouteID(t *testing.T) {
+	c := crudConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_add", Listen: ":8080", ServerNames: []string{"app.example"},
+		Match:   &locationMatch{Type: "prefix", Path: "/api"},
+		Action:  &locationActionPayload{Kind: "deny"},
+		RouteID: "checkout-api",
+	}); err != nil {
+		t.Fatalf("location_add: %v", err)
+	}
+	added := c.Servers[0].Locations[1]
+	if added.RouteID == nil || *added.RouteID != "checkout-api" {
+		t.Errorf("route_id = %v, want \"checkout-api\"", added.RouteID)
+	}
+	assertValidCandidate(t, c)
+}
+
+func TestApplyPatchLocationAddRejectsDuplicateRouteID(t *testing.T) {
+	c := crudConfig()
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_add", Listen: ":8080", ServerNames: []string{"app.example"},
+		Match:   &locationMatch{Type: "prefix", Path: "/api"},
+		Action:  &locationActionPayload{Kind: "deny"},
+		RouteID: "dup-id",
+	}); err != nil {
+		t.Fatalf("location_add: %v", err)
+	}
+	if _, err := applyPatch(c, patchRequest{
+		Op: "location_add", Listen: ":8080", ServerNames: []string{"app.example"},
+		Match:   &locationMatch{Type: "prefix", Path: "/other"},
+		Action:  &locationActionPayload{Kind: "deny"},
+		RouteID: "dup-id",
+	}); err != nil {
+		t.Fatalf("location_add: %v", err)
+	}
+	if err := config.Validate(c); err == nil {
+		t.Fatal("expected config.Validate to reject the duplicate route_id")
+	}
+}
+
+func TestApplyPatchOnlyLocationAddMintsRouteID(t *testing.T) {
+	// Every other patch op that touches a location must leave its route_id
+	// untouched: durable identity is create-only (ADR 0019 §4).
+	c := crudConfig()
+	before := c.Servers[0].Locations[0].RouteID
+	if before != nil {
+		t.Fatal("test fixture route unexpectedly already has a route_id")
+	}
+	ops := []patchRequest{
+		{Op: "route_set_target", Listen: ":8080", ServerNames: []string{"app.example"}, MatchType: "prefix", Path: "/", Target: "http://127.0.0.1:9200"},
+		{Op: "route_toggle_cache", Listen: ":8080", ServerNames: []string{"app.example"}, MatchType: "prefix", Path: "/", Enabled: boolPtr(true)},
+		{Op: "location_set_match", Listen: ":8080", ServerNames: []string{"app.example"}, MatchType: "prefix", Path: "/", Match: &locationMatch{Type: "prefix", Path: "/renamed"}},
+	}
+	for _, op := range ops {
+		if _, err := applyPatch(c, op); err != nil {
+			t.Fatalf("op %s: %v", op.Op, err)
+		}
+	}
+	if c.Servers[0].Locations[0].RouteID != nil {
+		t.Errorf("op %s minted or set a route_id on an existing location", ops[len(ops)-1].Op)
+	}
+}
+
 // ── location_remove ───────────────────────────────────────────────────────────
 
 func TestApplyPatchLocationRemoveDeletesRoute(t *testing.T) {

@@ -8,10 +8,25 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 )
+
+// patchBatchResourceIDs joins every non-empty ResourceID a batch's operations
+// recorded (e.g. route_ids location_add minted or accepted), for the audit
+// trail's ResourceID field. Empty when no operation touched a durable
+// resource identity.
+func patchBatchResourceIDs(summaries []patchOperationSummary) string {
+	var ids []string
+	for _, s := range summaries {
+		if s.ResourceID != "" {
+			ids = append(ids, s.ResourceID)
+		}
+	}
+	return strings.Join(ids, ",")
+}
 
 // patchBatchBaseline binds an execution to one authoritative editable
 // configuration, one effective serving configuration, and one live-listener
@@ -30,6 +45,10 @@ type patchOperationSummary struct {
 	OpIndex int    `json:"op_index"`
 	Op      string `json:"op"`
 	Summary string `json:"summary"`
+	// ResourceID is the durable route_id a location_add op created (whether
+	// caller-supplied or minted). It is empty for every other op: an
+	// existing route's route_id never changes as a side effect of a patch.
+	ResourceID string `json:"resource_id,omitempty"`
 }
 
 // patchBatchExecution is the complete side-effect-free result shared by the
@@ -201,11 +220,19 @@ func executePatchBatch(
 		if applyErr != nil {
 			return out, &patchOperationError{OpIndex: i, Op: op.Op, Err: applyErr}
 		}
-		operationSummaries = append(operationSummaries, patchOperationSummary{
+		opSummary := patchOperationSummary{
 			OpIndex: i,
 			Op:      op.Op,
 			Summary: summary,
-		})
+		}
+		if op.Op == "location_add" {
+			if srv, err := findServerByNames(candidateConfig, op.Listen, op.ServerNames); err == nil && len(srv.Locations) > 0 {
+				if id := srv.Locations[len(srv.Locations)-1].RouteID; id != nil {
+					opSummary.ResourceID = *id
+				}
+			}
+		}
+		operationSummaries = append(operationSummaries, opSummary)
 	}
 
 	candidateRaw, err := config.Marshal(candidateConfig)

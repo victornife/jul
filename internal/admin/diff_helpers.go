@@ -222,13 +222,80 @@ func coverLocationTarget(b, a *config.LocationConfig, d *ConfigDiff) {
 	coverLocationAction(b, a, d)
 }
 
-func locationIndex(locs []config.LocationConfig) map[string]*config.LocationConfig {
-	m := make(map[string]*config.LocationConfig, len(locs))
-	for i := range locs {
-		l := &locs[i]
-		m[locationKey(l)] = l
+// routeID returns a location's durable identity, or "" when it has none.
+func routeID(l *config.LocationConfig) string {
+	if l.RouteID == nil {
+		return ""
 	}
-	return m
+	return *l.RouteID
+}
+
+// correlateLocations pairs before/after locations across a revision boundary
+// per ADR 0019 §7. A durable route_id present on both sides is authoritative
+// and wins over the fingerprint: two locations sharing a route_id are the
+// same resource even if every predicate changed, and two locations that
+// happen to share a fingerprint are NOT the same resource if only one side
+// carries a route_id (that is an identity change, not a coincidence — it
+// renders as remove+add). Only when NEITHER side has a route_id does the
+// existing fingerprint-based locationKey decide correlation, exactly as
+// before route_id existed.
+type locationPair struct {
+	key     string // stable sort/display key: route_id when present, else fingerprint
+	before  *config.LocationConfig
+	after   *config.LocationConfig
+	routeID string // non-empty only when this pair was correlated by route_id
+	byID    bool
+}
+
+func correlateLocations(before, after []config.LocationConfig) (afterPairs, removedPairs []locationPair) {
+	byIDBefore := make(map[string]*config.LocationConfig)
+	byFPBefore := make(map[string]*config.LocationConfig)
+	for i := range before {
+		b := &before[i]
+		if id := routeID(b); id != "" {
+			byIDBefore[id] = b
+		} else {
+			byFPBefore[locationKey(b)] = b
+		}
+	}
+	usedBefore := make(map[*config.LocationConfig]bool, len(before))
+
+	for i := range after {
+		a := &after[i]
+		if id := routeID(a); id != "" {
+			if b, ok := byIDBefore[id]; ok {
+				usedBefore[b] = true
+				afterPairs = append(afterPairs, locationPair{key: id, before: b, after: a, routeID: id, byID: true})
+				continue
+			}
+			// The before side either has no route_id or a different one:
+			// per ADR 0019 §7 that is not the same resource, regardless of
+			// any fingerprint coincidence.
+			afterPairs = append(afterPairs, locationPair{key: id, after: a})
+			continue
+		}
+		if b, ok := byFPBefore[locationKey(a)]; ok {
+			usedBefore[b] = true
+			afterPairs = append(afterPairs, locationPair{key: locationKey(a), before: b, after: a})
+			continue
+		}
+		afterPairs = append(afterPairs, locationPair{key: locationKey(a), after: a})
+	}
+	for i := range before {
+		b := &before[i]
+		if usedBefore[b] {
+			continue
+		}
+		key := routeID(b)
+		if key == "" {
+			key = locationKey(b)
+		}
+		removedPairs = append(removedPairs, locationPair{key: key, before: b})
+	}
+
+	sort.SliceStable(afterPairs, func(i, j int) bool { return afterPairs[i].key < afterPairs[j].key })
+	sort.SliceStable(removedPairs, func(i, j int) bool { return removedPairs[i].key < removedPairs[j].key })
+	return afterPairs, removedPairs
 }
 
 // diffLocations compares the locations (routes) within a single server block,
@@ -236,30 +303,32 @@ func locationIndex(locs []config.LocationConfig) map[string]*config.LocationConf
 // consequences (action/target, auth, cache, compression, rate limit, body
 // size, proxy timeouts).
 func diffLocations(server string, before, after []config.LocationConfig, beforeGlobWAF, afterGlobWAF config.WAFConfig, d *ConfigDiff) {
-	bs, as := locationIndex(before), locationIndex(after)
-	for _, key := range sortedKeys(as) {
-		a := as[key]
+	// route_id is fully accounted for by correlateLocations: it decides
+	// resource identity (matched/added/removed) rather than being reported as
+	// a plain field change, so the registry completeness pass must not
+	// separately flag it.
+	d.cover("servers.*.locations.*.route_id")
+	afterPairs, removedPairs := correlateLocations(before, after)
+	for _, p := range afterPairs {
+		a := p.after
 		label := locationLabel(a)
-		b, ok := bs[key]
 		name := server + " " + label
-		if !ok {
+		if p.before == nil {
 			d.add(DiffEntry{Kind: "location", Name: name, After: locationAction(a) + " → " + orNone(locationTarget(a)), Detail: "Add route " + label + " on " + server}, "route "+name)
 			continue
 		}
-		diffLocationFields(server, label, b, a, beforeGlobWAF, afterGlobWAF, d)
+		diffLocationFields(server, label, p.before, a, beforeGlobWAF, afterGlobWAF, d)
 	}
-	for _, key := range sortedKeys(bs) {
-		if _, ok := as[key]; !ok {
-			b := bs[key]
-			label := locationLabel(b)
-			name := server + " " + label
-			d.del(DiffEntry{Kind: "location", Name: name, Before: locationAction(b) + " → " + orNone(locationTarget(b)), Detail: "Remove route " + label + " on " + server}, "route "+name)
-			// Editing a predicate re-keys the route, so it renders as a removal
-			// plus an addition. Warning that traffic will stop being handled would
-			// be false whenever another route still covers the same coordinates.
-			if !coordinatesStillPresent(b, after) {
-				d.warn("Removing route %s on %s will stop matching requests from being handled by it.", label, server)
-			}
+	for _, p := range removedPairs {
+		b := p.before
+		label := locationLabel(b)
+		name := server + " " + label
+		d.del(DiffEntry{Kind: "location", Name: name, Before: locationAction(b) + " → " + orNone(locationTarget(b)), Detail: "Remove route " + label + " on " + server}, "route "+name)
+		// Editing a predicate re-keys the route, so it renders as a removal
+		// plus an addition. Warning that traffic will stop being handled would
+		// be false whenever another route still covers the same coordinates.
+		if !coordinatesStillPresent(b, after) {
+			d.warn("Removing route %s on %s will stop matching requests from being handled by it.", label, server)
 		}
 	}
 }

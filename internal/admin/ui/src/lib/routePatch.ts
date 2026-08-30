@@ -23,6 +23,11 @@ export interface ServerIdentity {
 export interface LocationIdentity {
   readonly matchType: string;
   readonly path: string;
+  // routeId is the route's durable identity (ADR 0019 §4), when the server
+  // sent one. The Console never derives its own correlation logic from it —
+  // it is simply preferred over the revision-relative matchType+path key
+  // when present, since it is stable across edits that change the match.
+  readonly routeId?: string;
 }
 
 export interface RouteSelection {
@@ -164,6 +169,14 @@ export function serverIdentityKey(identity: ServerIdentity): string {
 }
 
 export function routeIdentityKey(server: ServerIdentity, location: LocationIdentity): string {
+  if (location.routeId) {
+    // A durable route_id is stable across a match/predicate change, unlike
+    // the fingerprint below; it also does not depend on the server
+    // identity, since a route_id is unique across the whole configuration
+    // (ADR 0019 §4), but keeping the same JSON.stringify shape as the
+    // fallback keeps this a plain opaque string key either way.
+    return JSON.stringify(["route_id", location.routeId]);
+  }
   return JSON.stringify([
     server.listen,
     canonicalServerNames(server.serverNames),

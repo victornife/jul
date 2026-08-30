@@ -116,6 +116,25 @@ describe("route patch exact server identity", () => {
     );
   });
 
+  it("prefers a durable route_id over the match fingerprint when present", () => {
+    const a = { listen: ":8080", serverNames: ["a.example"] };
+    const b = { listen: ":9090", serverNames: ["b.example"] };
+    // Same route_id correlates even across different servers/matches (the
+    // Console never re-derives its own correlation logic; it consumes
+    // whatever the server sent, per ADR 0019 §4/§7).
+    expect(
+      routeIdentityKey(a, { matchType: "prefix", path: "/old", routeId: "r-same" }),
+    ).toBe(routeIdentityKey(b, { matchType: "exact", path: "/new", routeId: "r-same" }));
+    // Different route_ids never collide, even with identical server+match.
+    expect(
+      routeIdentityKey(a, { matchType: "prefix", path: "/", routeId: "r-one" }),
+    ).not.toBe(routeIdentityKey(a, { matchType: "prefix", path: "/", routeId: "r-two" }));
+    // No route_id falls back to the pre-route_id fingerprint behavior.
+    expect(routeIdentityKey(a, { matchType: "prefix", path: "/" })).toBe(
+      routeIdentityKey(a, { matchType: "prefix", path: "/" }),
+    );
+  });
+
   it("finds an exact identity rather than any server sharing the listen", () => {
     expect(exactServerExists(inventory, baseSpec.server)).toBe(true);
     expect(

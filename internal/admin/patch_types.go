@@ -96,6 +96,14 @@ type patchRequest struct {
 	// removed and the renamed route added.
 	Match *locationMatch `json:"match_set,omitempty"`
 
+	// location_add payload: an optional caller-supplied route_id. Left empty,
+	// location_add mints a fresh durable ID (ADR 0019 §4); if present, it is
+	// validated by the same grammar as any other route_id and must not
+	// collide with an existing one. No other op accepts this field — an
+	// existing route's route_id is durable and never re-minted or replaced by
+	// a patch.
+	RouteID string `json:"route_id,omitempty"`
+
 	// location_set_action payload: the route's new action (proxy/static/
 	// redirect/return/deny). The op clears every other action field first.
 	Action *locationActionPayload `json:"action,omitempty"`

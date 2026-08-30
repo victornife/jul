@@ -37,9 +37,16 @@ type AuditEvent struct {
 	TokenID   string    `json:"token_id,omitempty"` // public credential identifier, if known
 	Operation string    `json:"operation"`          // e.g. config.apply, config.rollback, auth.fail
 	Resource  string    `json:"resource,omitempty"` // affected resource, if any
-	Result    string    `json:"result"`             // success | failure
-	Detail    string    `json:"detail,omitempty"`   // short, redacted description
-	SourceIP  string    `json:"source_ip,omitempty"`
+	// ResourceID is a durable resource identity touched by this event (ADR
+	// 0019 §4/§5), when one is known — e.g. a route_id a patch batch minted
+	// or referenced. It is distinct from Resource (a free-form label like
+	// "config") and from apply/history/version identifiers, which already
+	// have their own fields elsewhere; a single event may touch more than
+	// one resource, in which case this is a comma-separated list.
+	ResourceID string `json:"resource_id,omitempty"`
+	Result     string `json:"result"`           // success | failure
+	Detail     string `json:"detail,omitempty"` // short, redacted description
+	SourceIP   string `json:"source_ip,omitempty"`
 }
 
 // auditLog is a fixed-size ring buffer of audit events with a monotonic id and
@@ -243,6 +250,13 @@ func (a *auditLog) snapshot(opFilter, resultFilter string, limit int) []AuditEve
 // RBAC or legacy auth has populated it; otherwise actor falls back to
 // "anonymous".
 func (s *Server) recordAudit(r *http.Request, operation, resource, result, detail string) {
+	s.recordAuditResource(r, operation, resource, "", result, detail)
+}
+
+// recordAuditResource is recordAudit with an explicit durable ResourceID
+// (ADR 0019 §4/§5), for events that touch one or more identified resources
+// (e.g. a location_add that minted a route_id).
+func (s *Server) recordAuditResource(r *http.Request, operation, resource, resourceID, result, detail string) {
 	if s.audit == nil {
 		return
 	}
@@ -252,14 +266,15 @@ func (s *Server) recordAudit(r *http.Request, operation, resource, result, detai
 		tokenID = id.TokenID
 	}
 	s.audit.record(AuditEvent{
-		Time:      time.Now().UTC(),
-		Actor:     actor,
-		TokenID:   tokenID,
-		Operation: operation,
-		Resource:  resource,
-		Result:    result,
-		Detail:    detail,
-		SourceIP:  adminClientIP(r),
+		Time:       time.Now().UTC(),
+		Actor:      actor,
+		TokenID:    tokenID,
+		Operation:  operation,
+		Resource:   resource,
+		ResourceID: resourceID,
+		Result:     result,
+		Detail:     detail,
+		SourceIP:   adminClientIP(r),
 	})
 }
 

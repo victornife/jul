@@ -59,6 +59,47 @@ func TestExecutePatchBatchAppliesOrderedOperations(t *testing.T) {
 	}
 }
 
+func TestExecutePatchBatchLocationAddSummaryCarriesResourceID(t *testing.T) {
+	before := patchProxyConfig()
+	ops := []patchRequest{
+		{
+			Op:          "location_add",
+			Listen:      before.Servers[0].Listen,
+			ServerNames: before.Servers[0].ServerNames,
+			Match:       &locationMatch{Type: "prefix", Path: "/added"},
+			Action:      &locationActionPayload{Kind: "proxy", Target: "http://127.0.0.1:9100"},
+		},
+	}
+	got, err := executePatchBatch(context.Background(), patchBatchBaseline{
+		Config: before,
+		Live:   lifecycle.Live{BoundHTTPAddrs: []string{":8080"}},
+	}, "", ops)
+	if err != nil {
+		t.Fatalf("executePatchBatch: %v", err)
+	}
+	if len(got.OperationSummaries) != 1 || got.OperationSummaries[0].ResourceID == "" {
+		t.Fatalf("location_add summary should carry a non-empty ResourceID, got %+v", got.OperationSummaries)
+	}
+	if joined := patchBatchResourceIDs(got.OperationSummaries); joined != got.OperationSummaries[0].ResourceID {
+		t.Errorf("patchBatchResourceIDs = %q, want %q", joined, got.OperationSummaries[0].ResourceID)
+	}
+}
+
+func TestPatchBatchResourceIDsJoinsOnlyNonEmpty(t *testing.T) {
+	got := patchBatchResourceIDs([]patchOperationSummary{
+		{Op: "server_add"},
+		{Op: "location_add", ResourceID: "r-one"},
+		{Op: "route_set_target"},
+		{Op: "location_add", ResourceID: "r-two"},
+	})
+	if got != "r-one,r-two" {
+		t.Errorf("patchBatchResourceIDs = %q, want %q", got, "r-one,r-two")
+	}
+	if got := patchBatchResourceIDs(nil); got != "" {
+		t.Errorf("patchBatchResourceIDs(nil) = %q, want empty", got)
+	}
+}
+
 func TestExecutePatchBatchCreatesAppAndNativeGRPCMountInOneCandidate(t *testing.T) {
 	before := patchProxyConfig()
 	enabled := true

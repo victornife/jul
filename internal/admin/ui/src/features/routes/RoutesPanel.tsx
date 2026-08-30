@@ -155,6 +155,7 @@ function RouteCard({
                 key={routeIdentityKey(serverIdentityFromRoute(route), {
                   matchType: loc.type,
                   path: loc.match,
+                  ...(loc.route_id ? { routeId: loc.route_id } : {}),
                 })}
                 loc={loc}
                 onOpen={() => {

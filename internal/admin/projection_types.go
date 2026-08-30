@@ -39,8 +39,13 @@ type LocationProjection struct {
 	//
 	// It is a revision-relative selector and not an identity: it must not be
 	// stored, shown as a resource name, or correlated across revisions. A
-	// durable route_id belongs to ADR 0019.
+	// durable route_id is projected separately below (ADR 0019 §4).
 	MatchOrdinal int `json:"match_ordinal"`
+	// RouteID is the location's durable identity (ADR 0019 §4), present only
+	// when the route has one. Unlike MatchOrdinal, it is stable across
+	// revisions and is what diff/audit correlation and the external
+	// /api/v1/routes/{route_id} surface use to refer to this specific route.
+	RouteID string `json:"route_id,omitempty"`
 	// Predicates summarises the route's method, header and query predicates so
 	// two routes sharing a path are distinguishable in a list. Values are
 	// omitted deliberately; names and operations are enough to tell them apart.
