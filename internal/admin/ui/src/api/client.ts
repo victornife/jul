@@ -1585,6 +1585,12 @@ export type ConfigPatch =
       server_names?: string[];
       match_set: LocationMatchPatch;
       action: LocationActionPatch;
+      // route_id is optional on the wire: omitted mints a fresh durable id
+      // (ADR 0019 §4). The Console must set this to the resource_id a prior
+      // preview of the SAME op already returned, once one exists, so a
+      // re-preview or the final apply reuses that exact id rather than
+      // minting a second one.
+      route_id?: string;
     }
   | {
       op: "location_remove";
@@ -1656,6 +1662,16 @@ export const PatchOperationSummarySchema = z.object({
   op_index: z.number().int().nonnegative(),
   op: z.string(),
   summary: z.string(),
+  // resource_id is the durable route_id a location_add op created (whether
+  // caller-supplied or freshly minted). The Console must echo this exact
+  // value back as route_id on the same op for every later preview/apply of
+  // this same batch — the backend only mints once, on an omitted route_id,
+  // so replaying the op without it would mint a second, different id.
+  resource_id: z.string().optional(),
+  // selector is a revision-scoped route reference (listen/server_names/
+  // match_type/path/match_ordinal), present only when the op's target route
+  // has no resource_id.
+  selector: z.string().optional(),
 });
 export type PatchOperationSummary = z.infer<typeof PatchOperationSummarySchema>;
 
