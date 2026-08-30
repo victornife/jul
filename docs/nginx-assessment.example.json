@@ -1,0 +1,108 @@
+{
+  "schema_version": 2,
+  "source": "nginx.conf",
+  "source_policy": {
+    "path_style": "relative",
+    "root": ".",
+    "follow_includes": false
+  },
+  "sources": [
+    {
+      "id": "source-0001",
+      "display_path": "nginx.conf",
+      "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  ],
+  "status": "manual_action_required",
+  "summary": {
+    "total": 2,
+    "supported": 1,
+    "approximated": 0,
+    "ignored": 0,
+    "blocking": 1,
+    "informational": 0,
+    "parse_errors": 0,
+    "validation_errors": 0,
+    "ready": false
+  },
+  "results": [
+    {
+      "id": "result-source-0001-0001",
+      "code": "NGX_MAIN_INCLUDE",
+      "class": "blocking",
+      "severity": "error",
+      "risk": "operational",
+      "context": "main",
+      "directive": "include",
+      "line": 1,
+      "message": "include files are not followed unless bounded traversal is enabled",
+      "provenance": {
+        "source_id": "source-0001",
+        "display_path": "nginx.conf",
+        "start": {
+          "line": 1,
+          "column": 1
+        },
+        "end": {
+          "line": 1,
+          "column": 23
+        },
+        "context_path": "main",
+        "directive": "include",
+        "summary": "include <path-omitted>"
+      },
+      "guidance_codes": [
+        "GUIDE_INCLUDE_ENABLE"
+      ]
+    },
+    {
+      "id": "result-source-0001-0002",
+      "code": "NGX_SERVER_LISTEN",
+      "class": "supported",
+      "severity": "info",
+      "risk": "routing",
+      "context": "server",
+      "directive": "listen",
+      "line": 4,
+      "message": "listen address translated",
+      "target_paths": [
+        "servers[].listen"
+      ],
+      "provenance": {
+        "source_id": "source-0001",
+        "display_path": "nginx.conf",
+        "start": {
+          "line": 4,
+          "column": 5
+        },
+        "end": {
+          "line": 4,
+          "column": 16
+        },
+        "context_path": "http > server[example.test @ :8080]",
+        "directive": "listen",
+        "summary": "listen 8080"
+      },
+      "target_mappings": [
+        {
+          "relation": "direct",
+          "paths": [
+            "servers[].listen"
+          ]
+        }
+      ]
+    }
+  ],
+  "guidance": [
+    {
+      "code": "GUIDE_INCLUDE_ENABLE",
+      "title": "Assess included files explicitly",
+      "action": "Run the importer with bounded include traversal and an explicit assessment root, then review every included source result.",
+      "docs": "nginx-importer#include-security",
+      "blocking": true
+    }
+  ],
+  "validation": {
+    "status": "valid"
+  }
+}

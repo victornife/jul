@@ -31,8 +31,8 @@ const (
 // keeps the original positional/-o grammar and adds explicit assessment modes:
 //
 //	jul import nginx [--input nginx.conf] [--output jul.toml]
-//	jul import nginx --assess nginx.conf
-//	jul import nginx --json nginx.conf
+//	jul import nginx --assess [--source-order] nginx.conf
+//	jul import nginx --json [--path-style relative|absolute] nginx.conf
 //	jul import nginx --report assessment.json -o jul.toml nginx.conf
 //
 // Exit codes are stable for automation: 0 success, 1 internal error, 2 usage,
@@ -59,9 +59,22 @@ func cmdImport(args []string) int {
 	assess := fs.Bool("assess", false, "emit a human migration assessment without writing generated config")
 	reportPath := fs.String("report", "", "write the versioned JSON assessment to this file")
 	jsonOut := fs.Bool("json", false, "emit only the versioned JSON assessment to stdout")
+	pathStyleRaw := fs.String("path-style", "relative", "render assessment source paths as relative or absolute")
+	sourceOrder := fs.Bool("source-order", false, "render the human assessment in source order (requires --assess)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return importExitUsage
 	}
+
+	pathStyle, err := nginx.ParseAssessmentPathStyle(*pathStyleRaw)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return importExitUsage
+	}
+	if *sourceOrder && !*assess {
+		fmt.Fprintln(stderr, "error: --source-order requires --assess because JSON result order is already deterministic")
+		return importExitUsage
+	}
+	assessmentOptions := nginx.AssessmentOptions{PathStyle: pathStyle}
 
 	inPath, err := resolveImportInput(*inputPath, fs.Args())
 	if err != nil {
@@ -74,10 +87,11 @@ func cmdImport(args []string) int {
 	}
 	assessmentRequested := *assess || *jsonOut || *reportPath != ""
 
-	cfg, report, err := nginx.ImportFile(inPath)
+	cfg, report, err := nginx.ImportFileWithOptions(inPath, assessmentOptions)
 	if err != nil {
 		code, class, findingCode, message := classifyImportReadError(err)
-		assessment := nginx.FailureAssessment(inPath, class, findingCode, message)
+		assessment := nginx.FailureAssessmentWithOptions(inPath, class, findingCode, message, assessmentOptions)
+		assessment.SetSourceOrder(*sourceOrder)
 		if emitErr := emitImportAssessment(assessment, *assess, *jsonOut, *reportPath); emitErr != nil {
 			fmt.Fprintf(stderr, "error: %v\n", emitErr)
 			return importExitIO
@@ -93,9 +107,10 @@ func cmdImport(args []string) int {
 	}
 	assessment := report.Assessment
 	if assessment == nil {
-		assessment = nginx.FailureAssessment(inPath, nginx.AssessmentValidationError, "NGX_ASSESSMENT_MISSING", "migration assessment was not produced")
+		assessment = nginx.FailureAssessmentWithOptions(inPath, nginx.AssessmentValidationError, "NGX_ASSESSMENT_MISSING", "migration assessment was not produced", assessmentOptions)
 		report.Assessment = assessment
 	}
+	assessment.SetSourceOrder(*sourceOrder)
 
 	toml, err := config.Marshal(cfg)
 	if err != nil {

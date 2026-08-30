@@ -141,7 +141,7 @@ func TestEmitImportAssessmentReportAndNoop(t *testing.T) {
 	if err := emitImportAssessment(a, false, false, reportPath); err != nil {
 		t.Fatalf("report emit failed: %v", err)
 	}
-	if data, err := os.ReadFile(reportPath); err != nil || !strings.Contains(string(data), `"schema_version": 1`) {
+	if data, err := os.ReadFile(reportPath); err != nil || !strings.Contains(string(data), `"schema_version": 2`) {
 		t.Fatalf("report not written: err=%v data=%s", err, data)
 	}
 }
