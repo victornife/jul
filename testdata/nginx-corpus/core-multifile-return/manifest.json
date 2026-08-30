@@ -1,0 +1,194 @@
+{
+  "schema_version": 1,
+  "id": "core-multifile-return",
+  "tier": "core",
+  "description": "A multi-file HTTP fixture proving include provenance, response-header translation, returns, redirects, candidate validation, and safe real-Jul replay.",
+  "origin": {
+    "kind": "repository_authored",
+    "license": "AGPL-3.0-only",
+    "source": "victornife/jul#154"
+  },
+  "categories": [
+    "core-http",
+    "include-trees",
+    "response-headers"
+  ],
+  "build_tags": [
+    "importer"
+  ],
+  "root": "nginx/nginx.conf",
+  "follow_includes": true,
+  "expected_assessment": {
+    "status": "ready_for_review",
+    "ready": true,
+    "complete": true,
+    "files_read": 2,
+    "sources": [
+      "conf.d/site.conf",
+      "nginx.conf"
+    ],
+    "results": [
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_EVENTS",
+        "class": "informational",
+        "risk": "operational",
+        "context": "main",
+        "directive": "events"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_HTTP",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "http"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_INCLUDE_RESOLVED",
+        "class": "informational",
+        "risk": "operational",
+        "context": "http",
+        "directive": "include"
+      },
+      {
+        "source": "conf.d/site.conf",
+        "code": "NGX_HTTP_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "server"
+      },
+      {
+        "source": "conf.d/site.conf",
+        "code": "NGX_SERVER_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "server",
+        "directive": "listen"
+      },
+      {
+        "source": "conf.d/site.conf",
+        "code": "NGX_SERVER_NAME",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "server_name"
+      },
+      {
+        "source": "conf.d/site.conf",
+        "code": "NGX_SERVER_LOCATION",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "location",
+        "count": 2
+      },
+      {
+        "source": "conf.d/site.conf",
+        "code": "NGX_LOCATION_ADD_HEADER",
+        "class": "supported",
+        "risk": "security",
+        "context": "location",
+        "directive": "add_header"
+      },
+      {
+        "source": "conf.d/site.conf",
+        "code": "NGX_LOCATION_RETURN",
+        "class": "supported",
+        "risk": "routing",
+        "context": "location",
+        "directive": "return",
+        "count": 1
+      },
+      {
+        "source": "conf.d/site.conf",
+        "code": "NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT",
+        "class": "approximated",
+        "risk": "routing",
+        "context": "location",
+        "directive": "return",
+        "count": 1
+      }
+    ]
+  },
+  "expected_candidate": {
+    "required": true,
+    "contains": [
+      "listen = ':18080'",
+      "path = '/health'",
+      "redirect = '/health'",
+      "return = 204",
+      "server_names = ['corpus.test']"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "health-header",
+      "safe": true,
+      "request": {
+        "method": "GET",
+        "path": "/health",
+        "host": "corpus.test"
+      },
+      "assert": [
+        "status",
+        "headers"
+      ],
+      "assert_headers": [
+        "x-corpus"
+      ],
+      "ignore_headers": [
+        "date",
+        "server",
+        "x-request-id"
+      ],
+      "reference": {
+        "status": 204,
+        "headers": {
+          "x-corpus": [
+            "supported"
+          ]
+        }
+      },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "relative-redirect",
+      "safe": true,
+      "request": {
+        "method": "GET",
+        "path": "/redirect",
+        "host": "corpus.test"
+      },
+      "assert": [
+        "status",
+        "redirect_target"
+      ],
+      "ignore_headers": [
+        "date",
+        "server",
+        "x-request-id"
+      ],
+      "reference": {
+        "status": 302,
+        "headers": {
+          "location": [
+            "http://corpus.test:18080/health"
+          ]
+        }
+      },
+      "jul": {
+        "status": 302,
+        "headers": {
+          "location": [
+            "/health"
+          ]
+        }
+      },
+      "expected_verdict": "expected_difference",
+      "expected_difference_code": "NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT"
+    }
+  ]
+}
