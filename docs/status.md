@@ -10,11 +10,12 @@
 The at-a-glance view of **every shipped feature**, its **maturity**, and how
 it stands against the nine-criteria GA bar ([ADR 0003](adr/0003-maturity-and-ga.md)).
 
-> For the current evidence-based assessment, release blockers and
-> implementation sequence, see the
-> [2026-08-03 combined repository audit](audit/combined-audit-2026-08-03.md),
-> [`docs/audit-register.md`](audit-register.md), and master programme #62. Older
-> audits remain historical evidence.
+> Current maturity and delivery live in this page and
+> [`feature-status.yaml`](feature-status.yaml). Volatile issue sequencing lives
+> in [#62](https://github.com/victornife/jul/issues/62), and dated audit
+> disposition lives in the [audit register](audit-register.md). The
+> [2026-08-03 combined audit](audit/combined-audit-2026-08-03.md) remains a
+> preserved programme-opening baseline, not a second current-status source.
 
 **Keep this current.** When a feature's maturity or any GA criterion changes,
 update [`docs/feature-status.yaml`](feature-status.yaml) first — that is the
@@ -195,61 +196,6 @@ the [soak evidence log](soak-evidence.md).
 | HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ✅ **soaked 8h Linux** 2026-07-13 (55,302,486 requests, 0 errors, 100% success, isolated QUIC+TLS on `:8443`) — [evidence](soak-evidence.md#2026-07-13--http3-over-quic-8h-isolated-soak-linux-completed) |
 | WASM plugin system (Y2-02) | 2026-07-03 | ✅ **8h Linux soak completed 2026-07-16** (21.7M+ requests verified at 33-min snapshot, ~10K–20K req/s, 0 missing plugin headers throughout full 8h run; transport errors caused by disk I/O contention, not WASM failures — plugin executed correctly on 100% of successful responses) — [evidence](soak-evidence.md#2026-07-16--wasm-plugin-8h-isolated-soak-linux--authoritative-run) |
 | L4 stream proxy (Y2-03) | 2026-07-03 | ✅ completed 8h isolated Linux soak 2026-07-11 (`TestSoakUDPChurn`, 54,892,354 sends, 0% err, bounded goroutines/heap) — [evidence](soak-evidence.md#2026-07-11--l4-stream-proxy-8h-isolated-soak-linux-completed) |
-
-## Recently shipped continuous panels
-
-**Y2-09 Console v2 continuous panels** (tracked above as part of the **Console**
-row, Y1-07 · Y2-09):
-
-| Panel | Status | Note |
-| --- | --- | --- |
-| Live log tail | **Shipped** | Operations panel, SSE stream, filter/pause |
-| WASM plugin manager | **Shipped** | Plugins panel, structured CRUD + attach/detach; `.wasm` file upload included |
-| gRPC route designer | **Shipped** | Descriptor upload (inspection only), `google.api.http` parse, visual mapping editor |
-
-Deferred / demand-gated: **Y2-08** GraphQL composition. Time-boxed bet:
-**AI-MVP** AI Gateway. Years 3–5 are the demand-gated vision horizon. See the
-[roadmap](roadmap/README.md) for the full plan.
-
-## Beta (shipped; remaining GA gaps)
-
-Shipped and documented, with a Console surface, but not yet released and
-therefore not yet through the post-GA soak gate. See
-[ga-push.md](ga-push.md) for the per-feature push plan.
-
-| Feature | ID | Tag | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
-| --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| Trusted client address (`client_address`) | CGC-IN | core | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [configuration.md](configuration.md) |
-| Backend TLS trust (`backend_tls`) | UT-BE | core · `grpc` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [upstreams.md](upstreams.md) |
-
-**Trusted client address.** One canonical client address per request, derived
-per listen address from an explicit `trusted_proxies` policy before the `Host`
-header selects a server block, and read by CIDR authentication, IP rate limiting,
-the WAF, access logs, upstream forwarding and the FastCGI environment
-([ADR 0016](adr/0016-inbound-identity-and-backend-peer-trust.md)). Criterion 5
-is open because the capability is merged under `[Unreleased]` and has not been
-tagged, released or soaked — the post-GA gate cannot be claimed before a release
-exists. Everything else is met: the derivation algorithm and per-deployment
-forwarded-chain matrix ([configuration.md](configuration.md#client-address-and-trusted-proxies),
-[core-http.md](core-http.md#forwarded-headers-to-the-backend)), published
-benchmarks ([benchmarks.md](benchmarks.md)), the limitation list
-([known-limitations.md](known-limitations.md)), lifecycle and value-contract
-entries, the ADR threat model, `FuzzDerive`/`FuzzParsePrefix`, and the Security
-panel listener editor with its status row.
-
-**Backend TLS trust.** One outbound policy — trust roots with an explicit
-`ca_mode`, a client certificate, a verified name that a discovery-returned
-address can never displace, a minimum version and explicit `peer_identities` —
-resolved once and enforced by **every** outbound consumer: the HTTP reverse
-proxy (including WebSocket and streaming upgrades), native gRPC passthrough,
-gRPC-JSON transcoding with its reflection fetch, and active health probes, which
-now verify a backend exactly as live traffic does
-([ADR 0016](adr/0016-inbound-identity-and-backend-peer-trust.md)). Criterion 5 is
-open for the same reason as above: merged, not released, not soaked. Criteria 2
-and 8 are **n/a** — the policy is resolved once per handler generation and adds
-no measurable per-request work beyond the TLS handshake already covered by the
-existing TLS benchmarks, and it has no custom parser, since PEM and certificate
-parsing are the standard library's.
 
 ## Changelog
 

@@ -608,11 +608,28 @@ def test_status_heading_uniqueness_rejects_duplicate_anchor():
         docs = root / "docs"
         docs.mkdir(parents=True)
         (docs / "status.md").write_text(
-            "# Status\n\n## Repeated\n\nText.\n\n## Repeated\n",
+            "# Status\n\n## GA\n\n### Repeated\n\nText.\n\n### Repeated\n\n"
+            "## GA — soak pending\n\n## Beta\n\n## Alpha\n\n## Deprecated\n\n"
+            "## Soak tracking (post-GA gate)\n\n## Changelog\n",
             encoding="utf-8",
         )
         _, fail = _run_in_tmp(root, docs_check.check_status_heading_uniqueness)
         assert fail == 1, f"expected one duplicate-heading failure, got {fail}"
+
+
+def test_status_heading_contract_rejects_legacy_beta_section():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        docs = root / "docs"
+        docs.mkdir(parents=True)
+        (docs / "status.md").write_text(
+            "# Status\n\n## GA\n\n## GA — soak pending\n\n## Beta\n\n"
+            "## Alpha\n\n## Deprecated\n\n## Soak tracking (post-GA gate)\n\n"
+            "## Beta (shipped; remaining GA gaps)\n\n## Changelog\n",
+            encoding="utf-8",
+        )
+        _, fail = _run_in_tmp(root, docs_check.check_status_heading_uniqueness)
+        assert fail == 1, f"expected one legacy-section failure, got {fail}"
 
 if __name__ == "__main__":
     _run_existing_tests()
@@ -622,4 +639,5 @@ if __name__ == "__main__":
     test_readme_go_version_accepts_major_minor_and_rejects_stale_patch()
     test_living_doc_header_detects_newer_changelog()
     test_status_heading_uniqueness_rejects_duplicate_anchor()
+    test_status_heading_contract_rejects_legacy_beta_section()
     print("OK")

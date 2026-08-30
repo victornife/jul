@@ -284,16 +284,36 @@ For a multi-file estate, place the root and included files below one directory
 and add `--follow-includes --root <directory>`. Use `--json` or `--assess` to
 inspect evidence before writing a candidate.
 
-## GA status
+## Maturity and delivery
 
-| Criterion | Status | Evidence |
-| --- | --- | --- |
-| Conformance/behavior matrix | ✅ | Matrix above and schema-v2 result taxonomy. |
-| Published benchmark baseline | ✅ | Existing parse/translate benchmarks. |
-| Known limitations | ✅ | Explicit list above. |
-| Versioned contract | ✅ | Assessment schema version 2. |
-| Soak evidence | ✅ | [Soak evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts). |
-| Runnable example and docs | ✅ | Example, schema, sample report, and this guide. |
-| Security/threat model | ✅ | Root/symlink/bounds/redaction note above. |
-| Fuzzing | ✅ | `FuzzTranslate` covers parse, translate, and marshal round trip. |
-| Operable surface | ✅ | `jul import nginx --help` and deterministic human/JSON output. |
+This guide documents the current `main` surface, which is broader than
+the released base importer. The two contracts are deliberately separate:
+
+### Base importer — Y1-09 (`GA` / `soaked`)
+
+The released GA record covers the single-file conversion contract and the
+evidence that existed in the released line. The current support matrix above
+also contains later additive mappings; those do **not** retroactively widen
+the released GA contract.
+
+| Criterion | Released base evidence |
+| --- | --- |
+| Translation behavior | Deterministic single-file parse/translate path and its released golden output. |
+| Performance | Published parse and translate benchmark baselines. |
+| Limitations | Explicit unsupported-directive and semantic-difference list; no full NGINX emulation claim. |
+| Compatibility | The documented conversion CLI and generated Jul configuration behavior are governed by [compatibility.md](compatibility.md). |
+| Soak / validation | [Released importer validation evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts). |
+| Runnable example | `examples/migrate/nginx.conf` through ordinary conversion mode. |
+| Security | Parser failure containment, secret-safe diagnostics, and use on a trusted migration host. |
+| Fuzzing | `FuzzTranslate` covers parse, translate, and marshal round trip. |
+| Operable surface | `jul import nginx -o <file> <nginx.conf>`. |
+
+### Assessment, provenance, and includes — MIG-ASSESS (`Beta` / `merged`)
+
+Schema-v2 human/JSON assessment, stable findings and guidance, source spans,
+target mappings, and bounded root-confined include traversal are merged on
+current `main`. They are not contained in the older released GA record and
+have not completed a separate stable-release and long-running-soak promotion.
+Their machine contract and operating boundary are documented in
+[nginx-assessment.md](nginx-assessment.md) and tracked explicitly in
+[status.md](status.md).

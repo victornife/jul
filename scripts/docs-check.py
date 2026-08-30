@@ -982,8 +982,23 @@ def check_status_heading_uniqueness():
             error(path, line_no, f"duplicate heading {match.group(2)!r}; first declared on line {headings[key]}")
         else:
             headings[key] = line_no
-    if len(headings) == len(set(headings)):
-        ok("status.md headings are unique")
+    required = {
+        "GA", "GA — soak pending", "Beta", "Alpha", "Deprecated",
+        "Soak tracking (post-GA gate)", "Changelog",
+    }
+    declared = {title for level, title in headings if level == 2}
+    for title in sorted(required - declared):
+        error(path, 0, f"missing canonical status section: {title}")
+    forbidden = {
+        "Beta (shipped; remaining GA gaps)",
+        "Recently shipped continuous panels",
+    }
+    for title in sorted(forbidden & declared):
+        error(path, 0, f"legacy status section remains: {title}")
+    if required <= declared and not (forbidden & declared):
+        ok("status.md canonical sections are complete")
+
+
 def main():
     SKIP_DIRS = {"node_modules", "vendor", ".git", "__pycache__", "reviews"}
     md_files = [
