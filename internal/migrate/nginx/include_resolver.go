@@ -130,7 +130,7 @@ func resolveSourceTree(path string, options ImportOptions) (*resolvedSourceTree,
 	if err != nil {
 		return nil, err
 	}
-	cfg, source, err := tree.readParseRegister(lexicalPath, evaluatedPath, "", 0, true)
+	cfg, source, err := tree.readParseRegister(lexicalPath, evaluatedPath, "", 0)
 	if err != nil {
 		return nil, err
 	}
@@ -238,6 +238,14 @@ func (t *resolvedSourceTree) safeGlob(pattern string) ([]string, error) {
 		}
 	}
 	parts := strings.Split(filepath.Clean(rel), string(filepath.Separator))
+	for _, part := range parts {
+		if strings.ContainsAny(part, "*?[") {
+			if _, err := filepath.Match(part, ""); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	candidates := []string{t.lexicalRoot}
 	for index, part := range parts {
 		if part == "" || part == "." {
@@ -245,11 +253,6 @@ func (t *resolvedSourceTree) safeGlob(pattern string) ([]string, error) {
 		}
 		last := index == len(parts)-1
 		hasMeta := strings.ContainsAny(part, "*?[")
-		if hasMeta {
-			if _, err := filepath.Match(part, ""); err != nil {
-				return nil, err
-			}
-		}
 		next := make([]string, 0)
 		for _, base := range candidates {
 			if !hasMeta {
@@ -335,7 +338,7 @@ func (t *resolvedSourceTree) safeDirectory(path string) (string, error) {
 	return evaluatedPath, nil
 }
 
-func (t *resolvedSourceTree) readParseRegister(lexicalPath, evaluatedPath, parentID string, includeLine int, root bool) (*ngx.Config, AssessmentSource, error) {
+func (t *resolvedSourceTree) readParseRegister(lexicalPath, evaluatedPath, parentID string, includeLine int) (*ngx.Config, AssessmentSource, error) {
 	if t.filesRead >= t.limits.MaxFiles {
 		return nil, AssessmentSource{}, &includeTraversalError{Code: "NGX_INCLUDE_FILE_LIMIT", Message: "include file-count limit reached"}
 	}
@@ -576,7 +579,7 @@ func (t *resolvedSourceTree) resolveInclude(include *ngx.Include, includingPath 
 			continue
 		}
 
-		cfg, childSource, err := t.readParseRegister(lexicalPath, evaluatedPath, source.ID, include.GetLine(), false)
+		cfg, childSource, err := t.readParseRegister(lexicalPath, evaluatedPath, source.ID, include.GetLine())
 		if err != nil {
 			code, message := classifyIncludeReadError(err)
 			if firstFailure == nil {
