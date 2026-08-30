@@ -1,0 +1,86 @@
+name: Issue 353 heading reconciliation
+
+on:
+  push:
+    branches:
+      - agent/issue-353-docs-reconciliation
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-353-heading-reconciliation
+  cancel-in-progress: true
+
+jobs:
+  fix-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: install documentation dependencies
+        run: pip install tomli pyyaml
+      - name: fix duplicate headings and add drift guard
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          status = Path('docs/status.md')
+          text = status.read_text(encoding='utf-8')
+          replacements = {
+              '## GA criteria legend\n## GA criteria legend\n': '## GA criteria legend\n',
+              '## Soak tracking (post-GA gate)\n## Soak tracking (post-GA gate)\n': '## Soak tracking (post-GA gate)\n',
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one duplicate status heading {old!r}, found {text.count(old)}')
+              text = text.replace(old, new, 1)
+          status.write_text(text, encoding='utf-8', newline='\n')
+
+          checker = Path('scripts/docs-check.py')
+          text = checker.read_text(encoding='utf-8')
+          function = '''\n\ndef check_adjacent_duplicate_headings(paths):\n    \"\"\"Reject consecutive identical Markdown headings.\"\"\"\n    heading_re = re.compile(r\"^#{1,6}\\s+\\S\")\n    for path in paths:\n        lines = path.read_text(encoding=\"utf-8\").splitlines()\n        for index in range(len(lines) - 1):\n            current = lines[index].strip()\n            following = lines[index + 1].strip()\n            if current == following and heading_re.match(current):\n                error(path, index + 2, f\"adjacent duplicate heading: {current}\")\n\n'''
+          if 'def check_adjacent_duplicate_headings(paths):' not in text:
+              marker = '\ndef main():\n'
+              if text.count(marker) != 1:
+                  raise SystemExit(f'expected one main marker, found {text.count(marker)}')
+              text = text.replace(marker, function + 'def main():\n', 1)
+          call = '    check_adjacent_duplicate_headings(md_files)\n'
+          if call not in text:
+              marker = '    check_living_doc_headers()\n'
+              if text.count(marker) != 1:
+                  raise SystemExit(f'expected one living-header call, found {text.count(marker)}')
+              text = text.replace(marker, marker + call, 1)
+          checker.write_text(text, encoding='utf-8', newline='\n')
+
+          tests = Path('scripts/test_docs_check.py')
+          text = tests.read_text(encoding='utf-8')
+          addition = '''\n\ndef test_adjacent_duplicate_heading_is_rejected():\n    with tempfile.TemporaryDirectory() as tmpdir:\n        root = Path(tmpdir)\n        doc = root / \"duplicate.md\"\n        doc.write_text(\"# Title\\n\\n## Repeated\\n## Repeated\\n\", encoding=\"utf-8\")\n        _, fail = _run_in_tmp(root, lambda: docs_check.check_adjacent_duplicate_headings([doc]))\n        assert fail == 1, f\"expected one failure, got {fail}\"\n'''
+          if 'def test_adjacent_duplicate_heading_is_rejected():' not in text:
+              text += addition
+          tests.write_text(text, encoding='utf-8', newline='\n')
+          PY
+      - name: verify generated contracts and documentation
+        run: |
+          make generated-check
+          python scripts/docs-check.py
+          python scripts/test_docs_check.py
+          git diff --check
+      - name: remove one-shot workflow
+        run: rm .github/workflows/issue353-heading-fix.yml
+      - name: commit correction
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "docs: reject adjacent duplicate headings"
+          git push origin HEAD:agent/issue-353-docs-reconciliation
