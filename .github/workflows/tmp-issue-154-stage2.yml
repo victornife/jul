@@ -1,0 +1,61 @@
+name: Temporary issue 154 pinned NGINX lane
+
+on:
+  push:
+    branches:
+      - agent/issue-154-nginx-corpus-e2e
+
+permissions:
+  contents: write
+
+jobs:
+  materialize-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Materialize implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/tmp/issue154-stage2-*.b64 | tr -d '\n' | base64 --decode > /tmp/issue154-stage2.tgz
+          tar -xzf /tmp/issue154-stage2.tgz
+          chmod +x scripts/nginx-corpus-check.sh scripts/nginx-migration-e2e.sh
+          gofmt -w internal/migrate/nginx/corpus/*.go cmd/jul/import_corpus_test.go
+      - name: Validate corpus package
+        run: go test -tags importer ./internal/migrate/nginx/corpus -count=1
+      - name: Validate importer and real Jul E2E
+        run: go test -tags importer ./cmd/jul -run '^TestNGINXCorpusAssessmentCandidateAndRealJul$' -count=1 -v
+      - name: Validate pinned NGINX reference lane
+        env:
+          REQUIRE_NGINX_E2E: "1"
+          NGINX_CORPUS_ARTIFACT_DIR: /tmp/nginx-corpus-artifacts
+        run: scripts/nginx-migration-e2e.sh
+      - name: Validate docs and formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/docs-check.py
+          test -z "$(gofmt -l internal/migrate/nginx/corpus cmd/jul/import_corpus_test.go)"
+      - name: Commit validated implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tmp-issue-154-stage2.yml .github/tmp/issue154-stage2-*.b64
+          git add \
+            .github/workflows/nginx-migration-e2e.yml \
+            Makefile \
+            docs/nginx-migration-corpus.md \
+            docs/nginx-importer.md \
+            internal/migrate/nginx/corpus \
+            scripts/nginx-migration-e2e.sh \
+            testdata/nginx-corpus/README.md
+          git commit -m "test(importer): add pinned NGINX reference lane (#154)"
+          git push origin HEAD:agent/issue-154-nginx-corpus-e2e
