@@ -76,10 +76,12 @@ func (r Resource) CollectionElementPath() string {
 // Configuration revision / Managed apply operation / History revision /
 // Reload transaction are operation identities with no schema path at all.
 //
-// "route_id" (ADR 0019 §4) is not yet part of this schema (see the
-// generator's README/PR notes) — Route is classified as a revision-scoped
-// selector only until that field lands; the catalog needs no change when it
-// does, only a new row.
+// ExternalPath reflects ADR 0019 §24's accepted external `/api/v1` contract —
+// the forward surface #150 implements — never a legacy internal `/api/...`
+// route. A resource with no entry in that table (plugin, rbac_role,
+// rbac_principal: "the initial external surface, deliberately small", and
+// stream, whose only accepted route is the `/api/v1/streams` collection) gets
+// the empty string, not an invented path.
 //
 // ADR 0019 §5's table lists "RBAC role / principal" as one row; this catalog
 // splits it into two kinds (rbac_role, rbac_principal) because they are two
@@ -90,12 +92,12 @@ var ResourceCatalog = []Resource{
 	{
 		Kind:            "route",
 		CollectionPath:  "servers.*.locations.*",
-		IdentityClass:   IdentityRevisionSelector,
-		IdentityFields:  nil,
-		UniquenessScope: "none",
+		IdentityClass:   IdentityDurableID,
+		IdentityFields:  []string{"route_id"},
+		UniquenessScope: "configuration",
 		Required:        false,
-		Renameable:      true,
-		ExternalPath:    "",
+		Renameable:      false,
+		ExternalPath:    "/api/v1/routes/{route_id}",
 	},
 	{
 		Kind:            "upstream_pool",
@@ -105,7 +107,7 @@ var ResourceCatalog = []Resource{
 		UniquenessScope: "configuration",
 		Required:        true,
 		Renameable:      false,
-		ExternalPath:    "/api/upstreams/{name}/resilience",
+		ExternalPath:    "/api/v1/upstreams/{name}",
 	},
 	{
 		Kind:            "upstream_backend",
@@ -135,7 +137,7 @@ var ResourceCatalog = []Resource{
 		UniquenessScope: "configuration",
 		Required:        true,
 		Renameable:      false,
-		ExternalPath:    "/api/listeners/{addr}/client_address",
+		ExternalPath:    "/api/v1/listeners/{addr}/client_address",
 	},
 	{
 		Kind:            "stream",

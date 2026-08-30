@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 344 |
-| Schema leaves (configurable values) | 292 |
-| Registry entries | 292 |
+| Schema paths (containers included) | 345 |
+| Schema leaves (configurable values) | 293 |
+| Registry entries | 293 |
 | Startup-consumed entries | 59 |
-| Class `hot_reload` | 219 |
+| Class `hot_reload` | 220 |
 | Class `restart_required` | 59 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
@@ -294,6 +294,7 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.rewrites.*.pattern` | `hot_reload` | `rewrites` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.rewrites.*.replacement` | `hot_reload` | `rewrites` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.root` | `hot_reload` | `root` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.route_id` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.try_files` | `hot_reload` | `try_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.uwsgi_pass` | `hot_reload` | `uwsgi` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.waf.block_status` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |

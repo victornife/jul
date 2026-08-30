@@ -122,3 +122,68 @@ func TestResourceCatalogNoOperationIdentity(t *testing.T) {
 		}
 	}
 }
+
+// TestResourceCatalogExternalPathsMatchADR0019Section24 pins every
+// ExternalPath to the accepted external `/api/v1` contract (ADR 0019 §24),
+// never a legacy internal `/api/...` route and never an invented one for a
+// resource the accepted table does not address individually.
+func TestResourceCatalogExternalPathsMatchADR0019Section24(t *testing.T) {
+	want := map[string]string{
+		"route":            "/api/v1/routes/{route_id}",
+		"upstream_pool":    "/api/v1/upstreams/{name}",
+		"upstream_backend": "",
+		"http_server":      "",
+		"listener":         "/api/v1/listeners/{addr}/client_address",
+		"stream":           "",
+		"plugin":           "",
+		"rbac_role":        "",
+		"rbac_principal":   "",
+	}
+	have := map[string]string{}
+	for _, r := range ResourceCatalog {
+		have[r.Kind] = r.ExternalPath
+	}
+	for kind, path := range want {
+		got, ok := have[kind]
+		if !ok {
+			t.Errorf("resource kind %q is missing from the catalog", kind)
+			continue
+		}
+		if got != path {
+			t.Errorf("resource %q ExternalPath = %q, want %q", kind, got, path)
+		}
+		if path != "" && !strings.HasPrefix(path, "/api/v1/") {
+			t.Errorf("resource %q ExternalPath %q does not use the accepted /api/v1 contract", kind, path)
+		}
+		if strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/api/v1/") {
+			t.Errorf("resource %q ExternalPath %q encodes a legacy /api/... route instead of /api/v1/...", kind, path)
+		}
+	}
+}
+
+// TestResourceCatalogRouteIsDurableID proves the route resource is the exact
+// shape ADR 0019 §21 describes now that route_id exists: one row, durable_id,
+// optional, not renameable (changing the ID is delete+create).
+func TestResourceCatalogRouteIsDurableID(t *testing.T) {
+	var route *Resource
+	for i := range ResourceCatalog {
+		if ResourceCatalog[i].Kind == "route" {
+			route = &ResourceCatalog[i]
+		}
+	}
+	if route == nil {
+		t.Fatal("route resource missing from catalog")
+	}
+	if route.IdentityClass != IdentityDurableID {
+		t.Errorf("route IdentityClass = %q, want %q", route.IdentityClass, IdentityDurableID)
+	}
+	if len(route.IdentityFields) != 1 || route.IdentityFields[0] != "route_id" {
+		t.Errorf("route IdentityFields = %v, want [route_id]", route.IdentityFields)
+	}
+	if route.Required {
+		t.Error("route should not be Required: a route_id is optional")
+	}
+	if route.Renameable {
+		t.Error("route should not be Renameable: changing route_id is delete+create")
+	}
+}

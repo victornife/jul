@@ -256,12 +256,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 344,
-    "schema_leaves": 292,
-    "registry_entries": 292,
+    "schema_paths": 345,
+    "schema_leaves": 293,
+    "registry_entries": 293,
     "startup_consumed": 59,
     "by_class": {
-      "hot_reload": 219,
+      "hot_reload": 220,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
       "restart_required": 59,
@@ -2562,6 +2562,19 @@
       "path": "servers.*.locations.*.root",
       "class": "hot_reload",
       "subsystem": "root",
+      "reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "servers.*.locations.*.route_id",
+      "class": "hot_reload",
+      "subsystem": "routing",
       "reason": "the handler tree is rebuilt from the effective config on each successful reload",
       "startup_consumed": false,
       "address_keyed": false,
