@@ -179,7 +179,15 @@ func (writer *limitWriter) Write(data []byte) (int, error) {
 		return 0, ErrArchiveTooLarge
 	}
 	if int64(len(data)) > remaining {
-		data = data[:remaining]
+		count, err := writer.writer.Write(data[:remaining])
+		writer.written += int64(count)
+		if err != nil {
+			return count, err
+		}
+		if int64(count) < remaining {
+			return count, io.ErrShortWrite
+		}
+		return count, ErrArchiveTooLarge
 	}
 	count, err := writer.writer.Write(data)
 	writer.written += int64(count)
@@ -188,9 +196,6 @@ func (writer *limitWriter) Write(data []byte) (int, error) {
 	}
 	if count < len(data) {
 		return count, io.ErrShortWrite
-	}
-	if writer.written >= writer.limit {
-		return count, ErrArchiveTooLarge
 	}
 	return count, nil
 }
@@ -240,13 +245,14 @@ func rejectSymlinkComponents(target string) error {
 	volume := filepath.VolumeName(absolute)
 	root := volume + string(filepath.Separator)
 	remainder := strings.TrimPrefix(absolute, root)
+	components := strings.Split(remainder, string(filepath.Separator))
 	current := root
-	for _, component := range strings.Split(remainder, string(filepath.Separator)) {
+	for index, component := range components {
 		if component == "" {
 			continue
 		}
-		current = filepath.Join(current, component)
-		info, statErr := os.Lstat(current)
+		next := filepath.Join(current, component)
+		info, statErr := os.Lstat(next)
 		if errors.Is(statErr, os.ErrNotExist) {
 			return nil
 		}
@@ -254,8 +260,24 @@ func rejectSymlinkComponents(target string) error {
 			return fmt.Errorf("inspect support-bundle path component: %w", statErr)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%w: symbolic-link component", ErrUnsafeOutputPath)
+			// macOS exposes system-owned roots such as /var and /tmp through a
+			// first-component symlink. Resolve that immutable root alias, but
+			// continue to reject every later/user-controlled symlink component.
+			if index != 0 {
+				return fmt.Errorf("%w: symbolic-link component", ErrUnsafeOutputPath)
+			}
+			resolved, resolveErr := filepath.EvalSymlinks(next)
+			if resolveErr != nil {
+				return fmt.Errorf("resolve support-bundle root alias: %w", resolveErr)
+			}
+			resolvedInfo, resolveErr := os.Stat(resolved)
+			if resolveErr != nil || !resolvedInfo.IsDir() {
+				return fmt.Errorf("%w: invalid root alias", ErrUnsafeOutputPath)
+			}
+			current = resolved
+			continue
 		}
+		current = next
 	}
 	return nil
 }
