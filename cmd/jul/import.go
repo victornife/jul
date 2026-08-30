@@ -185,7 +185,7 @@ func cmdImport(args []string) int {
 		return importAssessmentExit(assessment, *strict, warns)
 	}
 	if *assess {
-		fmt.Fprint(stdout, assessment.Human())
+		fmt.Fprint(stdout, assessment.HumanWithSourcePolicy())
 		return importAssessmentExit(assessment, *strict, warns)
 	}
 
@@ -313,7 +313,7 @@ func emitImportAssessment(assessment *nginx.Assessment, human, jsonOut bool, rep
 		return writeAssessment(stdout, assessment)
 	}
 	if human {
-		fmt.Fprint(stdout, assessment.Human())
+		fmt.Fprint(stdout, assessment.HumanWithSourcePolicy())
 	}
 	return nil
 }
