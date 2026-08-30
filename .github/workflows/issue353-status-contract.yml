@@ -80,28 +80,28 @@ jobs:
           )
           if text.count(old) != 1:
               raise SystemExit(f'expected one status heading success block, found {text.count(old)}')
-          text = text.replace(old, new + '\n\n', 1)
-          checker.write_text(text, encoding='utf-8', newline='\n')
+          checker.write_text(text.replace(old, new + '\n\n', 1), encoding='utf-8', newline='\n')
 
           tests = Path('scripts/test_docs_check.py')
           text = tests.read_text(encoding='utf-8')
-          addition = '''
-
-def test_status_heading_contract_rejects_legacy_beta_section():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        root = Path(tmpdir)
-        docs = root / "docs"
-        docs.mkdir(parents=True)
-        (docs / "status.md").write_text(
-            "# Status\n\n## GA\n\n## GA — soak pending\n\n## Beta\n\n"
-            "## Alpha\n\n## Deprecated\n\n## Soak tracking (post-GA gate)\n\n"
-            "## Beta (shipped; remaining GA gaps)\n\n## Changelog\n",
-            encoding="utf-8",
-        )
-        _, fail = _run_in_tmp(root, docs_check.check_status_heading_uniqueness)
-        assert fail == 1, f"expected one legacy-section failure, got {fail}"
-'''
-          if 'def test_status_heading_contract_rejects_legacy_beta_section():' not in text:
+          test_name = 'test_status_heading_contract_rejects_legacy_beta_section'
+          addition = (
+              '\n\n'
+              'def test_status_heading_contract_rejects_legacy_beta_section():\n'
+              '    with tempfile.TemporaryDirectory() as tmpdir:\n'
+              '        root = Path(tmpdir)\n'
+              '        docs = root / "docs"\n'
+              '        docs.mkdir(parents=True)\n'
+              '        (docs / "status.md").write_text(\n'
+              '            "# Status\\n\\n## GA\\n\\n## GA — soak pending\\n\\n## Beta\\n\\n"\n'
+              '            "## Alpha\\n\\n## Deprecated\\n\\n## Soak tracking (post-GA gate)\\n\\n"\n'
+              '            "## Beta (shipped; remaining GA gaps)\\n\\n## Changelog\\n",\n'
+              '            encoding="utf-8",\n'
+              '        )\n'
+              '        _, fail = _run_in_tmp(root, docs_check.check_status_heading_uniqueness)\n'
+              '        assert fail == 1, f"expected one legacy-section failure, got {fail}"\n'
+          )
+          if f'def {test_name}():' not in text:
               main_marker = '\nif __name__ == "__main__":\n'
               main_at = text.rfind(main_marker)
               if main_at < 0:
@@ -110,7 +110,7 @@ def test_status_heading_contract_rejects_legacy_beta_section():
               runner = '    test_status_heading_uniqueness_rejects_duplicate_anchor()\n    print("OK")'
               replacement = (
                   '    test_status_heading_uniqueness_rejects_duplicate_anchor()\n'
-                  '    test_status_heading_contract_rejects_legacy_beta_section()\n'
+                  f'    {test_name}()\n'
                   '    print("OK")'
               )
               if text.count(runner) != 1:
@@ -124,43 +124,36 @@ def test_status_heading_contract_rejects_legacy_beta_section():
           if text.count(marker) != 1:
               raise SystemExit(f'expected one importer GA section, found {text.count(marker)}')
           prefix = text.split(marker, 1)[0].rstrip()
-          replacement = '''
-
-## Maturity and delivery
-
-This guide documents the current `main` surface, which is broader than
-the released base importer. The two contracts are deliberately separate:
-
-### Base importer — Y1-09 (`GA` / `soaked`)
-
-The released GA record covers the single-file conversion contract and the
-evidence that existed in the released line. The current support matrix above
-also contains later additive mappings; those do **not** retroactively widen
-the released GA contract.
-
-| Criterion | Released base evidence |
-| --- | --- |
-| Translation behavior | Deterministic single-file parse/translate path and its released golden output. |
-| Performance | Published parse and translate benchmark baselines. |
-| Limitations | Explicit unsupported-directive and semantic-difference list; no full NGINX emulation claim. |
-| Compatibility | The documented conversion CLI and generated Jul configuration behavior are governed by [compatibility.md](compatibility.md). |
-| Soak / validation | [Released importer validation evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts). |
-| Runnable example | `examples/migrate/nginx.conf` through ordinary conversion mode. |
-| Security | Parser failure containment, secret-safe diagnostics, and use on a trusted migration host. |
-| Fuzzing | `FuzzTranslate` covers parse, translate, and marshal round trip. |
-| Operable surface | `jul import nginx -o <file> <nginx.conf>`. |
-
-### Assessment, provenance, and includes — MIG-ASSESS (`Beta` / `merged`)
-
-Schema-v2 human/JSON assessment, stable findings and guidance, source spans,
-target mappings, and bounded root-confined include traversal are merged on
-current `main`. They are not contained in the older released GA record and
-have not completed a separate stable-release and long-running-soak promotion.
-Their machine contract and operating boundary are documented in
-[nginx-assessment.md](nginx-assessment.md) and tracked explicitly in
-[status.md](status.md).
-'''
-          importer.write_text(prefix + replacement.rstrip() + '\n', encoding='utf-8', newline='\n')
+          replacement = (
+              '\n\n## Maturity and delivery\n\n'
+              'This guide documents the current `main` surface, which is broader than\n'
+              'the released base importer. The two contracts are deliberately separate:\n\n'
+              '### Base importer — Y1-09 (`GA` / `soaked`)\n\n'
+              'The released GA record covers the single-file conversion contract and the\n'
+              'evidence that existed in the released line. The current support matrix above\n'
+              'also contains later additive mappings; those do **not** retroactively widen\n'
+              'the released GA contract.\n\n'
+              '| Criterion | Released base evidence |\n'
+              '| --- | --- |\n'
+              '| Translation behavior | Deterministic single-file parse/translate path and its released golden output. |\n'
+              '| Performance | Published parse and translate benchmark baselines. |\n'
+              '| Limitations | Explicit unsupported-directive and semantic-difference list; no full NGINX emulation claim. |\n'
+              '| Compatibility | The documented conversion CLI and generated Jul configuration behavior are governed by [compatibility.md](compatibility.md). |\n'
+              '| Soak / validation | [Released importer validation evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts). |\n'
+              '| Runnable example | `examples/migrate/nginx.conf` through ordinary conversion mode. |\n'
+              '| Security | Parser failure containment, secret-safe diagnostics, and use on a trusted migration host. |\n'
+              '| Fuzzing | `FuzzTranslate` covers parse, translate, and marshal round trip. |\n'
+              '| Operable surface | `jul import nginx -o <file> <nginx.conf>`. |\n\n'
+              '### Assessment, provenance, and includes — MIG-ASSESS (`Beta` / `merged`)\n\n'
+              'Schema-v2 human/JSON assessment, stable findings and guidance, source spans,\n'
+              'target mappings, and bounded root-confined include traversal are merged on\n'
+              'current `main`. They are not contained in the older released GA record and\n'
+              'have not completed a separate stable-release and long-running-soak promotion.\n'
+              'Their machine contract and operating boundary are documented in\n'
+              '[nginx-assessment.md](nginx-assessment.md) and tracked explicitly in\n'
+              '[status.md](status.md).\n'
+          )
+          importer.write_text(prefix + replacement, encoding='utf-8', newline='\n')
           PY
       - name: verify documentation
         run: |
