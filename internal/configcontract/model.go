@@ -48,6 +48,11 @@ type Field struct {
 	TextScalar  bool
 	Description string
 	Anchor      string
+	// Default is the documented default, when one is recorded in
+	// DefaultOverrides. It is annotation only: no renderer materializes it
+	// into a submitted document, and it is kept distinct from ZeroSemantics.
+	Default    string
+	HasDefault bool
 
 	// Lifecycle (ADR 0019 §19, from lifecycle.BuildMetadata; every leaf has
 	// exactly one entry, enforced by lifecycle's own closed-world tests and
@@ -66,6 +71,10 @@ type Field struct {
 
 	// Capability requirement, if any (usually zero or one entry).
 	Capabilities []Capability
+	// ValueCapabilities maps a specific accepted value to the capability it
+	// requires, for a field whose presence is unconditional but one of whose
+	// values gates a build tag (e.g. compression.encoders' "br"/"zstd").
+	ValueCapabilities map[string]Capability
 
 	// Value contract (ADR 0019 §21), present only when an audited entry
 	// resolves to this path.
@@ -127,10 +136,33 @@ func Build(src Sources) (Contract, error) {
 		}
 	}
 
+	// Join the value-capability registry: every path must resolve against a
+	// real schema leaf, and every capability must have a known build tag.
+	for _, e := range ValueCapabilityRegistry {
+		if !schemaLeafSet[e.Path] {
+			return Contract{}, fmt.Errorf("configcontract: value-capability %s: path %q does not resolve against config.SchemaLeaves()", e.Capability, e.Path)
+		}
+		if _, ok := CapabilityBuildTag[e.Capability]; !ok {
+			return Contract{}, fmt.Errorf("configcontract: value-capability %s: no build tag registered in CapabilityBuildTag", e.Capability)
+		}
+	}
+	for _, e := range CapabilityRegistry {
+		if _, ok := CapabilityBuildTag[e.Capability]; !ok {
+			return Contract{}, fmt.Errorf("configcontract: capability %s: no build tag registered in CapabilityBuildTag", e.Capability)
+		}
+	}
+
 	// Join description overrides: every key must resolve to a real leaf.
 	for path := range DescriptionOverrides {
 		if !schemaLeafSet[path] {
 			return Contract{}, fmt.Errorf("configcontract: DescriptionOverrides entry %q does not resolve against config.SchemaLeaves()", path)
+		}
+	}
+
+	// Join documented defaults: every key must resolve to a real leaf.
+	for path := range DefaultOverrides {
+		if !schemaLeafSet[path] {
+			return Contract{}, fmt.Errorf("configcontract: DefaultOverrides entry %q does not resolve against config.SchemaLeaves()", path)
 		}
 	}
 
@@ -176,27 +208,32 @@ func Build(src Sources) (Contract, error) {
 		}
 
 		f := Field{
-			Path:            p.Path,
-			Kind:            p.Kind,
-			Scalar:          p.Scalar,
-			GoType:          p.GoType,
-			Optional:        p.Optional,
-			Dynamic:         p.Dynamic,
-			TextScalar:      p.TextScalar,
-			Description:     desc,
-			Anchor:          anchorFor(p.Path),
-			Class:           entry.Class.String(),
-			Subsystem:       string(entry.Subsystem),
-			Reason:          entry.Reason,
-			StartupConsumed: entry.StartupConsumed,
-			AddressKeyed:    entry.AddressKeyed,
-			CollectionKeyed: entry.CollectionKeyed,
-			Conditional:     entry.Conditional,
-			Deprecated:      entry.Deprecated,
-			Ignored:         entry.Ignored,
-			Reserved:        entry.Reserved,
-			Secret:          entry.Secret,
-			Capabilities:    CapabilitiesFor(p.Path),
+			Path:              p.Path,
+			Kind:              p.Kind,
+			Scalar:            p.Scalar,
+			GoType:            p.GoType,
+			Optional:          p.Optional,
+			Dynamic:           p.Dynamic,
+			TextScalar:        p.TextScalar,
+			Description:       desc,
+			Anchor:            anchorFor(p.Path),
+			Class:             entry.Class.String(),
+			Subsystem:         string(entry.Subsystem),
+			Reason:            entry.Reason,
+			StartupConsumed:   entry.StartupConsumed,
+			AddressKeyed:      entry.AddressKeyed,
+			CollectionKeyed:   entry.CollectionKeyed,
+			Conditional:       entry.Conditional,
+			Deprecated:        entry.Deprecated,
+			Ignored:           entry.Ignored,
+			Reserved:          entry.Reserved,
+			Secret:            entry.Secret,
+			Capabilities:      CapabilitiesFor(p.Path),
+			ValueCapabilities: ValueCapabilitiesFor(p.Path),
+		}
+		if def, ok := DefaultFor(p.Path); ok {
+			f.Default = def
+			f.HasDefault = true
 		}
 		if vc, ok := valueByPath[p.Path]; ok {
 			f.HasValueContract = true

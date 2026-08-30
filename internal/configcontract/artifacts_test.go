@@ -4,7 +4,9 @@
 package configcontract
 
 import (
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -101,6 +103,27 @@ func TestSchemaIDHasNoLocalPath(t *testing.T) {
 	}
 	if strings.HasPrefix(SchemaID, "file://") {
 		t.Errorf("$id must not be a local file:// identifier: %s", SchemaID)
+	}
+}
+
+// TestSchemaIDIsVersioned proves $id is tied to ContractVersion (ADR 0019
+// §11 of the corrective task): it embeds the version, and the formula is
+// sensitive to it, so the same $id can never represent two incompatible
+// contract versions.
+func TestSchemaIDIsVersioned(t *testing.T) {
+	want := fmt.Sprintf("https://github.com/victornife/jul/schema/config-contract/v%d", ContractVersion)
+	if SchemaID != want {
+		t.Errorf("SchemaID = %q, want %q", SchemaID, want)
+	}
+	if !strings.Contains(SchemaID, strconv.Itoa(ContractVersion)) {
+		t.Errorf("SchemaID %q does not embed ContractVersion %d", SchemaID, ContractVersion)
+	}
+	other := fmt.Sprintf("https://github.com/victornife/jul/schema/config-contract/v%d", ContractVersion+1)
+	if other == SchemaID {
+		t.Fatal("the $id formula is not sensitive to ContractVersion, so a version bump would not change it")
+	}
+	if strings.Contains(SchemaID, "/main/") || strings.Contains(SchemaID, "/blob/") {
+		t.Errorf("$id %q still points at a mutable branch/commit path", SchemaID)
 	}
 }
 

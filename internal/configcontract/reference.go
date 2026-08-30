@@ -55,6 +55,9 @@ func RenderReferenceMarkdown(c Contract) ([]byte, error) {
 		if len(f.Capabilities) > 0 {
 			fmt.Fprintf(&b, "| Requires | %s |\n", capabilityCell(f.Capabilities))
 		}
+		if f.HasDefault {
+			fmt.Fprintf(&b, "| Default | %s |\n", escapeCell(f.Default))
+		}
 		if flags := flagCell(f); flags != "" {
 			fmt.Fprintf(&b, "| Flags | %s |\n", flags)
 		}

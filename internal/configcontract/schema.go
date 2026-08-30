@@ -5,6 +5,7 @@ package configcontract
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,10 +17,13 @@ import (
 // (ADR 0019 §23.1).
 const SchemaDialect = "https://json-schema.org/draft/2020-12/schema"
 
-// SchemaID identifies the generated schema. It is tied to the real,
-// version-controlled location of the artifact in Jul's own repository —
-// never a local checkout path, developer username, or invented domain.
-const SchemaID = "https://github.com/victornife/jul/blob/main/docs/generated/config.schema.json"
+// SchemaID identifies the generated schema. It is tied to ContractVersion, so
+// bumping the contract version necessarily changes it, and to the real,
+// version-controlled Jul repository namespace — never mutable `main`, a
+// specific commit, a local checkout path, a developer username, or an
+// invented domain. It is not required to be a fetchable URL; like most JSON
+// Schema $id values it is a stable identifier.
+var SchemaID = fmt.Sprintf("https://github.com/victornife/jul/schema/config-contract/v%d", ContractVersion)
 
 // requiredChildren is the small, explicit, evidence-backed table of
 // unconditionally required properties. ADR 0019 §22.1 warns against
@@ -61,10 +65,11 @@ func RenderSchema(c Contract) ([]byte, error) {
 			"cross-field rule), and a document may pass `jul check` while " +
 			"`jul lint` reports an error-severity finding — lint policy is " +
 			"never converted into structural invalidity here.",
-		"title":                "Jul configuration",
-		"type":                 "object",
-		"additionalProperties": false,
-		"properties":           b.propertiesFor(""),
+		"title":                       "Jul configuration",
+		"type":                        "object",
+		"additionalProperties":        false,
+		"x-jul-capability-build-tags": CapabilityBuildTag,
+		"properties":                  b.propertiesFor(""),
 	}
 	if req := requiredChildren[""]; len(req) > 0 {
 		doc["required"] = req
@@ -226,6 +231,12 @@ func (b *schemaBuilder) leafSchema(path string) map[string]any {
 	if len(f.Capabilities) > 0 {
 		node["x-jul-capability"] = f.Capabilities
 	}
+	if len(f.ValueCapabilities) > 0 {
+		node["x-jul-value-capability"] = f.ValueCapabilities
+	}
+	if f.HasDefault {
+		node["x-jul-default"] = f.Default
+	}
 	if f.HasValueContract && f.Constraint != "" {
 		node["x-jul-constraint"] = f.Constraint
 	}
@@ -255,6 +266,25 @@ func scalarTypeSchema(k config.ScalarKind) map[string]any {
 	}
 }
 
+// mechanicalGrammarPatterns holds the small, explicit set of "grammar"-kind
+// leaves whose audited free-text constraint is simple and exact enough for a
+// sound hand-verified regex — unlike the general policy of leaving grammar
+// prose undocumented as schema keywords (most RFC 9110/regex-shaped grammars
+// have no safe mechanical translation), route_id's grammar is a closed,
+// simple rule and ADR 0019 §14 asks for it to be represented mechanically.
+// Global uniqueness stays a documented Go cross-object rule; no entry here
+// may encode it.
+var mechanicalGrammarPatterns = map[string]string{
+	"servers.*.locations.*.route_id": RouteIDPattern,
+}
+
+// acmeDirectoryURLPattern approximates internal/config/validate.go's
+// validateACME CA branch (url.Parse succeeds, Scheme=="https", Host!=""): an
+// https URL with a non-empty host. It is a sound-enough approximation per
+// ADR 0019 §9's bar ("closely enough to avoid false rejection"), grounded in
+// the actual validator rather than guessed.
+const acmeDirectoryURLPattern = `^https://[^\s/]+`
+
 // applyScalarValueContract adds mechanically sound constraints for a scalar
 // leaf. Prose that has no sound translation (most "grammar"/"grammar_list"
 // constraints) is deliberately left as the x-jul-constraint annotation
@@ -264,9 +294,19 @@ func applyScalarValueContract(node map[string]any, f Field) {
 		return
 	}
 	switch f.ValueKind {
-	case "enum", "enum_or_url":
+	case "enum":
 		if len(f.Allowed) > 0 {
 			node["enum"] = f.Allowed
+		}
+	case "enum_or_url":
+		// Closed aliases OR a valid ACME directory URL (never a closed enum
+		// alone — that would reject every valid custom CA, the defect this
+		// case exists to fix).
+		if len(f.Allowed) > 0 {
+			node["oneOf"] = []any{
+				map[string]any{"enum": f.Allowed},
+				map[string]any{"type": "string", "pattern": acmeDirectoryURLPattern},
+			}
 		}
 	case "integer_enum":
 		if len(f.IntegerEnum) > 0 {
@@ -274,22 +314,31 @@ func applyScalarValueContract(node map[string]any, f Field) {
 		}
 	case "integer", "ratio", "http_status":
 		applyNumericBound(node, f.NumericBound)
+	case "grammar":
+		if pat, ok := mechanicalGrammarPatterns[f.Path]; ok {
+			node["pattern"] = pat
+		}
 	}
 }
 
 // applyListValueContract adds constraints to a KindList leaf's items (and the
-// array itself), for the "enum_list" and "grammar_list" kinds.
+// array itself). A value-contract entry may describe a list-typed leaf with
+// kind "enum" (not "enum_list") when its own audited grammar never mentions a
+// per-list-item uniqueness requirement — the enum constraint still applies to
+// each item; only "enum_list" additionally implies uniqueItems.
 func applyListValueContract(node map[string]any, f Field) {
 	if !f.HasValueContract {
 		return
 	}
 	items, _ := node["items"].(map[string]any)
 	switch f.ValueKind {
-	case "enum_list":
+	case "enum", "enum_list":
 		if len(f.Allowed) > 0 && items != nil {
 			items["enum"] = f.Allowed
 		}
-		node["uniqueItems"] = true
+		if f.ValueKind == "enum_list" {
+			node["uniqueItems"] = true
+		}
 	}
 }
 

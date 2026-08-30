@@ -4,9 +4,23 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 344,
-    "schema_leaves": 292,
+    "schema_paths": 345,
+    "schema_leaves": 293,
     "resources": 9
+  },
+  "capability_build_tags": {
+    "acme": "acme",
+    "brotli": "brotli",
+    "console": "console",
+    "consul": "consul",
+    "grpc": "grpc",
+    "http3": "http3",
+    "kubernetes": "kubernetes",
+    "otel": "otel",
+    "stream_proxy": "stream",
+    "waf": "waf",
+    "wasm_plugins": "wasmplugins",
+    "zstd": "zstd"
   },
   "fields": {
     "admin.audit_log_file": {
@@ -36,6 +50,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 14 when audit_log_file is set",
       "active_when": "always",
+      "default": "14",
       "description": "AuditLogRotateKeep bounds how many rotated audit backups are retained; older backups are pruned",
       "anchor": "admin-audit_log_rotate_keep"
     },
@@ -53,6 +68,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 100 when audit_log_file is set",
       "active_when": "always",
+      "default": "100",
       "description": "AuditLogRotateMaxMB is the size in megabytes at which the durable audit sink rotates to a timestamped backup",
       "anchor": "admin-audit_log_rotate_max_mb"
     },
@@ -69,6 +85,7 @@
       "capabilities": [
         "console"
       ],
+      "default": "true (when admin.enabled)",
       "description": "Console toggles the web console dashboard at the admin root",
       "anchor": "admin-console"
     },
@@ -95,6 +112,7 @@
       "lifecycle_class": "restart_required",
       "lifecycle_reason": "the admin listener and its resources are created once at startup",
       "startup_consumed": true,
+      "default": "./jul-data/config-history",
       "description": "HistoryDir is the directory where the console snapshots the previous configuration before each successful edit, enabling one-click rollback",
       "anchor": "admin-history_dir"
     },
@@ -112,6 +130,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 50 when admin is enabled",
       "active_when": "always",
+      "default": "50",
       "description": "HistoryKeep bounds how many configuration snapshots are retained; older snapshots are pruned",
       "anchor": "admin-history_keep"
     },
@@ -142,6 +161,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 4",
       "active_when": "always",
+      "default": "4",
       "description": "MaxEventConns bounds concurrent /api/events SSE streams per client to prevent resource exhaustion",
       "anchor": "admin-max_event_conns"
     },
@@ -168,6 +188,7 @@
       "lifecycle_class": "restart_required",
       "lifecycle_reason": "the admin listener and its resources are created once at startup",
       "startup_consumed": true,
+      "default": "false",
       "description": "PluginUploadEnabled controls whether the admin console allows uploading .wasm plugin modules",
       "anchor": "admin-plugin_upload_enabled"
     },
@@ -185,6 +206,7 @@
       "constraint": "positive when upload is enabled; otherwise non-negative",
       "zero_semantics": "omitted/zero defaults to 32 MiB when upload is enabled",
       "active_when": "always",
+      "default": "32",
       "description": "PluginUploadMaxSize caps the size of an uploaded .wasm file in megabytes",
       "anchor": "admin-plugin_upload_max_size"
     },
@@ -202,6 +224,7 @@
       "constraint": "any integer; negative disables the limiter",
       "zero_semantics": "omitted/zero defaults to 30",
       "active_when": "always",
+      "default": "30",
       "description": "RateLimitApplyPerMin caps the high-impact config validate/diff/apply endpoints per client per minute, separately and more strictly than other mutations",
       "anchor": "admin-rate_limit_apply_per_min"
     },
@@ -219,6 +242,7 @@
       "constraint": "any integer; negative disables the limiter",
       "zero_semantics": "omitted/zero defaults to 240",
       "active_when": "always",
+      "default": "240",
       "description": "RateLimitReadPerMin caps read (GET) admin/API requests per client per minute",
       "anchor": "admin-rate_limit_read_per_min"
     },
@@ -236,6 +260,7 @@
       "constraint": "any integer; negative disables the limiter",
       "zero_semantics": "omitted/zero defaults to 60",
       "active_when": "always",
+      "default": "60",
       "description": "RateLimitWritePerMin caps mutating (POST/PUT/DELETE) admin requests per client per minute",
       "anchor": "admin-rate_limit_write_per_min"
     },
@@ -248,6 +273,7 @@
       "subsystem": "rbac",
       "lifecycle_class": "hot_reload",
       "lifecycle_reason": "the admin RBAC policy is rebuilt and atomically swapped after each successful reload",
+      "default": "admin",
       "description": "DefaultRole is the role assigned to the synthetic \"shared\" legacy principal when RBAC is enabled alongside a legacy admin.token",
       "anchor": "admin-rbac-default_role"
     },
@@ -260,6 +286,7 @@
       "subsystem": "rbac",
       "lifecycle_class": "hot_reload",
       "lifecycle_reason": "the admin RBAC policy is rebuilt and atomically swapped after each successful reload",
+      "default": "false",
       "description": "Enabled activates named-principal RBAC",
       "anchor": "admin-rbac-enabled"
     },
@@ -494,6 +521,10 @@
       "subsystem": "compression",
       "lifecycle_class": "hot_reload",
       "lifecycle_reason": "the compression middleware is rebuilt with the handler tree on each successful reload",
+      "value_capabilities": {
+        "br": "brotli",
+        "zstd": "zstd"
+      },
       "value_kind": "enum",
       "constraint": "exact lowercase enum",
       "zero_semantics": "omitted selects the documented default where supported",
@@ -503,6 +534,7 @@
         "br",
         "zstd"
       ],
+      "default": "[gzip]",
       "description": "Encoders lists allowed content codings in server-preference order, each one of \"gzip\", \"br\", or \"zstd\"",
       "anchor": "compression-encoders"
     },
@@ -535,6 +567,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 1 KiB when enabled",
       "active_when": "always",
+      "default": "1k",
       "description": "MinSize is the smallest response body that is compressed",
       "anchor": "compression-min_size"
     },
@@ -620,6 +653,7 @@
         "managed",
         "file_owned"
       ],
+      "default": "file_owned",
       "description": "ConfigAuthority declares who owns configuration persistence, managed history, and drift detection: \"managed\" (Jul owns the file; Console/API writes are subject to RBAC and CAS, and external edits become drift that must be explicitly adopted) or \"file_owned\" (an external file or GitOps pipeline owns the file; every mutating admin endpoint is refused and the file watcher/SIGHUP behave exactly as they do without this field)",
       "anchor": "global-config_authority"
     },
@@ -655,6 +689,7 @@
         "text",
         "json"
       ],
+      "default": "text",
       "description": "LogFormat is \"text\" (human readable, default in dev) or \"json\"",
       "anchor": "global-log_format"
     },
@@ -677,6 +712,7 @@
         "warn",
         "error"
       ],
+      "default": "info",
       "description": "LogLevel is one of debug, info, warn, error",
       "anchor": "global-log_level"
     },
@@ -693,6 +729,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero uses the default floor",
       "active_when": "always",
+      "default": "4",
       "description": "RedactMinSecretLength is the shortest resolved secret value that is masked from logs",
       "anchor": "global-redact_min_secret_length"
     },
@@ -709,6 +746,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 10s",
       "active_when": "always",
+      "default": "10s",
       "description": "ReloadTimeout is how long a hot reload may run before it is reported as timed out",
       "anchor": "global-reload_timeout"
     },
@@ -725,6 +763,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 30s",
       "active_when": "always",
+      "default": "30s",
       "description": "ShutdownTimeout is how long to wait for in-flight requests to drain",
       "anchor": "global-shutdown_timeout"
     },
@@ -741,6 +780,7 @@
       "constraint": "auto or a canonical positive base-10 integer",
       "zero_semantics": "omitted/empty and auto use the Go runtime default",
       "active_when": "always",
+      "default": "auto",
       "description": "WorkerThreads accepts \"auto\" or a positive integer as a string",
       "anchor": "global-worker_threads"
     },
@@ -758,6 +798,7 @@
       "constraint": "true or false",
       "zero_semantics": "omitted preserves the v1 default-on behavior; explicit false disables request access records",
       "active_when": "always",
+      "default": "true",
       "description": "Enabled controls whether Jul emits request access records",
       "anchor": "observability-access_log-enabled"
     },
@@ -792,6 +833,7 @@
         "text",
         "json"
       ],
+      "default": "text",
       "description": "Format selects the encoding of the file and syslog sinks: \"text\" (logfmt, the default) or \"json\"",
       "anchor": "observability-access_log-format"
     },
@@ -917,6 +959,7 @@
         "otlp-grpc",
         "otlp-http"
       ],
+      "default": "otlp-grpc",
       "description": "Exporter selects the OTLP transport: \"otlp-grpc\" (default) or \"otlp-http\"",
       "anchor": "observability-tracing-exporter"
     },
@@ -953,6 +996,7 @@
       "constraint": "0..1",
       "zero_semantics": "omitted/zero defaults to 1.0 when tracing is enabled",
       "active_when": "tracing enabled",
+      "default": "1.0",
       "description": "SampleRatio is the head-based sampling probability for root spans, in the range [0,1]",
       "anchor": "observability-tracing-sample_ratio"
     },
@@ -969,6 +1013,7 @@
       "capabilities": [
         "otel"
       ],
+      "default": "jul",
       "description": "ServiceName sets the OpenTelemetry resource service.name",
       "anchor": "observability-tracing-service_name"
     },
@@ -1033,6 +1078,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero applies the documented plugin default",
       "active_when": "always",
+      "default": "5s",
       "description": "FetchTimeout bounds a single outbound fetch",
       "anchor": "plugins-x-fetch_timeout"
     },
@@ -1082,6 +1128,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero applies the documented plugin default",
       "active_when": "always",
+      "default": "1m",
       "description": "KVMaxBytes caps total stored bytes per plugin",
       "anchor": "plugins-x-kv_max_bytes"
     },
@@ -1101,6 +1148,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 1024",
       "active_when": "always",
+      "default": "1024",
       "description": "KVMaxEntries caps distinct keys per plugin",
       "anchor": "plugins-x-kv_max_entries"
     },
@@ -1120,6 +1168,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero applies the documented plugin default",
       "active_when": "always",
+      "default": "1m",
       "description": "MaxFetchResponse caps a fetch response body",
       "anchor": "plugins-x-max_fetch_response"
     },
@@ -1139,6 +1188,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero applies the documented plugin default",
       "active_when": "always",
+      "default": "1m",
       "description": "MaxRequestBody caps the request body the host buffers for a guest",
       "anchor": "plugins-x-max_request_body"
     },
@@ -1158,6 +1208,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero applies the documented plugin default",
       "active_when": "always",
+      "default": "8m",
       "description": "MaxResponseBody caps the response body a guest may accumulate",
       "anchor": "plugins-x-max_response_body"
     },
@@ -1177,6 +1228,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero applies the documented plugin default",
       "active_when": "always",
+      "default": "16m",
       "description": "MemoryLimit caps the guest's linear memory",
       "anchor": "plugins-x-memory_limit"
     },
@@ -1211,6 +1263,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero applies the documented plugin default",
       "active_when": "always",
+      "default": "100ms",
       "description": "Timeout bounds a single guest invocation",
       "anchor": "plugins-x-timeout"
     },
@@ -1234,6 +1287,7 @@
         "middleware",
         "handler"
       ],
+      "default": "middleware",
       "description": "Type is \"middleware\" (wraps a handler, may pass through) or \"handler\" (a terminal location action)",
       "anchor": "plugins-x-type"
     },
@@ -1278,6 +1332,7 @@
       "constraint": "ip, header:<Name>, or jwt:<claim>",
       "zero_semantics": "omitted defaults to ip",
       "active_when": "rate limit enabled",
+      "default": "ip",
       "description": "Key selects the bucket identity: \"ip\" (client address, the default), \"header:<Name>\" (a request header value), or \"jwt:<claim>\" (a validated JWT claim once auth is configured)",
       "anchor": "rate_limit-key"
     },
@@ -1345,6 +1400,7 @@
         "forwarded",
         "x-forwarded-for"
       ],
+      "default": "[forwarded, x-forwarded-for]",
       "description": "ForwardedHeaders is the ordered preference of forwarding headers: \"forwarded\" (RFC 7239) and \"x-forwarded-for\"",
       "anchor": "servers-x-client_address-forwarded_headers"
     },
@@ -1361,6 +1417,7 @@
       "constraint": "non-negative, at most 255",
       "zero_semantics": "0 selects the default of 16",
       "active_when": "the listener trusts at least one proxy",
+      "default": "16",
       "description": "MaxHops bounds how many asserted hops a chain may carry",
       "anchor": "servers-x-client_address-max_hops"
     },
@@ -1552,6 +1609,7 @@
       "subsystem": "auth",
       "lifecycle_class": "hot_reload",
       "lifecycle_reason": "auth modifiers are rebuilt around each location action on every successful reload",
+      "default": "Restricted",
       "description": "Realm is the authentication realm presented in the challenge",
       "anchor": "servers-x-locations-x-auth-basic-realm"
     },
@@ -1592,6 +1650,7 @@
       "constraint": "0s to 60s",
       "zero_semantics": "omitted/zero means 10s",
       "active_when": "forward_auth configured",
+      "default": "10s",
       "description": "Timeout bounds one forward-auth subrequest",
       "anchor": "servers-x-locations-x-auth-forward_auth-timeout"
     },
@@ -1668,6 +1727,7 @@
       "constraint": "0s to 60s",
       "zero_semantics": "omitted/zero means 10s",
       "active_when": "jwt configured",
+      "default": "10s",
       "description": "Timeout bounds one JWKS fetch",
       "anchor": "servers-x-locations-x-auth-jwt-timeout"
     },
@@ -1702,6 +1762,7 @@
         "system_and_file",
         "file_only"
       ],
+      "default": "system",
       "description": "CAMode is \"system\" (default), \"system_and_file\" or \"file_only\"",
       "anchor": "servers-x-locations-x-backend_tls-ca_mode"
     },
@@ -1760,6 +1821,7 @@
         "1.2",
         "1.3"
       ],
+      "default": "1.2",
       "description": "MinVersion is \"1.2\" (default) or \"1.3\"",
       "anchor": "servers-x-locations-x-backend_tls-min_version"
     },
@@ -1864,6 +1926,7 @@
       "subsystem": "cors",
       "lifecycle_class": "hot_reload",
       "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "default": "[GET, HEAD, POST]",
       "description": "AllowedMethods governs preflight approval only, never ordinary requests (that is match.methods)",
       "anchor": "servers-x-locations-x-cors-allowed_methods"
     },
@@ -2017,6 +2080,7 @@
       "constraint": "non-negative",
       "zero_semantics": "0 applies the 4 MiB default",
       "active_when": "always",
+      "default": "4m",
       "description": "MaxMessageSize caps a single encoded message (a JSON request frame or a gRPC reply)",
       "anchor": "servers-x-locations-x-grpc_transcode-max_message_size"
     },
@@ -2032,6 +2096,7 @@
       "capabilities": [
         "grpc"
       ],
+      "default": "false",
       "description": "PreserveNames keeps original proto field names in JSON output instead of the default lowerCamelCase",
       "anchor": "servers-x-locations-x-grpc_transcode-preserve_proto_field_names"
     },
@@ -2055,6 +2120,7 @@
         "ndjson",
         "sse"
       ],
+      "default": "ndjson",
       "description": "StreamMode selects the wire framing for streamed responses: \"ndjson\" (newline-delimited JSON objects, the default) or \"sse\" (Server-Sent Events)",
       "anchor": "servers-x-locations-x-grpc_transcode-stream_mode"
     },
@@ -2706,6 +2772,22 @@
       "description": "Static file serving",
       "anchor": "servers-x-locations-x-root"
     },
+    "servers.*.locations.*.route_id": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "*string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "routing",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "grammar",
+      "constraint": "1 to 64 bytes; lowercase ASCII [a-z0-9_-]; first byte alphanumeric; present-and-empty invalid; globally unique across the configuration",
+      "zero_semantics": "omitted means no durable identity; the revision-scoped selector (listen, server_names, match_type, path, match_ordinal) plus base_version remains fully functional",
+      "active_when": "always",
+      "description": "RouteID is an optional, durable identifier for this location (ADR 0019 §4)",
+      "anchor": "servers-x-locations-x-route_id"
+    },
     "servers.*.locations.*.try_files": {
       "kind": "list",
       "scalar": "string",
@@ -2829,6 +2911,7 @@
         "block",
         "detect"
       ],
+      "default": "block",
       "description": "Mode is \"block\" (default) — a rule interruption returns BlockStatus — or \"detect\", which records and logs the event but lets the request proceed",
       "anchor": "servers-x-locations-x-waf-mode"
     },
@@ -2867,6 +2950,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 128 KiB",
       "active_when": "WAF enabled",
+      "default": "128k",
       "description": "RequestBodyLimit caps how many request-body bytes are buffered for inspection",
       "anchor": "servers-x-locations-x-waf-request_body_limit"
     },
@@ -2899,6 +2983,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 1 MiB",
       "active_when": "always",
+      "default": "1m",
       "description": "MaxHeaderBytes caps the size of request headers (default 1 MiB)",
       "anchor": "servers-x-max_header_bytes"
     },
@@ -3034,6 +3119,7 @@
         "letsencrypt",
         "letsencrypt-staging"
       ],
+      "default": "letsencrypt-staging",
       "description": "CA selects the directory: \"letsencrypt\", \"letsencrypt-staging\", or a full ACME directory URL",
       "anchor": "servers-x-tls-acme-ca"
     },
@@ -3052,6 +3138,7 @@
       "capabilities": [
         "acme"
       ],
+      "default": "./jul-data/certs",
       "description": "CacheDir is where issued certificates and account keys are stored",
       "anchor": "servers-x-tls-acme-cache_dir"
     },
@@ -3078,6 +3165,7 @@
         "http-01",
         "tls-alpn-01"
       ],
+      "default": "http-01",
       "description": "Challenge selects the ACME challenge type: \"http-01\" (default) or \"tls-alpn-01\"",
       "anchor": "servers-x-tls-acme-challenge"
     },
@@ -3166,6 +3254,7 @@
       "capabilities": [
         "acme"
       ],
+      "default": "true",
       "description": "OCSPStapling enables OCSP stapling for ACME-issued certificates so clients can verify revocation without a separate round-trip",
       "anchor": "servers-x-tls-acme-ocsp_stapling"
     },
@@ -3226,6 +3315,7 @@
       "subsystem": "mtls",
       "lifecycle_class": "hot_reload",
       "lifecycle_reason": "the client-certificate forwarding mode is read when the handler tree is rebuilt",
+      "default": "none",
       "description": "ForwardCertificate conveys the verified client certificate to backends with the RFC 9440 Client-Cert header: \"none\" (default), \"leaf\", or \"chain\" (which adds Client-Cert-Chain)",
       "anchor": "servers-x-tls-client_auth-forward_certificate"
     },
@@ -3250,6 +3340,7 @@
         "request",
         "require"
       ],
+      "default": "none",
       "description": "Mode selects enforcement at the TLS handshake: \"none\" — off (the default)",
       "anchor": "servers-x-tls-client_auth-mode"
     },
@@ -3355,6 +3446,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 10s",
       "active_when": "always",
+      "default": "10s",
       "description": "ConnectTimeout bounds dialing the backend",
       "anchor": "stream-x-connect_timeout"
     },
@@ -3374,6 +3466,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 5m",
       "active_when": "always",
+      "default": "5m",
       "description": "IdleTimeout closes a relayed connection/UDP session after this period with no traffic in either direction",
       "anchor": "stream-x-idle_timeout"
     },
@@ -3409,6 +3502,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 10000",
       "active_when": "always",
+      "default": "10000",
       "description": "MaxUDPSessions caps the number of concurrent UDP sessions (one per client source address) a UDP listener tracks, bounding memory and backend sockets on the public internet where source addresses are cheap to spoof",
       "anchor": "stream-x-max_udp_sessions"
     },
@@ -3432,6 +3526,7 @@
         "tcp",
         "udp"
       ],
+      "default": "tcp",
       "description": "Protocol is \"tcp\" (default) or \"udp\"",
       "anchor": "stream-x-protocol"
     },
@@ -3550,6 +3645,7 @@
         "system_and_file",
         "file_only"
       ],
+      "default": "system",
       "description": "CAMode is \"system\" (default), \"system_and_file\" or \"file_only\"",
       "anchor": "upstreams-x-backend_tls-ca_mode"
     },
@@ -3608,6 +3704,7 @@
         "1.2",
         "1.3"
       ],
+      "default": "1.2",
       "description": "MinVersion is \"1.2\" (default) or \"1.3\"",
       "anchor": "upstreams-x-backend_tls-min_version"
     },
@@ -3651,6 +3748,7 @@
       "capabilities": [
         "consul"
       ],
+      "default": "http://127.0.0.1:8500",
       "description": "Address is the Consul HTTP API base URL (default \"http://127.0.0.1:8500\")",
       "anchor": "upstreams-x-discovery-consul-address"
     },
@@ -3681,6 +3779,7 @@
       "capabilities": [
         "consul"
       ],
+      "default": "true",
       "description": "PassingOnly restricts results to instances whose health checks are passing (default true)",
       "anchor": "upstreams-x-discovery-consul-passing_only"
     },
@@ -3742,6 +3841,7 @@
       "capabilities": [
         "consul"
       ],
+      "default": "system",
       "description": "CAMode is \"system\" (default), \"system_and_file\" or \"file_only\"",
       "anchor": "upstreams-x-discovery-consul-tls-ca_mode"
     },
@@ -3804,6 +3904,7 @@
       "capabilities": [
         "consul"
       ],
+      "default": "1.2",
       "description": "MinVersion is \"1.2\" (default) or \"1.3\"",
       "anchor": "upstreams-x-discovery-consul-tls-min_version"
     },
@@ -3972,6 +4073,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 30s for dynamic providers",
       "active_when": "dynamic discovery",
+      "default": "30s",
       "description": "Refresh is the polling interval (default 30s)",
       "anchor": "upstreams-x-discovery-refresh"
     },
@@ -4023,6 +4125,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 10s; deprecated in favour of upstreams[].resilience.fail_timeout, and setting both is an error",
       "active_when": "always",
+      "default": "10s",
       "description": "FailTimeout is the deprecated spelling of [upstreams.resilience] fail_timeout: how long a backend stays out of rotation before being probed again",
       "anchor": "upstreams-x-fail_timeout"
     },
@@ -4059,6 +4162,7 @@
       "subsystem": "health_check",
       "lifecycle_class": "hot_reload",
       "lifecycle_reason": "active probes are restarted with the pool on each successful reload",
+      "default": "[200]",
       "description": "ExpectStatus lists acceptable HTTP status codes for a passing probe (default [200])",
       "anchor": "upstreams-x-health_check-expect_status"
     },
@@ -4075,6 +4179,7 @@
       "constraint": "at least 1 effective",
       "zero_semantics": "omitted/zero defaults to 2",
       "active_when": "health check enabled",
+      "default": "2",
       "description": "HealthyThreshold is the number of consecutive successes to mark a backend healthy again (default 2)",
       "anchor": "upstreams-x-health_check-healthy_threshold"
     },
@@ -4091,6 +4196,7 @@
       "constraint": "positive effective value",
       "zero_semantics": "omitted/zero defaults to 5s",
       "active_when": "health check enabled",
+      "default": "5s",
       "description": "Interval is the delay between probe rounds (default 5s)",
       "anchor": "upstreams-x-health_check-interval"
     },
@@ -4119,6 +4225,7 @@
       "constraint": "positive and less than interval",
       "zero_semantics": "omitted/zero defaults to 2s",
       "active_when": "health check enabled",
+      "default": "2s",
       "description": "Timeout bounds a single probe (default 2s); must be less than Interval",
       "anchor": "upstreams-x-health_check-timeout"
     },
@@ -4139,6 +4246,7 @@
         "http",
         "tcp"
       ],
+      "default": "http",
       "description": "Type is the probe protocol: \"http\" (default) or \"tcp\"",
       "anchor": "upstreams-x-health_check-type"
     },
@@ -4155,6 +4263,7 @@
       "constraint": "at least 1 effective",
       "zero_semantics": "omitted/zero defaults to 3",
       "active_when": "health check enabled",
+      "default": "3",
       "description": "UnhealthyThreshold is the number of consecutive failures to take a backend out of rotation (default 3)",
       "anchor": "upstreams-x-health_check-unhealthy_threshold"
     },
@@ -4171,6 +4280,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 3; deprecated in favour of upstreams[].resilience.max_fails, and setting both is an error",
       "active_when": "always",
+      "default": "3",
       "description": "MaxFails and FailTimeout are the circuit breaker's failure threshold and open duration",
       "anchor": "upstreams-x-max_fails"
     },
@@ -4199,6 +4309,7 @@
       "constraint": "0 or greater",
       "zero_semantics": "omitted means 1; an explicit zero means unbounded probing",
       "active_when": "always",
+      "default": "1",
       "description": "CircuitHalfOpenProbes bounds how many requests may test a recovering backend at once",
       "anchor": "upstreams-x-resilience-circuit_half_open_probes"
     },
@@ -4215,6 +4326,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 10s",
       "active_when": "always",
+      "default": "10s",
       "description": "FailTimeout is how long a backend stays out of rotation before it is probed",
       "anchor": "upstreams-x-resilience-fail_timeout"
     },
@@ -4279,6 +4391,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 3",
       "active_when": "always",
+      "default": "3",
       "description": "MaxFails is how many consecutive failures take a backend out of rotation",
       "anchor": "upstreams-x-resilience-max_fails"
     },
@@ -4440,6 +4553,7 @@
         "weighted_round_robin",
         "least_conn"
       ],
+      "default": "round_robin",
       "description": "Strategy is one of \"round_robin\", \"weighted_round_robin\", \"least_conn\"",
       "anchor": "upstreams-x-strategy"
     },
@@ -4542,6 +4656,7 @@
         "block",
         "detect"
       ],
+      "default": "block",
       "description": "Mode is \"block\" (default) — a rule interruption returns BlockStatus — or \"detect\", which records and logs the event but lets the request proceed",
       "anchor": "waf-mode"
     },
@@ -4580,6 +4695,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 128 KiB",
       "active_when": "WAF enabled",
+      "default": "128k",
       "description": "RequestBodyLimit caps how many request-body bytes are buffered for inspection",
       "anchor": "waf-request_body_limit"
     },
@@ -4603,10 +4719,14 @@
     {
       "kind": "route",
       "collection_path": "servers.*.locations.*",
-      "identity_class": "revision_selector",
-      "uniqueness_scope": "none",
+      "identity_class": "durable_id",
+      "identity_fields": [
+        "route_id"
+      ],
+      "uniqueness_scope": "configuration",
       "required": false,
-      "renameable": true
+      "renameable": false,
+      "external_path": "/api/v1/routes/{route_id}"
     },
     {
       "kind": "upstream_pool",
@@ -4618,7 +4738,7 @@
       "uniqueness_scope": "configuration",
       "required": true,
       "renameable": false,
-      "external_path": "/api/upstreams/{name}/resilience"
+      "external_path": "/api/v1/upstreams/{name}"
     },
     {
       "kind": "upstream_backend",
@@ -4650,7 +4770,7 @@
       "uniqueness_scope": "configuration",
       "required": true,
       "renameable": false,
-      "external_path": "/api/listeners/{addr}/client_address"
+      "external_path": "/api/v1/listeners/{addr}/client_address"
     },
     {
       "kind": "stream",

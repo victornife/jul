@@ -79,14 +79,21 @@ type MetadataEntry struct {
 	Reserved        bool         `json:"reserved,omitempty"`
 	Secret          bool         `json:"secret,omitempty"`
 	Capabilities    []Capability `json:"capabilities,omitempty"`
-	ValueKind       string       `json:"value_kind,omitempty"`
-	Constraint      string       `json:"constraint,omitempty"`
-	ZeroSemantics   string       `json:"zero_semantics,omitempty"`
-	ActiveWhen      string       `json:"active_when,omitempty"`
-	Allowed         []string     `json:"allowed,omitempty"`
-	IntegerEnum     []int64      `json:"integer_enum,omitempty"`
-	Description     string       `json:"description"`
-	Anchor          string       `json:"anchor"`
+	// ValueCapabilities maps a specific accepted value to the capability it
+	// requires (e.g. compression.encoders' "br"->"brotli"); most fields have
+	// none, since presence rather than a particular value gates a build tag.
+	ValueCapabilities map[string]Capability `json:"value_capabilities,omitempty"`
+	ValueKind         string                `json:"value_kind,omitempty"`
+	Constraint        string                `json:"constraint,omitempty"`
+	ZeroSemantics     string                `json:"zero_semantics,omitempty"`
+	ActiveWhen        string                `json:"active_when,omitempty"`
+	Allowed           []string              `json:"allowed,omitempty"`
+	IntegerEnum       []int64               `json:"integer_enum,omitempty"`
+	// Default is the documented default, present only when Config lists one
+	// in DefaultOverrides; distinct from ZeroSemantics.
+	Default     string `json:"default,omitempty"`
+	Description string `json:"description"`
+	Anchor      string `json:"anchor"`
 }
 
 // ResourceEntry is the machine projection of one catalog Resource.
@@ -113,13 +120,18 @@ type MetadataCounts struct {
 // config-metadata.json is a direct rendering of it, keyed by canonical path
 // so lookup never depends on array position.
 type ContractMetadata struct {
-	Generated         string                   `json:"_generated"`
-	Version           int                      `json:"version"`
-	GeneratedBy       string                   `json:"generated_by"`
-	RegenerateCommand string                   `json:"regenerate_command"`
-	Counts            MetadataCounts           `json:"counts"`
-	Fields            map[string]MetadataEntry `json:"fields"`
-	Resources         []ResourceEntry          `json:"resources"`
+	Generated         string         `json:"_generated"`
+	Version           int            `json:"version"`
+	GeneratedBy       string         `json:"generated_by"`
+	RegenerateCommand string         `json:"regenerate_command"`
+	Counts            MetadataCounts `json:"counts"`
+	// CapabilityBuildTags maps every logical capability name used in
+	// "capabilities"/"value_capabilities" to the actual Go build tag that
+	// compiles it in (Makefile's FULL_TAGS) — most already match, but
+	// stream_proxy/stream and wasm_plugins/wasmplugins differ.
+	CapabilityBuildTags map[string]string        `json:"capability_build_tags"`
+	Fields              map[string]MetadataEntry `json:"fields"`
+	Resources           []ResourceEntry          `json:"resources"`
 }
 
 // BuildContractMetadata projects c into the shape config-metadata.json
@@ -128,31 +140,33 @@ func BuildContractMetadata(c Contract) ContractMetadata {
 	fields := make(map[string]MetadataEntry, len(c.Leaves))
 	for _, f := range c.Leaves {
 		fields[f.Path] = MetadataEntry{
-			Kind:            string(f.Kind),
-			Scalar:          string(f.Scalar),
-			GoType:          f.GoType,
-			Optional:        f.Optional,
-			Dynamic:         f.Dynamic,
-			Subsystem:       f.Subsystem,
-			LifecycleClass:  f.Class,
-			LifecycleReason: f.Reason,
-			StartupConsumed: f.StartupConsumed,
-			AddressKeyed:    f.AddressKeyed,
-			CollectionKeyed: f.CollectionKeyed,
-			Conditional:     f.Conditional,
-			Deprecated:      f.Deprecated,
-			Ignored:         f.Ignored,
-			Reserved:        f.Reserved,
-			Secret:          f.Secret,
-			Capabilities:    f.Capabilities,
-			ValueKind:       f.ValueKind,
-			Constraint:      f.Constraint,
-			ZeroSemantics:   f.ZeroSemantics,
-			ActiveWhen:      f.ActiveWhen,
-			Allowed:         f.Allowed,
-			IntegerEnum:     f.IntegerEnum,
-			Description:     f.Description,
-			Anchor:          f.Anchor,
+			Kind:              string(f.Kind),
+			Scalar:            string(f.Scalar),
+			GoType:            f.GoType,
+			Optional:          f.Optional,
+			Dynamic:           f.Dynamic,
+			Subsystem:         f.Subsystem,
+			LifecycleClass:    f.Class,
+			LifecycleReason:   f.Reason,
+			StartupConsumed:   f.StartupConsumed,
+			AddressKeyed:      f.AddressKeyed,
+			CollectionKeyed:   f.CollectionKeyed,
+			Conditional:       f.Conditional,
+			Deprecated:        f.Deprecated,
+			Ignored:           f.Ignored,
+			Reserved:          f.Reserved,
+			Secret:            f.Secret,
+			Capabilities:      f.Capabilities,
+			ValueCapabilities: f.ValueCapabilities,
+			ValueKind:         f.ValueKind,
+			Constraint:        f.Constraint,
+			ZeroSemantics:     f.ZeroSemantics,
+			ActiveWhen:        f.ActiveWhen,
+			Allowed:           f.Allowed,
+			IntegerEnum:       f.IntegerEnum,
+			Default:           f.Default,
+			Description:       f.Description,
+			Anchor:            f.Anchor,
 		}
 	}
 
@@ -180,9 +194,21 @@ func BuildContractMetadata(c Contract) ContractMetadata {
 			SchemaLeaves: len(config.SchemaLeaves()),
 			Resources:    len(resources),
 		},
-		Fields:    fields,
-		Resources: resources,
+		CapabilityBuildTags: buildCapabilityBuildTags(),
+		Fields:              fields,
+		Resources:           resources,
 	}
+}
+
+// buildCapabilityBuildTags projects CapabilityBuildTag with string keys for
+// JSON (Capability is already a string type, but the map's declared key type
+// must be converted explicitly for encoding/json to emit plain string keys).
+func buildCapabilityBuildTags() map[string]string {
+	out := make(map[string]string, len(CapabilityBuildTag))
+	for cap, tag := range CapabilityBuildTag {
+		out[string(cap)] = tag
+	}
+	return out
 }
 
 // RenderMetadataJSON renders docs/generated/config-metadata.json.

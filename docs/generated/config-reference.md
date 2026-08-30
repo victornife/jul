@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 292 configurable leaves.
+Coverage: 293 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -45,6 +45,7 @@ AuditLogRotateKeep bounds how many rotated audit backups are retained; older bac
 | Lifecycle | `restart_required` |
 | Subsystem | `admin` |
 | Why | the admin listener and its resources are created once at startup |
+| Default | 14 |
 | Flags | startup-consumed |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 14 when audit_log_file is set |
@@ -60,6 +61,7 @@ AuditLogRotateMaxMB is the size in megabytes at which the durable audit sink rot
 | Lifecycle | `restart_required` |
 | Subsystem | `admin` |
 | Why | the admin listener and its resources are created once at startup |
+| Default | 100 |
 | Flags | startup-consumed |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 100 when audit_log_file is set |
@@ -77,6 +79,7 @@ Console toggles the web console dashboard at the admin root.
 | Subsystem | `admin` |
 | Why | the admin listener and its resources are created once at startup |
 | Requires | `console` |
+| Default | true (when admin.enabled) |
 | Flags | startup-consumed |
 
 ## `admin.enabled` {#admin-enabled}
@@ -101,6 +104,7 @@ HistoryDir is the directory where the console snapshots the previous configurati
 | Lifecycle | `restart_required` |
 | Subsystem | `admin` |
 | Why | the admin listener and its resources are created once at startup |
+| Default | ./jul-data/config-history |
 | Flags | startup-consumed |
 
 ## `admin.history_keep` {#admin-history_keep}
@@ -113,6 +117,7 @@ HistoryKeep bounds how many configuration snapshots are retained; older snapshot
 | Lifecycle | `restart_required` |
 | Subsystem | `admin` |
 | Why | the admin listener and its resources are created once at startup |
+| Default | 50 |
 | Flags | startup-consumed |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 50 when admin is enabled |
@@ -140,6 +145,7 @@ MaxEventConns bounds concurrent /api/events SSE streams per client to prevent re
 | Lifecycle | `restart_required` |
 | Subsystem | `admin` |
 | Why | the admin listener and its resources are created once at startup |
+| Default | 4 |
 | Flags | startup-consumed |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 4 |
@@ -168,6 +174,7 @@ PluginUploadEnabled controls whether the admin console allows uploading .wasm pl
 | Lifecycle | `restart_required` |
 | Subsystem | `admin` |
 | Why | the admin listener and its resources are created once at startup |
+| Default | false |
 | Flags | startup-consumed |
 
 ## `admin.plugin_upload_max_size` {#admin-plugin_upload_max_size}
@@ -180,6 +187,7 @@ PluginUploadMaxSize caps the size of an uploaded .wasm file in megabytes.
 | Lifecycle | `restart_required` |
 | Subsystem | `admin` |
 | Why | the admin listener and its resources are created once at startup |
+| Default | 32 |
 | Flags | startup-consumed |
 | Constraint | positive when upload is enabled; otherwise non-negative |
 | Zero/empty semantics | omitted/zero defaults to 32 MiB when upload is enabled |
@@ -195,6 +203,7 @@ RateLimitApplyPerMin caps the high-impact config validate/diff/apply endpoints p
 | Lifecycle | `restart_required` |
 | Subsystem | `admin` |
 | Why | the admin listener and its resources are created once at startup |
+| Default | 30 |
 | Flags | startup-consumed |
 | Constraint | any integer; negative disables the limiter |
 | Zero/empty semantics | omitted/zero defaults to 30 |
@@ -210,6 +219,7 @@ RateLimitReadPerMin caps read (GET) admin/API requests per client per minute.
 | Lifecycle | `restart_required` |
 | Subsystem | `admin` |
 | Why | the admin listener and its resources are created once at startup |
+| Default | 240 |
 | Flags | startup-consumed |
 | Constraint | any integer; negative disables the limiter |
 | Zero/empty semantics | omitted/zero defaults to 240 |
@@ -225,6 +235,7 @@ RateLimitWritePerMin caps mutating (POST/PUT/DELETE) admin requests per client p
 | Lifecycle | `restart_required` |
 | Subsystem | `admin` |
 | Why | the admin listener and its resources are created once at startup |
+| Default | 60 |
 | Flags | startup-consumed |
 | Constraint | any integer; negative disables the limiter |
 | Zero/empty semantics | omitted/zero defaults to 60 |
@@ -240,6 +251,7 @@ DefaultRole is the role assigned to the synthetic "shared" legacy principal when
 | Lifecycle | `hot_reload` |
 | Subsystem | `rbac` |
 | Why | the admin RBAC policy is rebuilt and atomically swapped after each successful reload |
+| Default | admin |
 
 ## `admin.rbac.enabled` {#admin-rbac-enabled}
 
@@ -251,6 +263,7 @@ Enabled activates named-principal RBAC.
 | Lifecycle | `hot_reload` |
 | Subsystem | `rbac` |
 | Why | the admin RBAC policy is rebuilt and atomically swapped after each successful reload |
+| Default | false |
 
 ## `admin.rbac.principals.*.disabled` {#admin-rbac-principals-x-disabled}
 
@@ -463,6 +476,7 @@ Encoders lists allowed content codings in server-preference order, each one of "
 | Lifecycle | `hot_reload` |
 | Subsystem | `compression` |
 | Why | the compression middleware is rebuilt with the handler tree on each successful reload |
+| Default | [gzip] |
 | Allowed values | `gzip`, `br`, `zstd` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
@@ -492,6 +506,7 @@ MinSize is the smallest response body that is compressed.
 | Lifecycle | `hot_reload` |
 | Subsystem | `compression` |
 | Why | the compression middleware is rebuilt with the handler tree on each successful reload |
+| Default | 1k |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 1 KiB when enabled |
 | Active when | always |
@@ -564,6 +579,7 @@ ConfigAuthority declares who owns configuration persistence, managed history, an
 | Lifecycle | `restart_required` |
 | Subsystem | `config_authority` |
 | Why | authority is resolved once at startup and wires the file watcher, SIGHUP, and the managed baseline before any writer exists; changing it moves ownership of the configuration file and cannot be hot-applied (ADR 0019 §9.2) |
+| Default | file_owned |
 | Flags | startup-consumed |
 | Allowed values | `managed`, `file_owned` |
 | Constraint | exact lowercase enum; controller_owned is reserved and rejected |
@@ -592,6 +608,7 @@ LogFormat is "text" (human readable, default in dev) or "json".
 | Lifecycle | `restart_required` |
 | Subsystem | `log_format` |
 | Why | the slog handler encoding is chosen once when the logger is built at startup |
+| Default | text |
 | Flags | startup-consumed |
 | Allowed values | `text`, `json` |
 | Constraint | exact lowercase enum |
@@ -608,6 +625,7 @@ LogLevel is one of debug, info, warn, error.
 | Lifecycle | `hot_reload` |
 | Subsystem | `log_level` |
 | Why | the level var is updated by OnReloaded on each successful reload |
+| Default | info |
 | Allowed values | `debug`, `info`, `warn`, `error` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted defaults to info |
@@ -623,6 +641,7 @@ RedactMinSecretLength is the shortest resolved secret value that is masked from 
 | Lifecycle | `hot_reload` |
 | Subsystem | `redact` |
 | Why | the redaction state is rebuilt and installed atomically on each successful reload |
+| Default | 4 |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero uses the default floor |
 | Active when | always |
@@ -637,6 +656,7 @@ ReloadTimeout is how long a hot reload may run before it is reported as timed ou
 | Lifecycle | `hot_reload` |
 | Subsystem | `reload_timeout` |
 | Why | the threshold is read from the effective config at the start of each reload |
+| Default | 10s |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 10s |
 | Active when | always |
@@ -651,6 +671,7 @@ ShutdownTimeout is how long to wait for in-flight requests to drain.
 | Lifecycle | `hot_reload` |
 | Subsystem | `shutdown_timeout` |
 | Why | the drain budget is read from the effective config on each graceful stop |
+| Default | 30s |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 30s |
 | Active when | always |
@@ -665,6 +686,7 @@ WorkerThreads accepts "auto" or a positive integer as a string.
 | Lifecycle | `hot_reload` |
 | Subsystem | `worker_threads` |
 | Why | OnReloaded applies the cap with runtime.GOMAXPROCS, restoring the container-aware default for "auto" |
+| Default | auto |
 | Constraint | auto or a canonical positive base-10 integer |
 | Zero/empty semantics | omitted/empty and auto use the Go runtime default |
 | Active when | always |
@@ -680,6 +702,7 @@ Enabled controls whether Jul emits request access records.
 | Lifecycle | `restart_required` |
 | Subsystem | `access_log` |
 | Why | access-log sinks are opened once at startup |
+| Default | true |
 | Flags | startup-consumed |
 | Constraint | true or false |
 | Zero/empty semantics | omitted preserves the v1 default-on behavior; explicit false disables request access records |
@@ -707,6 +730,7 @@ Format selects the encoding of the file and syslog sinks: "text" (logfmt, the de
 | Lifecycle | `restart_required` |
 | Subsystem | `access_log` |
 | Why | access-log sinks are opened once at startup |
+| Default | text |
 | Flags | startup-consumed |
 | Allowed values | `text`, `json` |
 | Constraint | exact lowercase enum |
@@ -808,6 +832,7 @@ Exporter selects the OTLP transport: "otlp-grpc" (default) or "otlp-http".
 | Subsystem | `tracing` |
 | Why | the tracer provider and exporter are created once at startup |
 | Requires | `otel` |
+| Default | otlp-grpc |
 | Flags | startup-consumed |
 | Allowed values | `otlp-grpc`, `otlp-http` |
 | Constraint | exact lowercase enum |
@@ -838,6 +863,7 @@ SampleRatio is the head-based sampling probability for root spans, in the range 
 | Subsystem | `tracing` |
 | Why | the tracer provider and exporter are created once at startup |
 | Requires | `otel` |
+| Default | 1.0 |
 | Flags | startup-consumed |
 | Constraint | 0..1 |
 | Zero/empty semantics | omitted/zero defaults to 1.0 when tracing is enabled |
@@ -854,6 +880,7 @@ ServiceName sets the OpenTelemetry resource service.name.
 | Subsystem | `tracing` |
 | Why | the tracer provider and exporter are created once at startup |
 | Requires | `otel` |
+| Default | jul |
 | Flags | startup-consumed |
 
 ## `plugins.*.allowed_hosts` {#plugins-x-allowed_hosts}
@@ -903,6 +930,7 @@ FetchTimeout bounds a single outbound fetch.
 | Subsystem | `plugins` |
 | Why | the plugin set is rebuilt and re-instantiated on each successful reload |
 | Requires | `wasm_plugins` |
+| Default | 5s |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero applies the documented plugin default |
 | Active when | always |
@@ -942,6 +970,7 @@ KVMaxBytes caps total stored bytes per plugin.
 | Subsystem | `plugins` |
 | Why | the plugin set is rebuilt and re-instantiated on each successful reload |
 | Requires | `wasm_plugins` |
+| Default | 1m |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero applies the documented plugin default |
 | Active when | always |
@@ -957,6 +986,7 @@ KVMaxEntries caps distinct keys per plugin.
 | Subsystem | `plugins` |
 | Why | the plugin set is rebuilt and re-instantiated on each successful reload |
 | Requires | `wasm_plugins` |
+| Default | 1024 |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 1024 |
 | Active when | always |
@@ -972,6 +1002,7 @@ MaxFetchResponse caps a fetch response body.
 | Subsystem | `plugins` |
 | Why | the plugin set is rebuilt and re-instantiated on each successful reload |
 | Requires | `wasm_plugins` |
+| Default | 1m |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero applies the documented plugin default |
 | Active when | always |
@@ -987,6 +1018,7 @@ MaxRequestBody caps the request body the host buffers for a guest.
 | Subsystem | `plugins` |
 | Why | the plugin set is rebuilt and re-instantiated on each successful reload |
 | Requires | `wasm_plugins` |
+| Default | 1m |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero applies the documented plugin default |
 | Active when | always |
@@ -1002,6 +1034,7 @@ MaxResponseBody caps the response body a guest may accumulate.
 | Subsystem | `plugins` |
 | Why | the plugin set is rebuilt and re-instantiated on each successful reload |
 | Requires | `wasm_plugins` |
+| Default | 8m |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero applies the documented plugin default |
 | Active when | always |
@@ -1017,6 +1050,7 @@ MemoryLimit caps the guest's linear memory.
 | Subsystem | `plugins` |
 | Why | the plugin set is rebuilt and re-instantiated on each successful reload |
 | Requires | `wasm_plugins` |
+| Default | 16m |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero applies the documented plugin default |
 | Active when | always |
@@ -1044,6 +1078,7 @@ Timeout bounds a single guest invocation.
 | Subsystem | `plugins` |
 | Why | the plugin set is rebuilt and re-instantiated on each successful reload |
 | Requires | `wasm_plugins` |
+| Default | 100ms |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero applies the documented plugin default |
 | Active when | always |
@@ -1059,6 +1094,7 @@ Type is "middleware" (wraps a handler, may pass through) or "handler" (a termina
 | Subsystem | `plugins` |
 | Why | the plugin set is rebuilt and re-instantiated on each successful reload |
 | Requires | `wasm_plugins` |
+| Default | middleware |
 | Allowed values | `middleware`, `handler` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
@@ -1099,6 +1135,7 @@ Key selects the bucket identity: "ip" (client address, the default), "header:<Na
 | Lifecycle | `hot_reload` |
 | Subsystem | `rate_limit` |
 | Why | the rate-limiter store accepts a new policy on each successful reload |
+| Default | ip |
 | Constraint | ip, header:<Name>, or jwt:<claim> |
 | Zero/empty semantics | omitted defaults to ip |
 | Active when | rate limit enabled |
@@ -1154,6 +1191,7 @@ ForwardedHeaders is the ordered preference of forwarding headers: "forwarded" (R
 | Lifecycle | `hot_reload` |
 | Subsystem | `client_address` |
 | Why | the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish |
+| Default | [forwarded, x-forwarded-for] |
 | Allowed values | `forwarded`, `x-forwarded-for` |
 | Constraint | ordered list of exact lowercase enum values, each listed at most once |
 | Zero/empty semantics | omitted defaults to [forwarded, x-forwarded-for]; an explicitly empty list disables every forwarding header |
@@ -1169,6 +1207,7 @@ MaxHops bounds how many asserted hops a chain may carry.
 | Lifecycle | `hot_reload` |
 | Subsystem | `client_address` |
 | Why | the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish |
+| Default | 16 |
 | Constraint | non-negative, at most 255 |
 | Zero/empty semantics | 0 selects the default of 16 |
 | Active when | the listener trusts at least one proxy |
@@ -1335,6 +1374,7 @@ Realm is the authentication realm presented in the challenge.
 | Lifecycle | `hot_reload` |
 | Subsystem | `auth` |
 | Why | auth modifiers are rebuilt around each location action on every successful reload |
+| Default | Restricted |
 
 ## `servers.*.locations.*.auth.deny` {#servers-x-locations-x-auth-deny}
 
@@ -1368,6 +1408,7 @@ Timeout bounds one forward-auth subrequest.
 | Lifecycle | `hot_reload` |
 | Subsystem | `auth` |
 | Why | auth modifiers are rebuilt around each location action on every successful reload |
+| Default | 10s |
 | Constraint | 0s to 60s |
 | Zero/empty semantics | omitted/zero means 10s |
 | Active when | forward_auth configured |
@@ -1437,6 +1478,7 @@ Timeout bounds one JWKS fetch.
 | Lifecycle | `hot_reload` |
 | Subsystem | `auth` |
 | Why | auth modifiers are rebuilt around each location action on every successful reload |
+| Default | 10s |
 | Constraint | 0s to 60s |
 | Zero/empty semantics | omitted/zero means 10s |
 | Active when | jwt configured |
@@ -1463,6 +1505,7 @@ CAMode is "system" (default), "system_and_file" or "file_only".
 | Lifecycle | `hot_reload` |
 | Subsystem | `backend_tls` |
 | Why | the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload |
+| Default | system |
 | Allowed values | `system`, `system_and_file`, `file_only` |
 | Constraint | exact lowercase enum; never inferred from the presence of ca_file |
 | Zero/empty semantics | omitted means system roots only |
@@ -1513,6 +1556,7 @@ MinVersion is "1.2" (default) or "1.3".
 | Lifecycle | `hot_reload` |
 | Subsystem | `backend_tls` |
 | Why | the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload |
+| Default | 1.2 |
 | Allowed values | `1.2`, `1.3` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted defaults to 1.2, matching Go's client default |
@@ -1613,6 +1657,7 @@ AllowedMethods governs preflight approval only, never ordinary requests (that is
 | Lifecycle | `hot_reload` |
 | Subsystem | `cors` |
 | Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Default | [GET, HEAD, POST] |
 
 ## `servers.*.locations.*.cors.allowed_origins` {#servers-x-locations-x-cors-allowed_origins}
 
@@ -1746,6 +1791,7 @@ MaxMessageSize caps a single encoded message (a JSON request frame or a gRPC rep
 | Subsystem | `grpc_transcode` |
 | Why | the handler tree is rebuilt from the effective config on each successful reload |
 | Requires | `grpc` |
+| Default | 4m |
 | Constraint | non-negative |
 | Zero/empty semantics | 0 applies the 4 MiB default |
 | Active when | always |
@@ -1761,6 +1807,7 @@ PreserveNames keeps original proto field names in JSON output instead of the def
 | Subsystem | `grpc_transcode` |
 | Why | the handler tree is rebuilt from the effective config on each successful reload |
 | Requires | `grpc` |
+| Default | false |
 
 ## `servers.*.locations.*.grpc_transcode.stream_mode` {#servers-x-locations-x-grpc_transcode-stream_mode}
 
@@ -1773,6 +1820,7 @@ StreamMode selects the wire framing for streamed responses: "ndjson" (newline-de
 | Subsystem | `grpc_transcode` |
 | Why | the handler tree is rebuilt from the effective config on each successful reload |
 | Requires | `grpc` |
+| Default | ndjson |
 | Allowed values | `ndjson`, `sse` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
@@ -2331,6 +2379,21 @@ Static file serving.
 | Subsystem | `root` |
 | Why | the handler tree is rebuilt from the effective config on each successful reload |
 
+## `servers.*.locations.*.route_id` {#servers-x-locations-x-route_id}
+
+RouteID is an optional, durable identifier for this location (ADR 0019 §4).
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `routing` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Constraint | 1 to 64 bytes; lowercase ASCII [a-z0-9_-]; first byte alphanumeric; present-and-empty invalid; globally unique across the configuration |
+| Zero/empty semantics | omitted means no durable identity; the revision-scoped selector (listen, server_names, match_type, path, match_ordinal) plus base_version remains fully functional |
+| Active when | always |
+
 ## `servers.*.locations.*.try_files` {#servers-x-locations-x-try_files}
 
 TryFiles lists candidate paths tried in order before falling back to the location's action.
@@ -2427,6 +2490,7 @@ Mode is "block" (default) — a rule interruption returns BlockStatus — or "de
 | Subsystem | `waf` |
 | Why | the WAF policy is rebuilt on each successful reload |
 | Requires | `waf` |
+| Default | block |
 | Allowed values | `block`, `detect` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
@@ -2458,6 +2522,7 @@ RequestBodyLimit caps how many request-body bytes are buffered for inspection.
 | Subsystem | `waf` |
 | Why | the WAF policy is rebuilt on each successful reload |
 | Requires | `waf` |
+| Default | 128k |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 128 KiB |
 | Active when | WAF enabled |
@@ -2484,6 +2549,7 @@ MaxHeaderBytes caps the size of request headers (default 1 MiB).
 | Lifecycle | `new_listener_only` |
 | Subsystem | `listener_limits` |
 | Why | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
+| Default | 1m |
 | Flags | conditional |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 1 MiB |
@@ -2591,6 +2657,7 @@ CA selects the directory: "letsencrypt", "letsencrypt-staging", or a full ACME d
 | Subsystem | `acme` |
 | Why | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | Requires | `acme` |
+| Default | letsencrypt-staging |
 | Flags | startup-consumed, per-address, conditional |
 | Allowed values | `letsencrypt`, `letsencrypt-staging` |
 | Constraint | letsencrypt, letsencrypt-staging, or an https directory URL |
@@ -2608,6 +2675,7 @@ CacheDir is where issued certificates and account keys are stored.
 | Subsystem | `acme` |
 | Why | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | Requires | `acme` |
+| Default | ./jul-data/certs |
 | Flags | startup-consumed, per-address, conditional |
 
 ## `servers.*.tls.acme.challenge` {#servers-x-tls-acme-challenge}
@@ -2621,6 +2689,7 @@ Challenge selects the ACME challenge type: "http-01" (default) or "tls-alpn-01".
 | Subsystem | `acme` |
 | Why | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | Requires | `acme` |
+| Default | http-01 |
 | Flags | startup-consumed, per-address, conditional |
 | Allowed values | `http-01`, `tls-alpn-01` |
 | Constraint | exact lowercase enum |
@@ -2691,6 +2760,7 @@ OCSPStapling enables OCSP stapling for ACME-issued certificates so clients can v
 | Subsystem | `acme` |
 | Why | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | Requires | `acme` |
+| Default | true |
 | Flags | startup-consumed, per-address, conditional |
 
 ## `servers.*.tls.cert` {#servers-x-tls-cert}
@@ -2739,6 +2809,7 @@ ForwardCertificate conveys the verified client certificate to backends with the 
 | Lifecycle | `hot_reload` |
 | Subsystem | `mtls` |
 | Why | the client-certificate forwarding mode is read when the handler tree is rebuilt |
+| Default | none |
 
 ## `servers.*.tls.client_auth.mode` {#servers-x-tls-client_auth-mode}
 
@@ -2750,6 +2821,7 @@ Mode selects enforcement at the TLS handshake: "none" — off (the default).
 | Lifecycle | `restart_required` |
 | Subsystem | `mtls` |
 | Why | the client-certificate policy is written into the listener's tls.Config at bind time |
+| Default | none |
 | Flags | startup-consumed, per-address, conditional |
 | Allowed values | `none`, `request`, `require` |
 | Constraint | exact lowercase enum |
@@ -2834,6 +2906,7 @@ ConnectTimeout bounds dialing the backend.
 | Subsystem | `stream` |
 | Why | the stream listener swaps its route pointer atomically on each successful reload |
 | Requires | `stream_proxy` |
+| Default | 10s |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 10s |
 | Active when | always |
@@ -2849,6 +2922,7 @@ IdleTimeout closes a relayed connection/UDP session after this period with no tr
 | Subsystem | `stream` |
 | Why | the stream listener swaps its route pointer atomically on each successful reload |
 | Requires | `stream_proxy` |
+| Default | 5m |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 5m |
 | Active when | always |
@@ -2877,6 +2951,7 @@ MaxUDPSessions caps the number of concurrent UDP sessions (one per client source
 | Subsystem | `stream` |
 | Why | the stream listener swaps its route pointer atomically on each successful reload |
 | Requires | `stream_proxy` |
+| Default | 10000 |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 10000 |
 | Active when | always |
@@ -2892,6 +2967,7 @@ Protocol is "tcp" (default) or "udp".
 | Subsystem | `stream` |
 | Why | the stream reload binds the candidate protocol's listener before retiring the previous one; established connections and UDP sessions follow the retired listener's drain boundary while new traffic uses the candidate protocol |
 | Requires | `stream_proxy` |
+| Default | tcp |
 | Allowed values | `tcp`, `udp` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
@@ -2983,6 +3059,7 @@ CAMode is "system" (default), "system_and_file" or "file_only".
 | Lifecycle | `hot_reload` |
 | Subsystem | `backend_tls` |
 | Why | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| Default | system |
 | Allowed values | `system`, `system_and_file`, `file_only` |
 | Constraint | exact lowercase enum; never inferred from the presence of ca_file |
 | Zero/empty semantics | omitted means system roots only |
@@ -3033,6 +3110,7 @@ MinVersion is "1.2" (default) or "1.3".
 | Lifecycle | `hot_reload` |
 | Subsystem | `backend_tls` |
 | Why | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
+| Default | 1.2 |
 | Allowed values | `1.2`, `1.3` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted defaults to 1.2, matching Go's client default |
@@ -3074,6 +3152,7 @@ Address is the Consul HTTP API base URL (default "http://127.0.0.1:8500").
 | Subsystem | `discovery` |
 | Why | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | Requires | `consul` |
+| Default | http://127.0.0.1:8500 |
 
 ## `upstreams.*.discovery.consul.datacenter` {#upstreams-x-discovery-consul-datacenter}
 
@@ -3099,6 +3178,7 @@ PassingOnly restricts results to instances whose health checks are passing (defa
 | Subsystem | `discovery` |
 | Why | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | Requires | `consul` |
+| Default | true |
 
 ## `upstreams.*.discovery.consul.service` {#upstreams-x-discovery-consul-service}
 
@@ -3148,6 +3228,7 @@ CAMode is "system" (default), "system_and_file" or "file_only".
 | Subsystem | `backend_tls` |
 | Why | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
 | Requires | `consul` |
+| Default | system |
 
 ## `upstreams.*.discovery.consul.tls.client_cert` {#upstreams-x-discovery-consul-tls-client_cert}
 
@@ -3198,6 +3279,7 @@ MinVersion is "1.2" (default) or "1.3".
 | Subsystem | `backend_tls` |
 | Why | the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload |
 | Requires | `consul` |
+| Default | 1.2 |
 
 ## `upstreams.*.discovery.consul.tls.peer_identities` {#upstreams-x-discovery-consul-tls-peer_identities}
 
@@ -3331,6 +3413,7 @@ Refresh is the polling interval (default 30s).
 | Lifecycle | `hot_reload` |
 | Subsystem | `discovery` |
 | Why | the per-pool discovery refresher is restarted with the pool on each successful reload |
+| Default | 30s |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 30s for dynamic providers |
 | Active when | dynamic discovery |
@@ -3371,6 +3454,7 @@ FailTimeout is the deprecated spelling of [upstreams.resilience] fail_timeout: h
 | Lifecycle | `hot_reload` |
 | Subsystem | `resilience` |
 | Why | the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once |
+| Default | 10s |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 10s; deprecated in favour of upstreams[].resilience.fail_timeout, and setting both is an error |
 | Active when | always |
@@ -3407,6 +3491,7 @@ ExpectStatus lists acceptable HTTP status codes for a passing probe (default [20
 | Lifecycle | `hot_reload` |
 | Subsystem | `health_check` |
 | Why | active probes are restarted with the pool on each successful reload |
+| Default | [200] |
 
 ## `upstreams.*.health_check.healthy_threshold` {#upstreams-x-health_check-healthy_threshold}
 
@@ -3418,6 +3503,7 @@ HealthyThreshold is the number of consecutive successes to mark a backend health
 | Lifecycle | `hot_reload` |
 | Subsystem | `health_check` |
 | Why | active probes are restarted with the pool on each successful reload |
+| Default | 2 |
 | Constraint | at least 1 effective |
 | Zero/empty semantics | omitted/zero defaults to 2 |
 | Active when | health check enabled |
@@ -3432,6 +3518,7 @@ Interval is the delay between probe rounds (default 5s).
 | Lifecycle | `hot_reload` |
 | Subsystem | `health_check` |
 | Why | active probes are restarted with the pool on each successful reload |
+| Default | 5s |
 | Constraint | positive effective value |
 | Zero/empty semantics | omitted/zero defaults to 5s |
 | Active when | health check enabled |
@@ -3457,6 +3544,7 @@ Timeout bounds a single probe (default 2s); must be less than Interval.
 | Lifecycle | `hot_reload` |
 | Subsystem | `health_check` |
 | Why | active probes are restarted with the pool on each successful reload |
+| Default | 2s |
 | Constraint | positive and less than interval |
 | Zero/empty semantics | omitted/zero defaults to 2s |
 | Active when | health check enabled |
@@ -3471,6 +3559,7 @@ Type is the probe protocol: "http" (default) or "tcp".
 | Lifecycle | `hot_reload` |
 | Subsystem | `health_check` |
 | Why | active probes are restarted with the pool on each successful reload |
+| Default | http |
 | Allowed values | `http`, `tcp` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
@@ -3486,6 +3575,7 @@ UnhealthyThreshold is the number of consecutive failures to take a backend out o
 | Lifecycle | `hot_reload` |
 | Subsystem | `health_check` |
 | Why | active probes are restarted with the pool on each successful reload |
+| Default | 3 |
 | Constraint | at least 1 effective |
 | Zero/empty semantics | omitted/zero defaults to 3 |
 | Active when | health check enabled |
@@ -3500,6 +3590,7 @@ MaxFails and FailTimeout are the circuit breaker's failure threshold and open du
 | Lifecycle | `hot_reload` |
 | Subsystem | `resilience` |
 | Why | the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once |
+| Default | 3 |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 3; deprecated in favour of upstreams[].resilience.max_fails, and setting both is an error |
 | Active when | always |
@@ -3526,6 +3617,7 @@ CircuitHalfOpenProbes bounds how many requests may test a recovering backend at 
 | Lifecycle | `hot_reload` |
 | Subsystem | `resilience` |
 | Why | the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once |
+| Default | 1 |
 | Constraint | 0 or greater |
 | Zero/empty semantics | omitted means 1; an explicit zero means unbounded probing |
 | Active when | always |
@@ -3540,6 +3632,7 @@ FailTimeout is how long a backend stays out of rotation before it is probed.
 | Lifecycle | `hot_reload` |
 | Subsystem | `resilience` |
 | Why | the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once |
+| Default | 10s |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 10s |
 | Active when | always |
@@ -3596,6 +3689,7 @@ MaxFails is how many consecutive failures take a backend out of rotation.
 | Lifecycle | `hot_reload` |
 | Subsystem | `resilience` |
 | Why | the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once |
+| Default | 3 |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 3 |
 | Active when | always |
@@ -3733,6 +3827,7 @@ Strategy is one of "round_robin", "weighted_round_robin", "least_conn".
 | Lifecycle | `hot_reload` |
 | Subsystem | `upstream` |
 | Why | the upstream registry stages and swaps pools on each successful reload |
+| Default | round_robin |
 | Allowed values | `round_robin`, `weighted_round_robin`, `least_conn` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
@@ -3812,6 +3907,7 @@ Mode is "block" (default) — a rule interruption returns BlockStatus — or "de
 | Subsystem | `waf` |
 | Why | the WAF policy is rebuilt on each successful reload |
 | Requires | `waf` |
+| Default | block |
 | Allowed values | `block`, `detect` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
@@ -3843,6 +3939,7 @@ RequestBodyLimit caps how many request-body bytes are buffered for inspection.
 | Subsystem | `waf` |
 | Why | the WAF policy is rebuilt on each successful reload |
 | Requires | `waf` |
+| Default | 128k |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 128 KiB |
 | Active when | WAF enabled |

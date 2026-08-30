@@ -208,3 +208,9 @@ const (
 	DurationPattern = `^-?([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$`
 	SizePattern     = `^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$`
 )
+
+// RouteIDPattern is ADR 0019 §4's route_id grammar: 1-64 bytes, lowercase
+// ASCII [a-z0-9_-], first byte alphanumeric. Global uniqueness across the
+// configuration is not expressible here and stays a documented Go cross-
+// object rule (internal/config.Validate).
+const RouteIDPattern = `^[a-z0-9][a-z0-9_-]{0,63}$`

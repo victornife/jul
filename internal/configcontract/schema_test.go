@@ -171,6 +171,105 @@ func TestSchemaSizePattern(t *testing.T) {
 	}
 }
 
+// TestSchemaACMECustomHTTPSCAAccepted proves the enum_or_url fix: a valid
+// custom ACME directory URL validates alongside the two known aliases,
+// matching internal/config/validate.go's validateACME exactly (Scheme=="https"
+// and a non-empty Host) rather than being rejected as an unknown enum value.
+func TestSchemaACMECustomHTTPSCAAccepted(t *testing.T) {
+	schema := buildTestSchema(t)
+	base := func(ca any) map[string]any {
+		doc := minimalValidConfig()
+		doc["servers"] = []any{
+			map[string]any{
+				"listen": "127.0.0.1:8443",
+				"tls": map[string]any{
+					"enabled": true,
+					"acme": map[string]any{
+						"enabled": true,
+						"email":   "ops@example.test",
+						"ca":      ca,
+					},
+				},
+			},
+		}
+		return doc
+	}
+	for _, ca := range []string{"letsencrypt", "letsencrypt-staging", "https://acme.example.test/directory"} {
+		if err := minivalidate(schema, base(ca)); err != nil {
+			t.Errorf("ca = %q should validate: %v", ca, err)
+		}
+	}
+	for _, ca := range []string{"unknown-alias", "http://not-https.example.test/directory", "not-a-url"} {
+		if err := minivalidate(schema, base(ca)); err == nil {
+			t.Errorf("ca = %q should be rejected", ca)
+		}
+	}
+}
+
+// TestSchemaListValuedEnumRejectsInvalidElement is the regression test for
+// the list/enum mismatch: compression.encoders and
+// observability.access_log.sinks are audited as kind "enum" (not
+// "enum_list") even though their schema leaf is a list, and previously got no
+// enum constraint on items at all.
+func TestSchemaListValuedEnumRejectsInvalidElement(t *testing.T) {
+	schema := buildTestSchema(t)
+
+	base := func(encoders any) map[string]any {
+		doc := minimalValidConfig()
+		doc["compression"] = map[string]any{"encoders": encoders}
+		return doc
+	}
+	if err := minivalidate(schema, base([]any{"gzip", "br", "zstd"})); err != nil {
+		t.Errorf("valid encoders should validate: %v", err)
+	}
+	if err := minivalidate(schema, base([]any{"deflate"})); err == nil {
+		t.Error("an unknown encoder should be rejected")
+	}
+
+	sinksBase := func(sinks any) map[string]any {
+		doc := minimalValidConfig()
+		doc["observability"] = map[string]any{"access_log": map[string]any{"sinks": sinks}}
+		return doc
+	}
+	if err := minivalidate(schema, sinksBase([]any{"stdout", "file"})); err != nil {
+		t.Errorf("valid sinks should validate: %v", err)
+	}
+	if err := minivalidate(schema, sinksBase([]any{"carrier-pigeon"})); err == nil {
+		t.Error("an unknown access-log sink should be rejected")
+	}
+}
+
+// TestSchemaRouteIDPatternMechanicallyRepresented proves route_id's grammar
+// is a real JSON Schema pattern, not merely documentation (ADR 0019 §14).
+func TestSchemaRouteIDPatternMechanicallyRepresented(t *testing.T) {
+	schema := buildTestSchema(t)
+	base := func(id any) map[string]any {
+		doc := minimalValidConfig()
+		doc["servers"] = []any{
+			map[string]any{
+				"listen": "127.0.0.1:8080",
+				"locations": []any{
+					map[string]any{
+						"match":    map[string]any{"type": "exact", "path": "/"},
+						"route_id": id,
+					},
+				},
+			},
+		}
+		return doc
+	}
+	for _, id := range []string{"public-api", "r-k7m2q9x4vb8nfp3jd6ths5wzy0", "a"} {
+		if err := minivalidate(schema, base(id)); err != nil {
+			t.Errorf("route_id = %q should validate: %v", id, err)
+		}
+	}
+	for _, id := range []string{"", "Public-Api", "-abc", "abc.def", "abc def"} {
+		if err := minivalidate(schema, base(id)); err == nil {
+			t.Errorf("route_id = %q should be rejected", id)
+		}
+	}
+}
+
 // TestSchemaEnumRejectsUnknownValue proves an audited enum is a structural
 // constraint.
 func TestSchemaEnumRejectsUnknownValue(t *testing.T) {
