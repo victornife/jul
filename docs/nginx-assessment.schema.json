@@ -1,454 +1,304 @@
 {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://github.com/victornife/jul/blob/main/docs/nginx-assessment.schema.json",
-    "title": "Jul NGINX migration assessment",
-    "type": "object",
-    "additionalProperties": false,
-    "required": [
-        "schema_version",
-        "source",
-        "source_policy",
-        "sources",
-        "status",
-        "summary",
-        "results",
-        "validation"
-    ],
-    "properties": {
-        "schema_version": {
-            "const": 2
-        },
-        "source": {
-            "type": "string",
-            "minLength": 1
-        },
-        "source_policy": {
-            "$ref": "#/$defs/source_policy"
-        },
-        "sources": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-                "$ref": "#/$defs/source"
-            }
-        },
-        "status": {
-            "enum": [
-                "ready_for_review",
-                "manual_action_required",
-                "parse_error",
-                "invalid_candidate"
-            ]
-        },
-        "summary": {
-            "$ref": "#/$defs/summary"
-        },
-        "results": {
-            "type": "array",
-            "items": {
-                "$ref": "#/$defs/result"
-            }
-        },
-        "guidance": {
-            "type": "array",
-            "items": {
-                "$ref": "#/$defs/guidance"
-            }
-        },
-        "validation": {
-            "$ref": "#/$defs/validation"
-        }
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/victornife/jul/blob/main/docs/nginx-assessment.schema.json",
+  "title": "Jul NGINX migration assessment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source",
+    "source_policy",
+    "sources",
+    "status",
+    "summary",
+    "results",
+    "validation"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "source": { "type": "string", "minLength": 1 },
+    "source_policy": { "$ref": "#/$defs/source_policy" },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/source" }
     },
-    "$defs": {
-        "position": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "line": {
-                    "type": "integer",
-                    "minimum": 1
-                },
-                "column": {
-                    "type": "integer",
-                    "minimum": 1
-                }
-            }
-        },
-        "source_policy": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-                "path_style",
-                "root",
-                "follow_includes"
-            ],
-            "properties": {
-                "path_style": {
-                    "enum": [
-                        "relative",
-                        "absolute"
-                    ]
-                },
-                "root": {
-                    "type": "string",
-                    "minLength": 1
-                },
-                "follow_includes": {
-                    "const": false
-                }
-            }
-        },
-        "source": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-                "id",
-                "display_path"
-            ],
-            "properties": {
-                "id": {
-                    "type": "string",
-                    "pattern": "^source-[0-9]{4}$"
-                },
-                "display_path": {
-                    "type": "string",
-                    "minLength": 1
-                },
-                "digest": {
-                    "type": "string",
-                    "pattern": "^sha256:[0-9a-f]{64}$"
-                },
-                "parent_id": {
-                    "type": "string",
-                    "pattern": "^source-[0-9]{4}$"
-                },
-                "include_line": {
-                    "type": "integer",
-                    "minimum": 1
-                }
-            }
-        },
-        "provenance": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-                "source_id",
-                "display_path",
-                "start",
-                "context_path",
-                "directive",
-                "summary"
-            ],
-            "properties": {
-                "source_id": {
-                    "type": "string",
-                    "pattern": "^source-[0-9]{4}$"
-                },
-                "display_path": {
-                    "type": "string",
-                    "minLength": 1
-                },
-                "start": {
-                    "$ref": "#/$defs/position"
-                },
-                "end": {
-                    "$ref": "#/$defs/position"
-                },
-                "context_path": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 163
-                },
-                "directive": {
-                    "type": "string",
-                    "minLength": 1
-                },
-                "summary": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 163
-                }
-            }
-        },
-        "target_mapping": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "relation": {
-                    "enum": [
-                        "direct",
-                        "approximate",
-                        "expands_to_multiple",
-                        "combines_with_siblings"
-                    ]
-                },
-                "paths": {
-                    "type": "array",
-                    "minItems": 1,
-                    "uniqueItems": true,
-                    "items": {
-                        "type": "string",
-                        "minLength": 1
-                    }
-                }
-            }
-        },
-        "guidance": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-                "code",
-                "title",
-                "action",
-                "blocking"
-            ],
-            "properties": {
-                "code": {
-                    "type": "string",
-                    "pattern": "^GUIDE_[A-Z0-9_]+$"
-                },
-                "title": {
-                    "type": "string",
-                    "minLength": 1
-                },
-                "action": {
-                    "type": "string",
-                    "minLength": 1
-                },
-                "consequence": {
-                    "type": "string"
-                },
-                "docs": {
-                    "type": "string"
-                },
-                "blocking": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "summary": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-                "total",
-                "supported",
-                "approximated",
-                "ignored",
-                "blocking",
-                "informational",
-                "parse_errors",
-                "validation_errors",
-                "ready"
-            ],
-            "properties": {
-                "total": {
-                    "type": "integer",
-                    "minimum": 0
-                },
-                "supported": {
-                    "type": "integer",
-                    "minimum": 0
-                },
-                "approximated": {
-                    "type": "integer",
-                    "minimum": 0
-                },
-                "ignored": {
-                    "type": "integer",
-                    "minimum": 0
-                },
-                "blocking": {
-                    "type": "integer",
-                    "minimum": 0
-                },
-                "informational": {
-                    "type": "integer",
-                    "minimum": 0
-                },
-                "parse_errors": {
-                    "type": "integer",
-                    "minimum": 0
-                },
-                "validation_errors": {
-                    "type": "integer",
-                    "minimum": 0
-                },
-                "ready": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "result": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-                "id",
-                "code",
-                "class",
-                "severity",
-                "risk",
-                "context",
-                "directive",
-                "message"
-            ],
-            "properties": {
-                "id": {
-                    "type": "string",
-                    "pattern": "^result-(source-[0-9]{4}-[0-9]{4}|synthetic-[0-9]{4}|unmatched-[0-9]{4})(-[0-9]{2})?$"
-                },
-                "code": {
-                    "type": "string",
-                    "pattern": "^[A-Z][A-Z0-9_]+$"
-                },
-                "class": {
-                    "enum": [
-                        "supported",
-                        "approximated",
-                        "ignored",
-                        "blocking",
-                        "informational",
-                        "parse_error",
-                        "validation_error"
-                    ]
-                },
-                "severity": {
-                    "enum": [
-                        "info",
-                        "warning",
-                        "error"
-                    ]
-                },
-                "risk": {
-                    "enum": [
-                        "security",
-                        "routing",
-                        "availability",
-                        "observability",
-                        "performance",
-                        "operational",
-                        "cosmetic"
-                    ]
-                },
-                "context": {
-                    "enum": [
-                        "main",
-                        "events",
-                        "http",
-                        "server",
-                        "location",
-                        "upstream",
-                        "limit_except",
-                        "stream",
-                        "mail",
-                        "variable_block"
-                    ]
-                },
-                "directive": {
-                    "type": "string",
-                    "minLength": 1
-                },
-                "line": {
-                    "type": "integer",
-                    "minimum": 1
-                },
-                "message": {
-                    "type": "string",
-                    "minLength": 1
-                },
-                "target_paths": {
-                    "type": "array",
-                    "uniqueItems": true,
-                    "items": {
-                        "type": "string",
-                        "minLength": 1
-                    }
-                },
-                "provenance": {
-                    "$ref": "#/$defs/provenance"
-                },
-                "target_mappings": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/$defs/target_mapping"
-                    }
-                },
-                "guidance_codes": {
-                    "type": "array",
-                    "uniqueItems": true,
-                    "items": {
-                        "type": "string",
-                        "pattern": "^GUIDE_[A-Z0-9_]+$"
-                    }
-                },
-                "related_result_ids": {
-                    "type": "array",
-                    "uniqueItems": true,
-                    "items": {
-                        "type": "string",
-                        "pattern": "^result-"
-                    }
-                },
-                "synthetic": {
-                    "type": "boolean"
-                },
-                "scope": {
-                    "enum": [
-                        "global",
-                        "derived"
-                    ]
-                }
-            }
-        },
-        "diagnostic": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-                "severity",
-                "message"
-            ],
-            "properties": {
-                "severity": {
-                    "enum": [
-                        "info",
-                        "warning",
-                        "error"
-                    ]
-                },
-                "field": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
-        "validation": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-                "status"
-            ],
-            "properties": {
-                "status": {
-                    "enum": [
-                        "not_run",
-                        "valid",
-                        "invalid"
-                    ]
-                },
-                "errors": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/$defs/diagnostic"
-                    }
-                },
-                "warnings": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/$defs/diagnostic"
-                    }
-                }
-            }
+    "status": {
+      "enum": [
+        "ready_for_review",
+        "manual_action_required",
+        "parse_error",
+        "invalid_candidate"
+      ]
+    },
+    "summary": { "$ref": "#/$defs/summary" },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/result" }
+    },
+    "guidance": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/guidance" }
+    },
+    "validation": { "$ref": "#/$defs/validation" }
+  },
+  "$defs": {
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "include_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_depth",
+        "max_files",
+        "max_file_bytes",
+        "max_total_bytes",
+        "max_glob_matches"
+      ],
+      "properties": {
+        "max_depth": { "type": "integer", "minimum": 1 },
+        "max_files": { "type": "integer", "minimum": 1 },
+        "max_file_bytes": { "type": "integer", "minimum": 1 },
+        "max_total_bytes": { "type": "integer", "minimum": 1 },
+        "max_glob_matches": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "source_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path_style",
+        "root",
+        "follow_includes",
+        "complete",
+        "files_read",
+        "total_bytes"
+      ],
+      "properties": {
+        "path_style": { "enum": ["relative", "absolute"] },
+        "root": { "type": "string", "minLength": 1 },
+        "follow_includes": { "type": "boolean" },
+        "complete": { "type": "boolean" },
+        "files_read": { "type": "integer", "minimum": 0 },
+        "total_bytes": { "type": "integer", "minimum": 0 },
+        "limits": { "$ref": "#/$defs/include_limits" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "follow_includes": { "const": true } },
+            "required": ["follow_includes"]
+          },
+          "then": { "required": ["limits"] }
         }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "display_path"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^source-[0-9]{4}$" },
+        "display_path": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "parent_id": { "type": "string", "pattern": "^source-[0-9]{4}$" },
+        "include_line": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "display_path",
+        "start",
+        "context_path",
+        "directive",
+        "summary"
+      ],
+      "properties": {
+        "source_id": { "type": "string", "pattern": "^source-[0-9]{4}$" },
+        "display_path": { "type": "string", "minLength": 1 },
+        "start": { "$ref": "#/$defs/position" },
+        "end": { "$ref": "#/$defs/position" },
+        "context_path": { "type": "string", "minLength": 1, "maxLength": 163 },
+        "directive": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 163 }
+      }
+    },
+    "target_mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "relation": {
+          "enum": [
+            "direct",
+            "approximate",
+            "expands_to_multiple",
+            "combines_with_siblings"
+          ]
+        },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "guidance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "title", "action", "blocking"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^GUIDE_[A-Z0-9_]+$" },
+        "title": { "type": "string", "minLength": 1 },
+        "action": { "type": "string", "minLength": 1 },
+        "consequence": { "type": "string" },
+        "docs": { "type": "string" },
+        "blocking": { "type": "boolean" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "supported",
+        "approximated",
+        "ignored",
+        "blocking",
+        "informational",
+        "parse_errors",
+        "validation_errors",
+        "ready"
+      ],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "supported": { "type": "integer", "minimum": 0 },
+        "approximated": { "type": "integer", "minimum": 0 },
+        "ignored": { "type": "integer", "minimum": 0 },
+        "blocking": { "type": "integer", "minimum": 0 },
+        "informational": { "type": "integer", "minimum": 0 },
+        "parse_errors": { "type": "integer", "minimum": 0 },
+        "validation_errors": { "type": "integer", "minimum": 0 },
+        "ready": { "type": "boolean" }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "code",
+        "class",
+        "severity",
+        "risk",
+        "context",
+        "directive",
+        "message"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^result-(source-[0-9]{4}-[0-9]{4}|synthetic-[0-9]{4}|unmatched-[0-9]{4})(-[0-9]{2})?$"
+        },
+        "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" },
+        "class": {
+          "enum": [
+            "supported",
+            "approximated",
+            "ignored",
+            "blocking",
+            "informational",
+            "parse_error",
+            "validation_error"
+          ]
+        },
+        "severity": { "enum": ["info", "warning", "error"] },
+        "risk": {
+          "enum": [
+            "security",
+            "routing",
+            "availability",
+            "observability",
+            "performance",
+            "operational",
+            "cosmetic"
+          ]
+        },
+        "context": {
+          "enum": [
+            "main",
+            "events",
+            "http",
+            "server",
+            "location",
+            "upstream",
+            "limit_except",
+            "stream",
+            "mail",
+            "variable_block"
+          ]
+        },
+        "directive": { "type": "string", "minLength": 1 },
+        "line": { "type": "integer", "minimum": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "target_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "target_mappings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/target_mapping" }
+        },
+        "guidance_codes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^GUIDE_[A-Z0-9_]+$" }
+        },
+        "related_result_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^result-" }
+        },
+        "synthetic": { "type": "boolean" },
+        "scope": { "enum": ["global", "derived", "source"] }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "message"],
+      "properties": {
+        "severity": { "enum": ["info", "warning", "error"] },
+        "field": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["not_run", "valid", "invalid"] },
+        "errors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/diagnostic" }
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/diagnostic" }
+        }
+      }
     }
+  }
 }
