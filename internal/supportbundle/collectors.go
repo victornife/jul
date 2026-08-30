@@ -172,16 +172,6 @@ func collectAccessLog(ctx context.Context, snapshot Snapshot) ([]Artifact, error
 	if !accessLog.IsEnabled() || accessLog.File == "" || !containsString(accessLog.Sinks, "file") {
 		return nil, nil
 	}
-	info, err := os.Lstat(accessLog.File)
-	if err != nil {
-		return nil, fmt.Errorf("inspect configured access log: %w", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("configured access log is a symbolic link; refusing to follow it")
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("configured access log is not a regular file")
-	}
 	limit := snapshot.LogTailBytes
 	if limit <= 0 {
 		limit = defaultLogTailBytes
@@ -189,7 +179,7 @@ func collectAccessLog(ctx context.Context, snapshot Snapshot) ([]Artifact, error
 	if limit > maximumLogTailBytes {
 		limit = maximumLogTailBytes
 	}
-	data, truncated, err := tailRegularFile(ctx, accessLog.File, info.Size(), limit)
+	data, truncated, err := tailRegularFile(ctx, accessLog.File, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -233,13 +223,14 @@ func containsString(values []string, expected string) bool {
 	return false
 }
 
-func tailRegularFile(ctx context.Context, path string, size, limit int64) ([]byte, bool, error) {
-	file, err := os.Open(filepath.Clean(path))
+func tailRegularFile(ctx context.Context, path string, limit int64) ([]byte, bool, error) {
+	file, info, err := openVerifiedRegularFile(path)
 	if err != nil {
-		return nil, false, fmt.Errorf("open configured access log: %w", err)
+		return nil, false, err
 	}
 	defer file.Close()
-	start := size - limit
+
+	start := info.Size() - limit
 	truncated := start > 0
 	if start < 0 {
 		start = 0
@@ -260,6 +251,46 @@ func tailRegularFile(ctx context.Context, path string, size, limit int64) ([]byt
 		}
 	}
 	return data, truncated, nil
+}
+
+func openVerifiedRegularFile(path string) (*os.File, os.FileInfo, error) {
+	cleanPath := filepath.Clean(path)
+	before, err := os.Lstat(cleanPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("inspect configured access log: %w", err)
+	}
+	if before.Mode()&os.ModeSymlink != 0 {
+		return nil, nil, fmt.Errorf("configured access log is a symbolic link; refusing to follow it")
+	}
+	if !before.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("configured access log is not a regular file")
+	}
+
+	file, err := os.Open(cleanPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open configured access log: %w", err)
+	}
+	closeWithError := func(message string, cause error) (*os.File, os.FileInfo, error) {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("%s: %w", message, cause)
+	}
+	opened, err := file.Stat()
+	if err != nil {
+		return closeWithError("stat opened access log", err)
+	}
+	after, err := os.Lstat(cleanPath)
+	if err != nil {
+		return closeWithError("reinspect configured access log", err)
+	}
+	if after.Mode()&os.ModeSymlink != 0 || !after.Mode().IsRegular() || !opened.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("configured access log changed type during open; refusing to read it")
+	}
+	if !os.SameFile(before, opened) || !os.SameFile(after, opened) {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("configured access log changed identity during open; refusing to read it")
+	}
+	return file, opened, nil
 }
 
 type contextReader struct {
