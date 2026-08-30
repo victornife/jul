@@ -945,3 +945,91 @@ func TestCoordinatorHotApplyBlocksAdmissionUntilBaselineRetryResolves(t *testing
 		t.Error("admission must have reopened after the retry resolved; the refusal must come from the inconsistent baseline, not the stale in-flight gate")
 	}
 }
+
+// TestManagedApplyDriftDuringReloadWaitSurvivesTerminalization pins ADR 0019
+// §12: a watcher/SIGHUP-triggered drift assessment during the async
+// hot-apply reload wait (when applyMu has already been released) must never
+// be silently erased by the finalizer's own CompleteWrite call, which
+// otherwise assumes disk holds exactly what this transaction wrote.
+//
+// Sequence: apply A persists candidate I and enqueues its reload; before the
+// reload result arrives, an external writer changes the file to J and the
+// watcher fires AssessDriftNow, which (correctly, at that instant) sees J
+// against the still-old baseline; A's reload then succeeds and its
+// finalizer calls CompleteWrite(I, ...). The final state must still be
+// managed_drift naming baseline I and disk J — CompleteWrite's optimistic
+// managed_clean must not overwrite what actually happened on disk.
+func TestManagedApplyDriftDuringReloadWaitSurvivesTerminalization(t *testing.T) {
+	submitCalled := make(chan struct{})
+	proceedReload := make(chan struct{})
+	submit := func(req server.ReloadRequest) error {
+		close(submitCalled)
+		go func() {
+			<-proceedReload
+			req.Result <- server.ReloadResult{
+				ID:             req.ID,
+				Source:         server.ReloadSourceAdmin,
+				Outcome:        server.ReloadAppliedLive,
+				Published:      true,
+				ServingVersion: "v2",
+			}
+		}()
+		return nil
+	}
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, submit)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+
+	newRaw := validConfigRaw(t, ":8081")
+	type applyOutcome struct {
+		res ApplyResult
+		err error
+	}
+	done := make(chan applyOutcome, 1)
+	go func() {
+		res, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot)
+		done <- applyOutcome{res, err}
+	}()
+
+	// SubmitReload is called synchronously, immediately after candidate I is
+	// persisted — waiting for it guarantees I is already on disk.
+	<-submitCalled
+
+	// An external writer changes the file to J while A's baseline has not
+	// yet terminalized to I.
+	external := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("simulate external write: %v", err)
+	}
+
+	// The watcher/SIGHUP entry point fires here, exactly as it would in
+	// production, and may briefly block on applyMu before proceeding.
+	c.AssessDriftNow()
+
+	// Allow A's reload to complete and its finalizer to terminalize.
+	close(proceedReload)
+	out := <-done
+	if out.err != nil {
+		t.Fatalf("ApplyRaw error: %v", out.err)
+	}
+	if !out.res.OK {
+		t.Fatalf("the apply itself must still succeed, got %+v", out.res)
+	}
+
+	st := c.ManagedBaseline.Status()
+	if st.State != ConfigStateManagedDrift {
+		t.Fatalf("state = %v, want managed_drift — an external write during the reload wait must not be silently erased by CompleteWrite's assumed-clean baseline", st.State)
+	}
+	if st.BaselineRawSHA256 != digestHex(newRaw) {
+		t.Errorf("baseline digest = %q, want I (%q) — the baseline must still name what this apply committed", st.BaselineRawSHA256, digestHex(newRaw))
+	}
+	if st.DiskRawSHA256 != digestHex(external) {
+		t.Errorf("disk digest = %q, want J (%q) — drift must reflect the actual current disk content, not an assumption", st.DiskRawSHA256, digestHex(external))
+	}
+}

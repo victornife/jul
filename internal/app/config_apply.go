@@ -820,6 +820,28 @@ func (c *ConfigApplyCoordinator) fileOwnedConfigState() ConfigState {
 	return ConfigStateFileOwnedClean
 }
 
+// completeWriteAndReassessDrift wraps ManagedBaselineStore.CompleteWrite with
+// an immediate re-read of the actual disk file. CompleteWrite assumes disk
+// holds exactly committedRaw — the bytes this transaction wrote — but an
+// external writer does not take applyMu and can land between the write and
+// this call, or (on the async hot-apply path, where applyMu is released once
+// the candidate is persisted and the reload is enqueued) any time during the
+// whole reload wait. Re-assessing immediately afterward, from the CURRENT
+// file content rather than the assumption CompleteWrite bakes in, is what
+// lets such a race surface as managed_drift(committedRaw, disk) instead of
+// being silently overwritten by CompleteWrite's own optimistic
+// managed_clean — an external write racing the transaction is exactly what
+// ADR 0019 §12's drift detection exists to catch, not something admission
+// alone can prevent, since it never gated external writers in the first
+// place.
+func (c *ConfigApplyCoordinator) completeWriteAndReassessDrift(committedRaw []byte, canonicalVersion string) error {
+	if err := c.ManagedBaseline.CompleteWrite(committedRaw, canonicalVersion); err != nil {
+		return err
+	}
+	c.assessManagedDrift()
+	return nil
+}
+
 // rewindOrMarkInconsistent resolves the managed-baseline transaction when a
 // managed write's reload failed and restoration was attempted (T-write's
 // restored arm, ADR 0019 §11.2). When restoration succeeded it rewinds the
@@ -1217,11 +1239,11 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 	// never be lost to — or block — the outer machine's own guarantee.
 	var stageDegraded *DegradedEntry
 	if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
-		if err := c.ManagedBaseline.CompleteWrite(data, persistedVersion); err != nil {
+		if err := c.completeWriteAndReassessDrift(data, persistedVersion); err != nil {
 			stageDegraded = &DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written"}
 			// ApplyRaw still holds applyMu for this whole call, so the retry
 			// runs inline rather than racing a later apply for it.
-			c.retryBaselineWriteLocked(data, func(b []byte) error { return c.ManagedBaseline.CompleteWrite(b, persistedVersion) })
+			c.retryBaselineWriteLocked(data, func(b []byte) error { return c.completeWriteAndReassessDrift(b, persistedVersion) })
 		}
 	}
 	c.mu.Unlock()
@@ -1558,7 +1580,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 				if d := c.rewindOrMarkInconsistent(terminal.Restored); d != nil {
 					terminal.Degraded = append(terminal.Degraded, *d)
 				}
-			} else if err := c.ManagedBaseline.CompleteWrite(data, persistedVersion); err != nil {
+			} else if err := c.completeWriteAndReassessDrift(data, persistedVersion); err != nil {
 				terminal.Degraded = append(terminal.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written"})
 				needsBaselineRetry = true
 			}
@@ -1574,7 +1596,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// the whole of it; AdoptExternal checks the same flag for the same
 		// reason, since applyMu alone no longer serializes this window.
 		if needsBaselineRetry {
-			c.resolveBaselineWriteRetry(data, func(b []byte) error { return c.ManagedBaseline.CompleteWrite(b, persistedVersion) })
+			c.resolveBaselineWriteRetry(data, func(b []byte) error { return c.completeWriteAndReassessDrift(b, persistedVersion) })
 		}
 
 		// #226 / AC-03: every config-path mutation — including any baseline
