@@ -50,6 +50,12 @@ type patchBatchBaseline struct {
 	Effective *config.Config
 	Version   string
 	Live      lifecycle.Live
+	// DenyMint is true in file_owned mode (ADR 0019 §4/§15): Jul never mints
+	// a route_id on any path, including preview, which otherwise runs
+	// without an authority gate because it is a read. The zero value
+	// (false) preserves every existing caller's behavior — only
+	// executeCurrentPatchBatch, which has the real authority, ever sets it.
+	DenyMint bool
 }
 
 // patchOperationSummary is the ordered typed result of one successfully
@@ -244,6 +250,9 @@ func executePatchBatch(
 		// even for an op like location_remove or location_set_match, whose
 		// own effect would make the target unresolvable afterward.
 		preOpIdentity := resolveRouteAuditIdentity(candidateConfig, op.locationTarget())
+		if baseline.DenyMint {
+			op.denyMint = true
+		}
 		summary, applyErr := applyPatch(candidateConfig, op)
 		if applyErr != nil {
 			return out, &patchOperationError{OpIndex: i, Op: op.Op, Err: applyErr}
@@ -346,6 +355,11 @@ func (s *Server) executeCurrentPatchBatch(
 		Effective: effective,
 		Version:   state.Version,
 		Live:      live,
+		// A route_id is never minted in file_owned mode, on any path — apply
+		// never reaches here in file_owned mode (denyIfFileOwned refuses it
+		// first), but preview deliberately runs without that gate because it
+		// is a read, so this is the one place that still needs the check.
+		DenyMint: s.currentAuthority().IsFileOwned(),
 	}, requestedVersion, ops)
 	if err != nil {
 		return state, patchBatchExecution{}, err

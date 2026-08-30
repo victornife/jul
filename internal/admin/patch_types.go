@@ -107,6 +107,14 @@ type patchRequest struct {
 	// re-minted or replaced by a patch.
 	RouteID *string `json:"route_id,omitempty"`
 
+	// denyMint is executor-internal, never a wire field (unexported, so
+	// json.Unmarshal ignores it): the batch executor sets it on its own copy
+	// of a location_add op when the process is file_owned (ADR 0019 §4/§15,
+	// "never mint a route_id on any path"), so an omitted route_id stays nil
+	// in the candidate instead of being minted, even during a preview, which
+	// otherwise runs without an authority gate because it is a read.
+	denyMint bool
+
 	// location_set_action payload: the route's new action (proxy/static/
 	// redirect/return/deny). The op clears every other action field first.
 	Action *locationActionPayload `json:"action,omitempty"`

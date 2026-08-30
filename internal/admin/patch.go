@@ -666,18 +666,23 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 			return "", fmt.Errorf("location_add: a route with match %s %q already exists on server %s", matchType, path, req.Listen)
 		}
 		loc := config.LocationConfig{Match: config.MatchConfig{Type: matchType, Path: path}}
-		if req.RouteID == nil {
-			minted, err := mintRouteID()
-			if err != nil {
-				return "", fmt.Errorf("location_add: %w", err)
-			}
-			loc.RouteID = &minted
-		} else {
+		switch {
+		case req.RouteID != nil:
 			// Preserve the caller's bytes exactly: a present-empty string or
 			// any other malformed value is not normalized here, it is left
 			// for config.Validate to reject like any other route_id.
 			id := *req.RouteID
 			loc.RouteID = &id
+		case req.denyMint:
+			// file_owned: never mint on any path, including preview (ADR
+			// 0019 §4/§15). The candidate simply has no route_id, exactly as
+			// if the operator had omitted it in a file Jul does not write.
+		default:
+			minted, err := mintRouteID()
+			if err != nil {
+				return "", fmt.Errorf("location_add: %w", err)
+			}
+			loc.RouteID = &minted
 		}
 		label, err := setLocationAction(&loc, *req.Action)
 		if err != nil {

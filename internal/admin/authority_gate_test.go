@@ -196,6 +196,78 @@ func TestFileOwnedAllowsPreviewAndStatus(t *testing.T) {
 	}
 }
 
+// TestFileOwnedPreviewNeverMintsRouteID pins ADR 0019 §4/§15: minting a
+// route_id must never happen in file_owned mode, on any path — including
+// preview, which otherwise runs without the authority gate because it is a
+// read. A location_add preview must still succeed (it is not a mutation),
+// but its candidate must stay ID-less.
+func TestFileOwnedPreviewNeverMintsRouteID(t *testing.T) {
+	counters := &authorityGateCounters{}
+	s := newFileOwnedTestServer(t, counters)
+	h := s.routes()
+
+	body, _ := json.Marshal(patchApplyRequest{Ops: []patchRequest{{
+		Op: "location_add", Listen: ":8080",
+		Match:  &locationMatch{Type: "prefix", Path: "/api"},
+		Action: &locationActionPayload{Kind: "deny"},
+	}}})
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/preview", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("patch preview = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp patchPreviewResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode preview response: %v; body=%s", err, rr.Body.String())
+	}
+	if len(resp.OperationSummaries) != 1 {
+		t.Fatalf("operation_summaries = %d, want 1", len(resp.OperationSummaries))
+	}
+	if got := resp.OperationSummaries[0].ResourceID; got != "" {
+		t.Errorf("file_owned preview minted a route_id: %q, want none", got)
+	}
+}
+
+// TestManagedPreviewMintsRouteID is the managed-mode counterpart: preview
+// (and, by the same code path, apply) is expected to mint when the process
+// is not file_owned.
+func TestManagedPreviewMintsRouteID(t *testing.T) {
+	deps := Deps{
+		LoadConfig: func() (*config.Config, error) {
+			return config.Parse([]byte(`[[servers]]
+listen = ":8080"
+
+[[servers.locations]]
+proxy_pass = "http://127.0.0.1:9001"
+
+[servers.locations.match]
+type = "prefix"
+path = "/"
+`))
+		},
+	}
+	s := newTestServer(t, config.AdminConfig{}, deps)
+	h := s.routes()
+
+	body, _ := json.Marshal(patchApplyRequest{Ops: []patchRequest{{
+		Op: "location_add", Listen: ":8080",
+		Match:  &locationMatch{Type: "prefix", Path: "/api"},
+		Action: &locationActionPayload{Kind: "deny"},
+	}}})
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/preview", bytes.NewReader(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("patch preview = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp patchPreviewResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode preview response: %v; body=%s", err, rr.Body.String())
+	}
+	if len(resp.OperationSummaries) != 1 || resp.OperationSummaries[0].ResourceID == "" {
+		t.Fatalf("managed preview should mint a route_id, got operation_summaries=%+v", resp.OperationSummaries)
+	}
+}
+
 // TestFileOwnedDenialObservesMetricHook pins that a wired
 // ObserveAuthorityDenied hook is invoked with the bounded action label on
 // every denial (ADR 0019 §15); a nil hook (every other test in this file)
