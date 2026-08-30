@@ -1,0 +1,43 @@
+name: One-shot diagnostics gofmt fix
+
+on:
+  push:
+    branches: [agent/ops-diagnostics-foundation]
+    paths: [.github/workflows/ops-gofmt-fix.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/ops-diagnostics-foundation
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Format diagnostics sources
+        run: |
+          gofmt -w \
+            internal/diagnostics/sanitize.go \
+            internal/doctor/doctor_test.go \
+            internal/supportbundle/archive.go \
+            internal/supportbundle/coverage_edges_test.go \
+            internal/supportbundle/types.go \
+            internal/supportbundle/collectors.go \
+            internal/supportbundle/symlink_parent_test.go
+          go test ./internal/diagnostics ./internal/doctor ./internal/supportbundle ./cmd/jul
+          test -z "$(gofmt -l internal/diagnostics internal/doctor internal/supportbundle cmd/jul)"
+      - name: Commit formatting and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/ops-gofmt-fix.yml
+          git add internal/diagnostics internal/doctor internal/supportbundle cmd/jul
+          git commit -m "style(ops): format diagnostics implementation (#155 #156)"
+          git push origin HEAD:agent/ops-diagnostics-foundation
