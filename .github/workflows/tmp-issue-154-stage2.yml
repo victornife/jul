@@ -27,6 +27,9 @@ jobs:
           tar -xzf /tmp/issue154-stage2.tgz
           chmod +x scripts/nginx-corpus-check.sh scripts/nginx-migration-e2e.sh
           gofmt -w internal/migrate/nginx/corpus/*.go cmd/jul/import_corpus_test.go
+      - name: Show pinned NGINX lane implementation
+        shell: bash
+        run: sed -n '1,260p' scripts/nginx-migration-e2e.sh
       - name: Validate corpus package
         run: go test -tags importer ./internal/migrate/nginx/corpus -count=1
       - name: Validate importer and real Jul E2E
