@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,6 +88,21 @@ func TestTLSCertificateValidityAndConfiguredNameCoverage(t *testing.T) {
 	result = (&session{cfg: &config.Config{Servers: []config.ServerConfig{{ServerNames: []string{"other.test"}, TLS: &config.TLSConfig{Cert: validCert, Key: validKey}}}}}).tlsCertificatesCheck(context.Background())
 	if result.Status != diagnostics.StatusError || result.Evidence["hostname_mismatches"] != 1 {
 		t.Fatalf("hostname mismatch result = %#v", result)
+	}
+}
+
+func TestCertificatePairsMergeConfiguredNamesDeterministically(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{Servers: []config.ServerConfig{
+		{ServerNames: []string{"b.example.test", "a.example.test"}, TLS: &config.TLSConfig{Cert: "shared.crt", Key: "shared.key"}},
+		{ServerNames: []string{"a.example.test", "*.example.test"}, TLS: &config.TLSConfig{Cert: "shared.crt", Key: "shared.key"}},
+	}}
+	pairs := collectCertificatePairs(cfg)
+	if len(pairs) != 1 {
+		t.Fatalf("certificate pairs = %#v", pairs)
+	}
+	if got, want := strings.Join(pairs[0].ServerNames, ","), "*.example.test,a.example.test,b.example.test"; got != want {
+		t.Fatalf("merged server names = %q, want %q", got, want)
 	}
 }
 
