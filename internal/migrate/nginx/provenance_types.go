@@ -67,6 +67,10 @@ type AssessmentSourcePolicy struct {
 	PathStyle     AssessmentPathStyle `json:"path_style"`
 	Root          string              `json:"root"`
 	FollowInclude bool                `json:"follow_includes"`
+	Complete      bool                `json:"complete"`
+	FilesRead     int                 `json:"files_read"`
+	TotalBytes    int64               `json:"total_bytes"`
+	Limits        *IncludeLimits      `json:"limits,omitempty"`
 }
 
 // AssessmentTargetMapping describes how one source result relates to generated
