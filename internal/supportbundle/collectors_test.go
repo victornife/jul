@@ -159,20 +159,20 @@ func TestTailRegularFileBoundsPartialLineAndCancellation(t *testing.T) {
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	data, truncated, err := tailRegularFile(context.Background(), path, int64(len(content)), 15)
+	data, truncated, err := tailRegularFile(context.Background(), path, 15)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !truncated || string(data) != "second\nthird\n" {
 		t.Fatalf("tail = %q truncated=%v", data, truncated)
 	}
-	data, truncated, err = tailRegularFile(context.Background(), path, int64(len(content)), int64(len(content)+10))
+	data, truncated, err = tailRegularFile(context.Background(), path, int64(len(content)+10))
 	if err != nil || truncated || !bytes.Equal(data, content) {
 		t.Fatalf("full tail = %q truncated=%v err=%v", data, truncated, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := tailRegularFile(ctx, path, int64(len(content)), int64(len(content))); !errors.Is(err, context.Canceled) {
+	if _, _, err := tailRegularFile(ctx, path, int64(len(content))); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled tail error = %v", err)
 	}
 }
