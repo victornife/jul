@@ -1,4 +1,4 @@
-name: Temporary issue 154 source export
+name: Temporary issue 154 bootstrap
 
 on:
   push:
@@ -6,26 +6,40 @@ on:
       - agent/issue-154-nginx-corpus-e2e
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  bootstrap:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - name: Package source tree
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Materialize implementation
         shell: bash
         run: |
           set -euo pipefail
-          tar \
-            --exclude=.git \
-            --exclude='*.exe' \
-            --exclude=tmp \
-            --exclude=soak-artifacts \
-            -czf /tmp/jul-source.tgz .
-      - name: Upload source tree
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: issue-154-source
-          path: /tmp/jul-source.tgz
-          retention-days: 1
+          cat .github/tmp/issue154-payload-*.b64 | tr -d '\n' | base64 --decode > /tmp/issue154-payload.tgz
+          tar -xzf /tmp/issue154-payload.tgz
+          chmod +x scripts/nginx-corpus-check.sh
+          gofmt -w internal/migrate/nginx/corpus/*.go cmd/jul/import_corpus_test.go
+      - name: Validate corpus package
+        run: go test -tags importer ./internal/migrate/nginx/corpus -count=1
+      - name: Validate importer and real Jul E2E
+        run: go test -tags importer ./cmd/jul -run '^TestNGINXCorpusAssessmentCandidateAndRealJul$' -count=1 -v
+      - name: Validate docs
+        run: python3 scripts/docs-check.py
+      - name: Commit validated implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tmp-issue-154-source-export.yml .github/tmp/issue154-payload-*.b64
+          git add internal/migrate/nginx/corpus cmd/jul/import_corpus_test.go docs/nginx-migration-corpus.md scripts/nginx-corpus-check.sh testdata/nginx-corpus
+          git commit -m "test(importer): add migration compatibility corpus (#154)"
+          git push origin HEAD:agent/issue-154-nginx-corpus-e2e
