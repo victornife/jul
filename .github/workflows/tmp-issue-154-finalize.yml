@@ -1,0 +1,430 @@
+name: Temporary issue 154 finalizer
+
+on:
+  push:
+    branches:
+      - agent/issue-154-nginx-corpus-e2e
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Materialize and correct the implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/tmp/issue154-stage2-*.b64 | tr -d '\n' | base64 --decode > /tmp/issue154-stage2.tgz
+          tar -xzf /tmp/issue154-stage2.tgz
+
+          python3 - <<'PYFIX'
+          import json
+          from pathlib import Path
+
+          classifier_path = Path("internal/migrate/nginx/assessment_classify.go")
+          classifier = classifier_path.read_text(encoding="utf-8")
+          old_classifier = '''func classifyReturn(params []string, serverLevel bool) capability {
+          \tif len(params) == 0 {
+          \t\treturn blocking("NGX_RETURN_MALFORMED", RiskRouting, "return directive has no status or target")
+          \t}
+          \tif serverLevel {
+          \t\treturn capabilityRegistry[capabilityKey{ContextServer, "return"}]
+          \t}
+          \tcode, err := strconv.Atoi(params[0])
+          \tif err == nil && len(params) > 1 && (code < 300 || code >= 400) {
+          \t\treturn approximated("NGX_LOCATION_RETURN_BODY", RiskRouting, "non-redirect response body is dropped")
+          \t}
+          \treturn capabilityRegistry[capabilityKey{ContextLocation, "return"}]
+          }
+          '''
+          new_classifier = '''func classifyReturn(params []string, serverLevel bool) capability {
+          \tif len(params) == 0 {
+          \t\treturn blocking("NGX_RETURN_MALFORMED", RiskRouting, "return directive has no status or target")
+          \t}
+          \tif serverLevel {
+          \t\treturn capabilityRegistry[capabilityKey{ContextServer, "return"}]
+          \t}
+          \tcode, err := strconv.Atoi(params[0])
+          \tif err == nil {
+          \t\tif len(params) > 1 && (code < 300 || code >= 400) {
+          \t\t\treturn approximated("NGX_LOCATION_RETURN_BODY", RiskRouting, "non-redirect response body is dropped")
+          \t\t}
+          \t\tif code >= 300 && code < 400 && len(params) > 1 {
+          \t\t\treturn classifyRedirectTarget(params[1])
+          \t\t}
+          \t\treturn capabilityRegistry[capabilityKey{ContextLocation, "return"}]
+          \t}
+          \treturn classifyRedirectTarget(params[0])
+          }
+
+          func classifyRedirectTarget(target string) capability {
+          \ttarget = strings.TrimSpace(target)
+          \tlower := strings.ToLower(target)
+          \tif strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+          \t\treturn capabilityRegistry[capabilityKey{ContextLocation, "return"}]
+          \t}
+          \treturn approximated(
+          \t\t"NGX_LOCATION_RETURN_RELATIVE",
+          \t\tRiskRouting,
+          \t\t"NGINX expands a local redirect to an absolute URL by default while Jul preserves the relative target",
+          \t)
+          }
+          '''
+          if "func classifyRedirectTarget(" not in classifier:
+              if old_classifier not in classifier:
+                  raise SystemExit("classifyReturn implementation did not match the expected baseline")
+              classifier = classifier.replace(old_classifier, new_classifier, 1)
+              classifier_path.write_text(classifier, encoding="utf-8")
+
+          model_path = Path("internal/migrate/nginx/corpus/model.go")
+          model = model_path.read_text(encoding="utf-8")
+          old_sha_check = "if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {"
+          new_sha_check = "if (r < '0' || r > '9') && (r < 'a' || r > 'f') {"
+          if old_sha_check in model:
+              model = model.replace(old_sha_check, new_sha_check, 1)
+              model_path.write_text(model, encoding="utf-8")
+          elif new_sha_check not in model:
+              raise SystemExit("SHA-256 validation expression did not match the expected baseline")
+
+          manifest_path = Path("testdata/nginx-corpus/core-multifile-return/manifest.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          results = manifest["expected_assessment"]["results"]
+          if not any(result.get("code") == "NGX_LOCATION_RETURN_RELATIVE" for result in results):
+              updated_results = []
+              replaced = False
+              for result in results:
+                  if result.get("code") == "NGX_LOCATION_RETURN" and result.get("count") == 2:
+                      supported = dict(result)
+                      supported["count"] = 1
+                      updated_results.append(supported)
+                      approximate = dict(result)
+                      approximate.update({
+                          "code": "NGX_LOCATION_RETURN_RELATIVE",
+                          "class": "approximated",
+                          "count": 1,
+                      })
+                      updated_results.append(approximate)
+                      replaced = True
+                  else:
+                      updated_results.append(result)
+              if not replaced:
+                  raise SystemExit("return assessment golden did not match the expected baseline")
+              manifest["expected_assessment"]["results"] = updated_results
+
+          for scenario in manifest["scenarios"]:
+              if scenario["id"] != "relative-redirect":
+                  continue
+              scenario["reference"]["headers"]["location"] = ["http://corpus.test:18080/health"]
+              scenario["jul"] = {
+                  "status": 302,
+                  "headers": {"location": ["/health"]},
+              }
+              scenario["expected_verdict"] = "expected_difference"
+              scenario["expected_difference_code"] = "NGX_LOCATION_RETURN_RELATIVE"
+              break
+          else:
+              raise SystemExit("relative-redirect scenario not found")
+          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+          test_path = Path("internal/migrate/nginx/assessment_return_redirect_test.go")
+          test_path.write_text('''// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+          // SPDX-License-Identifier: agpl
+
+          //go:build importer
+
+          package nginx
+
+          import "testing"
+
+          func TestClassifyReturnRedirectTargets(t *testing.T) {
+              tests := []struct {
+                  name      string
+                  params    []string
+                  wantCode  string
+                  wantClass AssessmentClass
+              }{
+                  {
+                      name:      "numeric relative redirect",
+                      params:    []string{"302", "/health"},
+                      wantCode:  "NGX_LOCATION_RETURN_RELATIVE",
+                      wantClass: AssessmentApproximated,
+                  },
+                  {
+                      name:      "implicit relative redirect",
+                      params:    []string{"/health"},
+                      wantCode:  "NGX_LOCATION_RETURN_RELATIVE",
+                      wantClass: AssessmentApproximated,
+                  },
+                  {
+                      name:      "absolute http redirect",
+                      params:    []string{"301", "http://example.test/next"},
+                      wantCode:  "NGX_LOCATION_RETURN",
+                      wantClass: AssessmentSupported,
+                  },
+                  {
+                      name:      "absolute https redirect",
+                      params:    []string{"https://example.test/next"},
+                      wantCode:  "NGX_LOCATION_RETURN",
+                      wantClass: AssessmentSupported,
+                  },
+                  {
+                      name:      "non redirect body",
+                      params:    []string{"200", "ok"},
+                      wantCode:  "NGX_LOCATION_RETURN_BODY",
+                      wantClass: AssessmentApproximated,
+                  },
+              }
+              for _, test := range tests {
+                  t.Run(test.name, func(t *testing.T) {
+                      got := classifyReturn(test.params, false)
+                      if got.code != test.wantCode || got.class != test.wantClass {
+                          t.Fatalf("classifyReturn(%q) = %s/%s, want %s/%s", test.params, got.code, got.class, test.wantCode, test.wantClass)
+                      }
+                  })
+              }
+          }
+          ''', encoding="utf-8")
+
+          changelog_path = Path("CHANGELOG.md")
+          changelog = changelog_path.read_text(encoding="utf-8")
+          changelog_entry = (
+              "- **NGINX migration corpus and selected-dimension real E2E (#154):** "
+              "adds a licensed, sanitized fixture contract; exact assessment/candidate goldens; "
+              "real Jul replay; and a digest-pinned, network-isolated NGINX reference lane. The "
+              "first differential finding classifies local `return` redirects as approximated "
+              "because NGINX expands them to absolute URLs by default while Jul preserves the "
+              "relative target.\n"
+          )
+          if changelog_entry not in changelog:
+              marker = "### Added\n"
+              if marker not in changelog:
+                  raise SystemExit("CHANGELOG Added section not found")
+              changelog_path.write_text(changelog.replace(marker, marker + changelog_entry, 1), encoding="utf-8")
+
+          docs_note = '''
+
+          ### Corpus-discovered relative redirect boundary
+
+          NGINX expands a local `return 30x /path` target to an absolute `Location`
+          by default, using the request/server authority. Jul preserves `/path`.
+          The importer therefore reports `NGX_LOCATION_RETURN_RELATIVE` as
+          `approximated`, and the corpus records the selected-dimension runtime
+          relationship as `expected_difference` rather than claiming equivalence.
+          '''
+          for docs_path in (Path("docs/nginx-migration-corpus.md"), Path("docs/nginx-importer.md")):
+              docs = docs_path.read_text(encoding="utf-8")
+              if "NGX_LOCATION_RETURN_RELATIVE" not in docs:
+                  docs_path.write_text(docs.rstrip() + docs_note + "\n", encoding="utf-8")
+          PYFIX
+
+          cat > scripts/nginx-migration-e2e.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          # Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+          # SPDX-License-Identifier: AGPL-3.0-only
+
+          set -euo pipefail
+
+          readonly NGINX_IMAGE="docker.io/library/nginx:1.28.3-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236"
+          readonly FIXTURE_ID="core-multifile-return"
+          readonly FIXTURE_DIR="${PWD}/testdata/nginx-corpus/${FIXTURE_ID}"
+          readonly CONTAINER_PORT="18080"
+          readonly ARTIFACT_DIR="${NGINX_CORPUS_ARTIFACT_DIR:-${PWD}/tmp/nginx-migration-e2e}"
+          readonly REQUIRED="${REQUIRE_NGINX_E2E:-0}"
+
+          mkdir -p "${ARTIFACT_DIR}"
+
+          for dependency in docker python3; do
+            if command -v "${dependency}" >/dev/null 2>&1; then
+              continue
+            fi
+            message="not_executed: ${dependency} is unavailable; pinned NGINX reference lane skipped"
+            echo "${message}" | tee "${ARTIFACT_DIR}/result.txt"
+            if [[ "${REQUIRED}" == "1" ]]; then
+              exit 1
+            fi
+            exit 0
+          done
+
+          container_name="jul-nginx-corpus-${RANDOM}-$$"
+          network_name="jul-nginx-corpus-net-${RANDOM}-$$"
+          proxy_port_file="$(mktemp)"
+          container_started=0
+          network_created=0
+          proxy_pid=0
+
+          cleanup() {
+            status=$?
+            trap - EXIT INT TERM
+            if [[ "${proxy_pid}" != "0" ]]; then
+              kill "${proxy_pid}" >/dev/null 2>&1 || true
+              wait "${proxy_pid}" >/dev/null 2>&1 || true
+            fi
+            rm -f "${proxy_port_file}"
+            if [[ "${container_started}" == "1" ]]; then
+              docker logs "${container_name}" >"${ARTIFACT_DIR}/nginx.log" 2>&1 || true
+              docker inspect "${container_name}" >"${ARTIFACT_DIR}/container-inspect.json" 2>/dev/null || true
+              docker rm -f "${container_name}" >/dev/null 2>&1 || true
+            fi
+            if [[ "${network_created}" == "1" ]]; then
+              docker network rm "${network_name}" >/dev/null 2>&1 || true
+            fi
+            if [[ "${status}" != "0" ]]; then
+              echo "unexpected_difference: pinned NGINX reference lane failed" | tee "${ARTIFACT_DIR}/result.txt"
+            fi
+            exit "${status}"
+          }
+          trap cleanup EXIT INT TERM
+
+          if [[ ! -f "${FIXTURE_DIR}/manifest.json" || ! -f "${FIXTURE_DIR}/nginx/nginx.conf" ]]; then
+            echo "fixture ${FIXTURE_ID} is incomplete" >&2
+            exit 1
+          fi
+
+          docker pull "${NGINX_IMAGE}"
+          docker image inspect "${NGINX_IMAGE}" >"${ARTIFACT_DIR}/image-inspect.json"
+          docker network create --internal "${network_name}" >/dev/null
+          network_created=1
+
+          docker run --detach \
+            --name "${container_name}" \
+            --network "${network_name}" \
+            --read-only \
+            --user 101:101 \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 128 \
+            --memory 128m \
+            --cpus 1 \
+            --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0700 \
+            --tmpfs /var/run:rw,noexec,nosuid,size=1m,uid=101,gid=101,mode=0700 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0700 \
+            --volume "${FIXTURE_DIR}/nginx:/etc/nginx:ro" \
+            --entrypoint /usr/sbin/nginx \
+            "${NGINX_IMAGE}" \
+            -g 'daemon off;' >/dev/null
+          container_started=1
+
+          container_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${container_name}")"
+          if [[ ! "${container_ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "unexpected internal container address" >&2
+            exit 1
+          fi
+
+          python3 - "${container_ip}" "${CONTAINER_PORT}" "${proxy_port_file}" <<'PYPROXY' &
+          import socket
+          import sys
+          import threading
+
+          target = (sys.argv[1], int(sys.argv[2]))
+          port_file = sys.argv[3]
+          listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+          listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          listener.bind(("127.0.0.1", 0))
+          listener.listen(32)
+          with open(port_file, "w", encoding="utf-8") as handle:
+              handle.write(str(listener.getsockname()[1]))
+              handle.flush()
+
+          def pump(source, destination):
+              try:
+                  while True:
+                      data = source.recv(65536)
+                      if not data:
+                          try:
+                              destination.shutdown(socket.SHUT_WR)
+                          except OSError:
+                              pass
+                          return
+                      destination.sendall(data)
+              except OSError:
+                  return
+
+          def bridge(client):
+              try:
+                  upstream = socket.create_connection(target, timeout=5)
+              except OSError:
+                  client.close()
+                  return
+              threading.Thread(target=pump, args=(client, upstream), daemon=True).start()
+              threading.Thread(target=pump, args=(upstream, client), daemon=True).start()
+
+          while True:
+              client, _ = listener.accept()
+              threading.Thread(target=bridge, args=(client,), daemon=True).start()
+          PYPROXY
+          proxy_pid=$!
+
+          for _ in $(seq 1 100); do
+            if [[ -s "${proxy_port_file}" ]]; then
+              break
+            fi
+            if ! kill -0 "${proxy_pid}" >/dev/null 2>&1; then
+              echo "loopback proxy exited before publishing its port" >&2
+              exit 1
+            fi
+            sleep 0.05
+          done
+          if [[ ! -s "${proxy_port_file}" ]]; then
+            echo "loopback proxy did not publish a port" >&2
+            exit 1
+          fi
+          host_port="$(cat "${proxy_port_file}")"
+          if [[ ! "${host_port}" =~ ^[0-9]+$ ]] || (( host_port < 1 || host_port > 65535 )); then
+            echo "invalid loopback proxy port" >&2
+            exit 1
+          fi
+
+          NGINX_CORPUS_FIXTURE_DIR="${FIXTURE_DIR}" \
+          NGINX_CORPUS_BASE_URL="http://127.0.0.1:${host_port}" \
+            go test -tags importer ./internal/migrate/nginx/corpus \
+              -run '^TestNGINXCorpusReferenceRuntime$' \
+              -count=1 \
+              -v
+
+          echo "expected_difference: ${FIXTURE_ID}/relative-redirect NGX_LOCATION_RETURN_RELATIVE" | tee "${ARTIFACT_DIR}/result.txt"
+          SCRIPT
+
+          chmod +x scripts/nginx-corpus-check.sh scripts/nginx-migration-e2e.sh
+          gofmt -w \
+            internal/migrate/nginx/assessment_classify.go \
+            internal/migrate/nginx/assessment_return_redirect_test.go \
+            internal/migrate/nginx/corpus/*.go \
+            cmd/jul/import_corpus_test.go
+
+      - name: Validate importer and corpus packages
+        run: go test -tags importer ./internal/migrate/nginx ./internal/migrate/nginx/corpus -count=1
+      - name: Validate importer and real Jul E2E
+        run: go test -tags importer ./cmd/jul -run '^TestNGINXCorpusAssessmentCandidateAndRealJul$' -count=1 -v
+      - name: Validate pinned NGINX reference lane
+        env:
+          REQUIRE_NGINX_E2E: "1"
+          NGINX_CORPUS_ARTIFACT_DIR: /tmp/nginx-corpus-artifacts
+        run: scripts/nginx-migration-e2e.sh
+      - name: Validate race path
+        run: go test -race -p 2 -tags "importer grpc stream waf" ./internal/migrate/nginx ./cmd/jul
+      - name: Validate docs and formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          test -z "$(gofmt -l internal/migrate/nginx/assessment_classify.go internal/migrate/nginx/assessment_return_redirect_test.go internal/migrate/nginx/corpus cmd/jul/import_corpus_test.go)"
+      - name: Commit validated implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f .github/workflows/tmp-issue-154-stage2.yml .github/workflows/tmp-issue-154-finalize.yml .github/tmp/issue154-stage2-*.b64
+          git add -A
+          git commit -m "test(importer): add corpus E2E and classify relative redirects (#154)"
+          git push origin HEAD:agent/issue-154-nginx-corpus-e2e
