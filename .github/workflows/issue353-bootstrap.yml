@@ -1,0 +1,55 @@
+name: Issue 353 documentation reconciliation
+
+on:
+  push:
+    branches:
+      - agent/issue-353-docs-reconciliation
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-353-docs-reconciliation
+  cancel-in-progress: true
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: install documentation dependencies
+        run: pip install tomli pyyaml
+      - name: apply issue 353 reconciliation
+        run: python .github/issue353_apply.py
+      - name: verify generated contracts
+        run: make generated-check
+      - name: verify documentation
+        run: |
+          python scripts/docs-check.py
+          python scripts/test_docs_check.py
+          python scripts/link-check.py
+          python scripts/test_link_check.py
+          git diff --check
+      - name: remove one-shot bootstrap files
+        run: rm .github/issue353_apply.py .github/workflows/issue353-bootstrap.yml
+      - name: commit reconciled documentation
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes produced"
+            exit 1
+          fi
+          git commit -m "docs: reconcile product truth and maturity (#353)"
+          git push origin HEAD:agent/issue-353-docs-reconciliation
