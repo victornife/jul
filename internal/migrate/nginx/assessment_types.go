@@ -165,16 +165,20 @@ func FailureAssessment(source string, class AssessmentClass, code, message strin
 	return a
 }
 
-// SetValidation adds the canonical Jul validation and lint result.
+// SetValidation adds a secret-safe projection of canonical Jul validation and
+// lint results. Raw validator/linter prose is deliberately not copied into the
+// assessment: it may contain user-controlled configuration values. Canonical
+// field names, severities, counts, and the ordinary CLI diagnostics remain
+// available without creating a second secret-bearing machine report.
 func (a *Assessment) SetValidation(verrs []error, warnings []config.Diagnostic) {
 	if a == nil {
 		return
 	}
 	a.Validation = AssessmentValidation{Status: "valid"}
-	for _, err := range verrs {
+	for range verrs {
 		a.Validation.Errors = append(a.Validation.Errors, AssessmentDiagnostic{
 			Severity: "error",
-			Message:  assessmentText(err.Error()),
+			Message:  "generated Jul configuration failed authoritative validation",
 		})
 		a.Results = append(a.Results, AssessmentResult{
 			Code:      "JUL_CANDIDATE_VALIDATION",
@@ -191,7 +195,7 @@ func (a *Assessment) SetValidation(verrs []error, warnings []config.Diagnostic) 
 		a.Validation.Warnings = append(a.Validation.Warnings, AssessmentDiagnostic{
 			Severity: d.Severity.String(),
 			Field:    assessmentText(d.Field),
-			Message:  assessmentText(d.Message),
+			Message:  "generated Jul configuration triggered a lint finding",
 		})
 	}
 	if len(a.Validation.Errors) > 0 {
@@ -343,8 +347,7 @@ func defaultRisk(name string) AssessmentRisk {
 }
 
 func assessmentText(s string) string {
-	// Assessment output never includes raw NGINX arguments. Candidate diagnostics
-	// are produced from generated Jul fields, but collapse control characters so
+	// Canonical field names may be surfaced, but collapse control characters so
 	// one finding cannot forge additional report lines.
 	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
