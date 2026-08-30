@@ -1,6 +1,6 @@
 # NGINX migration assessment
 
-> Feature ID: **Y1-09** · Build tag: `importer` · Report schema: **2**
+> Feature ID: **MIG-ASSESS** · Maturity/delivery: **Beta / merged** · Build tag: `importer` · Report schema: **2**
 
 `jul import nginx` produces deterministic evidence about what the importer
 translated, approximated, ignored, or could not represent. It is not a

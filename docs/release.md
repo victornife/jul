@@ -108,13 +108,12 @@ maturity work is complete.
 
 The [current roadmap checkpoint](roadmap/README.md#release-candidate-checkpoint)
 is the independently verified, published `v1.32.1-rc.1` prerelease at
-`9a936d0cc1bc3f7086f38ca87741d9d09f950e25`. The complete inventory, checksum,
-archive-content, version, provenance, SBOM-attestation, and soak-smoke evidence
-is recorded in
+`9a936d0cc1bc3f7086f38ca87741d9d09f950e25`. Its exact evidence is recorded in
 [`docs/release-candidates/v1.32.1-rc.1.md`](release-candidates/v1.32.1-rc.1.md).
-Issue #194 is the closed operational ledger. A later stable `v1.32.1` tag requires a
-separate publication decision and fresh release run; the RC tag is never renamed
-or reused.
+Current `main` contains substantial later work; consult [status.md](status.md)
+for maturity/delivery and do not infer that a merged capability is present in
+the RC. A later stable tag requires a separate publication decision and fresh
+release run; the RC tag is never renamed or reused.
 
 Before creating any tag:
 
