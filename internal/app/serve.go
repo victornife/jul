@@ -717,13 +717,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				return admin.AdoptPreviewResult{}, err
 			}
 			out := admin.AdoptPreviewResult{
-				OK:               a.OK,
-				Origin:           a.Origin,
-				ObservedDigest:   a.ObservedDigest,
-				BaseVersion:      a.BaselineVersion,
-				CandidateVersion: a.CandidateVersion,
-				RestartRequired:  a.RestartRequired,
-				ValidationErrors: a.ValidationErrors,
+				OK:                 a.OK,
+				Origin:             a.Origin,
+				InconsistentReason: string(a.InconsistentReason),
+				ObservedDigest:     a.ObservedDigest,
+				BaseVersion:        a.BaselineVersion,
+				CandidateVersion:   a.CandidateVersion,
+				RestartRequired:    a.RestartRequired,
+				ValidationErrors:   a.ValidationErrors,
 			}
 			if !a.OK {
 				return out, nil

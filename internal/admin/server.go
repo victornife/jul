@@ -578,8 +578,12 @@ type AdoptExternalRequest struct {
 // AdoptPreviewResult is the side-effect-free assessment returned by adopt
 // preview (ADR 0019 §14/§14.1).
 type AdoptPreviewResult struct {
-	OK                    bool              `json:"ok"`
-	Origin                string            `json:"origin"` // drift | no_baseline | inconsistent
+	OK     bool   `json:"ok"`
+	Origin string `json:"origin"` // drift | no_baseline | inconsistent
+	// InconsistentReason is the bounded ADR 0019 §11.2.1 reason accompanying
+	// Origin == "inconsistent" (e.g. "marker_missing", "snapshot_unreadable").
+	// Empty for every other origin.
+	InconsistentReason    string            `json:"inconsistent_reason,omitempty"`
 	ObservedDigest        string            `json:"observed_digest"`
 	BaseVersion           string            `json:"base_version,omitempty"`
 	CandidateVersion      string            `json:"candidate_version,omitempty"`

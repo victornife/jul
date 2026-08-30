@@ -229,10 +229,16 @@ type ConfigApplyCoordinator struct {
 	// slow terminal restoration. Production leaves them unset.
 	beforeRestore func()
 	waitMargin    time.Duration
+	// beforeBaselineWriteRetry is a deterministic test barrier invoked at the
+	// start of resolveBaselineWriteRetry, before it does any work. Production
+	// leaves it nil; tests use it to hold the retry open and observe that the
+	// admission gate (inFlightState) still refuses a concurrent hot apply for
+	// as long as the retry is unresolved (ADR 0019 §11.2.0.1).
+	beforeBaselineWriteRetry func()
 	// afterBaselineWriteRetry is a deterministic test barrier invoked once
-	// scheduleBaselineWriteRetry's background retry has resolved (committed,
-	// abandoned, or marked inconsistent). Production leaves it nil; tests use
-	// it to await the retry goroutine instead of polling.
+	// resolveBaselineWriteRetry has resolved (committed, abandoned, or marked
+	// inconsistent). Production leaves it nil; tests use it to await the
+	// retry instead of polling.
 	afterBaselineWriteRetry func()
 
 	// clock is an internal deterministic test seam for time. nil selects the
@@ -849,55 +855,67 @@ func (c *ConfigApplyCoordinator) retryBaselineWriteLocked(committedRaw []byte, c
 	}
 }
 
-// scheduleBaselineWriteRetry is retryBaselineWriteLocked's counterpart for
-// the one call site that cannot run it inline: the hot-apply finalizer runs
-// in its own goroutine, and by the time its CompleteWrite call can fail, the
-// ApplyRaw call that spawned it may already have returned on a timeout and
-// released applyMu — so this retry cannot assume applyMu is still held, and
-// re-entering it here would deadlock if it were. It must therefore acquire
-// applyMu itself, fresh, in a detached goroutine, which reopens exactly the
-// admission-gate window retryBaselineWriteLocked's callers avoid: a later
-// apply can be admitted, run, and even fully commit its own valid baseline
-// before this retry gets its turn.
+// resolveBaselineWriteRetry is retryBaselineWriteLocked's counterpart for
+// the one call site that cannot run it inline: the hot-apply finalizer's
+// initial CompleteWrite failure happens in its own goroutine, and by that
+// point the ApplyRaw call that spawned it may already have returned on a
+// timeout and released applyMu — so the retry cannot assume applyMu is
+// already held, and re-entering it there would deadlock if it were.
 //
-// The digest check is therefore not enough on its own — a mismatch is not
-// necessarily this retry's failure to detect, it may be a later, independent
-// transaction that already established its own valid baseline for whatever
-// the file now holds, in which case the system is already consistent and
-// recording managed_inconsistent here would wrongly regress a newer
-// successful commit. Abandoning silently when the current baseline already
-// names the current file's digest closes that specific hole; it does not
-// remove the admission-gate window itself, which remains a documented
-// residual for this one call site.
-func (c *ConfigApplyCoordinator) scheduleBaselineWriteRetry(committedRaw []byte, commit func([]byte) error) {
+// ADR 0019 §11.2.0.1 requires the admission gate to stay closed until this
+// retry reaches its terminal state, exactly like the initial write. The
+// caller enforces that: it must call this only after the finalizer's own
+// terminal-result delivery (so a synchronously-waiting ApplyRaw call has
+// already returned and dropped applyMu, rather than deadlocking against
+// it), and it must not clear inFlightState until this call returns — that
+// is what keeps a later hot apply from being admitted while this retry is
+// still pending, closing the exact race an earlier version of this fix
+// left open (a stale retry losing the race for applyMu to a later,
+// fully-successful apply and wrongly regressing it to
+// managed_inconsistent).
+//
+// It takes applyMu itself, re-reads the configuration, and verifies it
+// still matches the digest committedRaw intends to record. A mismatch is
+// not automatically this retry's failure to detect: while inFlightState
+// blocks a later ordinary apply, it does not gate adoption or
+// stage_restart, so the mismatch may be a later, independent transaction
+// that already established its own valid baseline for whatever the file
+// now holds — in which case the system is already consistent, and
+// recording managed_inconsistent would wrongly regress that newer
+// successful commit. Abandoning silently when the current baseline
+// already names the current file's digest closes that hole. Any other
+// mismatch, a read failure, or a failed retry all resolve the same way:
+// managed_inconsistent, reason baseline_unwritable.
+func (c *ConfigApplyCoordinator) resolveBaselineWriteRetry(committedRaw []byte, commit func([]byte) error) {
 	if c.ManagedBaseline == nil {
 		return
 	}
+	if c.beforeBaselineWriteRetry != nil {
+		c.beforeBaselineWriteRetry()
+	}
 	intended := sha256Hex(committedRaw)
-	go func() {
-		c.applyMu.Lock()
-		defer c.applyMu.Unlock()
-		raw, err := c.readConfigRaw()
-		var currentDigest string
-		if err == nil {
-			currentDigest = sha256Hex(raw)
-		}
-		switch {
-		case err != nil:
+	c.applyMu.Lock()
+	defer c.applyMu.Unlock()
+	raw, err := c.readConfigRaw()
+	var currentDigest string
+	if err == nil {
+		currentDigest = sha256Hex(raw)
+	}
+	switch {
+	case err != nil:
+		c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
+	case currentDigest != intended:
+		if bst := c.ManagedBaseline.Status(); bst.BaselineRawSHA256 != currentDigest {
 			c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
-		case currentDigest != intended:
-			if bst := c.ManagedBaseline.Status(); bst.BaselineRawSHA256 != currentDigest {
-				c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
-			}
-		default:
-			if err := commit(committedRaw); err != nil {
-				c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
-			}
 		}
-		if c.afterBaselineWriteRetry != nil {
-			c.afterBaselineWriteRetry()
+	default:
+		if err := commit(committedRaw); err != nil {
+			c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
 		}
-	}()
+	}
+	if c.afterBaselineWriteRetry != nil {
+		c.afterBaselineWriteRetry()
+	}
 }
 
 // newManagedApplyInstanceID returns a 12-hex-character boot-scoped identifier
@@ -1506,7 +1524,13 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// ADR 0019 §11.2.0.1: the baseline transaction terminalizes here — under
 		// c.mu, immediately before the admission gate (inFlightState) is
 		// cleared — so a later apply is never admitted while this one's
-		// baseline is still pending.
+		// baseline is still pending. A post-commit write failure needs a
+		// retry (§11.2.1a) that this goroutine cannot safely run yet — doing
+		// so here could deadlock a synchronously-waiting ApplyRaw call that
+		// still holds applyMu awaiting this same goroutine's terminal result
+		// — so needsBaselineRetry defers it to below, where the gate stays
+		// closed (inFlightState is NOT cleared yet) until the retry resolves.
+		needsBaselineRetry := false
 		if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
 			if restoreNeeded {
 				if d := c.rewindOrMarkInconsistent(terminal.Restored); d != nil {
@@ -1514,22 +1538,27 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 				}
 			} else if err := c.ManagedBaseline.CompleteWrite(data, persistedVersion); err != nil {
 				terminal.Degraded = append(terminal.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written"})
-				c.scheduleBaselineWriteRetry(data, func(b []byte) error { return c.ManagedBaseline.CompleteWrite(b, persistedVersion) })
+				needsBaselineRetry = true
 			}
 		}
 		// #226 / AC-03: every config-path mutation is complete at this point,
-		// including any required restoration and the final disk-state read. Clear
-		// the admission gate while still holding mu, then release the server's
-		// reload-serialization gate before any completion callback can publish a
-		// terminal ledger record. Therefore a client that observes terminal state
-		// can immediately submit the next valid apply; it can never see terminal
-		// truth while the coordinator still reports the prior apply as in flight.
+		// including any required restoration and the final disk-state read.
+		// Clear the admission gate while still holding mu, then release the
+		// server's reload-serialization gate before any completion callback
+		// can publish a terminal ledger record — unless a baseline retry is
+		// still owed, in which case the gate must stay closed
+		// (inFlightState remains ApplyInFlightWaiting) until that retry
+		// itself reaches a terminal state, per §11.2.0.1: the next apply
+		// must never be admitted while this one's baseline write is still
+		// unresolved, not even when what remains is only a retry.
 		//
 		// The non-config terminal side effects remain exactly-once and ordered:
 		// completeManagedApply serializes history/audit/metrics/ledger work with
 		// finalizeMu. A later apply may start while that work finishes, but its own
 		// terminal publication queues behind this finalizer.
-		c.inFlightState = ApplyInFlightNone
+		if !needsBaselineRetry {
+			c.inFlightState = ApplyInFlightNone
+		}
 		c.mu.Unlock()
 		close(finalizedCh)
 		// Carry any post-persistence pending-registration failure into the
@@ -1544,6 +1573,19 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// result. The trusted history write runs outside c.mu.
 		terminal = c.completeManagedApply(reqCtx, terminal, baseline.Raw)
 		terminalCh <- terminal
+		// The retry runs only now, after the terminal result has been
+		// delivered: a synchronously-waiting ApplyRaw call receives from
+		// terminalCh and returns (dropping applyMu) at this point, so
+		// acquiring applyMu here cannot deadlock against it. inFlightState
+		// was deliberately left ApplyInFlightWaiting above so no other hot
+		// apply can be admitted for the whole of this window; it is only
+		// cleared once the retry below reaches its own terminal state.
+		if needsBaselineRetry {
+			c.resolveBaselineWriteRetry(data, func(b []byte) error { return c.ManagedBaseline.CompleteWrite(b, persistedVersion) })
+			c.mu.Lock()
+			c.inFlightState = ApplyInFlightNone
+			c.mu.Unlock()
+		}
 	}()
 
 	waitMargin := c.waitMargin

@@ -21,15 +21,16 @@ import (
 // PreviousRaw is nil when Origin is "no_baseline", so a caller never renders
 // an empty diff where none is knowable.
 type AdoptExternalAssessment struct {
-	OK               bool
-	Origin           string // drift | no_baseline | inconsistent
-	ObservedDigest   string
-	BaselineVersion  string
-	CandidateRaw     []byte
-	CandidateVersion string
-	PreviousRaw      []byte
-	RestartRequired  bool
-	ValidationErrors []string
+	OK                 bool
+	Origin             string                    // drift | no_baseline | inconsistent
+	InconsistentReason ManagedInconsistentReason // set only when Origin == "inconsistent"
+	ObservedDigest     string
+	BaselineVersion    string
+	CandidateRaw       []byte
+	CandidateVersion   string
+	PreviousRaw        []byte
+	RestartRequired    bool
+	ValidationErrors   []string
 }
 
 // originForBaselineState maps a managed-baseline state to the §11.2.1 origin
@@ -99,17 +100,18 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 	cfg, perr := config.Parse(raw)
 	if perr != nil {
 		return AdoptExternalAssessment{
-			Origin:           origin,
-			ObservedDigest:   digest,
-			BaselineVersion:  bst.BaselineCanonicalVersion,
-			ValidationErrors: []string{perr.Error()},
+			Origin:             origin,
+			InconsistentReason: bst.Reason,
+			ObservedDigest:     digest,
+			BaselineVersion:    bst.BaselineCanonicalVersion,
+			ValidationErrors:   []string{perr.Error()},
 		}, nil
 	}
 
 	var prevRaw []byte
 	var prevCfg *config.Config
 	if origin != "no_baseline" {
-		snap, _, serr := c.verifyRetainedSnapshot(bst)
+		snap, reason, serr := c.verifyRetainedSnapshot(bst)
 		if serr != nil {
 			// ADR 0019 §14 step 5/§11.2.1b: a baseline the marker claims exists
 			// but whose snapshot bytes cannot be read, or verified, is not
@@ -120,10 +122,11 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 			// MarkInconsistent — only AdoptExternal's actual commit attempt
 			// may mutate the live baseline state.
 			return AdoptExternalAssessment{
-				Origin:           "inconsistent",
-				ObservedDigest:   digest,
-				BaselineVersion:  bst.BaselineCanonicalVersion,
-				ValidationErrors: []string{fmt.Sprintf("managed baseline snapshot could not be verified: %v", serr)},
+				Origin:             "inconsistent",
+				InconsistentReason: reason,
+				ObservedDigest:     digest,
+				BaselineVersion:    bst.BaselineCanonicalVersion,
+				ValidationErrors:   []string{fmt.Sprintf("managed baseline snapshot could not be verified: %v", serr)},
 			}, nil
 		}
 		prevRaw = snap
@@ -138,10 +141,11 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 	pfResult, err := c.Preflight.Apply(context.Background(), cfg, prevCfg, PreflightStageRestart)
 	if err != nil {
 		return AdoptExternalAssessment{
-			Origin:           origin,
-			ObservedDigest:   digest,
-			BaselineVersion:  bst.BaselineCanonicalVersion,
-			ValidationErrors: []string{err.Error()},
+			Origin:             origin,
+			InconsistentReason: bst.Reason,
+			ObservedDigest:     digest,
+			BaselineVersion:    bst.BaselineCanonicalVersion,
+			ValidationErrors:   []string{err.Error()},
 		}, nil
 	}
 	restartRequired := false
@@ -156,14 +160,15 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 	}
 
 	return AdoptExternalAssessment{
-		OK:               true,
-		Origin:           origin,
-		ObservedDigest:   digest,
-		BaselineVersion:  bst.BaselineCanonicalVersion,
-		CandidateRaw:     raw,
-		CandidateVersion: server.CanonicalVersion(cfg),
-		PreviousRaw:      prevRaw,
-		RestartRequired:  restartRequired,
+		OK:                 true,
+		Origin:             origin,
+		InconsistentReason: bst.Reason,
+		ObservedDigest:     digest,
+		BaselineVersion:    bst.BaselineCanonicalVersion,
+		CandidateRaw:       raw,
+		CandidateVersion:   server.CanonicalVersion(cfg),
+		PreviousRaw:        prevRaw,
+		RestartRequired:    restartRequired,
 	}, nil
 }
 
@@ -211,12 +216,29 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 	// required only when one does (origin != "no_baseline"); observed_digest is
 	// always required, because a preview — including a no_baseline one — always
 	// returns one.
+	//
+	// Some managed_inconsistent reasons (marker_missing, marker_unreadable,
+	// cleanup_incomplete) have no marker to recover a canonical version from
+	// at all — BaselineCanonicalVersion is itself "". ADR 0019 §11.2.1 says
+	// adoption remains available from managed_inconsistent, so requiring a
+	// non-empty base_version there would make it impossible to ever adopt:
+	// there is no value a client could send that both satisfies "non-empty"
+	// and matches the recorded (empty) version. In that case only an empty
+	// base_version is accepted — matching exactly what a genuine preview of
+	// this same state would have reported — and anything else is the same
+	// stale-preview conflict the ordinary case catches.
 	if origin != "no_baseline" {
-		if req.BaseVersion == "" {
-			return ApplyResult{OK: false, Mode: mode, Message: "A managed baseline exists; base_version from the preview is required to adopt."}, nil
-		}
-		if req.BaseVersion != bst.BaselineCanonicalVersion {
-			return ApplyResult{OK: false, Mode: mode, Conflict: true, Message: "The managed baseline changed since this adoption was previewed; re-preview and try again."}, nil
+		if bst.BaselineCanonicalVersion == "" {
+			if req.BaseVersion != "" {
+				return ApplyResult{OK: false, Mode: mode, Conflict: true, Message: "The managed baseline changed since this adoption was previewed; re-preview and try again."}, nil
+			}
+		} else {
+			if req.BaseVersion == "" {
+				return ApplyResult{OK: false, Mode: mode, Message: "A managed baseline exists; base_version from the preview is required to adopt."}, nil
+			}
+			if req.BaseVersion != bst.BaselineCanonicalVersion {
+				return ApplyResult{OK: false, Mode: mode, Conflict: true, Message: "The managed baseline changed since this adoption was previewed; re-preview and try again."}, nil
+			}
 		}
 	}
 
