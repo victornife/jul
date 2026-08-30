@@ -1,0 +1,69 @@
+name: Diagnostics coverage gates
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'internal/diagnostics/**'
+      - 'internal/doctor/**'
+      - 'internal/supportbundle/**'
+      - 'cmd/jul/diagnostics_cli*'
+      - '.github/workflows/diagnostics-coverage.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'internal/diagnostics/**'
+      - 'internal/doctor/**'
+      - 'internal/supportbundle/**'
+      - 'cmd/jul/diagnostics_cli*'
+      - '.github/workflows/diagnostics-coverage.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+  COVERAGE_FLOOR: "85"
+
+jobs:
+  diagnostics-coverage:
+    name: diagnostics packages >= 85%
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: focused tests and coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=(diagnostics doctor supportbundle)
+          for package in "${packages[@]}"; do
+            go test -tags "${FULL_TAGS}" -coverprofile="cover-${package}.out" "./internal/${package}"
+          done
+      - name: enforce package floors
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          for package in diagnostics doctor supportbundle; do
+            coverage=$(go tool cover -func="cover-${package}.out" | awk '/^total:/ {gsub(/%/, "", $3); print $3}')
+            echo "internal/${package}: ${coverage}% (floor: ${COVERAGE_FLOOR}%)"
+            if ! awk -v actual="${coverage}" -v floor="${COVERAGE_FLOOR}" 'BEGIN { exit (actual >= floor) ? 0 : 1 }'; then
+              echo "ERROR: internal/${package} is below ${COVERAGE_FLOOR}%"
+              failed=1
+            fi
+          done
+          exit "${failed}"
+      - name: race and full-tag gate
+        run: go test -race -p 2 -tags "${FULL_TAGS}" ./internal/diagnostics ./internal/doctor ./internal/supportbundle ./cmd/jul
+      - name: upload focused coverage profiles
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: diagnostics-coverage-profiles
+          path: cover-*.out
