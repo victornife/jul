@@ -53,6 +53,9 @@ func (generator *Generator) Build(ctx context.Context, snapshot Snapshot) (Bundl
 	started := generator.now().UTC()
 	runCtx, cancel := context.WithTimeout(ctx, generator.limits.TotalTimeout)
 	defer cancel()
+	if err := runCtx.Err(); err != nil {
+		return Bundle{}, err
+	}
 
 	manifest := Manifest{
 		FormatVersion:     FormatVersion,
@@ -168,8 +171,15 @@ func (generator *Generator) Build(ctx context.Context, snapshot Snapshot) (Bundl
 }
 
 func (generator *Generator) acquire(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	select {
 	case generator.semaphore <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-generator.semaphore
+			return err
+		}
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
