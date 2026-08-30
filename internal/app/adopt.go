@@ -109,39 +109,36 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 	var prevRaw []byte
 	var prevCfg *config.Config
 	recoveredBaseVersion := bst.BaselineCanonicalVersion
+	inconsistentReason := bst.Reason
 	if origin != "no_baseline" {
 		snap, reason, serr := c.verifyRetainedSnapshot(bst)
 		if serr != nil {
-			// ADR 0019 §14 step 5/§11.2.1b: a baseline the marker claims exists
-			// but whose snapshot bytes cannot be read, or verified, is not
-			// "nothing prior" — it is damage, and must be reported as such
-			// rather than silently degrading into a no_baseline-shaped preview.
-			// Preview stays side-effect-free (ADR 0019 §14): it reports the
-			// damage in the response, but does not itself call
-			// MarkInconsistent — only AdoptExternal's actual commit attempt
-			// may mutate the live baseline state.
-			return AdoptExternalAssessment{
-				Origin:             "inconsistent",
-				InconsistentReason: reason,
-				ObservedDigest:     digest,
-				BaselineVersion:    recoveredBaseVersion,
-				ValidationErrors:   []string{fmt.Sprintf("managed baseline snapshot could not be verified: %v", serr)},
-			}, nil
-		}
-		prevRaw = snap
-		prevCfg, _ = config.Parse(snap)
-		if recoveredBaseVersion == "" {
-			if prevCfg != nil {
-				recoveredBaseVersion = server.CanonicalVersion(prevCfg)
-			} else {
-				// The retained snapshot itself does not parse: there is no
-				// canonical version to compute, but falling back to "" here
-				// would make it indistinguishable from an omitted field, and
-				// would never detect the snapshot being replaced by a
-				// different unparseable blob between preview and adoption.
-				// A digest-derived, unambiguously-tagged token still gives
-				// the CAS something real to bind to and compare.
-				recoveredBaseVersion = "unparsed:" + sha256Hex(snap)
+			// ADR 0019 §14.1: an inconsistent origin is "attempted; degraded
+			// if the snapshot is unreadable" — not unavailable. A damaged
+			// prior snapshot means the diff and history are unavailable, not
+			// that adoption itself is; the preview must reach the same
+			// OK=true conclusion the actual hot-adoption commit does, or a
+			// client would see a preview saying "cannot adopt" contradicted
+			// by a commit that then succeeds. prevRaw/prevCfg stay nil so
+			// the diff stays absent below.
+			origin = "inconsistent"
+			inconsistentReason = reason
+		} else {
+			prevRaw = snap
+			prevCfg, _ = config.Parse(snap)
+			if recoveredBaseVersion == "" {
+				if prevCfg != nil {
+					recoveredBaseVersion = server.CanonicalVersion(prevCfg)
+				} else {
+					// The retained snapshot itself does not parse: there is no
+					// canonical version to compute, but falling back to "" here
+					// would make it indistinguishable from an omitted field, and
+					// would never detect the snapshot being replaced by a
+					// different unparseable blob between preview and adoption.
+					// A digest-derived, unambiguously-tagged token still gives
+					// the CAS something real to bind to and compare.
+					recoveredBaseVersion = "unparsed:" + sha256Hex(snap)
+				}
 			}
 		}
 	}
@@ -150,7 +147,7 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 	if perr != nil {
 		return AdoptExternalAssessment{
 			Origin:             origin,
-			InconsistentReason: bst.Reason,
+			InconsistentReason: inconsistentReason,
 			ObservedDigest:     digest,
 			BaselineVersion:    recoveredBaseVersion,
 			ValidationErrors:   []string{perr.Error()},
@@ -166,7 +163,7 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 	if err != nil {
 		return AdoptExternalAssessment{
 			Origin:             origin,
-			InconsistentReason: bst.Reason,
+			InconsistentReason: inconsistentReason,
 			ObservedDigest:     digest,
 			BaselineVersion:    recoveredBaseVersion,
 			ValidationErrors:   []string{err.Error()},
@@ -186,7 +183,7 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 	return AdoptExternalAssessment{
 		OK:                 true,
 		Origin:             origin,
-		InconsistentReason: bst.Reason,
+		InconsistentReason: inconsistentReason,
 		ObservedDigest:     digest,
 		BaselineVersion:    recoveredBaseVersion,
 		CandidateRaw:       raw,

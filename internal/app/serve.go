@@ -719,30 +719,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			if err != nil {
 				return admin.AdoptPreviewResult{}, err
 			}
-			out := admin.AdoptPreviewResult{
-				OK:                 a.OK,
-				Origin:             a.Origin,
-				InconsistentReason: string(a.InconsistentReason),
-				ObservedDigest:     a.ObservedDigest,
-				BaseVersion:        a.BaselineVersion,
-				CandidateVersion:   a.CandidateVersion,
-				RestartRequired:    a.RestartRequired,
-				ValidationErrors:   a.ValidationErrors,
-			}
-			if !a.OK {
-				return out, nil
-			}
-			if a.PreviousRaw == nil {
-				out.DiffUnavailableReason = "no_prior_managed_state"
-				return out, nil
-			}
-			prevCfg, perr := config.Parse(a.PreviousRaw)
-			candCfg, cerr := config.Parse(a.CandidateRaw)
-			if perr == nil && cerr == nil {
-				d := admin.DiffConfigs(prevCfg, candCfg)
-				out.Diff = &d
-			}
-			return out, nil
+			return toAdminAdoptPreviewResult(a), nil
 		}
 		deps.AdoptExternal = func(ctx admin.ApplyRequestContext, req admin.AdoptExternalRequest) (admin.ConfigApplyResult, error) {
 			res, err := coordinator.AdoptExternal(ctx, req)
@@ -1127,6 +1104,46 @@ func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
 		Origin:                r.Origin,
 		AppOutcome:            r.AppOutcome,
 	}
+}
+
+// toAdminAdoptPreviewResult converts an app-layer adoption assessment into
+// the admin API preview response shape, including parsing the diff itself
+// (the assessment carries only raw buffers). It is a pure projection: no
+// new policy is added.
+func toAdminAdoptPreviewResult(a AdoptExternalAssessment) admin.AdoptPreviewResult {
+	out := admin.AdoptPreviewResult{
+		OK:                 a.OK,
+		Origin:             a.Origin,
+		InconsistentReason: string(a.InconsistentReason),
+		ObservedDigest:     a.ObservedDigest,
+		BaseVersion:        a.BaselineVersion,
+		CandidateVersion:   a.CandidateVersion,
+		RestartRequired:    a.RestartRequired,
+		ValidationErrors:   a.ValidationErrors,
+	}
+	if !a.OK {
+		return out
+	}
+	if a.PreviousRaw == nil {
+		// ADR 0019 §14.1: origin inconsistent means the diff is unavailable
+		// because the prior snapshot is damaged, not because no prior
+		// baseline ever existed — reporting no_prior_managed_state here
+		// would contradict the inconsistent_reason already carried on the
+		// same response.
+		if a.Origin == "inconsistent" {
+			out.DiffUnavailableReason = out.InconsistentReason
+		} else {
+			out.DiffUnavailableReason = "no_prior_managed_state"
+		}
+		return out
+	}
+	prevCfg, perr := config.Parse(a.PreviousRaw)
+	candCfg, cerr := config.Parse(a.CandidateRaw)
+	if perr == nil && cerr == nil {
+		d := admin.DiffConfigs(prevCfg, candCfg)
+		out.Diff = &d
+	}
+	return out
 }
 
 // buildRBACPolicy constructs an rbac.Policy from the already-secrets-expanded

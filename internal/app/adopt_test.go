@@ -209,12 +209,13 @@ func TestAssessAdoptExternalAbortsPreparedAdmin(t *testing.T) {
 	}
 }
 
-// TestAssessAdoptExternalSnapshotUnreadableIsInconsistent pins ADR 0019 §14
-// step 5/§11.2.1b: a baseline the marker claims exists but whose snapshot
-// bytes cannot be read must never be silently treated as if no prior
-// baseline existed — it is damage, reported as an "inconsistent" origin.
-// Preview itself stays side-effect-free (ADR 0019 §14): it must not mutate
-// the live baseline status — only AdoptExternal's actual commit attempt may.
+// TestAssessAdoptExternalSnapshotUnreadableIsInconsistent pins ADR 0019 §14.1:
+// an inconsistent origin is "attempted; degraded if the snapshot is
+// unreadable" — never unavailable. A baseline the marker claims exists but
+// whose snapshot bytes cannot be read must still let preview classify and
+// preflight the external candidate; only the diff (which needs the prior
+// bytes) is what becomes unavailable. Preview itself stays side-effect-free
+// (ADR 0019 §14): it must not mutate the live baseline status.
 func TestAssessAdoptExternalSnapshotUnreadableIsInconsistent(t *testing.T) {
 	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
 	c.ManagedBaseline = NewManagedBaselineStore(path)
@@ -240,17 +241,94 @@ func TestAssessAdoptExternalSnapshotUnreadableIsInconsistent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssessAdoptExternal: %v", err)
 	}
-	if assessment.OK {
-		t.Fatalf("assessment = %+v, want OK=false", assessment)
+	if !assessment.OK {
+		t.Fatalf("assessment = %+v, want OK=true — a damaged prior snapshot degrades the diff, not adoption itself", assessment)
 	}
 	if assessment.Origin != "inconsistent" {
 		t.Errorf("origin = %q, want inconsistent", assessment.Origin)
 	}
-	if len(assessment.ValidationErrors) == 0 {
-		t.Error("expected a validation error naming the unreadable snapshot")
+	if assessment.InconsistentReason != ReasonSnapshotUnreadable {
+		t.Errorf("InconsistentReason = %q, want snapshot_unreadable", assessment.InconsistentReason)
+	}
+	if assessment.PreviousRaw != nil {
+		t.Error("PreviousRaw must stay nil — the prior snapshot could not be verified")
+	}
+	if assessment.CandidateVersion == "" {
+		t.Error("CandidateVersion must be populated: the external candidate itself still parses and preflights fine")
+	}
+	if len(assessment.ValidationErrors) != 0 {
+		t.Errorf("ValidationErrors = %v, want none — the candidate itself is valid", assessment.ValidationErrors)
 	}
 	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedClean {
 		t.Errorf("state=%v, want the live baseline left undisturbed (managed_clean) — preview must be side-effect-free", st.State)
+	}
+}
+
+// TestAssessAdoptExternalSnapshotUnreadableEndToEndPreviewThenAdopt pins the
+// full preview-then-confirm workflow the review required: preview must not
+// contradict a commit that succeeds. It exercises the real admin-response
+// projection (toAdminAdoptPreviewResult), not just the coordinator-level
+// assessment, so the diff_unavailable_reason regression cannot recur
+// silently in the HTTP wrapper alone.
+func TestAssessAdoptExternalSnapshotUnreadableEndToEndPreviewThenAdopt(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	if err := os.Remove(path + ".managed-baseline.snapshot"); err != nil {
+		t.Fatalf("remove real snapshot: %v", err)
+	}
+	if err := os.Mkdir(path+".managed-baseline.snapshot", 0o755); err != nil {
+		t.Fatalf("occupy snapshot path: %v", err)
+	}
+	external := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	assessment, err := c.AssessAdoptExternal()
+	if err != nil {
+		t.Fatalf("AssessAdoptExternal: %v", err)
+	}
+	if !assessment.OK {
+		t.Fatalf("assessment = %+v, want OK=true", assessment)
+	}
+
+	preview := toAdminAdoptPreviewResult(assessment)
+	if !preview.OK {
+		t.Fatalf("preview = %+v, want OK=true", preview)
+	}
+	if preview.Origin != "inconsistent" {
+		t.Errorf("preview.Origin = %q, want inconsistent", preview.Origin)
+	}
+	if preview.Diff != nil {
+		t.Error("preview.Diff must be absent: the prior snapshot is unavailable")
+	}
+	if preview.DiffUnavailableReason == "no_prior_managed_state" {
+		t.Error("diff_unavailable_reason must not claim no prior baseline existed when the baseline is actually damaged")
+	}
+	if preview.DiffUnavailableReason != string(ReasonSnapshotUnreadable) {
+		t.Errorf("diff_unavailable_reason = %q, want the inconsistency reason %q", preview.DiffUnavailableReason, ReasonSnapshotUnreadable)
+	}
+
+	// A normal client echoes exactly the preview's own CAS fields back into
+	// the confirm step.
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+		ObservedDigest: preview.ObservedDigest,
+		BaseVersion:    preview.BaseVersion,
+		Mode:           "hot",
+		Confirm:        true,
+	})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("adoption previewed as recoverable must actually proceed, got %+v", res)
 	}
 }
 
@@ -442,11 +520,14 @@ func TestAssessAdoptExternalSnapshotMissingIsDistinctFromUnreadable(t *testing.T
 	if err != nil {
 		t.Fatalf("AssessAdoptExternal: %v", err)
 	}
+	if !assessment.OK {
+		t.Fatalf("assessment = %+v, want OK=true — a missing prior snapshot degrades the diff, not adoption itself", assessment)
+	}
 	if assessment.Origin != "inconsistent" {
 		t.Errorf("origin = %q, want inconsistent", assessment.Origin)
 	}
-	if len(assessment.ValidationErrors) == 0 {
-		t.Fatal("expected a validation error naming the missing snapshot")
+	if assessment.InconsistentReason != ReasonSnapshotMissing {
+		t.Errorf("InconsistentReason = %q, want snapshot_missing", assessment.InconsistentReason)
 	}
 
 	// AdoptExternal (the actual commit) recovers rather than refuses: hot
