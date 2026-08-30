@@ -6,6 +6,7 @@ on:
       - agent/issue-353-docs-reconciliation
     paths:
       - .github/workflows/issue353-status-contract.yml
+      - .github/issue353_status_fix.py
 
 permissions:
   contents: write
@@ -25,163 +26,17 @@ jobs:
           cache: true
       - name: install documentation dependency
         run: python3 -m pip install --disable-pip-version-check pyyaml
-      - name: reconcile status and importer maturity contracts
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          status = Path('docs/status.md')
-          text = status.read_text(encoding='utf-8')
-
-          pointer_start = '> For the current evidence-based assessment, release blockers and\n'
-          pointer_end = '\n\n**Keep this current.**'
-          start_at = text.find(pointer_start)
-          end_at = text.find(pointer_end, start_at + len(pointer_start))
-          if start_at < 0 or end_at < 0:
-              raise SystemExit('status audit-pointer markers not found')
-          new_pointer = (
-              '> Current maturity and delivery live in this page and\n'
-              '> [`feature-status.yaml`](feature-status.yaml). Volatile issue sequencing lives\n'
-              '> in [#62](https://github.com/victornife/jul/issues/62), and dated audit\n'
-              '> disposition lives in the [audit register](audit-register.md). The\n'
-              '> [2026-08-03 combined audit](audit/combined-audit-2026-08-03.md) remains a\n'
-              '> preserved programme-opening baseline, not a second current-status source.'
-          )
-          text = text[:start_at] + new_pointer + text[end_at:]
-
-          legacy_start = '## Recently shipped continuous panels\n'
-          changelog = '## Changelog\n'
-          start_at = text.find(legacy_start)
-          end_at = text.find(changelog, start_at + len(legacy_start))
-          if start_at < 0 or end_at < 0:
-              raise SystemExit('legacy status block markers not found')
-          text = text[:start_at] + text[end_at:]
-          status.write_text(text.rstrip() + '\n', encoding='utf-8', newline='\n')
-
-          checker = Path('scripts/docs-check.py')
-          text = checker.read_text(encoding='utf-8')
-          old = '    if len(headings) == len(set(headings)):\n        ok("status.md headings are unique")'
-          new = (
-              '    required = {\n'
-              '        "GA", "GA — soak pending", "Beta", "Alpha", "Deprecated",\n'
-              '        "Soak tracking (post-GA gate)", "Changelog",\n'
-              '    }\n'
-              '    declared = {title for level, title in headings if level == 2}\n'
-              '    for title in sorted(required - declared):\n'
-              '        error(path, 0, f"missing canonical status section: {title}")\n'
-              '    forbidden = {\n'
-              '        "Beta (shipped; remaining GA gaps)",\n'
-              '        "Recently shipped continuous panels",\n'
-              '    }\n'
-              '    for title in sorted(forbidden & declared):\n'
-              '        error(path, 0, f"legacy status section remains: {title}")\n'
-              '    if required <= declared and not (forbidden & declared):\n'
-              '        ok("status.md canonical sections are complete")'
-          )
-          if text.count(old) != 1:
-              raise SystemExit(f'expected one status heading success block, found {text.count(old)}')
-          checker.write_text(text.replace(old, new + '\n\n', 1), encoding='utf-8', newline='\n')
-
-          tests = Path('scripts/test_docs_check.py')
-          text = tests.read_text(encoding='utf-8')
-          old_fixture = (
-              '        (docs / "status.md").write_text(\n'
-              '            "# Status\\n\\n## Repeated\\n\\nText.\\n\\n## Repeated\\n",\n'
-              '            encoding="utf-8",\n'
-              '        )\n'
-          )
-          new_fixture = (
-              '        (docs / "status.md").write_text(\n'
-              '            "# Status\\n\\n## GA\\n\\n## GA — soak pending\\n\\n## Beta\\n\\n"\n'
-              '            "## Alpha\\n\\n## Deprecated\\n\\n## Soak tracking (post-GA gate)\\n\\n"\n'
-              '            "## Repeated\\n\\nText.\\n\\n## Repeated\\n\\n## Changelog\\n",\n'
-              '            encoding="utf-8",\n'
-              '        )\n'
-          )
-          if text.count(old_fixture) != 1:
-              raise SystemExit(f'expected one duplicate-heading fixture, found {text.count(old_fixture)}')
-          text = text.replace(old_fixture, new_fixture, 1)
-
-          test_name = 'test_status_heading_contract_rejects_legacy_beta_section'
-          addition = (
-              '\n\n'
-              'def test_status_heading_contract_rejects_legacy_beta_section():\n'
-              '    with tempfile.TemporaryDirectory() as tmpdir:\n'
-              '        root = Path(tmpdir)\n'
-              '        docs = root / "docs"\n'
-              '        docs.mkdir(parents=True)\n'
-              '        (docs / "status.md").write_text(\n'
-              '            "# Status\\n\\n## GA\\n\\n## GA — soak pending\\n\\n## Beta\\n\\n"\n'
-              '            "## Alpha\\n\\n## Deprecated\\n\\n## Soak tracking (post-GA gate)\\n\\n"\n'
-              '            "## Beta (shipped; remaining GA gaps)\\n\\n## Changelog\\n",\n'
-              '            encoding="utf-8",\n'
-              '        )\n'
-              '        _, fail = _run_in_tmp(root, docs_check.check_status_heading_uniqueness)\n'
-              '        assert fail == 1, f"expected one legacy-section failure, got {fail}"\n'
-          )
-          if f'def {test_name}():' not in text:
-              main_marker = '\nif __name__ == "__main__":\n'
-              main_at = text.rfind(main_marker)
-              if main_at < 0:
-                  raise SystemExit('final test runner marker not found')
-              text = text[:main_at] + addition + text[main_at:]
-              runner = '    test_status_heading_uniqueness_rejects_duplicate_anchor()\n    print("OK")'
-              replacement = (
-                  '    test_status_heading_uniqueness_rejects_duplicate_anchor()\n'
-                  f'    {test_name}()\n'
-                  '    print("OK")'
-              )
-              if text.count(runner) != 1:
-                  raise SystemExit(f'expected one final runner tail, found {text.count(runner)}')
-              text = text.replace(runner, replacement, 1)
-          tests.write_text(text, encoding='utf-8', newline='\n')
-
-          importer = Path('docs/nginx-importer.md')
-          text = importer.read_text(encoding='utf-8')
-          marker = '\n## GA status\n'
-          if text.count(marker) != 1:
-              raise SystemExit(f'expected one importer GA section, found {text.count(marker)}')
-          prefix = text.split(marker, 1)[0].rstrip()
-          replacement = (
-              '\n\n## Maturity and delivery\n\n'
-              'This guide documents the current `main` surface, which is broader than\n'
-              'the released base importer. The two contracts are deliberately separate:\n\n'
-              '### Base importer — Y1-09 (`GA` / `soaked`)\n\n'
-              'The released GA record covers the single-file conversion contract and the\n'
-              'evidence that existed in the released line. The current support matrix above\n'
-              'also contains later additive mappings; those do **not** retroactively widen\n'
-              'the released GA contract.\n\n'
-              '| Criterion | Released base evidence |\n'
-              '| --- | --- |\n'
-              '| Translation behavior | Deterministic single-file parse/translate path and its released golden output. |\n'
-              '| Performance | Published parse and translate benchmark baselines. |\n'
-              '| Limitations | Explicit unsupported-directive and semantic-difference list; no full NGINX emulation claim. |\n'
-              '| Compatibility | The documented conversion CLI and generated Jul configuration behavior are governed by [compatibility.md](compatibility.md). |\n'
-              '| Soak / validation | [Released importer validation evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts). |\n'
-              '| Runnable example | `examples/migrate/nginx.conf` through ordinary conversion mode. |\n'
-              '| Security | Parser failure containment, secret-safe diagnostics, and use on a trusted migration host. |\n'
-              '| Fuzzing | `FuzzTranslate` covers parse, translate, and marshal round trip. |\n'
-              '| Operable surface | `jul import nginx -o <file> <nginx.conf>`. |\n\n'
-              '### Assessment, provenance, and includes — MIG-ASSESS (`Beta` / `merged`)\n\n'
-              'Schema-v2 human/JSON assessment, stable findings and guidance, source spans,\n'
-              'target mappings, and bounded root-confined include traversal are merged on\n'
-              'current `main`. They are not contained in the older released GA record and\n'
-              'have not completed a separate stable-release and long-running-soak promotion.\n'
-              'Their machine contract and operating boundary are documented in\n'
-              '[nginx-assessment.md](nginx-assessment.md) and tracked explicitly in\n'
-              '[status.md](status.md).\n'
-          )
-          importer.write_text(prefix + replacement, encoding='utf-8', newline='\n')
-          PY
+      - name: apply status contract correction
+        run: python3 .github/issue353_status_fix.py
       - name: verify documentation
         run: |
           make generated-check
           python3 scripts/docs-check.py
           python3 scripts/test_docs_check.py
           git diff --check
-      - name: remove one-shot workflow and commit
+      - name: remove one-shot files and commit
         run: |
-          rm .github/workflows/issue353-status-contract.yml
+          rm .github/issue353_status_fix.py .github/workflows/issue353-status-contract.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
