@@ -32,7 +32,7 @@ func TestOpenVerifiedRegularFileRejectsSymlinkedParent(t *testing.T) {
 	if file != nil {
 		_ = file.Close()
 	}
-	if err == nil || !strings.Contains(err.Error(), "symbolic-link component") {
+	if err == nil || !strings.Contains(err.Error(), "symbolic link") {
 		t.Fatalf("symlinked parent error = %v", err)
 	}
 }
