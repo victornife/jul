@@ -9,6 +9,24 @@ import (
 	"jul/internal/config"
 )
 
+func TestProjectRoutesIncludesRouteIDWhenPresent(t *testing.T) {
+	id := "r-abc123"
+	c := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":8080",
+		Locations: []config.LocationConfig{
+			{Match: config.MatchConfig{Type: "prefix", Path: "/"}, ProxyPass: "http://127.0.0.1:3000"},
+			{Match: config.MatchConfig{Type: "prefix", Path: "/api"}, ProxyPass: "http://127.0.0.1:3001", RouteID: &id},
+		},
+	}}}
+	locs := projectRoutes(c)[0].Locations
+	if locs[0].RouteID != "" {
+		t.Errorf("route without a route_id should project an empty RouteID, got %q", locs[0].RouteID)
+	}
+	if locs[1].RouteID != id {
+		t.Errorf("RouteID = %q, want %q", locs[1].RouteID, id)
+	}
+}
+
 func TestFirstNonEmpty(t *testing.T) {
 	if got := firstNonEmpty("a", "b"); got != "a" {
 		t.Errorf("firstNonEmpty(a,b) = %q", got)

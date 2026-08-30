@@ -8,10 +8,39 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 )
+
+// patchBatchResourceIDs joins every non-empty ResourceID a batch's operations
+// recorded (e.g. route_ids location_add minted or accepted), for the audit
+// trail's ResourceID field. Empty when no operation touched a durable
+// resource identity.
+func patchBatchResourceIDs(summaries []patchOperationSummary) string {
+	var ids []string
+	for _, s := range summaries {
+		if s.ResourceID != "" {
+			ids = append(ids, s.ResourceID)
+		}
+	}
+	return strings.Join(ids, ",")
+}
+
+// patchBatchSelectors is patchBatchResourceIDs' counterpart for Selector: it
+// joins every op's revision-scoped selector, populated only when that same
+// op had no ResourceID, so an ID-less route's audit trail still names which
+// route was touched.
+func patchBatchSelectors(summaries []patchOperationSummary) string {
+	var selectors []string
+	for _, s := range summaries {
+		if s.Selector != "" {
+			selectors = append(selectors, s.Selector)
+		}
+	}
+	return strings.Join(selectors, ",")
+}
 
 // patchBatchBaseline binds an execution to one authoritative editable
 // configuration, one effective serving configuration, and one live-listener
@@ -21,6 +50,12 @@ type patchBatchBaseline struct {
 	Effective *config.Config
 	Version   string
 	Live      lifecycle.Live
+	// DenyMint is true in file_owned mode (ADR 0019 §4/§15): Jul never mints
+	// a route_id on any path, including preview, which otherwise runs
+	// without an authority gate because it is a read. The zero value
+	// (false) preserves every existing caller's behavior — only
+	// executeCurrentPatchBatch, which has the real authority, ever sets it.
+	DenyMint bool
 }
 
 // patchOperationSummary is the ordered typed result of one successfully
@@ -30,6 +65,18 @@ type patchOperationSummary struct {
 	OpIndex int    `json:"op_index"`
 	Op      string `json:"op"`
 	Summary string `json:"summary"`
+	// ResourceID is the route_id the op's target route carries — whether a
+	// location_add op created it (caller-supplied or minted) or an existing
+	// identified route's op simply reports the identity it already had. A
+	// route's route_id never changes as a side effect of any op.
+	ResourceID string `json:"resource_id,omitempty"`
+	// Selector is the revision-scoped selector (listen, server_names,
+	// match_type, path, match_ordinal) for a route-targeting op whose target
+	// has no route_id — populated only when ResourceID is empty, so an audit
+	// event for an ID-less route still carries a stable, non-value-bearing
+	// reference to which route it was, per ADR 0019 §7. Never carries
+	// predicate/header/query values.
+	Selector string `json:"selector,omitempty"`
 }
 
 // patchBatchExecution is the complete side-effect-free result shared by the
@@ -197,15 +244,33 @@ func executePatchBatch(
 		if err := ctx.Err(); err != nil {
 			return out, &patchCandidateError{Err: err}
 		}
+		// Route-targeting ops (everything except location_add, which has no
+		// target until it runs) are resolved against the *pre-op* candidate:
+		// route_id is immutable outside minting, so this is a stable identity
+		// even for an op like location_remove or location_set_match, whose
+		// own effect would make the target unresolvable afterward.
+		preOpIdentity := resolveRouteAuditIdentity(candidateConfig, op.locationTarget())
+		if baseline.DenyMint {
+			op.denyMint = true
+		}
 		summary, applyErr := applyPatch(candidateConfig, op)
 		if applyErr != nil {
 			return out, &patchOperationError{OpIndex: i, Op: op.Op, Err: applyErr}
 		}
-		operationSummaries = append(operationSummaries, patchOperationSummary{
+		opSummary := patchOperationSummary{
 			OpIndex: i,
 			Op:      op.Op,
 			Summary: summary,
-		})
+		}
+		switch {
+		case op.Op == "location_add":
+			if srv, err := findServerByNames(candidateConfig, op.Listen, op.ServerNames); err == nil && len(srv.Locations) > 0 {
+				opSummary.ResourceID, opSummary.Selector = auditIdentityOf(op.Listen, op.ServerNames, &srv.Locations[len(srv.Locations)-1])
+			}
+		case preOpIdentity != (routeAuditIdentity{}):
+			opSummary.ResourceID, opSummary.Selector = preOpIdentity.ResourceID, preOpIdentity.Selector
+		}
+		operationSummaries = append(operationSummaries, opSummary)
 	}
 
 	candidateRaw, err := config.Marshal(candidateConfig)
@@ -290,6 +355,11 @@ func (s *Server) executeCurrentPatchBatch(
 		Effective: effective,
 		Version:   state.Version,
 		Live:      live,
+		// A route_id is never minted in file_owned mode, on any path — apply
+		// never reaches here in file_owned mode (denyIfFileOwned refuses it
+		// first), but preview deliberately runs without that gate because it
+		// is a read, so this is the one place that still needs the check.
+		DenyMint: s.currentAuthority().IsFileOwned(),
 	}, requestedVersion, ops)
 	if err != nil {
 		return state, patchBatchExecution{}, err

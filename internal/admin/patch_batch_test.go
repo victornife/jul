@@ -59,6 +59,138 @@ func TestExecutePatchBatchAppliesOrderedOperations(t *testing.T) {
 	}
 }
 
+func TestExecutePatchBatchLocationAddSummaryCarriesResourceID(t *testing.T) {
+	before := patchProxyConfig()
+	ops := []patchRequest{
+		{
+			Op:          "location_add",
+			Listen:      before.Servers[0].Listen,
+			ServerNames: before.Servers[0].ServerNames,
+			Match:       &locationMatch{Type: "prefix", Path: "/added"},
+			Action:      &locationActionPayload{Kind: "proxy", Target: "http://127.0.0.1:9100"},
+		},
+	}
+	got, err := executePatchBatch(context.Background(), patchBatchBaseline{
+		Config: before,
+		Live:   lifecycle.Live{BoundHTTPAddrs: []string{":8080"}},
+	}, "", ops)
+	if err != nil {
+		t.Fatalf("executePatchBatch: %v", err)
+	}
+	if len(got.OperationSummaries) != 1 || got.OperationSummaries[0].ResourceID == "" {
+		t.Fatalf("location_add summary should carry a non-empty ResourceID, got %+v", got.OperationSummaries)
+	}
+	if joined := patchBatchResourceIDs(got.OperationSummaries); joined != got.OperationSummaries[0].ResourceID {
+		t.Errorf("patchBatchResourceIDs = %q, want %q", joined, got.OperationSummaries[0].ResourceID)
+	}
+}
+
+func TestPatchBatchResourceIDsJoinsOnlyNonEmpty(t *testing.T) {
+	got := patchBatchResourceIDs([]patchOperationSummary{
+		{Op: "server_add"},
+		{Op: "location_add", ResourceID: "r-one"},
+		{Op: "route_set_target"},
+		{Op: "location_add", ResourceID: "r-two"},
+	})
+	if got != "r-one,r-two" {
+		t.Errorf("patchBatchResourceIDs = %q, want %q", got, "r-one,r-two")
+	}
+	if got := patchBatchResourceIDs(nil); got != "" {
+		t.Errorf("patchBatchResourceIDs(nil) = %q, want empty", got)
+	}
+}
+
+// TestExecutePatchBatchEditOnIdentifiedRouteReportsResourceID proves an
+// ordinary edit of an already-identified route (not just its creation)
+// reports the route's route_id in the operation summary.
+func TestExecutePatchBatchEditOnIdentifiedRouteReportsResourceID(t *testing.T) {
+	before := patchProxyConfig()
+	id := "r-existing"
+	before.Servers[0].Locations[0].RouteID = &id
+	ops := []patchRequest{
+		{Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/api", Target: "http://127.0.0.1:9999"},
+	}
+	got, err := executePatchBatch(context.Background(), patchBatchBaseline{
+		Config: before,
+		Live:   lifecycle.Live{BoundHTTPAddrs: []string{":8080"}},
+	}, "", ops)
+	if err != nil {
+		t.Fatalf("executePatchBatch: %v", err)
+	}
+	if got.OperationSummaries[0].ResourceID != id {
+		t.Errorf("ResourceID = %q, want %q", got.OperationSummaries[0].ResourceID, id)
+	}
+	if got.OperationSummaries[0].Selector != "" {
+		t.Errorf("Selector should be empty when ResourceID is set, got %q", got.OperationSummaries[0].Selector)
+	}
+}
+
+// TestExecutePatchBatchEditOnIDLessRouteReportsSelector proves an edit of a
+// route with no route_id reports a revision-scoped selector instead of an
+// empty audit identity (ADR 0019 §7).
+func TestExecutePatchBatchEditOnIDLessRouteReportsSelector(t *testing.T) {
+	before := patchProxyConfig()
+	ops := []patchRequest{
+		{Op: "route_set_target", Listen: ":8080", MatchType: "prefix", Path: "/api", Target: "http://127.0.0.1:9999"},
+	}
+	got, err := executePatchBatch(context.Background(), patchBatchBaseline{
+		Config: before,
+		Live:   lifecycle.Live{BoundHTTPAddrs: []string{":8080"}},
+	}, "", ops)
+	if err != nil {
+		t.Fatalf("executePatchBatch: %v", err)
+	}
+	summary := got.OperationSummaries[0]
+	if summary.ResourceID != "" {
+		t.Errorf("ResourceID should be empty for an ID-less route, got %q", summary.ResourceID)
+	}
+	if !strings.Contains(summary.Selector, "listen=:8080") || !strings.Contains(summary.Selector, "path=/api") {
+		t.Errorf("Selector = %q, want it to name listen and path", summary.Selector)
+	}
+	for _, forbidden := range []string{"header", "query", "predicate"} {
+		if strings.Contains(strings.ToLower(summary.Selector), forbidden) {
+			t.Errorf("Selector must never carry predicate/header/query material, got %q", summary.Selector)
+		}
+	}
+}
+
+// TestExecutePatchBatchRemoveOnIdentifiedRouteReportsResourceID proves
+// location_remove reports its target's route_id even though the location no
+// longer exists once the op has run.
+func TestExecutePatchBatchRemoveOnIdentifiedRouteReportsResourceID(t *testing.T) {
+	before := patchProxyConfig()
+	id := "r-doomed"
+	before.Servers[0].Locations[0].RouteID = &id
+	ops := []patchRequest{
+		{Op: "location_remove", Listen: ":8080", MatchType: "prefix", Path: "/api"},
+	}
+	got, err := executePatchBatch(context.Background(), patchBatchBaseline{
+		Config: before,
+		Live:   lifecycle.Live{BoundHTTPAddrs: []string{":8080"}},
+	}, "", ops)
+	if err != nil {
+		t.Fatalf("executePatchBatch: %v", err)
+	}
+	if got.OperationSummaries[0].ResourceID != id {
+		t.Errorf("ResourceID = %q, want %q", got.OperationSummaries[0].ResourceID, id)
+	}
+}
+
+func TestPatchBatchSelectorsJoinsOnlyNonEmpty(t *testing.T) {
+	got := patchBatchSelectors([]patchOperationSummary{
+		{Op: "server_add"},
+		{Op: "route_set_target", Selector: "listen=:8080 path=/a"},
+		{Op: "location_add", ResourceID: "r-two"},
+		{Op: "location_remove", Selector: "listen=:8080 path=/b"},
+	})
+	if got != "listen=:8080 path=/a,listen=:8080 path=/b" {
+		t.Errorf("patchBatchSelectors = %q, want %q", got, "listen=:8080 path=/a,listen=:8080 path=/b")
+	}
+	if got := patchBatchSelectors(nil); got != "" {
+		t.Errorf("patchBatchSelectors(nil) = %q, want empty", got)
+	}
+}
+
 func TestExecutePatchBatchCreatesAppAndNativeGRPCMountInOneCandidate(t *testing.T) {
 	before := patchProxyConfig()
 	enabled := true

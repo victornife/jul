@@ -96,6 +96,25 @@ type patchRequest struct {
 	// removed and the renamed route added.
 	Match *locationMatch `json:"match_set,omitempty"`
 
+	// location_add payload: an optional caller-supplied route_id. A nil
+	// pointer (the key omitted) mints a fresh durable ID (ADR 0019 §4); a
+	// non-nil pointer is used exactly as sent — including a present-empty
+	// string, which config.Validate then rejects like any other malformed
+	// route_id — and must not collide with an existing one. This must stay a
+	// pointer, not a plain string: omitted and present-empty are different
+	// requests and a bare string cannot tell them apart. No other op accepts
+	// this field — an existing route's route_id is durable and never
+	// re-minted or replaced by a patch.
+	RouteID *string `json:"route_id,omitempty"`
+
+	// denyMint is executor-internal, never a wire field (unexported, so
+	// json.Unmarshal ignores it): the batch executor sets it on its own copy
+	// of a location_add op when the process is file_owned (ADR 0019 §4/§15,
+	// "never mint a route_id on any path"), so an omitted route_id stays nil
+	// in the candidate instead of being minted, even during a preview, which
+	// otherwise runs without an authority gate because it is a read.
+	denyMint bool
+
 	// location_set_action payload: the route's new action (proxy/static/
 	// redirect/return/deny). The op clears every other action field first.
 	Action *locationActionPayload `json:"action,omitempty"`

@@ -136,6 +136,7 @@ func fullConfig() *config.Config {
 						Value: strPtr("v2"),
 					}},
 				},
+				RouteID: strPtr("fixture-route"),
 
 				Root:             "/srv",
 				Index:            []string{"index.html"},

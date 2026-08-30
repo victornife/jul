@@ -184,3 +184,135 @@ func TestSchemaPathTypesAreCheckoutIndependent(t *testing.T) {
 		}
 	}
 }
+
+// TestSchemaPathStructureIsClosed proves every container carries exactly one
+// of the closed StructureKind values and every leaf carries none, so a
+// generated JSON Schema never has to fall back to parsing GoType.
+func TestSchemaPathStructureIsClosed(t *testing.T) {
+	for _, p := range SchemaPaths() {
+		if p.Kind == KindTable {
+			if p.Structure == "" {
+				t.Errorf("%s is a container with no Structure classification", p.Path)
+			}
+			continue
+		}
+		if p.Structure != "" {
+			t.Errorf("%s is a leaf but carries Structure %q", p.Path, p.Structure)
+		}
+		if p.TextScalar {
+			t.Errorf("%s is a leaf but carries TextScalar", p.Path)
+		}
+	}
+}
+
+// TestSchemaPathScalarIsClosed proves every leaf carries a basic wire type and
+// every container carries none.
+func TestSchemaPathScalarIsClosed(t *testing.T) {
+	for _, p := range SchemaPaths() {
+		if p.Kind == KindTable {
+			if p.Scalar != "" {
+				t.Errorf("%s is a container but carries Scalar %q", p.Path, p.Scalar)
+			}
+			continue
+		}
+		if p.Scalar == "" {
+			t.Errorf("%s is a leaf with no Scalar classification", p.Path)
+		}
+	}
+}
+
+// TestSchemaPathStructureCoversKnownShapes pins each StructureKind to a real
+// path, so the four shapes a JSON Schema renderer must distinguish (object,
+// array-of-tables, map-of-tables, map-of-scalars) are proven to exist and be
+// classified correctly, without parsing GoType.
+func TestSchemaPathStructureCoversKnownShapes(t *testing.T) {
+	idx := indexPaths(t)
+	cases := []struct {
+		path string
+		want StructureKind
+	}{
+		{"servers.*.tls", StructObject},
+		{"servers.*.locations", StructArrayTable},
+		{"upstreams", StructArrayTable},
+		{"plugins", StructMapTable},
+		{"plugins.*.config", StructMapScalar},
+		{"servers.*.error_pages", StructMapScalar},
+	}
+	for _, tc := range cases {
+		got, ok := idx[tc.path]
+		if !ok {
+			t.Fatalf("%s is missing from the inventory", tc.path)
+		}
+		if got.Structure != tc.want {
+			t.Errorf("%s Structure = %q, want %q", tc.path, got.Structure, tc.want)
+		}
+	}
+}
+
+// TestSchemaPathTextScalar proves the one array-of-tables element that also
+// accepts a plain scalar string (an upstream server written as
+// "host:port weight=N") is flagged, so a JSON Schema renders it as a union
+// rather than a closed object that would reject the shorthand form.
+func TestSchemaPathTextScalar(t *testing.T) {
+	idx := indexPaths(t)
+	p, ok := idx["upstreams.*.servers"]
+	if !ok {
+		t.Fatal("upstreams.*.servers is missing from the inventory")
+	}
+	if !p.TextScalar {
+		t.Error("upstreams.*.servers should accept a plain scalar string (encoding.TextUnmarshaler)")
+	}
+	if p.Structure != StructArrayTable {
+		t.Errorf("upstreams.*.servers Structure = %q, want %q", p.Structure, StructArrayTable)
+	}
+	for _, path := range []string{"servers.*.locations", "upstreams", "plugins"} {
+		if idx[path].TextScalar {
+			t.Errorf("%s should not be flagged TextScalar", path)
+		}
+	}
+}
+
+// TestSchemaPathScalarCoversKnownTypes pins ScalarKind to real paths, proving
+// Jul's named scalar types (Duration, Size, time.Time) are distinguished from
+// a plain string/bool/integer/float by type identity, not by parsing GoType.
+func TestSchemaPathScalarCoversKnownTypes(t *testing.T) {
+	idx := indexPaths(t)
+	cases := []struct {
+		path string
+		want ScalarKind
+	}{
+		{"global.log_level", ScalarString},
+		{"observability.access_log.enabled", ScalarBool},
+		{"admin.rate_limit_apply_per_min", ScalarInteger},
+		{"observability.tracing.sample_ratio", ScalarFloat},
+		{"cache.default_ttl", ScalarDuration},
+		{"cache.memory_max_size", ScalarSize},
+		{"admin.rbac.principals.*.expires_at", ScalarTime},
+		{"servers.*.server_names", ScalarString}, // scalar list: element type
+	}
+	for _, tc := range cases {
+		got, ok := idx[tc.path]
+		if !ok {
+			t.Fatalf("%s is missing from the inventory", tc.path)
+		}
+		if got.Scalar != tc.want {
+			t.Errorf("%s Scalar = %q, want %q", tc.path, got.Scalar, tc.want)
+		}
+	}
+}
+
+// TestSchemaPathDeclaringTypeAndFieldName proves every path carries its
+// originating Go struct type and field name, so a generator can join an
+// external per-field authority (e.g. a Go doc comment) back to a canonical
+// path without re-walking the schema.
+func TestSchemaPathDeclaringTypeAndFieldName(t *testing.T) {
+	for _, p := range SchemaPaths() {
+		if p.DeclaringType == "" || p.FieldName == "" {
+			t.Errorf("%s has no DeclaringType/FieldName (%q/%q)", p.Path, p.DeclaringType, p.FieldName)
+		}
+	}
+	idx := indexPaths(t)
+	if got := idx["servers.*.tls.acme.ca"]; got.DeclaringType != "ACMEConfig" || got.FieldName != "CA" {
+		t.Errorf("servers.*.tls.acme.ca DeclaringType/FieldName = %q/%q, want ACMEConfig/CA", got.DeclaringType, got.FieldName)
+	}
+}

@@ -79,6 +79,12 @@ func Validate(c *Config) error {
 	acmeByAddr := map[string]bool{}
 	staticTLSByAddr := map[string]bool{}
 
+	// routeIDLocations tracks every location declaring a route_id so a
+	// duplicate can be reported naming every conflicting location, not just
+	// the second one seen (ADR 0019 §4: "duplicate is a validation error
+	// naming both locations").
+	routeIDLocations := map[string][]string{}
+
 	for i, srv := range c.Servers {
 		where := fmt.Sprintf("servers[%d]", i)
 		errs = append(errs, validateServerValues(srv, where)...)
@@ -100,6 +106,10 @@ func Validate(c *Config) error {
 		for j, loc := range srv.Locations {
 			locWhere := fmt.Sprintf("%s.locations[%d]", where, j)
 			errs = append(errs, validateMatch(loc.Match, srv, locWhere)...)
+			errs = append(errs, validateRouteID(loc.RouteID, locWhere)...)
+			if loc.RouteID != nil {
+				routeIDLocations[*loc.RouteID] = append(routeIDLocations[*loc.RouteID], locWhere)
+			}
 			if loc.RequireClientCert && (srv.TLS == nil || !srv.TLS.ClientAuth.Active()) {
 				errs = append(errs, fmt.Errorf("%s: require_client_cert needs the server's tls.client_auth enabled (mode request or require)", locWhere))
 			}
@@ -158,6 +168,20 @@ func Validate(c *Config) error {
 		}
 		if acmeByAddr[addr] && staticTLSByAddr[addr] {
 			errs = append(errs, fmt.Errorf("listen %q mixes ACME and static TLS server blocks; a listener uses one certificate provider", addr))
+		}
+	}
+
+	// route_id is unique across the whole document, not merely within one
+	// server block, so it is checked once here rather than per-location.
+	duplicateIDs := make([]string, 0, len(routeIDLocations))
+	for id := range routeIDLocations {
+		duplicateIDs = append(duplicateIDs, id)
+	}
+	sort.Strings(duplicateIDs)
+	for _, id := range duplicateIDs {
+		locs := routeIDLocations[id]
+		if len(locs) > 1 {
+			errs = append(errs, fmt.Errorf("duplicate route_id %q at %s", id, strings.Join(locs, " and ")))
 		}
 	}
 

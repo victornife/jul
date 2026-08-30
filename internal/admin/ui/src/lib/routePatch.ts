@@ -23,6 +23,11 @@ export interface ServerIdentity {
 export interface LocationIdentity {
   readonly matchType: string;
   readonly path: string;
+  // routeId is the route's durable identity (ADR 0019 §4), when the server
+  // sent one. The Console never derives its own correlation logic from it —
+  // it is simply preferred over the revision-relative matchType+path key
+  // when present, since it is stable across edits that change the match.
+  readonly routeId?: string;
 }
 
 export interface RouteSelection {
@@ -64,7 +69,27 @@ export interface StoredRouteSelectionV2 {
     readonly match_type: string;
     readonly path: string;
   };
+  // base_version is the config revision this selection was reviewed against
+  // (ADR 0019 §8: an ID-less link is revision-bound, not durable). Restoring
+  // it against a later revision must be detected rather than silently
+  // resolving the stored coordinates to whatever route now occupies them.
+  readonly base_version: string;
 }
+
+/**
+ * The durable form (ADR 0019 §8): a route_id alone, resolved against every
+ * server's every location regardless of listen, host set, match, or
+ * declaration order. This is what makes a stored selection or a Console deep
+ * link survive an edit, a reorder, or a reload — a v2 selection cannot,
+ * because it is bound to coordinates that a durable identity is specifically
+ * meant to outlive.
+ */
+export interface StoredRouteSelectionV3 {
+  readonly version: 3;
+  readonly route_id: string;
+}
+
+export type StoredRouteSelection = StoredRouteSelectionV2 | StoredRouteSelectionV3;
 
 export class RoutePatchValidationError extends Error {
   constructor(public readonly issues: readonly string[]) {
@@ -164,6 +189,14 @@ export function serverIdentityKey(identity: ServerIdentity): string {
 }
 
 export function routeIdentityKey(server: ServerIdentity, location: LocationIdentity): string {
+  if (location.routeId) {
+    // A durable route_id is stable across a match/predicate change, unlike
+    // the fingerprint below; it also does not depend on the server
+    // identity, since a route_id is unique across the whole configuration
+    // (ADR 0019 §4), but keeping the same JSON.stringify shape as the
+    // fallback keeps this a plain opaque string key either way.
+    return JSON.stringify(["route_id", location.routeId]);
+  }
   return JSON.stringify([
     server.listen,
     canonicalServerNames(server.serverNames),
@@ -426,19 +459,37 @@ export function buildServerRemovalBatch(server: ServerIdentity): ConfigPatch[] {
   ];
 }
 
-export function storeRouteSelection(selection: RouteSelection): StoredRouteSelectionV2 {
+export function storeRouteSelection(selection: RouteSelection, baseVersion: string): StoredRouteSelection {
   const server = serverIdentityFromRoute(selection.route);
-  return storeRouteIdentity(server, {
-    matchType: selection.loc.type,
-    path: selection.loc.match,
-  });
+  return storeRouteIdentity(
+    server,
+    {
+      matchType: selection.loc.type,
+      path: selection.loc.match,
+      ...(selection.loc.route_id ? { routeId: selection.loc.route_id } : {}),
+    },
+    baseVersion,
+  );
 }
 
-/** Store an exact target identity for post-preview/post-mutation restoration. */
+/**
+ * Store an exact target identity for post-preview/post-mutation restoration.
+ * A route carrying a durable route_id is stored in the v3 durable form
+ * (ADR 0019 §8): coordinates are not stored at all, so an edit that changes
+ * the match, or a reorder, cannot make the stored selection resolve to the
+ * wrong route or fail to resolve at all. A route with no route_id falls back
+ * to the v2 revision-bound form, which now carries the reviewed base_version
+ * so a later restore can detect the revision has moved instead of silently
+ * resolving to whatever route now occupies the same coordinates.
+ */
 export function storeRouteIdentity(
   server: ServerIdentity,
   location: LocationIdentity,
-): StoredRouteSelectionV2 {
+  baseVersion: string,
+): StoredRouteSelection {
+  if (location.routeId) {
+    return { version: 3, route_id: location.routeId };
+  }
   return {
     version: 2,
     server: {
@@ -446,6 +497,7 @@ export function storeRouteIdentity(
       server_names: canonicalServerNames(server.serverNames),
     },
     location: { match_type: location.matchType, path: location.path.trim() },
+    base_version: baseVersion,
   };
 }
 
@@ -467,17 +519,41 @@ function findLocation(
   return matches.length === 1 ? (matches[0] ?? null) : null;
 }
 
+/** Find the one route/location pair carrying routeId, across every server. */
+function findByRouteID(routes: readonly RouteProjection[], routeId: string): RouteSelection | null {
+  for (const route of routes) {
+    for (const loc of route.locations) {
+      if (loc.route_id === routeId) return { route, loc };
+    }
+  }
+  return null;
+}
+
 /**
- * Restore the current v2 shape and the previous Selection-shaped value. A
- * listen-only legacy value is migrated only when that listen is unambiguous;
- * otherwise it fails closed rather than selecting a sibling virtual host.
+ * Restore a stored selection. The v3 durable form (a route_id alone) is
+ * resolved against every route regardless of coordinates, so it survives an
+ * edit that changed the match or a reorder — a route_id disappearing (the
+ * route was removed) fails closed exactly like every other unresolvable
+ * form, rather than falling through to a coordinate-based guess. The v2 form
+ * is revision-bound (ADR 0019 §8): when currentBaseVersion is supplied and
+ * does not match the selection's stored base_version, restoration fails
+ * closed rather than silently resolving the stored coordinates against a
+ * revision they were never reviewed on. A caller with no current version to
+ * compare against (currentBaseVersion omitted) gets the coordinate-only
+ * resolution, unchanged. The pre-route_id legacy Selection-shaped value is
+ * unchanged.
  */
 export function restoreRouteSelection(
   routes: readonly RouteProjection[],
   stored: unknown,
+  currentBaseVersion?: string,
 ): RouteSelection | null {
   const root = objectValue(stored);
   if (!root) return null;
+
+  if (root.version === 3) {
+    return typeof root.route_id === "string" ? findByRouteID(routes, root.route_id) : null;
+  }
 
   if (root.version === 2) {
     const server = objectValue(root.server);
@@ -487,6 +563,10 @@ export function restoreRouteSelection(
     const names = stringArray(server.server_names);
     if (names === null) return null;
     if (typeof location.match_type !== "string" || typeof location.path !== "string") return null;
+    if (typeof root.base_version !== "string") return null;
+    if (currentBaseVersion !== undefined && root.base_version !== currentBaseVersion) {
+      return null;
+    }
 
     const route = findExactServer(routes, { listen: server.listen, serverNames: names });
     if (!route) return null;

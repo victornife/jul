@@ -164,6 +164,9 @@ When adding a new feature, include **all** of these in your PR:
 - [ ] Config validation (`internal/config/validate.go`).
 - [ ] Lifecycle disposition for every new configuration leaf
       (`internal/lifecycle/registry.go`), then `make lifecycle-generate`.
+- [ ] Description for every new configuration leaf (a Go doc comment on the
+      field, or an `internal/configcontract.DescriptionOverrides` entry when
+      none applies), then `make config-contract-generate`.
 - [ ] Admin diff support (`internal/admin/diff_helpers.go`) when applicable.
 - [ ] Documentation in `docs/<feature>.md` or update to `docs/configuration.md`.
 - [ ] README mention (brief, with a link to the deep-dive doc).
@@ -189,10 +192,17 @@ exactly one disposition, and CI fails when one is missing. Follow this order:
    `docs/config-lifecycle.yaml` and `docs/generated/config-lifecycle.{md,json}`.
    Never hand-edit those files: they are outputs, and the runtime does not read
    them.
-5. Update conceptual prose in `docs/reload-semantics.md` only when the
+5. Run `make config-contract-generate` and review the diff in
+   `docs/generated/config.schema.json`, `config-metadata.json` and
+   `config-reference.md` (ADR 0019 §21-23). These are also outputs, rendered
+   from `config.SchemaPaths()`, the lifecycle registry, `docs/config-value-contract.json`
+   and the small capability/resource/description tables in
+   `internal/configcontract`. A new leaf needs a description (a Go doc comment
+   on the field is usually enough); `make generated-check` fails otherwise.
+6. Update conceptual prose in `docs/reload-semantics.md` only when the
    transition semantics changed — the per-field table is generated.
-6. Verify with `make generated-check` (which `make ci-pr` runs) and
-   `go test ./internal/lifecycle ./internal/config`.
+7. Verify with `make generated-check` (which `make ci-pr` runs) and
+   `go test ./internal/lifecycle ./internal/config ./internal/configcontract`.
 
 A stale artifact fails with the exact regeneration command, so a missing
 regeneration is never a guess.

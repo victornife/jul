@@ -566,6 +566,12 @@ export const LocationProjectionSchema = z.object({
   // valid; absent means "treat as 0", the same as an omitted patch ordinal
   // means "there must be exactly one".
   match_ordinal: z.number().optional(),
+  // route_id is the route's durable identity (ADR 0019 §4), present only
+  // when the route has one. Unlike match_ordinal, it is stable across
+  // revisions; the Console must not derive its own correlation from
+  // match_ordinal/predicates when this is present — it is server-computed
+  // and simply consumed.
+  route_id: z.string().optional(),
   // predicates summarises the route's method/header/query predicates so two
   // routes sharing a path are distinguishable in a list. Values are omitted
   // deliberately; names and operations are enough to tell them apart.
@@ -1008,6 +1014,28 @@ export function fetchOverview(): Promise<Overview> {
 
 export function fetchRoutes(): Promise<RouteProjection[]> {
   return api<unknown>("/routes").then((d) => z.array(RouteProjectionSchema).parse(d));
+}
+
+/**
+ * Reads the config revision serving `/api/routes` right now, from its
+ * `X-Jul-Config-Version` response header — the same value a structured patch
+ * preview reports as `base_version`. Used only to detect whether an ID-less
+ * (v2) stored route selection has gone stale (ADR 0019 §8); returns
+ * undefined on any failure, which the caller must treat as "cannot confirm,
+ * fail closed" rather than as "no staged restart" the way
+ * fetchPendingRestart's absent status does.
+ */
+export async function fetchCurrentConfigVersion(): Promise<string | undefined> {
+  const token = authToken.get();
+  const headers = new Headers({ Accept: "application/json" });
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  try {
+    const resp = await fetch("/api/routes", { headers });
+    if (!resp.ok) return undefined;
+    return resp.headers.get("X-Jul-Config-Version") ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // ── Route testing (Milestone 2.3) ────────────────────────────────────────────
@@ -1579,6 +1607,12 @@ export type ConfigPatch =
       server_names?: string[];
       match_set: LocationMatchPatch;
       action: LocationActionPatch;
+      // route_id is optional on the wire: omitted mints a fresh durable id
+      // (ADR 0019 §4). The Console must set this to the resource_id a prior
+      // preview of the SAME op already returned, once one exists, so a
+      // re-preview or the final apply reuses that exact id rather than
+      // minting a second one.
+      route_id?: string;
     }
   | {
       op: "location_remove";
@@ -1650,6 +1684,16 @@ export const PatchOperationSummarySchema = z.object({
   op_index: z.number().int().nonnegative(),
   op: z.string(),
   summary: z.string(),
+  // resource_id is the durable route_id a location_add op created (whether
+  // caller-supplied or freshly minted). The Console must echo this exact
+  // value back as route_id on the same op for every later preview/apply of
+  // this same batch — the backend only mints once, on an omitted route_id,
+  // so replaying the op without it would mint a second, different id.
+  resource_id: z.string().optional(),
+  // selector is a revision-scoped route reference (listen/server_names/
+  // match_type/path/match_ordinal), present only when the op's target route
+  // has no resource_id.
+  selector: z.string().optional(),
 });
 export type PatchOperationSummary = z.infer<typeof PatchOperationSummarySchema>;
 

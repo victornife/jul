@@ -116,6 +116,25 @@ describe("route patch exact server identity", () => {
     );
   });
 
+  it("prefers a durable route_id over the match fingerprint when present", () => {
+    const a = { listen: ":8080", serverNames: ["a.example"] };
+    const b = { listen: ":9090", serverNames: ["b.example"] };
+    // Same route_id correlates even across different servers/matches (the
+    // Console never re-derives its own correlation logic; it consumes
+    // whatever the server sent, per ADR 0019 §4/§7).
+    expect(
+      routeIdentityKey(a, { matchType: "prefix", path: "/old", routeId: "r-same" }),
+    ).toBe(routeIdentityKey(b, { matchType: "exact", path: "/new", routeId: "r-same" }));
+    // Different route_ids never collide, even with identical server+match.
+    expect(
+      routeIdentityKey(a, { matchType: "prefix", path: "/", routeId: "r-one" }),
+    ).not.toBe(routeIdentityKey(a, { matchType: "prefix", path: "/", routeId: "r-two" }));
+    // No route_id falls back to the pre-route_id fingerprint behavior.
+    expect(routeIdentityKey(a, { matchType: "prefix", path: "/" })).toBe(
+      routeIdentityKey(a, { matchType: "prefix", path: "/" }),
+    );
+  });
+
   it("finds an exact identity rather than any server sharing the listen", () => {
     expect(exactServerExists(inventory, baseSpec.server)).toBe(true);
     expect(
@@ -281,7 +300,7 @@ describe("route selection restoration", () => {
     if (chosen === undefined) throw new Error("expected second virtual-host fixture");
     const location = chosen.locations[0];
     if (location === undefined) throw new Error("expected a location fixture");
-    const stored = storeRouteSelection({ route: chosen, loc: location });
+    const stored = storeRouteSelection({ route: chosen, loc: location }, "v1");
     const restored = restoreRouteSelection(inventory, stored);
     expect(restored?.route.server_names).toEqual(["other.example"]);
     expect(restored?.loc.match).toBe("/other");
@@ -292,11 +311,13 @@ describe("route selection restoration", () => {
       storeRouteIdentity(
         { listen: ":8080", serverNames: ["b.example", "a.example"] },
         { matchType: "exact", path: " /created " },
+        "v1",
       ),
     ).toEqual({
       version: 2,
       server: { listen: ":8080", server_names: ["a.example", "b.example"] },
       location: { match_type: "exact", path: "/created" },
+      base_version: "v1",
     });
   });
 
@@ -314,6 +335,93 @@ describe("route selection restoration", () => {
       route: { listen: ":8080" },
       loc: { index: 0 },
     });
+    expect(restored).toBeNull();
+  });
+
+  it("stores a route with a durable route_id in the v3 durable form, not v2 coordinates", () => {
+    const chosen = inventory[1];
+    if (chosen === undefined) throw new Error("expected second virtual-host fixture");
+    const withID: LocationProjection = { ...location(0, "/other"), route_id: "r-durable" };
+    const stored = storeRouteSelection({ route: chosen, loc: withID }, "v1");
+    expect(stored).toEqual({ version: 3, route_id: "r-durable" });
+  });
+
+  it("resolves the v3 durable form across any server/match, unlike v2", () => {
+    const withID: LocationProjection = { ...location(0, "/other"), route_id: "r-durable" };
+    const routes = [route(":8080", ["other.example"], [withID])];
+    const restored = restoreRouteSelection(routes, { version: 3, route_id: "r-durable" });
+    expect(restored?.loc.match).toBe("/other");
+
+    // The durable form still resolves after the route's own coordinates
+    // change, which a v2 (coordinates-based) selection could never do.
+    const moved = [
+      route(":9090", ["renamed.example"], [{ ...location(0, "/moved"), route_id: "r-durable" }]),
+    ];
+    const restoredAfterMove = restoreRouteSelection(moved, { version: 3, route_id: "r-durable" });
+    expect(restoredAfterMove?.loc.match).toBe("/moved");
+    expect(restoredAfterMove?.route.listen).toBe(":9090");
+  });
+
+  it("fails closed when a durable route_id no longer exists, never guessing a different route", () => {
+    const restored = restoreRouteSelection(inventory, { version: 3, route_id: "r-deleted" });
+    expect(restored).toBeNull();
+  });
+
+  it("falls back to the v2 revision-bound form for a route with no route_id", () => {
+    expect(
+      storeRouteIdentity(
+        { listen: ":8080", serverNames: ["b.example", "a.example"] },
+        { matchType: "exact", path: "/created" },
+        "v1",
+      ),
+    ).toEqual({
+      version: 2,
+      server: { listen: ":8080", server_names: ["a.example", "b.example"] },
+      location: { match_type: "exact", path: "/created" },
+      base_version: "v1",
+    });
+  });
+
+  it("resolves a v2 selection when the current revision matches the reviewed one", () => {
+    const stored = storeRouteIdentity(
+      { listen: ":8080", serverNames: ["a.example", "b.example"] },
+      { matchType: "prefix", path: "/" },
+      "v1",
+    );
+    const restored = restoreRouteSelection(inventory, stored, "v1");
+    expect(restored?.route.listen).toBe(":8080");
+  });
+
+  it("fails closed on a v2 selection when the revision has moved (ADR 0019 §8)", () => {
+    const stored = storeRouteIdentity(
+      { listen: ":8080", serverNames: ["a.example", "b.example"] },
+      { matchType: "prefix", path: "/" },
+      "v1",
+    );
+    const restored = restoreRouteSelection(inventory, stored, "v2");
+    expect(restored).toBeNull();
+  });
+
+  it("resolves a v2 selection by coordinates alone when no current version is supplied", () => {
+    const stored = storeRouteIdentity(
+      { listen: ":8080", serverNames: ["a.example", "b.example"] },
+      { matchType: "prefix", path: "/" },
+      "v1",
+    );
+    const restored = restoreRouteSelection(inventory, stored);
+    expect(restored?.route.listen).toBe(":8080");
+  });
+
+  it("fails closed on a v2 selection missing base_version entirely", () => {
+    const restored = restoreRouteSelection(
+      inventory,
+      {
+        version: 2,
+        server: { listen: ":8080", server_names: ["a.example", "b.example"] },
+        location: { match_type: "prefix", path: "/" },
+      },
+      "v1",
+    );
     expect(restored).toBeNull();
   });
 });

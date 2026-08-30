@@ -120,6 +120,23 @@ configurable to anything else.
 No file gains a `config_authority` value on upgrade; it must be declared
 explicitly to opt into `managed`.
 
+### Generated configuration contract artifacts (ADR 0019 §21-23)
+
+`docs/generated/config.schema.json`, `config-metadata.json` and
+`config-reference.md` are deterministic renderings of the same configuration
+surface item 1 above already covers — they describe existing keys, types,
+defaults and value constraints, and do not themselves widen or narrow the
+configuration contract. Their own **rendered shape** (JSON Schema dialect,
+`config-metadata.json`'s field layout, generated-reference structure) is
+tracked separately by `configcontract.ContractVersion`, which changes only
+when that shape changes, independent of ordinary additive configuration
+growth. **JSON Schema validity is necessary and not sufficient**: a document
+satisfying the generated schema can still fail `jul check`, whose cross-field
+and cross-object rules remain authoritative and are not themselves part of
+the schema. Likewise, a configuration may satisfy both the schema and
+`jul check` while `jul lint` reports an error-severity finding — lint policy
+is never encoded as schema-level invalidity.
+
 ## What it does not cover
 
 - **Beta / Prototype / Alpha features** — still evolving; their config and APIs

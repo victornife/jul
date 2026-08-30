@@ -11,6 +11,7 @@ import {
   fetchPendingRestart,
   patchConfigBatch,
   type ConfigPatch,
+  type PatchOperationSummary,
   type PatchResult,
 } from "@/api/client.ts";
 import {
@@ -36,6 +37,26 @@ export function describePatchBatchError(error: PatchBatchPreviewError | null): s
   return error.message || "The structured edit could not be previewed.";
 }
 
+/**
+ * Fixes a location_add op that has no route_id yet to the resource_id its
+ * own preview response returned. The backend mints a route_id only when the
+ * op omits one (ADR 0019 §4); without this, a re-preview or the final apply
+ * of the very same batch would replay the op with route_id still absent and
+ * mint a second, different id than the one already shown to the operator.
+ * Every other op is returned unchanged.
+ */
+function withMintedRouteIDs(
+  ops: readonly ConfigPatch[],
+  summaries: readonly PatchOperationSummary[],
+): ConfigPatch[] {
+  return ops.map((op, index) => {
+    if (op.op !== "location_add" || op.route_id !== undefined) return op;
+    const summary = summaries.find((candidate) => candidate.op_index === index);
+    if (summary?.resource_id === undefined) return op;
+    return { ...op, route_id: summary.resource_id };
+  });
+}
+
 /** Pure conversion from the secret-safe preview response to pending state. */
 export function patchResultToPendingDraft(
   ops: readonly ConfigPatch[],
@@ -53,7 +74,7 @@ export function patchResultToPendingDraft(
   const baseVersion = result.base_version ?? requestedBaseVersion;
   return {
     kind: "patch",
-    ops: [...ops],
+    ops: withMintedRouteIDs(ops, result.operation_summaries),
     ...(baseVersion !== undefined ? { baseVersion } : {}),
     summary: result.summary,
     operationSummaries: result.operation_summaries,
@@ -75,6 +96,7 @@ export function patchResultToPendingDraft(
     // Candidate is intentionally omitted; ordinary preview is secret-safe.
   };
 }
+
 
 /**
  * Capture the value-free pending-restart state before previewing the pinned

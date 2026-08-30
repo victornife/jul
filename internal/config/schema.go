@@ -417,6 +417,19 @@ type CORSConfig struct {
 type LocationConfig struct {
 	Match MatchConfig `toml:"match"`
 
+	// RouteID is an optional, durable identifier for this location (ADR 0019
+	// §4). It survives edits to Match, the action, and reordering, and is
+	// globally unique across the whole configuration document. Jul mints one
+	// (r-<26 lowercase base32 characters over 128 CSPRNG bits>) only when a
+	// managed structured-API create operation omits it; every other path —
+	// edit, raw apply, adoption, parse, validate, lint, fmt, schema
+	// generation, a projection or diff read, reload, or startup — preserves
+	// exactly what is present and never adds one. A route without a RouteID
+	// remains fully addressable through ADR 0018's revision-scoped selector
+	// (listen, server_names, match_type, path, match_ordinal) plus
+	// base_version; neither form is degraded relative to the other.
+	RouteID *string `toml:"route_id,omitempty"`
+
 	// ResponseHeaders is the ordered list of add/set/remove operations applied
 	// to the response this location produces, outside the cache and outside
 	// compression's own headers (ADR 0018 §8). CORS's own Access-Control-*

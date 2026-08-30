@@ -510,7 +510,11 @@ console = true
 
 The full **configuration reference** — every key, type, default, and example —
 lives in [`docs/configuration.md`](docs/configuration.md) so it can be updated
-independently and deep-linked.
+independently and deep-linked. An exhaustive, generated field-by-field
+reference (regenerated from the schema, never hand-edited) is also available:
+[`docs/generated/config-reference.md`](docs/generated/config-reference.md),
+[`docs/generated/config.schema.json`](docs/generated/config.schema.json) (JSON
+Schema 2020-12), and [`docs/generated/config-metadata.json`](docs/generated/config-metadata.json).
 
 Key sections covered there:
 

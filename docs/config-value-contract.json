@@ -557,6 +557,14 @@
       "active_when": "always"
     },
     {
+      "go_field": "LocationConfig.RouteID",
+      "path": "servers[].locations[].route_id",
+      "kind": "grammar",
+      "constraint": "1 to 64 bytes; lowercase ASCII [a-z0-9_-]; first byte alphanumeric; present-and-empty invalid; globally unique across the configuration",
+      "zero_semantics": "omitted means no durable identity; the revision-scoped selector (listen, server_names, match_type, path, match_ordinal) plus base_version remains fully functional",
+      "active_when": "always"
+    },
+    {
       "go_field": "LocationResilienceConfig.MaxConnectionsPerBackend",
       "path": "servers[].locations[].resilience.max_connections_per_backend",
       "kind": "integer",

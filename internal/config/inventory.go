@@ -4,6 +4,7 @@
 package config
 
 import (
+	"encoding"
 	"reflect"
 	"sort"
 	"strings"
@@ -45,11 +46,66 @@ type SchemaPath struct {
 	// Dynamic is true when the path contains at least one wildcard segment,
 	// meaning it expands to one instance per configured collection element.
 	Dynamic bool
+	// Structure classifies a KindTable container's shape. Empty for leaves.
+	Structure StructureKind
+	// Scalar classifies a KindScalar leaf's basic wire type, or a KindList
+	// leaf's element type. Empty for KindTable.
+	Scalar ScalarKind
+	// TextScalar is true when a table element also accepts a plain scalar
+	// string on the wire, via encoding.TextUnmarshaler/TextMarshaler (e.g. an
+	// upstream server written as "host:port weight=N" instead of a table).
+	// It is set on the container path, never on a leaf.
+	TextScalar bool
+	// DeclaringType and FieldName name the Go struct type and field that
+	// produced this path (e.g. "ACMEConfig", "CA"), letting a generator join
+	// an external per-field authority (such as a Go doc comment) back to a
+	// canonical path without re-walking the schema itself.
+	DeclaringType string
+	FieldName     string
 }
 
 // IsLeaf reports whether the path is a configurable value rather than a
 // container that only groups other paths.
 func (p SchemaPath) IsLeaf() bool { return p.Kind != KindTable }
+
+// StructureKind classifies the shape of a KindTable container so a generated
+// JSON Schema (or any other renderer) never has to parse GoType to recover it.
+// It is produced by this file's one schema walker, never inferred elsewhere.
+type StructureKind string
+
+const (
+	// StructObject is a plain struct: a closed set of named fields.
+	StructObject StructureKind = "object"
+	// StructArrayTable is a slice of structs (TOML array-of-tables): an ordered
+	// list whose elements are closed objects.
+	StructArrayTable StructureKind = "array_table"
+	// StructMapTable is a map whose values are structs: operator-chosen keys,
+	// each naming a closed object.
+	StructMapTable StructureKind = "map_table"
+	// StructMapScalar is a map whose values are scalars: operator-chosen keys,
+	// each naming a single configurable value.
+	StructMapScalar StructureKind = "map_scalar"
+	// StructOpen marks a container whose value shape is intentionally
+	// unconstrained (e.g. arbitrary user/plugin data). No field in the current
+	// schema has this shape; it exists so a future one is classified rather
+	// than silently rendered as a closed object.
+	StructOpen StructureKind = "open"
+)
+
+// ScalarKind classifies the basic wire type of a KindScalar leaf (or a KindList
+// leaf's element type), distinguishing Jul's named scalar types (Duration,
+// Size) from a plain string, number or boolean without parsing GoType.
+type ScalarKind string
+
+const (
+	ScalarString   ScalarKind = "string"
+	ScalarBool     ScalarKind = "bool"
+	ScalarInteger  ScalarKind = "integer"
+	ScalarFloat    ScalarKind = "float"
+	ScalarDuration ScalarKind = "duration"
+	ScalarSize     ScalarKind = "size"
+	ScalarTime     ScalarKind = "time"
+)
 
 // SchemaPaths returns every public TOML path reachable from Config, containers
 // included, sorted by path. The result is deterministic and independent of the
@@ -80,7 +136,42 @@ func SchemaLeaves() []SchemaPath {
 	return out
 }
 
-var timeType = reflect.TypeOf(time.Time{})
+var (
+	timeType            = reflect.TypeOf(time.Time{})
+	durationType        = reflect.TypeOf(Duration(0))
+	sizeType            = reflect.TypeOf(Size(0))
+	textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
+)
+
+// scalarKindOf classifies a dereferenced scalar type without parsing its
+// GoType string, distinguishing Jul's named scalar types by identity.
+func scalarKindOf(t reflect.Type) ScalarKind {
+	switch t {
+	case timeType:
+		return ScalarTime
+	case durationType:
+		return ScalarDuration
+	case sizeType:
+		return ScalarSize
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return ScalarString
+	case reflect.Bool:
+		return ScalarBool
+	case reflect.Float32, reflect.Float64:
+		return ScalarFloat
+	default:
+		return ScalarInteger
+	}
+}
+
+// acceptsTextScalar reports whether t's element also decodes from a plain
+// scalar string via encoding.TextUnmarshaler, checked structurally rather than
+// by name.
+func acceptsTextScalar(t reflect.Type) bool {
+	return reflect.PointerTo(t).Implements(textUnmarshalerType)
+}
 
 // walkSchema appends the inventory of t under prefix. visiting guards against a
 // self-referential schema type; the current schema has none, but a future
@@ -102,33 +193,35 @@ func walkSchema(t reflect.Type, prefix string, dynamic bool, visiting map[reflec
 		path := joinSchemaPath(prefix, name)
 		optional := opts["omitempty"] || f.Type.Kind() == reflect.Pointer
 		ft := derefType(f.Type)
+		declaringType, fieldName := t.Name(), f.Name
 
 		switch {
 		case isScalarType(ft):
-			*out = append(*out, SchemaPath{Path: path, Kind: KindScalar, GoType: goTypeName(f.Type), Optional: optional, Dynamic: dynamic})
+			*out = append(*out, SchemaPath{Path: path, Kind: KindScalar, GoType: goTypeName(f.Type), Optional: optional, Dynamic: dynamic, Scalar: scalarKindOf(ft), DeclaringType: declaringType, FieldName: fieldName})
 
 		case ft.Kind() == reflect.Slice || ft.Kind() == reflect.Array:
 			et := derefType(ft.Elem())
 			if et.Kind() == reflect.Struct && !isScalarType(et) {
-				*out = append(*out, SchemaPath{Path: path, Kind: KindTable, GoType: goTypeName(f.Type), Optional: optional, Dynamic: dynamic})
+				*out = append(*out, SchemaPath{Path: path, Kind: KindTable, GoType: goTypeName(f.Type), Optional: optional, Dynamic: dynamic, Structure: StructArrayTable, TextScalar: acceptsTextScalar(et), DeclaringType: declaringType, FieldName: fieldName})
 				walkSchema(et, path+".*", true, visiting, out)
 				continue
 			}
-			*out = append(*out, SchemaPath{Path: path, Kind: KindList, GoType: goTypeName(f.Type), Optional: optional, Dynamic: dynamic})
+			*out = append(*out, SchemaPath{Path: path, Kind: KindList, GoType: goTypeName(f.Type), Optional: optional, Dynamic: dynamic, Scalar: scalarKindOf(et), DeclaringType: declaringType, FieldName: fieldName})
 
 		case ft.Kind() == reflect.Map:
 			et := derefType(ft.Elem())
-			*out = append(*out, SchemaPath{Path: path, Kind: KindTable, GoType: goTypeName(f.Type), Optional: optional, Dynamic: dynamic})
 			if et.Kind() == reflect.Struct && !isScalarType(et) {
+				*out = append(*out, SchemaPath{Path: path, Kind: KindTable, GoType: goTypeName(f.Type), Optional: optional, Dynamic: dynamic, Structure: StructMapTable, TextScalar: acceptsTextScalar(et), DeclaringType: declaringType, FieldName: fieldName})
 				walkSchema(et, path+".*", true, visiting, out)
 				continue
 			}
+			*out = append(*out, SchemaPath{Path: path, Kind: KindTable, GoType: goTypeName(f.Type), Optional: optional, Dynamic: dynamic, Structure: StructMapScalar, DeclaringType: declaringType, FieldName: fieldName})
 			// A map of scalars contributes exactly one canonical leaf for its
 			// operator-chosen keys.
-			*out = append(*out, SchemaPath{Path: path + ".*", Kind: KindScalar, GoType: goTypeName(ft.Elem()), Optional: false, Dynamic: true})
+			*out = append(*out, SchemaPath{Path: path + ".*", Kind: KindScalar, GoType: goTypeName(ft.Elem()), Optional: false, Dynamic: true, Scalar: scalarKindOf(et), DeclaringType: declaringType, FieldName: fieldName})
 
 		case ft.Kind() == reflect.Struct:
-			*out = append(*out, SchemaPath{Path: path, Kind: KindTable, GoType: goTypeName(f.Type), Optional: optional, Dynamic: dynamic})
+			*out = append(*out, SchemaPath{Path: path, Kind: KindTable, GoType: goTypeName(f.Type), Optional: optional, Dynamic: dynamic, Structure: StructObject, DeclaringType: declaringType, FieldName: fieldName})
 			walkSchema(ft, path, dynamic, visiting, out)
 		}
 	}
