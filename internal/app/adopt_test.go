@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 
 	"jul/internal/admin"
@@ -253,10 +254,12 @@ func TestAssessAdoptExternalSnapshotUnreadableIsInconsistent(t *testing.T) {
 	}
 }
 
-// TestAdoptExternalSnapshotUnreadableRefusesAdoption mirrors the preview
-// case for the actual commit path: AdoptExternal must refuse rather than
-// silently proceed as though no prior baseline existed.
-func TestAdoptExternalSnapshotUnreadableRefusesAdoption(t *testing.T) {
+// TestAdoptExternalSnapshotUnreadableHotAdoptionRecovers mirrors the preview
+// case for the actual commit path: managed_inconsistent already blocks
+// ordinary managed writes, so hot adoption — the designated recovery path —
+// must not also refuse an unreadable prior snapshot, or the state becomes
+// unrecoverable without manual sidecar surgery (ADR 0019 §14.1).
+func TestAdoptExternalSnapshotUnreadableHotAdoptionRecovers(t *testing.T) {
 	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
 	c.ManagedBaseline = NewManagedBaselineStore(path)
 	seed := validConfigRaw(t, ":8080")
@@ -283,8 +286,119 @@ func TestAdoptExternalSnapshotUnreadableRefusesAdoption(t *testing.T) {
 		Mode:           "hot",
 		Confirm:        true,
 	})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	// Hot adoption attempts recovery rather than refusing outright: the
+	// marker commits to the adopted bytes even though, in this specific
+	// scenario, the same directory obstruction that made the prior snapshot
+	// unreadable also blocks writing the new one, degrading to
+	// managed_inconsistent/baseline_unwritable instead of reaching
+	// managed_clean — a truthful, still-actionable outcome, never the old
+	// hard refusal that left the marker (and the whole recovery) untouched.
+	if !res.OK {
+		t.Fatalf("hot adoption must attempt recovery rather than refuse outright, got %+v", res)
+	}
+	if res.Origin != "inconsistent" {
+		t.Errorf("Origin = %q, want inconsistent", res.Origin)
+	}
+	marker, rerr := os.ReadFile(path + ".managed-baseline.json")
+	if rerr != nil {
+		t.Fatalf("read marker: %v", rerr)
+	}
+	if !strings.Contains(string(marker), digestHex(external)) {
+		t.Errorf("marker = %s, want it to commit to the adopted bytes %s", marker, digestHex(external))
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonBaselineUnwritable {
+		t.Errorf("state=%v reason=%v, want managed_inconsistent/baseline_unwritable (marker committed, but the snapshot write is still obstructed by the same directory)", st.State, st.Reason)
+	}
+}
+
+// TestAdoptExternalDoesNotDowngradeInconsistentToDesiredAhead pins the P1
+// found on top of ADR 0019's recovery/state precedence: a failed baseline
+// snapshot write whose single required retry (§11.2.1a) also fails must
+// enter managed_inconsistent and refuse further managed writes. A
+// subsequent, unrelated reload failure must not then downgrade that to
+// managed_desired_ahead, which explicitly permits managed writes — that
+// would silently reopen writes over a durable baseline that is still
+// broken.
+func TestAdoptExternalDoesNotDowngradeInconsistentToDesiredAhead(t *testing.T) {
+	submit := func(req server.ReloadRequest) error {
+		return errors.New("simulated enqueue failure")
+	}
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, submit)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	// Obstruct the snapshot path so CommitSnapshotOnly and its required
+	// retry both fail, forcing managed_inconsistent/baseline_unwritable.
+	if err := os.Remove(path + ".managed-baseline.snapshot"); err != nil {
+		t.Fatalf("remove real snapshot: %v", err)
+	}
+	if err := os.Mkdir(path+".managed-baseline.snapshot", 0o755); err != nil {
+		t.Fatalf("occupy snapshot path: %v", err)
+	}
+	external := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+		ObservedDigest: digestHex(external),
+		BaseVersion:    "seed-version",
+		Mode:           "hot",
+		Confirm:        true,
+	})
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("adoption is still a degraded success even though the reload also failed, got %+v", res)
+	}
+
+	st := c.ManagedBaseline.Status()
+	if st.State != ConfigStateManagedInconsistent || st.Reason != ReasonBaselineUnwritable {
+		t.Fatalf("state=%v reason=%v, want managed_inconsistent/baseline_unwritable to survive the later reload failure, not be downgraded to managed_desired_ahead", st.State, st.Reason)
+	}
+
+	// A managed_inconsistent baseline must itself refuse further writes.
+	apply, err := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
+	if err != nil {
+		t.Fatalf("ApplyRaw: %v", err)
+	}
+	if apply.OK {
+		t.Fatalf("a managed_inconsistent baseline must refuse further managed writes, got %+v", apply)
+	}
+}
+
+// TestAdoptExternalDamagedSnapshotStageRestartRefuses pins the one exception
+// to hot adoption's recovery: stage_restart needs a trustworthy prior
+// snapshot to construct a safe `.bak`/discard (ADR 0019 §11.2.4), so it must
+// continue refusing when that snapshot cannot be verified.
+func TestAdoptExternalDamagedSnapshotStageRestartRefuses(t *testing.T) {
+	seed := validConfigRaw(t, ":8080")
+	candidate := validConfigRaw(t, ":9999")
+	c, path := newStageRestartAdoptFixture(t, seed, candidate)
+	if err := os.Remove(path + ".managed-baseline.snapshot"); err != nil {
+		t.Fatalf("remove real snapshot: %v", err)
+	}
+	if err := os.Mkdir(path+".managed-baseline.snapshot", 0o755); err != nil {
+		t.Fatalf("occupy snapshot path: %v", err)
+	}
+
+	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+		ObservedDigest: digestHex(candidate),
+		BaseVersion:    "seed-version",
+		Mode:           "stage_restart",
+		Confirm:        true,
+	})
 	if err == nil {
-		t.Fatal("expected an error refusing the adoption")
+		t.Fatal("expected an error refusing the staged adoption")
 	}
 	if res.OK {
 		t.Fatalf("result = %+v, want OK=false", res)
@@ -293,8 +407,11 @@ func TestAdoptExternalSnapshotUnreadableRefusesAdoption(t *testing.T) {
 		t.Errorf("state=%v reason=%v, want managed_inconsistent/snapshot_unreadable", st.State, st.Reason)
 	}
 	onDisk, _ := os.ReadFile(path)
-	if string(onDisk) != string(external) {
+	if string(onDisk) != string(candidate) {
 		t.Error("a refused adoption must not touch the file")
+	}
+	if _, err := os.Stat(path + ".pending-restart.bak"); !os.IsNotExist(err) {
+		t.Error("a refused adoption must not create a .bak without a trustworthy prior snapshot")
 	}
 }
 
@@ -332,18 +449,22 @@ func TestAssessAdoptExternalSnapshotMissingIsDistinctFromUnreadable(t *testing.T
 		t.Fatal("expected a validation error naming the missing snapshot")
 	}
 
-	// AdoptExternal (the actual commit, unlike preview) may record why.
+	// AdoptExternal (the actual commit) recovers rather than refuses: hot
+	// adoption is the designated recovery path out of managed_inconsistent.
 	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
 		ObservedDigest: digestHex(external),
 		BaseVersion:    "seed-version",
 		Mode:           "hot",
 		Confirm:        true,
 	})
-	if err == nil || res.OK {
-		t.Fatalf("expected AdoptExternal to refuse, got res=%+v err=%v", res, err)
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
 	}
-	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonSnapshotMissing {
-		t.Errorf("state=%v reason=%v, want managed_inconsistent/snapshot_missing", st.State, st.Reason)
+	if !res.OK {
+		t.Fatalf("hot adoption must recover from a missing prior snapshot, got %+v", res)
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedClean {
+		t.Errorf("state=%v, want managed_clean after a successful recovery adoption", st.State)
 	}
 }
 
@@ -392,15 +513,18 @@ func TestAssessAdoptExternalSnapshotDigestMismatchIsInconsistent(t *testing.T) {
 		Mode:           "hot",
 		Confirm:        true,
 	})
-	if err == nil || res.OK {
-		t.Fatalf("expected AdoptExternal to refuse a corrupted snapshot, got res=%+v err=%v", res, err)
+	if err != nil {
+		t.Fatalf("AdoptExternal: %v", err)
 	}
-	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonSnapshotDigestMismatch {
-		t.Errorf("state=%v reason=%v, want managed_inconsistent/snapshot_digest_mismatch", st.State, st.Reason)
+	if !res.OK {
+		t.Fatalf("hot adoption must recover from a corrupted prior snapshot, got %+v", res)
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedClean {
+		t.Errorf("state=%v, want managed_clean after a successful recovery adoption", st.State)
 	}
 	onDisk, _ := os.ReadFile(path)
 	if string(onDisk) != string(external) {
-		t.Error("a refused adoption must not touch the file")
+		t.Error("hot adoption must never write the configuration file itself")
 	}
 }
 
@@ -1729,6 +1853,13 @@ func TestAdoptAndStageLockedPostPromotionMismatchCleansUp(t *testing.T) {
 	}
 	if c.PlannedRestart.IsPending() {
 		t.Error("no restart should be reported pending after the cleanup")
+	}
+	// The code already knows the file no longer matches the just-committed
+	// baseline (that is what drift_after_adopt reports) — config_state must
+	// reflect that immediately rather than reporting managed_clean until an
+	// unrelated later trigger catches up.
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedDrift {
+		t.Errorf("state = %v, want managed_drift set before terminal publication", st.State)
 	}
 }
 

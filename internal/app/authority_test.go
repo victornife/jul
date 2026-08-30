@@ -126,6 +126,49 @@ func TestCheckManagedFilesystemUnwritableDirIsWarning(t *testing.T) {
 	}
 }
 
+// TestCheckFileOwnedArtifactsNoopWithoutSurvivingArtifacts pins that the
+// check is inert for managed authority, an empty config path, or a
+// file_owned path with no leftover managed-baseline sidecar files.
+func TestCheckFileOwnedArtifactsNoopWithoutSurvivingArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "server.toml")
+	if err := os.WriteFile(path, []byte("a = 1\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if diags := CheckFileOwnedArtifacts(path, AuthorityManaged); diags != nil {
+		t.Errorf("managed authority = %+v, want nil", diags)
+	}
+	if diags := CheckFileOwnedArtifacts("", AuthorityFileOwned); diags != nil {
+		t.Errorf("empty path = %+v, want nil", diags)
+	}
+	if diags := CheckFileOwnedArtifacts(path, AuthorityFileOwned); diags != nil {
+		t.Errorf("no surviving artifacts = %+v, want nil", diags)
+	}
+}
+
+// TestCheckFileOwnedArtifactsWarnsWhenArtifactsSurvive pins ADR 0019 §17.2's
+// required lint finding: a file_owned process with leftover managed-baseline
+// artifacts (e.g. a read-only-mount cleanup failure) must be reported by
+// `jul lint` rather than stay invisible until the next restart tries again.
+func TestCheckFileOwnedArtifactsWarnsWhenArtifactsSurvive(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "server.toml")
+	if err := os.WriteFile(path, []byte("a = 1\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := NewManagedBaselineStore(path).CommitMark([]byte("a = 1\n"), "v1"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+
+	diags := CheckFileOwnedArtifacts(path, AuthorityFileOwned)
+	if len(diags) != 1 {
+		t.Fatalf("diags = %+v, want exactly one finding", diags)
+	}
+	if diags[0].Severity != config.SeverityWarning {
+		t.Errorf("severity = %v, want warning", diags[0].Severity)
+	}
+}
+
 // TestTruncatedDigest pins the §13 bound: the same 16 hex characters
 // CanonicalVersion uses.
 func TestTruncatedDigest(t *testing.T) {

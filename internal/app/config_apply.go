@@ -236,6 +236,13 @@ type ConfigApplyCoordinator struct {
 	// tests use it to write an external change between the restoration write
 	// and the baseline's own resolution of that restoration.
 	afterRestore func()
+	// beforeGateClears is a deterministic test barrier invoked immediately
+	// before inFlightState clears, on both the synchronous enqueue-failure
+	// path and the async finalizer, after any baseline resolution/retry has
+	// already run. Production leaves it nil; tests use it to simulate a
+	// watcher event landing in the narrow window between the transaction's
+	// own terminal drift reassessment and the gate actually reopening.
+	beforeGateClears func()
 	// beforeBaselineWriteRetry is a deterministic test barrier invoked at the
 	// start of resolveBaselineWriteRetry, before it does any work. Production
 	// leaves it nil; tests use it to hold the retry open and observe that the
@@ -270,6 +277,13 @@ type ConfigApplyCoordinator struct {
 	// inFlightState tracks whether a managed apply transaction still owns the
 	// config-path mutation/restoration gate. It is protected by mu.
 	inFlightState ApplyInFlightState
+	// driftAssessmentPending is set by AssessDriftNow when a watcher/SIGHUP
+	// event arrives while inFlightState is waiting and is deferred rather than
+	// evaluated (see AssessDriftNow). It is protected by mu and drained by
+	// drainPendingDriftAssessment once the gate clears, so a real external
+	// write landing after the transaction's own terminal reassessment but
+	// before the gate clears is not lost until an unrelated later trigger.
+	driftAssessmentPending bool
 }
 
 // ApplyRaw applies a raw configuration bytes slice. It is the hot-apply entry
@@ -743,11 +757,34 @@ func (c *ConfigApplyCoordinator) AssessDriftNow() {
 	defer c.applyMu.Unlock()
 	c.mu.Lock()
 	inFlight := c.inFlightState == ApplyInFlightWaiting
+	if inFlight {
+		// Remember that an assessment was deferred, so drainPendingDriftAssessment
+		// re-checks once the gate clears rather than losing this event entirely —
+		// a real external write can still land after the transaction's own
+		// terminal reassessment but before inFlightState clears.
+		c.driftAssessmentPending = true
+	}
 	c.mu.Unlock()
 	if inFlight {
 		return
 	}
 	c.assessManagedDrift()
+}
+
+// drainPendingDriftAssessment re-runs the drift assessment once more if
+// AssessDriftNow deferred one while this transaction owned inFlightState.
+// Called immediately after every point that clears inFlightState, outside
+// mu (assessManagedDrift needs only ManagedBaselineStore's own locking), so
+// a watcher/SIGHUP event that arrived during the transaction's window is not
+// silently dropped once the gate reopens.
+func (c *ConfigApplyCoordinator) drainPendingDriftAssessment() {
+	c.mu.Lock()
+	pending := c.driftAssessmentPending
+	c.driftAssessmentPending = false
+	c.mu.Unlock()
+	if pending {
+		c.assessManagedDrift()
+	}
 }
 
 // managedBaselineBlockMessage reports whether a managed write must be
@@ -1553,12 +1590,21 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
 			baselineDegraded = c.rewindOrMarkInconsistent(terminal.Restored)
 		}
-		c.inFlightState = ApplyInFlightNone
 		if baselineDegraded != nil {
 			terminal.Degraded = append(terminal.Degraded, *baselineDegraded)
 		}
 		// M-05: Move callback after unlock to prevent mutex wedge on panic.
 		c.mu.Unlock()
+		// beforeGateClears fires with mu released: a test barrier that blocks
+		// here must not hold mu, or a concurrent AssessDriftNow (which also
+		// takes mu) would deadlock against it.
+		if c.beforeGateClears != nil {
+			c.beforeGateClears()
+		}
+		c.mu.Lock()
+		c.inFlightState = ApplyInFlightNone
+		c.mu.Unlock()
+		c.drainPendingDriftAssessment()
 		// AC-05: an enqueue failure whose restoration also failed records a
 		// recovery snapshot; a clean restoration records nothing. Recorded
 		// through the single terminal completion helper outside c.mu.
@@ -1663,9 +1709,17 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// completeManagedApply serializes history/audit/metrics/ledger work with
 		// finalizeMu. A later apply may start while that work finishes, but its own
 		// terminal publication queues behind this finalizer.
+		//
+		// beforeGateClears fires with mu released: a test barrier that blocks
+		// here must not hold mu, or a concurrent AssessDriftNow (which also
+		// takes mu) would deadlock against it.
+		if c.beforeGateClears != nil {
+			c.beforeGateClears()
+		}
 		c.mu.Lock()
 		c.inFlightState = ApplyInFlightNone
 		c.mu.Unlock()
+		c.drainPendingDriftAssessment()
 		close(finalizedCh)
 		// Carry any post-persistence pending-registration failure into the
 		// terminal finalization provenance so it is surfaced through the

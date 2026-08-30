@@ -639,8 +639,11 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				// as the step-2 callback so CloseEpoch runs the two
 				// secret-bearing removals (snapshot, then orphan backup)
 				// strictly before the safe tombstone write.
+				hadManagedArtifacts := managedBaseline.HasArtifacts()
 				if err := managedBaseline.CloseEpoch(sharedStore.RemoveOrphanBackup); err != nil {
 					log.Warn("file-owned startup could not remove leftover managed-baseline artifacts (read-only mount?)", "error", err)
+				} else if hadManagedArtifacts {
+					log.Info("file-owned startup closed a leftover managed-baseline epoch", "config", configPath)
 				}
 			}
 		}

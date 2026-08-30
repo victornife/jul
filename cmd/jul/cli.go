@@ -145,6 +145,7 @@ func cmdLint(args []string) int {
 	hasConfigPath := *configPath != ""
 	authority, _ := app.ResolveConfigAuthority(cfg.Global.ConfigAuthority, hasConfigPath)
 	diags = append(diags, app.CheckManagedFilesystem(*configPath, authority)...)
+	diags = append(diags, app.CheckFileOwnedArtifacts(*configPath, authority)...)
 	var lintErrs, warns []config.Diagnostic
 	for _, d := range diags {
 		if d.Severity == config.SeverityError {

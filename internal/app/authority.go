@@ -194,6 +194,27 @@ func CheckManagedFilesystem(configPath string, authority ConfigAuthority) []conf
 	return diags
 }
 
+// CheckFileOwnedArtifacts implements ADR 0019 §17.2's required lint finding:
+// when file_owned startup cleanup (CloseEpoch) could not remove leftover
+// managed-baseline artifacts — e.g. a read-only mount — they must not stay
+// invisible until the next restart tries again, since they can carry literal
+// configuration secrets. It is a no-op outside file_owned authority or when
+// configPath is empty.
+func CheckFileOwnedArtifacts(configPath string, authority ConfigAuthority) []config.Diagnostic {
+	if authority != AuthorityFileOwned || configPath == "" {
+		return nil
+	}
+	if !NewManagedBaselineStore(configPath).HasArtifacts() {
+		return nil
+	}
+	return []config.Diagnostic{{
+		Severity: config.SeverityWarning,
+		Field:    "global.config_authority",
+		Message:  fmt.Sprintf("config_authority is file_owned, but managed-baseline artifacts survive alongside %s", configPath),
+		Hint:     "a previous cleanup could not remove them (e.g. a read-only mount); they may contain configuration secrets and should be removed manually once the mount is writable",
+	}}
+}
+
 // dirIsWritable reports whether dir accepts a new file, using the same
 // create-temp-file operation atomicfile.Write performs for a real managed
 // write, so the answer matches what a write would actually do.

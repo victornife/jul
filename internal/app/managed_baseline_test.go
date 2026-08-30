@@ -904,12 +904,26 @@ func TestManagedBaselineRewindWriteSurfacesMarkerReadError(t *testing.T) {
 
 func TestManagedBaselineCloseEpochMarkerUnreadableFails(t *testing.T) {
 	store, cfgPath := newBaselineStoreForTest(t)
+	raw := []byte("a = 1\n")
+	if err := store.CommitMark(raw, "v1"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	if err := os.Remove(cfgPath + ".managed-baseline.json"); err != nil {
+		t.Fatalf("remove real marker: %v", err)
+	}
 	if err := os.Mkdir(cfgPath+".managed-baseline.json", 0o755); err != nil {
 		t.Fatalf("occupy marker path: %v", err)
 	}
 
 	if err := store.CloseEpoch(nil); err == nil {
 		t.Fatal("want error when the marker cannot be read")
+	}
+	// ADR 0019 §17.2: the secret-bearing snapshot must already be gone
+	// regardless of the marker failure — an undecodable marker is materially
+	// less serious than retaining configuration bytes past a file_owned
+	// handoff, and must never block its removal.
+	if _, err := os.Stat(cfgPath + ".managed-baseline.snapshot"); !os.IsNotExist(err) {
+		t.Errorf("snapshot must be removed even when the marker cannot be read, stat err = %v", err)
 	}
 }
 

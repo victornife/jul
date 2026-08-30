@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"jul/internal/app"
 	"jul/internal/config"
 	"jul/internal/handler"
 )
@@ -135,6 +136,25 @@ func TestCmdLintInvalid(t *testing.T) {
 	}
 	if !strings.Contains(out, "error") {
 		t.Errorf("expected an error in output:\n%s", out)
+	}
+}
+
+// TestCmdLintReportsSurvivingFileOwnedArtifacts pins ADR 0019 §17.2's
+// required lint finding: `jul lint` must surface managed-baseline sidecar
+// files left behind by a failed file_owned cleanup, since they can carry
+// literal configuration secrets and would otherwise stay invisible until
+// the next restart tries the cleanup again.
+func TestCmdLintReportsSurvivingFileOwnedArtifacts(t *testing.T) {
+	path := writeTemp(t, validConfig)
+	if err := app.NewManagedBaselineStore(path).CommitMark([]byte("a = 1\n"), "v1"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	code, out, _ := capture(t, func() int { return cmdLint([]string{"-config", path}) })
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0 (a warning alone, without -strict)\n%s", code, out)
+	}
+	if !strings.Contains(out, "managed-baseline artifacts survive") {
+		t.Errorf("expected a surviving-artifacts warning in output:\n%s", out)
 	}
 }
 

@@ -1184,3 +1184,99 @@ func TestManagedApplyRestorationSurvivesExternalWriteRace(t *testing.T) {
 		t.Fatalf("disk = %q, want the external write J to remain untouched by restoration bookkeeping", finalOnDisk)
 	}
 }
+
+// TestAssessDriftNowDeferredEventIsDrainedAfterGateClears pins the
+// completeness gap left by simply dropping a deferred watcher/SIGHUP event:
+// a real external write can land after the transaction's own terminal
+// drift reassessment but before inFlightState clears — AssessDriftNow's
+// in-flight guard defers rather than evaluates at that instant, and without
+// draining the deferred event afterward it would be lost until an unrelated
+// later trigger. beforeGateClears pins the pause to that exact narrow
+// window so the write here cannot be attributed to the transaction's own
+// terminal reassessment (which already ran, against the still-earlier disk
+// content, before this hook fires).
+func TestAssessDriftNowDeferredEventIsDrainedAfterGateClears(t *testing.T) {
+	submitCalled := make(chan struct{})
+	proceedReload := make(chan struct{})
+	submit := func(req server.ReloadRequest) error {
+		close(submitCalled)
+		go func() {
+			<-proceedReload
+			req.Result <- server.ReloadResult{
+				ID:             req.ID,
+				Source:         server.ReloadSourceAdmin,
+				Outcome:        server.ReloadAppliedLive,
+				Published:      true,
+				ServingVersion: "v2",
+			}
+		}()
+		return nil
+	}
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, submit)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+
+	reachedGateClear := make(chan struct{})
+	proceedGateClear := make(chan struct{})
+	c.beforeGateClears = func() {
+		close(reachedGateClear)
+		<-proceedGateClear
+	}
+
+	newRaw := validConfigRaw(t, ":8081")
+	type applyOutcome struct {
+		res ApplyResult
+		err error
+	}
+	done := make(chan applyOutcome, 1)
+	go func() {
+		res, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot)
+		done <- applyOutcome{res, err}
+	}()
+
+	<-submitCalled
+	close(proceedReload)
+	<-reachedGateClear
+
+	// At this point the finalizer's own terminal reassessment has already
+	// run (disk still held newRaw when it did) and reported managed_clean.
+	// An external write lands only now, strictly after that check.
+	external := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, external, 0o600); err != nil {
+		t.Fatalf("simulate external write: %v", err)
+	}
+
+	// The watcher fires in the exact window between the terminal
+	// reassessment and the gate clearing: inFlightState is still waiting,
+	// so this defers rather than evaluates.
+	c.AssessDriftNow()
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedClean {
+		t.Fatalf("state = %v, want the deferred call to have left managed_clean untouched for now", st.State)
+	}
+
+	close(proceedGateClear)
+	out := <-done
+	if out.err != nil {
+		t.Fatalf("ApplyRaw error: %v", out.err)
+	}
+	if !out.res.OK {
+		t.Fatalf("the apply itself must still succeed, got %+v", out.res)
+	}
+
+	st := c.ManagedBaseline.Status()
+	if st.State != ConfigStateManagedDrift {
+		t.Fatalf("state = %v, want managed_drift — the deferred watcher event must be drained once the gate clears, not lost", st.State)
+	}
+	if st.BaselineRawSHA256 != digestHex(newRaw) {
+		t.Errorf("baseline digest = %q, want %q", st.BaselineRawSHA256, digestHex(newRaw))
+	}
+	if st.DiskRawSHA256 != digestHex(external) {
+		t.Errorf("disk digest = %q, want %q", st.DiskRawSHA256, digestHex(external))
+	}
+}

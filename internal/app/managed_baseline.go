@@ -638,37 +638,15 @@ func (s *ManagedBaselineStore) CloseEpoch(removeOrphanArtifacts func() error) er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	marker, err := s.loadMarkerLocked()
-	if err != nil {
-		return fmt.Errorf("managed baseline: read marker before closing epoch: %w", err)
-	}
-
 	// Step 1: the snapshot is secret-bearing and is removed unconditionally,
-	// even when no marker survives to name it — an orphan snapshot with no
-	// marker at all is a reachable, ADR-anticipated state (§11.2.1b's
-	// "absent marker, present snapshot" row), and it must not outlive a
-	// missing marker just because there is nothing left to tombstone.
+	// before the marker is even read — a marker that cannot be decoded must
+	// never block removal of the secret-bearing artifacts this ordering
+	// exists to guarantee. An orphan snapshot with no marker at all is a
+	// reachable, ADR-anticipated state (§11.2.1b's "absent marker, present
+	// snapshot" row), and it must not outlive a missing marker just because
+	// there is nothing left to tombstone.
 	if err := os.Remove(s.snapshotPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("managed baseline: remove snapshot: %w", err)
-	}
-
-	if marker == nil {
-		// No marker to replace with a tombstone, but step 2 still runs: an
-		// orphan planned-restart backup is secret-bearing configuration bytes
-		// regardless of whether a baseline marker exists.
-		if removeOrphanArtifacts != nil {
-			if err := removeOrphanArtifacts(); err != nil {
-				return fmt.Errorf("managed baseline: remove orphan planned-restart backup: %w", err)
-			}
-		}
-		return nil
-	}
-
-	// Already closed or not, the digest the tombstone should carry is the
-	// same either way.
-	lastDigest := marker.CurrentRawSHA256
-	if marker.State == baselineStateClosed {
-		lastDigest = marker.LastRawSHA256
 	}
 
 	// Step 2, strictly before step 3: a failure here must leave the tombstone
@@ -680,7 +658,25 @@ func (s *ManagedBaselineStore) CloseEpoch(removeOrphanArtifacts func() error) er
 		}
 	}
 
-	// Step 3.
+	// Step 3: the marker is read only now, after both secret-bearing
+	// artifacts are already gone — an unreadable marker is materially less
+	// serious than retaining configuration bytes past a file_owned handoff,
+	// and must not prevent the removals above.
+	marker, err := s.loadMarkerLocked()
+	if err != nil {
+		return fmt.Errorf("managed baseline: read marker before closing epoch: %w", err)
+	}
+	if marker == nil {
+		return nil
+	}
+
+	// Already closed or not, the digest the tombstone should carry is the
+	// same either way.
+	lastDigest := marker.CurrentRawSHA256
+	if marker.State == baselineStateClosed {
+		lastDigest = marker.LastRawSHA256
+	}
+
 	if err := s.writeMarkerLocked(ManagedBaselineMarker{
 		State:         baselineStateClosed,
 		ClosedAt:      time.Now().UTC(),
@@ -750,13 +746,24 @@ func (s *ManagedBaselineStore) MarkFailedApply() {
 // in this state; only a restart or an explicit re-stage converges it. It is
 // reached only from a caller that has already confirmed the baseline itself
 // is correct (e.g. after AdoptExternal commits but the hot reload does not
-// take), so it does not re-verify Status().
+// take), so it does not re-verify the disk/marker itself.
+//
+// It never downgrades an existing managed_inconsistent or managed_drift: a
+// caller can reach here after a baseline write already failed its retry
+// (managed_inconsistent, managed writes refused) and only then discover its
+// own reload could not be enqueued or did not take — desired_ahead would
+// silently reopen writes a still-broken durable baseline must keep refused.
+// A no-op call also leaves Reason untouched, so a state this guard blocks
+// never carries a stale reason forward either.
 func (s *ManagedBaselineStore) MarkDesiredAhead() {
 	if s == nil || s.ConfigPath == "" {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.status.State == ConfigStateManagedInconsistent || s.status.State == ConfigStateManagedDrift {
+		return
+	}
 	s.status.State = ConfigStateManagedDesiredAhead
 	s.status.Drift = false
 	s.status.DriftDetectedAt = time.Time{}
