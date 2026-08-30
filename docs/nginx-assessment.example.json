@@ -4,80 +4,95 @@
   "source_policy": {
     "path_style": "relative",
     "root": ".",
-    "follow_includes": false
+    "follow_includes": true,
+    "complete": true,
+    "files_read": 2,
+    "total_bytes": 154,
+    "limits": {
+      "max_depth": 16,
+      "max_files": 256,
+      "max_file_bytes": 4194304,
+      "max_total_bytes": 33554432,
+      "max_glob_matches": 1024
+    }
   },
   "sources": [
     {
       "id": "source-0001",
       "display_path": "nginx.conf",
       "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    {
+      "id": "source-0002",
+      "display_path": "conf.d/site.conf",
+      "digest": "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "parent_id": "source-0001",
+      "include_line": 2
     }
   ],
-  "status": "manual_action_required",
+  "status": "ready_for_review",
   "summary": {
     "total": 2,
     "supported": 1,
     "approximated": 0,
     "ignored": 0,
-    "blocking": 1,
-    "informational": 0,
+    "blocking": 0,
+    "informational": 1,
     "parse_errors": 0,
     "validation_errors": 0,
-    "ready": false
+    "ready": true
   },
   "results": [
     {
       "id": "result-source-0001-0001",
-      "code": "NGX_MAIN_INCLUDE",
-      "class": "blocking",
-      "severity": "error",
+      "code": "NGX_INCLUDE_RESOLVED",
+      "class": "informational",
+      "severity": "info",
       "risk": "operational",
-      "context": "main",
+      "context": "http",
       "directive": "include",
-      "line": 1,
-      "message": "include files are not followed unless bounded traversal is enabled",
+      "line": 2,
+      "message": "include resolved 1 source file(s) inside the configured assessment root",
       "provenance": {
         "source_id": "source-0001",
         "display_path": "nginx.conf",
         "start": {
-          "line": 1,
-          "column": 1
+          "line": 2,
+          "column": 3
         },
         "end": {
-          "line": 1,
-          "column": 23
+          "line": 2,
+          "column": 28
         },
-        "context_path": "main",
+        "context_path": "http",
         "directive": "include",
         "summary": "include <path-omitted>"
       },
-      "guidance_codes": [
-        "GUIDE_INCLUDE_ENABLE"
-      ]
+      "scope": "source"
     },
     {
-      "id": "result-source-0001-0002",
+      "id": "result-source-0002-0001",
       "code": "NGX_SERVER_LISTEN",
       "class": "supported",
       "severity": "info",
       "risk": "routing",
       "context": "server",
       "directive": "listen",
-      "line": 4,
+      "line": 2,
       "message": "listen address translated",
       "target_paths": [
         "servers[].listen"
       ],
       "provenance": {
-        "source_id": "source-0001",
-        "display_path": "nginx.conf",
+        "source_id": "source-0002",
+        "display_path": "conf.d/site.conf",
         "start": {
-          "line": 4,
-          "column": 5
+          "line": 2,
+          "column": 3
         },
         "end": {
-          "line": 4,
-          "column": 16
+          "line": 2,
+          "column": 14
         },
         "context_path": "http > server[example.test @ :8080]",
         "directive": "listen",
@@ -91,15 +106,6 @@
           ]
         }
       ]
-    }
-  ],
-  "guidance": [
-    {
-      "code": "GUIDE_INCLUDE_ENABLE",
-      "title": "Assess included files explicitly",
-      "action": "Run the importer with bounded include traversal and an explicit assessment root, then review every included source result.",
-      "docs": "nginx-importer#include-security",
-      "blocking": true
     }
   ],
   "validation": {
