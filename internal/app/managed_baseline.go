@@ -726,6 +726,24 @@ func (s *ManagedBaselineStore) MarkInconsistent(reason ManagedInconsistentReason
 	s.status.Reason = reason
 }
 
+// MarkFailedApply transitions to managed_failed_apply (ADR 0019 §10/§16): a
+// T-write committed and its reload did not apply. It is the transient state
+// between that commit and the restoration decision that resolves it moments
+// later — RewindWrite on a successful restoration, or
+// MarkInconsistent(ReasonRestorationFailed) otherwise — and exists so a
+// status read concurrent with that window observes managed_failed_apply
+// rather than the stale state from before the failed apply started. It
+// touches neither the marker nor the snapshot on disk.
+func (s *ManagedBaselineStore) MarkFailedApply() {
+	if s == nil || s.ConfigPath == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status.State = ConfigStateManagedFailedApply
+	s.status.Reason = ""
+}
+
 // MarkDesiredAhead transitions to managed_desired_ahead (ADR 0019 §11.2.5):
 // the baseline and file are coherent — this call does not touch either — but
 // the runtime is behind and nothing is staged. Managed writes remain allowed

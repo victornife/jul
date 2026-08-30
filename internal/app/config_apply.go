@@ -736,10 +736,17 @@ func (c *ConfigApplyCoordinator) managedBaselineBlockMessage() (string, bool) {
 // would report managed_clean, because the baseline itself already advanced
 // to the staged candidate and is not drift (ADR 0019 §11.2.3).
 //
-// A managed_pending_restart takes priority over whatever the baseline alone
-// reports: the baseline's own view is correct evidence about provenance, but
-// §16's table defines managed_pending_restart for "a staged restart is
-// durable" regardless of what the baseline separately shows.
+// managed_drift and managed_inconsistent always win over a durable staged
+// restart, never the reverse: both name a condition §12/§11.2.1 requires to
+// be reported and alertable, and a planned-restart marker being present says
+// nothing about whether the file has since drifted out from under it — an
+// external writer does not consult PlannedRestart before editing the file.
+// Masking that behind managed_pending_restart would hide exactly the
+// condition an operator most needs to see. Only once neither applies does a
+// durable staged restart take priority over the baseline's other states
+// (managed_clean, managed_desired_ahead, managed_unadopted): §16's table
+// defines managed_pending_restart for "a staged restart is durable"
+// regardless of what the baseline separately shows in those cases.
 func (c *ConfigApplyCoordinator) currentConfigState() (ConfigState, ManagedInconsistentReason) {
 	if c.Authority == AuthorityFileOwned {
 		return c.fileOwnedConfigState(), ""
@@ -747,10 +754,13 @@ func (c *ConfigApplyCoordinator) currentConfigState() (ConfigState, ManagedIncon
 	if c.ManagedBaseline == nil {
 		return "", ""
 	}
+	bst := c.ManagedBaseline.Status()
+	if bst.State == ConfigStateManagedDrift || bst.State == ConfigStateManagedInconsistent {
+		return bst.State, bst.Reason
+	}
 	if c.PlannedRestart != nil && c.PlannedRestart.IsPending() {
 		return ConfigStateManagedPendingRestart, ""
 	}
-	bst := c.ManagedBaseline.Status()
 	return bst.State, bst.Reason
 }
 
@@ -759,7 +769,10 @@ func (c *ConfigApplyCoordinator) currentConfigState() (ConfigState, ManagedIncon
 // managed epoch may have left behind. file_owned_desired_ahead reuses the
 // same external-divergence signal PendingRestartCheck already maintains for
 // a restart-required edit that is not yet live; file_owned_invalid is a
-// current file that fails to parse; file_owned_clean is everything else,
+// current file that fails validation — parsing is necessary but not
+// sufficient, since config.Parse performs no semantic validation of its own
+// and a syntactically well-formed file can still fail config.Validate (e.g.
+// an unresolvable upstream reference) — file_owned_clean is everything else,
 // including a process with no configuration file at all (ADR 0019 §9.1.1).
 func (c *ConfigApplyCoordinator) fileOwnedConfigState() ConfigState {
 	if c.PlannedRestart != nil {
@@ -777,7 +790,11 @@ func (c *ConfigApplyCoordinator) fileOwnedConfigState() ConfigState {
 		// not observe.
 		return ConfigStateFileOwnedClean
 	}
-	if _, perr := config.Parse(raw); perr != nil {
+	cfg, perr := config.Parse(raw)
+	if perr != nil {
+		return ConfigStateFileOwnedInvalid
+	}
+	if verr := config.Validate(cfg); verr != nil {
 		return ConfigStateFileOwnedInvalid
 	}
 	return ConfigStateFileOwnedClean
@@ -800,24 +817,58 @@ func (c *ConfigApplyCoordinator) rewindOrMarkInconsistent(restored bool) *Degrad
 	return &DegradedEntry{Kind: DegradedBaselineError, Message: "baseline left inconsistent after a failed restoration"}
 }
 
-// scheduleBaselineWriteRetry performs ADR 0019 §11.2.1a's single required
-// retry after a post-commit baseline write failure (T-write's snapshot/
-// promotion, or T-mark's snapshot-only write). The caller has already
-// recorded the immediate baseline_error degradation and returned its own
-// terminal outcome unchanged, exactly as the ADR requires; this retry never
-// feeds back into that already-recorded result. It runs in its own goroutine
-// because every call site here still holds applyMu for its own transaction,
-// and the retry must acquire applyMu itself, fresh, to observe whatever the
-// state is by the time it actually runs.
+// retryBaselineWriteLocked performs ADR 0019 §11.2.1a's single required
+// retry after a post-commit baseline write failure, for callers that already
+// hold applyMu for their own transaction (T-mark's adoption commit and
+// T-write's stage_restart commit both do — unlike the hot-apply finalizer,
+// neither detaches into another goroutine before returning). Running the
+// retry inline, under the same applyMu hold, keeps it inside the same
+// admission-gate-held critical section §11.2.0.1 requires: no later
+// transaction can be admitted, contend with this retry over the same digest,
+// or observe a window where the retry's own eventual outcome is still
+// pending.
 //
-// Under applyMu, it re-reads the configuration and verifies it still matches
-// the digest committedRaw intends to record — the exact check the ADR
-// requires, because a retry that skipped it could record a digest a later
-// write or restoration had already superseded. A mismatch, a read failure, or
-// a failed retry all resolve the same way: managed_inconsistent, reason
-// baseline_unwritable. Recovery never resolves managed_clean on the strength
-// of an intention — only the retry write's own success does that, via
-// commit's normal path.
+// It re-reads the configuration and verifies it still matches the digest
+// committedRaw intends to record — the exact check the ADR requires, because
+// a retry that skipped it could record a digest a restoration had already
+// superseded. A mismatch, a read failure, or a failed retry all resolve the
+// same way: managed_inconsistent, reason baseline_unwritable. Recovery never
+// resolves managed_clean on the strength of an intention — only the retry
+// write's own success does that, via commit's normal path.
+func (c *ConfigApplyCoordinator) retryBaselineWriteLocked(committedRaw []byte, commit func([]byte) error) {
+	if c.ManagedBaseline == nil {
+		return
+	}
+	current, err := c.readConfigRaw()
+	if err != nil || sha256Hex(current) != sha256Hex(committedRaw) {
+		c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
+		return
+	}
+	if err := commit(committedRaw); err != nil {
+		c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
+	}
+}
+
+// scheduleBaselineWriteRetry is retryBaselineWriteLocked's counterpart for
+// the one call site that cannot run it inline: the hot-apply finalizer runs
+// in its own goroutine, and by the time its CompleteWrite call can fail, the
+// ApplyRaw call that spawned it may already have returned on a timeout and
+// released applyMu — so this retry cannot assume applyMu is still held, and
+// re-entering it here would deadlock if it were. It must therefore acquire
+// applyMu itself, fresh, in a detached goroutine, which reopens exactly the
+// admission-gate window retryBaselineWriteLocked's callers avoid: a later
+// apply can be admitted, run, and even fully commit its own valid baseline
+// before this retry gets its turn.
+//
+// The digest check is therefore not enough on its own — a mismatch is not
+// necessarily this retry's failure to detect, it may be a later, independent
+// transaction that already established its own valid baseline for whatever
+// the file now holds, in which case the system is already consistent and
+// recording managed_inconsistent here would wrongly regress a newer
+// successful commit. Abandoning silently when the current baseline already
+// names the current file's digest closes that specific hole; it does not
+// remove the admission-gate window itself, which remains a documented
+// residual for this one call site.
 func (c *ConfigApplyCoordinator) scheduleBaselineWriteRetry(committedRaw []byte, commit func([]byte) error) {
 	if c.ManagedBaseline == nil {
 		return
@@ -826,11 +877,22 @@ func (c *ConfigApplyCoordinator) scheduleBaselineWriteRetry(committedRaw []byte,
 	go func() {
 		c.applyMu.Lock()
 		defer c.applyMu.Unlock()
-		current, err := c.readConfigRaw()
-		if err != nil || sha256Hex(current) != intended {
+		raw, err := c.readConfigRaw()
+		var currentDigest string
+		if err == nil {
+			currentDigest = sha256Hex(raw)
+		}
+		switch {
+		case err != nil:
 			c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
-		} else if err := commit(committedRaw); err != nil {
-			c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
+		case currentDigest != intended:
+			if bst := c.ManagedBaseline.Status(); bst.BaselineRawSHA256 != currentDigest {
+				c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
+			}
+		default:
+			if err := commit(committedRaw); err != nil {
+				c.ManagedBaseline.MarkInconsistent(ReasonBaselineUnwritable)
+			}
 		}
 		if c.afterBaselineWriteRetry != nil {
 			c.afterBaselineWriteRetry()
@@ -1125,7 +1187,9 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 	if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
 		if err := c.ManagedBaseline.CompleteWrite(data, persistedVersion); err != nil {
 			stageDegraded = &DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written"}
-			c.scheduleBaselineWriteRetry(data, func(b []byte) error { return c.ManagedBaseline.CompleteWrite(b, persistedVersion) })
+			// ApplyRaw still holds applyMu for this whole call, so the retry
+			// runs inline rather than racing a later apply for it.
+			c.retryBaselineWriteLocked(data, func(b []byte) error { return c.ManagedBaseline.CompleteWrite(b, persistedVersion) })
 		}
 	}
 	c.mu.Unlock()
@@ -1345,6 +1409,9 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// Enqueue failed: the candidate file is on disk but the runtime will
 		// not reload. Restore the exact previous bytes and suppress the
 		// restoration echo so the watcher does not loop.
+		if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
+			c.ManagedBaseline.MarkFailedApply()
+		}
 		restoreErr := c.restorePreviousLocked(baseline.Raw, baseline.Exists, rawDigest)
 		var baselineDegraded *DegradedEntry
 		if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
@@ -1425,6 +1492,9 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		restoreNeeded := !rr.Published && rr.Outcome != server.ReloadAppliedLive && rr.Outcome != server.ReloadAppliedDegraded
 		c.mu.Lock()
 		if restoreNeeded {
+			if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
+				c.ManagedBaseline.MarkFailedApply()
+			}
 			if c.beforeRestore != nil {
 				c.beforeRestore()
 			}

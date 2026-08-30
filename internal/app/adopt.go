@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"os"
 
 	"jul/internal/admin"
 	"jul/internal/config"
@@ -48,11 +49,41 @@ func originForBaselineState(state ConfigState) string {
 	}
 }
 
+// verifyRetainedSnapshot reads the managed baseline's snapshot and verifies
+// it against the marker's own digest (ADR 0019 §14 step 5) before any caller
+// trusts it as the previous managed configuration. Snapshot() only reads
+// bytes; it performs no verification of its own, and adoptAndStageLocked's
+// digest check on prevRaw must not be the only place a corrupted-but-
+// readable snapshot is caught — the preview and hot-adoption paths read the
+// same snapshot and must be equally suspicious of it, since a wrong-but-
+// readable snapshot would otherwise silently produce the wrong diff, the
+// wrong history entry, and the wrong lifecycle classification.
+//
+// A missing snapshot and an unreadable one are reported with the distinct
+// ADR-defined reasons (§11.2.1's table lists both), not collapsed into one.
+func (c *ConfigApplyCoordinator) verifyRetainedSnapshot(bst BaselineStatus) ([]byte, ManagedInconsistentReason, error) {
+	snap, serr := c.ManagedBaseline.Snapshot()
+	if serr != nil {
+		reason := ReasonSnapshotUnreadable
+		if errors.Is(serr, os.ErrNotExist) {
+			reason = ReasonSnapshotMissing
+		}
+		return nil, reason, serr
+	}
+	if bst.BaselineRawSHA256 != "" && sha256Hex(snap) != bst.BaselineRawSHA256 {
+		return nil, ReasonSnapshotDigestMismatch, fmt.Errorf("snapshot digest does not match the recorded baseline")
+	}
+	return snap, "", nil
+}
+
 // AssessAdoptExternal reads the current external file and assesses it
 // against the managed baseline without any side effect: strict decode,
 // lifecycle classification (to report RestartRequired without rejecting),
 // and the origin the operation would resolve. It never writes the marker,
-// the snapshot, or the configuration file.
+// the snapshot, or the configuration file, and it never mutates the
+// in-memory baseline status either (ADR 0019 §14: preview is side-effect-
+// free) — a damaged baseline is reported through the assessment's own
+// fields, never by calling MarkInconsistent.
 func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment, error) {
 	if c.Authority != AuthorityManaged || c.ManagedBaseline == nil {
 		return AdoptExternalAssessment{}, errors.New("adoption is only available in managed mode")
@@ -78,18 +109,21 @@ func (c *ConfigApplyCoordinator) AssessAdoptExternal() (AdoptExternalAssessment,
 	var prevRaw []byte
 	var prevCfg *config.Config
 	if origin != "no_baseline" {
-		snap, serr := c.ManagedBaseline.Snapshot()
+		snap, _, serr := c.verifyRetainedSnapshot(bst)
 		if serr != nil {
 			// ADR 0019 §14 step 5/§11.2.1b: a baseline the marker claims exists
-			// but whose snapshot bytes cannot be read is not "nothing prior" —
-			// it is damage, and must be reported as such rather than silently
-			// degrading into a no_baseline-shaped preview.
-			c.ManagedBaseline.MarkInconsistent(ReasonSnapshotUnreadable)
+			// but whose snapshot bytes cannot be read, or verified, is not
+			// "nothing prior" — it is damage, and must be reported as such
+			// rather than silently degrading into a no_baseline-shaped preview.
+			// Preview stays side-effect-free (ADR 0019 §14): it reports the
+			// damage in the response, but does not itself call
+			// MarkInconsistent — only AdoptExternal's actual commit attempt
+			// may mutate the live baseline state.
 			return AdoptExternalAssessment{
 				Origin:           "inconsistent",
 				ObservedDigest:   digest,
 				BaselineVersion:  bst.BaselineCanonicalVersion,
-				ValidationErrors: []string{fmt.Sprintf("managed baseline snapshot could not be read: %v", serr)},
+				ValidationErrors: []string{fmt.Sprintf("managed baseline snapshot could not be verified: %v", serr)},
 			}, nil
 		}
 		prevRaw = snap
@@ -207,12 +241,12 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 
 	var prevRaw []byte
 	if origin != "no_baseline" {
-		snap, serr := c.ManagedBaseline.Snapshot()
+		snap, reason, serr := c.verifyRetainedSnapshot(bst)
 		if serr != nil {
 			// See AssessAdoptExternal: a claimed baseline whose snapshot cannot
-			// be read is damage, never a silent no_baseline degrade.
-			c.ManagedBaseline.MarkInconsistent(ReasonSnapshotUnreadable)
-			return ApplyResult{OK: false, Mode: mode, Message: "The managed baseline snapshot could not be read; nothing was adopted."}, fmt.Errorf("%w: read managed baseline snapshot: %v", admin.ErrConfigStorageUnavailable, serr)
+			// be read or verified is damage, never a silent no_baseline degrade.
+			c.ManagedBaseline.MarkInconsistent(reason)
+			return ApplyResult{OK: false, Mode: mode, Message: "The managed baseline snapshot could not be verified; nothing was adopted."}, fmt.Errorf("%w: verify managed baseline snapshot: %v", admin.ErrConfigStorageUnavailable, serr)
 		}
 		prevRaw = snap
 	}
@@ -279,7 +313,7 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 	}
 	if err := c.ManagedBaseline.CommitSnapshotOnly(raw); err != nil {
 		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after adoption"})
-		c.scheduleBaselineWriteRetry(raw, c.ManagedBaseline.CommitSnapshotOnly)
+		c.retryBaselineWriteLocked(raw, c.ManagedBaseline.CommitSnapshotOnly)
 	}
 
 	// ADR 0019 §14.2/§14.3: the one post-commit read, scoped exclusively to
@@ -455,7 +489,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 		}
 		if snapErr := c.ManagedBaseline.CommitSnapshotOnly(candidateRaw); snapErr != nil {
 			result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after adoption"})
-			c.scheduleBaselineWriteRetry(candidateRaw, c.ManagedBaseline.CommitSnapshotOnly)
+			c.retryBaselineWriteLocked(candidateRaw, c.ManagedBaseline.CommitSnapshotOnly)
 		}
 		c.ManagedBaseline.MarkDesiredAhead()
 		result.AppOutcome = "owned_not_serving"
@@ -483,7 +517,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 			}
 			if snapErr := c.ManagedBaseline.CommitSnapshotOnly(candidateRaw); snapErr != nil {
 				result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after adoption"})
-				c.scheduleBaselineWriteRetry(candidateRaw, c.ManagedBaseline.CommitSnapshotOnly)
+				c.retryBaselineWriteLocked(candidateRaw, c.ManagedBaseline.CommitSnapshotOnly)
 			}
 			result.AppOutcome = "owned_not_serving"
 			result.Degraded = append(result.Degraded,
@@ -513,7 +547,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 	// configuration file can repair it (§11.2.1b).
 	if err := c.ManagedBaseline.CommitSnapshotOnly(candidateRaw); err != nil {
 		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after staging"})
-		c.scheduleBaselineWriteRetry(candidateRaw, c.ManagedBaseline.CommitSnapshotOnly)
+		c.retryBaselineWriteLocked(candidateRaw, c.ManagedBaseline.CommitSnapshotOnly)
 	}
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"jul/internal/admin"
+	"jul/internal/config"
 	"jul/internal/server"
 )
 
@@ -259,6 +260,53 @@ func TestCoordinatorManagedFailedApplyRewindsBaseline(t *testing.T) {
 	}
 }
 
+// TestManagedFailedApplyObservableDuringRestorationWindow pins ADR 0019
+// §10/§16's managed_failed_apply state: it must actually be produced when a
+// commit's reload does not apply and restoration follows, not merely
+// declared and never emitted. It is transient — the same critical section
+// resolves it to managed_clean (restored) or managed_inconsistent
+// (restoration failed) moments later — so this uses the beforeRestore test
+// seam to observe it while the finalizer is wedged mid-restoration.
+func TestManagedFailedApplyObservableDuringRestorationWindow(t *testing.T) {
+	restoreStarted := make(chan struct{})
+	restoreContinue := make(chan struct{})
+	submit := func(req server.ReloadRequest) error {
+		go func() {
+			req.Result <- server.ReloadResult{ID: req.ID, Source: server.ReloadSourceAdmin, Outcome: server.ReloadNotApplied, FailedPhase: "prepare", Error: "build failed"}
+		}()
+		return nil
+	}
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, submit)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	c.beforeRestore = func() {
+		close(restoreStarted)
+		<-restoreContinue
+	}
+
+	resultCh := make(chan ApplyResult, 1)
+	go func() {
+		result, _ := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
+		resultCh <- result
+	}()
+	<-restoreStarted
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedFailedApply {
+		t.Errorf("state during restoration = %v, want managed_failed_apply", st.State)
+	}
+	close(restoreContinue)
+	<-resultCh
+
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedClean {
+		t.Errorf("state after a successful restoration = %v, want managed_clean", st.State)
+	}
+}
+
 // ─── currentConfigState / fileOwnedConfigState (ADR 0019 §16) ───────────────
 
 // TestCurrentConfigStatePendingRestartTakesPriority pins that a durable
@@ -284,6 +332,62 @@ func TestCurrentConfigStatePendingRestartTakesPriority(t *testing.T) {
 	state, reason := c.currentConfigState()
 	if state != ConfigStateManagedPendingRestart || reason != "" {
 		t.Errorf("currentConfigState() = (%v, %v), want (managed_pending_restart, \"\")", state, reason)
+	}
+}
+
+// TestCurrentConfigStateDriftOverridesPendingRestart pins that an external
+// write after a restart is staged is never masked behind
+// managed_pending_restart: a planned restart's durability says nothing about
+// whether the file has since drifted out from under it, and drift is
+// alertable (ADR 0019 §12) in a way a staged restart alone is not.
+func TestCurrentConfigStateDriftOverridesPendingRestart(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	c.PlannedRestart = NewFilePlannedRestartStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	c.PlannedRestart.Stage([]byte("staged-candidate"))
+
+	// An external writer edits the file again, on top of the staged
+	// candidate, without going through the coordinator.
+	drifted := validConfigRaw(t, ":9999")
+	if err := os.WriteFile(path, drifted, 0o600); err != nil {
+		t.Fatalf("simulate external edit: %v", err)
+	}
+	c.ManagedBaseline.AssessDrift(drifted, nil, "v-ext", "")
+
+	state, reason := c.currentConfigState()
+	if state != ConfigStateManagedDrift || reason != "" {
+		t.Errorf("currentConfigState() = (%v, %v), want (managed_drift, \"\") even with a restart staged", state, reason)
+	}
+}
+
+// TestCurrentConfigStateInconsistentOverridesPendingRestart mirrors the
+// drift case for damage to Jul's own baseline tracking: a staged restart
+// must never hide managed_inconsistent, since the reason is required
+// operator-actionable information (ADR 0019 §16).
+func TestCurrentConfigStateInconsistentOverridesPendingRestart(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	c.PlannedRestart = NewFilePlannedRestartStore(path)
+	seed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+	c.PlannedRestart.Stage([]byte("staged-candidate"))
+	c.ManagedBaseline.MarkInconsistent(ReasonRestorationFailed)
+
+	state, reason := c.currentConfigState()
+	if state != ConfigStateManagedInconsistent || reason != ReasonRestorationFailed {
+		t.Errorf("currentConfigState() = (%v, %v), want (managed_inconsistent, restoration_failed) even with a restart staged", state, reason)
 	}
 }
 
@@ -366,6 +470,33 @@ func TestFileOwnedConfigStateInvalidWhenFileFailsToParse(t *testing.T) {
 
 	if state := c.fileOwnedConfigState(); state != ConfigStateFileOwnedInvalid {
 		t.Errorf("fileOwnedConfigState() = %v, want file_owned_invalid", state)
+	}
+}
+
+// TestFileOwnedConfigStateInvalidWhenFileFailsValidation pins ADR 0019 §16's
+// exact definition of file_owned_invalid: "the current file fails
+// validation", not merely "fails to parse". config.Parse performs no
+// semantic validation of its own (callers must run Validate separately), so
+// a syntactically well-formed file with a semantic error — here, a
+// proxy_pass referencing an upstream that does not exist — must still be
+// reported as file_owned_invalid, not file_owned_clean.
+func TestFileOwnedConfigStateInvalidWhenFileFailsValidation(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityFileOwned, nil, nil)
+	cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
+	cfg.Servers[0].Locations[0].ProxyPass = "http://ghost-upstream"
+	raw, err := config.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if _, perr := config.Parse(raw); perr != nil {
+		t.Fatalf("precondition: the file must parse syntactically, got %v", perr)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if state := c.fileOwnedConfigState(); state != ConfigStateFileOwnedInvalid {
+		t.Errorf("fileOwnedConfigState() = %v, want file_owned_invalid for a file that parses but fails validation", state)
 	}
 }
 
@@ -474,6 +605,44 @@ func TestScheduleBaselineWriteRetryAbandonsOnSupersededDigest(t *testing.T) {
 	}
 }
 
+// TestScheduleBaselineWriteRetryAbandonsSilentlyWhenSupersededByValidNewerBaseline
+// pins the fix for the race an adversarial review identified: the retry runs
+// in its own goroutine and can lose the race for applyMu to a later,
+// independent, fully-successful transaction. Before this fix, any digest
+// mismatch — including one fully explained by that later transaction's own
+// valid commit — was reported as managed_inconsistent/baseline_unwritable,
+// which would wrongly regress a newer successful commit into a failure state
+// an old, now-irrelevant retry happened to observe last.
+func TestScheduleBaselineWriteRetryAbandonsSilentlyWhenSupersededByValidNewerBaseline(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	stale := validConfigRaw(t, ":8080")
+	// A later, independent transaction already established its own valid
+	// baseline for different content — the system is already consistent.
+	newer := validConfigRaw(t, ":9090")
+	if err := os.WriteFile(path, newer, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := c.ManagedBaseline.CommitMark(newer, "v-newer"); err != nil {
+		t.Fatalf("CommitMark: %v", err)
+	}
+
+	done := awaitBaselineWriteRetry(c)
+	commitCalled := false
+	c.scheduleBaselineWriteRetry(stale, func(b []byte) error {
+		commitCalled = true
+		return nil
+	})
+	<-done
+
+	if commitCalled {
+		t.Fatal("a digest already explained by a valid newer baseline must not retry the commit")
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedClean {
+		t.Errorf("state = %v, want managed_clean left undisturbed — the newer transaction's own state must not be regressed", st.State)
+	}
+}
+
 func TestScheduleBaselineWriteRetryAbandonsOnReadError(t *testing.T) {
 	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
 	c.ManagedBaseline = NewManagedBaselineStore(path)
@@ -501,6 +670,91 @@ func TestScheduleBaselineWriteRetryNilBaselineIsNoop(t *testing.T) {
 	commitCalled := false
 	// Must return synchronously without spawning anything to await.
 	c.scheduleBaselineWriteRetry([]byte("a = 1\n"), func(b []byte) error {
+		commitCalled = true
+		return nil
+	})
+	if commitCalled {
+		t.Error("a nil ManagedBaseline must be a no-op")
+	}
+}
+
+// ─── retryBaselineWriteLocked (inline retry for callers already holding
+// applyMu: adoption's T-mark commit, stage_restart's T-write commit) ────────
+//
+// Unlike scheduleBaselineWriteRetry, these run synchronously — no goroutine,
+// no test hook to await — so admission-gate serialization is exact rather
+// than best-effort (ADR 0019 §11.2.0.1).
+
+func TestRetryBaselineWriteLockedSucceedsWhenDigestUnchanged(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	committed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, committed, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	commitCalled := false
+	c.retryBaselineWriteLocked(committed, func(b []byte) error {
+		commitCalled = true
+		return c.ManagedBaseline.CompleteWrite(b, "v1")
+	})
+
+	if !commitCalled {
+		t.Fatal("an unchanged digest must retry the commit, not abandon it")
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedClean {
+		t.Errorf("state = %v, want managed_clean after a successful retry", st.State)
+	}
+}
+
+func TestRetryBaselineWriteLockedMarksInconsistentWhenRetryFails(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	committed := validConfigRaw(t, ":8080")
+	if err := os.WriteFile(path, committed, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	c.retryBaselineWriteLocked(committed, func(b []byte) error {
+		return errors.New("disk still unwritable")
+	})
+
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonBaselineUnwritable {
+		t.Errorf("state=%v reason=%v, want managed_inconsistent/baseline_unwritable", st.State, st.Reason)
+	}
+}
+
+func TestRetryBaselineWriteLockedMarksInconsistentOnMismatch(t *testing.T) {
+	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	c.ManagedBaseline = NewManagedBaselineStore(path)
+	committed := validConfigRaw(t, ":8080")
+	// An external write landed inside this same held-applyMu critical
+	// section — the only way a mismatch can happen here at all, since no
+	// other coordinator transaction can run concurrently while applyMu is
+	// held for this one.
+	mismatched := validConfigRaw(t, ":9090")
+	if err := os.WriteFile(path, mismatched, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	commitCalled := false
+	c.retryBaselineWriteLocked(committed, func(b []byte) error {
+		commitCalled = true
+		return nil
+	})
+
+	if commitCalled {
+		t.Fatal("a digest mismatch must abandon the retry without calling commit")
+	}
+	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonBaselineUnwritable {
+		t.Errorf("state=%v reason=%v, want managed_inconsistent/baseline_unwritable", st.State, st.Reason)
+	}
+}
+
+func TestRetryBaselineWriteLockedNilBaselineIsNoop(t *testing.T) {
+	c, _ := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+	commitCalled := false
+	c.retryBaselineWriteLocked([]byte("a = 1\n"), func(b []byte) error {
 		commitCalled = true
 		return nil
 	})
