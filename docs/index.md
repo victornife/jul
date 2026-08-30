@@ -26,10 +26,11 @@ binary.
 - **[Concepts appendix](vision/appendix.md)** — New to HTTP, proxies, TLS, caching, or observability? Start here.
 
 ### Evaluating or operating?
-- **[Feature status & GA matrix](status.md)** — What is GA, what is Beta, and what the maturity bar means. Read it together with the current audit. The response-cache correctness programme (#107), lifecycle authority (#89), and structured-configuration sequence (#77 → #78 → #79 → #80 → #81 → #82) are complete. The next programme stage is the core architecture-decision sequence #115 → #116 → #117 → #118; #115 is READY / NEXT but implementation has not started.
+- **[Feature status & GA matrix](status.md)** — What is GA, what is Beta, and what the maturity bar means. Read it together with the current audit.
 - **[Known limitations](known-limitations.md)** — Documented gaps and current correction notices.
 - **[Deployment guide](deployment.md)** — systemd, Windows service, Docker, and log rotation.
 - **[Observability](observability.md)** — Metrics, tracing, logging, health checks, and the admin API.
+- **[Diagnostics and support bundles](diagnostics.md)** — Read-only `jul doctor`, bounded local support bundles, result schemas, privacy limits, and sharing guidance.
 - **[Prometheus metric contract](metrics-contract.json)** — Machine-readable names, types, help strings, labels, and released/additive state.
 - **[Reload semantics](reload-semantics.md)** — What reloads safely, what needs a restart, and how zero-downtime reload works.
 - **[Security model](../SECURITY.md)** — Threat model, hardening defaults, and per-feature security notes.
@@ -42,6 +43,7 @@ binary.
 |---------|----------|
 | Authentication | [docs/auth.md](auth.md) |
 | Response cache | [docs/cache.md](cache.md) |
+| Diagnostics | [docs/diagnostics.md](diagnostics.md) |
 | Web console | [docs/console.md](console.md) |
 | gRPC passthrough | [docs/grpc-proxy.md](grpc-proxy.md) |
 | gRPC-JSON transcoding | [docs/grpc-transcoding.md](grpc-transcoding.md) |
