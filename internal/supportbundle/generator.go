@@ -86,7 +86,7 @@ func (generator *Generator) Build(ctx context.Context, snapshot Snapshot) (Bundl
 		record := CollectorRecord{Name: name}
 		if collectErr != nil {
 			record.Status = CollectorError
-			record.Error = diagnostics.SanitizeString(collectErr.Error())
+			record.Error = diagnostics.SanitizeErrorString(collectErr.Error())
 			bundle.Manifest.Collectors = append(bundle.Manifest.Collectors, record)
 			continue
 		}
@@ -142,7 +142,7 @@ func (generator *Generator) Build(ctx context.Context, snapshot Snapshot) (Bundl
 		}
 		if validationErr != nil {
 			record.Status = CollectorError
-			record.Error = diagnostics.SanitizeString(validationErr.Error())
+			record.Error = diagnostics.SanitizeErrorString(validationErr.Error())
 			bundle.Manifest.Collectors = append(bundle.Manifest.Collectors, record)
 			continue
 		}
