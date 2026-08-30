@@ -42,6 +42,17 @@ jobs:
           PY
       - name: apply issue 353 reconciliation
         run: python .github/issue353_apply.py
+      - name: remove duplicated README heading
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('README.md')
+          text = path.read_text(encoding='utf-8')
+          old = '## Features\n## Features\n'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one duplicated heading, found {text.count(old)}')
+          path.write_text(text.replace(old, '## Features\n', 1), encoding='utf-8', newline='\n')
+          PY
       - name: preserve historical roadmap anchor
         run: |
           python - <<'PY'
