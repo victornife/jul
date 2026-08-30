@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -46,6 +47,9 @@ type Result struct {
 // NewRequest builds only loopback HTTP(S) requests from the safe scenario
 // grammar. It never resolves or dials an external host.
 func NewRequest(ctx context.Context, baseURL string, spec RequestSpec) (*http.Request, error) {
+	if err := validateRequestTarget(spec.Path); err != nil {
+		return nil, fmt.Errorf("request path must be a valid origin-form target: %w", err)
+	}
 	base, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse base URL: %w", err)
@@ -240,7 +244,11 @@ func hasDimension(dimensions []Dimension, target Dimension) bool {
 
 func loopbackHost(hostport string) bool {
 	host := hostport
-	if splitHost, _, err := net.SplitHostPort(hostport); err == nil {
+	if splitHost, port, err := net.SplitHostPort(hostport); err == nil {
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return false
+		}
 		host = splitHost
 	} else if strings.Contains(hostport, ":") && !strings.HasPrefix(hostport, "[") {
 		return false
