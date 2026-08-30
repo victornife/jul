@@ -42,6 +42,23 @@ jobs:
           PY
       - name: apply issue 353 reconciliation
         run: python .github/issue353_apply.py
+      - name: preserve historical roadmap anchor
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('docs/roadmap/README.md')
+          text = path.read_text(encoding='utf-8')
+          marker = '## Active operating roadmap\n'
+          replacement = (
+              '## Current execution sequence\n\n'
+              'The durable current sequence is summarized in the active operating roadmap below. '
+              'Exact issue-level status remains in #62.\n\n'
+              '## Active operating roadmap\n'
+          )
+          if text.count(marker) != 1:
+              raise SystemExit(f'expected one active-roadmap heading, found {text.count(marker)}')
+          path.write_text(text.replace(marker, replacement, 1), encoding='utf-8', newline='\n')
+          PY
       - name: verify generated contracts
         run: make generated-check
       - name: verify documentation
