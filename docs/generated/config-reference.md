@@ -79,7 +79,7 @@ Console toggles the web console dashboard at the admin root.
 | Subsystem | `admin` |
 | Why | the admin listener and its resources are created once at startup |
 | Requires | `console` |
-| Default | true (when admin.enabled) |
+| Default (conditional) | true (when admin.enabled) |
 | Flags | startup-consumed |
 
 ## `admin.enabled` {#admin-enabled}
@@ -863,7 +863,7 @@ SampleRatio is the head-based sampling probability for root spans, in the range 
 | Subsystem | `tracing` |
 | Why | the tracer provider and exporter are created once at startup |
 | Requires | `otel` |
-| Default | 1.0 |
+| Default | 1 |
 | Flags | startup-consumed |
 | Constraint | 0..1 |
 | Zero/empty semantics | omitted/zero defaults to 1.0 when tracing is enabled |

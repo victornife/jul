@@ -3,21 +3,31 @@
 
 package configcontract
 
-// DefaultOverrides is the small, explicit, reviewable table of documented
-// defaults, joined against canonical schema paths. It is deliberately NOT
-// derived by parsing zero_semantics prose (e.g. "omitted/zero defaults to
-// 14") — each entry is a human-authored fact read directly from the Go doc
-// comment that states it, kept separate from zero/empty semantics rather
-// than collapsing the two.
+// DefaultOverrides is the small, explicit, reviewable table of documented,
+// UNCONDITIONAL defaults, joined against canonical schema paths. It is
+// deliberately NOT derived by parsing zero_semantics prose (e.g. "omitted/
+// zero defaults to 14") — each entry is a human-authored fact read directly
+// from the Go doc comment that states it, kept separate from zero/empty
+// semantics rather than collapsing the two.
+//
+// Values are authored as plain text for readability, but every renderer sees
+// a properly JSON-typed value (bool, number, string, or array), produced by
+// convertDefaultValue against the leaf's own Scalar/Kind in Build() — never
+// the literal author string. A malformed entry (one convertDefaultValue
+// cannot parse against its leaf's actual scalar type) fails Build() loudly
+// rather than silently rendering the wrong JSON type.
 //
 // Coverage is representative, not exhaustive: a field is included only when
-// its Go doc comment states a concrete, unconditional (or simply-described
-// conditional, e.g. admin.console) default. A field whose omission simply
-// means "zero/disabled" already has that fact in ZeroSemantics and gets no
-// separate entry here, so the two concepts are never duplicated. A field
-// whose default depends on another field in a way that cannot be stated as
-// one short fact (e.g. "positive when upload is enabled; otherwise
-// non-negative") is left out rather than flattened into a misleading string.
+// its Go doc comment states a concrete, unconditional default. A field whose
+// omission simply means "zero/disabled" already has that fact in
+// ZeroSemantics and gets no separate entry here, so the two concepts are
+// never duplicated. A field whose default is conditional on another field
+// (e.g. admin.console) belongs in ConditionalDefaultOverrides instead, never
+// here — an unconditional JSON Schema `default` would misdescribe it. A
+// field whose default depends on another field in a way that cannot be
+// stated as one short fact (e.g. "positive when upload is enabled;
+// otherwise non-negative") is left out of both tables rather than flattened
+// into a misleading value.
 var DefaultOverrides = map[string]string{
 	"global.worker_threads":           "auto",
 	"global.log_format":               "text",
@@ -93,9 +103,6 @@ var DefaultOverrides = map[string]string{
 
 	"rate_limit.key": "ip",
 
-	// admin.console's default depends on admin.enabled, but the dependency is
-	// short enough to state as one fact rather than being left out.
-	"admin.console":                  "true (when admin.enabled)",
 	"admin.history_dir":              "./jul-data/config-history",
 	"admin.history_keep":             "50",
 	"admin.rate_limit_read_per_min":  "240",
@@ -116,8 +123,26 @@ var DefaultOverrides = map[string]string{
 	"observability.tracing.service_name": "jul",
 }
 
-// DefaultFor returns the documented default for path, if one is recorded.
+// ConditionalDefaultOverrides is the (currently tiny) table of defaults that
+// depend on another field, stated as one short human-readable fact. These
+// are NEVER converted to a JSON Schema `default` (an unconditional default
+// would misdescribe them — admin.console's true only holds when
+// admin.enabled is also true) — they surface only as machine metadata and
+// reference text.
+var ConditionalDefaultOverrides = map[string]string{
+	"admin.console": "true (when admin.enabled)",
+}
+
+// DefaultFor returns the documented unconditional default for path, as
+// originally authored (before scalar-type conversion), if one is recorded.
 func DefaultFor(path string) (string, bool) {
 	d, ok := DefaultOverrides[path]
+	return d, ok
+}
+
+// ConditionalDefaultFor returns the documented conditional default text for
+// path, if one is recorded.
+func ConditionalDefaultFor(path string) (string, bool) {
+	d, ok := ConditionalDefaultOverrides[path]
 	return d, ok
 }

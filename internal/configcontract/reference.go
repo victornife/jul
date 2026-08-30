@@ -6,6 +6,7 @@ package configcontract
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -56,7 +57,10 @@ func RenderReferenceMarkdown(c Contract) ([]byte, error) {
 			fmt.Fprintf(&b, "| Requires | %s |\n", capabilityCell(f.Capabilities))
 		}
 		if f.HasDefault {
-			fmt.Fprintf(&b, "| Default | %s |\n", escapeCell(f.Default))
+			fmt.Fprintf(&b, "| Default | %s |\n", escapeCell(defaultCell(f.Default)))
+		}
+		if f.ConditionalDefault != "" {
+			fmt.Fprintf(&b, "| Default (conditional) | %s |\n", escapeCell(f.ConditionalDefault))
 		}
 		if flags := flagCell(f); flags != "" {
 			fmt.Fprintf(&b, "| Flags | %s |\n", flags)
@@ -97,6 +101,24 @@ func capabilityCell(caps []Capability) string {
 		names[i] = "`" + string(c) + "`"
 	}
 	return strings.Join(names, ", ")
+}
+
+// defaultCell renders a typed default value (bool, int64, float64, string,
+// []string, or []int64 — the only shapes convertDefaultValue produces) as
+// display text.
+func defaultCell(v any) string {
+	switch val := v.(type) {
+	case []string:
+		return "[" + strings.Join(val, ", ") + "]"
+	case []int64:
+		parts := make([]string, len(val))
+		for i, n := range val {
+			parts[i] = strconv.FormatInt(n, 10)
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }
 
 func flagCell(f Field) string {

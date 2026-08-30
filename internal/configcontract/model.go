@@ -49,10 +49,18 @@ type Field struct {
 	Description string
 	Anchor      string
 	// Default is the documented default, when one is recorded in
-	// DefaultOverrides. It is annotation only: no renderer materializes it
-	// into a submitted document, and it is kept distinct from ZeroSemantics.
-	Default    string
+	// DefaultOverrides, converted to a properly JSON-typed value (bool,
+	// number, string, or array) against this leaf's own Scalar/Kind. It is
+	// annotation only: no renderer materializes it into a submitted
+	// document, and it is kept distinct from ZeroSemantics.
+	Default    any
 	HasDefault bool
+	// ConditionalDefault is the documented default's human-readable text when
+	// the default depends on another field (e.g. "true (when
+	// admin.enabled)"), from ConditionalDefaultOverrides. It is mutually
+	// exclusive with Default/HasDefault and is NEVER rendered as a JSON
+	// Schema `default` — an unconditional default would misdescribe it.
+	ConditionalDefault string
 
 	// Lifecycle (ADR 0019 §19, from lifecycle.BuildMetadata; every leaf has
 	// exactly one entry, enforced by lifecycle's own closed-world tests and
@@ -159,10 +167,22 @@ func Build(src Sources) (Contract, error) {
 		}
 	}
 
-	// Join documented defaults: every key must resolve to a real leaf.
+	// Join documented defaults: every key must resolve to a real leaf, in
+	// EXACTLY one of DefaultOverrides (unconditional) or
+	// ConditionalDefaultOverrides (conditional) — never both, since an
+	// unconditional JSON Schema `default` would misdescribe a conditional
+	// field.
 	for path := range DefaultOverrides {
 		if !schemaLeafSet[path] {
 			return Contract{}, fmt.Errorf("configcontract: DefaultOverrides entry %q does not resolve against config.SchemaLeaves()", path)
+		}
+		if _, ok := ConditionalDefaultOverrides[path]; ok {
+			return Contract{}, fmt.Errorf("configcontract: %q is in both DefaultOverrides and ConditionalDefaultOverrides", path)
+		}
+	}
+	for path := range ConditionalDefaultOverrides {
+		if !schemaLeafSet[path] {
+			return Contract{}, fmt.Errorf("configcontract: ConditionalDefaultOverrides entry %q does not resolve against config.SchemaLeaves()", path)
 		}
 	}
 
@@ -231,9 +251,16 @@ func Build(src Sources) (Contract, error) {
 			Capabilities:      CapabilitiesFor(p.Path),
 			ValueCapabilities: ValueCapabilitiesFor(p.Path),
 		}
-		if def, ok := DefaultFor(p.Path); ok {
-			f.Default = def
+		if raw, ok := DefaultFor(p.Path); ok {
+			typed, err := convertDefaultValue(p.Kind, p.Scalar, raw)
+			if err != nil {
+				return Contract{}, fmt.Errorf("configcontract: DefaultOverrides entry %q: %w", p.Path, err)
+			}
+			f.Default = typed
 			f.HasDefault = true
+		}
+		if text, ok := ConditionalDefaultFor(p.Path); ok {
+			f.ConditionalDefault = text
 		}
 		if vc, ok := valueByPath[p.Path]; ok {
 			f.HasValueContract = true

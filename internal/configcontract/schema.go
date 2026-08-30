@@ -235,7 +235,16 @@ func (b *schemaBuilder) leafSchema(path string) map[string]any {
 		node["x-jul-value-capability"] = f.ValueCapabilities
 	}
 	if f.HasDefault {
-		node["x-jul-default"] = f.Default
+		// The standard JSON Schema keyword, holding a properly typed value
+		// (bool/number/string/array) — never a string that merely looks like
+		// one, and never emitted for a conditional default (see
+		// ConditionalDefault below).
+		node["default"] = f.Default
+	}
+	if f.ConditionalDefault != "" {
+		// Deliberately NOT "default": the value only holds conditionally, and
+		// an unconditional JSON Schema default would misdescribe it.
+		node["x-jul-conditional-default"] = f.ConditionalDefault
 	}
 	if f.HasValueContract && f.Constraint != "" {
 		node["x-jul-constraint"] = f.Constraint

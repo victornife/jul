@@ -89,11 +89,17 @@ type MetadataEntry struct {
 	ActiveWhen        string                `json:"active_when,omitempty"`
 	Allowed           []string              `json:"allowed,omitempty"`
 	IntegerEnum       []int64               `json:"integer_enum,omitempty"`
-	// Default is the documented default, present only when Config lists one
-	// in DefaultOverrides; distinct from ZeroSemantics.
-	Default     string `json:"default,omitempty"`
-	Description string `json:"description"`
-	Anchor      string `json:"anchor"`
+	// Default is the documented default, properly JSON-typed (bool, number,
+	// string, or array), present only when Config lists one in
+	// DefaultOverrides; distinct from ZeroSemantics.
+	Default any `json:"default,omitempty"`
+	// ConditionalDefault is the documented default's human-readable text
+	// when it depends on another field (e.g. "true (when admin.enabled)"),
+	// present only when Config lists one in ConditionalDefaultOverrides.
+	// Mutually exclusive with Default.
+	ConditionalDefault string `json:"conditional_default,omitempty"`
+	Description        string `json:"description"`
+	Anchor             string `json:"anchor"`
 }
 
 // ResourceEntry is the machine projection of one catalog Resource.
@@ -140,33 +146,34 @@ func BuildContractMetadata(c Contract) ContractMetadata {
 	fields := make(map[string]MetadataEntry, len(c.Leaves))
 	for _, f := range c.Leaves {
 		fields[f.Path] = MetadataEntry{
-			Kind:              string(f.Kind),
-			Scalar:            string(f.Scalar),
-			GoType:            f.GoType,
-			Optional:          f.Optional,
-			Dynamic:           f.Dynamic,
-			Subsystem:         f.Subsystem,
-			LifecycleClass:    f.Class,
-			LifecycleReason:   f.Reason,
-			StartupConsumed:   f.StartupConsumed,
-			AddressKeyed:      f.AddressKeyed,
-			CollectionKeyed:   f.CollectionKeyed,
-			Conditional:       f.Conditional,
-			Deprecated:        f.Deprecated,
-			Ignored:           f.Ignored,
-			Reserved:          f.Reserved,
-			Secret:            f.Secret,
-			Capabilities:      f.Capabilities,
-			ValueCapabilities: f.ValueCapabilities,
-			ValueKind:         f.ValueKind,
-			Constraint:        f.Constraint,
-			ZeroSemantics:     f.ZeroSemantics,
-			ActiveWhen:        f.ActiveWhen,
-			Allowed:           f.Allowed,
-			IntegerEnum:       f.IntegerEnum,
-			Default:           f.Default,
-			Description:       f.Description,
-			Anchor:            f.Anchor,
+			Kind:               string(f.Kind),
+			Scalar:             string(f.Scalar),
+			GoType:             f.GoType,
+			Optional:           f.Optional,
+			Dynamic:            f.Dynamic,
+			Subsystem:          f.Subsystem,
+			LifecycleClass:     f.Class,
+			LifecycleReason:    f.Reason,
+			StartupConsumed:    f.StartupConsumed,
+			AddressKeyed:       f.AddressKeyed,
+			CollectionKeyed:    f.CollectionKeyed,
+			Conditional:        f.Conditional,
+			Deprecated:         f.Deprecated,
+			Ignored:            f.Ignored,
+			Reserved:           f.Reserved,
+			Secret:             f.Secret,
+			Capabilities:       f.Capabilities,
+			ValueCapabilities:  f.ValueCapabilities,
+			ValueKind:          f.ValueKind,
+			Constraint:         f.Constraint,
+			ZeroSemantics:      f.ZeroSemantics,
+			ActiveWhen:         f.ActiveWhen,
+			Allowed:            f.Allowed,
+			IntegerEnum:        f.IntegerEnum,
+			Default:            f.Default,
+			ConditionalDefault: f.ConditionalDefault,
+			Description:        f.Description,
+			Anchor:             f.Anchor,
 		}
 	}
 

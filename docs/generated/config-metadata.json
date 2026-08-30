@@ -50,7 +50,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 14 when audit_log_file is set",
       "active_when": "always",
-      "default": "14",
+      "default": 14,
       "description": "AuditLogRotateKeep bounds how many rotated audit backups are retained; older backups are pruned",
       "anchor": "admin-audit_log_rotate_keep"
     },
@@ -68,7 +68,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 100 when audit_log_file is set",
       "active_when": "always",
-      "default": "100",
+      "default": 100,
       "description": "AuditLogRotateMaxMB is the size in megabytes at which the durable audit sink rotates to a timestamped backup",
       "anchor": "admin-audit_log_rotate_max_mb"
     },
@@ -85,7 +85,7 @@
       "capabilities": [
         "console"
       ],
-      "default": "true (when admin.enabled)",
+      "conditional_default": "true (when admin.enabled)",
       "description": "Console toggles the web console dashboard at the admin root",
       "anchor": "admin-console"
     },
@@ -130,7 +130,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 50 when admin is enabled",
       "active_when": "always",
-      "default": "50",
+      "default": 50,
       "description": "HistoryKeep bounds how many configuration snapshots are retained; older snapshots are pruned",
       "anchor": "admin-history_keep"
     },
@@ -161,7 +161,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 4",
       "active_when": "always",
-      "default": "4",
+      "default": 4,
       "description": "MaxEventConns bounds concurrent /api/events SSE streams per client to prevent resource exhaustion",
       "anchor": "admin-max_event_conns"
     },
@@ -188,7 +188,7 @@
       "lifecycle_class": "restart_required",
       "lifecycle_reason": "the admin listener and its resources are created once at startup",
       "startup_consumed": true,
-      "default": "false",
+      "default": false,
       "description": "PluginUploadEnabled controls whether the admin console allows uploading .wasm plugin modules",
       "anchor": "admin-plugin_upload_enabled"
     },
@@ -206,7 +206,7 @@
       "constraint": "positive when upload is enabled; otherwise non-negative",
       "zero_semantics": "omitted/zero defaults to 32 MiB when upload is enabled",
       "active_when": "always",
-      "default": "32",
+      "default": 32,
       "description": "PluginUploadMaxSize caps the size of an uploaded .wasm file in megabytes",
       "anchor": "admin-plugin_upload_max_size"
     },
@@ -224,7 +224,7 @@
       "constraint": "any integer; negative disables the limiter",
       "zero_semantics": "omitted/zero defaults to 30",
       "active_when": "always",
-      "default": "30",
+      "default": 30,
       "description": "RateLimitApplyPerMin caps the high-impact config validate/diff/apply endpoints per client per minute, separately and more strictly than other mutations",
       "anchor": "admin-rate_limit_apply_per_min"
     },
@@ -242,7 +242,7 @@
       "constraint": "any integer; negative disables the limiter",
       "zero_semantics": "omitted/zero defaults to 240",
       "active_when": "always",
-      "default": "240",
+      "default": 240,
       "description": "RateLimitReadPerMin caps read (GET) admin/API requests per client per minute",
       "anchor": "admin-rate_limit_read_per_min"
     },
@@ -260,7 +260,7 @@
       "constraint": "any integer; negative disables the limiter",
       "zero_semantics": "omitted/zero defaults to 60",
       "active_when": "always",
-      "default": "60",
+      "default": 60,
       "description": "RateLimitWritePerMin caps mutating (POST/PUT/DELETE) admin requests per client per minute",
       "anchor": "admin-rate_limit_write_per_min"
     },
@@ -286,7 +286,7 @@
       "subsystem": "rbac",
       "lifecycle_class": "hot_reload",
       "lifecycle_reason": "the admin RBAC policy is rebuilt and atomically swapped after each successful reload",
-      "default": "false",
+      "default": false,
       "description": "Enabled activates named-principal RBAC",
       "anchor": "admin-rbac-enabled"
     },
@@ -534,7 +534,9 @@
         "br",
         "zstd"
       ],
-      "default": "[gzip]",
+      "default": [
+        "gzip"
+      ],
       "description": "Encoders lists allowed content codings in server-preference order, each one of \"gzip\", \"br\", or \"zstd\"",
       "anchor": "compression-encoders"
     },
@@ -729,7 +731,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero uses the default floor",
       "active_when": "always",
-      "default": "4",
+      "default": 4,
       "description": "RedactMinSecretLength is the shortest resolved secret value that is masked from logs",
       "anchor": "global-redact_min_secret_length"
     },
@@ -798,7 +800,7 @@
       "constraint": "true or false",
       "zero_semantics": "omitted preserves the v1 default-on behavior; explicit false disables request access records",
       "active_when": "always",
-      "default": "true",
+      "default": true,
       "description": "Enabled controls whether Jul emits request access records",
       "anchor": "observability-access_log-enabled"
     },
@@ -996,7 +998,7 @@
       "constraint": "0..1",
       "zero_semantics": "omitted/zero defaults to 1.0 when tracing is enabled",
       "active_when": "tracing enabled",
-      "default": "1.0",
+      "default": 1,
       "description": "SampleRatio is the head-based sampling probability for root spans, in the range [0,1]",
       "anchor": "observability-tracing-sample_ratio"
     },
@@ -1148,7 +1150,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 1024",
       "active_when": "always",
-      "default": "1024",
+      "default": 1024,
       "description": "KVMaxEntries caps distinct keys per plugin",
       "anchor": "plugins-x-kv_max_entries"
     },
@@ -1400,7 +1402,10 @@
         "forwarded",
         "x-forwarded-for"
       ],
-      "default": "[forwarded, x-forwarded-for]",
+      "default": [
+        "forwarded",
+        "x-forwarded-for"
+      ],
       "description": "ForwardedHeaders is the ordered preference of forwarding headers: \"forwarded\" (RFC 7239) and \"x-forwarded-for\"",
       "anchor": "servers-x-client_address-forwarded_headers"
     },
@@ -1417,7 +1422,7 @@
       "constraint": "non-negative, at most 255",
       "zero_semantics": "0 selects the default of 16",
       "active_when": "the listener trusts at least one proxy",
-      "default": "16",
+      "default": 16,
       "description": "MaxHops bounds how many asserted hops a chain may carry",
       "anchor": "servers-x-client_address-max_hops"
     },
@@ -1926,7 +1931,11 @@
       "subsystem": "cors",
       "lifecycle_class": "hot_reload",
       "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
-      "default": "[GET, HEAD, POST]",
+      "default": [
+        "GET",
+        "HEAD",
+        "POST"
+      ],
       "description": "AllowedMethods governs preflight approval only, never ordinary requests (that is match.methods)",
       "anchor": "servers-x-locations-x-cors-allowed_methods"
     },
@@ -2096,7 +2105,7 @@
       "capabilities": [
         "grpc"
       ],
-      "default": "false",
+      "default": false,
       "description": "PreserveNames keeps original proto field names in JSON output instead of the default lowerCamelCase",
       "anchor": "servers-x-locations-x-grpc_transcode-preserve_proto_field_names"
     },
@@ -3254,7 +3263,7 @@
       "capabilities": [
         "acme"
       ],
-      "default": "true",
+      "default": true,
       "description": "OCSPStapling enables OCSP stapling for ACME-issued certificates so clients can verify revocation without a separate round-trip",
       "anchor": "servers-x-tls-acme-ocsp_stapling"
     },
@@ -3502,7 +3511,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 10000",
       "active_when": "always",
-      "default": "10000",
+      "default": 10000,
       "description": "MaxUDPSessions caps the number of concurrent UDP sessions (one per client source address) a UDP listener tracks, bounding memory and backend sockets on the public internet where source addresses are cheap to spoof",
       "anchor": "stream-x-max_udp_sessions"
     },
@@ -3779,7 +3788,7 @@
       "capabilities": [
         "consul"
       ],
-      "default": "true",
+      "default": true,
       "description": "PassingOnly restricts results to instances whose health checks are passing (default true)",
       "anchor": "upstreams-x-discovery-consul-passing_only"
     },
@@ -4162,7 +4171,9 @@
       "subsystem": "health_check",
       "lifecycle_class": "hot_reload",
       "lifecycle_reason": "active probes are restarted with the pool on each successful reload",
-      "default": "[200]",
+      "default": [
+        200
+      ],
       "description": "ExpectStatus lists acceptable HTTP status codes for a passing probe (default [200])",
       "anchor": "upstreams-x-health_check-expect_status"
     },
@@ -4179,7 +4190,7 @@
       "constraint": "at least 1 effective",
       "zero_semantics": "omitted/zero defaults to 2",
       "active_when": "health check enabled",
-      "default": "2",
+      "default": 2,
       "description": "HealthyThreshold is the number of consecutive successes to mark a backend healthy again (default 2)",
       "anchor": "upstreams-x-health_check-healthy_threshold"
     },
@@ -4263,7 +4274,7 @@
       "constraint": "at least 1 effective",
       "zero_semantics": "omitted/zero defaults to 3",
       "active_when": "health check enabled",
-      "default": "3",
+      "default": 3,
       "description": "UnhealthyThreshold is the number of consecutive failures to take a backend out of rotation (default 3)",
       "anchor": "upstreams-x-health_check-unhealthy_threshold"
     },
@@ -4280,7 +4291,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 3; deprecated in favour of upstreams[].resilience.max_fails, and setting both is an error",
       "active_when": "always",
-      "default": "3",
+      "default": 3,
       "description": "MaxFails and FailTimeout are the circuit breaker's failure threshold and open duration",
       "anchor": "upstreams-x-max_fails"
     },
@@ -4309,7 +4320,7 @@
       "constraint": "0 or greater",
       "zero_semantics": "omitted means 1; an explicit zero means unbounded probing",
       "active_when": "always",
-      "default": "1",
+      "default": 1,
       "description": "CircuitHalfOpenProbes bounds how many requests may test a recovering backend at once",
       "anchor": "upstreams-x-resilience-circuit_half_open_probes"
     },
@@ -4391,7 +4402,7 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 3",
       "active_when": "always",
-      "default": "3",
+      "default": 3,
       "description": "MaxFails is how many consecutive failures take a backend out of rotation",
       "anchor": "upstreams-x-resilience-max_fails"
     },

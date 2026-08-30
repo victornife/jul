@@ -12,18 +12,18 @@
           "type": "string"
         },
         "audit_log_rotate_keep": {
+          "default": 14,
           "description": "AuditLogRotateKeep bounds how many rotated audit backups are retained; older backups are pruned",
           "minimum": 0,
           "type": "integer",
-          "x-jul-constraint": "non-negative",
-          "x-jul-default": "14"
+          "x-jul-constraint": "non-negative"
         },
         "audit_log_rotate_max_mb": {
+          "default": 100,
           "description": "AuditLogRotateMaxMB is the size in megabytes at which the durable audit sink rotates to a timestamped backup",
           "minimum": 0,
           "type": "integer",
-          "x-jul-constraint": "non-negative",
-          "x-jul-default": "100"
+          "x-jul-constraint": "non-negative"
         },
         "console": {
           "description": "Console toggles the web console dashboard at the admin root",
@@ -31,80 +31,80 @@
           "x-jul-capability": [
             "console"
           ],
-          "x-jul-default": "true (when admin.enabled)"
+          "x-jul-conditional-default": "true (when admin.enabled)"
         },
         "enabled": {
           "description": "Enabled turns on the separate admin/observability listener",
           "type": "boolean"
         },
         "history_dir": {
+          "default": "./jul-data/config-history",
           "description": "HistoryDir is the directory where the console snapshots the previous configuration before each successful edit, enabling one-click rollback",
-          "type": "string",
-          "x-jul-default": "./jul-data/config-history"
+          "type": "string"
         },
         "history_keep": {
+          "default": 50,
           "description": "HistoryKeep bounds how many configuration snapshots are retained; older snapshots are pruned",
           "minimum": 0,
           "type": "integer",
-          "x-jul-constraint": "non-negative",
-          "x-jul-default": "50"
+          "x-jul-constraint": "non-negative"
         },
         "listen": {
           "description": "Listen is the bind address for the admin/observability listener, defaulting to loopback",
           "type": "string"
         },
         "max_event_conns": {
+          "default": 4,
           "description": "MaxEventConns bounds concurrent /api/events SSE streams per client to prevent resource exhaustion",
           "minimum": 0,
           "type": "integer",
-          "x-jul-constraint": "non-negative",
-          "x-jul-default": "4"
+          "x-jul-constraint": "non-negative"
         },
         "plugin_upload_dir": {
           "description": "PluginUploadDir is the directory where uploaded .wasm files are stored when operators use the Console Plugins panel upload feature",
           "type": "string"
         },
         "plugin_upload_enabled": {
+          "default": false,
           "description": "PluginUploadEnabled controls whether the admin console allows uploading .wasm plugin modules",
-          "type": "boolean",
-          "x-jul-default": "false"
+          "type": "boolean"
         },
         "plugin_upload_max_size": {
+          "default": 32,
           "description": "PluginUploadMaxSize caps the size of an uploaded .wasm file in megabytes",
           "type": "integer",
-          "x-jul-constraint": "positive when upload is enabled; otherwise non-negative",
-          "x-jul-default": "32"
+          "x-jul-constraint": "positive when upload is enabled; otherwise non-negative"
         },
         "rate_limit_apply_per_min": {
+          "default": 30,
           "description": "RateLimitApplyPerMin caps the high-impact config validate/diff/apply endpoints per client per minute, separately and more strictly than other mutations",
           "type": "integer",
-          "x-jul-constraint": "any integer; negative disables the limiter",
-          "x-jul-default": "30"
+          "x-jul-constraint": "any integer; negative disables the limiter"
         },
         "rate_limit_read_per_min": {
+          "default": 240,
           "description": "RateLimitReadPerMin caps read (GET) admin/API requests per client per minute",
           "type": "integer",
-          "x-jul-constraint": "any integer; negative disables the limiter",
-          "x-jul-default": "240"
+          "x-jul-constraint": "any integer; negative disables the limiter"
         },
         "rate_limit_write_per_min": {
+          "default": 60,
           "description": "RateLimitWritePerMin caps mutating (POST/PUT/DELETE) admin requests per client per minute",
           "type": "integer",
-          "x-jul-constraint": "any integer; negative disables the limiter",
-          "x-jul-default": "60"
+          "x-jul-constraint": "any integer; negative disables the limiter"
         },
         "rbac": {
           "additionalProperties": false,
           "properties": {
             "default_role": {
+              "default": "admin",
               "description": "DefaultRole is the role assigned to the synthetic \"shared\" legacy principal when RBAC is enabled alongside a legacy admin.token",
-              "type": "string",
-              "x-jul-default": "admin"
+              "type": "string"
             },
             "enabled": {
+              "default": false,
               "description": "Enabled activates named-principal RBAC",
-              "type": "boolean",
-              "x-jul-default": "false"
+              "type": "boolean"
             },
             "principals": {
               "items": {
@@ -220,6 +220,9 @@
           "type": "boolean"
         },
         "encoders": {
+          "default": [
+            "gzip"
+          ],
           "description": "Encoders lists allowed content codings in server-preference order, each one of \"gzip\", \"br\", or \"zstd\"",
           "items": {
             "enum": [
@@ -231,7 +234,6 @@
           },
           "type": "array",
           "x-jul-constraint": "exact lowercase enum",
-          "x-jul-default": "[gzip]",
           "x-jul-value-capability": {
             "br": "brotli",
             "zstd": "zstd"
@@ -245,11 +247,11 @@
           "x-jul-constraint": "0..11"
         },
         "min_size": {
+          "default": "1k",
           "description": "MinSize is the smallest response body that is compressed",
           "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
           "type": "string",
-          "x-jul-constraint": "non-negative",
-          "x-jul-default": "1k"
+          "x-jul-constraint": "non-negative"
         },
         "precompressed": {
           "description": "Precompressed serves sidecar .gz/.br files for static responses when the matching encoding is acceptable, avoiding on-the-fly recompression",
@@ -292,14 +294,14 @@
           "x-jul-ignored": true
         },
         "config_authority": {
+          "default": "file_owned",
           "description": "ConfigAuthority declares who owns configuration persistence, managed history, and drift detection: \"managed\" (Jul owns the file; Console/API writes are subject to RBAC and CAS, and external edits become drift that must be explicitly adopted) or \"file_owned\" (an external file or GitOps pipeline owns the file; every mutating admin endpoint is refused and the file watcher/SIGHUP behave exactly as they do without this field)",
           "enum": [
             "managed",
             "file_owned"
           ],
           "type": "string",
-          "x-jul-constraint": "exact lowercase enum; controller_owned is reserved and rejected",
-          "x-jul-default": "file_owned"
+          "x-jul-constraint": "exact lowercase enum; controller_owned is reserved and rejected"
         },
         "error_log": {
           "deprecated": true,
@@ -308,16 +310,17 @@
           "x-jul-ignored": true
         },
         "log_format": {
+          "default": "text",
           "description": "LogFormat is \"text\" (human readable, default in dev) or \"json\"",
           "enum": [
             "text",
             "json"
           ],
           "type": "string",
-          "x-jul-constraint": "exact lowercase enum",
-          "x-jul-default": "text"
+          "x-jul-constraint": "exact lowercase enum"
         },
         "log_level": {
+          "default": "info",
           "description": "LogLevel is one of debug, info, warn, error",
           "enum": [
             "debug",
@@ -326,35 +329,34 @@
             "error"
           ],
           "type": "string",
-          "x-jul-constraint": "exact lowercase enum",
-          "x-jul-default": "info"
+          "x-jul-constraint": "exact lowercase enum"
         },
         "redact_min_secret_length": {
+          "default": 4,
           "description": "RedactMinSecretLength is the shortest resolved secret value that is masked from logs",
           "minimum": 0,
           "type": "integer",
-          "x-jul-constraint": "non-negative",
-          "x-jul-default": "4"
+          "x-jul-constraint": "non-negative"
         },
         "reload_timeout": {
+          "default": "10s",
           "description": "ReloadTimeout is how long a hot reload may run before it is reported as timed out",
           "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
           "type": "string",
-          "x-jul-constraint": "non-negative",
-          "x-jul-default": "10s"
+          "x-jul-constraint": "non-negative"
         },
         "shutdown_timeout": {
+          "default": "30s",
           "description": "ShutdownTimeout is how long to wait for in-flight requests to drain",
           "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
           "type": "string",
-          "x-jul-constraint": "non-negative",
-          "x-jul-default": "30s"
+          "x-jul-constraint": "non-negative"
         },
         "worker_threads": {
+          "default": "auto",
           "description": "WorkerThreads accepts \"auto\" or a positive integer as a string",
           "type": "string",
-          "x-jul-constraint": "auto or a canonical positive base-10 integer",
-          "x-jul-default": "auto"
+          "x-jul-constraint": "auto or a canonical positive base-10 integer"
         }
       },
       "type": "object"
@@ -366,24 +368,24 @@
           "additionalProperties": false,
           "properties": {
             "enabled": {
+              "default": true,
               "description": "Enabled controls whether Jul emits request access records",
               "type": "boolean",
-              "x-jul-constraint": "true or false",
-              "x-jul-default": "true"
+              "x-jul-constraint": "true or false"
             },
             "file": {
               "description": "File is the path of the access-log file",
               "type": "string"
             },
             "format": {
+              "default": "text",
               "description": "Format selects the encoding of the file and syslog sinks: \"text\" (logfmt, the default) or \"json\"",
               "enum": [
                 "text",
                 "json"
               ],
               "type": "string",
-              "x-jul-constraint": "exact lowercase enum",
-              "x-jul-default": "text"
+              "x-jul-constraint": "exact lowercase enum"
             },
             "rotate_keep": {
               "description": "RotateKeep is the maximum number of rotated files to retain",
@@ -441,6 +443,7 @@
               ]
             },
             "exporter": {
+              "default": "otlp-grpc",
               "description": "Exporter selects the OTLP transport: \"otlp-grpc\" (default) or \"otlp-http\"",
               "enum": [
                 "otlp-grpc",
@@ -450,8 +453,7 @@
               "x-jul-capability": [
                 "otel"
               ],
-              "x-jul-constraint": "exact lowercase enum",
-              "x-jul-default": "otlp-grpc"
+              "x-jul-constraint": "exact lowercase enum"
             },
             "insecure": {
               "description": "Insecure sends spans over plaintext instead of TLS",
@@ -461,6 +463,7 @@
               ]
             },
             "sample_ratio": {
+              "default": 1,
               "description": "SampleRatio is the head-based sampling probability for root spans, in the range [0,1]",
               "maximum": 1,
               "minimum": 0,
@@ -468,16 +471,15 @@
               "x-jul-capability": [
                 "otel"
               ],
-              "x-jul-constraint": "0..1",
-              "x-jul-default": "1.0"
+              "x-jul-constraint": "0..1"
             },
             "service_name": {
+              "default": "jul",
               "description": "ServiceName sets the OpenTelemetry resource service.name",
               "type": "string",
               "x-jul-capability": [
                 "otel"
-              ],
-              "x-jul-default": "jul"
+              ]
             }
           },
           "type": "object"
@@ -517,14 +519,14 @@
             ]
           },
           "fetch_timeout": {
+            "default": "5s",
             "description": "FetchTimeout bounds a single outbound fetch",
             "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
             "type": "string",
             "x-jul-capability": [
               "wasm_plugins"
             ],
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "5s"
+            "x-jul-constraint": "non-negative"
           },
           "inline": {
             "description": "Inline is the module bytes encoded as standard base64, an alternative to Path for self-contained configs",
@@ -541,64 +543,64 @@
             ]
           },
           "kv_max_bytes": {
+            "default": "1m",
             "description": "KVMaxBytes caps total stored bytes per plugin",
             "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
             "type": "string",
             "x-jul-capability": [
               "wasm_plugins"
             ],
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "1m"
+            "x-jul-constraint": "non-negative"
           },
           "kv_max_entries": {
+            "default": 1024,
             "description": "KVMaxEntries caps distinct keys per plugin",
             "minimum": 0,
             "type": "integer",
             "x-jul-capability": [
               "wasm_plugins"
             ],
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "1024"
+            "x-jul-constraint": "non-negative"
           },
           "max_fetch_response": {
+            "default": "1m",
             "description": "MaxFetchResponse caps a fetch response body",
             "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
             "type": "string",
             "x-jul-capability": [
               "wasm_plugins"
             ],
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "1m"
+            "x-jul-constraint": "non-negative"
           },
           "max_request_body": {
+            "default": "1m",
             "description": "MaxRequestBody caps the request body the host buffers for a guest",
             "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
             "type": "string",
             "x-jul-capability": [
               "wasm_plugins"
             ],
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "1m"
+            "x-jul-constraint": "non-negative"
           },
           "max_response_body": {
+            "default": "8m",
             "description": "MaxResponseBody caps the response body a guest may accumulate",
             "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
             "type": "string",
             "x-jul-capability": [
               "wasm_plugins"
             ],
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "8m"
+            "x-jul-constraint": "non-negative"
           },
           "memory_limit": {
+            "default": "16m",
             "description": "MemoryLimit caps the guest's linear memory",
             "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
             "type": "string",
             "x-jul-capability": [
               "wasm_plugins"
             ],
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "16m"
+            "x-jul-constraint": "non-negative"
           },
           "path": {
             "description": "Path is the filesystem path to the .wasm module",
@@ -608,16 +610,17 @@
             ]
           },
           "timeout": {
+            "default": "100ms",
             "description": "Timeout bounds a single guest invocation",
             "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
             "type": "string",
             "x-jul-capability": [
               "wasm_plugins"
             ],
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "100ms"
+            "x-jul-constraint": "non-negative"
           },
           "type": {
+            "default": "middleware",
             "description": "Type is \"middleware\" (wraps a handler, may pass through) or \"handler\" (a terminal location action)",
             "enum": [
               "middleware",
@@ -627,8 +630,7 @@
             "x-jul-capability": [
               "wasm_plugins"
             ],
-            "x-jul-constraint": "exact lowercase enum",
-            "x-jul-default": "middleware"
+            "x-jul-constraint": "exact lowercase enum"
           }
         },
         "type": "object"
@@ -648,10 +650,10 @@
           "type": "boolean"
         },
         "key": {
+          "default": "ip",
           "description": "Key selects the bucket identity: \"ip\" (client address, the default), \"header:<Name>\" (a request header value), or \"jwt:<claim>\" (a validated JWT claim once auth is configured)",
           "type": "string",
-          "x-jul-constraint": "ip, header:<Name>, or jwt:<claim>",
-          "x-jul-default": "ip"
+          "x-jul-constraint": "ip, header:<Name>, or jwt:<claim>"
         },
         "max_conns": {
           "description": "MaxConns caps concurrent connections per listener (0 = unlimited)",
@@ -682,6 +684,10 @@
             "additionalProperties": false,
             "properties": {
               "forwarded_headers": {
+                "default": [
+                  "forwarded",
+                  "x-forwarded-for"
+                ],
                 "description": "ForwardedHeaders is the ordered preference of forwarding headers: \"forwarded\" (RFC 7239) and \"x-forwarded-for\"",
                 "items": {
                   "enum": [
@@ -692,16 +698,15 @@
                 },
                 "type": "array",
                 "uniqueItems": true,
-                "x-jul-constraint": "ordered list of exact lowercase enum values, each listed at most once",
-                "x-jul-default": "[forwarded, x-forwarded-for]"
+                "x-jul-constraint": "ordered list of exact lowercase enum values, each listed at most once"
               },
               "max_hops": {
+                "default": 16,
                 "description": "MaxHops bounds how many asserted hops a chain may carry",
                 "maximum": 255,
                 "minimum": 0,
                 "type": "integer",
-                "x-jul-constraint": "non-negative, at most 255",
-                "x-jul-default": "16"
+                "x-jul-constraint": "non-negative, at most 255"
               },
               "trusted_proxies": {
                 "description": "TrustedProxies lists the CIDR prefixes (or bare addresses, meaning a single host) whose forwarding headers are believed",
@@ -795,9 +800,9 @@
                           "type": "string"
                         },
                         "realm": {
+                          "default": "Restricted",
                           "description": "Realm is the authentication realm presented in the challenge",
-                          "type": "string",
-                          "x-jul-default": "Restricted"
+                          "type": "string"
                         }
                       },
                       "type": "object"
@@ -820,11 +825,11 @@
                           "type": "array"
                         },
                         "timeout": {
+                          "default": "10s",
                           "description": "Timeout bounds one forward-auth subrequest",
                           "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
                           "type": "string",
-                          "x-jul-constraint": "0s to 60s",
-                          "x-jul-default": "10s"
+                          "x-jul-constraint": "0s to 60s"
                         },
                         "url": {
                           "description": "URL receives a subrequest carrying the original request's method, path, and headers",
@@ -856,11 +861,11 @@
                           "type": "string"
                         },
                         "timeout": {
+                          "default": "10s",
                           "description": "Timeout bounds one JWKS fetch",
                           "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
                           "type": "string",
-                          "x-jul-constraint": "0s to 60s",
-                          "x-jul-default": "10s"
+                          "x-jul-constraint": "0s to 60s"
                         }
                       },
                       "type": "object"
@@ -877,6 +882,7 @@
                       "x-jul-secret": true
                     },
                     "ca_mode": {
+                      "default": "system",
                       "description": "CAMode is \"system\" (default), \"system_and_file\" or \"file_only\"",
                       "enum": [
                         "system",
@@ -884,8 +890,7 @@
                         "file_only"
                       ],
                       "type": "string",
-                      "x-jul-constraint": "exact lowercase enum; never inferred from the presence of ca_file",
-                      "x-jul-default": "system"
+                      "x-jul-constraint": "exact lowercase enum; never inferred from the presence of ca_file"
                     },
                     "client_cert": {
                       "description": "ClientCert and ClientKey are the client certificate presented to the backend (mutual TLS)",
@@ -902,14 +907,14 @@
                       "type": "boolean"
                     },
                     "min_version": {
+                      "default": "1.2",
                       "description": "MinVersion is \"1.2\" (default) or \"1.3\"",
                       "enum": [
                         "1.2",
                         "1.3"
                       ],
                       "type": "string",
-                      "x-jul-constraint": "exact lowercase enum",
-                      "x-jul-default": "1.2"
+                      "x-jul-constraint": "exact lowercase enum"
                     },
                     "peer_identities": {
                       "description": "PeerIdentities are prefixed identities (\"dns:name\", \"uri:spiffe://...\") matched against the backend certificate after standard verification",
@@ -955,12 +960,16 @@
                       "type": "array"
                     },
                     "allowed_methods": {
+                      "default": [
+                        "GET",
+                        "HEAD",
+                        "POST"
+                      ],
                       "description": "AllowedMethods governs preflight approval only, never ordinary requests (that is match.methods)",
                       "items": {
                         "type": "string"
                       },
-                      "type": "array",
-                      "x-jul-default": "[GET, HEAD, POST]"
+                      "type": "array"
                     },
                     "allowed_origins": {
                       "description": "AllowedOrigins is required when Enabled",
@@ -1027,24 +1036,25 @@
                       ]
                     },
                     "max_message_size": {
+                      "default": "4m",
                       "description": "MaxMessageSize caps a single encoded message (a JSON request frame or a gRPC reply)",
                       "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
                       "type": "string",
                       "x-jul-capability": [
                         "grpc"
                       ],
-                      "x-jul-constraint": "non-negative",
-                      "x-jul-default": "4m"
+                      "x-jul-constraint": "non-negative"
                     },
                     "preserve_proto_field_names": {
+                      "default": false,
                       "description": "PreserveNames keeps original proto field names in JSON output instead of the default lowerCamelCase",
                       "type": "boolean",
                       "x-jul-capability": [
                         "grpc"
-                      ],
-                      "x-jul-default": "false"
+                      ]
                     },
                     "stream_mode": {
+                      "default": "ndjson",
                       "description": "StreamMode selects the wire framing for streamed responses: \"ndjson\" (newline-delimited JSON objects, the default) or \"sse\" (Server-Sent Events)",
                       "enum": [
                         "ndjson",
@@ -1054,8 +1064,7 @@
                       "x-jul-capability": [
                         "grpc"
                       ],
-                      "x-jul-constraint": "exact lowercase enum",
-                      "x-jul-default": "ndjson"
+                      "x-jul-constraint": "exact lowercase enum"
                     },
                     "streaming": {
                       "description": "Streaming enables transcoding of streaming methods (server-streaming, client-streaming, and bidirectional)",
@@ -1443,6 +1452,7 @@
                       ]
                     },
                     "mode": {
+                      "default": "block",
                       "description": "Mode is \"block\" (default) — a rule interruption returns BlockStatus — or \"detect\", which records and logs the event but lets the request proceed",
                       "enum": [
                         "block",
@@ -1452,8 +1462,7 @@
                       "x-jul-capability": [
                         "waf"
                       ],
-                      "x-jul-constraint": "exact lowercase enum",
-                      "x-jul-default": "block"
+                      "x-jul-constraint": "exact lowercase enum"
                     },
                     "paranoia": {
                       "description": "Paranoia sets the CRS blocking paranoia level (1–4) when CRSEnabled is set",
@@ -1464,14 +1473,14 @@
                       "x-jul-constraint": "0 or 1..4; non-zero requires CRS"
                     },
                     "request_body_limit": {
+                      "default": "128k",
                       "description": "RequestBodyLimit caps how many request-body bytes are buffered for inspection",
                       "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
                       "type": "string",
                       "x-jul-capability": [
                         "waf"
                       ],
-                      "x-jul-constraint": "non-negative",
-                      "x-jul-default": "128k"
+                      "x-jul-constraint": "non-negative"
                     },
                     "response_body_check": {
                       "description": "ResponseBodyCheck enables inspection of response bodies (CRS phase 4)",
@@ -1489,11 +1498,11 @@
             "type": "array"
           },
           "max_header_bytes": {
+            "default": "1m",
             "description": "MaxHeaderBytes caps the size of request headers (default 1 MiB)",
             "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
             "type": "string",
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "1m"
+            "x-jul-constraint": "non-negative"
           },
           "name": {
             "description": "Name is a descriptive label for this server block, used only in projections",
@@ -1549,6 +1558,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "ca": {
+                    "default": "letsencrypt-staging",
                     "description": "CA selects the directory: \"letsencrypt\", \"letsencrypt-staging\", or a full ACME directory URL",
                     "oneOf": [
                       {
@@ -1566,18 +1576,18 @@
                     "x-jul-capability": [
                       "acme"
                     ],
-                    "x-jul-constraint": "letsencrypt, letsencrypt-staging, or an https directory URL",
-                    "x-jul-default": "letsencrypt-staging"
+                    "x-jul-constraint": "letsencrypt, letsencrypt-staging, or an https directory URL"
                   },
                   "cache_dir": {
+                    "default": "./jul-data/certs",
                     "description": "CacheDir is where issued certificates and account keys are stored",
                     "type": "string",
                     "x-jul-capability": [
                       "acme"
-                    ],
-                    "x-jul-default": "./jul-data/certs"
+                    ]
                   },
                   "challenge": {
+                    "default": "http-01",
                     "description": "Challenge selects the ACME challenge type: \"http-01\" (default) or \"tls-alpn-01\"",
                     "enum": [
                       "http-01",
@@ -1587,8 +1597,7 @@
                     "x-jul-capability": [
                       "acme"
                     ],
-                    "x-jul-constraint": "exact lowercase enum",
-                    "x-jul-default": "http-01"
+                    "x-jul-constraint": "exact lowercase enum"
                   },
                   "dns_provider": {
                     "description": "DNSProvider names the DNS-01 provider plugin (e.g. \"cloudflare\")",
@@ -1623,12 +1632,12 @@
                     ]
                   },
                   "ocsp_stapling": {
+                    "default": true,
                     "description": "OCSPStapling enables OCSP stapling for ACME-issued certificates so clients can verify revocation without a separate round-trip",
                     "type": "boolean",
                     "x-jul-capability": [
                       "acme"
-                    ],
-                    "x-jul-default": "true"
+                    ]
                   }
                 },
                 "type": "object"
@@ -1652,11 +1661,12 @@
                     "x-jul-secret": true
                   },
                   "forward_certificate": {
+                    "default": "none",
                     "description": "ForwardCertificate conveys the verified client certificate to backends with the RFC 9440 Client-Cert header: \"none\" (default), \"leaf\", or \"chain\" (which adds Client-Cert-Chain)",
-                    "type": "string",
-                    "x-jul-default": "none"
+                    "type": "string"
                   },
                   "mode": {
+                    "default": "none",
                     "description": "Mode selects enforcement at the TLS handshake: \"none\" — off (the default)",
                     "enum": [
                       "none",
@@ -1664,8 +1674,7 @@
                       "require"
                     ],
                     "type": "string",
-                    "x-jul-constraint": "exact lowercase enum",
-                    "x-jul-default": "none"
+                    "x-jul-constraint": "exact lowercase enum"
                   },
                   "verify_san": {
                     "description": "VerifySAN, when non-empty, is an allow-list of subject alternative names (DNS name, URI, email, or IP)",
@@ -1718,24 +1727,24 @@
         "additionalProperties": false,
         "properties": {
           "connect_timeout": {
+            "default": "10s",
             "description": "ConnectTimeout bounds dialing the backend",
             "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
             "type": "string",
             "x-jul-capability": [
               "stream_proxy"
             ],
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "10s"
+            "x-jul-constraint": "non-negative"
           },
           "idle_timeout": {
+            "default": "5m",
             "description": "IdleTimeout closes a relayed connection/UDP session after this period with no traffic in either direction",
             "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
             "type": "string",
             "x-jul-capability": [
               "stream_proxy"
             ],
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "5m"
+            "x-jul-constraint": "non-negative"
           },
           "listen": {
             "description": "Listen is the bind address (host:port), e.g. \"0.0.0.0:5432\"",
@@ -1745,16 +1754,17 @@
             ]
           },
           "max_udp_sessions": {
+            "default": 10000,
             "description": "MaxUDPSessions caps the number of concurrent UDP sessions (one per client source address) a UDP listener tracks, bounding memory and backend sockets on the public internet where source addresses are cheap to spoof",
             "minimum": 0,
             "type": "integer",
             "x-jul-capability": [
               "stream_proxy"
             ],
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "10000"
+            "x-jul-constraint": "non-negative"
           },
           "protocol": {
+            "default": "tcp",
             "description": "Protocol is \"tcp\" (default) or \"udp\"",
             "enum": [
               "tcp",
@@ -1764,8 +1774,7 @@
             "x-jul-capability": [
               "stream_proxy"
             ],
-            "x-jul-constraint": "exact lowercase enum",
-            "x-jul-default": "tcp"
+            "x-jul-constraint": "exact lowercase enum"
           },
           "proxy_pass": {
             "description": "ProxyPass is the default backend: a named upstream or a literal host:port",
@@ -1835,6 +1844,7 @@
                 "x-jul-secret": true
               },
               "ca_mode": {
+                "default": "system",
                 "description": "CAMode is \"system\" (default), \"system_and_file\" or \"file_only\"",
                 "enum": [
                   "system",
@@ -1842,8 +1852,7 @@
                   "file_only"
                 ],
                 "type": "string",
-                "x-jul-constraint": "exact lowercase enum; never inferred from the presence of ca_file",
-                "x-jul-default": "system"
+                "x-jul-constraint": "exact lowercase enum; never inferred from the presence of ca_file"
               },
               "client_cert": {
                 "description": "ClientCert and ClientKey are the client certificate presented to the backend (mutual TLS)",
@@ -1860,14 +1869,14 @@
                 "type": "boolean"
               },
               "min_version": {
+                "default": "1.2",
                 "description": "MinVersion is \"1.2\" (default) or \"1.3\"",
                 "enum": [
                   "1.2",
                   "1.3"
                 ],
                 "type": "string",
-                "x-jul-constraint": "exact lowercase enum",
-                "x-jul-default": "1.2"
+                "x-jul-constraint": "exact lowercase enum"
               },
               "peer_identities": {
                 "description": "PeerIdentities are prefixed identities (\"dns:name\", \"uri:spiffe://...\") matched against the backend certificate after standard verification",
@@ -1891,12 +1900,12 @@
                 "additionalProperties": false,
                 "properties": {
                   "address": {
+                    "default": "http://127.0.0.1:8500",
                     "description": "Address is the Consul HTTP API base URL (default \"http://127.0.0.1:8500\")",
                     "type": "string",
                     "x-jul-capability": [
                       "consul"
-                    ],
-                    "x-jul-default": "http://127.0.0.1:8500"
+                    ]
                   },
                   "datacenter": {
                     "description": "Datacenter, when set, queries a specific datacenter",
@@ -1906,12 +1915,12 @@
                     ]
                   },
                   "passing_only": {
+                    "default": true,
                     "description": "PassingOnly restricts results to instances whose health checks are passing (default true)",
                     "type": "boolean",
                     "x-jul-capability": [
                       "consul"
-                    ],
-                    "x-jul-default": "true"
+                    ]
                   },
                   "service": {
                     "description": "Service is the Consul service name to resolve (required)",
@@ -1939,12 +1948,12 @@
                         "x-jul-secret": true
                       },
                       "ca_mode": {
+                        "default": "system",
                         "description": "CAMode is \"system\" (default), \"system_and_file\" or \"file_only\"",
                         "type": "string",
                         "x-jul-capability": [
                           "consul"
-                        ],
-                        "x-jul-default": "system"
+                        ]
                       },
                       "client_cert": {
                         "description": "ClientCert and ClientKey are the client certificate presented to the backend (mutual TLS)",
@@ -1970,12 +1979,12 @@
                         ]
                       },
                       "min_version": {
+                        "default": "1.2",
                         "description": "MinVersion is \"1.2\" (default) or \"1.3\"",
                         "type": "string",
                         "x-jul-capability": [
                           "consul"
-                        ],
-                        "x-jul-default": "1.2"
+                        ]
                       },
                       "peer_identities": {
                         "description": "PeerIdentities are prefixed identities (\"dns:name\", \"uri:spiffe://...\") matched against the backend certificate after standard verification",
@@ -2065,11 +2074,11 @@
                 "type": "object"
               },
               "refresh": {
+                "default": "30s",
                 "description": "Refresh is the polling interval (default 30s)",
                 "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
                 "type": "string",
-                "x-jul-constraint": "non-negative",
-                "x-jul-default": "30s"
+                "x-jul-constraint": "non-negative"
               },
               "target": {
                 "description": "Target is the resolver query",
@@ -2091,11 +2100,11 @@
             "type": "object"
           },
           "fail_timeout": {
+            "default": "10s",
             "description": "FailTimeout is the deprecated spelling of [upstreams.resilience] fail_timeout: how long a backend stays out of rotation before being probed again",
             "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
             "type": "string",
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "10s"
+            "x-jul-constraint": "non-negative"
           },
           "health_check": {
             "additionalProperties": false,
@@ -2109,64 +2118,66 @@
                 "type": "string"
               },
               "expect_status": {
+                "default": [
+                  200
+                ],
                 "description": "ExpectStatus lists acceptable HTTP status codes for a passing probe (default [200])",
                 "items": {
                   "type": "integer"
                 },
-                "type": "array",
-                "x-jul-default": "[200]"
+                "type": "array"
               },
               "healthy_threshold": {
+                "default": 2,
                 "description": "HealthyThreshold is the number of consecutive successes to mark a backend healthy again (default 2)",
                 "minimum": 1,
                 "type": "integer",
-                "x-jul-constraint": "at least 1 effective",
-                "x-jul-default": "2"
+                "x-jul-constraint": "at least 1 effective"
               },
               "interval": {
+                "default": "5s",
                 "description": "Interval is the delay between probe rounds (default 5s)",
                 "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
                 "type": "string",
-                "x-jul-constraint": "positive effective value",
-                "x-jul-default": "5s"
+                "x-jul-constraint": "positive effective value"
               },
               "path": {
                 "description": "Path is the request path for HTTP probes (required for type \"http\")",
                 "type": "string"
               },
               "timeout": {
+                "default": "2s",
                 "description": "Timeout bounds a single probe (default 2s); must be less than Interval",
                 "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
                 "type": "string",
-                "x-jul-constraint": "positive and less than interval",
-                "x-jul-default": "2s"
+                "x-jul-constraint": "positive and less than interval"
               },
               "type": {
+                "default": "http",
                 "description": "Type is the probe protocol: \"http\" (default) or \"tcp\"",
                 "enum": [
                   "http",
                   "tcp"
                 ],
                 "type": "string",
-                "x-jul-constraint": "exact lowercase enum",
-                "x-jul-default": "http"
+                "x-jul-constraint": "exact lowercase enum"
               },
               "unhealthy_threshold": {
+                "default": 3,
                 "description": "UnhealthyThreshold is the number of consecutive failures to take a backend out of rotation (default 3)",
                 "minimum": 1,
                 "type": "integer",
-                "x-jul-constraint": "at least 1 effective",
-                "x-jul-default": "3"
+                "x-jul-constraint": "at least 1 effective"
               }
             },
             "type": "object"
           },
           "max_fails": {
+            "default": 3,
             "description": "MaxFails and FailTimeout are the circuit breaker's failure threshold and open duration",
             "minimum": 0,
             "type": "integer",
-            "x-jul-constraint": "non-negative",
-            "x-jul-default": "3"
+            "x-jul-constraint": "non-negative"
           },
           "name": {
             "description": "Name is the pool's identifier, referenced by proxy_pass and the admin API",
@@ -2176,18 +2187,18 @@
             "additionalProperties": false,
             "properties": {
               "circuit_half_open_probes": {
+                "default": 1,
                 "description": "CircuitHalfOpenProbes bounds how many requests may test a recovering backend at once",
                 "minimum": 0,
                 "type": "integer",
-                "x-jul-constraint": "0 or greater",
-                "x-jul-default": "1"
+                "x-jul-constraint": "0 or greater"
               },
               "fail_timeout": {
+                "default": "10s",
                 "description": "FailTimeout is how long a backend stays out of rotation before it is probed",
                 "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
                 "type": "string",
-                "x-jul-constraint": "non-negative",
-                "x-jul-default": "10s"
+                "x-jul-constraint": "non-negative"
               },
               "max_active_per_backend": {
                 "description": "MaxActivePerBackend bounds admitted logical requests per backend",
@@ -2211,11 +2222,11 @@
                 "x-jul-constraint": "0 to 100000"
               },
               "max_fails": {
+                "default": 3,
                 "description": "MaxFails is how many consecutive failures take a backend out of rotation",
                 "minimum": 0,
                 "type": "integer",
-                "x-jul-constraint": "non-negative",
-                "x-jul-default": "3"
+                "x-jul-constraint": "non-negative"
               },
               "max_pending_requests": {
                 "description": "MaxPendingRequests bounds the queue of requests waiting for a slot",
@@ -2294,6 +2305,7 @@
             "type": "array"
           },
           "strategy": {
+            "default": "round_robin",
             "description": "Strategy is one of \"round_robin\", \"weighted_round_robin\", \"least_conn\"",
             "enum": [
               "round_robin",
@@ -2301,8 +2313,7 @@
               "least_conn"
             ],
             "type": "string",
-            "x-jul-constraint": "exact lowercase enum",
-            "x-jul-default": "round_robin"
+            "x-jul-constraint": "exact lowercase enum"
           }
         },
         "required": [
@@ -2357,6 +2368,7 @@
           ]
         },
         "mode": {
+          "default": "block",
           "description": "Mode is \"block\" (default) — a rule interruption returns BlockStatus — or \"detect\", which records and logs the event but lets the request proceed",
           "enum": [
             "block",
@@ -2366,8 +2378,7 @@
           "x-jul-capability": [
             "waf"
           ],
-          "x-jul-constraint": "exact lowercase enum",
-          "x-jul-default": "block"
+          "x-jul-constraint": "exact lowercase enum"
         },
         "paranoia": {
           "description": "Paranoia sets the CRS blocking paranoia level (1–4) when CRSEnabled is set",
@@ -2378,14 +2389,14 @@
           "x-jul-constraint": "0 or 1..4; non-zero requires CRS"
         },
         "request_body_limit": {
+          "default": "128k",
           "description": "RequestBodyLimit caps how many request-body bytes are buffered for inspection",
           "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
           "type": "string",
           "x-jul-capability": [
             "waf"
           ],
-          "x-jul-constraint": "non-negative",
-          "x-jul-default": "128k"
+          "x-jul-constraint": "non-negative"
         },
         "response_body_check": {
           "description": "ResponseBodyCheck enables inspection of response bodies (CRS phase 4)",
