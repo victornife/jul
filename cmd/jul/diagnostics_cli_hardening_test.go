@@ -74,8 +74,11 @@ func TestSupportBundleFatalErrorsHideAbsolutePaths(t *testing.T) {
 		if code != 1 {
 			t.Fatalf("bundle exit = %d, stdout=%s, stderr=%s", code, out.String(), errOut.String())
 		}
-		if strings.Contains(errOut.String(), directory) || !strings.Contains(errOut.String(), "[PATH REDACTED]") {
-			t.Fatalf("fatal error path was not redacted: %s", errOut.String())
+		if strings.Contains(errOut.String(), directory) {
+			t.Fatalf("fatal error exposed an absolute path: %s", errOut.String())
+		}
+		if !strings.Contains(errOut.String(), "support-bundle output path is unsafe") {
+			t.Fatalf("fatal error lost its stable classification: %s", errOut.String())
 		}
 	})
 }
