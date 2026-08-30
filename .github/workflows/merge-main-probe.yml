@@ -1,0 +1,33 @@
+name: One-shot merge-main probe
+
+on:
+  push:
+    branches: [agent/ops-diagnostics-foundation]
+    paths: [.github/workflows/merge-main-probe.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/ops-diagnostics-foundation
+          fetch-depth: 0
+      - name: Probe merge
+        shell: bash
+        run: |
+          set -u
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          if git merge --no-commit --no-ff origin/main; then
+            echo "MERGE_CLEAN"
+            git merge --abort || true
+          else
+            echo "MERGE_CONFLICTS"
+            git diff --name-only --diff-filter=U
+            exit 1
+          fi
