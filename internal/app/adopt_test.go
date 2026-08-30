@@ -408,10 +408,11 @@ func TestAssessAdoptExternalSnapshotDigestMismatchIsInconsistent(t *testing.T) {
 // state an adversarial review found unadoptable: managed_inconsistent with
 // reason marker_missing has no marker to recover a canonical baseline
 // version from, so BaselineCanonicalVersion is itself "". ADR 0019 §11.2.1
-// says adoption remains available from managed_inconsistent — a client that
-// faithfully echoes back exactly what the preview reported (an empty
-// base_version) must be able to adopt, not be permanently locked out by a
-// CAS check demanding a non-empty value that can never exist here.
+// says adoption remains available from managed_inconsistent, and rather than
+// treating the missing marker version as an empty CAS wildcard, both preview
+// and adoption bind to the retained snapshot's own canonical version instead
+// — the snapshot is exactly why the state is marker_missing rather than
+// managed_unadopted, so it is a real prior state to bind to, not "unknown".
 func TestAdoptFromMarkerMissingWithNoRecoverableBaseVersion(t *testing.T) {
 	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
 	c.ManagedBaseline = NewManagedBaselineStore(path)
@@ -451,12 +452,14 @@ func TestAdoptFromMarkerMissingWithNoRecoverableBaseVersion(t *testing.T) {
 	if assessment.InconsistentReason != ReasonMarkerMissing {
 		t.Errorf("InconsistentReason = %q, want marker_missing", assessment.InconsistentReason)
 	}
-	if assessment.BaselineVersion != "" {
-		t.Errorf("BaselineVersion = %q, want empty (unrecoverable)", assessment.BaselineVersion)
+	seedCfg := mustParseForTest(t, seed)
+	wantVersion := server.CanonicalVersion(seedCfg)
+	if assessment.BaselineVersion != wantVersion {
+		t.Errorf("BaselineVersion = %q, want the snapshot's own canonical version %q", assessment.BaselineVersion, wantVersion)
 	}
 
-	// A client faithfully echoing back exactly what preview reported (an
-	// empty base_version) must be able to complete the adoption.
+	// A client faithfully echoing back exactly what preview reported must be
+	// able to complete the adoption.
 	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
 		ObservedDigest: assessment.ObservedDigest,
 		BaseVersion:    assessment.BaselineVersion,
@@ -467,7 +470,7 @@ func TestAdoptFromMarkerMissingWithNoRecoverableBaseVersion(t *testing.T) {
 		t.Fatalf("AdoptExternal: %v", err)
 	}
 	if !res.OK {
-		t.Fatalf("adoption from marker_missing with an empty (unrecoverable) base_version must succeed, got %+v", res)
+		t.Fatalf("adoption from marker_missing bound to the snapshot's canonical version must succeed, got %+v", res)
 	}
 	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedClean {
 		t.Errorf("state = %v, want managed_clean after a successful adoption", st.State)
@@ -477,13 +480,84 @@ func TestAdoptFromMarkerMissingWithNoRecoverableBaseVersion(t *testing.T) {
 	}
 }
 
-// TestAdoptFromMarkerMissingRejectsStaleNonEmptyBaseVersion pins the other
-// half of the same fix: relaxing the base_version requirement for an
-// unrecoverable baseline must not become a blanket CAS bypass. A client
-// that supplies any non-empty base_version here is looking at a preview
-// from before the marker was lost (or a bug), and must still be refused as
-// a conflict.
-func TestAdoptFromMarkerMissingRejectsStaleNonEmptyBaseVersion(t *testing.T) {
+// TestAdoptFromMarkerMissingRejectsStaleOrMissingBaseVersion pins the other
+// half of the same fix: binding to the snapshot's canonical version must not
+// become a blanket CAS bypass. Neither an empty base_version (the field
+// omitted, since a real recoverable version now exists) nor a wrong non-empty
+// one (a preview from before the marker was lost, or a bug) may adopt.
+func TestAdoptFromMarkerMissingRejectsStaleOrMissingBaseVersion(t *testing.T) {
+	setup := func(t *testing.T) (*ConfigApplyCoordinator, string, []byte) {
+		t.Helper()
+		c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
+		c.ManagedBaseline = NewManagedBaselineStore(path)
+		seed := validConfigRaw(t, ":8080")
+		if err := os.WriteFile(path, seed, 0o600); err != nil {
+			t.Fatalf("write seed: %v", err)
+		}
+		if err := c.ManagedBaseline.CommitMark(seed, "seed-version"); err != nil {
+			t.Fatalf("CommitMark: %v", err)
+		}
+		if err := os.Remove(path + ".managed-baseline.json"); err != nil {
+			t.Fatalf("remove marker: %v", err)
+		}
+		if err := c.ManagedBaseline.Reconcile(seed, nil, "seed-version", ""); err == nil {
+			t.Fatal("Reconcile: want an error for marker_missing")
+		}
+		external := validConfigRaw(t, ":9999")
+		if err := os.WriteFile(path, external, 0o600); err != nil {
+			t.Fatalf("write external file: %v", err)
+		}
+		return c, path, external
+	}
+
+	t.Run("empty", func(t *testing.T) {
+		c, path, external := setup(t)
+		res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+			ObservedDigest: digestHex(external),
+			BaseVersion:    "",
+			Mode:           "hot",
+			Confirm:        true,
+		})
+		if err != nil {
+			t.Fatalf("AdoptExternal: %v", err)
+		}
+		if res.OK {
+			t.Fatalf("an omitted base_version against a recoverable snapshot version must be rejected, got %+v", res)
+		}
+		onDisk, _ := os.ReadFile(path)
+		if string(onDisk) != string(external) {
+			t.Error("a refused adoption must not touch the file")
+		}
+	})
+
+	t.Run("stale", func(t *testing.T) {
+		c, path, external := setup(t)
+		res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
+			ObservedDigest: digestHex(external),
+			BaseVersion:    "seed-version", // the marker's version, not the snapshot's canonical one
+			Mode:           "hot",
+			Confirm:        true,
+		})
+		if err != nil {
+			t.Fatalf("AdoptExternal: %v", err)
+		}
+		if res.OK || !res.Conflict {
+			t.Fatalf("a wrong base_version against a recoverable snapshot version must conflict, got %+v", res)
+		}
+		onDisk, _ := os.ReadFile(path)
+		if string(onDisk) != string(external) {
+			t.Error("a refused adoption must not touch the file")
+		}
+	})
+}
+
+// TestAdoptFromMarkerMissingDetectsSnapshotChangeBetweenPreviewAndAdoption
+// pins the reviewer's exact concern: binding base_version to the retained
+// snapshot's own canonical version is what makes this a real CAS. If the
+// snapshot changes between preview and adoption while the external file
+// stays untouched, observed_digest alone cannot detect it — only a
+// base_version bound to the snapshot's content can.
+func TestAdoptFromMarkerMissingDetectsSnapshotChangeBetweenPreviewAndAdoption(t *testing.T) {
 	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, nil)
 	c.ManagedBaseline = NewManagedBaselineStore(path)
 	seed := validConfigRaw(t, ":8080")
@@ -504,9 +578,22 @@ func TestAdoptFromMarkerMissingRejectsStaleNonEmptyBaseVersion(t *testing.T) {
 		t.Fatalf("write external file: %v", err)
 	}
 
+	assessment, err := c.AssessAdoptExternal()
+	if err != nil {
+		t.Fatalf("AssessAdoptExternal: %v", err)
+	}
+
+	// Something else repairs/rewrites the snapshot between preview and
+	// adoption to different content — the external file itself is
+	// untouched, so observed_digest alone would not catch this.
+	replaced := validConfigRaw(t, ":7000")
+	if err := os.WriteFile(path+".managed-baseline.snapshot", replaced, 0o600); err != nil {
+		t.Fatalf("replace snapshot: %v", err)
+	}
+
 	res, err := c.AdoptExternal(admin.ApplyRequestContext{}, admin.AdoptExternalRequest{
-		ObservedDigest: digestHex(external),
-		BaseVersion:    "seed-version", // stale: from before the marker was lost
+		ObservedDigest: assessment.ObservedDigest,
+		BaseVersion:    assessment.BaselineVersion, // the now-stale snapshot's version
 		Mode:           "hot",
 		Confirm:        true,
 	})
@@ -514,7 +601,7 @@ func TestAdoptFromMarkerMissingRejectsStaleNonEmptyBaseVersion(t *testing.T) {
 		t.Fatalf("AdoptExternal: %v", err)
 	}
 	if res.OK || !res.Conflict {
-		t.Fatalf("a non-empty base_version against an unrecoverable baseline must conflict, got %+v", res)
+		t.Fatalf("a base_version bound to a since-replaced snapshot must conflict, got %+v", res)
 	}
 	onDisk, _ := os.ReadFile(path)
 	if string(onDisk) != string(external) {

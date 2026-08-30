@@ -277,9 +277,23 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 
 	// applyMu serializes applies so only one candidate is in flight at a time.
 	// c.mu protects coordinator state and is not held across the reload wait so
-	// the async finalizer can safely restore without deadlocking.
+	// the async finalizer can safely restore without deadlocking. For the
+	// hot-apply path specifically, applyMu itself is released once the
+	// candidate is persisted and the reload is enqueued (see applyMuHeld
+	// below) — inFlightState, not applyMu, is what continues to admit-refuse
+	// a later apply for the rest of this transaction's lifetime, including
+	// its baseline retry. Releasing applyMu there rather than only at
+	// function return is what lets the finalizer resolve that retry under
+	// applyMu itself without deadlocking against this call's own wait below
+	// (ADR 0015 §4 / #226: the mutation gate and terminal publication must
+	// not depend on each other for release).
 	c.applyMu.Lock()
-	defer c.applyMu.Unlock()
+	applyMuHeld := true
+	defer func() {
+		if applyMuHeld {
+			c.applyMu.Unlock()
+		}
+	}()
 
 	if mode == "" {
 		mode = ApplyHot
@@ -458,7 +472,7 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 		return result, nil
 	}
 
-	return c.applyCandidate(ctx, id, data, pfResult.Candidate, pfResult.PreparedAdmin, baseline, mode)
+	return c.applyCandidate(ctx, id, data, pfResult.Candidate, pfResult.PreparedAdmin, baseline, mode, &applyMuHeld)
 }
 
 // servingReloadTimeout returns the transaction deadline budget for AC-08. It is
@@ -1295,7 +1309,7 @@ func (c *ConfigApplyCoordinator) plannedRestartStatus() *admin.PendingRestartSta
 	return res
 }
 
-func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext, id string, data []byte, candidate *config.Candidate, preparedAdmin *server.PreparedCommit, baseline admin.MutationBaseline, mode ApplyMode) (ApplyResult, error) {
+func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext, id string, data []byte, candidate *config.Candidate, preparedAdmin *server.PreparedCommit, baseline admin.MutationBaseline, mode ApplyMode, applyMuHeld *bool) (ApplyResult, error) {
 	preparedOwned := preparedAdmin != nil
 	defer func() {
 		if preparedOwned {
@@ -1479,6 +1493,13 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	}
 	preparedOwned = false // the server reload plan now owns commit/abort
 	c.mu.Unlock()
+	// The candidate is persisted and the reload is enqueued: release applyMu
+	// here rather than at function return (see the comment where it was
+	// acquired, in ApplyRaw). inFlightState — already ApplyInFlightWaiting —
+	// is what continues to refuse a later apply for the rest of this
+	// transaction, including the async finalizer's baseline retry below.
+	*applyMuHeld = false
+	c.applyMu.Unlock()
 
 	// AC-02: register the exact-ID pending ledger record now that the candidate
 	// is persisted and the reload is enqueued, but BEFORE the synchronous path
@@ -1521,15 +1542,16 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 			}
 		}
 		terminal := c.buildTerminalResult(mode, persistedVersion, desiredVersion, rr, baseline.Raw, baseline.Exists, rawDigest)
-		// ADR 0019 §11.2.0.1: the baseline transaction terminalizes here — under
-		// c.mu, immediately before the admission gate (inFlightState) is
-		// cleared — so a later apply is never admitted while this one's
-		// baseline is still pending. A post-commit write failure needs a
-		// retry (§11.2.1a) that this goroutine cannot safely run yet — doing
-		// so here could deadlock a synchronously-waiting ApplyRaw call that
-		// still holds applyMu awaiting this same goroutine's terminal result
-		// — so needsBaselineRetry defers it to below, where the gate stays
-		// closed (inFlightState is NOT cleared yet) until the retry resolves.
+		// ADR 0019 §11.2.0.1: the baseline transaction terminalizes here,
+		// before the admission gate (inFlightState) is cleared, so a later
+		// apply is never admitted while this one's baseline is still
+		// pending. A post-commit write failure needs a retry (§11.2.1a); it
+		// cannot run inline here because it takes applyMu itself (freed
+		// above once the candidate was persisted and the reload enqueued —
+		// see ApplyRaw), and this goroutine still holds c.mu, which would
+		// invert the lock order every other applyMu-then-c.mu caller uses.
+		// c.mu is released below, before the retry runs, precisely to avoid
+		// that.
 		needsBaselineRetry := false
 		if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
 			if restoreNeeded {
@@ -1541,24 +1563,31 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 				needsBaselineRetry = true
 			}
 		}
-		// #226 / AC-03: every config-path mutation is complete at this point,
-		// including any required restoration and the final disk-state read.
-		// Clear the admission gate while still holding mu, then release the
-		// server's reload-serialization gate before any completion callback
-		// can publish a terminal ledger record — unless a baseline retry is
-		// still owed, in which case the gate must stay closed
-		// (inFlightState remains ApplyInFlightWaiting) until that retry
-		// itself reaches a terminal state, per §11.2.0.1: the next apply
-		// must never be admitted while this one's baseline write is still
-		// unresolved, not even when what remains is only a retry.
+		c.mu.Unlock()
+
+		// ADR 0015 §4 / #226 requires the mutation gate to clear and the
+		// terminal result to publish only after the config-path mutation is
+		// fully resolved — a baseline retry is part of that mutation, not a
+		// side effect of reporting it, so it must resolve here, before
+		// either. inFlightState is still ApplyInFlightWaiting throughout
+		// this call, so a later ordinary apply is refused as in flight for
+		// the whole of it; AdoptExternal checks the same flag for the same
+		// reason, since applyMu alone no longer serializes this window.
+		if needsBaselineRetry {
+			c.resolveBaselineWriteRetry(data, func(b []byte) error { return c.ManagedBaseline.CompleteWrite(b, persistedVersion) })
+		}
+
+		// #226 / AC-03: every config-path mutation — including any baseline
+		// retry — is complete at this point. Clear the admission gate, then
+		// release the server's reload-serialization gate, before any
+		// completion callback can publish a terminal ledger record.
 		//
 		// The non-config terminal side effects remain exactly-once and ordered:
 		// completeManagedApply serializes history/audit/metrics/ledger work with
 		// finalizeMu. A later apply may start while that work finishes, but its own
 		// terminal publication queues behind this finalizer.
-		if !needsBaselineRetry {
-			c.inFlightState = ApplyInFlightNone
-		}
+		c.mu.Lock()
+		c.inFlightState = ApplyInFlightNone
 		c.mu.Unlock()
 		close(finalizedCh)
 		// Carry any post-persistence pending-registration failure into the
@@ -1573,19 +1602,6 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// result. The trusted history write runs outside c.mu.
 		terminal = c.completeManagedApply(reqCtx, terminal, baseline.Raw)
 		terminalCh <- terminal
-		// The retry runs only now, after the terminal result has been
-		// delivered: a synchronously-waiting ApplyRaw call receives from
-		// terminalCh and returns (dropping applyMu) at this point, so
-		// acquiring applyMu here cannot deadlock against it. inFlightState
-		// was deliberately left ApplyInFlightWaiting above so no other hot
-		// apply can be admitted for the whole of this window; it is only
-		// cleared once the retry below reaches its own terminal state.
-		if needsBaselineRetry {
-			c.resolveBaselineWriteRetry(data, func(b []byte) error { return c.ManagedBaseline.CompleteWrite(b, persistedVersion) })
-			c.mu.Lock()
-			c.inFlightState = ApplyInFlightNone
-			c.mu.Unlock()
-		}
 	}()
 
 	waitMargin := c.waitMargin

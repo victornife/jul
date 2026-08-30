@@ -801,9 +801,10 @@ func TestCoordinatorManagedApplyRetriesBaselineWriteAfterSnapshotFailure(t *test
 		t.Errorf("expected a baseline_error degradation, got %+v", res.Degraded)
 	}
 
-	// The retry (holding applyMu, run only after the terminal result was
-	// delivered) still sees the occupied snapshot path and must mark the
-	// baseline inconsistent rather than leave it silently stale.
+	// The retry resolves before ApplyRaw's own caller ever sees a result
+	// (ADR 0015 §4 / #226: the mutation gate and terminal publication both
+	// wait for it), so by the time res is available here the retry has
+	// already run and still sees the occupied snapshot path.
 	<-done
 	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonBaselineUnwritable {
 		t.Errorf("state=%v reason=%v, want managed_inconsistent/baseline_unwritable", st.State, st.Reason)
@@ -843,16 +844,34 @@ func TestCoordinatorHotApplyBlocksAdmissionUntilBaselineRetryResolves(t *testing
 		close(retryStarted)
 		<-retryContinue
 	}
-	retryDone := awaitBaselineWriteRetry(c)
+	// ADR 0015 §4 / #226: the mutation gate must clear, and only then may the
+	// terminal ledger publish — this must hold true even when what remains
+	// unresolved is only the baseline retry. OnManagedApplyComplete fires
+	// exactly at terminal publication (inside completeManagedApply), so
+	// recording inFlightState there proves the ordering directly rather than
+	// inferring it from timing.
+	var inFlightAtCompletion ApplyInFlightState
+	var configStateAtCompletion ConfigState
+	completed := make(chan struct{})
+	c.OnManagedApplyComplete = func(comp admin.ManagedApplyCompletion) admin.ManagedApplyFinalization {
+		c.mu.Lock()
+		inFlightAtCompletion = c.inFlightState
+		c.mu.Unlock()
+		configStateAtCompletion = ConfigState(comp.Result.ConfigState)
+		close(completed)
+		return admin.ManagedApplyFinalization{}
+	}
 
 	newRaw := validConfigRaw(t, ":8081")
-	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot)
-	if err != nil {
-		t.Fatalf("ApplyRaw error: %v", err)
+	type applyOutcome struct {
+		res ApplyResult
+		err error
 	}
-	if !res.OK {
-		t.Fatalf("a post-commit baseline failure must not change the apply's own outcome, got %+v", res)
-	}
+	firstDone := make(chan applyOutcome, 1)
+	go func() {
+		res, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot)
+		firstDone <- applyOutcome{res, err}
+	}()
 	<-retryStarted
 
 	// A second apply arriving while the first's baseline retry is still
@@ -869,10 +888,47 @@ func TestCoordinatorHotApplyBlocksAdmissionUntilBaselineRetryResolves(t *testing
 		t.Error("a refused second apply must not have touched the file")
 	}
 
+	// Neither the first apply's own caller-visible result nor its terminal
+	// ledger publication may be observable yet: both are gated by the same
+	// unresolved retry.
+	select {
+	case out := <-firstDone:
+		t.Fatalf("the first apply must not complete while its own baseline retry is still blocked, got %+v (err=%v)", out.res, out.err)
+	case <-completed:
+		t.Fatal("terminal ledger publication must not occur while the baseline retry is still blocked")
+	default:
+	}
+
 	close(retryContinue)
-	// The retry itself still fails (the snapshot path remains occupied), but
-	// the point of this test is that it was never raced.
-	<-retryDone
+	<-completed
+	first := <-firstDone
+	if first.err != nil {
+		t.Fatalf("ApplyRaw error: %v", first.err)
+	}
+	if !first.res.OK {
+		t.Fatalf("a post-commit baseline failure must not change the apply's own outcome, got %+v", first.res)
+	}
+	found := false
+	for _, d := range first.res.Degraded {
+		if d.Kind == DegradedBaselineError {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a baseline_error degradation, got %+v", first.res.Degraded)
+	}
+
+	// The gate must have cleared before terminal publication observed it,
+	// and the published config_state must already reflect the retry's own
+	// outcome (managed_inconsistent) rather than a stale pre-retry value —
+	// both are the same completeManagedApply call this hook fired from.
+	if inFlightAtCompletion != ApplyInFlightNone {
+		t.Errorf("inFlightState at terminal publication = %q, want cleared — the gate must clear before publication, not after", inFlightAtCompletion)
+	}
+	if configStateAtCompletion != ConfigStateManagedInconsistent {
+		t.Errorf("config_state at terminal publication = %q, want managed_inconsistent (the retry's own outcome), not a stale pre-retry value", configStateAtCompletion)
+	}
+
 	if st := c.ManagedBaseline.Status(); st.State != ConfigStateManagedInconsistent || st.Reason != ReasonBaselineUnwritable {
 		t.Errorf("state=%v reason=%v, want managed_inconsistent/baseline_unwritable", st.State, st.Reason)
 	}
