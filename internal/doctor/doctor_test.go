@@ -190,7 +190,7 @@ func TestCollectConfiguredPathsDoesNotExposeValuesInResult(t *testing.T) {
 	dir := t.TempDir()
 	secretPath := filepath.Join(dir, "private-name.key")
 	cfg := &config.Config{
-		Admin: config.AdminConfig{HistoryDir: filepath.Join(dir, "history")},
+		Admin:   config.AdminConfig{HistoryDir: filepath.Join(dir, "history")},
 		Servers: []config.ServerConfig{{TLS: &config.TLSConfig{Cert: filepath.Join(dir, "cert.pem"), Key: secretPath}}},
 		Plugins: map[string]config.PluginConfig{"p": {Path: filepath.Join(dir, "module.wasm")}},
 	}
@@ -322,7 +322,7 @@ func TestRenderAndExitCode(t *testing.T) {
 	t.Parallel()
 	report := diagnostics.Report{
 		SchemaVersion: 1,
-		Summary: diagnostics.Summary{Status: diagnostics.StatusWarning, Passed: 1, Warnings: 1},
+		Summary:       diagnostics.Summary{Status: diagnostics.StatusWarning, Passed: 1, Warnings: 1},
 		Checks: []diagnostics.Result{
 			{Code: "OK", Status: diagnostics.StatusPass, Message: "fine"},
 			{Code: "WARN", Status: diagnostics.StatusWarning, Message: "attention", Remediation: "fix it"},

@@ -21,16 +21,16 @@ const (
 // RedactValues is a defensive final scan list for resolved secrets known by the
 // caller; collectors must still exclude sensitive fields structurally.
 type Snapshot struct {
-	Product       string
-	Version       string
-	Commit        string
-	BuildProfile  string
-	ConfigPath    string
-	Capabilities  map[string]bool
-	CheckNetwork  bool
-	IncludeLogs   bool
-	LogTailBytes  int64
-	RedactValues  []string
+	Product      string
+	Version      string
+	Commit       string
+	BuildProfile string
+	ConfigPath   string
+	Capabilities map[string]bool
+	CheckNetwork bool
+	IncludeLogs  bool
+	LogTailBytes int64
+	RedactValues []string
 }
 
 // Limits bounds collection and archive resource use.
