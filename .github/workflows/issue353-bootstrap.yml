@@ -28,6 +28,18 @@ jobs:
           cache: true
       - name: install documentation dependencies
         run: pip install tomli pyyaml
+      - name: narrow changelog insertion to Unreleased
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/issue353_apply.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'text = replace_once(text, marker, marker + row, path)'
+          new = 'text = text.replace(marker, marker + row, 1)'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one changelog insertion call, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8', newline='\n')
+          PY
       - name: apply issue 353 reconciliation
         run: python .github/issue353_apply.py
       - name: verify generated contracts
