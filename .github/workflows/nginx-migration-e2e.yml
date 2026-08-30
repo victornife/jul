@@ -1,0 +1,69 @@
+name: NGINX migration reference E2E
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/nginx-migration-e2e.yml'
+      - 'CHANGELOG.md'
+      - 'Makefile'
+      - 'cmd/jul/import_corpus_test.go'
+      - 'docs/nginx-importer.md'
+      - 'docs/nginx-migration-corpus.md'
+      - 'internal/migrate/nginx/**'
+      - 'scripts/nginx-corpus-check.sh'
+      - 'scripts/nginx-migration-e2e.sh'
+      - 'testdata/nginx-corpus/**'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/nginx-migration-e2e.yml'
+      - 'CHANGELOG.md'
+      - 'Makefile'
+      - 'cmd/jul/import_corpus_test.go'
+      - 'docs/nginx-importer.md'
+      - 'docs/nginx-migration-corpus.md'
+      - 'internal/migrate/nginx/**'
+      - 'scripts/nginx-corpus-check.sh'
+      - 'scripts/nginx-migration-e2e.sh'
+      - 'testdata/nginx-corpus/**'
+      - 'go.mod'
+      - 'go.sum'
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nginx-migration-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pinned-nginx-reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Record Docker runtime
+        run: docker version
+      - name: Run pinned NGINX reference lane
+        env:
+          REQUIRE_NGINX_E2E: '1'
+          NGINX_CORPUS_ARTIFACT_DIR: ${{ runner.temp }}/nginx-migration-e2e
+        run: scripts/nginx-migration-e2e.sh
+      - name: Upload bounded reference evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nginx-migration-reference-${{ github.run_id }}
+          path: ${{ runner.temp }}/nginx-migration-e2e
+          if-no-files-found: error
+          retention-days: 7

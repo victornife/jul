@@ -1,6 +1,7 @@
 .PHONY: build test bench fuzz soak format format-check lint vulncheck clean \
         console-dev console-build console-check build-console build-full license-check \
-        hooks waf-churn security-gates lifecycle-generate config-contract-generate generated-check
+        hooks waf-churn security-gates lifecycle-generate config-contract-generate generated-check \
+        nginx-corpus-check nginx-migration-e2e
 
 # ── Default ──────────────────────────────────────────────────────────
 build:
@@ -23,6 +24,16 @@ bench-compare:
 
 fuzz:
 	scripts/fuzz.sh
+
+# Core NGINX migration corpus: contract, importer assessment/candidate, and
+# real-Jul loopback replay. Does not require Docker.
+nginx-corpus-check:
+	scripts/nginx-corpus-check.sh
+
+# Pinned official NGINX reference runtime. Requires Docker and fails rather than
+# silently skipping when the runtime is unavailable.
+nginx-migration-e2e:
+	REQUIRE_NGINX_E2E=1 scripts/nginx-migration-e2e.sh
 
 # Post-GA soak gate (ADR 0005). Override SOAK_DURATION/SOAK_WORKERS for a longer,
 # release-style run, e.g. `SOAK_DURATION=5m SOAK_WORKERS=32 make soak`.
