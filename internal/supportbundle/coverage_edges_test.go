@@ -257,7 +257,7 @@ func TestSupportBundleCoverageCollectorEarlyExits(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte("single-line-without-newline"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	data, truncated, err := tailRegularFile(context.Background(), logPath, int64(len("single-line-without-newline")), 5)
+	data, truncated, err := tailRegularFile(context.Background(), logPath, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
