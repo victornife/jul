@@ -7,6 +7,8 @@
     "required": [
         "schema_version",
         "source",
+        "source_policy",
+        "sources",
         "status",
         "summary",
         "results",
@@ -14,10 +16,21 @@
     ],
     "properties": {
         "schema_version": {
-            "const": 1
+            "const": 2
         },
         "source": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
+        },
+        "source_policy": {
+            "$ref": "#/$defs/source_policy"
+        },
+        "sources": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "$ref": "#/$defs/source"
+            }
         },
         "status": {
             "enum": [
@@ -36,11 +49,183 @@
                 "$ref": "#/$defs/result"
             }
         },
+        "guidance": {
+            "type": "array",
+            "items": {
+                "$ref": "#/$defs/guidance"
+            }
+        },
         "validation": {
             "$ref": "#/$defs/validation"
         }
     },
     "$defs": {
+        "position": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "line": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "column": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "source_policy": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "path_style",
+                "root",
+                "follow_includes"
+            ],
+            "properties": {
+                "path_style": {
+                    "enum": [
+                        "relative",
+                        "absolute"
+                    ]
+                },
+                "root": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "follow_includes": {
+                    "const": false
+                }
+            }
+        },
+        "source": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "id",
+                "display_path"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "pattern": "^source-[0-9]{4}$"
+                },
+                "display_path": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "digest": {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "parent_id": {
+                    "type": "string",
+                    "pattern": "^source-[0-9]{4}$"
+                },
+                "include_line": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "provenance": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "source_id",
+                "display_path",
+                "start",
+                "context_path",
+                "directive",
+                "summary"
+            ],
+            "properties": {
+                "source_id": {
+                    "type": "string",
+                    "pattern": "^source-[0-9]{4}$"
+                },
+                "display_path": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "start": {
+                    "$ref": "#/$defs/position"
+                },
+                "end": {
+                    "$ref": "#/$defs/position"
+                },
+                "context_path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 163
+                },
+                "directive": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "summary": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 163
+                }
+            }
+        },
+        "target_mapping": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "relation": {
+                    "enum": [
+                        "direct",
+                        "approximate",
+                        "expands_to_multiple",
+                        "combines_with_siblings"
+                    ]
+                },
+                "paths": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                }
+            }
+        },
+        "guidance": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "code",
+                "title",
+                "action",
+                "blocking"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "pattern": "^GUIDE_[A-Z0-9_]+$"
+                },
+                "title": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "action": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "consequence": {
+                    "type": "string"
+                },
+                "docs": {
+                    "type": "string"
+                },
+                "blocking": {
+                    "type": "boolean"
+                }
+            }
+        },
         "summary": {
             "type": "object",
             "additionalProperties": false,
@@ -109,7 +294,7 @@
             "properties": {
                 "id": {
                     "type": "string",
-                    "pattern": "^result-[0-9]{4,}$"
+                    "pattern": "^result-(source-[0-9]{4}-[0-9]{4}|synthetic-[0-9]{4}|unmatched-[0-9]{4})(-[0-9]{2})?$"
                 },
                 "code": {
                     "type": "string",
@@ -172,13 +357,45 @@
                 },
                 "target_paths": {
                     "type": "array",
+                    "uniqueItems": true,
                     "items": {
                         "type": "string",
                         "minLength": 1
                     }
                 },
+                "provenance": {
+                    "$ref": "#/$defs/provenance"
+                },
+                "target_mappings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/target_mapping"
+                    }
+                },
+                "guidance_codes": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "pattern": "^GUIDE_[A-Z0-9_]+$"
+                    }
+                },
+                "related_result_ids": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "pattern": "^result-"
+                    }
+                },
                 "synthetic": {
                     "type": "boolean"
+                },
+                "scope": {
+                    "enum": [
+                        "global",
+                        "derived"
+                    ]
                 }
             }
         },
@@ -192,6 +409,7 @@
             "properties": {
                 "severity": {
                     "enum": [
+                        "info",
                         "warning",
                         "error"
                     ]
