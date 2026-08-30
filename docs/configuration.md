@@ -8,6 +8,22 @@ present (for example `[waf]` requires the `waf` tag, `[[stream]]` the `stream`
 tag, and `[plugins.<name>]` the `wasmplugins` tag); absent tags are rejected at
 preflight rather than silently ignored.
 
+> **Looking for an exhaustive, field-by-field reference?** This page stays a
+> conceptual guide — what each area means, how to configure it, and worked
+> examples. The generated, factual reference over every configurable leaf
+> (type, default, lifecycle, required capability, allowed values, and more)
+> lives in [`docs/generated/config-reference.md`](generated/config-reference.md),
+> rendered from the same normalized contract as
+> [`docs/generated/config.schema.json`](generated/config.schema.json) (a JSON
+> Schema 2020-12 document) and
+> [`docs/generated/config-metadata.json`](generated/config-metadata.json) (compact
+> machine metadata keyed by canonical path). All three are generated —
+> regenerate with `make config-contract-generate` after changing the schema —
+> and are authoritative over the field-level facts. **Schema validity is
+> necessary and not sufficient: Jul's runtime configuration validation
+> (`jul check`) remains authoritative**, and a document may satisfy the schema
+> while `jul lint` still reports an error-severity finding.
+
 A minimal, working example:
 
 ```toml

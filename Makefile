@@ -1,6 +1,6 @@
 .PHONY: build test bench fuzz soak format format-check lint vulncheck clean \
         console-dev console-build console-check build-console build-full license-check \
-        hooks waf-churn security-gates lifecycle-generate generated-check
+        hooks waf-churn security-gates lifecycle-generate config-contract-generate generated-check
 
 # ── Default ──────────────────────────────────────────────────────────
 build:
@@ -75,10 +75,18 @@ ci-fast: format-check lint test build license-check
 lifecycle-generate:
 	go generate ./internal/lifecycle
 
+# The configuration contract (internal/configcontract) generates the JSON
+# Schema, machine metadata and Markdown reference in docs/generated/ from
+# config.SchemaPaths + lifecycle.BuildMetadata + docs/config-value-contract.json.
+# Never hand-edit them; change a source and regenerate.
+config-contract-generate:
+	go generate ./internal/configcontract
+
 # Non-mutating drift gate. Fails when a generated artifact does not match what
-# the registry renders, printing the exact regeneration command.
+# its source renders, printing the exact regeneration command.
 generated-check:
 	go run ./internal/lifecycle/lifecyclegen -out docs -check
+	go run ./internal/configcontract/configcontractgen -out docs -check
 
 # Full-tag Go gates (build, lint, test, vulncheck, license).
 # Closest local equivalent to the merge gate; does not cover race, coverage
