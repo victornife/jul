@@ -211,7 +211,6 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   repeat the block. Every consumer takes the resolved policy type, so named
   profiles remain an additive change to resolution rather than a transport
   rewrite; the promotion triggers are recorded in ADR 0016.
-- **Health probes use the pool-level resolved policy.** A route-level override cannot govern a shared pool probe; put the roots and client identity required by the probe on the upstream.
 - **`insecure_skip_verify` disables verification, not encryption.** It exists as
   an emergency path: `jul lint` fails on it, the server warns once per backend
   at startup, and it cannot be combined with `peer_identities` or a non-system

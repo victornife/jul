@@ -499,7 +499,7 @@ def test_lifecycle_generator_check_is_non_mutating_and_names_the_remedy():
             f"stale-artifact failure must name the regeneration command: {result.stderr}"
 
 
-if __name__ == "__main__":
+def _run_existing_tests():
     test_check_finding_uniqueness_detects_conflict()
     test_check_finding_uniqueness_allows_decimal_suffixes()
     test_check_horizon_specs_detects_missing_banner()
@@ -517,7 +517,6 @@ if __name__ == "__main__":
     test_lifecycle_detects_missing_reload_semantics_coverage()
     test_lifecycle_passes_on_a_consistent_tree()
     test_lifecycle_generator_check_is_non_mutating_and_names_the_remedy()
-    print("OK")
 
 
 # ── Product-truth drift guards (issue #353) ─────────────────────────────────
@@ -602,3 +601,25 @@ def test_living_doc_header_detects_newer_changelog():
         )
         _, fail = _run_in_tmp(root, docs_check.check_living_doc_headers)
         assert fail == 1, f"expected stale header failure, got {fail}"
+
+def test_status_heading_uniqueness_rejects_duplicate_anchor():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        docs = root / "docs"
+        docs.mkdir(parents=True)
+        (docs / "status.md").write_text(
+            "# Status\n\n## Repeated\n\nText.\n\n## Repeated\n",
+            encoding="utf-8",
+        )
+        _, fail = _run_in_tmp(root, docs_check.check_status_heading_uniqueness)
+        assert fail == 1, f"expected one duplicate-heading failure, got {fail}"
+
+if __name__ == "__main__":
+    _run_existing_tests()
+    test_feature_manifest_rejects_readme_all_ga_claim()
+    test_feature_manifest_requires_index_discoverability()
+    test_feature_manifest_compares_delivery_state()
+    test_readme_go_version_accepts_major_minor_and_rejects_stale_patch()
+    test_living_doc_header_detects_newer_changelog()
+    test_status_heading_uniqueness_rejects_duplicate_anchor()
+    print("OK")

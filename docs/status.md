@@ -75,7 +75,6 @@ not inherit an older GA row merely because it lives in the same package or guide
   GA rows.
 
 ## GA criteria legend
-## GA criteria legend
 
 | # | Criterion |
 | --- | --- |
@@ -165,7 +164,6 @@ not yet at the GA bar. `merged` and `candidate` are not synonyms for released.
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
 | *(none)* | — | — | — | — | — | — | — | — | — | — | — | — | — |
 
-## Soak tracking (post-GA gate)
 ## Soak tracking (post-GA gate)
 
 Criterion 5 for the GA — soak pending features. A soak failure is a

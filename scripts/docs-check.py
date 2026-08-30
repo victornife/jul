@@ -965,6 +965,25 @@ def check_living_doc_headers():
         else:
             ok(f"{rel} header is current with its changelog")
 
+
+def check_status_heading_uniqueness():
+    """The living feature-status page must not create duplicate heading anchors."""
+    path = DOCS / "status.md"
+    if not path.exists():
+        error(path, 0, "docs/status.md is missing")
+        return
+    headings: dict[tuple[int, str], int] = {}
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        match = re.match(r"^(#{2,6})\s+(.+?)\s*$", line)
+        if not match:
+            continue
+        key = (len(match.group(1)), match.group(2))
+        if key in headings:
+            error(path, line_no, f"duplicate heading {match.group(2)!r}; first declared on line {headings[key]}")
+        else:
+            headings[key] = line_no
+    if len(headings) == len(set(headings)):
+        ok("status.md headings are unique")
 def main():
     SKIP_DIRS = {"node_modules", "vendor", ".git", "__pycache__", "reviews"}
     md_files = [
@@ -995,6 +1014,7 @@ def main():
     check_roadmap_active_ids()
     check_readme_go_version()
     check_living_doc_headers()
+    check_status_heading_uniqueness()
 
     print()
     print(f"Results: {OK} passed, {FAIL} failed")
