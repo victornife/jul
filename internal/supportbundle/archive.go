@@ -68,6 +68,7 @@ func (generator *Generator) WriteFile(ctx context.Context, output string, snapsh
 	published = true
 	if err := os.Remove(temporaryPath); err != nil {
 		_ = os.Remove(path)
+		published = false
 		return FileResult{}, fmt.Errorf("remove support-bundle temporary link: %w", err)
 	}
 	if directoryHandle, openErr := os.Open(directory); openErr == nil {
