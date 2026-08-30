@@ -106,14 +106,21 @@ func TestCmdImportFollowIncludesJSONAndConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated config: %v", err)
 	}
-	if !strings.Contains(string(data), `listen = ":8080"`) || !strings.Contains(string(data), "example.test") {
+	if !strings.Contains(string(data), "listen = ':8080'") || !strings.Contains(string(data), "example.test") {
 		t.Fatalf("generated config omitted included source:\n%s", data)
 	}
 }
 
 func TestCmdImportIncompleteTraversalDoesNotWrite(t *testing.T) {
 	root := t.TempDir()
-	writeCLIIncludeFixture(t, root, "nginx.conf", "include missing.conf;\n")
+	writeCLIIncludeFixture(t, root, "nginx.conf", `http {
+    include missing.conf;
+    server {
+        listen 8080;
+        location / { return 204; }
+    }
+}
+`)
 	in := filepath.Join(root, "nginx.conf")
 	output := filepath.Join(root, "jul.toml")
 
@@ -130,8 +137,15 @@ func TestCmdImportIncompleteTraversalDoesNotWrite(t *testing.T) {
 
 func TestCmdImportFollowIncludesDefaultRootAndHuman(t *testing.T) {
 	root := t.TempDir()
-	writeCLIIncludeFixture(t, root, "nginx.conf", "include child.conf;\n")
-	writeCLIIncludeFixture(t, root, "child.conf", "events {}\n")
+	writeCLIIncludeFixture(t, root, "nginx.conf", `http {
+    include child.conf;
+}
+`)
+	writeCLIIncludeFixture(t, root, "child.conf", `server {
+    listen 8080;
+    location / { return 204; }
+}
+`)
 	in := filepath.Join(root, "nginx.conf")
 
 	code, out, errOut := capture(t, func() int {
