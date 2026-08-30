@@ -9,6 +9,7 @@ package doctor
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"jul/internal/config"
@@ -28,6 +29,8 @@ type Options struct {
 	PerCheckTimeout time.Duration
 	Product         string
 	Version         string
+	Commit          string
+	BuildProfile    string
 	Capabilities    map[string]bool
 }
 
@@ -86,7 +89,7 @@ func SafeConfigMetadata(cfg *config.Config, capabilities map[string]bool) Config
 	}
 	metadata.AdminEnabled = cfg.Admin.Enabled
 	metadata.AdminRBACEnabled = cfg.Admin.RBAC.Enabled
-	metadata.AdminAuthenticated = cfg.Admin.Token != "" || (cfg.Admin.RBAC.Enabled && len(cfg.Admin.RBAC.Principals) > 0)
+	metadata.AdminAuthenticated = adminHasUsableCredential(cfg.Admin, time.Now())
 	metadata.Servers = len(cfg.Servers)
 	metadata.Listeners = countListeners(cfg)
 	metadata.Upstreams = len(cfg.Upstreams)
@@ -99,6 +102,25 @@ func SafeConfigMetadata(cfg *config.Config, capabilities map[string]bool) Config
 		metadata.Backends += len(upstream.Servers)
 	}
 	return metadata
+}
+
+func adminHasUsableCredential(admin config.AdminConfig, now time.Time) bool {
+	if strings.TrimSpace(admin.Token) != "" {
+		return true
+	}
+	if !admin.RBAC.Enabled {
+		return false
+	}
+	for _, principal := range admin.RBAC.Principals {
+		if principal.Disabled || strings.TrimSpace(principal.Token) == "" {
+			continue
+		}
+		if !principal.ExpiresAt.IsZero() && !principal.ExpiresAt.After(now) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func cloneCapabilities(input map[string]bool) map[string]bool {
