@@ -36,6 +36,12 @@ func main() {
 }
 
 func run() int {
+	// Local diagnostics are kept in a separate dispatch seam so the existing
+	// command router remains stable while doctor and support-bundle evolve
+	// together. All other subcommands retain their established dispatch path.
+	if handled, code := dispatchDiagnosticsSubcommand(os.Args[1:]); handled {
+		return code
+	}
 	// Subcommands (lint/fmt/run) are additive; when none matches we fall back to
 	// the original flag-based behavior so existing invocations are unchanged.
 	if handled, code := dispatchSubcommand(os.Args[1:]); handled {
@@ -47,7 +53,7 @@ func run() int {
 		checkOnly   bool
 		showVersion bool
 	)
-	flag.Usage = usage
+	flag.Usage = extendedUsage
 	flag.StringVar(&configPath, "config", "server.toml", "path to the TOML configuration file")
 	flag.BoolVar(&checkOnly, "check", false, "validate the configuration and exit")
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
