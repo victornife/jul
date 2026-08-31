@@ -32,10 +32,13 @@ func wave1Server(t *testing.T, current *config.Config) (*Server, string, string,
 		t.Fatalf("build policy: %v", err)
 	}
 	s := &Server{
-		cfg:  config.AdminConfig{Token: "legacy-token-32-chars-padded--"},
+		// Listen is set explicitly because ADR 0019 §28.1's transport gate is a
+		// property of the listener: a server built without one has no stated
+		// transport posture and is refused, which is the fail-closed direction.
+		cfg:  config.AdminConfig{Listen: "127.0.0.1:0", Token: "legacy-token-32-chars-padded--"},
 		hist: newHistory(t.TempDir(), 10),
 	}
-	s.installAuth(config.AdminConfig{Token: "legacy-token-32-chars-padded--"}, nil)
+	s.installAuth(config.AdminConfig{Listen: "127.0.0.1:0", Token: "legacy-token-32-chars-padded--"}, nil)
 	s.UpdatePolicy(pol)
 	s.deps.WriteConfigRaw = func([]byte) error { return nil }
 	s.deps.ReadConfigRaw = func() ([]byte, error) {

@@ -6,6 +6,12 @@
 # every platform.
 *.golden text eol=lf
 
+# Generated contract artifacts are byte-compared against the generator's output
+# by `make generated-check` and by the contract tests. The generators emit LF, so
+# a CRLF checkout would report every artifact as stale on Windows and a Windows
+# contributor regenerating one would commit bytes the Linux gate rejects.
+docs/generated/** text eol=lf
+
 # Git hooks run under /bin/sh (Git for Windows' bundled sh included) and must
 # keep LF endings on every platform, regardless of core.autocrlf.
 .githooks/* text eol=lf

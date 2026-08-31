@@ -1,0 +1,817 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Jul admin API",
+    "version": "v1",
+    "description": "The supported, versioned external administration API.\n\nOnly the operations described here are part of the compatibility contract. The admin listener serves many other routes; they exist for the Console and may change shape in any release, and being served is not the same as being supported. See docs/compatibility.md.\n\nEvery authenticated route requires a transport that is either TLS-terminated or bound to loopback. A request that arrives in cleartext on a non-loopback listener is refused with 403 insecure_transport before authentication, on reads as well as writes, and the refusal is not configurable.\n\nThis document is generated from the Go route catalog and the Go request and response types. It is not edited by hand and an edit to it will be overwritten; change the source and regenerate.",
+    "license": {
+      "name": "GNU Affero General Public License v3.0 or later",
+      "identifier": "AGPL-3.0-or-later"
+    }
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "getHealthz",
+        "summary": "Liveness probe. Unauthenticated, and never affected by control-plane conditions such as configuration drift.",
+        "tags": [
+          "health"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ],
+        "x-jul-stability": "public"
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "getMetrics",
+        "summary": "Prometheus exposition. Requires metrics:read, and therefore requires loopback or TLS.",
+        "tags": [
+          "observability"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "text/plain; version=0.0.4; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrometheusExposition"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "metrics:read"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "getReadyz",
+        "summary": "Readiness probe. Unauthenticated, and never affected by control-plane conditions such as configuration drift.",
+        "tags": [
+          "health"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ],
+        "x-jul-stability": "public"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorBody": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "details": {
+            "$ref": "#/components/schemas/ErrorDetails"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "request_id"
+        ],
+        "additionalProperties": false
+      },
+      "ErrorCode": {
+        "type": "string",
+        "description": "The bounded external error-code catalogue. `code` is the machine contract; the accompanying `message` is for humans and may change in any release. Each code maps to exactly one HTTP status.\n\n- `admin_reachability_confirmation_required` (409): The change would alter admin reachability and must be confirmed explicitly.\n- `config_authority_read_only` (409): The server is in file_owned authority and does not write configuration. This is a property of the server, identical for every principal including a wildcard admin, which is why it is 409 and not 403.\n- `drift_detected` (409): Managed authority with an external write present on disk — including an adoption whose bytes changed under it at the verification fence.\n- `forbidden` (403): The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.\n- `idempotency_key_in_flight` (409): The Idempotency-Key matches an operation that has not reached a terminal state. Poll the named apply_id rather than retrying.\n- `idempotency_key_reused` (409): The Idempotency-Key matches a recorded operation with a different request fingerprint. The recorded operation is named by its route template, never by a concrete path.\n- `insecure_transport` (403): The request arrived in cleartext on a listener that is neither TLS-terminated nor bound to loopback, on a route that consumes an admin credential. Rejected before route lookup and before authentication.\n- `internal_error` (500): An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.\n- `invalid_request` (400): The request was malformed: an unparseable body, an unknown field, a bad parameter or a missing required parameter.\n- `not_found` (404): The addressed resource does not exist. Returned only to a caller that already holds the required permission.\n- `not_implemented` (501): The capability is not compiled into this build. Returned instead of 404 so a client never has to infer capability from a missing route.\n- `operation_failed` (400): A typed patch operation was rejected. The index identifies which operation in the batch failed.\n- `operation_timeout` (504): reload_timeout was exceeded before the operation reached a terminal state.\n- `payload_too_large` (413): The request body exceeded the admin body cap. The cap applies to every body-bearing /api/v1 request, not only mutations.\n- `pending_restart_conflict` (409): A staged planned restart blocks this operation.\n- `rate_limited` (429): The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.\n- `restart_required` (409): The candidate cannot be hot-applied. The named subsystems require a restart.\n- `stale_base_version` (409): Optimistic-concurrency failure: the configuration changed since base_version was observed.\n- `storage_unavailable` (503): The configuration or history store cannot be read or written.\n- `unauthenticated` (401): No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.\n- `unsupported_media_type` (415): The request Content-Type is not accepted for this operation.\n- `validation_failed` (400): The candidate configuration is not valid. Findings carry the exact configuration path that failed.",
+        "enum": [
+          "admin_reachability_confirmation_required",
+          "config_authority_read_only",
+          "drift_detected",
+          "forbidden",
+          "idempotency_key_in_flight",
+          "idempotency_key_reused",
+          "insecure_transport",
+          "internal_error",
+          "invalid_request",
+          "not_found",
+          "not_implemented",
+          "operation_failed",
+          "operation_timeout",
+          "payload_too_large",
+          "pending_restart_conflict",
+          "rate_limited",
+          "restart_required",
+          "stale_base_version",
+          "storage_unavailable",
+          "unauthenticated",
+          "unsupported_media_type",
+          "validation_failed"
+        ]
+      },
+      "ErrorDetails": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "apply_id": {
+            "type": "string"
+          },
+          "base_version": {
+            "type": "string"
+          },
+          "baseline_version": {
+            "type": "string"
+          },
+          "can_stage": {
+            "type": "boolean"
+          },
+          "capability": {
+            "type": "string"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "config_authority": {
+            "type": "string"
+          },
+          "config_authority_source": {
+            "type": "string"
+          },
+          "current_version": {
+            "type": "string"
+          },
+          "detected_at": {
+            "type": "string"
+          },
+          "disk_version": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ValidationFinding"
+            }
+          },
+          "field": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "limit_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "observed_digest": {
+            "type": "string"
+          },
+          "op": {
+            "type": "string"
+          },
+          "op_index": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pending_restart": {
+            "type": "boolean"
+          },
+          "recorded_method": {
+            "type": "string"
+          },
+          "recorded_operation": {
+            "type": "string"
+          },
+          "required": {
+            "type": "string"
+          },
+          "required_permission": {
+            "type": "string"
+          },
+          "retry_after_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "subsystems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timed_out_phase": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "PrometheusExposition": {
+        "type": "string",
+        "description": "Prometheus text exposition format. The format is owned by Prometheus and is not restated here; the set of metric names and labels Jul emits is documented in docs/metrics-contract.json."
+      },
+      "ValidationFinding": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "summary"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "responses": {
+      "AdminReachabilityConfirmationRequired": {
+        "description": "`admin_reachability_confirmation_required` — The change would alter admin reachability and must be confirmed explicitly.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "ConfigAuthorityReadOnly": {
+        "description": "`config_authority_read_only` — The server is in file_owned authority and does not write configuration. This is a property of the server, identical for every principal including a wildcard admin, which is why it is 409 and not 403.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "DriftDetected": {
+        "description": "`drift_detected` — Managed authority with an external write present on disk — including an adoption whose bytes changed under it at the verification fence.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "IdempotencyKeyInFlight": {
+        "description": "`idempotency_key_in_flight` — The Idempotency-Key matches an operation that has not reached a terminal state. Poll the named apply_id rather than retrying.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "IdempotencyKeyReused": {
+        "description": "`idempotency_key_reused` — The Idempotency-Key matches a recorded operation with a different request fingerprint. The recorded operation is named by its route template, never by a concrete path.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "InsecureTransport": {
+        "description": "`insecure_transport` — The request arrived in cleartext on a listener that is neither TLS-terminated nor bound to loopback, on a route that consumes an admin credential. Rejected before route lookup and before authentication.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "InvalidRequest": {
+        "description": "`invalid_request` — The request was malformed: an unparseable body, an unknown field, a bad parameter or a missing required parameter.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "`not_found` — The addressed resource does not exist. Returned only to a caller that already holds the required permission.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "NotImplemented": {
+        "description": "`not_implemented` — The capability is not compiled into this build. Returned instead of 404 so a client never has to infer capability from a missing route.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "OperationFailed": {
+        "description": "`operation_failed` — A typed patch operation was rejected. The index identifies which operation in the batch failed.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "OperationTimeout": {
+        "description": "`operation_timeout` — reload_timeout was exceeded before the operation reached a terminal state.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "`payload_too_large` — The request body exceeded the admin body cap. The cap applies to every body-bearing /api/v1 request, not only mutations.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "PendingRestartConflict": {
+        "description": "`pending_restart_conflict` — A staged planned restart blocks this operation.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "RestartRequired": {
+        "description": "`restart_required` — The candidate cannot be hot-applied. The named subsystems require a restart.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "StaleBaseVersion": {
+        "description": "`stale_base_version` — Optimistic-concurrency failure: the configuration changed since base_version was observed.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "StorageUnavailable": {
+        "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Unauthenticated": {
+        "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "`unsupported_media_type` — The request Content-Type is not accepted for this operation.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "ValidationFailed": {
+        "description": "`validation_failed` — The candidate configuration is not valid. Findings carry the exact configuration path that failed.",
+        "headers": {
+          "X-Request-ID": {
+            "description": "The server-minted correlation identifier, identical to the envelope's request_id. A client-supplied value is never reflected.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "adminToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An admin bearer token. Tokens are issued out of band through the configuration file; there is no token-issuance API. No example is given here, and none should be copied from documentation into a deployment: an example that resembles a credential is a credential someone will paste into a configuration file."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "health",
+      "description": "Unauthenticated liveness and readiness probes."
+    },
+    {
+      "name": "observability",
+      "description": "Metrics exposition."
+    }
+  ]
+}
