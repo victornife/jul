@@ -131,17 +131,10 @@ var internalRouteReasons = map[string]string{
 	"/api/listeners/{addr}/client_address": "Retained for the Console. /api/v1/listeners/{addr}/client_address is the supported one.",
 }
 
-// InternalReason returns the recorded reason a route is not external, and
-// whether one is recorded at all. It is exported so the contract test in
-// internal/apicontract can assert the inventory is complete without
-// duplicating it.
-func InternalReason(pattern string) (string, bool) {
-	r, ok := internalRouteReasons[pattern]
-	return r, ok
-}
-
-// InternalRouteReasons returns a copy of the classification inventory. The copy
-// keeps the map unmodifiable by a caller that only wants to read it.
+// InternalRouteReasons returns a copy of the classification inventory. It is
+// exported so the contract test in internal/apicontract can assert that no
+// internal route reached the published document without duplicating the
+// inventory. The copy keeps the map unmodifiable by a caller that only reads it.
 func InternalRouteReasons() map[string]string {
 	out := make(map[string]string, len(internalRouteReasons))
 	for k, v := range internalRouteReasons {

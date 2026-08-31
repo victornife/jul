@@ -68,7 +68,7 @@ func Build() (*Document, error) {
 		return nil, err
 	}
 	addErrorResponses(doc)
-	if err := addPaths(doc); err != nil {
+	if err := addPaths(doc, externalRoutes()); err != nil {
 		return nil, err
 	}
 	if err := checkResourcePaths(doc); err != nil {
@@ -166,8 +166,11 @@ func errorResponseName(c adminapi.Code) string {
 // addPaths renders every externally classified route. Nothing else reaches the
 // document: an internal route has no ExternalOperation, so it cannot be
 // rendered even by mistake.
-func addPaths(doc *Document) error {
-	for _, r := range externalRoutes() {
+//
+// The routes are a parameter rather than being read from the catalog here so a
+// test can drive the per-method branches without mutating the global catalog.
+func addPaths(doc *Document, routes []admin.ExternalRoute) error {
+	for _, r := range routes {
 		op, err := buildOperation(r, doc)
 		if err != nil {
 			return err

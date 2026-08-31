@@ -53,18 +53,16 @@ func Generate() ([]byte, error) {
 // path, a real host or anything resembling a credential (ADR 0019 §29). It runs
 // on the rendered bytes rather than on the model, so a leak introduced through
 // any field is caught rather than only the fields someone remembered to check.
+//
+// The absence of a `servers` block is not checked here: Document has no such
+// field, so it is a property of the type rather than of the output, and
+// TestDocumentCannotDeclareAServersBlock asserts it where it is provable.
 func checkNoLeakedHostOrPath(doc *Document) error {
 	b, err := Render(doc)
 	if err != nil {
 		return err
 	}
 	text := string(b)
-
-	// A `servers` block is the usual way a host reaches an OpenAPI document.
-	// This generator never emits one; the check states that as an invariant.
-	if strings.Contains(text, `"servers"`) {
-		return fmt.Errorf("the document declares a servers block: a server URL is either a local address or a fabricated host, and neither belongs in a published contract")
-	}
 
 	forbidden := []struct{ needle, why string }{
 		{"http://127.0.0.1", "a loopback URL"},
