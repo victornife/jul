@@ -234,8 +234,12 @@ bounded egress-denial reason as authoritative. See
 
 - **No DNS-01 challenge.** Wildcard issuance through DNS automation is not
   implemented; `dns-01` and `dns_provider` are rejected.
-- **Static certificate rotation is restart-bound.** #100 owns the planned
-  dynamic provider publication work.
+- **Static certificate rotation is hot-reloadable on a retained listener
+  (#100).** A cert/key content or path change is validated during preflight and
+  swapped atomically into the listener's existing dynamic certificate
+  provider at Publish — no rebind, no dropped connections. Enabling or
+  disabling TLS itself, and TLS minimum version / mutual-TLS policy changes,
+  remain restart-bound (`HR-16`, `HR-12`).
 - **ACME manager transitions are restart-bound.** Domain, account, issuer,
   challenge, cache, and OCSP policy changes require planned restart.
 - **OCSP stapling is ACME-only.** Static certificates are served without a

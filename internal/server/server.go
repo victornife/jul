@@ -14,7 +14,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -425,6 +424,13 @@ type listenerEntry struct {
 	provider         *dynamicCertProvider // nil for plain HTTP
 	h3               h3Listener           // nil unless HTTP/3 is enabled and compiled in
 	boundFingerprint string               // listenerBindFingerprint at bind time, for rotation detection
+	// certFingerprint is tlsIdentityFingerprint of the currently live,
+	// file-backed certificate provider (empty for plain HTTP, ACME, or no
+	// provider yet). It is read and written only from the single serial
+	// reload loop (prepareCertRotation during Prepare, certRotationComponent
+	// during Publish's commit), so no additional synchronization is needed
+	// beyond that serialization (#100).
+	certFingerprint string
 }
 
 // BoundListenerInfo is a read-only summary of a bound HTTP listener, used by
@@ -671,6 +677,9 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		dyn := &dynamicCertProvider{}
 		dyn.set(provider)
 		entry.provider = dyn
+		if !acmeEnabledForAddr(cfg.Servers, addr) {
+			entry.certFingerprint = tlsIdentityFingerprint(bindings)
+		}
 		tlsConf := &tls.Config{
 			GetCertificate: dyn.GetCertificate,
 			MinVersion:     minVer,
@@ -1215,7 +1224,6 @@ func (s *Server) doReload(req ReloadRequest) {
 	plan.RetireRemovedListeners()
 	plan.FinalizeRuntimeState()
 	plan.RetirePreparedRuntime()
-	certErrs := plan.RefreshCerts()
 	adminErr, onReloadErr := plan.PostCommit()
 
 	result.CompletedAt = time.Now()
@@ -1263,21 +1271,6 @@ func (s *Server) doReload(req ReloadRequest) {
 	}
 
 	switch {
-	case len(certErrs) > 0 && (onReloadErr != nil || adminErr != nil):
-		result.Outcome = ReloadAppliedDegraded
-		result.Error = "degraded: certificate refresh failed: " + strings.Join(certErrs, "; ")
-		if onReloadErr != nil {
-			result.Error += "; stream reload: " + onReloadErr.Error()
-		}
-		if adminErr != nil {
-			result.Error += "; admin reload: " + adminErr.Error()
-		}
-		s.log.Warn("reload completed with errors", "cert_errors", strings.Join(certErrs, "; "),
-			"stream_error", onReloadErr, "admin_error", adminErr, "reload_id", req.ID)
-	case len(certErrs) > 0:
-		result.Outcome = ReloadAppliedDegraded
-		result.Error = "degraded: certificate refresh failed: " + strings.Join(certErrs, "; ") + "; old certificate(s) remain active"
-		s.log.Warn("reload completed with certificate errors", "errors", strings.Join(certErrs, "; "), "reload_id", req.ID)
 	case onReloadErr != nil && adminErr != nil:
 		result.Outcome = ReloadAppliedDegraded
 		result.Error = "degraded: stream reload: " + onReloadErr.Error() + "; admin reload: " + adminErr.Error()
@@ -1329,14 +1322,6 @@ func (s *Server) sendReloadResult(ch chan<- ReloadResult, r *ReloadResult) {
 	default:
 		s.log.Warn("reload result channel was full; result discarded for caller", "reload_id", r.ID)
 	}
-}
-
-// reloadCertificates is now a no-op: TLS certificate rotation is restart-only
-// (R7-07). The dynamicCertProvider is still used by new listeners at bind time,
-// but once a listener is bound its provider is frozen for the listener's
-// lifetime. Operators must restart the process to pick up new cert/key files.
-func (s *Server) reloadCertificates() []string {
-	return nil
 }
 
 // removeListener gracefully shuts down and forgets a listener.

@@ -14,11 +14,11 @@ import (
 // prepared type/setter/accessor, an explicit Prepare call site, a publication
 // order entry and a retirement category — never a runtime registration.
 //
-// No production component exists yet. #100 (static certificate/key rotation)
-// and #98 (access-log sink enablement) are the first and second consumers and
-// each adds its own value when it lands; do not add a value here merely
-// because a gated issue exists (egress, tracing, ACME, cache and the admin
-// listener all remain restart-required until their own issue lands).
+// ComponentStaticCertificates (#100, see cert_rotation.go) is the first
+// production component. #98 (access-log sink enablement) adds the second
+// value when it lands; do not add a value here merely because a gated issue
+// exists (egress, tracing, ACME, cache and the admin listener all remain
+// restart-required until their own issue lands).
 type RuntimeComponent uint8
 
 // preparedComponent is a candidate resource built during a reload's Prepare

@@ -95,12 +95,6 @@ linters:
         text: "is unused"
         linters:
           - unused
-      # reloadCertificates is intentionally a no-op (restart-only cert rotation,
-      # R7-07); the method documents the intentional absence of runtime reload.
-      - path: internal/server/server\.go
-        text: "reloadCertificates is unused"
-        linters:
-          - unused
       # identitySet is a stable-backend helper not yet used by the current
       # weighted-balancer implementation; retained for the planned identity-aware
       # subsetting path.

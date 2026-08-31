@@ -25,14 +25,15 @@ import (
 //  1. Resolve   — expand secrets, compute effective config + redaction state + candidate fingerprint.
 //  2. Validate  — run structural/runtime validation on the raw source config.
 //  3. Lifecycle — compare the candidate fingerprint against the startup fingerprint.
-//  4. Prepare   — build handlers and stage the upstream/generation resources.
+//  4. Prepare   — build handlers, stage upstream/generation resources, and
+//     prepare any PreparedRuntime components (e.g. #100's
+//     candidate certificate providers for retained TLS addresses).
 //  5. StageListeners — bind new TCP listeners (and HTTP/3 resources) without serving.
-//  6. Publish   — commit handler generation, install redaction, swap configs and handler pointer.
+//  6. Publish   — commit the PreparedRuntime, handler generation, redaction,
+//     configs and handler pointer.
 //  7. Activate  — start serving on staged listeners.
 //  8. Retire    — remove listeners no longer in the config and retire old handler generation.
-//  9. Refresh   — reload TLS certificates.
-//
-// 10. PostCommit — apply dynamic side effects (log level, GOMAXPROCS, stream reload).
+//  9. PostCommit — apply dynamic side effects (log level, GOMAXPROCS, stream reload).
 //
 // On any failure before Publish, Abort must be called to release all candidate
 // resources without touching live state.
@@ -205,6 +206,14 @@ func (p *ReloadPlan) Prepare() error {
 		p.GenID = genID
 		p.handlerCommit = commit
 		p.handlerAbort = abort
+
+		certRotation, err := p.s.prepareCertRotation(p.Candidate.Effective)
+		if err != nil {
+			return fmt.Errorf("prepare certificates: %w", err)
+		}
+		if certRotation != nil {
+			p.Runtime.add(certRotation)
+		}
 		return nil
 	})
 }
@@ -367,14 +376,6 @@ func (p *ReloadPlan) RetireRemovedListeners() {
 			p.s.log.Info("reload: removed listener", "addr", addr)
 		}
 	}
-}
-
-// RefreshCerts is now a no-op: TLS certificate rotation is restart-only
-// (R7-07). The reload plan no longer attempts to refresh certificates.
-func (p *ReloadPlan) RefreshCerts() []string {
-	start := time.Now()
-	defer func() { p.phaseDurations["refresh_certs"] = time.Since(start) }()
-	return nil
 }
 
 // PostCommit applies dynamic side effects that must only run on a committed

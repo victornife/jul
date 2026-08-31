@@ -42,7 +42,7 @@ server_names = ["example.com"]
 | First request (no prior Alt-Svc) | HTTP/1.1 or HTTP/2 via ALPN | Not used yet | Client needs an Alt-Svc hint to try h3 |
 | Subsequent request (Alt-Svc cached) | May be skipped by client | HTTP/3 | Browser decides based on cached Alt-Svc |
 | TLS ALPN | `h2`, `http/1.1` | `h3` | QUIC handshake includes h3 ALPN |
-| Certificate source | `GetCertificate` callback | Same callback | ACME renewal applies to both; static-file replacement remains restart-bound until certificate rotation is implemented |
+| Certificate source | `GetCertificate` callback | Same callback | ACME renewal applies to both; static-file rotation hot-applies to both through the same shared `dynamicCertProvider` callback (#100) |
 | Server-level client authentication | Complete `tls.client_auth` policy | Same complete policy | `request`/`require`, CA verification, SAN allow-list, CRL checks and result hooks are equivalent |
 
 ### Alt-Svc advertisement

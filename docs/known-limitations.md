@@ -47,9 +47,10 @@ roadmap and must be tracked in focused issues with tests and disposition.
 Field-level lifecycle authority is the Go registry rendered in
 [`generated/config-lifecycle.md`](generated/config-lifecycle.md). Structural or
 unselected transitions may remain restart-required; the complete
-`stage_restart` workflow is an acceptable final product design. Selected future
-candidates include certificate material, admin credentials, access-log sinks,
-selected cache scalars and Alt-Svc advertisement state.
+`stage_restart` workflow is an acceptable final product design. Static
+certificate/key rotation on a retained TLS listener hot-applies (#100);
+remaining selected future candidates include admin credentials, access-log
+sinks, selected cache scalars and Alt-Svc advertisement state.
 
 ## Historical corrections
 

@@ -2770,10 +2770,10 @@ Cert is the path to the PEM certificate file for static (non-ACME) TLS.
 | | |
 | --- | --- |
 | Type | `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `tls` |
-| Why | TLS material is wired into the listener when it binds and reloadCertificates is a no-op, so a kept address serves the startup material until restart |
-| Flags | startup-consumed, per-address, conditional, secret |
+| Why | a candidate certificate provider is built and validated during Prepare and swapped atomically into the listener's existing dynamic provider at Publish, without rebinding (#100) |
+| Flags | secret |
 
 ## `servers.*.tls.client_auth.ca_file` {#servers-x-tls-client_auth-ca_file}
 
@@ -2859,10 +2859,10 @@ Key is the path to the PEM private key file paired with cert.
 | | |
 | --- | --- |
 | Type | `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `tls` |
-| Why | TLS material is wired into the listener when it binds and reloadCertificates is a no-op, so a kept address serves the startup material until restart |
-| Flags | startup-consumed, per-address, conditional, secret |
+| Why | a candidate certificate provider is built and validated during Prepare and swapped atomically into the listener's existing dynamic provider at Publish, without rebinding (#100) |
+| Flags | secret |
 
 ## `servers.*.tls.min_version` {#servers-x-tls-min_version}
 

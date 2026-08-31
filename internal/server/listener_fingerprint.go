@@ -83,14 +83,18 @@ func listenerBindFingerprint(cfg *config.Config, addr string) string {
 		strings.ToLower(strings.TrimSpace(s.proxyProtocolModeForAddr(addr))),
 		s.proxyProtocolTrustForAddr(addr))
 
-	bindings, minVer, tlsOK := tlsBindingsForAddr(cfg.Servers, addr)
+	_, minVer, tlsOK := tlsBindingsForAddr(cfg.Servers, addr)
 	fmt.Fprintf(&b, "tls=%t;", tlsOK)
 	if tlsOK {
-		// TLS minimum version, the mutual-TLS bundle, HTTP/3, and the static
-		// TLS identity (cert/key/SNI or ACME domain set) are all wired into the
-		// TLS listener at bind time. Rotating a cert file in place must change
-		// the fingerprint so the rebind check rejects it (R9-05).
-		fmt.Fprintf(&b, "minver=%d;mtls=%s;identity=%s;", minVer, mtlsConfigFingerprint(cfg.Servers, addr), tlsIdentityFingerprint(bindings))
+		// TLS minimum version, the mutual-TLS bundle, and HTTP/3 are wired into
+		// the TLS listener at bind time, so a change to any of them forces a
+		// rebind. The static certificate identity (cert/key/SNI mapping) is
+		// deliberately NOT part of this fingerprint: #100 hot-swaps it into the
+		// existing dynamicCertProvider without a rebind (see
+		// prepareCertRotation and listenerEntry.certFingerprint), while an
+		// ACME domain-set change is still gated separately by
+		// ACMERestartRequired so its restart reason stays specific.
+		fmt.Fprintf(&b, "minver=%d;mtls=%s;", minVer, mtlsConfigFingerprint(cfg.Servers, addr))
 		if s.http3EnabledForAddr(addr) {
 			fmt.Fprintf(&b, "h3=1,ma=%d;", s.http3MaxAgeForAddr(addr))
 		} else {

@@ -1475,8 +1475,9 @@ The `syslog` sink uses the local system log and is **not supported on Windows**.
 
 TLS is configured per server block. Jul supports TLS 1.2 and 1.3, SNI
 certificate selection, and dynamic certificate selection at listener startup.
-Certificate rotation (static `cert`/`key` files or ACME domain changes) requires a
-process restart. Use `redirect_https` on a plain HTTP server to force clients onto HTTPS.
+Static `cert`/`key` rotation on an already-bound listener hot-applies, without a
+rebind or dropped connections (#100); an ACME domain-set or issuer change still
+requires a process restart. Use `redirect_https` on a plain HTTP server to force clients onto HTTPS.
 
 ```toml
 [[servers]]

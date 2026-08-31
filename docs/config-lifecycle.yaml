@@ -79,10 +79,10 @@ counts:
   schema_paths: 345
   schema_leaves: 293
   registry_entries: 293
-  startup_consumed: 59
+  startup_consumed: 57
   by_class:
-    hot_reload: 220
-    restart_required: 59
+    hot_reload: 222
+    restart_required: 57
     new_listener_only: 8
     ignored_deprecated: 4
     validation_rejected_reserved: 2
@@ -1007,12 +1007,9 @@ fields:
     address_keyed: true
     conditional: true
   - path: "servers.*.tls.cert"
-    class: restart_required
+    class: hot_reload
     subsystem: tls
-    reason: "TLS material is wired into the listener when it binds and reloadCertificates is a no-op, so a kept address serves the startup material until restart"
-    startup_consumed: true
-    address_keyed: true
-    conditional: true
+    reason: "a candidate certificate provider is built and validated during Prepare and swapped atomically into the listener's existing dynamic provider at Publish, without rebinding (#100)"
     secret_digested: true
   - path: "servers.*.tls.client_auth.ca_file"
     class: restart_required
@@ -1056,12 +1053,9 @@ fields:
     address_keyed: true
     conditional: true
   - path: "servers.*.tls.key"
-    class: restart_required
+    class: hot_reload
     subsystem: tls
-    reason: "TLS material is wired into the listener when it binds and reloadCertificates is a no-op, so a kept address serves the startup material until restart"
-    startup_consumed: true
-    address_keyed: true
-    conditional: true
+    reason: "a candidate certificate provider is built and validated during Prepare and swapped atomically into the listener's existing dynamic provider at Publish, without rebinding (#100)"
     secret_digested: true
   - path: "servers.*.tls.min_version"
     class: restart_required
