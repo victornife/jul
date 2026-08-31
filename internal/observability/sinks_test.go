@@ -85,6 +85,18 @@ func TestBuildAccessSinksRejectsExplicitEmptyEnabledSet(t *testing.T) {
 	}
 }
 
+// TestBuildAccessSinksRejectsEmptyFilePath is a defense-in-depth check: config
+// validation already rejects a "file" sink with no path, but BuildAccessSinks
+// must not rely solely on that upstream gate — a misconfigured candidate that
+// somehow reached here must still fail before any write, not silently probe
+// the process's current working directory.
+func TestBuildAccessSinksRejectsEmptyFilePath(t *testing.T) {
+	_, _, err := BuildAccessSinks(config.AccessLogConfig{Sinks: []string{"file"}, File: ""}, newBase())
+	if err == nil {
+		t.Fatal("expected an error for a file sink with no configured path")
+	}
+}
+
 func TestBuildAccessSinksDedupes(t *testing.T) {
 	sinks, _, err := BuildAccessSinks(config.AccessLogConfig{Sinks: []string{"stdout", "stdout"}}, newBase())
 	if err != nil {
@@ -214,5 +226,36 @@ func TestBuildAccessSinksFailedFileSinkLeavesNoRealFile(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("a failed candidate build left %d artifact(s) in %s: %v", len(entries), dir, entries)
+	}
+}
+
+// TestProbeWritableDirRejectsEmptyPath pins a Copilot review finding on #376:
+// an empty path must not silently probe the process's current working
+// directory (which is normally writable, masking a misconfiguration that
+// config validation already rejects elsewhere).
+func TestProbeWritableDirRejectsEmptyPath(t *testing.T) {
+	if err := probeWritableDir(""); err == nil {
+		t.Fatal("expected an error for an empty path")
+	}
+	if err := probeWritableDir("   "); err == nil {
+		t.Fatal("expected an error for a whitespace-only path")
+	}
+}
+
+// TestProbeWritableDirLeavesNoSentinelBehind pins the other half of the same
+// review finding: the temporary sentinel must actually be gone afterward, not
+// merely attempted-and-ignored.
+func TestProbeWritableDirLeavesNoSentinelBehind(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "access.log")
+	if err := probeWritableDir(path); err != nil {
+		t.Fatalf("probeWritableDir: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("probeWritableDir left %d artifact(s) behind: %v", len(entries), entries)
 	}
 }

@@ -4,11 +4,13 @@
 package observability
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"jul/internal/config"
 	"jul/internal/middleware"
@@ -117,8 +119,13 @@ func accessHandler(w io.Writer, format string) slog.Handler {
 // if it does not exist. It never touches path itself: a candidate access-sink
 // build (#98) must be fully reversible on Abort, and the real file is created
 // only by the writer's own first live write, which cannot happen before the
-// candidate generation is committed.
+// candidate generation is committed. Rejects an empty path outright rather
+// than probing the current working directory, and treats a failure to close
+// or remove the sentinel as an error rather than leaving it behind silently.
 func probeWritableDir(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("no path configured")
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("cannot create directory %q: %w", dir, err)
@@ -127,7 +134,13 @@ func probeWritableDir(path string) error {
 	if err != nil {
 		return fmt.Errorf("directory %q not writable: %w", dir, err)
 	}
-	_ = tmp.Close()
-	_ = os.Remove(tmp.Name())
+	name := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("directory %q: closing writability probe: %w", dir, err)
+	}
+	if err := os.Remove(name); err != nil {
+		return fmt.Errorf("directory %q: removing writability probe: %w", dir, err)
+	}
 	return nil
 }
