@@ -19,9 +19,12 @@ Jul.IA supports two local admin authentication modes:
 
 The shared token remains a bootstrap/compatibility mode, not the only shipped
 model. External OIDC/SAML/SCIM identity and browser login flows are not shipped.
-Admin token rotation is tracked by the selected runtime-dynamics issue #95; use
-the lifecycle result returned by the running server rather than assuming every
-admin setting is already live-applicable.
+Admin token rotation hot-reloads through the prepared atomic authentication
+snapshot (#95): a rotated token is live for the very next request after a
+successful reload, and the prior token is rejected immediately, with no
+overlap window. Consult the lifecycle result returned by the running server
+rather than assuming every admin setting is live-applicable — the admin
+listener address and TLS handshake policy remain restart-required.
 
 ### Console RBAC (HP-02 / ADR 0010) — delivered (opt-in)
 
@@ -83,7 +86,7 @@ console = true
 | Bind address | `127.0.0.1` (loopback) by default. Remote access is supported by terminating TLS with `[admin.tls]` (#336) — certificate content and same-path rotation hot-apply, with no rebind — optionally with `[admin.tls.client_auth]` requiring a client certificate as well, composing with the token/RBAC check. An SSH tunnel or a mutual-TLS proxy in front remains a valid alternative to a raw off-loopback bind. |
 | Token strength | Minimum 32 random bytes (256-bit); use a password manager or `openssl rand -base64 32`. |
 | Token storage | Use `${env:}`, `${file:}`, or `${secret:}` references. See [docs/secrets.md](secrets.md). |
-| Token rotation | Rotate through the validated configuration lifecycle; legacy shared-token cutover remains tracked by #95. RBAC token IDs can be revoked independently. |
+| Token rotation | Rotate through the validated configuration lifecycle; legacy shared-token cutover hot-reloads with no restart and no overlap window (#95). RBAC token IDs can be revoked independently. |
 | pprof endpoints | `/debug/pprof/` is mounted behind bearer-token auth. Do not disable auth when pprof is needed — authenticate with the admin token. |
 | Rate limiting | The admin API has a built-in rate limiter (reads, writes, applies separately). Default limits are conservative. |
 

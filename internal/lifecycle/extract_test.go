@@ -73,9 +73,9 @@ func TestSecretPathsAreDigested(t *testing.T) {
 func TestSecretDigestStillDetectsRotation(t *testing.T) {
 	before := fullConfig()
 	after := fullConfig()
-	after.Admin.Token = "rotated"
+	after.Admin.TLS.ClientAuth.CAFile = "/etc/admin-ca-rotated.pem"
 	if _, need := RestartRequired(ComputeFingerprint(before), ComputeFingerprint(after)); !need {
-		t.Fatal("rotating admin.token must be restart-required")
+		t.Fatal("rotating admin.tls.client_auth.ca_file must be restart-required")
 	}
 }
 

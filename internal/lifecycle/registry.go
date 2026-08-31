@@ -312,7 +312,12 @@ func adminEntries() []Entry {
 	}
 	out := restartGroup(SubAdmin, reasonAdminStartup, adminPaths...)
 	out = append(out,
-		secretDigest(restart("admin.token", SubAdmin, "the shared bearer token is captured when the admin listener is created; rotating it must not appear to succeed while the old token still grants access")),
+		// admin.token feeds the same immutable authSnapshot the RBAC fields
+		// below already install atomically at Publish (PrepareAuth/
+		// CommitPreparedAuth): every authentication read loads the current
+		// snapshot, so a candidate token is live for the very next request and
+		// the prior token is rejected — no restart, no overlap window (#95).
+		secretDigest(hot("admin.token", SubAdmin, "the shared bearer token is resolved into the same immutable authentication snapshot the RBAC fields below install atomically at Publish; the prior token is rejected for every request after the swap")),
 		// The RBAC policy is rebuilt and atomically swapped after a successful
 		// apply, and requirePermission reads the current policy per request, so
 		// every RBAC leaf including the enable flag is genuinely hot (M-03, P3-01).

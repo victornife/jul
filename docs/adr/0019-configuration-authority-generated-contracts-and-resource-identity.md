@@ -3044,13 +3044,17 @@ when no key was sent, the client falls back to inspecting `applies/{apply_id}` a
 inspection, not a proof.
 
 **Endpoint and token cutover.** A configuration change may alter the channel that controls
-configuration — relocating the admin listener, rotating the token, changing RBAC. `admin.listen` and
-`admin.token` are `restart_required`, so such a change is staged rather than applied, and the CLI:
-prints, before confirmation, that the change alters admin reachability (reusing the existing
-`admin_change` guard, surfaced as `admin_reachability_confirmation_required`); reports the outcome
-before the cutover takes effect, since it takes effect at restart; and after a restart-time cutover,
-tells the operator which endpoint or credential to use next. A staged change that would strand the
-client is therefore visible before it is confirmed, not after.
+configuration — relocating the admin listener, rotating the token, changing RBAC. `admin.listen` is
+`restart_required`, so a listener relocation is staged rather than applied, and the CLI: prints,
+before confirmation, that the change alters admin reachability (reusing the existing `admin_change`
+guard, surfaced as `admin_reachability_confirmation_required`); reports the outcome before the
+cutover takes effect, since it takes effect at restart; and after a restart-time cutover, tells the
+operator which endpoint to use next. `admin.token` and RBAC policy are `hot_reload` (#95): a token or
+RBAC rotation takes effect at the next successful reload, not at restart, so the CLI instead confirms
+the new credential is stored before sending the apply, reports the outcome once the rotation is
+live, and tells the operator to switch to the new credential immediately — there is no restart-time
+grace window to rely on. A staged (listener) or live (token/RBAC) change that would strand the client
+is therefore visible before it is confirmed, not after.
 
 ### 32. CLI resource targeting
 

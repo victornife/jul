@@ -323,3 +323,86 @@ func TestPreparedAuthInstallsExactSnapshot(t *testing.T) {
 		t.Fatal("prepared snapshot has no effective auth generation")
 	}
 }
+
+// TestPrepareAuthBuildsNoLiveSideEffect proves Prepare-phase safety (#95): just
+// building a candidate snapshot must never affect what the live server accepts
+// until CommitPreparedAuth actually installs it.
+func TestPrepareAuthBuildsNoLiveSideEffect(t *testing.T) {
+	s := &Server{cfg: config.AdminConfig{Listen: "127.0.0.1:0"}}
+	s.installAuth(config.AdminConfig{Token: snapLegacyTok}, nil)
+	h := s.requirePermission(rbac.ConfigApply, okHandler())
+
+	// Build (but never commit) a candidate with a different token.
+	_ = PrepareAuth(config.AdminConfig{Token: "candidate-token-32-chars-padxxxx"}, nil)
+
+	// The live token must still work; the candidate token must not.
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, applyReq(snapLegacyTok))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("live token must still work after an uncommitted Prepare, got %d", rr.Code)
+	}
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, applyReq("candidate-token-32-chars-padxxxx"))
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("uncommitted candidate token must not authenticate, got %d", rr.Code)
+	}
+}
+
+// TestTokenRotationAtomicOverAdminHTTP is the real end-to-end proof for #95's
+// target contract (items 2-4): it drives the exact Prepare/Commit seam
+// production uses (PrepareAuth/CommitPreparedAuth, the reload Publish path),
+// not the lower-level installAuth the tests above use directly. A request
+// authenticated under the OLD token before Publish completes under its
+// established identity; the very next request under the OLD token is
+// rejected; the NEW token works immediately. No grace/overlap window exists.
+func TestTokenRotationAtomicOverAdminHTTP(t *testing.T) {
+	const tokA = "token-a-32-chars-padded-xxxxxxxx"
+	const tokB = "token-b-32-chars-padded-xxxxxxxx"
+	s := &Server{cfg: config.AdminConfig{Listen: "127.0.0.1:0"}}
+	s.installAuth(config.AdminConfig{Token: tokA}, nil)
+
+	// A slow handler lets the test commit a rotation while a request
+	// authenticated under A is still in flight.
+	started := make(chan struct{})
+	resume := make(chan struct{})
+	slow := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-resume
+		w.WriteHeader(http.StatusOK)
+	})
+	h := s.requirePermission(rbac.ConfigApply, slow)
+
+	done := make(chan int, 1)
+	go func() {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, applyReq(tokA))
+		done <- rr.Code
+	}()
+	<-started
+
+	// Rotate A -> B via the exact Publish-time seam the reload pipeline uses.
+	s.CommitPreparedAuth(PrepareAuth(config.AdminConfig{Token: tokB}, nil))
+
+	// The in-flight request, authenticated before Publish, must still complete.
+	close(resume)
+	if code := <-done; code != http.StatusOK {
+		t.Fatalf("in-flight request authenticated before Publish should complete, got %d", code)
+	}
+
+	// A new request with the OLD token must be rejected immediately — no grace.
+	// A fresh handler over okHandler avoids reusing the slow handler's
+	// already-closed channels for these post-rotation requests.
+	fresh := s.requirePermission(rbac.ConfigApply, okHandler())
+	rr := httptest.NewRecorder()
+	fresh.ServeHTTP(rr, applyReq(tokA))
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("old token must be rejected immediately after rotation, got %d", rr.Code)
+	}
+
+	// A new request with the NEW token must succeed immediately.
+	rr = httptest.NewRecorder()
+	fresh.ServeHTTP(rr, applyReq(tokB))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("new token should be accepted immediately after rotation, got %d", rr.Code)
+	}
+}

@@ -518,9 +518,8 @@
       "optional": false,
       "dynamic": false,
       "subsystem": "admin",
-      "lifecycle_class": "restart_required",
-      "lifecycle_reason": "the shared bearer token is captured when the admin listener is created; rotating it must not appear to succeed while the old token still grants access",
-      "startup_consumed": true,
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the shared bearer token is resolved into the same immutable authentication snapshot the RBAC fields below install atomically at Publish; the prior token is rejected for every request after the swap",
       "secret": true,
       "description": "Token, when set, requires `Authorization: Bearer <token>`",
       "anchor": "admin-token"
