@@ -351,9 +351,9 @@ func acmeValue(fn func(*config.ACMEConfig) any) func(*config.Config) any {
 	})
 }
 
-// adminTLSValue and adminClientAuthValue are the admin.tls analogues of
-// tlsValue/clientAuthValue (#336): there is exactly one admin listener, not
-// one per server block, so no perListener grouping is needed.
+// adminTLSValue is the admin.tls analogue of tlsValue (#336): there is exactly
+// one admin listener, not one per server block, so no perListener grouping is
+// needed.
 func adminTLSValue(fn func(*config.AdminTLSConfig) any) func(*config.Config) any {
 	return func(cfg *config.Config) any {
 		if cfg.Admin.TLS == nil {
