@@ -92,7 +92,6 @@ without expanding the product category.
 
 Examples:
 
-- static certificate rotation;
 - admin credential rotation;
 - access-log sink generations;
 - selected live policy controls;

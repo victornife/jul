@@ -187,17 +187,11 @@ func TestListenerRebindRequired(t *testing.T) {
 			}})
 		}
 		// ListenerRebindRequired must not fire for an ACME-only change;
-		// ACMERestartRequired owns that classification. With R9-05 the listener
-		// fingerprint includes ACME identity, so we now expect it to require a
-		// rebind; the test name documents that the *classification* still lives
-		// in the restart-required path, not a listener error.
-		reason, need := ListenerRebindRequired(acme("a.example.com"), acme("a.example.com", "b.example.com"))
-		if !need {
-			t.Fatal("expected ACME domain change to require listener rebind via fingerprint")
-		}
-		if reason == "" {
-			t.Fatal("expected non-empty reason")
-		}
+		// ACMERestartRequired (see TestACMERestartRequired in tls_test.go) owns
+		// that classification exclusively, the same way #100 moved static
+		// certificate identity out of this fingerprint into its own hot-swap
+		// path rather than duplicating detection across two mechanisms.
+		hotApplies(t, acme("a.example.com"), acme("a.example.com", "b.example.com"))
 	})
 	t.Run("hot-reloadable field (server_names) does not force restart", func(t *testing.T) {
 		old := cfg(plain())
@@ -241,10 +235,13 @@ func TestPreflightRebindRequiredUsesLiveSnapshot(t *testing.T) {
 	}
 }
 
-// TestListenerBindFingerprintDetectsCertRotation (R9-05) verifies that rotating
-// the contents of a cert or key file on a kept listener changes the bound
-// fingerprint, so the rebind check rejects the rotation as restart-required.
-func TestListenerBindFingerprintDetectsCertRotation(t *testing.T) {
+// TestListenerBindFingerprintDoesNotDetectCertRotation (#100) verifies that
+// rotating the contents of a cert or key file on a kept listener does NOT
+// change the bound fingerprint: static certificate identity is hot-swapped
+// through prepareCertRotation/tlsIdentityFingerprint instead of forcing a
+// rebind (see TestTLSIdentityFingerprintDetectsContentRotation in
+// cert_rotation_test.go for the mechanism that does detect it).
+func TestListenerBindFingerprintDoesNotDetectCertRotation(t *testing.T) {
 	dir := t.TempDir()
 	cert1, key1 := writeSelfSigned(t, dir, "cert1", "a.example.com")
 	cert2, key2 := writeSelfSigned(t, dir, "cert2", "a.example.com")
@@ -265,11 +262,12 @@ func TestListenerBindFingerprintDetectsCertRotation(t *testing.T) {
 
 	fp1 := listenerBindFingerprint(cfg(cert1, key1), addr)
 	fp2 := listenerBindFingerprint(cfg(cert2, key2), addr)
-	if fp1 == fp2 {
-		t.Fatal("rotating cert/key content did not change listener fingerprint")
+	if fp1 != fp2 {
+		t.Fatal("rotating cert/key content changed the bind fingerprint; it must be hot-swapped instead of forcing a rebind (#100)")
 	}
 
-	// Re-using the same cert/key pair must produce an identical fingerprint.
+	// Re-using the same cert/key pair must still produce an identical
+	// fingerprint (unchanged from before #100).
 	fp1b := listenerBindFingerprint(cfg(cert1, key1), addr)
 	if fp1 != fp1b {
 		t.Fatal("identical cert/key content produced different fingerprints")

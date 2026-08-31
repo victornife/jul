@@ -79,10 +79,13 @@ func TestSecretDigestStillDetectsRotation(t *testing.T) {
 	}
 }
 
-// TestTLSCertContentRotationIsDetected proves that splitting the coarse TLS
-// entry into exact leaves preserved same-path file-content detection: the
-// configuration text is identical and only the bytes on disk changed.
-func TestTLSCertContentRotationIsDetected(t *testing.T) {
+// TestTLSCertContentRotationIsHotNotRestartRequired (#100) proves static
+// certificate rotation no longer forces a restart: rotating file content in
+// place is a real, detectable change (the digest differs) but is not a
+// startup-consumed path any more, so the fingerprint does not compare it and
+// RestartRequired never fires for it. The actual hot-swap detection lives in
+// internal/server's prepareCertRotation/tlsIdentityFingerprint, not here.
+func TestTLSCertContentRotationIsHotNotRestartRequired(t *testing.T) {
 	dir := t.TempDir()
 	cert := filepath.Join(dir, "cert.pem")
 	if err := os.WriteFile(cert, []byte("first"), 0o600); err != nil {
@@ -97,12 +100,11 @@ func TestTLSCertContentRotationIsDetected(t *testing.T) {
 	}
 	after := ComputeFingerprint(cfg)
 
-	reason, need := RestartRequired(before, after)
-	if !need {
-		t.Fatal("rotating the certificate file contents must be restart-required")
+	if _, need := RestartRequired(before, after); need {
+		t.Fatal("rotating the certificate file contents must not be restart-required (#100)")
 	}
-	if !strings.Contains(reason, "servers.*.tls.cert") {
-		t.Fatalf("reason names the wrong path: %s", reason)
+	if _, ok := before.Values["servers.*.tls.cert"]; ok {
+		t.Fatal("servers.*.tls.cert must not be a startup-consumed fingerprint value any more (#100)")
 	}
 }
 

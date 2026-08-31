@@ -406,23 +406,30 @@ are:
 2. **Validate** — run structural/runtime validation on `Candidate.Effective`.
 3. **Lifecycle** — compare the candidate fingerprint against the startup
    fingerprint; then check kept listeners for bind-time property changes.
-4. **Prepare** — build the handler tree and stage upstream pools and closers.
+4. **Prepare** — build the handler tree, stage upstream pools and closers, and
+   prepare any `PreparedRuntime` components for this transaction (D08, #90):
+   #100's candidate certificate providers for retained TLS addresses whose
+   certificate identity changed are built and validated here, so a malformed
+   candidate aborts the reload before any live mutation.
 5. **StageListeners** — bind every newly added listen address; HTTP/3 QUIC
    resources are created but their accept loops are **not** started. A bind
    failure aborts the reload before Publish, leaving the old generation
    authoritative.
-6. **Publish** — the ordered commit boundary. Commit the handler generation,
-   install the candidate's redaction state, assign the live config, and swap
-   the handler pointer. Each of these writes is ordered but not a single atomic
+6. **Publish** — the ordered commit boundary. Commit the `PreparedRuntime`
+   (e.g. #100's certificate provider swaps, applied before the handler
+   generation is stored so a new vhost route can never be selected against a
+   stale certificate mapping), then commit the handler generation, install the
+   candidate's redaction state, assign the live config, and swap the handler
+   pointer. Each of these writes is ordered but not a single atomic
    transaction; the swap is race-free because the handler pointer is stored
    with one atomic operation and because downstream readers observe the new
    generation only after it is fully built.
 7. **Activate** — start serving on staged TCP and HTTP/3 listeners.
-8. **Retire** — remove listeners no longer in the config and retire the old
-   handler generation after it drains.
-9. **Refresh** — TLS certificate rotation is restart-only (R7-07); this phase
-   is intentionally a no-op.
-10. **PostCommit** — apply dynamic side effects: log level, GOMAXPROCS, and
+8. **Retire** — remove listeners no longer in the config, retire the old
+   handler generation after it drains, and retire the `PreparedRuntime`
+   asynchronously (bounded by `[global] shutdown_timeout`, like handler
+   generation retirement) so Publish never waits on it.
+9. **PostCommit** — apply dynamic side effects: log level, GOMAXPROCS, and
     stream-proxy reload.
 
 On any failure before Publish, `Abort()` releases all candidate resources

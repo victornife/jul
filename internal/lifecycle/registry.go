@@ -166,7 +166,6 @@ const (
 	reasonAccessLogStart        = "access-log sinks are opened once at startup"
 	reasonTracingStartup        = "the tracer provider and exporter are created once at startup"
 	reasonBindFrozen            = "the value is read once when the socket binds; an address kept across the reload keeps the value it bound with"
-	reasonTLSBindFrozen         = "TLS material is wired into the listener when it binds and reloadCertificates is a no-op, so a kept address serves the startup material until restart"
 	reasonClientAddressRebuild  = "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish"
 	reasonBackendTLSPool        = "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
 	reasonBackendTLSRoute       = "the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload"
@@ -452,8 +451,8 @@ func tlsEntries() []Entry {
 	out := []Entry{
 		bindBound("servers.*.tls.enabled", SubTLS, "whether the listener terminates TLS is decided when the address binds"),
 		bindBound("servers.*.tls.min_version", SubTLS, "the minimum protocol version is written into the listener's tls.Config at bind time"),
-		secretDigest(bindBound("servers.*.tls.cert", SubTLS, reasonTLSBindFrozen)),
-		secretDigest(bindBound("servers.*.tls.key", SubTLS, reasonTLSBindFrozen)),
+		secretDigest(hot("servers.*.tls.cert", SubTLS, "a candidate certificate provider is built and validated during Prepare and swapped atomically into the listener's existing dynamic provider at Publish, without rebinding (#100)")),
+		secretDigest(hot("servers.*.tls.key", SubTLS, "a candidate certificate provider is built and validated during Prepare and swapped atomically into the listener's existing dynamic provider at Publish, without rebinding (#100)")),
 		bindBound("servers.*.tls.client_auth.mode", SubMTLS, "the client-certificate policy is written into the listener's tls.Config at bind time"),
 		secretDigest(bindBound("servers.*.tls.client_auth.ca_file", SubMTLS, "the client CA pool is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected")),
 		secretDigest(bindBound("servers.*.tls.client_auth.crl_file", SubMTLS, "the revocation list is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected")),

@@ -53,12 +53,6 @@ var bindFingerprintPaths = []struct {
 	{"servers.*.tls.min_version", func(c *config.Config) {
 		c.Servers[0].TLS.MinVersion = "1.3"
 	}},
-	{"servers.*.tls.cert", func(c *config.Config) {
-		c.Servers[0].TLS.Cert = "rotated-cert"
-	}},
-	{"servers.*.tls.key", func(c *config.Config) {
-		c.Servers[0].TLS.Key = "rotated-key"
-	}},
 	{"servers.*.tls.client_auth.mode", func(c *config.Config) {
 		c.Servers[0].TLS.ClientAuth = &config.ClientAuthConfig{Mode: "require", CAFile: "/ca.pem"}
 	}},
