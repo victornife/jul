@@ -288,6 +288,14 @@ enabled = true
 listen  = "127.0.0.1:9090"
 ```
 
+The admin listener defaults to loopback, and a request that consumes an admin
+credential over a non-loopback, non-TLS connection is refused with `403
+insecure_transport` (ADR 0019 §28.1) — `/healthz` and `/readyz` are exempt, so
+health probes keep working regardless. To reach the admin listener remotely,
+terminate TLS with [`[admin.tls]`](configuration.md#admintls) rather than
+binding off-loopback in cleartext; see [docs/security-posture.md](security-posture.md)
+for the full hardening checklist.
+
 The `jul healthcheck` subcommand polls these endpoints and maps the result to a
 deterministic exit code, so an orchestrator can probe the server **without a
 shell or `curl`** (the distroless image ships neither):
