@@ -73,6 +73,11 @@ var schemaTypes = map[string]reflect.Type{
 	"StreamsResponse":       reflect.TypeFor[StreamsResponse](),
 	"Stream":                reflect.TypeFor[Stream](),
 	"SNIRoute":              reflect.TypeFor[SNIRoute](),
+
+	"ConfigExportResponse": reflect.TypeFor[ConfigExportResponse](),
+	"ExportGlobal":         reflect.TypeFor[ExportGlobal](),
+	"HistoryDiffResponse":  reflect.TypeFor[HistoryDiffResponse](),
+	"DiffEntry":            reflect.TypeFor[DiffEntry](),
 }
 
 // SchemaTypes returns the registered external DTOs by component name.

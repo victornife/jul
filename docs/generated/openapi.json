@@ -266,6 +266,94 @@
         ]
       }
     },
+    "/api/v1/config/export": {
+      "get": {
+        "operationId": "exportConfig",
+        "summary": "The whole configuration as a redacted structured projection, captured at one revision. Exact bytes are never returned: raw export is local-only in v1.",
+        "tags": [
+          "configuration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigExportResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "config:read"
+        ]
+      }
+    },
     "/api/v1/config/history": {
       "get": {
         "operationId": "listConfigHistory",
@@ -351,6 +439,114 @@
         "x-jul-stability": "external",
         "x-jul-permissions": [
           "history:read"
+        ]
+      }
+    },
+    "/api/v1/config/history/{id}/diff": {
+      "get": {
+        "operationId": "diffHistoryRevision",
+        "summary": "What rolling back to a stored revision would change, against the persisted configuration, with the base_version to bind the rollback to what was reviewed.",
+        "tags": [
+          "configuration"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryDiffResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — The addressed resource does not exist. Returned only to a caller that already holds the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "history:rollback"
         ]
       }
     },
@@ -1642,6 +1838,63 @@
         ],
         "additionalProperties": false
       },
+      "ConfigExportResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "base_version": {
+            "type": "string"
+          },
+          "global": {
+            "$ref": "#/components/schemas/ExportGlobal"
+          },
+          "listeners": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Listener"
+            }
+          },
+          "redacted": {
+            "type": "boolean"
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Route"
+            }
+          },
+          "secret_ref_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "streams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Stream"
+            }
+          },
+          "upstreams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Upstream"
+            }
+          }
+        },
+        "required": [
+          "api_version",
+          "base_version",
+          "global",
+          "listeners",
+          "redacted",
+          "routes",
+          "secret_ref_count",
+          "streams",
+          "upstreams"
+        ],
+        "additionalProperties": false
+      },
       "ConfigResponse": {
         "type": "object",
         "properties": {
@@ -1689,6 +1942,33 @@
             "type": "string"
           },
           "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "DiffEntry": {
+        "type": "object",
+        "properties": {
+          "after": {
+            "type": "string"
+          },
+          "before": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "lifecycle_class": {
+            "type": "string"
+          },
+          "name": {
             "type": "string"
           }
         },
@@ -1931,6 +2211,61 @@
         ],
         "additionalProperties": false
       },
+      "ExportGlobal": {
+        "type": "object",
+        "properties": {
+          "access_log_configured": {
+            "type": "boolean"
+          },
+          "cache_enabled": {
+            "type": "boolean"
+          },
+          "compression_enabled": {
+            "type": "boolean"
+          },
+          "config_authority": {
+            "type": "string"
+          },
+          "error_log_configured": {
+            "type": "boolean"
+          },
+          "log_format": {
+            "type": "string"
+          },
+          "log_level": {
+            "type": "string"
+          },
+          "rate_limit_enabled": {
+            "type": "boolean"
+          },
+          "reload_timeout_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "shutdown_timeout_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tracing_enabled": {
+            "type": "boolean"
+          },
+          "waf_enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "access_log_configured",
+          "cache_enabled",
+          "compression_enabled",
+          "error_log_configured",
+          "rate_limit_enabled",
+          "reload_timeout_ms",
+          "shutdown_timeout_ms",
+          "tracing_enabled",
+          "waf_enabled"
+        ],
+        "additionalProperties": false
+      },
       "HealthResponse": {
         "type": "object",
         "properties": {
@@ -1946,6 +2281,60 @@
         },
         "required": [
           "status"
+        ],
+        "additionalProperties": false
+      },
+      "HistoryDiffResponse": {
+        "type": "object",
+        "properties": {
+          "additions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiffEntry"
+            }
+          },
+          "affected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "api_version": {
+            "type": "string"
+          },
+          "base_version": {
+            "type": "string"
+          },
+          "history_id": {
+            "type": "string"
+          },
+          "modifications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiffEntry"
+            }
+          },
+          "removals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiffEntry"
+            }
+          },
+          "summary": {
+            "type": "string"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "api_version",
+          "base_version",
+          "history_id",
+          "summary"
         ],
         "additionalProperties": false
       },
