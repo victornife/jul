@@ -1905,6 +1905,24 @@ require_client_cert = true
 	}
 }
 
+// TestClientAuthConfigActiveTrimsWhitespace pins a fix for a real bug a
+// Copilot PR review caught (#374): Active() must trim mode the same way
+// validateClientAuth and clientAuthMode do, or a whitespace-padded "none"
+// passes validation (which trims) but was still treated as "active" here,
+// leading to a spurious runtime failure trying to load an empty ca_file.
+func TestClientAuthConfigActiveTrimsWhitespace(t *testing.T) {
+	for _, mode := range []string{"", "none", " none", "none ", "\tnone\n"} {
+		if (&ClientAuthConfig{Mode: mode}).Active() {
+			t.Errorf("Active() with mode %q = true, want false", mode)
+		}
+	}
+	for _, mode := range []string{"request", " request", "require "} {
+		if !(&ClientAuthConfig{Mode: mode}).Active() {
+			t.Errorf("Active() with mode %q = false, want true", mode)
+		}
+	}
+}
+
 // adminTLSConfig builds a minimal enabled-admin config with the given
 // [admin.tls] block.
 func adminTLSConfig(tls *AdminTLSConfig) *Config {

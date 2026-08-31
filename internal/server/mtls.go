@@ -111,8 +111,8 @@ func clientAuthForAddr(servers []config.ServerConfig, addr string, onResult func
 
 // ClientAuthBundle is the resolved mutual-TLS configuration for one TLS
 // listener, exported for direct reuse by a single-target listener that has no
-// per-server-block aggregation to do — the admin listener (#336). A nil Mode
-// (tls.NoClientCert) means client authentication is off.
+// per-server-block aggregation to do — the admin listener (#336). A Mode of
+// tls.NoClientCert means client authentication is off.
 type ClientAuthBundle struct {
 	Mode   tls.ClientAuthType
 	Pool   *x509.CertPool

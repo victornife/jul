@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -373,8 +374,12 @@ func runAdminTLSServer(t *testing.T, cfg config.AdminConfig) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	runErr := make(chan error, 1)
 	go func() { runErr <- s.Run(ctx) }()
+	var drained atomic.Bool
 	t.Cleanup(func() {
 		cancel()
+		if drained.Load() {
+			return
+		}
 		select {
 		case <-runErr:
 		case <-time.After(2 * time.Second):
@@ -383,6 +388,12 @@ func runAdminTLSServer(t *testing.T, cfg config.AdminConfig) *Server {
 	})
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
+		select {
+		case err := <-runErr:
+			drained.Store(true)
+			t.Fatalf("Run exited before the listener became reachable: %v", err)
+		default:
+		}
 		// A TLS-level dial (not a bare TCP connect) forces the accept loop to
 		// actually process a connection, whatever it decides about the
 		// handshake, before this helper returns.

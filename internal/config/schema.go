@@ -12,6 +12,7 @@
 package config
 
 import (
+	"strings"
 	"time"
 
 	"jul/internal/backendtls"
@@ -1038,12 +1039,16 @@ type ClientAuthConfig struct {
 }
 
 // Active reports whether client-certificate authentication is enabled (a
-// non-nil config with a mode other than "" or "none"). It is nil-safe.
+// non-nil config with a mode other than "" or "none"). It is nil-safe and
+// trims whitespace, matching validateClientAuth's and clientAuthMode's own
+// trimming so a stray space in mode can never disagree with validation about
+// whether client_auth is active.
 func (c *ClientAuthConfig) Active() bool {
 	if c == nil {
 		return false
 	}
-	return c.Mode != "" && c.Mode != "none"
+	mode := strings.TrimSpace(c.Mode)
+	return mode != "" && mode != "none"
 }
 
 // ACMEConfig configures automatic certificate management via the ACME protocol.
