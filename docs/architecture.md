@@ -201,6 +201,38 @@ in-flight request, while remaining cancellable by process shutdown and bounded b
 `[global] shutdown_timeout`. See
 [reload semantics](reload-semantics.md#generation-owned-background-work).
 
+## Prepared-runtime components (`internal/server/prepared_runtime.go`)
+
+Some fields need candidate construction before Publish and bounded retirement
+of whatever they replace, but do not belong in `handlerGen` (they are not
+request-scoped) and are not the single admin-auth artifact `PreparedCommit`
+already owns. The accepted design (D08, #90) is a **closed, explicitly
+ordered aggregate**, not an open registry: adding a component is a reviewed
+code change — an enum value, a typed prepared type/setter/accessor, an
+explicit `Prepare` call site, a publication-order entry and a retirement
+category — never runtime registration, `init()` self-registration or
+reflection.
+
+| Piece | Responsibility |
+|------|---------------|
+| `RuntimeComponent` | Closed enum identifying a component slot. No production value exists yet; the first two consumers (#100 static certificates, #98 access-log sinks) each add their own value when they land. |
+| `preparedComponent` | `component()` / `commit() retirement` / `abort()`. Every fallible step (parsing, dialing, opening a file) happens before `commit`, which must not fail. |
+| `PreparedRuntime` | The aggregate. `Commit`/`Abort` are exactly-once (mirroring `PreparedCommit`); `Retire(ctx)` runs the retirements `Commit` collected, on a context the caller bounds. |
+
+`ReloadPlan.Runtime` holds one `PreparedRuntime` per reload transaction.
+`Publish` commits it before the new handler generation becomes reachable —
+so a component like a certificate provider can never leave a new vhost route
+reachable under a stale mapping — and `Abort` releases it on every
+pre-Publish failure path. `ReloadPlan.RetirePreparedRuntime` schedules
+`Retire` asynchronously, bounded by `[global] shutdown_timeout`, exactly like
+`retireGen` bounds handler-generation retirement: **Publish itself never
+waits for retirement.**
+
+This mechanism does not own handler-generation resources, the admin-auth
+snapshot, logger/metrics atomics, or listener/connection-epoch transitions —
+those keep their own existing owners. See #90 for the full rationale and the
+explicit triggers for reconsidering a more generic registry later.
+
 ## Capability-preserving response writers (`internal/respwriter/`)
 
 Every layer that observes or transforms a response wraps the
