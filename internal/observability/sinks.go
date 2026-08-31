@@ -114,6 +114,15 @@ func accessHandler(w io.Writer, format string) slog.Handler {
 	return slog.NewTextHandler(w, opts)
 }
 
+// probeCloseFile and probeRemoveFile are indirected so tests can force the
+// rare close/remove failure paths in probeWritableDir deterministically —
+// a real close or remove failure on a just-created temp file is impractical
+// to trigger portably across platforms without this seam.
+var (
+	probeCloseFile  = (*os.File).Close
+	probeRemoveFile = os.Remove
+)
+
 // probeWritableDir proves path's parent directory is writable by creating and
 // immediately removing a temporary sentinel file, creating the directory first
 // if it does not exist. It never touches path itself: a candidate access-sink
@@ -135,11 +144,11 @@ func probeWritableDir(path string) error {
 		return fmt.Errorf("directory %q not writable: %w", dir, err)
 	}
 	name := tmp.Name()
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(name)
+	if err := probeCloseFile(tmp); err != nil {
+		_ = probeRemoveFile(name)
 		return fmt.Errorf("directory %q: closing writability probe: %w", dir, err)
 	}
-	if err := os.Remove(name); err != nil {
+	if err := probeRemoveFile(name); err != nil {
 		return fmt.Errorf("directory %q: removing writability probe: %w", dir, err)
 	}
 	return nil
