@@ -17,12 +17,12 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 345 |
-| Schema leaves (configurable values) | 293 |
-| Registry entries | 293 |
-| Startup-consumed entries | 57 |
-| Class `hot_reload` | 222 |
-| Class `restart_required` | 57 |
+| Schema paths (containers included) | 350 |
+| Schema leaves (configurable values) | 297 |
+| Registry entries | 297 |
+| Startup-consumed entries | 59 |
+| Class `hot_reload` | 224 |
+| Class `restart_required` | 59 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 2 |
@@ -142,6 +142,10 @@ value is compared as a digest so no secret material leaves the process.
 | `admin.rbac.principals.*.token` | `hot_reload` | `rbac` | digest | the admin RBAC policy is rebuilt and atomically swapped after each successful reload |
 | `admin.rbac.roles.*.name` | `hot_reload` | `rbac` | — | the admin RBAC policy is rebuilt and atomically swapped after each successful reload |
 | `admin.rbac.roles.*.permissions` | `hot_reload` | `rbac` | — | the admin RBAC policy is rebuilt and atomically swapped after each successful reload |
+| `admin.tls.cert` | `hot_reload` | `tls` | digest | a candidate certificate provider is built and validated during preflight, then swapped atomically into the admin listener's existing dynamic provider on the next successful reload, reusing #100's seam (#336) |
+| `admin.tls.enabled` | `restart_required` | `tls` | startup | turning TLS on or off for the admin listener changes the socket's protocol, a structural transition |
+| `admin.tls.key` | `hot_reload` | `tls` | digest | a candidate certificate provider is built and validated during preflight, then swapped atomically into the admin listener's existing dynamic provider on the next successful reload, reusing #100's seam (#336) |
+| `admin.tls.min_version` | `restart_required` | `tls` | startup | the minimum protocol version is written into the admin listener's tls.Config when it is created |
 | `admin.token` | `restart_required` | `admin` | startup, digest | the shared bearer token is captured when the admin listener is created; rotating it must not appear to succeed while the old token still grants access |
 | `cache.default_ttl` | `restart_required` | `cache` | startup | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
 | `cache.disk_max_size` | `restart_required` | `cache` | startup | the response cache backend is created once at startup and retains its counters and LRU state across reloads |

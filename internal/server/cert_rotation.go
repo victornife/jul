@@ -44,7 +44,7 @@ func (c *certRotationComponent) component() RuntimeComponent { return ComponentS
 // once replaced (#100), so this returns no retirement.
 func (c *certRotationComponent) commit() retirement {
 	for _, sw := range c.swaps {
-		sw.entry.provider.set(sw.provider)
+		sw.entry.provider.Set(sw.provider)
 		sw.entry.certFingerprint = sw.newFP
 	}
 	return nil

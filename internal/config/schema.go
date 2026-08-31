@@ -1328,6 +1328,35 @@ type AdminConfig struct {
 	// the admin block is enabled and the key is absent, so upload is disabled by
 	// default. An explicit true is required to allow uploads.
 	PluginUploadEnabled *bool `toml:"plugin_upload_enabled"`
+
+	// TLS terminates the admin listener with an operator-supplied certificate
+	// (#336). Nil means plaintext, the existing default. Optional
+	// client-certificate authentication is a later, separate tranche.
+	TLS *AdminTLSConfig `toml:"tls"`
+}
+
+// AdminTLSConfig configures TLS for the admin listener (#336). It reuses the
+// data plane's CertProvider/DynamicCertProvider rotation seam (#100) rather
+// than a second one: Cert/Key content and same-path rotation hot-apply,
+// while Enabled is a structural transition that stays restart-required,
+// matching servers.*.tls's own split. There is no ACME option here: an
+// operator-supplied certificate is the bounded starting point. Client-
+// certificate authentication is a later tranche of this issue, not this
+// field: shipping a validated-but-unwired client_auth block would be a
+// closed-world contract this code does not actually keep.
+type AdminTLSConfig struct {
+	// Enabled terminates the admin listener with TLS instead of plaintext.
+	// Turning it on or off changes the socket's protocol, a structural
+	// transition applied only on restart.
+	Enabled bool `toml:"enabled"`
+	// Cert is the path to the PEM certificate file the admin listener
+	// presents. Content and same-path rotation hot-apply.
+	Cert string `toml:"cert"`
+	// Key is the path to the PEM private key matching Cert. Content and
+	// same-path rotation hot-apply.
+	Key string `toml:"key"`
+	// MinVersion is one of "1.2" or "1.3", defaulting like servers.*.tls.
+	MinVersion string `toml:"min_version"`
 }
 
 // ConsoleEnabled reports whether the web console should be served: it defaults

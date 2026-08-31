@@ -1372,6 +1372,36 @@ plugin_upload_max_size = 32
 | `plugin_upload_enabled` | bool | Default `false`; set `true` to enable the `.wasm` upload endpoint. Also requires positive `plugin_upload_max_size`. |
 | `plugin_upload_max_size` | int | Maximum `.wasm` upload size in megabytes (default `32`) |
 
+### `[admin.tls]`
+
+Terminates the admin listener with an operator-supplied certificate instead of
+plaintext (#336), reusing the same certificate-rotation seam as
+[`servers.*.tls`](#tls): certificate content and same-path rotation
+hot-apply, with no rebind and no dropped connection. There is no ACME option
+here and no client-certificate authentication yet — an operator-supplied
+certificate is the bounded first tranche. Enabling or disabling it is a
+structural transition and requires a restart, exactly like `servers.*.tls.enabled`.
+
+```toml
+[admin.tls]
+enabled = true
+cert = "/etc/jul/admin-cert.pem"
+key = "/etc/jul/admin-key.pem"
+min_version = "1.3"
+```
+
+| Key | Type | Description |
+| --- | ---- | ----------- |
+| `enabled` | bool | Terminate the admin listener with TLS instead of plaintext. Restart-required. |
+| `cert` | string | Path to the PEM certificate file. Content and same-path rotation hot-apply. |
+| `key` | string | Path to the PEM private key matching `cert`. Content and same-path rotation hot-apply. |
+| `min_version` | string | `"1.2"` (default) or `"1.3"`. Restart-required. |
+
+A malformed or missing certificate/key pair is rejected before the candidate
+configuration is persisted or applied. Binding off-loopback without `[admin.tls]`
+enabled produces a `jul lint` warning (L7); binding off-loopback with TLS
+configured is a supported configuration.
+
 ---
 
 ## `[observability.tracing]`

@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -634,6 +635,21 @@ type Server struct {
 	// are atomic, closing the read-modify-write race between concurrent edits
 	// (P2-12).
 	applyMu sync.Mutex
+
+	// certProvider is nil unless [admin.tls] was enabled at startup. TLS on/off
+	// is a structural transition applied only on restart, so this is fixed for
+	// the process lifetime; certificate content rotates hot through
+	// certProvider.Set, reusing #100's exact seam rather than a second one
+	// (#336). tlsErr, when set by New, means the initial cert/key failed to
+	// load; Run must fail before binding rather than half-start.
+	certProvider *server.DynamicCertProvider
+	tlsErr       error
+	// certMu guards certFingerprint, which PrepareTLS reads and
+	// CommitPreparedTLS writes; both can run from admin-apply preflight
+	// goroutines that are not otherwise serialized against each other the way
+	// applyMu serializes the write path itself.
+	certMu          sync.Mutex
+	certFingerprint string
 }
 
 // RecordManagedApplyOutcome records the terminal async outcome of a managed
@@ -728,6 +744,17 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 		health:   newConsoleHealth(),
 		quit:     make(chan struct{}),
 	}
+	if cfg.TLS != nil && cfg.TLS.Enabled {
+		provider, err := server.NewSingleCertProvider(cfg.TLS.Cert, cfg.TLS.Key)
+		if err != nil {
+			s.tlsErr = fmt.Errorf("admin.tls: %w", err)
+		} else {
+			dyn := &server.DynamicCertProvider{}
+			dyn.Set(provider)
+			s.certProvider = dyn
+			s.certFingerprint = server.SingleCertFingerprint(cfg.TLS.Cert, cfg.TLS.Key)
+		}
+	}
 	s.httpd = &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           s.Handler(),
@@ -749,20 +776,31 @@ func (s *Server) Handler() http.Handler {
 
 // Run starts the admin listener and shuts it down when ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
+	if s.tlsErr != nil {
+		return s.tlsErr
+	}
 	ln, err := net.Listen("tcp", s.cfg.Listen)
 	if err != nil {
 		return err
 	}
-	s.log.Info("admin listener started", "addr", s.cfg.Listen, "auth", s.currentAdminConfig().Token != "")
+	if s.certProvider != nil {
+		ln = tls.NewListener(ln, &tls.Config{
+			GetCertificate: s.certProvider.GetCertificate,
+			MinVersion:     server.MinTLSVersion(s.cfg.TLS.MinVersion),
+		})
+	}
+	s.log.Info("admin listener started", "addr", s.cfg.Listen, "tls", s.certProvider != nil, "auth", s.currentAdminConfig().Token != "")
 	// The admin API grants full read/write control of the running server. It is
 	// designed for single-operator, loopback-bound use. Binding to a routable
 	// address without an external firewall, VPN, or mTLS layer is unsafe.
-	if !adminIsLoopback(s.cfg.Listen) {
+	// A TLS-terminated listener is a supported off-loopback configuration
+	// (#336); the warning is for the plaintext case only.
+	if !adminIsLoopback(s.cfg.Listen) && s.certProvider == nil {
 		security := "single shared bearer token; full read/write access"
 		if pol := s.currentPolicy(); pol != nil && pol.Enabled() {
 			security = "RBAC enabled; full read/write access"
 		}
-		s.log.Warn("admin listener bound to a non-loopback address — restrict access with firewall rules or a private network",
+		s.log.Warn("admin listener bound to a non-loopback address without TLS — restrict access with firewall rules or a private network, or configure [admin.tls]",
 			"addr", s.cfg.Listen,
 			"security", security)
 	}

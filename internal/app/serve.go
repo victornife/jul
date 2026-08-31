@@ -900,7 +900,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 				policy = built
 			}
 			prepared := admin.PrepareAuth(adminCfg, policy)
-			return server.NewPreparedCommit(func() { adminSrv.CommitPreparedAuth(prepared) }, nil), nil
+			preparedTLS, err := adminSrv.PrepareTLS(adminCfg)
+			if err != nil {
+				return nil, err
+			}
+			return server.NewPreparedCommit(func() {
+				adminSrv.CommitPreparedAuth(prepared)
+				adminSrv.CommitPreparedTLS(preparedTLS)
+			}, nil), nil
 		}
 		pf.PrepareAdmin = prepareAdmin
 		srv.PrepareAdmin = prepareAdmin

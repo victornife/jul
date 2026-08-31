@@ -58,13 +58,13 @@ func writeSelfSigned(tb testing.TB, dir, name string, dnsNames ...string) (certP
 }
 
 func TestMinTLSVersion(t *testing.T) {
-	if minTLSVersion("1.3") != tls.VersionTLS13 {
+	if MinTLSVersion("1.3") != tls.VersionTLS13 {
 		t.Error("1.3 should map to TLS 1.3")
 	}
-	if minTLSVersion("") != tls.VersionTLS12 {
+	if MinTLSVersion("") != tls.VersionTLS12 {
 		t.Error("empty should default to TLS 1.2")
 	}
-	if minTLSVersion("1.2") != tls.VersionTLS12 {
+	if MinTLSVersion("1.2") != tls.VersionTLS12 {
 		t.Error("1.2 should map to TLS 1.2")
 	}
 }

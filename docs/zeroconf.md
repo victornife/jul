@@ -79,10 +79,11 @@ Output formats:
 | L4 | Directory listing enabled | `directory_listing = true` | warning | Exposes file names to clients | `TestLintDirectoryListing` |
 | L5 | TLS without min_version | `tls.enabled && tls.min_version == ""` | warning | Relies on runtime default | `TestLintTLSMinVersion` |
 | L6 | Exposed admin without token | Admin not loopback and no token | warning | Unauthenticated remote control | `TestLintAdminExposed` |
-| L7 | Literal admin token | `admin.token` non-empty and not a `${…}` ref | warning | Secret committed to config file | `TestLintLiteralSecret` |
-| L8 | Literal Consul token | `discovery.consul.token` non-empty, not `${…}` | warning | ACL token committed to config file | `TestLintLiteralSecret` |
-| L9 | Literal Kubernetes token | `discovery.kubernetes.token` non-empty, not `${…}` | warning | SA token committed to config file | `TestLintLiteralSecret` |
-| L10 | Compression disabled | `!compression.enabled` | warning | Wasted bandwidth on text responses | `TestLintCompressionDisabled` |
+| L7 | Exposed admin without TLS | Admin not loopback and `admin.tls` not enabled | warning | Credentials and config travel in cleartext | `TestLintAdminExposedWithoutTLS` |
+| L8 | Literal admin token | `admin.token` non-empty and not a `${…}` ref | warning | Secret committed to config file | `TestLintLiteralSecret` |
+| L9 | Literal Consul token | `discovery.consul.token` non-empty, not `${…}` | warning | ACL token committed to config file | `TestLintLiteralSecret` |
+| L10 | Literal Kubernetes token | `discovery.kubernetes.token` non-empty, not `${…}` | warning | SA token committed to config file | `TestLintLiteralSecret` |
+| L11 | Compression disabled | `!compression.enabled` | warning | Wasted bandwidth on text responses | `TestLintCompressionDisabled` |
 
 All rules are **conservative** (low false-positive rate).  A clean config
 (strong TLS, references for secrets, loopback admin, compression on, no

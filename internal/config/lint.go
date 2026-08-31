@@ -205,6 +205,19 @@ func Lint(c *Config) []Diagnostic {
 		})
 	}
 
+	// An admin listener reachable off-loopback in cleartext carries every
+	// credential and every configuration write over an unencrypted channel.
+	// TLS-terminating it (#336) is the supported way to expose it off-loopback;
+	// the finding does not fire once [admin.tls] is enabled.
+	if c.Admin.Enabled && !isLoopbackListen(c.Admin.Listen) && (c.Admin.TLS == nil || !c.Admin.TLS.Enabled) {
+		diags = append(diags, Diagnostic{
+			Severity: SeverityWarning,
+			Field:    "[admin]",
+			Message:  fmt.Sprintf("admin listener %q is not loopback and has no TLS; credentials and configuration travel in cleartext", c.Admin.Listen),
+			Hint:     "configure [admin.tls], or bind listen to 127.0.0.1 and tunnel instead",
+		})
+	}
+
 	// Literal secrets in sensitive fields. Prefer a ${env:NAME} or ${file:/path}
 	// reference (SEC-1) so the secret is not committed in the config file and is
 	// redacted from logs. The lint never echoes the value itself.

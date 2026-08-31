@@ -421,7 +421,7 @@ type listenerEntry struct {
 	addr             string
 	httpd            *http.Server
 	ln               net.Listener
-	provider         *dynamicCertProvider // nil for plain HTTP
+	provider         *DynamicCertProvider // nil for plain HTTP
 	h3               h3Listener           // nil unless HTTP/3 is enabled and compiled in
 	boundFingerprint string               // listenerBindFingerprint at bind time, for rotation detection
 	// certFingerprint is tlsIdentityFingerprint of the currently live,
@@ -674,8 +674,8 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 			_ = ln.Close()
 			return nil, fmt.Errorf("tls config for %s: %w", addr, err)
 		}
-		dyn := &dynamicCertProvider{}
-		dyn.set(provider)
+		dyn := &DynamicCertProvider{}
+		dyn.Set(provider)
 		entry.provider = dyn
 		if !acmeEnabledForAddr(cfg.Servers, addr) {
 			entry.certFingerprint = tlsIdentityFingerprint(bindings)

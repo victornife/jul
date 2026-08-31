@@ -103,7 +103,7 @@ func TestPrepareCertRotationSkipsACMEAddress(t *testing.T) {
 		}},
 	}
 	s := &Server{cfg: cfg, log: quietLogger(), listeners: map[string]*listenerEntry{
-		addr: {addr: addr, provider: &dynamicCertProvider{}},
+		addr: {addr: addr, provider: &DynamicCertProvider{}},
 	}}
 
 	comp, err := s.prepareCertRotation(cfg)
@@ -560,7 +560,7 @@ func TestLiveCertSummariesSkipsNonTLSAndUnboundAddresses(t *testing.T) {
 }
 
 // TestLiveCertSummariesSkipsANilHolder covers a bound TLS address whose
-// dynamicCertProvider was constructed but never had a provider installed —
+// DynamicCertProvider was constructed but never had a provider installed —
 // a state buildListenerEntry never leaves behind in production, but one
 // LiveCertSummaries must still not panic against.
 func TestLiveCertSummariesSkipsANilHolder(t *testing.T) {
@@ -569,7 +569,7 @@ func TestLiveCertSummariesSkipsANilHolder(t *testing.T) {
 		Servers: []config.ServerConfig{{Listen: addr, TLS: &config.TLSConfig{Enabled: true, Cert: "unused", Key: "unused"}}},
 	}
 	s := &Server{log: quietLogger(), listeners: map[string]*listenerEntry{
-		addr: {addr: addr, provider: &dynamicCertProvider{}},
+		addr: {addr: addr, provider: &DynamicCertProvider{}},
 	}}
 	s.runtimeState.Store(&runtimeState{EffectiveConfig: cfg})
 
@@ -580,10 +580,11 @@ func TestLiveCertSummariesSkipsANilHolder(t *testing.T) {
 
 // TestAcmeCertSummariesForAddrSkipsNonMatchingServers proves the skip branch
 // in the loop: a server on a different address, and a non-ACME server on the
-// same address, are both excluded.
+// same address, are both excluded. Uses fixed literal addresses rather than
+// freePort: this is a pure function over []config.ServerConfig, nothing binds
+// a socket, and two freePort calls could rarely coincide.
 func TestAcmeCertSummariesForAddrSkipsNonMatchingServers(t *testing.T) {
-	addr := freePort(t)
-	other := freePort(t)
+	const addr, other = "127.0.0.1:19001", "127.0.0.1:19002"
 	servers := []config.ServerConfig{
 		{Listen: other, TLS: &config.TLSConfig{Enabled: true, ACME: &config.ACMEConfig{Enabled: true}}},
 		{Listen: addr, TLS: &config.TLSConfig{Enabled: true}}, // no ACME on this one.

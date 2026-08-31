@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 293 configurable leaves.
+Coverage: 297 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -342,6 +342,58 @@ Permissions is the list of permission strings.
 | Lifecycle | `hot_reload` |
 | Subsystem | `rbac` |
 | Why | the admin RBAC policy is rebuilt and atomically swapped after each successful reload |
+
+## `admin.tls.cert` {#admin-tls-cert}
+
+Cert is the path to the PEM certificate file the admin listener presents.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `tls` |
+| Why | a candidate certificate provider is built and validated during preflight, then swapped atomically into the admin listener's existing dynamic provider on the next successful reload, reusing #100's seam (#336) |
+| Flags | secret |
+
+## `admin.tls.enabled` {#admin-tls-enabled}
+
+Enabled terminates the admin listener with TLS instead of plaintext.
+
+| | |
+| --- | --- |
+| Type | `bool` |
+| Lifecycle | `restart_required` |
+| Subsystem | `tls` |
+| Why | turning TLS on or off for the admin listener changes the socket's protocol, a structural transition |
+| Flags | startup-consumed |
+
+## `admin.tls.key` {#admin-tls-key}
+
+Key is the path to the PEM private key matching Cert.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `tls` |
+| Why | a candidate certificate provider is built and validated during preflight, then swapped atomically into the admin listener's existing dynamic provider on the next successful reload, reusing #100's seam (#336) |
+| Flags | secret |
+
+## `admin.tls.min_version` {#admin-tls-min_version}
+
+MinVersion is one of "1.2" or "1.3", defaulting like servers.*.tls.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `tls` |
+| Why | the minimum protocol version is written into the admin listener's tls.Config when it is created |
+| Flags | startup-consumed |
+| Allowed values | `1.2`, `1.3` |
+| Constraint | exact lowercase enum |
+| Zero/empty semantics | omitted selects the documented default where supported |
+| Active when | admin.tls enabled |
 
 ## `admin.token` {#admin-token}
 

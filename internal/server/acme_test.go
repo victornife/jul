@@ -202,8 +202,8 @@ func TestACMERotationUnderConcurrentHandshakes(t *testing.T) {
 		return &tlsCertB, nil
 	})
 
-	dyn := &dynamicCertProvider{}
-	dyn.set(providerA)
+	dyn := &DynamicCertProvider{}
+	dyn.Set(providerA)
 
 	const handshakeGoroutines = 50
 	const handshakesPerGoroutine = 200
@@ -242,7 +242,7 @@ func TestACMERotationUnderConcurrentHandshakes(t *testing.T) {
 	// Rotate the provider repeatedly while the handshake goroutines run.
 	providers := []CertProvider{providerA, providerB}
 	for i := 0; i < 500; i++ {
-		dyn.set(providers[i%2])
+		dyn.Set(providers[i%2])
 	}
 
 	// Signal workers to stop, wait for them, then drain the error channel.
