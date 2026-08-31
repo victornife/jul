@@ -83,6 +83,28 @@ func structSchema(t reflect.Type, self string) (*Schema, error) {
 		if name == "-" {
 			continue
 		}
+
+		// An embedded struct with no json name is flattened by encoding/json,
+		// so the schema must flatten it too. Describing it as a nested object
+		// would publish a shape the server never emits.
+		if f.Anonymous && name == "" {
+			embedded := f.Type
+			for embedded.Kind() == reflect.Pointer {
+				embedded = embedded.Elem()
+			}
+			if embedded.Kind() == reflect.Struct {
+				sub, err := structSchema(embedded, self)
+				if err != nil {
+					return nil, fmt.Errorf("%s.%s: %w", t, f.Name, err)
+				}
+				for k, v := range sub.Properties {
+					s.Properties[k] = v
+				}
+				required = append(required, sub.Required...)
+				continue
+			}
+		}
+
 		if name == "" {
 			return nil, fmt.Errorf("%s.%s has no json tag; every external DTO field names its wire key explicitly", t, f.Name)
 		}

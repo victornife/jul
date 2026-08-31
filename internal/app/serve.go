@@ -835,6 +835,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	managedApplies := admin.NewManagedApplyRegistry(0, 0)
 	if coordinator != nil {
 		deps.ManagedApplies = managedApplies
+		// The coordinator mints the boot-scoped instance id and embeds it in
+		// every apply id, so publishing its value is what keeps `boot_id` and
+		// the ids a client correlates it with in agreement (ADR 0019 §27.2).
+		deps.BootID = coordinator.BootID
 		deps.LastManagedApply = func() *admin.ManagedApplyOutcome {
 			return lastManagedApply.Load()
 		}

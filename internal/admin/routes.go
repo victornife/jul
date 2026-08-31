@@ -25,6 +25,15 @@ func (s *Server) routes() http.Handler {
 		default:
 			h = s.requirePermission(spec.Permission, spec.Handler(s))
 		}
+		// An externally classified route is marked *outside* authentication, so
+		// a refusal that happens before a credential is examined still carries
+		// a correlation id and still renders the §26 envelope. The
+		// authentication and authorization checks themselves are the same ones
+		// every internal route runs — only the rendering of their refusal
+		// differs (ADR 0019 §24).
+		if spec.Stability.External() && !spec.Public {
+			h = s.withExternalContract(h)
+		}
 		mux.Handle(spec.Pattern, h)
 	}
 	// Admin API security hardening (Console v2 Milestone 1.6): per-client rate

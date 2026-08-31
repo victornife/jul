@@ -114,6 +114,41 @@ var Catalog = []RouteSpec{
 		Handler: func(s *Server) http.Handler { return s.handleConsoleOrRoot() },
 	},
 
+	// ── Supported external API (/api/v1) ─────────────────────────────────────
+	// The versioned external contract (ADR 0019 §24). These are the only
+	// configuration routes covered by the compatibility policy; every
+	// unversioned /api/… route below is internal to the Console.
+	{
+		Pattern:    "/api/v1/status",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.StatusRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID: "getStatus",
+				Summary: "Control-plane state: serving and persisted versions, configuration authority and its origin, " +
+					"drift, any staged restart, the last managed transaction, and the boot identity that delimits the terminal ledger.",
+				Response: "StatusResponse",
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Status) },
+	},
+	{
+		Pattern:    "/api/v1/capabilities",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.StatusRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID: "getCapabilities",
+				Summary: "What this build serves: API version, configuration schema version, compiled feature flags, " +
+					"the external operations available, and the ledger bounds a polling client must respect.",
+				Response: "CapabilitiesResponse",
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Capabilities) },
+	},
+
 	// ── Identity (authenticated, any credential) ─────────────────────────────
 	// Returns the caller's own server-derived identity so the Console can
 	// display the current principal/role and gate controls proactively. It

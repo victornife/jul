@@ -10,6 +10,162 @@
     }
   },
   "paths": {
+    "/api/v1/capabilities": {
+      "get": {
+        "operationId": "getCapabilities",
+        "summary": "What this build serves: API version, configuration schema version, compiled feature flags, the external operations available, and the ledger bounds a polling client must respect.",
+        "tags": [
+          "status"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "status:read"
+        ]
+      }
+    },
+    "/api/v1/status": {
+      "get": {
+        "operationId": "getStatus",
+        "summary": "Control-plane state: serving and persisted versions, configuration authority and its origin, drift, any staged restart, the last managed transaction, and the boot identity that delimits the terminal ledger.",
+        "tags": [
+          "status"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "status:read"
+        ]
+      }
+    },
     "/healthz": {
       "get": {
         "operationId": "getHealthz",
@@ -181,6 +337,232 @@
   },
   "components": {
     "schemas": {
+      "ApplySummary": {
+        "type": "object",
+        "properties": {
+          "apply_id": {
+            "type": "string"
+          },
+          "completed_at": {
+            "type": "string"
+          },
+          "degraded": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Degradation"
+            }
+          },
+          "mode": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "apply_id",
+          "degraded",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "CapabilitiesResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "boot_id": {
+            "type": "string"
+          },
+          "build": {
+            "type": "object",
+            "properties": {
+              "acme": {
+                "type": "boolean"
+              },
+              "brotli": {
+                "type": "boolean"
+              },
+              "console": {
+                "type": "boolean"
+              },
+              "consul": {
+                "type": "boolean"
+              },
+              "grpc": {
+                "type": "boolean"
+              },
+              "http3": {
+                "type": "boolean"
+              },
+              "importer": {
+                "type": "boolean"
+              },
+              "kubernetes": {
+                "type": "boolean"
+              },
+              "otel": {
+                "type": "boolean"
+              },
+              "stream_proxy": {
+                "type": "boolean"
+              },
+              "waf": {
+                "type": "boolean"
+              },
+              "wasm_plugins": {
+                "type": "boolean"
+              },
+              "zstd": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "acme",
+              "brotli",
+              "console",
+              "consul",
+              "grpc",
+              "http3",
+              "importer",
+              "kubernetes",
+              "otel",
+              "stream_proxy",
+              "waf",
+              "wasm_plugins",
+              "zstd"
+            ],
+            "additionalProperties": false
+          },
+          "config_authority": {
+            "type": "string"
+          },
+          "config_authority_source": {
+            "type": "string"
+          },
+          "config_inconsistent_reason": {
+            "type": "string"
+          },
+          "config_schema_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "config_state": {
+            "type": "string"
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EndpointAvailability"
+            }
+          },
+          "ledger_retention": {
+            "$ref": "#/components/schemas/LedgerRetention"
+          }
+        },
+        "required": [
+          "api_version",
+          "boot_id",
+          "build",
+          "config_authority",
+          "config_authority_source",
+          "config_schema_version",
+          "endpoints",
+          "ledger_retention"
+        ],
+        "additionalProperties": false
+      },
+      "Degradation": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "DriftState": {
+        "type": "object",
+        "properties": {
+          "baseline_version": {
+            "type": "string"
+          },
+          "detected": {
+            "type": "boolean"
+          },
+          "detected_at": {
+            "type": "string"
+          },
+          "disk_parse_error": {
+            "type": "string"
+          },
+          "disk_raw_digest": {
+            "type": "string"
+          },
+          "disk_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "detected"
+        ],
+        "additionalProperties": false
+      },
+      "EndpointAvailability": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "path": {
+            "type": "string"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "required_capability": {
+            "type": "string"
+          },
+          "stability": {
+            "type": "string"
+          },
+          "sunset_on": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "methods",
+          "path",
+          "stability"
+        ],
+        "additionalProperties": false
+      },
       "ErrorBody": {
         "type": "object",
         "properties": {
@@ -367,9 +749,123 @@
         ],
         "additionalProperties": false
       },
+      "LedgerRetention": {
+        "type": "object",
+        "properties": {
+          "min_age_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "min_terminal_records": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "policy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "min_age_seconds",
+          "min_terminal_records",
+          "policy"
+        ],
+        "additionalProperties": false
+      },
+      "PendingRestartState": {
+        "type": "object",
+        "properties": {
+          "discard_available": {
+            "type": "boolean"
+          },
+          "pending": {
+            "type": "boolean"
+          },
+          "persisted_version": {
+            "type": "string"
+          },
+          "serving_version": {
+            "type": "string"
+          },
+          "staged_at": {
+            "type": "string"
+          },
+          "staged_version": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "subsystems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "discard_available",
+          "pending"
+        ],
+        "additionalProperties": false
+      },
       "PrometheusExposition": {
         "type": "string",
         "description": "Prometheus text exposition format. The format is owned by Prometheus and is not restated here; the set of metric names and labels Jul emits is documented in docs/metrics-contract.json."
+      },
+      "StatusResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "boot_id": {
+            "type": "string"
+          },
+          "config_authority": {
+            "type": "string"
+          },
+          "config_authority_source": {
+            "type": "string"
+          },
+          "config_inconsistent_reason": {
+            "type": "string"
+          },
+          "config_state": {
+            "type": "string"
+          },
+          "drift": {
+            "$ref": "#/components/schemas/DriftState"
+          },
+          "last_apply": {
+            "$ref": "#/components/schemas/ApplySummary"
+          },
+          "ledger_retention": {
+            "$ref": "#/components/schemas/LedgerRetention"
+          },
+          "pending_restart": {
+            "$ref": "#/components/schemas/PendingRestartState"
+          },
+          "persisted_version": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "serving_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_version",
+          "boot_id",
+          "config_authority",
+          "config_authority_source",
+          "drift",
+          "ledger_retention",
+          "pending_restart",
+          "ready"
+        ],
+        "additionalProperties": false
       },
       "ValidationFinding": {
         "type": "object",
