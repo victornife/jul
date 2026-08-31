@@ -513,3 +513,86 @@ func TestLiveCertSummariesReportsACME(t *testing.T) {
 		t.Fatalf("server names = %v, want [acme.example.com]", got[0].ServerNames)
 	}
 }
+
+// TestLiveCertSummariesNilEffectiveConfig covers a Server with no published
+// runtime state at all (never New()'d / never reloaded): LiveSnapshot's
+// EffectiveConfig is nil, and LiveCertSummaries must return nil rather than
+// panic.
+func TestLiveCertSummariesNilEffectiveConfig(t *testing.T) {
+	var s Server
+	if got := s.LiveCertSummaries(); got != nil {
+		t.Fatalf("summaries = %+v, want nil", got)
+	}
+}
+
+// TestLiveCertSummariesSkipsNonTLSAndUnboundAddresses covers the two
+// defensive skips between the ACME check and the live-provider read: a
+// configured address with no TLS at all, and a TLS address the config
+// describes but that has no corresponding bound listenerEntry yet (a
+// narrow, otherwise-unreachable state in production, since a live TLS
+// address always has an entry with a provider).
+func TestLiveCertSummariesSkipsNonTLSAndUnboundAddresses(t *testing.T) {
+	dir := t.TempDir()
+	certA, keyA := writeSelfSigned(t, dir, "a", "a.example.com")
+	plainAddr := freePort(t)
+	tlsAddr := freePort(t)
+	unboundAddr := freePort(t)
+
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{
+			{Listen: plainAddr},
+			{Listen: tlsAddr, ServerNames: []string{"a.example.com"}, TLS: &config.TLSConfig{Enabled: true, Cert: certA, Key: keyA}},
+			{Listen: unboundAddr, ServerNames: []string{"b.example.com"}, TLS: &config.TLSConfig{Enabled: true, Cert: certA, Key: keyA}},
+		},
+	}
+	s := &Server{log: quietLogger(), listeners: map[string]*listenerEntry{}}
+	s.runtimeState.Store(&runtimeState{EffectiveConfig: cfg})
+	s.listeners[tlsAddr] = boundTLSEntry(t, s, cfg, tlsAddr)
+	// unboundAddr deliberately has no entry in s.listeners.
+
+	got := s.LiveCertSummaries()
+	if len(got) != 1 {
+		t.Fatalf("summaries = %+v, want exactly 1 (only the bound TLS address)", got)
+	}
+	if got[0].Subject != "a" {
+		t.Fatalf("subject = %q, want a", got[0].Subject)
+	}
+}
+
+// TestLiveCertSummariesSkipsANilHolder covers a bound TLS address whose
+// dynamicCertProvider was constructed but never had a provider installed —
+// a state buildListenerEntry never leaves behind in production, but one
+// LiveCertSummaries must still not panic against.
+func TestLiveCertSummariesSkipsANilHolder(t *testing.T) {
+	addr := freePort(t)
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{{Listen: addr, TLS: &config.TLSConfig{Enabled: true, Cert: "unused", Key: "unused"}}},
+	}
+	s := &Server{log: quietLogger(), listeners: map[string]*listenerEntry{
+		addr: {addr: addr, provider: &dynamicCertProvider{}},
+	}}
+	s.runtimeState.Store(&runtimeState{EffectiveConfig: cfg})
+
+	if got := s.LiveCertSummaries(); len(got) != 0 {
+		t.Fatalf("summaries = %+v, want none (no provider installed yet)", got)
+	}
+}
+
+// TestAcmeCertSummariesForAddrSkipsNonMatchingServers proves the skip branch
+// in the loop: a server on a different address, and a non-ACME server on the
+// same address, are both excluded.
+func TestAcmeCertSummariesForAddrSkipsNonMatchingServers(t *testing.T) {
+	addr := freePort(t)
+	other := freePort(t)
+	servers := []config.ServerConfig{
+		{Listen: other, TLS: &config.TLSConfig{Enabled: true, ACME: &config.ACMEConfig{Enabled: true}}},
+		{Listen: addr, TLS: &config.TLSConfig{Enabled: true}}, // no ACME on this one.
+		{Listen: addr, ServerNames: []string{"acme.example.com"}, TLS: &config.TLSConfig{
+			Enabled: true, ACME: &config.ACMEConfig{Enabled: true},
+		}},
+	}
+	got := acmeCertSummariesForAddr(servers, addr)
+	if len(got) != 1 || got[0].ServerNames[0] != "acme.example.com" {
+		t.Fatalf("summaries = %+v, want exactly the one matching ACME server on addr", got)
+	}
+}

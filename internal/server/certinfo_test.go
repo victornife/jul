@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -143,5 +144,61 @@ func TestInspectCertsMultipleServers(t *testing.T) {
 	})
 	if len(cs) != 2 {
 		t.Errorf("expected 2 summaries, got %d", len(cs))
+	}
+}
+
+// makeCertDER returns a raw self-signed certificate DER, without a
+// tls.Certificate.Leaf attached, so callers can exercise
+// certSummaryFromCertificate's "leaf must be parsed" fallback directly.
+func makeCertDER(t *testing.T, cn string, dnsNames []string) []byte {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: cn},
+		DNSNames:     dnsNames,
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &priv.PublicKey, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return der
+}
+
+func TestCertSummaryFromCertificateParsesLeafWhenMissing(t *testing.T) {
+	der := makeCertDER(t, "no-leaf", []string{"no-leaf.example.com"})
+	got := certSummaryFromCertificate([]string{"no-leaf.example.com"}, &tls.Certificate{Certificate: [][]byte{der}})
+	if got.Error != "" {
+		t.Fatalf("unexpected error: %s", got.Error)
+	}
+	if got.Subject != "no-leaf" {
+		t.Fatalf("subject = %q, want no-leaf", got.Subject)
+	}
+}
+
+func TestCertSummaryFromCertificateNoCertificateBytes(t *testing.T) {
+	got := certSummaryFromCertificate([]string{"x.example.com"}, &tls.Certificate{})
+	if got.Error == "" {
+		t.Fatal("expected an error for a certificate with no DER bytes")
+	}
+}
+
+func TestCertSummaryFromCertificateMalformedDER(t *testing.T) {
+	got := certSummaryFromCertificate([]string{"x.example.com"}, &tls.Certificate{Certificate: [][]byte{[]byte("not-a-certificate")}})
+	if got.Error == "" {
+		t.Fatal("expected an error for malformed certificate bytes")
+	}
+}
+
+func TestCertSummaryFromCertificateFallsBackToDNSNamesWhenSubjectEmpty(t *testing.T) {
+	der := makeCertDER(t, "", []string{"a.example.com", "b.example.com"})
+	got := certSummaryFromCertificate(nil, &tls.Certificate{Certificate: [][]byte{der}})
+	if got.Subject != "a.example.com, b.example.com" {
+		t.Fatalf("subject = %q, want the joined DNS names", got.Subject)
 	}
 }
