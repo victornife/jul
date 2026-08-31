@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"jul/internal/buildcaps"
 	"jul/internal/config"
 	"jul/internal/observability"
 	"jul/internal/rbac"
@@ -492,6 +493,21 @@ type Deps struct {
 	// banner and the runtime overview surface it read-only.
 	Authority func() ConfigAuthorityStatus
 
+	// BootID returns the process's apply-instance identity, which delimits the
+	// terminal ledger and every idempotency binding (ADR 0019 §27.2). The apply
+	// coordinator mints it and embeds it in every apply id, so wiring its value
+	// here is what keeps `boot_id` and `rl_<instance>_<seq>` in agreement.
+	//
+	// Nil selects a per-Server fallback minted at construction. That is correct
+	// for a build with no coordinator, because such a build produces no apply
+	// ids for the value to disagree with.
+	BootID func() string
+
+	// BuildCapabilities reports the optional features compiled into this
+	// binary, for GET /api/v1/capabilities. Nil reads them from the running
+	// binary directly, which is the same answer in every non-test caller.
+	BuildCapabilities func() buildcaps.Flags
+
 	// RefreshAuthorityDrift re-assesses managed-baseline drift on demand and
 	// returns the resulting status. It is the "explicit drift/status refresh"
 	// trigger ADR 0019 §12 lists as one of exactly four event-driven
@@ -608,17 +624,22 @@ type ReloadSnapshot struct {
 
 // Server is the admin HTTP listener.
 type Server struct {
-	cfg      config.AdminConfig
-	log      *slog.Logger
-	deps     Deps
-	hist     *history
-	hub      *Hub
-	limiter  *adminLimiter
-	timeline *eventHistory
-	audit    *auditLog
-	health   *consoleHealth
-	quit     chan struct{}
-	httpd    *http.Server
+	cfg config.AdminConfig
+	// fallbackBootID delimits the terminal ledger when Deps.BootID is nil. It
+	// is minted once per Server so a client still sees a value that is stable
+	// for the process and changes across a restart, which is the property
+	// boot_id exists for.
+	fallbackBootID string
+	log            *slog.Logger
+	deps           Deps
+	hist           *history
+	hub            *Hub
+	limiter        *adminLimiter
+	timeline       *eventHistory
+	audit          *auditLog
+	health         *consoleHealth
+	quit           chan struct{}
+	httpd          *http.Server
 	// auth holds the immutable, atomically-installed authentication snapshot
 	// (H-01). It pairs the effective admin config, the built RBAC policy, and
 	// the derived authoritative mode so middleware observes a single,
@@ -738,16 +759,17 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 		return nil
 	}
 	s := &Server{
-		cfg:      cfg,
-		log:      log,
-		deps:     deps,
-		hist:     newHistory(cfg.HistoryDir, cfg.HistoryKeep),
-		hub:      newHub(),
-		limiter:  newAdminLimiter(log, cfg.RateLimitReadPerMin, cfg.RateLimitWritePerMin, cfg.RateLimitApplyPerMin, cfg.MaxEventConns),
-		timeline: newEventHistory(timelineCap),
-		audit:    newAuditLogWithSink(auditCap, cfg.AuditLogFile, cfg.AuditLogRotateMaxMB, cfg.AuditLogRotateKeep, log),
-		health:   newConsoleHealth(),
-		quit:     make(chan struct{}),
+		cfg:            cfg,
+		fallbackBootID: newBootID(),
+		log:            log,
+		deps:           deps,
+		hist:           newHistory(cfg.HistoryDir, cfg.HistoryKeep),
+		hub:            newHub(),
+		limiter:        newAdminLimiter(log, cfg.RateLimitReadPerMin, cfg.RateLimitWritePerMin, cfg.RateLimitApplyPerMin, cfg.MaxEventConns),
+		timeline:       newEventHistory(timelineCap),
+		audit:          newAuditLogWithSink(auditCap, cfg.AuditLogFile, cfg.AuditLogRotateMaxMB, cfg.AuditLogRotateKeep, log),
+		health:         newConsoleHealth(),
+		quit:           make(chan struct{}),
 	}
 	if cfg.TLS != nil && cfg.TLS.Enabled {
 		provider, err := server.NewSingleCertProvider(cfg.TLS.Cert, cfg.TLS.Key)

@@ -1,8 +1,8 @@
 // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 // SPDX-License-Identifier: agpl
 
-//go:build console
+//go:build acme
 
-package main
+package buildcaps
 
-func init() { tagConsole = true }
+func init() { tagACME = true }

@@ -40,6 +40,16 @@ var schemaTypes = map[string]reflect.Type{
 	"ErrorBody":         reflect.TypeFor[Body](),
 	"ErrorDetails":      reflect.TypeFor[Details](),
 	"ValidationFinding": reflect.TypeFor[Finding](),
+
+	// The /api/v1 read surface.
+	"StatusResponse":       reflect.TypeFor[StatusResponse](),
+	"CapabilitiesResponse": reflect.TypeFor[CapabilitiesResponse](),
+	"ApplySummary":         reflect.TypeFor[ApplySummary](),
+	"Degradation":          reflect.TypeFor[Degradation](),
+	"DriftState":           reflect.TypeFor[DriftState](),
+	"PendingRestartState":  reflect.TypeFor[PendingRestartState](),
+	"LedgerRetention":      reflect.TypeFor[LedgerRetention](),
+	"EndpointAvailability": reflect.TypeFor[EndpointAvailability](),
 }
 
 // SchemaTypes returns the registered external DTOs by component name.

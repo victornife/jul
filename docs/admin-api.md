@@ -137,6 +137,8 @@ route it asked for.
 | `/healthz` | GET | public | — |
 | `/readyz` | GET | public | — |
 | `/metrics` | GET | external | `metrics:read` |
+| `/api/v1/status` | GET | external | `status:read` |
+| `/api/v1/capabilities` | GET | external | `status:read` |
 
 The probes and the scrape target keep their **current unversioned paths**.
 Moving a liveness probe or a Prometheus target under `/api/v1` would break every
@@ -146,12 +148,57 @@ deployment for no benefit, and their contracts are already released.
 so publishing it as public would describe a contract the server does not
 implement and imply an unauthenticated scrape endpoint that does not exist.
 
-**The `/api/v1` configuration surface is not published yet.** ADR 0019 §24 fixes
-its 25 paths, and the machinery that publishes them — classification, the error
-envelope, the transport gate, the generator and its guard tests — is in place;
-the operations themselves are tracked on
-[#150](https://github.com/victornife/jul/issues/150). Publishing a `v1` path is
-a one-way door, so a half-specified one is worse than none.
+### `GET /api/v1/status`
+
+The control-plane state of one server: what is serving, what is persisted, who
+owns the configuration and why, whether the file has drifted, whether a restart
+is staged, and where the last managed transaction got to.
+
+It also reports **data-plane readiness**, deliberately alongside the
+control-plane fields so the two are not conflated. Drift and a pending restart
+are control-plane conditions and **never** make a serving data plane unready — a
+data plane that removed itself from a load balancer because somebody edited a
+file would turn a configuration problem into an outage.
+
+Two fields exist for clients that poll or retry:
+
+- **`boot_id`** is this process's apply-instance identity, the same value
+  embedded in every `rl_<instance>_<seq>` apply id. The terminal ledger is
+  in-memory and process-local, so **a changed `boot_id` means your replay window
+  is gone** — every recorded outcome and idempotency binding was discarded.
+  Record it alongside any `apply_id` you are polling.
+- **`ledger_retention`** publishes the ledger's bounds:
+  `{"min_terminal_records": 512, "min_age_seconds": 3600, "policy": "evict_after_both"}`.
+  **These are minimum guarantees, not caps.** A terminal record is evicted only
+  once it is *both* past the age bound *and* over the count bound, so a client
+  must not conclude a record is gone because one bound has passed.
+
+### `GET /api/v1/capabilities`
+
+What this build serves: the API version, the configuration schema version, the
+compiled feature flags, the external operations available, and the same
+`boot_id` and `ledger_retention` a polling client needs.
+
+An external client must not have to infer capability from an error, which is why
+this exists and why **an operation absent from a build answers `501
+not_implemented` naming the capability rather than `404`**.
+
+Two boundaries are worth stating:
+
+- **The configuration schema is build-independent.** A lean binary reports the
+  same `config_schema_version` as a fully tagged one, because a field belonging
+  to an uncompiled feature is present and *annotated* with its required
+  capability rather than missing.
+- **Schema surface and API surface are different questions.** `build` answers
+  the first; `endpoints` answers the second.
+
+The `build` flags are the same ones `jul capabilities` prints, read from one
+shared source so the two cannot drift apart.
+
+**The `/api/v1` mutating surface is not published yet.** ADR 0019 §24 fixes its
+full path set; the operations land incrementally, and a path appears here only
+once it is served. Publishing a `v1` path is a one-way door under §25, so
+nothing is declared stable ahead of being implemented.
 
 ## What is deliberately not published
 

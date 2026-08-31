@@ -123,6 +123,21 @@ func NewManagedApplyRegistry(maxTerminal int, ttl time.Duration) *ManagedApplyRe
 	}
 }
 
+// RetentionBounds returns the ledger's minimum guarantees: a terminal record is
+// evicted only once it is both past the age bound and over the count bound.
+//
+// They are read from the registry rather than restated by the caller, so the
+// bounds GET /api/v1/capabilities publishes cannot drift from the ones
+// pruneLocked actually enforces (ADR 0019 §30).
+func (r *ManagedApplyRegistry) RetentionBounds() (minTerminalRecords int, minAge time.Duration) {
+	if r == nil {
+		return defaultManagedApplyMaxTerminal, defaultManagedApplyTTL
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.maxTerminal, r.ttl
+}
+
 // managedApplyID is the structured decomposition of a managed apply ID. Instance
 // is the 12-hex boot-scoped prefix (empty for legacy IDs); Sequence is the
 // monotonic per-process counter; Legacy is true for the pre-boot-scoped

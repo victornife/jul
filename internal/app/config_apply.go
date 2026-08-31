@@ -1058,6 +1058,16 @@ func (c *ConfigApplyCoordinator) managedApplyInstanceID() string {
 	return c.applyInstanceID
 }
 
+// BootID returns the boot-scoped instance identity embedded in every apply id.
+//
+// It is published as `boot_id` by GET /api/v1/status and /api/v1/capabilities:
+// the terminal ledger is process-local, so a changed boot_id tells a client its
+// replay window and every idempotency binding were discarded (ADR 0019 §27.2).
+// Reading it from here rather than minting a second identity is what keeps
+// `boot_id` and the `rl_<instance>_<seq>` ids a client correlates it with from
+// disagreeing.
+func (c *ConfigApplyCoordinator) BootID() string { return c.managedApplyInstanceID() }
+
 // nextID allocates the next boot-scoped managed apply ID in the form
 // rl_<boot-id>_<sequence>. The boot-id prevents apply-ID reuse across process
 // restarts; the sequence is monotonically increasing within the process.

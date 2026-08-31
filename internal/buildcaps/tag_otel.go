@@ -1,8 +1,8 @@
 // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 // SPDX-License-Identifier: agpl
 
-//go:build consul
+//go:build otel
 
-package main
+package buildcaps
 
-func init() { tagConsul = true }
+func init() { tagOTel = true }
