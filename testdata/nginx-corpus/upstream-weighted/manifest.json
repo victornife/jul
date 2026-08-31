@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "id": "upstream-weighted",
+  "tier": "core",
+  "description": "Named upstream fixture covering least-connections balancing, weighted members, ignored NGINX connection-pool tuning, and proxy routing through the generated pool.",
+  "origin": {
+    "kind": "repository_authored",
+    "license": "AGPL-3.0-only",
+    "source": "victornife/jul#154"
+  },
+  "categories": [
+    "resiliency",
+    "upstreams"
+  ],
+  "build_tags": [
+    "importer"
+  ],
+  "root": "nginx/nginx.conf",
+  "follow_includes": false,
+  "expected_assessment": {
+    "status": "ready_for_review",
+    "ready": true,
+    "complete": true,
+    "files_read": 1,
+    "sources": [
+      "nginx.conf"
+    ],
+    "results": [
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_EVENTS",
+        "class": "informational",
+        "risk": "operational",
+        "context": "main",
+        "directive": "events"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_HTTP",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "http"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_UPSTREAM",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "upstream"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_UPSTREAM_LEAST_CONN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "upstream",
+        "directive": "least_conn"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_UPSTREAM_SERVER",
+        "class": "supported",
+        "risk": "availability",
+        "context": "upstream",
+        "directive": "server",
+        "count": 2
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_UPSTREAM_KEEPALIVE",
+        "class": "ignored",
+        "risk": "performance",
+        "context": "upstream",
+        "directive": "keepalive"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "server",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_NAME",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "server_name"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LOCATION",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "location"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_PROXY_PASS",
+        "class": "supported",
+        "risk": "routing",
+        "context": "location",
+        "directive": "proxy_pass"
+      }
+    ]
+  },
+  "expected_candidate": {
+    "required": true,
+    "contains": [
+      "listen = ':18085'",
+      "name = 'app_pool'",
+      "proxy_pass = 'http://app_pool'",
+      "server_names = ['upstream.test']",
+      "servers = ['127.0.0.1:19001 weight=2', '127.0.0.1:19002 weight=3']",
+      "strategy = 'least_conn'"
+    ]
+  }
+}

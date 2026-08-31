@@ -241,27 +241,53 @@ backend](core-http.md#forwarded-headers-to-the-backend).
 ## Migration evidence corpus
 
 The importer is continuously exercised against the versioned, sanitized
-[NGINX migration compatibility corpus](nginx-migration-corpus.md). The PR core
-lane checks exact schema-v2 assessment projections, canonical candidate
-validation, and real-Jul loopback behavior. A separate workflow runs an official
-NGINX 1.28.3 image pinned by digest and compares only the explicit response
-dimensions declared by each selected scenario.
+[NGINX migration compatibility corpus](nginx-migration-corpus.md). The closed
+#154 baseline contains 11 repository-owned fixtures across the six minimum
+categories, exact schema-v2 assessment projections, canonical candidate
+validation, real-Jul loopback scenarios, and a separate digest-pinned NGINX
+reference lane.
 
-The evidence is deliberately narrower than universal compatibility: fixtures
-can be supported, approximated, blocking, not executed, or equivalent only for
-their asserted dimensions. Corpus admission rejects proprietary/user source,
-private-key material, unsafe request headers, non-loopback replay, symlinks and
-unbounded files. See the corpus guide for the current category inventory,
-deferrals, image isolation, and local commands.
+Two machine-readable files keep the evidence honest:
 
-### Corpus-discovered local redirect boundary
+- `testdata/nginx-corpus/coverage.json` maps every minimum category to concrete
+  fixtures and records residual dimensions plus objective revisit triggers;
+- `testdata/nginx-corpus/inventory.json` is a deterministic aggregate of fixture
+  tiers, categories, result classes/risks/codes, verdicts, and coverage
+  dispositions. It is checked in CI and deliberately contains no compatibility
+  percentage.
 
-NGINX expands a local `return 30x /path` target to an absolute
-`Location` by default, using the request/server authority. Jul preserves
-`/path`. The importer therefore reports
-`NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT` as `approximated`, and the corpus
-records the selected-dimension runtime relationship as
-`expected_difference` rather than claiming equivalence.
+The baseline represents core routing, upstreams, trusted-client identity, TLS
+and other security controls, cache/compression boundaries, FastCGI plus blocked
+stream/mail sources, and operational/include behavior. Protocol-heavy or
+stateful dimensions such as migration-specific H2/H3, WebSocket, gRPC/uWSGI,
+L4, mTLS, cache-state, and resolver replay remain explicitly deferred in the
+coverage matrix. Existing product-level protocol tests remain authoritative for
+Jul runtime capability; they do not turn an unimported NGINX source into an
+equivalence claim.
+
+Fixtures can be supported, approximated, ignored, blocking, or equivalent only
+for their asserted dimensions. Corpus admission rejects proprietary/user source,
+private-key material, unsafe request headers, non-loopback replay, symlinks, and
+unbounded files. See the corpus guide and the
+[closure record](audit/2026-08-31-nginx-migration-corpus-closure.md) for the
+category matrix, image isolation, protocol decisions, commands, and rollback
+boundary.
+
+### Corpus-discovered selected differences
+
+The corpus currently records two reviewed differences rather than hiding them
+behind a global compatibility claim:
+
+- NGINX expands a local `return 30x /path` target to an absolute `Location` by
+  default, while Jul preserves the relative target. The importer reports
+  `NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT` as `approximated`.
+- A narrow `limit_except` denial returns `403` in NGINX. Jul translates the
+  allowed-method set into route matching, so an excluded method can resolve to
+  `404`; the corpus records `NGX_LOCATION_LIMIT_EXCEPT` as the expected
+  difference.
+
+See the [migration corpus guide](nginx-migration-corpus.md) for the exact
+asserted dimensions and the machine-checked inventory.
 
 ## Benchmarks
 

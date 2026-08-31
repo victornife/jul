@@ -1,0 +1,409 @@
+{
+  "schema_version": 1,
+  "fixture_schema_version": 1,
+  "fixture_count": 11,
+  "core_fixtures": 9,
+  "full_fixtures": 2,
+  "categories": [
+    {
+      "name": "cache-compression",
+      "count": 1
+    },
+    {
+      "name": "client-identity",
+      "count": 2
+    },
+    {
+      "name": "core-http",
+      "count": 4
+    },
+    {
+      "name": "fastcgi",
+      "count": 1
+    },
+    {
+      "name": "include-trees",
+      "count": 1
+    },
+    {
+      "name": "mail",
+      "count": 1
+    },
+    {
+      "name": "operations",
+      "count": 1
+    },
+    {
+      "name": "protocol-gateways",
+      "count": 2
+    },
+    {
+      "name": "request-policy",
+      "count": 1
+    },
+    {
+      "name": "resiliency",
+      "count": 1
+    },
+    {
+      "name": "response-headers",
+      "count": 2
+    },
+    {
+      "name": "security",
+      "count": 3
+    },
+    {
+      "name": "static-files",
+      "count": 1
+    },
+    {
+      "name": "stream",
+      "count": 1
+    },
+    {
+      "name": "tls",
+      "count": 1
+    },
+    {
+      "name": "upstreams",
+      "count": 1
+    },
+    {
+      "name": "variables",
+      "count": 2
+    }
+  ],
+  "classes": [
+    {
+      "name": "approximated",
+      "count": 3
+    },
+    {
+      "name": "blocking",
+      "count": 25
+    },
+    {
+      "name": "ignored",
+      "count": 4
+    },
+    {
+      "name": "informational",
+      "count": 10
+    },
+    {
+      "name": "supported",
+      "count": 85
+    }
+  ],
+  "risks": [
+    {
+      "name": "availability",
+      "count": 15
+    },
+    {
+      "name": "observability",
+      "count": 3
+    },
+    {
+      "name": "operational",
+      "count": 21
+    },
+    {
+      "name": "performance",
+      "count": 4
+    },
+    {
+      "name": "routing",
+      "count": 60
+    },
+    {
+      "name": "security",
+      "count": 24
+    }
+  ],
+  "codes": [
+    {
+      "name": "NGX_DIRECTIVE_UNSUPPORTED",
+      "count": 1
+    },
+    {
+      "name": "NGX_EVENTS_CONNECTIONS",
+      "count": 1
+    },
+    {
+      "name": "NGX_HTTP_ACCESS_LOG",
+      "count": 1
+    },
+    {
+      "name": "NGX_HTTP_BODY_LIMIT",
+      "count": 1
+    },
+    {
+      "name": "NGX_HTTP_GZIP",
+      "count": 1
+    },
+    {
+      "name": "NGX_HTTP_LOG_FORMAT",
+      "count": 1
+    },
+    {
+      "name": "NGX_HTTP_MAP",
+      "count": 1
+    },
+    {
+      "name": "NGX_HTTP_SERVER",
+      "count": 11
+    },
+    {
+      "name": "NGX_HTTP_UPSTREAM",
+      "count": 1
+    },
+    {
+      "name": "NGX_INCLUDE_RESOLVED",
+      "count": 1
+    },
+    {
+      "name": "NGX_LIMIT_EXCEPT_DENY",
+      "count": 1
+    },
+    {
+      "name": "NGX_LOCATION_ADD_HEADER",
+      "count": 4
+    },
+    {
+      "name": "NGX_LOCATION_ALIAS",
+      "count": 1
+    },
+    {
+      "name": "NGX_LOCATION_BODY_LIMIT",
+      "count": 1
+    },
+    {
+      "name": "NGX_LOCATION_CACHE",
+      "count": 1
+    },
+    {
+      "name": "NGX_LOCATION_FASTCGI",
+      "count": 1
+    },
+    {
+      "name": "NGX_LOCATION_LIMIT_EXCEPT",
+      "count": 1
+    },
+    {
+      "name": "NGX_LOCATION_PROXY_PASS",
+      "count": 1
+    },
+    {
+      "name": "NGX_LOCATION_PROXY_PASS_DYNAMIC",
+      "count": 1
+    },
+    {
+      "name": "NGX_LOCATION_RATE_LIMIT",
+      "count": 1
+    },
+    {
+      "name": "NGX_LOCATION_RETURN",
+      "count": 8
+    },
+    {
+      "name": "NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT",
+      "count": 1
+    },
+    {
+      "name": "NGX_MAIL_UNSUPPORTED",
+      "count": 3
+    },
+    {
+      "name": "NGX_MAIN_ERROR_LOG",
+      "count": 1
+    },
+    {
+      "name": "NGX_MAIN_EVENTS",
+      "count": 9
+    },
+    {
+      "name": "NGX_MAIN_HTTP",
+      "count": 11
+    },
+    {
+      "name": "NGX_MAIN_MAIL",
+      "count": 1
+    },
+    {
+      "name": "NGX_MAIN_STREAM",
+      "count": 1
+    },
+    {
+      "name": "NGX_MAIN_WORKERS",
+      "count": 1
+    },
+    {
+      "name": "NGX_REALIP_HEADER",
+      "count": 2
+    },
+    {
+      "name": "NGX_REALIP_RECURSIVE",
+      "count": 2
+    },
+    {
+      "name": "NGX_REALIP_TRUST_SOURCE",
+      "count": 3
+    },
+    {
+      "name": "NGX_SERVER_ALLOW",
+      "count": 1
+    },
+    {
+      "name": "NGX_SERVER_AUTH",
+      "count": 1
+    },
+    {
+      "name": "NGX_SERVER_AUTH_FILE",
+      "count": 1
+    },
+    {
+      "name": "NGX_SERVER_DENY",
+      "count": 1
+    },
+    {
+      "name": "NGX_SERVER_LISTEN",
+      "count": 11
+    },
+    {
+      "name": "NGX_SERVER_LOCATION",
+      "count": 13
+    },
+    {
+      "name": "NGX_SERVER_NAME",
+      "count": 11
+    },
+    {
+      "name": "NGX_SERVER_TLS_CERT",
+      "count": 1
+    },
+    {
+      "name": "NGX_SERVER_TLS_KEY",
+      "count": 1
+    },
+    {
+      "name": "NGX_SERVER_TLS_PROTOCOLS",
+      "count": 1
+    },
+    {
+      "name": "NGX_STREAM_UNSUPPORTED",
+      "count": 3
+    },
+    {
+      "name": "NGX_UPSTREAM_KEEPALIVE",
+      "count": 1
+    },
+    {
+      "name": "NGX_UPSTREAM_LEAST_CONN",
+      "count": 1
+    },
+    {
+      "name": "NGX_UPSTREAM_SERVER",
+      "count": 2
+    },
+    {
+      "name": "NGX_VARIABLE_BLOCK_UNSUPPORTED",
+      "count": 2
+    }
+  ],
+  "verdicts": [
+    {
+      "name": "equivalent_for_asserted_dimensions",
+      "count": 2
+    },
+    {
+      "name": "expected_difference",
+      "count": 2
+    }
+  ],
+  "coverage": [
+    {
+      "id": "cache-compression",
+      "status": "represented",
+      "fixtures": [
+        "security-cache-boundaries"
+      ],
+      "deferred_dimensions": [
+        "decoded compression-byte parity",
+        "shared/distributed cache directives",
+        "stateful cache/Vary/range replay"
+      ]
+    },
+    {
+      "id": "core-http-routing",
+      "status": "represented",
+      "fixtures": [
+        "approximate-alias",
+        "blocking-dynamic-proxy",
+        "core-multifile-return",
+        "routing-cors-policy"
+      ],
+      "deferred_dimensions": [
+        "full NGINX location-precedence cross-product",
+        "proxy_pass URI edge matrix beyond the classified approximation",
+        "rewrite control-flow beyond static supported flags"
+      ]
+    },
+    {
+      "id": "operations",
+      "status": "represented",
+      "fixtures": [
+        "core-multifile-return",
+        "operations-boundaries"
+      ],
+      "deferred_dimensions": [
+        "live log-sink parity",
+        "resolver/DNS runtime replay",
+        "worker/process tuning equivalence"
+      ]
+    },
+    {
+      "id": "protocol-gateways",
+      "status": "represented",
+      "fixtures": [
+        "fastcgi-gateway",
+        "protocol-boundaries"
+      ],
+      "deferred_dimensions": [
+        "H2/H3 migration replay",
+        "L4 runtime replay",
+        "WebSocket runtime replay",
+        "gRPC/uWSGI protocol backends"
+      ]
+    },
+    {
+      "id": "security",
+      "status": "represented",
+      "fixtures": [
+        "realip-blocking",
+        "realip-supported",
+        "security-cache-boundaries"
+      ],
+      "deferred_dimensions": [
+        "WAF/module-specific migration replay",
+        "generated certificate mTLS replay",
+        "multi-proxy forwarded-chain runtime comparison"
+      ]
+    },
+    {
+      "id": "upstreams-resiliency",
+      "status": "represented",
+      "fixtures": [
+        "blocking-dynamic-proxy",
+        "upstream-weighted"
+      ],
+      "deferred_dimensions": [
+        "WebSocket/gRPC upstream runtime replay",
+        "active-health migration replay",
+        "backend TLS/private-CA migration replay",
+        "retry/circuit behavior pending resilience programme closure"
+      ]
+    }
+  ]
+}

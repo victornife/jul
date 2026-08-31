@@ -21,8 +21,8 @@ func TestRepositoryCorpusLoadsAndIsSanitized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("discover corpus: %v", err)
 	}
-	if len(fixtures) < 3 {
-		t.Fatalf("fixture count = %d, want at least 3", len(fixtures))
+	if len(fixtures) < 11 {
+		t.Fatalf("fixture count = %d, want at least 11", len(fixtures))
 	}
 	seenSupported, seenApproximate, seenBlocking := false, false, false
 	for _, fixture := range fixtures {
