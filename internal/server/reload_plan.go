@@ -56,6 +56,13 @@ type ReloadPlan struct {
 	// Prepare for source-driven reloads, then installed exactly once at Publish.
 	PreparedAdmin *PreparedCommit
 
+	// Runtime is the closed, explicitly ordered prepared-resource aggregate for
+	// typed runtime components that need candidate construction ahead of
+	// Publish and bounded retirement of whatever they replace (D08, #90). It
+	// commits nothing on its own; consumers such as #100/#98 add their
+	// components during Prepare.
+	Runtime *PreparedRuntime
+
 	// StartupFP is the effective startup fingerprint the candidate is compared
 	// against. It is captured from the server at plan creation.
 	StartupFP lifecycle.Fingerprint
@@ -95,6 +102,7 @@ func (s *Server) newReloadPlan(ctx context.Context, raw *config.Config, candidat
 		rawConfig:       raw,
 		Candidate:       candidate,
 		PreparedAdmin:   preparedAdmin,
+		Runtime:         &PreparedRuntime{},
 		StartupFP:       s.startupFP,
 		oldAddrs:        setOf(uniqueListenAddrs(s.cfg.Servers)),
 		stagedListeners: make(map[string]*listenerEntry),
@@ -254,6 +262,11 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// (R6-06, R7-02).
 	p.s.registerRedactionGen(p.GenID, p.Candidate.Redaction)
 
+	// PreparedRuntime components (e.g. a future certificate provider swap)
+	// commit before the new handler generation becomes reachable, so a new
+	// vhost route can never be selected against a stale candidate mapping.
+	p.Runtime.Commit()
+
 	prevGen := p.s.handlers.Load()
 	newGen := p.s.newGeneration(p.Handlers, snapshots, p.GenID)
 	p.s.handlers.Store(newGen)
@@ -290,6 +303,28 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 // the actually bound listener set rather than the pre-activation state.
 func (p *ReloadPlan) FinalizeRuntimeState() {
 	p.publishRuntimeState()
+}
+
+// RetirePreparedRuntime releases whatever the committed PreparedRuntime
+// components replaced. It must be called only after Publish has succeeded; it
+// runs asynchronously, bounded by the configured shutdown timeout, so a slow
+// or hung retirement can never block the next reload or process shutdown.
+func (p *ReloadPlan) RetirePreparedRuntime() {
+	if p.Runtime == nil {
+		return
+	}
+	s := p.s
+	// Read the grace period synchronously, on the caller's goroutine: s.cfg
+	// is not safe for a detached goroutine to read concurrently with a later
+	// reload's Publish (mirrors retireGen's own grace := s.shutdownTimeout()).
+	grace := s.shutdownTimeout()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), grace)
+		defer cancel()
+		p.Runtime.Retire(ctx)
+	}()
 }
 
 // publishRuntimeState captures s.cfg, s.rawCfg, the current handler generation,
@@ -365,6 +400,7 @@ func (p *ReloadPlan) Abort() {
 		p.handlerAbort()
 	}
 	p.PreparedAdmin.Abort()
+	p.Runtime.Abort()
 	for _, entry := range p.stagedListeners {
 		_ = entry.ln.Close()
 		if entry.h3 != nil {

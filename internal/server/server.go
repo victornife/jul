@@ -1214,6 +1214,7 @@ func (s *Server) doReload(req ReloadRequest) {
 	}
 	plan.RetireRemovedListeners()
 	plan.FinalizeRuntimeState()
+	plan.RetirePreparedRuntime()
 	certErrs := plan.RefreshCerts()
 	adminErr, onReloadErr := plan.PostCommit()
 
