@@ -13,6 +13,7 @@ import (
 
 	"jul/internal/admin"
 	"jul/internal/adminapi"
+	"jul/internal/configcontract"
 )
 
 // probeRoute is a well-formed external route the branch tests can vary one
@@ -414,5 +415,25 @@ func TestRenderIsIndentedAndDoesNotEscapeHTML(t *testing.T) {
 	}
 	if !strings.HasSuffix(string(b), "\n") {
 		t.Fatal("the artifact does not end with a newline")
+	}
+}
+
+// TestCheckCatalogPathsAreServed. The catalog naming a path nothing serves is
+// worse than an undocumented one: it reads as a promise clients cannot use.
+func TestCheckCatalogPathsAreServed(t *testing.T) {
+	if err := checkCatalogPathsAreServed(&Document{Paths: map[string]*PathItem{}}); err == nil {
+		t.Fatal("an empty document satisfied every catalog claim")
+	} else if !strings.Contains(err.Error(), "ResourceCatalog") {
+		t.Fatalf("the error does not name the remedy: %v", err)
+	}
+
+	served := map[string]*PathItem{}
+	for _, res := range configcontract.ResourceCatalog {
+		if res.ExternalPath != "" {
+			served[res.ExternalPath] = &PathItem{Get: &Operation{}}
+		}
+	}
+	if err := checkCatalogPathsAreServed(&Document{Paths: served}); err != nil {
+		t.Fatalf("a fully served catalog was rejected: %v", err)
 	}
 }
