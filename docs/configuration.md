@@ -192,7 +192,7 @@ parameter that controls how a valid candidate is applied:
 | Mode | Description |
 | ---- | ----------- |
 | `hot` (default) | Validates, persists, and immediately triggers a live reload. Restart-required changes are rejected with `restart_required: true` and `can_stage: true`; nothing is written. |
-| `stage_restart` | Validates and persists the candidate without triggering a live reload. The running process continues serving the previous configuration. The candidate takes effect on the next process restart. Use this mode for changes to startup-bound settings (cache, egress, admin, tracing, access-log, ACME, log format, listener settings). |
+| `stage_restart` | Validates and persists the candidate without triggering a live reload. The running process continues serving the previous configuration. The candidate takes effect on the next process restart. Use this mode for changes to startup-bound settings (cache, egress, admin, tracing, ACME, log format, listener settings). |
 
 When a candidate is staged:
 
@@ -1523,7 +1523,7 @@ rotate_keep = 14
 
 When `enabled = false`, Jul opens no access-log file or syslog resource and emits no request access records to the Console tail. Process/application, reload, security/WAF, audit, health, metrics, and tracing output remain independent. Sink details remain stored and validated while dormant so re-enabling is deterministic.
 
-The `syslog` sink uses the local system log and is **not supported on Windows**. The whole block is fixed at startup and currently requires a staged restart to change; #98 owns future generation-safe sink reload.
+The `syslog` sink uses the local system log and is **not supported on Windows**. Every field in this block hot-applies (#98): a candidate sink generation is built and validated before Publish, then committed with the new handler generation, and the previous generation's file/syslog resources close only after its own in-flight requests drain. The permanent Console Operations-Log tail is never recreated by an access-log change.
 
 ---
 

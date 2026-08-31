@@ -52,15 +52,15 @@ func minimalFactory(t *testing.T) (*HandlerFactory, func()) {
 	logTail := observability.NewLogTail(0)
 
 	f := &HandlerFactory{
-		Log:         log,
-		Metrics:     metrics,
-		AccessSinks: []middleware.AccessSink{logTail},
-		RLStore:     rlStore,
-		EgressDial:  (&net.Dialer{}).DialContext,
-		PoolReg:     poolReg,
-		PluginMgr:   pm,
-		GenRes:      genRes,
-		RT:          rt,
+		Log:           log,
+		Metrics:       metrics,
+		AccessLogTail: logTail,
+		RLStore:       rlStore,
+		EgressDial:    (&net.Dialer{}).DialContext,
+		PoolReg:       poolReg,
+		PluginMgr:     pm,
+		GenRes:        genRes,
+		RT:            rt,
 	}
 
 	cleanup := func() {

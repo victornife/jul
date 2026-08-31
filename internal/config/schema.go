@@ -1487,8 +1487,10 @@ type TracingConfig struct {
 // AccessLogConfig configures where the access log is written. By default the
 // access log is emitted through the server's structured logger (the "stdout"
 // sink, honoring [global].log_format). Additional sinks write a dedicated copy
-// to a rotating file and/or the system log. Access-log settings are fixed at
-// startup; changing them takes effect after a restart.
+// to a rotating file and/or the system log. Every field here hot-applies (#98):
+// a candidate sink generation is built and validated before Publish, and the
+// previous generation's file/syslog resources close only after its in-flight
+// requests drain.
 type AccessLogConfig struct {
 	// Enabled controls whether Jul emits request access records. It is a pointer
 	// so an omitted key preserves the v1 default (enabled), while an explicit

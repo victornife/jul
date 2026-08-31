@@ -815,11 +815,10 @@ Enabled controls whether Jul emits request access records.
 | --- | --- |
 | Type | `bool` |
 | Optional | yes |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `access_log` |
-| Why | access-log sinks are opened once at startup |
+| Why | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
 | Default | true |
-| Flags | startup-consumed |
 | Constraint | true or false |
 | Zero/empty semantics | omitted preserves the v1 default-on behavior; explicit false disables request access records |
 | Active when | always |
@@ -831,10 +830,9 @@ File is the path of the access-log file.
 | | |
 | --- | --- |
 | Type | `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `access_log` |
-| Why | access-log sinks are opened once at startup |
-| Flags | startup-consumed |
+| Why | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
 
 ## `observability.access_log.format` {#observability-access_log-format}
 
@@ -843,11 +841,10 @@ Format selects the encoding of the file and syslog sinks: "text" (logfmt, the de
 | | |
 | --- | --- |
 | Type | `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `access_log` |
-| Why | access-log sinks are opened once at startup |
+| Why | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
 | Default | text |
-| Flags | startup-consumed |
 | Allowed values | `text`, `json` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
@@ -860,10 +857,9 @@ RotateKeep is the maximum number of rotated files to retain.
 | | |
 | --- | --- |
 | Type | `integer` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `access_log` |
-| Why | access-log sinks are opened once at startup |
-| Flags | startup-consumed |
+| Why | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 7 |
 | Active when | always |
@@ -875,10 +871,9 @@ RotateMaxMB is the file size in megabytes at which the log is rotated.
 | | |
 | --- | --- |
 | Type | `integer` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `access_log` |
-| Why | access-log sinks are opened once at startup |
-| Flags | startup-consumed |
+| Why | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 100 |
 | Active when | always |
@@ -890,10 +885,9 @@ Sinks selects the active access-log destinations: any of "stdout" (the server's 
 | | |
 | --- | --- |
 | Type | list of `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `access_log` |
-| Why | access-log sinks are opened once at startup |
-| Flags | startup-consumed |
+| Why | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
 | Allowed values | `stdout`, `file`, `syslog` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |

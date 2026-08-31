@@ -49,8 +49,25 @@ Field-level lifecycle authority is the Go registry rendered in
 unselected transitions may remain restart-required; the complete
 `stage_restart` workflow is an acceptable final product design. Static
 certificate/key rotation on a retained TLS listener hot-applies (#100);
-remaining selected future candidates include admin credentials, access-log
-sinks, selected cache scalars and Alt-Svc advertisement state.
+access-log sinks hot-apply (#98); remaining selected future candidates include
+admin credentials, selected cache scalars and Alt-Svc advertisement state.
+
+- **A same-path access-log rotation-setting change has a narrow, bounded
+  overlap risk.** Changing `rotate_max_mb`/`rotate_keep` while `file` stays the
+  same builds a new, independent file writer for the new generation rather
+  than mutating the live one (mutating a live writer's fields while a request
+  in the previous, still-draining generation might concurrently write to it
+  would be a data race). If the previous generation's writer happens to
+  rotate the file (crossing its own size threshold) during the brief window
+  before its in-flight requests finish draining, the new generation's writer
+  — which already holds its own file handle opened at the same path — keeps
+  appending to what is now a renamed backup file rather than the path an
+  operator expects, until its own next process restart or file-path change.
+  No data is lost (the bytes exist in the backup file), and a `file`-only
+  path change (no rotation-setting change) is unaffected, since the old and
+  new generations then use different, unrelated files. Only the narrow
+  combination of a same-path rotation-setting change and a rotation actually
+  firing during the bounded drain window is affected.
 
 ## Historical corrections
 

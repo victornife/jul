@@ -209,7 +209,7 @@ docker run --rm \
   To suppress request access records entirely, set `enabled = false`. This does
   not suppress process, security, audit, health, metric, or trace output. Do not
   use `sinks = []` as an off setting: an enabled block with an explicit empty
-  sink list is rejected. Access-log changes take effect after a restart.
+  sink list is rejected. Access-log changes hot-apply (#98) — no restart needed.
 
 ## Windows service
 

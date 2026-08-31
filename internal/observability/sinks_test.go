@@ -192,3 +192,27 @@ func TestBuildAccessSinksRollsBackOnError(t *testing.T) {
 		t.Error("failed build must return no sinks or closers")
 	}
 }
+
+// TestBuildAccessSinksFailedFileSinkLeavesNoRealFile pins #98's fix: probing
+// writability must never touch the real target path, so a candidate build
+// that ultimately fails (e.g. Abort after a later sink error) leaves no
+// artifact at the configured file path — only a temp sentinel that is removed
+// immediately.
+func TestBuildAccessSinksFailedFileSinkLeavesNoRealFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "access.log")
+	cfg := config.AccessLogConfig{Sinks: []string{"file", "bogus"}, File: path}
+	if _, _, err := BuildAccessSinks(cfg, newBase()); err == nil {
+		t.Fatal("expected error for unknown sink after file sink")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("a failed candidate build created the real log file: stat err = %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("a failed candidate build left %d artifact(s) in %s: %v", len(entries), dir, entries)
+	}
+}

@@ -22,10 +22,13 @@ import (
 // write a dedicated copy encoded per cfg.Format ("text" or "json").
 //
 // The returned closers (the rotating file and the syslog connection) must be
-// closed on shutdown; the base logger is never closed here. Sinks are built once
-// at startup — the file sink owns a rotating file handle and the syslog sink a
-// system-log connection — so changing access-log settings requires a restart. On
-// any error every resource opened so far is closed before returning.
+// closed once the caller no longer needs this sink generation; the base logger
+// is never closed here. Called once per handler generation — at startup and on
+// every reload — so config changes hot-apply (#98): the caller stages the
+// returned closers for generational teardown rather than closing them on
+// shutdown directly. On any error every resource opened so far is closed
+// before returning, and the real file/syslog target is never touched destructively:
+// see probeWritableDir.
 func BuildAccessSinks(cfg config.AccessLogConfig, base *slog.Logger) (sinks []middleware.AccessSink, closers []io.Closer, err error) {
 	if !cfg.IsEnabled() {
 		return nil, nil, nil
@@ -59,10 +62,21 @@ func BuildAccessSinks(cfg config.AccessLogConfig, base *slog.Logger) (sinks []mi
 		case "stdout":
 			sinks = append(sinks, middleware.NewSlogSink(base))
 		case "file":
-			if werr := ensureWritable(cfg.File); werr != nil {
+			if werr := probeWritableDir(cfg.File); werr != nil {
 				err = fmt.Errorf("access_log file sink: %w", werr)
 				return
 			}
+			// A fresh *lumberjack.Logger is built for every call, even when the
+			// path is unchanged from the previous generation (#98): mutating a
+			// live writer's exported fields (e.g. on a rotation-setting change)
+			// while the previous, still-draining generation might concurrently
+			// write to it would be a data race. This is safe for a changed path
+			// (different generations then own different files) and safe for a
+			// same-path change that does not alter rotation settings. The one
+			// documented residual: a same-path rotation-setting change whose old
+			// generation happens to rotate during the brief drain overlap can
+			// leave the new generation's writer appending to the just-rotated
+			// backup file rather than the live path — see docs/known-limitations.md.
 			lj := &lumberjack.Logger{
 				Filename:   cfg.File,
 				MaxSize:    cfg.RotateMaxMB,
@@ -98,18 +112,22 @@ func accessHandler(w io.Writer, format string) slog.Handler {
 	return slog.NewTextHandler(w, opts)
 }
 
-// ensureWritable verifies the access-log file can be created and appended to,
-// creating its parent directory if needed, so a bad path fails fast at startup
-// instead of silently dropping records on the first request.
-func ensureWritable(path string) error {
-	if dir := filepath.Dir(path); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
+// probeWritableDir proves path's parent directory is writable by creating and
+// immediately removing a temporary sentinel file, creating the directory first
+// if it does not exist. It never touches path itself: a candidate access-sink
+// build (#98) must be fully reversible on Abort, and the real file is created
+// only by the writer's own first live write, which cannot happen before the
+// candidate generation is committed.
+func probeWritableDir(path string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("cannot create directory %q: %w", dir, err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	tmp, err := os.CreateTemp(dir, ".access-log-probe-*")
 	if err != nil {
-		return err
+		return fmt.Errorf("directory %q not writable: %w", dir, err)
 	}
-	return f.Close()
+	_ = tmp.Close()
+	_ = os.Remove(tmp.Name())
+	return nil
 }

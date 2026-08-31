@@ -163,7 +163,7 @@ const (
 	reasonRBACSwap              = "the admin RBAC policy is rebuilt and atomically swapped after each successful reload"
 	reasonAdminStartup          = "the admin listener and its resources are created once at startup"
 	reasonCacheStartup          = "the response cache backend is created once at startup and retains its counters and LRU state across reloads"
-	reasonAccessLogStart        = "access-log sinks are opened once at startup"
+	reasonAccessLogHot          = "a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98)"
 	reasonTracingStartup        = "the tracer provider and exporter are created once at startup"
 	reasonBindFrozen            = "the value is read once when the socket binds; an address kept across the reload keeps the value it bound with"
 	reasonClientAddressRebuild  = "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish"
@@ -379,7 +379,7 @@ func egressEntries() []Entry {
 }
 
 func observabilityEntries() []Entry {
-	out := restartGroup(SubAccessLog, reasonAccessLogStart,
+	out := hotGroup(SubAccessLog, reasonAccessLogHot,
 		"observability.access_log.enabled",
 		"observability.access_log.file",
 		"observability.access_log.format",

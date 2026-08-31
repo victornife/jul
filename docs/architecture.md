@@ -135,13 +135,14 @@ unit-tested independently of a full process boot.
 2. **HandlerFactory** — `HandlerFactory` holds the process-lifetime dependencies
    and rebuilds the per-listen-address HTTP handler tree on every reload.
    Generational teardown (`GenerationResources`) keeps old gRPC connections,
-   plugin runtimes, and static handles alive until in-flight requests drain.
+   plugin runtimes, access-log file/syslog sinks (#98), and static handles
+   alive until in-flight requests drain.
    Background work that legitimately outlives its request holds a **generation
    lease** so it is counted in the same drain accounting; see
    [Generation-owned background work](#generation-owned-background-work-internalbackground).
 3. **Preflight** — `Preflight.Apply` is the admin-write validation gate:
    validate → TLS → handler dry-run → stream dry-run → bind probes →
-   restart-required checks (ACME, listeners, tracing, access-log, cache,
+   restart-required checks (ACME, listeners, tracing, cache,
    egress, admin, metrics).
 4. **Admin deps** — `BuildAdminDeps` wires the Console and admin API, then
    `admin.New` starts the admin listener.
@@ -215,7 +216,7 @@ reflection.
 
 | Piece | Responsibility |
 |------|---------------|
-| `RuntimeComponent` | Closed enum identifying a component slot. No production value exists yet; the first two consumers (#100 static certificates, #98 access-log sinks) each add their own value when they land. |
+| `RuntimeComponent` | Closed enum identifying a component slot. No production value exists yet beyond the first consumer (#100 static certificates); a second production consumer is still needed to prove the seam without redesign. Access-log sinks (#98) did not become one: they are app-level (built and staged per handler generation in `HandlerFactory.buildHandlers`), not server-listener-level, and the pre-existing `GenerationResources`/`Generation.Stage` mechanism (used already for gRPC connections, plugin runtimes and static handles) already provided the exact same candidate-build/stage/commit/abort/deferred-retirement shape this component slot exists for — reusing it, rather than routing an app-level resource through a server-level aggregate, avoided the duplication both #90 and #98 explicitly warn against. |
 | `preparedComponent` | `component()` / `commit() retirement` / `abort()`. Every fallible step (parsing, dialing, opening a file) happens before `commit`, which must not fail. |
 | `PreparedRuntime` | The aggregate. `Commit`/`Abort` are exactly-once (mirroring `PreparedCommit`); `Retire(ctx)` runs the retirements `Commit` collected, on a context the caller bounds. |
 

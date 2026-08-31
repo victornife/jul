@@ -79,7 +79,7 @@ func TestGlobalChainDerivesIdentityAtIndexOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPolicy: %v", err)
 	}
-	mws := f.globalChain(policy, nil)
+	mws := f.globalChain(policy, nil, nil)
 	if len(mws) < 2 {
 		t.Fatalf("global chain has %d middleware, want at least 2", len(mws))
 	}
@@ -137,7 +137,7 @@ func TestGlobalChainIdentityIsIndependentOfHost(t *testing.T) {
 	var got clientaddr.Identity
 	chain := middleware.Chain(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		got, _ = clientaddr.FromContext(r.Context())
-	}), f.globalChain(policy, nil)...)
+	}), f.globalChain(policy, nil, nil)...)
 
 	for _, host := range []string{"public.example.com", "internal.example.com", "", "attacker.invalid"} {
 		req := httptest.NewRequest(http.MethodGet, "http://placeholder/", nil)
@@ -180,7 +180,7 @@ func TestClientAddressPolicyReloadUnderLiveTraffic(t *testing.T) {
 	probe := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		got, _ = clientaddr.FromContext(r.Context())
 	})
-	live := middleware.Chain(probe, f.globalChain(policy, nil)...)
+	live := middleware.Chain(probe, f.globalChain(policy, nil, nil)...)
 
 	req := func() *http.Request { return request("10.1.2.3:5555", "198.51.100.9") }
 	live.ServeHTTP(httptest.NewRecorder(), req())
@@ -204,7 +204,7 @@ func TestClientAddressPolicyReloadUnderLiveTraffic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reloaded policy: %v", err)
 	}
-	middleware.Chain(probe, f.globalChain(next, nil)...).ServeHTTP(httptest.NewRecorder(), req())
+	middleware.Chain(probe, f.globalChain(next, nil, nil)...).ServeHTTP(httptest.NewRecorder(), req())
 	if got.Client.String() != "198.51.100.9" || got.Source != clientaddr.SourceXFF {
 		t.Fatalf("after reload: %+v, want the asserted client", got)
 	}
@@ -221,7 +221,7 @@ func TestClientAddressPolicyReloadUnderLiveTraffic(t *testing.T) {
 	if _, _, _, _, err := f.Prepare(t.Context(), bad); err == nil {
 		t.Fatal("Prepare accepted a policy that cannot compile")
 	}
-	middleware.Chain(probe, f.globalChain(next, nil)...).ServeHTTP(httptest.NewRecorder(), req())
+	middleware.Chain(probe, f.globalChain(next, nil, nil)...).ServeHTTP(httptest.NewRecorder(), req())
 	if got.Client.String() != "198.51.100.9" {
 		t.Fatalf("a failed reload disturbed the live policy: %+v", got)
 	}

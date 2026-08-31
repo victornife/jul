@@ -60,7 +60,7 @@ the file is written. This means:
   compression, rate limiting, etc.) apply exactly as they do through the
   Console.
 - Changes to **restart-required** fields (cache, egress, admin listener/token/
-  rate limits/history/plugin-upload/audit, tracing, access-log, ACME, log
+  rate limits/history/plugin-upload/audit, tracing, ACME, log
   format, listener bind settings) are **rejected at swap time** — the swap is
   aborted, `LastReload.Outcome=not_applied` is recorded
   with the reason, and the old config remains authoritative. The file on disk
@@ -787,10 +787,14 @@ using schema-derived extractors, so a field cannot be added to the registry
 without being diffed. The runtime rejects the following categories with `restart_required` at apply
 time (admin path) or at swap time (SIGHUP/file-watch):
 
-- **Log format and access-log settings** — the log handler, request access-log
-  middleware, Console access-record tail attachment, and sink handles are built
-  once at startup. `enabled`, sink selection, file/format, and rotation changes
-  therefore require restart. Log *level* is hot-reloadable.
+- **Log format** — the base structured logger's text/JSON encoding is built
+  once at startup and requires a restart. Log *level* is hot-reloadable.
+  `[observability.access_log]` (`enabled`, sink selection, file/format,
+  rotation) is fully hot-reloadable (#98): a candidate sink generation is
+  built and validated before Publish, committed with the new handler
+  generation, and the previous generation's file/syslog resources close only
+  after its own requests drain. The permanent Console Operations-Log tail is
+  never recreated by an access-log change.
 - **ACME issued-domain set / issuer** — frozen when the autocert manager is
   built at startup.
 

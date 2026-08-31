@@ -179,28 +179,13 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	}
 	defer rt.Close()
 
-	// Access-log sinks are built once at startup: the "file" sink owns a
-	// rotating file handle and the "syslog" sink a system-log connection.
-	// Changing [observability.access_log] takes effect only after a restart.
-	accessSinks, accessClosers, err := observability.BuildAccessSinks(cfg.Observability.AccessLog, log)
-	if err != nil {
-		log.Error("failed to initialize access log", "error", err)
-		return 1
-	}
-	defer func() {
-		for _, c := range accessClosers {
-			_ = c.Close()
-		}
-	}()
-
-	// The Console Operations Log tail always exists so the API remains stable,
-	// but it receives request records only when access logging is effectively
-	// enabled. Disabling access logging must not suppress process/security/audit
-	// events, which use independent channels.
+	// The Console Operations Log tail is a permanent, process-lifetime sink:
+	// it preserves Console Operations-Log/SSE history and subscribers across
+	// every reload, and is appended to each generation's candidate sink set
+	// (built per-reload in HandlerFactory.buildHandlers, #98) only when access
+	// logging is effectively enabled. It is never closed or recreated by an
+	// access-log configuration change.
 	logTail := observability.NewLogTail(0)
-	if cfg.Observability.AccessLog.IsEnabled() {
-		accessSinks = append(accessSinks, logTail)
-	}
 
 	// The rate-limiter store persists across reloads (its janitor is bound to
 	// baseCtx) so token buckets survive config edits.
@@ -262,16 +247,16 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// The factory holds the process-lifetime dependencies and rebuilds the
 	// per-listen-address handler tree on every reload. See factory.go.
 	f := &HandlerFactory{
-		Log:         log,
-		Metrics:     metrics,
-		Cache:       responseCache,
-		AccessSinks: accessSinks,
-		RLStore:     rlStore,
-		EgressDial:  authDial,
-		PoolReg:     poolReg,
-		PluginMgr:   pluginMgr,
-		GenRes:      genRes,
-		RT:          rt,
+		Log:           log,
+		Metrics:       metrics,
+		Cache:         responseCache,
+		AccessLogTail: logTail,
+		RLStore:       rlStore,
+		EgressDial:    authDial,
+		PoolReg:       poolReg,
+		PluginMgr:     pluginMgr,
+		GenRes:        genRes,
+		RT:            rt,
 	}
 
 	// factory adapts HandlerFactory.Prepare to the server reload hook: the
