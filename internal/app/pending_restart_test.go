@@ -106,19 +106,21 @@ func TestPendingRestartCheckMixedPendingAndHot(t *testing.T) {
 	}
 	startupFP := lifecycle.ComputeFingerprint(startup.Effective)
 
-	// Change an active restart-required access-log field and a hot-reloadable
+	// Change an active restart-required tracing field and a hot-reloadable
 	// location field. Deprecated global.access_log is deliberately ignored.
+	// access_log itself is hot-reloadable (#98), so tracing.enabled stands in
+	// as the restart-required trigger here.
 	nextRaw, err := startupRaw.Clone()
 	if err != nil {
 		t.Fatalf("clone: %v", err)
 	}
-	nextRaw.Observability.AccessLog.Format = "json"
+	nextRaw.Observability.Tracing.Enabled = true
 	nextRaw.Servers[0].Locations[0].Return = 201
 
 	loadFn := func() (*config.Config, error) { return nextRaw, nil }
 	got := pendingRestartCheck(startup, startupFP, server.LiveSnapshot{}, loadFn, testLogger(t))
-	if !slices.Contains(got, "access_log") {
-		t.Fatalf("restart-required change should report access_log, got %v", got)
+	if !slices.Contains(got, "tracing") {
+		t.Fatalf("restart-required change should report tracing, got %v", got)
 	}
 	if slices.Contains(got, "return") {
 		t.Fatalf("hot-reloadable change should not be reported, got %v", got)

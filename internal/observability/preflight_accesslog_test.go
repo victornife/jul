@@ -4,8 +4,10 @@
 package observability
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"jul/internal/config"
@@ -41,5 +43,28 @@ func TestPreflightAccessSinksEnabledProvesFileDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("preflight must not retain the real log file: %v", err)
+	}
+}
+
+// TestPreflightAccessSinksReportsUnwritableDirectory covers PreflightAccessSinks'
+// error path: a probeWritableDir failure must surface, not be swallowed.
+func TestPreflightAccessSinksReportsUnwritableDirectory(t *testing.T) {
+	orig := probeCloseFile
+	// Actually close the file so no locked handle is left behind (Windows
+	// cannot remove/clean up a still-open file) while still reporting a failure.
+	probeCloseFile = func(f *os.File) error { _ = f.Close(); return errors.New("injected close failure") }
+	defer func() { probeCloseFile = orig }()
+
+	path := filepath.Join(t.TempDir(), "logs", "access.log")
+	err := PreflightAccessSinks(config.AccessLogConfig{
+		Enabled: config.Bool(true),
+		Sinks:   []string{"file"},
+		File:    path,
+	})
+	if err == nil {
+		t.Fatal("expected an error when the writability probe fails")
+	}
+	if !strings.Contains(err.Error(), "file sink") {
+		t.Fatalf("error does not identify the file sink: %v", err)
 	}
 }

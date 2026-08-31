@@ -117,12 +117,9 @@ overhead; these numbers represent the in-process span construction cost.
    (`sample_ratio`). Adaptive or error-biased sampling must be done in the
    collector (e.g. OpenTelemetry Collector tail-sampling processor).
 
-3. **Access-log format changes require a restart.** Like tracing, `[observability.access_log]`
-   is built once at startup. Adding/removing sinks or changing file path/format
-   needs a process restart.
-
-4. **Syslog sink is Unix-only.** Windows builds silently ignore the `syslog`
-   sink if listed.
+3. **Syslog sink is Unix-only.** Windows builds reject a configured `syslog`
+   sink with an explicit error (`log/syslog` is not implemented there) rather
+   than silently dropping it; use `file` or `stdout` instead.
 
 ## Threat note (PII and data leakage)
 

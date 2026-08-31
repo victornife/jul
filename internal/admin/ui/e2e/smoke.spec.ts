@@ -419,7 +419,7 @@ test.describe("Console SPA smoke (UI-1)", () => {
   });
 });
 
-test("traffic controls exposes the restart-aware access-log editor", async ({ page }) => {
+test("traffic controls exposes the access-log editor", async ({ page }) => {
   await setupApiMocks(page);
   await page.goto("/traffic");
 
@@ -432,7 +432,6 @@ test("traffic controls exposes the restart-aware access-log editor", async ({ pa
 
   await expect(page.getByText("Edit access logging")).toBeVisible();
   await expect(page.getByRole("checkbox", { name: "Enable request access logging" })).toBeChecked();
-  await expect(page.getByText(/require a restart to take effect/)).toBeVisible();
 
   await page.getByRole("checkbox", { name: "Enable request access logging" }).uncheck();
   await page.getByRole("button", { name: "Review in editor →" }).click();

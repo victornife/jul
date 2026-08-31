@@ -289,15 +289,13 @@ func (p *Preflight) applyCandidate(ctx context.Context, candidate *config.Candid
 // startup-consumed subsystems that stage_restart mode must validate. Each
 // check creates and immediately removes a temporary file to prove writability
 // without retaining any handle, starting any goroutine, or contacting external
-// services.
+// services. [observability.access_log] is not included: it hot-applies (#98)
+// and is validated by the normal Prepare path, not the staged-restart gate.
 func startupResourcePreflight(cfg *config.Config) error {
 	if err := cache.Preflight(cfg.Cache); err != nil {
 		return err
 	}
 	if err := admin.PreflightConfig(cfg.Admin); err != nil {
-		return err
-	}
-	if err := observability.PreflightAccessSinks(cfg.Observability.AccessLog); err != nil {
 		return err
 	}
 	if err := observability.ValidateTracerConfig(cfg.Observability.Tracing); err != nil {

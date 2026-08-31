@@ -36,16 +36,16 @@ import (
 // and pass Build to server.New and app.Preflight. Extracting the per-reload
 // build logic here makes it unit-testable without a full process boot (ADR-0007).
 type HandlerFactory struct {
-	Log         *slog.Logger
-	Metrics     *observability.Metrics
-	Cache       *cache.Cache // nil when caching is disabled
-	AccessSinks []middleware.AccessSink
-	RLStore     *middleware.RateLimiterStore
-	EgressDial  func(context.Context, string, string) (net.Conn, error)
-	PoolReg     *upstream.Registry
-	PluginMgr   *plugins.Manager
-	GenRes      *GenerationResources
-	RT          *Runtime // Tracer.Middleware, ACME
+	Log           *slog.Logger
+	Metrics       *observability.Metrics
+	Cache         *cache.Cache // nil when caching is disabled
+	AccessLogTail *observability.LogTail
+	RLStore       *middleware.RateLimiterStore
+	EgressDial    func(context.Context, string, string) (net.Conn, error)
+	PoolReg       *upstream.Registry
+	PluginMgr     *plugins.Manager
+	GenRes        *GenerationResources
+	RT            *Runtime // Tracer.Middleware, ACME
 
 	mu sync.Mutex // serialises every build (startup, reload, preflight)
 
@@ -149,6 +149,24 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// Check context before starting a potentially slow plugin compilation.
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("build aborted before plugin compilation: %w", err)
+	}
+
+	// Build this generation's candidate access-log sink set (#98): the file
+	// and syslog resources are validated and opened here, staged for
+	// generational teardown so the previous generation's sinks close only
+	// after its in-flight requests drain, and never touched again once this
+	// generation retires. The permanent Console LogTail is not part of this
+	// candidate build — it is process-lifetime and is appended below, exactly
+	// once per generation, without being closed or recreated.
+	accessSinks, accessClosers, err := observability.BuildAccessSinks(c.Observability.AccessLog, f.Log)
+	if err != nil {
+		return nil, fmt.Errorf("access_log: %w", err)
+	}
+	for _, cl := range accessClosers {
+		gen.Stage(cl)
+	}
+	if c.Observability.AccessLog.IsEnabled() && f.AccessLogTail != nil {
+		accessSinks = append(accessSinks, f.AccessLogTail)
 	}
 
 	// Build this generation's WASM plugin set. A lean build (or a malformed
@@ -507,7 +525,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		if err != nil {
 			return nil, fmt.Errorf("listen %s: client_address: %w", addr, err)
 		}
-		h := middleware.Chain(rtr.For(addr), f.globalChain(policy, compress)...)
+		h := middleware.Chain(rtr.For(addr), f.globalChain(policy, compress, accessSinks)...)
 		// On plain HTTP listeners, answer ACME HTTP-01 challenges outermost so
 		// certificate issuance/renewal works even when the listener otherwise
 		// redirects to HTTPS. Non-challenge requests fall through to h.
@@ -547,15 +565,15 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 //
 // Per-location concerns (rate limiting, body limit) are applied inside the
 // router via LocationModifier, closer to the handler.
-func (f *HandlerFactory) globalChain(policy *clientaddr.Policy, compress middleware.Middleware) []middleware.Middleware {
+func (f *HandlerFactory) globalChain(policy *clientaddr.Policy, compress middleware.Middleware, accessSinks []middleware.AccessSink) []middleware.Middleware {
 	mws := []middleware.Middleware{
 		middleware.RequestID(),
 		middleware.ClientAddress(policy, f.Log, f.Metrics.ObserveClientAddrDerivation),
 		f.RT.Tracer.Middleware,
 		f.Metrics.Middleware,
 	}
-	if len(f.AccessSinks) > 0 {
-		mws = append(mws, middleware.AccessLog(f.AccessSinks...))
+	if len(accessSinks) > 0 {
+		mws = append(mws, middleware.AccessLog(accessSinks...))
 	}
 	mws = append(mws, middleware.Recover(f.Log))
 	if compress != nil {

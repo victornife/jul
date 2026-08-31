@@ -20,9 +20,9 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 | Schema paths (containers included) | 356 |
 | Schema leaves (configurable values) | 302 |
 | Registry entries | 302 |
-| Startup-consumed entries | 63 |
-| Class `hot_reload` | 224 |
-| Class `restart_required` | 63 |
+| Startup-consumed entries | 57 |
+| Class `hot_reload` | 230 |
+| Class `restart_required` | 57 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 3 |
@@ -176,12 +176,12 @@ value is compared as a digest so no secret material leaves the process.
 | `global.reload_timeout` | `hot_reload` | `reload_timeout` | — | the threshold is read from the effective config at the start of each reload |
 | `global.shutdown_timeout` | `hot_reload` | `shutdown_timeout` | — | the drain budget is read from the effective config on each graceful stop |
 | `global.worker_threads` | `hot_reload` | `worker_threads` | — | OnReloaded applies the cap with runtime.GOMAXPROCS, restoring the container-aware default for "auto" |
-| `observability.access_log.enabled` | `restart_required` | `access_log` | startup | access-log sinks are opened once at startup |
-| `observability.access_log.file` | `restart_required` | `access_log` | startup | access-log sinks are opened once at startup |
-| `observability.access_log.format` | `restart_required` | `access_log` | startup | access-log sinks are opened once at startup |
-| `observability.access_log.rotate_keep` | `restart_required` | `access_log` | startup | access-log sinks are opened once at startup |
-| `observability.access_log.rotate_max_mb` | `restart_required` | `access_log` | startup | access-log sinks are opened once at startup |
-| `observability.access_log.sinks` | `restart_required` | `access_log` | startup | access-log sinks are opened once at startup |
+| `observability.access_log.enabled` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
+| `observability.access_log.file` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
+| `observability.access_log.format` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
+| `observability.access_log.rotate_keep` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
+| `observability.access_log.rotate_max_mb` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
+| `observability.access_log.sinks` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
 | `observability.metrics.host_label` | `restart_required` | `metrics` | startup | the Prometheus registry and its label set are built once at startup |
 | `observability.tracing.enabled` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |
 | `observability.tracing.endpoint` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |

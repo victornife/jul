@@ -895,7 +895,7 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 | L4 stream proxy | Guided-create · Structured-edit (listen, protocol, default backend, SNI routes, TLS passthrough, PROXY protocol, timeouts) | Streams |
 | gRPC-JSON transcoding | Guided-create (upload descriptor, inspect HTTP bindings, generate route) · Read-only for existing transcode routes; gRPC passthrough remains raw-only | Transcode, Routes |
 | Tracing / OpenTelemetry | Structured-edit (global guided editor: exporter / endpoint / sample ratio / service name / transport) | Traffic Controls, Status |
-| Access logs | Structured-edit (`enabled`, sinks, file, format, rotation) + bounded live tail; changes are staged for restart | Traffic Controls, Operations |
+| Access logs | Structured-edit (`enabled`, sinks, file, format, rotation) + bounded live tail; changes hot-apply (#98) | Traffic Controls, Operations |
 | Admin listener | No surface | — |
 | Config history / rollback | Full (view + rollback) | History |
 | Audit log | Full (filter + export) | Audit |
