@@ -244,6 +244,63 @@ func TestSNICertSelection(t *testing.T) {
 	}
 }
 
+// TestFileCertProviderSummariesGroupsSharedCertificate (#100) proves
+// Summaries reports one entry per distinct loaded certificate, with every
+// server name that maps to it, rather than one entry per server block.
+func TestFileCertProviderSummariesGroupsSharedCertificate(t *testing.T) {
+	dir := t.TempDir()
+	certA, keyA := writeSelfSigned(t, dir, "shared", "a.example.com")
+
+	// Two bindings, same cert/key pair, different names: newFileCertProvider
+	// dedups by path, so this must still produce exactly one summary
+	// carrying both names.
+	p, err := newFileCertProvider([]certBinding{
+		{tls: &config.TLSConfig{Enabled: true, Cert: certA, Key: keyA}, names: []string{"a.example.com"}},
+		{tls: &config.TLSConfig{Enabled: true, Cert: certA, Key: keyA}, names: []string{"alias.example.com"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summaries := p.Summaries()
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %+v, want exactly 1 (shared certificate)", summaries)
+	}
+	names := summaries[0].ServerNames
+	if len(names) != 2 || names[0] != "a.example.com" || names[1] != "alias.example.com" {
+		t.Fatalf("server names = %v, want [a.example.com alias.example.com]", names)
+	}
+	if summaries[0].Subject != "shared" {
+		t.Fatalf("subject = %q, want %q", summaries[0].Subject, "shared")
+	}
+	if summaries[0].Source != "file" {
+		t.Fatalf("source = %q, want file", summaries[0].Source)
+	}
+}
+
+// TestFileCertProviderSummariesDistinctCertificates proves two different
+// certificate/key pairs produce two separate summaries even when they serve
+// the same address.
+func TestFileCertProviderSummariesDistinctCertificates(t *testing.T) {
+	dir := t.TempDir()
+	certA, keyA := writeSelfSigned(t, dir, "a", "a.example.com")
+	certB, keyB := writeSelfSigned(t, dir, "b", "b.example.com")
+
+	p, err := newFileCertProvider([]certBinding{
+		{tls: &config.TLSConfig{Enabled: true, Cert: certA, Key: keyA}, names: []string{"a.example.com"}},
+		{tls: &config.TLSConfig{Enabled: true, Cert: certB, Key: keyB}, names: []string{"b.example.com"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summaries := p.Summaries()
+	if len(summaries) != 2 {
+		t.Fatalf("summaries = %+v, want exactly 2", summaries)
+	}
+	if summaries[0].Subject != "a" || summaries[1].Subject != "b" {
+		t.Fatalf("subjects = [%q %q], want [a b] in first-seen order", summaries[0].Subject, summaries[1].Subject)
+	}
+}
+
 func TestTLSConfigForAddrPlainHTTP(t *testing.T) {
 	servers := []config.ServerConfig{{Listen: ":80", ServerNames: []string{"x"}}}
 	conf, err := tlsConfigForAddr(servers, ":80")

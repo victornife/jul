@@ -416,11 +416,12 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		return ValidateRuntimeConfig(ctx, c)
 	})
 	// Overrides the src.Load()-backed default from BuildAdminDeps: certificate
-	// status must reflect the server's live published config, not whatever
-	// bytes currently sit on disk — a rejected candidate must never make an
-	// unpublished (or invalid) on-disk certificate appear live (#100).
+	// status must reflect the server's actually-installed certificate, not
+	// whatever bytes currently sit on disk — a rejected candidate, or an
+	// out-of-band file rewrite between reloads, must never make an
+	// unpublished or invalid certificate appear live (#100).
 	deps.Certs = func() []admin.CertStatus {
-		return AdaptCerts(server.InspectCerts(srv.LiveSnapshot().EffectiveConfig.Servers))
+		return AdaptCerts(srv.LiveCertSummaries())
 	}
 	srv.ConnStateHook = metrics.ConnState
 	srv.OnReloadStart = metrics.ReloadStarted

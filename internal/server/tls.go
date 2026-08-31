@@ -30,6 +30,13 @@ type fileCertProvider struct {
 	byName  map[string]*tls.Certificate // server_name -> cert
 	wild    map[string]*tls.Certificate // ".example.com" -> cert
 	fallbck *tls.Certificate            // first loaded cert
+	// summaries is built once at construction from the certificates actually
+	// loaded here, never by re-reading the configured paths later. It is the
+	// live-status source of truth (#100): LiveCertSummaries reads this instead
+	// of the file the configured path currently names, so an out-of-band
+	// rewrite between reloads cannot make an unpublished certificate appear
+	// live. Immutable after construction; safe for concurrent reads.
+	summaries []CertSummary
 }
 
 // certBinding pairs a TLS config with the server names it should serve.
@@ -46,6 +53,8 @@ func newFileCertProvider(bindings []certBinding) (*fileCertProvider, error) {
 		wild:   make(map[string]*tls.Certificate),
 	}
 	loaded := make(map[string]*tls.Certificate) // cert+key path -> cert (dedup)
+	namesFor := make(map[string][]string)       // cert+key path -> aggregate configured-case names
+	var order []string                          // cache keys in first-seen order, for deterministic summaries
 
 	for _, b := range bindings {
 		if b.tls == nil || !b.tls.Enabled {
@@ -60,10 +69,12 @@ func newFileCertProvider(bindings []certBinding) (*fileCertProvider, error) {
 			}
 			cert = &c
 			loaded[cacheKey] = cert
+			order = append(order, cacheKey)
 		}
 		if p.fallbck == nil {
 			p.fallbck = cert
 		}
+		namesFor[cacheKey] = append(namesFor[cacheKey], b.names...)
 		for _, name := range b.names {
 			name = strings.ToLower(name)
 			if strings.HasPrefix(name, "*.") {
@@ -76,7 +87,18 @@ func newFileCertProvider(bindings []certBinding) (*fileCertProvider, error) {
 	if p.fallbck == nil {
 		return nil, fmt.Errorf("tls enabled but no certificates loaded")
 	}
+	for _, key := range order {
+		p.summaries = append(p.summaries, certSummaryFromCertificate(namesFor[key], loaded[key]))
+	}
 	return p, nil
+}
+
+// Summaries returns a live, secret-safe metadata summary of every distinct
+// certificate this provider holds, derived from the certificate this
+// provider actually has installed in memory. A certificate serving several
+// server names is reported once, with the full aggregate name set (#100).
+func (p *fileCertProvider) Summaries() []CertSummary {
+	return append([]CertSummary(nil), p.summaries...)
 }
 
 // GetCertificate implements CertProvider, matching exact then wildcard names,
