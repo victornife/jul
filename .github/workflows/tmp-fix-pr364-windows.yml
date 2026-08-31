@@ -1,0 +1,75 @@
+name: Temporary PR 364 Windows golden fix
+
+on:
+  push:
+    branches:
+      - agent/issue-154-corpus-closure
+    paths:
+      - '.github/workflows/tmp-fix-pr364-windows.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Normalize text-golden line endings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('internal/migrate/nginx/corpus/coverage_test.go')
+          text = path.read_text(encoding='utf-8')
+          old = '''\tif !bytes.Equal(actual, expected) {
+          \t\tt.Fatalf("inventory golden drift; run `go run -tags importer scripts/nginx-corpus-report.go -write` and review the diff\\n--- want\\n%s\\n--- got\\n%s", expected, actual)
+          \t}
+          }
+
+          func TestCoverageDecodeStrictness'''
+          new = '''\tactual = normalizeGoldenNewlines(actual)
+          \texpected = normalizeGoldenNewlines(expected)
+          \tif !bytes.Equal(actual, expected) {
+          \t\tt.Fatalf("inventory golden drift; run `go run -tags importer scripts/nginx-corpus-report.go -write` and review the diff\\n--- want\\n%s\\n--- got\\n%s", expected, actual)
+          \t}
+          }
+
+          func TestNormalizeGoldenNewlines(t *testing.T) {
+          \tinput := []byte("{\\r\\n  \\\"fixture_count\\\": 11\\r\\n}\\r\\n")
+          \twant := []byte("{\\n  \\\"fixture_count\\\": 11\\n}\\n")
+          \tif got := normalizeGoldenNewlines(input); !bytes.Equal(got, want) {
+          \t\tt.Fatalf("normalized golden = %q, want %q", got, want)
+          \t}
+          }
+
+          func normalizeGoldenNewlines(data []byte) []byte {
+          \treturn bytes.ReplaceAll(data, []byte("\\r\\n"), []byte("\\n"))
+          }
+
+          func TestCoverageDecodeStrictness'''
+          if text.count(old) != 1:
+              raise SystemExit('expected coverage golden comparison block was not found exactly once')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+          gofmt -w internal/migrate/nginx/corpus/coverage_test.go
+          go test -tags importer ./internal/migrate/nginx/corpus -run 'TestRepositoryCoverageMatrixAndInventoryGolden|TestNormalizeGoldenNewlines' -count=1
+      - name: Commit clean fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/tmp-fix-pr364-windows.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add internal/migrate/nginx/corpus/coverage_test.go .github/workflows/tmp-fix-pr364-windows.yml
+          git commit -m 'test(corpus): normalize inventory golden newlines on Windows'
+          git push origin HEAD:agent/issue-154-corpus-closure
