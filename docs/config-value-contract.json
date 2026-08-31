@@ -140,6 +140,18 @@
       "active_when": "always"
     },
     {
+      "go_field": "AdminTLSConfig.MinVersion",
+      "path": "admin.tls.min_version",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "admin.tls enabled",
+      "allowed": [
+        "1.2",
+        "1.3"
+      ]
+    },
+    {
       "go_field": "BackendTLSConfig.CAMode",
       "path": "upstreams[].backend_tls.ca_mode / servers[].locations[].backend_tls.ca_mode",
       "kind": "enum",

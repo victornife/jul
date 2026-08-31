@@ -117,6 +117,28 @@ func TestLintAdminExposed(t *testing.T) {
 	}
 }
 
+// TestLintAdminExposedWithoutTLS (#336) proves the cleartext-transport
+// finding fires independently of the token check, and stops once
+// [admin.tls] is enabled.
+func TestLintAdminExposedWithoutTLS(t *testing.T) {
+	base := func(listen string, tls *AdminTLSConfig) *Config {
+		return &Config{
+			Servers:     []ServerConfig{{Listen: ":80", Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}}}},
+			Compression: CompressionConfig{Enabled: Bool(true)},
+			Admin:       AdminConfig{Enabled: true, Listen: listen, Token: "secret", TLS: tls},
+		}
+	}
+	if !hasWarning(Lint(base("0.0.0.0:9090", nil)), "cleartext") {
+		t.Error("expected a warning for exposed admin without TLS")
+	}
+	if hasWarning(Lint(base("127.0.0.1:9090", nil)), "cleartext") {
+		t.Error("loopback admin should not warn about cleartext")
+	}
+	if hasWarning(Lint(base("0.0.0.0:9090", &AdminTLSConfig{Enabled: true, Cert: "c", Key: "k"})), "cleartext") {
+		t.Error("TLS-terminated admin should not warn about cleartext")
+	}
+}
+
 func TestLintCompressionDisabled(t *testing.T) {
 	c := &Config{Servers: []ServerConfig{{Listen: ":80", Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}}}}}
 	if !hasWarning(Lint(c), "compression is disabled") {

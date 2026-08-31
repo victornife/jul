@@ -351,6 +351,18 @@ func acmeValue(fn func(*config.ACMEConfig) any) func(*config.Config) any {
 	})
 }
 
+// adminTLSValue is the admin.tls analogue of tlsValue (#336): there is exactly
+// one admin listener, not one per server block, so no perListener grouping is
+// needed.
+func adminTLSValue(fn func(*config.AdminTLSConfig) any) func(*config.Config) any {
+	return func(cfg *config.Config) any {
+		if cfg.Admin.TLS == nil {
+			return nil
+		}
+		return fn(cfg.Admin.TLS)
+	}
+}
+
 // specialExtractor returns the extractor for paths whose comparison shape is not
 // the plain schema walk: listener-scoped values, file-content digests, pointer
 // defaults resolved to their effective value, and lists whose order carries no
@@ -375,6 +387,16 @@ func specialExtractor(path string) (func(*config.Config) any, bool) {
 		return clientAuthValue(func(c *config.ClientAuthConfig) any { return digestTLSMaterial(c.CRLFile) }), true
 	case "servers.*.tls.client_auth.verify_san":
 		return clientAuthValue(func(c *config.ClientAuthConfig) any { return sortedCopy(c.VerifySAN) }), true
+
+	// ── Admin listener TLS (#336) ───────────────────────────────────────────
+	case "admin.tls.enabled":
+		return adminTLSValue(func(t *config.AdminTLSConfig) any { return t.Enabled }), true
+	case "admin.tls.min_version":
+		return adminTLSValue(func(t *config.AdminTLSConfig) any { return t.MinVersion }), true
+	case "admin.tls.cert":
+		return adminTLSValue(func(t *config.AdminTLSConfig) any { return digestTLSMaterial(t.Cert) }), true
+	case "admin.tls.key":
+		return adminTLSValue(func(t *config.AdminTLSConfig) any { return digestTLSMaterial(t.Key) }), true
 
 	// ── ACME ───────────────────────────────────────────────────────────────
 	case "servers.*.tls.acme.enabled":

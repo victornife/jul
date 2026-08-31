@@ -56,6 +56,12 @@ func fullConfig() *config.Config {
 			PluginUploadDir:      "./jul-data/plugins",
 			PluginUploadMaxSize:  32,
 			PluginUploadEnabled:  config.Bool(false),
+			TLS: &config.AdminTLSConfig{
+				Enabled:    true,
+				Cert:       "admin-cert.pem",
+				Key:        "admin-key.pem",
+				MinVersion: "1.3",
+			},
 			RBAC: config.AdminRBACConfig{
 				Enabled:     true,
 				DefaultRole: "admin",

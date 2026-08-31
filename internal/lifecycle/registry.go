@@ -325,6 +325,13 @@ func adminEntries() []Entry {
 		secretDigest(hot("admin.rbac.principals.*.token", SubRBAC, reasonRBACSwap)),
 		hot("admin.rbac.roles.*.name", SubRBAC, reasonRBACSwap),
 		hot("admin.rbac.roles.*.permissions", SubRBAC, reasonRBACSwap),
+		// admin.tls: the same hot-content/restart-structural split as
+		// servers.*.tls, reusing #100's rotation seam rather than a second one
+		// (#336). Client-certificate authentication is a later tranche.
+		restart("admin.tls.enabled", SubTLS, "turning TLS on or off for the admin listener changes the socket's protocol, a structural transition"),
+		secretDigest(hot("admin.tls.cert", SubTLS, "a candidate certificate provider is built and validated during preflight, then swapped atomically into the admin listener's existing dynamic provider on the next successful reload, reusing #100's seam (#336)")),
+		secretDigest(hot("admin.tls.key", SubTLS, "a candidate certificate provider is built and validated during preflight, then swapped atomically into the admin listener's existing dynamic provider on the next successful reload, reusing #100's seam (#336)")),
+		restart("admin.tls.min_version", SubTLS, "the minimum protocol version is written into the admin listener's tls.Config when it is created"),
 	)
 	return out
 }

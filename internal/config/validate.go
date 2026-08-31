@@ -202,6 +202,7 @@ func Validate(c *Config) error {
 			errs = append(errs, errors.New("[admin] 'plugin_upload_max_size' must be positive when upload is enabled"))
 		}
 		errs = append(errs, validateRBAC(c.Admin.RBAC, c.Admin.Token)...)
+		errs = append(errs, validateAdminTLS(c.Admin.TLS)...)
 	}
 
 	errs = append(errs, validateCompression(c.Compression)...)
@@ -806,6 +807,28 @@ func validateClientAuth(ca *ClientAuthConfig, where string) []error {
 		} else if !ca.Active() {
 			errs = append(errs, fmt.Errorf("%s: forward_certificate needs a client certificate to forward; set mode to request or require", where))
 		}
+	}
+	return errs
+}
+
+// validateAdminTLS checks the optional [admin.tls] block (#336): enabled/cert/key/
+// min_version mirror servers.*.tls, but the admin listener currently supports
+// only operator-supplied cert/key termination (no ACME and no client_auth in
+// this tranche). Structural transitions (enabled/min_version) remain
+// restart-required; cert/key content is validated during admin preflight.
+func validateAdminTLS(t *AdminTLSConfig) []error {
+	if t == nil || !t.Enabled {
+		return nil
+	}
+	var errs []error
+	if strings.TrimSpace(t.Cert) == "" {
+		errs = append(errs, errors.New("[admin.tls] enabled but 'cert' is empty"))
+	}
+	if strings.TrimSpace(t.Key) == "" {
+		errs = append(errs, errors.New("[admin.tls] enabled but 'key' is empty"))
+	}
+	if v := strings.TrimSpace(t.MinVersion); v != "" && v != "1.2" && v != "1.3" {
+		errs = append(errs, fmt.Errorf("[admin.tls]: invalid min_version %q (want 1.2 or 1.3)", t.MinVersion))
 	}
 	return errs
 }

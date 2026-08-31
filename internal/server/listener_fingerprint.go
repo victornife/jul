@@ -183,6 +183,14 @@ func hashFileContent(path string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// SingleCertFingerprint digests one cert/key pair's file content, the same
+// way tlsIdentityFingerprint digests a listener's full binding set, so an
+// in-place same-path rotation is detected. Exported for the admin listener
+// (#336), which serves one certificate rather than a per-vhost SNI mapping.
+func SingleCertFingerprint(cert, key string) string {
+	return "file:cert=" + hashFileContent(cert) + ";key=" + hashFileContent(key)
+}
+
 // tlsIdentityFingerprint captures the certificate identity used by a TLS
 // listener at bind time. For file-backed certificates it digests the cert and
 // key bytes together with the SNI name set, so rotating either file in place

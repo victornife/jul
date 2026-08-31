@@ -45,6 +45,15 @@ type certBinding struct {
 	names []string
 }
 
+// NewSingleCertProvider loads exactly one cert/key pair with no SNI
+// multiplexing — the shape a listener serving one identity needs, rather
+// than the data plane's per-virtual-host mapping. Exported for the admin
+// listener (#336), which reuses this and DynamicCertProvider instead of
+// building a second certificate-loading path.
+func NewSingleCertProvider(cert, key string) (CertProvider, error) {
+	return newFileCertProvider([]certBinding{{tls: &config.TLSConfig{Enabled: true, Cert: cert, Key: key}}})
+}
+
 // newFileCertProvider loads every distinct cert/key pair referenced by the
 // given bindings and indexes them by server name for SNI selection.
 func newFileCertProvider(bindings []certBinding) (*fileCertProvider, error) {
@@ -215,9 +224,10 @@ func ACMERestartRequired(old, next []config.ServerConfig) (string, bool) {
 	return "automatic HTTPS (ACME) domains or issuer changed; the issued-domain set is fixed when the server starts", true
 }
 
-// minTLSVersion maps a config string to a crypto/tls version constant,
-// defaulting to TLS 1.2.
-func minTLSVersion(v string) uint16 {
+// MinTLSVersion maps a config string to a crypto/tls version constant,
+// defaulting to TLS 1.2. Exported so the admin listener (#336) uses the exact
+// same mapping as the data plane.
+func MinTLSVersion(v string) uint16 {
 	switch strings.TrimSpace(v) {
 	case "1.3":
 		return tls.VersionTLS13
@@ -226,11 +236,14 @@ func minTLSVersion(v string) uint16 {
 	}
 }
 
-// dynamicCertProvider holds a swappable CertProvider so certificates can be
+// DynamicCertProvider holds a swappable CertProvider so certificates can be
 // reloaded without rebinding the listener: the listener's tls.Config keeps a
 // stable GetCertificate callback that reads the current provider. The provider
 // may be file-backed or ACME-backed; the listener wiring does not care which.
-type dynamicCertProvider struct {
+// Exported so a second listener outside internal/server's own address map
+// (the admin listener, #336) can reuse this exact rotation seam instead of
+// building a parallel one.
+type DynamicCertProvider struct {
 	current atomic.Pointer[certProviderHolder]
 }
 
@@ -239,11 +252,14 @@ type dynamicCertProvider struct {
 // behind the interface.
 type certProviderHolder struct{ p CertProvider }
 
-func (d *dynamicCertProvider) set(p CertProvider) {
+// Set installs p as the provider consulted by the next handshake. Safe to
+// call concurrently with GetCertificate; a handshake already in progress may
+// still observe the previous provider (#100, #336).
+func (d *DynamicCertProvider) Set(p CertProvider) {
 	d.current.Store(&certProviderHolder{p: p})
 }
 
-func (d *dynamicCertProvider) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+func (d *DynamicCertProvider) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	h := d.current.Load()
 	if h == nil || h.p == nil {
 		return nil, fmt.Errorf("no certificate provider configured")
@@ -350,7 +366,7 @@ func tlsBindingsForAddr(servers []config.ServerConfig, addr string) (bindings []
 		}
 		ok = true
 		bindings = append(bindings, certBinding{tls: srv.TLS, names: srv.ServerNames})
-		if v := minTLSVersion(srv.TLS.MinVersion); v > minVer {
+		if v := MinTLSVersion(srv.TLS.MinVersion); v > minVer {
 			minVer = v
 		}
 	}

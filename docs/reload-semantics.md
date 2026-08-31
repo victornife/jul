@@ -447,6 +447,15 @@ The `admin` subsystem reports RBAC policy update failures independently of the
 `stream` subsystem, so a policy installation problem does not mask the L4
 stream-proxy reload status.
 
+The admin listener's own TLS certificate joins this same hot-certificate story
+(#336): a changed `[admin.tls]` cert/key candidate is built and validated
+during the shared admin `Prepare`/`Commit` seam (`PrepareTLS`/`CommitPreparedTLS`,
+reusing #100's `CertProvider`/`DynamicCertProvider`) alongside the RBAC policy
+candidate, and both commit together, atomically, at the same reload boundary.
+A malformed admin candidate aborts the whole apply before persistence, exactly
+like the data plane's `PreflightTLS`. `[admin.tls].enabled` and `.min_version`
+remain restart-required, matching `servers.*.tls`'s own split.
+
 ### Publish-then-Activate ordering
 
 The `Publish` phase installs the new handler generation **before** `Activate`

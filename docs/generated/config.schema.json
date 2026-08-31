@@ -160,6 +160,35 @@
           },
           "type": "object"
         },
+        "tls": {
+          "additionalProperties": false,
+          "properties": {
+            "cert": {
+              "description": "Cert is the path to the PEM certificate file the admin listener presents",
+              "type": "string",
+              "x-jul-secret": true
+            },
+            "enabled": {
+              "description": "Enabled terminates the admin listener with TLS instead of plaintext",
+              "type": "boolean"
+            },
+            "key": {
+              "description": "Key is the path to the PEM private key matching Cert",
+              "type": "string",
+              "x-jul-secret": true
+            },
+            "min_version": {
+              "description": "MinVersion is one of \"1.2\" or \"1.3\", defaulting like servers.*.tls",
+              "enum": [
+                "1.2",
+                "1.3"
+              ],
+              "type": "string",
+              "x-jul-constraint": "exact lowercase enum"
+            }
+          },
+          "type": "object"
+        },
         "token": {
           "description": "Token, when set, requires `Authorization: Bearer <token>`",
           "type": "string",
