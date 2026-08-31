@@ -46,6 +46,20 @@ type RouteSpec struct {
 	// authorization: every authenticated principal may read who it is. It is
 	// mutually exclusive with Permission/Permissions/AnyPermissions/Public.
 	Authenticated bool
+	// Stability classifies the route for external-contract purposes
+	// (ADR 0019 §24). The zero value is StabilityInternal, so a route added
+	// without thinking about it is never external by accident. An internal
+	// route must additionally record *why* it is internal, in the inventory in
+	// route_classification.go, which the guard test holds to exact-set
+	// equality with the internal routes in this catalog.
+	Stability RouteStability
+	// Operations carries the per-method external metadata the OpenAPI
+	// generator cannot infer. It is required for every method of an external
+	// route and must be absent on an internal one.
+	Operations map[string]ExternalOperation
+	// Sunset is the RFC 3339 date after which a StabilityDeprecated route may
+	// be removed. It is required on a deprecated route and empty otherwise.
+	Sunset string
 	// Handler returns the http.Handler for this route bound to the server.
 	Handler func(*Server) http.Handler
 }
@@ -57,16 +71,37 @@ type RouteSpec struct {
 // Ordering: public → unauthenticated-safe → read-only → write → mutating.
 var Catalog = []RouteSpec{
 	// ── Public (no authentication required) ──────────────────────────────────
+	// /healthz and /readyz keep their current unversioned paths and are
+	// declared external there: moving a liveness probe under /api/v1 would
+	// break every deployment for no benefit, and their contracts are already
+	// released. They are the *only* StabilityPublic routes, which this contract
+	// defines as requiring no authentication (ADR 0019 §24a).
 	{
-		Pattern: "/healthz",
-		Methods: []string{http.MethodGet},
-		Public:  true,
+		Pattern:   "/healthz",
+		Methods:   []string{http.MethodGet},
+		Public:    true,
+		Stability: StabilityPublic,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID:       "getHealthz",
+				Summary:  "Liveness probe. Unauthenticated, and never affected by control-plane conditions such as configuration drift.",
+				Response: "HealthResponse",
+			},
+		},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleHealthz) },
 	},
 	{
-		Pattern: "/readyz",
-		Methods: []string{http.MethodGet},
-		Public:  true,
+		Pattern:   "/readyz",
+		Methods:   []string{http.MethodGet},
+		Public:    true,
+		Stability: StabilityPublic,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID:       "getReadyz",
+				Summary:  "Readiness probe. Unauthenticated, and never affected by control-plane conditions such as configuration drift.",
+				Response: "HealthResponse",
+			},
+		},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleReadyz) },
 	},
 	// Console v2 SPA shell + hashed assets. The browser must load the app
@@ -92,11 +127,27 @@ var Catalog = []RouteSpec{
 	},
 
 	// ── Observability (metrics:read) ──────────────────────────────────────────
+	// /metrics keeps its unversioned path for the same reason the probes do — a
+	// scrape target that moves breaks every deployment — but it is external
+	// *authenticated*, not public: it requires metrics:read, so classifying it
+	// public would publish a contract the server does not implement and imply an
+	// unauthenticated scrape endpoint that does not exist (ADR 0019 §24a).
+	//
+	// Because it consumes an admin credential it is inside §28.1's transport
+	// gate: scraping it over cleartext on a non-loopback address is refused.
 	{
 		Pattern:    "/metrics",
 		Methods:    []string{http.MethodGet},
 		Permission: rbac.MetricsRead,
-		Handler:    func(s *Server) http.Handler { return s.handleMetrics() },
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID:       "getMetrics",
+				Summary:  "Prometheus exposition. Requires metrics:read, and therefore requires loopback or TLS.",
+				Response: "PrometheusExposition",
+			},
+		},
+		Handler: func(s *Server) http.Handler { return s.handleMetrics() },
 	},
 	{
 		Pattern:    "/api/stats",

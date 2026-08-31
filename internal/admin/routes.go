@@ -32,7 +32,13 @@ func (s *Server) routes() http.Handler {
 	// connection cap is enforced inside handleEvents via the same limiter.
 	// The console-health observer (Milestone 5.7) wraps the limited mux so it
 	// records the real per-request latency and status of every admin call.
-	return s.observeConsole(s.limiter.rateLimit(mux))
+	//
+	// ADR 0019 §28.1's transport gate wraps everything, outermost, because it
+	// must run before route lookup and before authentication: it is a property
+	// of the listener, so it is answered without consulting the credential or
+	// the target. Placing it inside the mux would make it a per-route decision
+	// and reintroduce the ordering the record forbids.
+	return s.requireSecureTransport(s.observeConsole(s.limiter.rateLimit(mux)))
 }
 
 // handleConsoleOrRoot returns the console v2 SPA handler when compiled in and
