@@ -143,6 +143,10 @@ route it asked for.
 | `/api/v1/config/pending-restart` | GET | external | any of `config:read`, `config:write`, `config:apply` |
 | `/api/v1/config/applies/{apply_id}` | GET | external | any of `status:read`, `config:apply`, `history:rollback` |
 | `/api/v1/config/history` | GET | external | `history:read` |
+| `/api/v1/routes` | GET | external | `status:read` |
+| `/api/v1/routes/{route_id}` | GET | external | `status:read` |
+| `/api/v1/upstreams` | GET | external | `status:read` |
+| `/api/v1/upstreams/{name}` | GET | external | `status:read` |
 
 The probes and the scrape target keep their **current unversioned paths**.
 Moving a liveness probe or a Prometheus target under `/api/v1` would break every
@@ -251,6 +255,70 @@ through their own configuration.
 | --- | --- |
 | `limit` | defaults to 50, caps at 200. An out-of-range value is rejected with `invalid_request` rather than silently clamped — a client asking for 1000 and receiving 200 without being told has a paging bug it cannot see |
 | `cursor` | **opaque**. Pass back `next_cursor` verbatim; never construct one. Its format is not part of the contract, and it expires as snapshots are pruned |
+
+### `GET /api/v1/routes`
+
+Every route, in **declaration order**: server blocks in configuration order,
+locations within each in configuration order. That ordering is not a
+presentation choice. Declaration order *is* routing precedence, so a collection
+that sorted by identifier or iterated a map would misrepresent which route wins
+a request.
+
+Each entry carries two different kinds of name, and the difference is the whole
+design:
+
+- `route_id` is a **durable identity**. It survives edits, reordering and
+  rewrites of the route's own semantics, and it is the only thing that addresses
+  a route at `/api/v1/routes/{route_id}`. It is present only when the route has
+  one.
+- `selector` is a **revision-scoped coordinate**: `listen`, `server_names`,
+  `match_type`, `path` and a `match_ordinal` that disambiguates two locations
+  with the same match within one server block. Every one of those is mutable
+  route semantics, so a selector means nothing on its own — it is only valid
+  against the `base_version` it was read with, which is why the collection
+  publishes that version alongside it.
+
+A route with no `route_id` is **collection-only**. It appears here, but it is not
+addressable at `/api/v1/routes/{...}` under any encoding — not an index, not an
+ordinal, not a hash of its coordinates. Inventing one would manufacture a second
+identity scheme with none of the durability guarantees of the first, and an
+operator would have no way to tell which kind they were holding. Such a route is
+mutated through its selector plus `base_version`.
+
+The policy fields (`tls`, `auth`, `cache`, `rate_limit`, `waf`,
+`require_client_cert`) report **whether a policy is attached, not its content**.
+A route's auth block can name an htpasswd file; that path is not a
+`status:read` disclosure, so it does not appear here. A client that needs the
+policy itself reads the configuration under its own permission.
+
+### `GET /api/v1/routes/{route_id}`
+
+One route, resolved from the id alone. An unknown id is `not_found` with
+`details.kind = "route"` — including for an id that is well-formed but
+unassigned, and for anything that looks like an invented encoding.
+
+### `GET /api/v1/upstreams`
+
+Every pool in configuration order, with each backend's configured `weight` and
+its live `state` (`available`, `circuit_open`, `circuit_half_open`,
+`health_unhealthy`, `at_capacity`) and `in_flight` count.
+
+The collection is built from the **configuration** and then enriched with
+runtime state joined by name, rather than being read out of the runtime's own
+snapshot. Two consequences follow, and both are deliberate:
+
+- the order is the configured order, because the runtime's internal ordering is
+  not part of any published contract; and
+- a pool the runtime has not yet reported on is still listed, with its configured
+  backends and an empty `state`, instead of vanishing from a collection that
+  claims to describe the configuration. A pool disappearing because a health
+  subsystem had not spoken yet would read as a deletion.
+
+### `GET /api/v1/upstreams/{name}`
+
+One pool, addressed by its natural key. `name` is required and unique by
+validation, so it *is* the identity — there is no separate id. Renaming a pool
+is therefore a delete plus a create, not an update.
 
 ## What is deliberately not published
 

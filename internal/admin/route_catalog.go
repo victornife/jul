@@ -217,6 +217,68 @@ var Catalog = []RouteSpec{
 		},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1HistoryList) },
 	},
+	{
+		Pattern:    "/api/v1/routes",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.StatusRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID: "listRoutes",
+				Summary: "Every route in declaration order, each carrying its durable route_id when it has one and the " +
+					"revision-scoped selector always, with the base_version those selectors are scoped to.",
+				Response: "RoutesResponse",
+				Errors:   []string{"storage_unavailable"},
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Routes) },
+	},
+	{
+		Pattern:    "/api/v1/routes/{route_id}",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.StatusRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID: "getRoute",
+				Summary: "One route, resolved from its durable id alone. A route without a route_id is collection-only " +
+					"and is not addressable here.",
+				Response: "RouteResponse",
+				Errors:   []string{"not_found", "storage_unavailable"},
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Route) },
+	},
+	{
+		Pattern:    "/api/v1/upstreams",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.StatusRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID:       "listUpstreams",
+				Summary:  "Every upstream pool in configuration order, with each backend's configured weight and live eligibility state.",
+				Response: "UpstreamsResponse",
+				Errors:   []string{"storage_unavailable"},
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Upstreams) },
+	},
+	{
+		Pattern:    "/api/v1/upstreams/{name}",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.StatusRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID:       "getUpstream",
+				Summary:  "One upstream pool, addressed by its natural key.",
+				Response: "UpstreamResponse",
+				Errors:   []string{"not_found", "storage_unavailable"},
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Upstream) },
+	},
 
 	// ── Identity (authenticated, any credential) ─────────────────────────────
 	// Returns the caller's own server-derived identity so the Console can
