@@ -148,6 +148,75 @@ var Catalog = []RouteSpec{
 		},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Capabilities) },
 	},
+	{
+		Pattern:    "/api/v1/config",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.ConfigRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID: "getConfig",
+				Summary: "Configuration metadata: serving and persisted versions, authority, drift and any staged restart. " +
+					"Returns no configuration bytes.",
+				Response: "ConfigResponse",
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Config) },
+	},
+	{
+		Pattern: "/api/v1/config/pending-restart",
+		Methods: []string{http.MethodGet},
+		AnyPermissions: []rbac.Permission{
+			rbac.ConfigRead,
+			rbac.ConfigWrite,
+			rbac.ConfigApply,
+		},
+		Stability: StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID:       "getPendingRestart",
+				Summary:  "The staged planned restart, if any: which subsystems require it, the staged version, and whether it can be discarded.",
+				Response: "PendingRestartResponse",
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1PendingRestart) },
+	},
+	{
+		Pattern: "/api/v1/config/applies/{apply_id}",
+		Methods: []string{http.MethodGet},
+		AnyPermissions: []rbac.Permission{
+			rbac.StatusRead,
+			rbac.ConfigApply,
+			rbac.HistoryRollback,
+		},
+		Stability: StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID: "getApplyResult",
+				Summary: "The exact outcome of one managed transaction. Answers 202 while pending or finalizing and 200 once terminal; " +
+					"branch on `terminal`, never on the status code alone.",
+				Response: "ApplyResultResponse",
+				Errors:   []string{"not_found"},
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1ApplyGet) },
+	},
+	{
+		Pattern:    "/api/v1/config/history",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.HistoryRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID: "listConfigHistory",
+				Summary: "Configuration history as safe metadata, newest first. Paginated with limit and cursor; returns no snapshot bodies. " +
+					"The only v1 collection that paginates, because it is the only unbounded one.",
+				Response: "HistoryListResponse",
+				Errors:   []string{"storage_unavailable"},
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1HistoryList) },
+	},
 
 	// ── Identity (authenticated, any credential) ─────────────────────────────
 	// Returns the caller's own server-derived identity so the Console can

@@ -139,6 +139,10 @@ route it asked for.
 | `/metrics` | GET | external | `metrics:read` |
 | `/api/v1/status` | GET | external | `status:read` |
 | `/api/v1/capabilities` | GET | external | `status:read` |
+| `/api/v1/config` | GET | external | `config:read` |
+| `/api/v1/config/pending-restart` | GET | external | any of `config:read`, `config:write`, `config:apply` |
+| `/api/v1/config/applies/{apply_id}` | GET | external | any of `status:read`, `config:apply`, `history:rollback` |
+| `/api/v1/config/history` | GET | external | `history:read` |
 
 The probes and the scrape target keep their **current unversioned paths**.
 Moving a liveness probe or a Prometheus target under `/api/v1` would break every
@@ -199,6 +203,54 @@ shared source so the two cannot drift apart.
 full path set; the operations land incrementally, and a path appears here only
 once it is served. Publishing a `v1` path is a one-way door under §25, so
 nothing is declared stable ahead of being implemented.
+
+### `GET /api/v1/config`
+
+The configuration-centric view of the same state `/api/v1/status` reports from
+the server's side: serving and persisted versions, authority, drift and any
+staged restart.
+
+It returns **no configuration bytes**. Raw export is not part of the external
+contract in v1.
+
+### `GET /api/v1/config/applies/{apply_id}`
+
+The exact outcome of one managed transaction, retrievable regardless of later
+transactions. This is what an apply, stage or rollback polls.
+
+> **Branch on `terminal`, never on the status code alone.**
+
+The operation answers `202` while the record is pending or finalizing and `200`
+once it is terminal — but a non-empty `outcome` is *not* the terminal test
+either. `saved_not_live` means the configuration was persisted and the live
+reload result is not yet known; a client that stopped polling on it would wait
+forever for a result that had not happened yet. Reaching your poll deadline is
+`operation_timeout`.
+
+The response carries `boot_id`, so a client that reconnects can tell an evicted
+record from a discarded ledger.
+
+A `404` means the record is unknown **or evicted** — the ledger is process-local
+and its bounds are published in `/api/v1/capabilities`.
+
+### `GET /api/v1/config/history`
+
+Configuration history as **safe metadata**, newest first.
+
+It returns **no snapshot bodies**: a history snapshot *is* a configuration file
+and may contain literal secret values, which is why raw bodies stay on the
+internal route under `history:raw`. It also carries **no actor** — attribution
+is the audit API's surface, behind its own permission.
+
+This is the only `v1` collection that paginates, because it is the only one whose
+size is unbounded; every other collection is bounded by the configuration itself
+and returns in full, since paginating a route list would make an operator page
+through their own configuration.
+
+| Parameter | Behaviour |
+| --- | --- |
+| `limit` | defaults to 50, caps at 200. An out-of-range value is rejected with `invalid_request` rather than silently clamped — a client asking for 1000 and receiving 200 without being told has a paging bug it cannot see |
+| `cursor` | **opaque**. Pass back `next_cursor` verbatim; never construct one. Its format is not part of the contract, and it expires as snapshots are pruned |
 
 ## What is deliberately not published
 

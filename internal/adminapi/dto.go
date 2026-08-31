@@ -50,6 +50,12 @@ var schemaTypes = map[string]reflect.Type{
 	"PendingRestartState":  reflect.TypeFor[PendingRestartState](),
 	"LedgerRetention":      reflect.TypeFor[LedgerRetention](),
 	"EndpointAvailability": reflect.TypeFor[EndpointAvailability](),
+
+	"ConfigResponse":         reflect.TypeFor[ConfigResponse](),
+	"PendingRestartResponse": reflect.TypeFor[PendingRestartResponse](),
+	"ApplyResultResponse":    reflect.TypeFor[ApplyResultResponse](),
+	"HistoryListResponse":    reflect.TypeFor[HistoryListResponse](),
+	"HistoryEntry":           reflect.TypeFor[HistoryEntry](),
 }
 
 // SchemaTypes returns the registered external DTOs by component name.
