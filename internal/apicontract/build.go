@@ -74,6 +74,9 @@ func Build() (*Document, error) {
 	if err := checkResourcePaths(doc); err != nil {
 		return nil, err
 	}
+	if err := checkCatalogPathsAreServed(doc); err != nil {
+		return nil, err
+	}
 	return doc, nil
 }
 
@@ -365,6 +368,24 @@ func checkResourcePaths(doc *Document) error {
 			return fmt.Errorf("path %s addresses a resource, but no entry in the generated resource catalog claims it.\n"+
 				"Add the resource to internal/configcontract.ResourceCatalog with that ExternalPath, or remove the path: "+
 				"a per-resource URI that no resource claims is a second, unchecked identity model", pattern)
+		}
+	}
+	return nil
+}
+
+// checkCatalogPathsAreServed holds the catalog to the document: the other
+// direction, and a different failure. A catalog entry naming a path nothing
+// serves documents an identity clients cannot use, which is worse than an
+// undocumented one because it reads as a promise.
+func checkCatalogPathsAreServed(doc *Document) error {
+	for _, res := range configcontract.ResourceCatalog {
+		if res.ExternalPath == "" {
+			continue
+		}
+		if _, ok := doc.Paths[res.ExternalPath]; !ok {
+			return fmt.Errorf("resource %q claims external path %s, but the contract publishes no such path.\n"+
+				"Serve it, or clear the ExternalPath in internal/configcontract.ResourceCatalog: a catalog entry "+
+				"naming an unserved address documents an identity clients cannot use", res.Kind, res.ExternalPath)
 		}
 	}
 	return nil

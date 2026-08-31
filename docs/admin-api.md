@@ -147,6 +147,9 @@ route it asked for.
 | `/api/v1/routes/{route_id}` | GET | external | `status:read` |
 | `/api/v1/upstreams` | GET | external | `status:read` |
 | `/api/v1/upstreams/{name}` | GET | external | `status:read` |
+| `/api/v1/listeners` | GET | external | `config:read` |
+| `/api/v1/listeners/{addr}/client_address` | GET | external | `config:read` |
+| `/api/v1/streams` | GET | external | `status:read` |
 
 The probes and the scrape target keep their **current unversioned paths**.
 Moving a liveness probe or a Prometheus target under `/api/v1` would break every
@@ -319,6 +322,74 @@ snapshot. Two consequences follow, and both are deliberate:
 One pool, addressed by its natural key. `name` is required and unique by
 validation, so it *is* the identity — there is no separate id. Renaming a pool
 is therefore a delete plus a create, not an update.
+
+### `GET /api/v1/listeners`
+
+Every bound address in **declaration order**. The internal listener route sorts
+by address for the Console's table; that sort is deliberately not carried over,
+because §24a makes declaration order the published ordering and the two surfaces
+are allowed to differ in encoding precisely so the Console can keep its table
+without the contract inheriting a sort.
+
+A listener **is the address**, not the server block: several blocks may bind one
+address, so `server_blocks` counts them and `server_names` is their union in
+declaration order.
+
+The trusted-proxy policy is **not inlined here**. It has its own address and its
+own permission, and publishing it in two shapes would be one thing represented
+twice, free to drift apart. The collection reports only
+`client_address_configured`, so a client knows whether there is anything to
+fetch.
+
+### `GET /api/v1/listeners/{addr}/client_address`
+
+One listener's effective trusted-proxy policy: which upstream proxies are
+trusted, which forwarded headers are honoured, and how many hops are accepted.
+
+It is a sub-resource rather than a listener field because it is the one part of
+a listener with its own permission — reading it is `config:read` and changing it
+is `config:trust`. A trusted-proxy range decides which address a request is
+attributed to, and therefore what every allow-list, rate limit and audit record
+downstream sees.
+
+`configured` distinguishes a written policy from the defaults, which are
+otherwise identical on the wire. An address no server block binds is
+`not_found` rather than a default policy: reporting defaults for a listener that
+does not exist would tell an operator their listener was configured permissively
+when in fact it was not configured at all.
+
+`trusts_every_client` flags a range covering the whole address space, which lets
+any client assert any address. It mirrors the `jul lint` finding rather than
+restating the rule.
+
+### `GET /api/v1/streams`
+
+Every declared L4 stream in declaration order, with `compiled` reporting whether
+this build includes the stream proxy. A declared stream still validates in a
+build without it, but the process refuses to start — so a client that saw only
+the declarations would believe a service was configured that this binary cannot
+serve.
+
+A stream's identity is the composite natural key `(protocol, listen)`, and it
+has **deliberately no addressable path**: the collection is its whole external
+surface, and the resource catalogue records the empty path rather than an
+invented one.
+
+Two encoding decisions are worth stating, because they point in opposite
+directions:
+
+- **Durations are integer milliseconds** in `_ms`-suffixed fields, never a Go
+  duration string (ADR 0019 §26.4) — a client should not have to implement Go's
+  duration grammar to read a number. They are the **effective** values after
+  defaulting, so a client reads what the stream will actually do without knowing
+  this server's defaults. `protocol` is resolved the same way.
+- **`sni_routes` is a sorted list, not an object.** The keys are
+  operator-chosen, so an object with unbounded keys could not be described by a
+  schema — part of the contract would sit outside the generated document. And
+  unlike the collections, a map has no declaration order to preserve, so sorting
+  by server name is the only stable choice here; leaving it unsorted would
+  publish Go's randomized map iteration as if it were an ordering, and a client
+  diffing two reads would see phantom changes.
 
 ## What is deliberately not published
 

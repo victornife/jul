@@ -434,6 +434,202 @@
         ]
       }
     },
+    "/api/v1/listeners": {
+      "get": {
+        "operationId": "listListeners",
+        "summary": "Every bound address in declaration order, with the server blocks and names it serves and whether a trusted-proxy policy was written for it.",
+        "tags": [
+          "listeners"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListenersResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "config:read"
+        ]
+      }
+    },
+    "/api/v1/listeners/{addr}/client_address": {
+      "get": {
+        "operationId": "getListenerClientAddress",
+        "summary": "One listener's effective trusted-proxy policy: the rules deciding which client address a request is attributed to.",
+        "tags": [
+          "listeners"
+        ],
+        "parameters": [
+          {
+            "name": "addr",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientAddressResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — The addressed resource does not exist. Returned only to a caller that already holds the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "config:read"
+        ]
+      }
+    },
     "/api/v1/routes": {
       "get": {
         "operationId": "listRoutes",
@@ -688,6 +884,94 @@
           },
           "500": {
             "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "status:read"
+        ]
+      }
+    },
+    "/api/v1/streams": {
+      "get": {
+        "operationId": "listStreams",
+        "summary": "Every declared L4 stream in declaration order, with whether this build compiled the stream proxy that serves them.",
+        "tags": [
+          "streams"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1290,6 +1574,74 @@
         ],
         "additionalProperties": false
       },
+      "ClientAddress": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "forwarded_headers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "headers_disabled": {
+            "type": "boolean"
+          },
+          "listen": {
+            "type": "string"
+          },
+          "max_hops": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "server_blocks": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "trusted_proxies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trusts_every_client": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "configured",
+          "forwarded_headers",
+          "headers_disabled",
+          "listen",
+          "max_hops",
+          "server_blocks",
+          "trusted_proxies",
+          "trusts_every_client"
+        ],
+        "additionalProperties": false
+      },
+      "ClientAddressResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "base_version": {
+            "type": "string"
+          },
+          "client_address": {
+            "$ref": "#/components/schemas/ClientAddress"
+          }
+        },
+        "required": [
+          "api_version",
+          "base_version",
+          "client_address"
+        ],
+        "additionalProperties": false
+      },
       "ConfigResponse": {
         "type": "object",
         "properties": {
@@ -1688,6 +2040,67 @@
         ],
         "additionalProperties": false
       },
+      "Listener": {
+        "type": "object",
+        "properties": {
+          "client_address_configured": {
+            "type": "boolean"
+          },
+          "client_auth": {
+            "type": "string"
+          },
+          "http3": {
+            "type": "boolean"
+          },
+          "listen": {
+            "type": "string"
+          },
+          "server_blocks": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "server_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tls": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "client_address_configured",
+          "http3",
+          "listen",
+          "server_blocks",
+          "tls"
+        ],
+        "additionalProperties": false
+      },
+      "ListenersResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "base_version": {
+            "type": "string"
+          },
+          "listeners": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Listener"
+            }
+          }
+        },
+        "required": [
+          "api_version",
+          "base_version",
+          "listeners"
+        ],
+        "additionalProperties": false
+      },
       "PendingRestartResponse": {
         "type": "object",
         "properties": {
@@ -1913,6 +2326,22 @@
         ],
         "additionalProperties": false
       },
+      "SNIRoute": {
+        "type": "object",
+        "properties": {
+          "server_name": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_name",
+          "target"
+        ],
+        "additionalProperties": false
+      },
       "StatusResponse": {
         "type": "object",
         "properties": {
@@ -1965,6 +2394,75 @@
           "ledger_retention",
           "pending_restart",
           "ready"
+        ],
+        "additionalProperties": false
+      },
+      "Stream": {
+        "type": "object",
+        "properties": {
+          "connect_timeout_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "idle_timeout_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "listen": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "proxy_protocol": {
+            "type": "string"
+          },
+          "sni_routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SNIRoute"
+            }
+          },
+          "target": {
+            "type": "string"
+          },
+          "tls_passthrough": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "connect_timeout_ms",
+          "idle_timeout_ms",
+          "listen",
+          "protocol",
+          "tls_passthrough"
+        ],
+        "additionalProperties": false
+      },
+      "StreamsResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "base_version": {
+            "type": "string"
+          },
+          "compiled": {
+            "type": "boolean"
+          },
+          "streams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Stream"
+            }
+          }
+        },
+        "required": [
+          "api_version",
+          "base_version",
+          "compiled",
+          "streams"
         ],
         "additionalProperties": false
       },

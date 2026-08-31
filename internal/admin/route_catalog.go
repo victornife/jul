@@ -279,6 +279,51 @@ var Catalog = []RouteSpec{
 		},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Upstream) },
 	},
+	{
+		Pattern:    "/api/v1/listeners",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.ConfigRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID:       "listListeners",
+				Summary:  "Every bound address in declaration order, with the server blocks and names it serves and whether a trusted-proxy policy was written for it.",
+				Response: "ListenersResponse",
+				Errors:   []string{"storage_unavailable"},
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Listeners) },
+	},
+	{
+		Pattern:    "/api/v1/listeners/{addr}/client_address",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.ConfigRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID:       "getListenerClientAddress",
+				Summary:  "One listener's effective trusted-proxy policy: the rules deciding which client address a request is attributed to.",
+				Response: "ClientAddressResponse",
+				Errors:   []string{"not_found", "storage_unavailable"},
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1ClientAddress) },
+	},
+	{
+		Pattern:    "/api/v1/streams",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.StatusRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID:       "listStreams",
+				Summary:  "Every declared L4 stream in declaration order, with whether this build compiled the stream proxy that serves them.",
+				Response: "StreamsResponse",
+				Errors:   []string{"storage_unavailable"},
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Streams) },
+	},
 
 	// ── Identity (authenticated, any credential) ─────────────────────────────
 	// Returns the caller's own server-derived identity so the Console can
