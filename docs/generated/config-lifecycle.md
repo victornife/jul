@@ -17,15 +17,15 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 350 |
-| Schema leaves (configurable values) | 297 |
-| Registry entries | 297 |
-| Startup-consumed entries | 59 |
+| Schema paths (containers included) | 356 |
+| Schema leaves (configurable values) | 302 |
+| Registry entries | 302 |
+| Startup-consumed entries | 63 |
 | Class `hot_reload` | 224 |
-| Class `restart_required` | 59 |
+| Class `restart_required` | 63 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
-| Class `validation_rejected_reserved` | 2 |
+| Class `validation_rejected_reserved` | 3 |
 
 ## Classes
 
@@ -143,6 +143,11 @@ value is compared as a digest so no secret material leaves the process.
 | `admin.rbac.roles.*.name` | `hot_reload` | `rbac` | — | the admin RBAC policy is rebuilt and atomically swapped after each successful reload |
 | `admin.rbac.roles.*.permissions` | `hot_reload` | `rbac` | — | the admin RBAC policy is rebuilt and atomically swapped after each successful reload |
 | `admin.tls.cert` | `hot_reload` | `tls` | digest | a candidate certificate provider is built and validated during preflight, then swapped atomically into the admin listener's existing dynamic provider on the next successful reload, reusing #100's seam (#336) |
+| `admin.tls.client_auth.ca_file` | `restart_required` | `mtls` | startup, digest | the client CA pool is read and installed when the admin listener is created; the fingerprint digests the file contents so an in-place rotation is detected |
+| `admin.tls.client_auth.crl_file` | `restart_required` | `mtls` | startup, digest | the revocation list is read and installed when the admin listener is created; the fingerprint digests the file contents so an in-place rotation is detected |
+| `admin.tls.client_auth.forward_certificate` | `validation_rejected_reserved` | `mtls` | reserved | the admin API has no backend to forward a client certificate to; Validate rejects a non-none value, so no running process can have consumed it |
+| `admin.tls.client_auth.mode` | `restart_required` | `mtls` | startup | the client-certificate policy is written into the admin listener's tls.Config when it is created |
+| `admin.tls.client_auth.verify_san` | `restart_required` | `mtls` | startup | the SAN allow-list is captured by the admin listener's verify callback when it is created |
 | `admin.tls.enabled` | `restart_required` | `tls` | startup | turning TLS on or off for the admin listener changes the socket's protocol, a structural transition |
 | `admin.tls.key` | `hot_reload` | `tls` | digest | a candidate certificate provider is built and validated during preflight, then swapped atomically into the admin listener's existing dynamic provider on the next successful reload, reusing #100's seam (#336) |
 | `admin.tls.min_version` | `restart_required` | `tls` | startup | the minimum protocol version is written into the admin listener's tls.Config when it is created |

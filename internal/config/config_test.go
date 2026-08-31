@@ -1905,6 +1905,108 @@ require_client_cert = true
 	}
 }
 
+// TestClientAuthConfigActiveTrimsWhitespace pins a fix for a real bug a
+// Copilot PR review caught (#374): Active() must trim mode the same way
+// validateClientAuth and clientAuthMode do, or a whitespace-padded "none"
+// passes validation (which trims) but was still treated as "active" here,
+// leading to a spurious runtime failure trying to load an empty ca_file.
+func TestClientAuthConfigActiveTrimsWhitespace(t *testing.T) {
+	for _, mode := range []string{"", "none", " none", "none ", "\tnone\n"} {
+		if (&ClientAuthConfig{Mode: mode}).Active() {
+			t.Errorf("Active() with mode %q = true, want false", mode)
+		}
+	}
+	for _, mode := range []string{"request", " request", "require "} {
+		if !(&ClientAuthConfig{Mode: mode}).Active() {
+			t.Errorf("Active() with mode %q = false, want true", mode)
+		}
+	}
+}
+
+// adminTLSConfig builds a minimal enabled-admin config with the given
+// [admin.tls] block.
+func adminTLSConfig(tls *AdminTLSConfig) *Config {
+	return &Config{
+		Admin: AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", TLS: tls, PluginUploadEnabled: Bool(false)},
+		Servers: []ServerConfig{{
+			Listen:    ":8080",
+			Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}},
+		}},
+	}
+}
+
+func TestValidateAdminTLSValid(t *testing.T) {
+	cfg := adminTLSConfig(&AdminTLSConfig{Enabled: true, Cert: "/etc/admin-cert.pem", Key: "/etc/admin-key.pem", MinVersion: "1.3"})
+	if err := Validate(cfg); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateAdminTLSRequiresCertAndKey(t *testing.T) {
+	for _, tls := range []*AdminTLSConfig{
+		{Enabled: true, Key: "/etc/admin-key.pem"},
+		{Enabled: true, Cert: "/etc/admin-cert.pem"},
+	} {
+		if err := Validate(adminTLSConfig(tls)); err == nil {
+			t.Errorf("expected error for %+v", tls)
+		}
+	}
+}
+
+func TestValidateAdminTLSBadMinVersion(t *testing.T) {
+	cfg := adminTLSConfig(&AdminTLSConfig{Enabled: true, Cert: "/etc/admin-cert.pem", Key: "/etc/admin-key.pem", MinVersion: "1.1"})
+	if err := Validate(cfg); err == nil {
+		t.Error("expected error for invalid min_version")
+	}
+}
+
+func TestValidateAdminTLSDisabledIgnoresRestOfBlock(t *testing.T) {
+	cfg := adminTLSConfig(&AdminTLSConfig{Enabled: false, MinVersion: "bogus"})
+	if err := Validate(cfg); err != nil {
+		t.Errorf("a disabled [admin.tls] block should not be validated: %v", err)
+	}
+}
+
+func TestValidateAdminTLSClientAuthValid(t *testing.T) {
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(caFile, []byte("ca"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := adminTLSConfig(&AdminTLSConfig{
+		Enabled: true, Cert: "/etc/admin-cert.pem", Key: "/etc/admin-key.pem",
+		ClientAuth: &ClientAuthConfig{Mode: "require", CAFile: caFile},
+	})
+	if err := Validate(cfg); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateAdminTLSClientAuthReusesClientAuthValidation(t *testing.T) {
+	cfg := adminTLSConfig(&AdminTLSConfig{
+		Enabled: true, Cert: "/etc/admin-cert.pem", Key: "/etc/admin-key.pem",
+		ClientAuth: &ClientAuthConfig{Mode: "bogus"},
+	})
+	if err := Validate(cfg); err == nil {
+		t.Error("expected error for an invalid admin.tls.client_auth mode")
+	}
+}
+
+func TestValidateAdminTLSClientAuthRejectsForwardCertificate(t *testing.T) {
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(caFile, []byte("ca"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, fc := range []string{"leaf", "chain"} {
+		cfg := adminTLSConfig(&AdminTLSConfig{
+			Enabled: true, Cert: "/etc/admin-cert.pem", Key: "/etc/admin-key.pem",
+			ClientAuth: &ClientAuthConfig{Mode: "require", CAFile: caFile, ForwardCertificate: fc},
+		})
+		if err := Validate(cfg); err == nil {
+			t.Errorf("forward_certificate %q: expected error: the admin API has no backend to forward to", fc)
+		}
+	}
+}
+
 func TestAdminPluginUploadDisabled(t *testing.T) {
 	cfg, err := Parse([]byte("[admin]\nenabled = true\nplugin_upload_enabled = false\nplugin_upload_max_size = 32\n\n[[servers]]\nlisten = \":8080\"\n"))
 	if err != nil {

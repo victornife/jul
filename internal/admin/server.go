@@ -644,6 +644,11 @@ type Server struct {
 	// load; Run must fail before binding rather than half-start.
 	certProvider *server.DynamicCertProvider
 	tlsErr       error
+	// clientAuth is nil unless [admin.tls.client_auth] was active at startup.
+	// Like the data plane's mutual TLS, the whole block is restart-required —
+	// there is no hot path for handshake policy — so this is built once in New
+	// and never mutated, needing no lock (#336).
+	clientAuth *server.ClientAuthBundle
 	// certMu guards certFingerprint, which PrepareTLS reads and
 	// CommitPreparedTLS writes; both can run from admin-apply preflight
 	// goroutines that are not otherwise serialized against each other the way
@@ -754,6 +759,14 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 			s.certProvider = dyn
 			s.certFingerprint = server.SingleCertFingerprint(cfg.TLS.Cert, cfg.TLS.Key)
 		}
+		if s.tlsErr == nil {
+			bundle, err := server.NewSingleClientAuthBundle(cfg.TLS.ClientAuth, nil)
+			if err != nil {
+				s.tlsErr = fmt.Errorf("admin.tls.client_auth: %w", err)
+			} else {
+				s.clientAuth = bundle
+			}
+		}
 	}
 	s.httpd = &http.Server{
 		Addr:              cfg.Listen,
@@ -784,12 +797,21 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 	if s.certProvider != nil {
-		ln = tls.NewListener(ln, &tls.Config{
+		tlsConf := &tls.Config{
 			GetCertificate: s.certProvider.GetCertificate,
 			MinVersion:     server.MinTLSVersion(s.cfg.TLS.MinVersion),
-		})
+		}
+		if s.clientAuth != nil {
+			// Composes with — does not replace — the bearer/RBAC layer: this
+			// only gates the handshake. Every request that reaches the
+			// handler still goes through the normal auth chokepoint (#336).
+			tlsConf.ClientAuth = s.clientAuth.Mode
+			tlsConf.ClientCAs = s.clientAuth.Pool
+			tlsConf.VerifyPeerCertificate = s.clientAuth.Verify
+		}
+		ln = tls.NewListener(ln, tlsConf)
 	}
-	s.log.Info("admin listener started", "addr", s.cfg.Listen, "tls", s.certProvider != nil, "auth", s.currentAdminConfig().Token != "")
+	s.log.Info("admin listener started", "addr", s.cfg.Listen, "tls", s.certProvider != nil, "client_auth", s.clientAuth != nil, "auth", s.currentAdminConfig().Token != "")
 	// The admin API grants full read/write control of the running server. It is
 	// designed for single-operator, loopback-bound use. Binding to a routable
 	// address without an external firewall, VPN, or mTLS layer is unsafe.

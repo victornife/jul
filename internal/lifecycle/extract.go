@@ -363,6 +363,18 @@ func adminTLSValue(fn func(*config.AdminTLSConfig) any) func(*config.Config) any
 	}
 }
 
+// adminClientAuthValue is the admin.tls.client_auth analogue of
+// clientAuthValue (#336): nil-safe access to the one admin listener's
+// client_auth block, matching adminTLSValue's no-perListener-grouping shape.
+func adminClientAuthValue(fn func(*config.ClientAuthConfig) any) func(*config.Config) any {
+	return adminTLSValue(func(t *config.AdminTLSConfig) any {
+		if t.ClientAuth == nil {
+			return nil
+		}
+		return fn(t.ClientAuth)
+	})
+}
+
 // specialExtractor returns the extractor for paths whose comparison shape is not
 // the plain schema walk: listener-scoped values, file-content digests, pointer
 // defaults resolved to their effective value, and lists whose order carries no
@@ -397,6 +409,23 @@ func specialExtractor(path string) (func(*config.Config) any, bool) {
 		return adminTLSValue(func(t *config.AdminTLSConfig) any { return digestTLSMaterial(t.Cert) }), true
 	case "admin.tls.key":
 		return adminTLSValue(func(t *config.AdminTLSConfig) any { return digestTLSMaterial(t.Key) }), true
+	case "admin.tls.client_auth.mode":
+		return adminClientAuthValue(func(c *config.ClientAuthConfig) any { return c.Mode }), true
+	case "admin.tls.client_auth.ca_file":
+		return adminClientAuthValue(func(c *config.ClientAuthConfig) any { return digestTLSMaterial(c.CAFile) }), true
+	case "admin.tls.client_auth.crl_file":
+		return adminClientAuthValue(func(c *config.ClientAuthConfig) any { return digestTLSMaterial(c.CRLFile) }), true
+	case "admin.tls.client_auth.verify_san":
+		return adminClientAuthValue(func(c *config.ClientAuthConfig) any { return sortedCopy(c.VerifySAN) }), true
+	case "admin.tls.client_auth.forward_certificate":
+		// Validation rejects a non-none value: the admin API has no backend to
+		// forward a client certificate to. The extractor reports only whether
+		// one is configured at all, mirroring servers.*.tls.acme.dns_provider,
+		// so a never-consumable field still resolves to a stable value.
+		return adminClientAuthValue(func(c *config.ClientAuthConfig) any {
+			v := strings.ToLower(strings.TrimSpace(c.ForwardCertificate))
+			return v != "" && v != "none"
+		}), true
 
 	// ── ACME ───────────────────────────────────────────────────────────────
 	case "servers.*.tls.acme.enabled":

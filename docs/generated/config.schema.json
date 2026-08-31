@@ -168,6 +168,44 @@
               "type": "string",
               "x-jul-secret": true
             },
+            "client_auth": {
+              "additionalProperties": false,
+              "properties": {
+                "ca_file": {
+                  "description": "CAFile is the PEM bundle of certificate authorities that client certificates are verified against",
+                  "type": "string",
+                  "x-jul-secret": true
+                },
+                "crl_file": {
+                  "description": "CRLFile, when set, is a PEM- or DER-encoded certificate revocation list",
+                  "type": "string",
+                  "x-jul-secret": true
+                },
+                "forward_certificate": {
+                  "description": "ForwardCertificate conveys the verified client certificate to backends with the RFC 9440 Client-Cert header: \"none\" (default), \"leaf\", or \"chain\" (which adds Client-Cert-Chain)",
+                  "type": "string",
+                  "x-jul-reserved": true
+                },
+                "mode": {
+                  "description": "Mode selects enforcement at the TLS handshake: \"none\" — off (the default)",
+                  "enum": [
+                    "none",
+                    "request",
+                    "require"
+                  ],
+                  "type": "string",
+                  "x-jul-constraint": "exact lowercase enum"
+                },
+                "verify_san": {
+                  "description": "VerifySAN, when non-empty, is an allow-list of subject alternative names (DNS name, URI, email, or IP)",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
             "enabled": {
               "description": "Enabled terminates the admin listener with TLS instead of plaintext",
               "type": "boolean"

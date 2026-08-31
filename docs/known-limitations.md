@@ -483,11 +483,11 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   for multi-user workflows. External identity (OIDC/SSO) remains a Y3-02 horizon
   item. See [docs/specs/console-rbac.md](specs/console-rbac.md) and the migration
   steps in [docs/console.md](console.md).
-- **Admin listener TLS has no client-certificate authentication yet, and no
-  ACME.** `[admin.tls]` (#336) terminates the listener with an operator-supplied
-  certificate, with hot content rotation reusing #100's seam. Client-certificate
-  authentication composing with the bearer/RBAC layer, and automatic
-  certificate management, are later, separate tranches of this issue.
+- **Admin listener TLS has no ACME.** `[admin.tls]` (#336) terminates the
+  listener with an operator-supplied certificate, with hot content rotation
+  reusing #100's seam, and optional client-certificate authentication
+  (`[admin.tls.client_auth]`) composing with the bearer/RBAC layer. Automatic
+  certificate management is a later, separate tranche of this issue.
 
 ---
 

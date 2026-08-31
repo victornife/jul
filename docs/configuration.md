@@ -1378,9 +1378,9 @@ Terminates the admin listener with an operator-supplied certificate instead of
 plaintext (#336), reusing the same certificate-rotation seam as
 [`servers.*.tls`](#tls): certificate content and same-path rotation
 hot-apply, with no rebind and no dropped connection. There is no ACME option
-here and no client-certificate authentication yet — an operator-supplied
-certificate is the bounded first tranche. Enabling or disabling it is a
-structural transition and requires a restart, exactly like `servers.*.tls.enabled`.
+here — an operator-supplied certificate is the bounded starting point.
+Enabling or disabling it is a structural transition and requires a restart,
+exactly like `servers.*.tls.enabled`.
 
 ```toml
 [admin.tls]
@@ -1401,6 +1401,32 @@ A malformed or missing certificate/key pair is rejected before the candidate
 configuration is persisted or applied. Binding off-loopback without `[admin.tls]`
 enabled produces a `jul lint` warning (L7); binding off-loopback with TLS
 configured is a supported configuration.
+
+#### `[admin.tls.client_auth]`
+
+Optionally requires or requests a client certificate on the admin listener,
+reusing [`servers.*.tls.client_auth`](#mutual-tls-client-certificates)'s exact
+vocabulary and validation directly rather than a second one. It **composes
+with — does not replace —** the bearer-token/RBAC layer: the handshake itself
+gates the connection, and every request that reaches the handler still goes
+through the normal auth chokepoint, so a valid client certificate never
+bypasses the token or RBAC check and a valid token never bypasses the
+certificate requirement. The whole block is restart-required, like the data
+plane's mutual TLS — there is no hot path for handshake policy.
+
+```toml
+[admin.tls.client_auth]
+mode = "require"
+ca_file = "/etc/jul/admin-clients-ca.pem"
+```
+
+| Key | Type | Description |
+| --- | ---- | ----------- |
+| `mode` | string | `"none"` (default), `"request"`, or `"require"`. Restart-required. |
+| `ca_file` | string | PEM bundle of CAs client certificates are verified against. Required unless `mode` is `"none"`. Content and same-path rotation are captured at restart. |
+| `verify_san` | list of string | Optional allow-list of subject alternative names. |
+| `crl_file` | string | Optional PEM/DER certificate revocation list, verified against `ca_file`. |
+| `forward_certificate` | string | Must stay `"none"` (the default): the admin API has no backend to forward a client certificate to. Set to anything else and validation rejects the configuration. |
 
 ---
 

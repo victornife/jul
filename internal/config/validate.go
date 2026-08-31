@@ -811,11 +811,13 @@ func validateClientAuth(ca *ClientAuthConfig, where string) []error {
 	return errs
 }
 
-// validateAdminTLS checks the optional [admin.tls] block (#336): enabled/cert/key/
-// min_version mirror servers.*.tls, but the admin listener currently supports
-// only operator-supplied cert/key termination (no ACME and no client_auth in
-// this tranche). Structural transitions (enabled/min_version) remain
-// restart-required; cert/key content is validated during admin preflight.
+// validateAdminTLS checks the optional [admin.tls] block (#336): enabled/cert/
+// key/min_version mirror servers.*.tls, and client_auth reuses
+// validateClientAuth directly. Structural transitions (enabled/min_version/
+// client_auth) remain restart-required; cert/key content is validated during
+// admin preflight. The admin API has no backend to forward a client
+// certificate to, so forward_certificate must stay unset/"none" here even
+// though the field exists on the shared ClientAuthConfig type.
 func validateAdminTLS(t *AdminTLSConfig) []error {
 	if t == nil || !t.Enabled {
 		return nil
@@ -829,6 +831,12 @@ func validateAdminTLS(t *AdminTLSConfig) []error {
 	}
 	if v := strings.TrimSpace(t.MinVersion); v != "" && v != "1.2" && v != "1.3" {
 		errs = append(errs, fmt.Errorf("[admin.tls]: invalid min_version %q (want 1.2 or 1.3)", t.MinVersion))
+	}
+	errs = append(errs, validateClientAuth(t.ClientAuth, "admin.tls.client_auth")...)
+	if t.ClientAuth != nil {
+		if fc := strings.ToLower(strings.TrimSpace(t.ClientAuth.ForwardCertificate)); fc != "" && fc != "none" {
+			errs = append(errs, errors.New("admin.tls.client_auth: forward_certificate must be \"none\": the admin API has no backend to forward a client certificate to"))
+		}
 	}
 	return errs
 }
