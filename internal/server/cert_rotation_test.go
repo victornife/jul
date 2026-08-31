@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"io"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -367,5 +368,148 @@ func TestReloadRotatesLiveCertificateWithoutRebind(t *testing.T) {
 	// and ordinary certificate rotation never drops existing connections.
 	if body := httpOverConn(t, held, addr); body != "ok" {
 		t.Fatalf("held connection body after rotation = %q", body)
+	}
+}
+
+// startTestServerWithTLS builds and starts a real *Server bound to a TLS
+// listener at addr, serving initial, and returns the server, its reload
+// channel, and the stubSource backing it (so a caller can mutate it before
+// sending a file-watch-style ReloadRequest to drive a real rotation). The
+// server stops when the test ends (t.Cleanup cancels its context).
+func startTestServerWithTLS(t *testing.T, addr string, initial *config.Config) (*Server, chan ReloadRequest, *stubSource) {
+	t.Helper()
+	src := &stubSource{}
+	src.set(initial, nil)
+	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+		return map[string]http.Handler{addr: h}, 1, func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, nil
+	}
+	srv := New(initial, nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(context.Context, *config.Config) error { return nil })
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	reload := make(chan ReloadRequest, 2)
+	go func() { _ = srv.Run(ctx, reload, redact.EmptyState()) }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		c, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true, ServerName: "a.example.com"})
+		if err == nil {
+			_ = c.Close()
+			return srv, reload, src
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("TLS listener never became reachable")
+	return nil, nil, nil
+}
+
+// TestLiveCertSummariesDoesNotReReadDiskAfterPublish (#100 acceptance
+// criterion 6) is the residual's exact scenario: a certificate file is
+// rewritten out of band, at its already-configured path, with no
+// configuration change and therefore no reload. LiveCertSummaries must keep
+// reporting the certificate actually installed in the live provider, not
+// whatever bytes now sit at that path.
+func TestLiveCertSummariesDoesNotReReadDiskAfterPublish(t *testing.T) {
+	dir := t.TempDir()
+	certA, keyA := writeSelfSigned(t, dir, "a", "a.example.com")
+	certB, keyB := writeSelfSigned(t, dir, "b", "a.example.com")
+	addr := freePort(t)
+
+	srv, _, _ := startTestServerWithTLS(t, addr, tlsCfgFor(addr, certA, keyA, "a.example.com"))
+
+	summaries := srv.LiveCertSummaries()
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %+v, want exactly 1", summaries)
+	}
+	certAParsed, _, _ := loadLeafForTest(t, certA, keyA)
+	if summaries[0].Subject != certAParsed.Subject.CommonName {
+		t.Fatalf("subject = %q, want %q (certificate A)", summaries[0].Subject, certAParsed.Subject.CommonName)
+	}
+
+	// Rewrite the SAME configured path out of band with certificate B's
+	// bytes, without going through a reload at all.
+	bBytes, err := os.ReadFile(certB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(certA, bBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kBytes, err := os.ReadFile(keyB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyA, kBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	after := srv.LiveCertSummaries()
+	if len(after) != 1 {
+		t.Fatalf("summaries after out-of-band rewrite = %+v, want exactly 1", after)
+	}
+	certBParsed, _, _ := loadLeafForTest(t, certB, keyB)
+	if after[0].Subject == certBParsed.Subject.CommonName {
+		t.Fatal("LiveCertSummaries reported the out-of-band on-disk bytes instead of the live installed certificate")
+	}
+	if after[0].Subject != certAParsed.Subject.CommonName {
+		t.Fatalf("subject after out-of-band rewrite = %q, want the still-live certificate A (%q)", after[0].Subject, certAParsed.Subject.CommonName)
+	}
+}
+
+// TestLiveCertSummariesReflectsAPublishedRotation proves the complementary
+// half: once a rotation genuinely goes through Publish, LiveCertSummaries
+// does advance to the new certificate.
+func TestLiveCertSummariesReflectsAPublishedRotation(t *testing.T) {
+	dir := t.TempDir()
+	certA, keyA := writeSelfSigned(t, dir, "a", "a.example.com")
+	certB, keyB := writeSelfSigned(t, dir, "b", "a.example.com")
+	addr := freePort(t)
+
+	srv, reload, src := startTestServerWithTLS(t, addr, tlsCfgFor(addr, certA, keyA, "a.example.com"))
+
+	certAParsed, _, _ := loadLeafForTest(t, certA, keyA)
+	if got := srv.LiveCertSummaries(); len(got) != 1 || got[0].Subject != certAParsed.Subject.CommonName {
+		t.Fatalf("summaries before rotation = %+v, want certificate A", got)
+	}
+
+	src.set(tlsCfgFor(addr, certB, keyB, "a.example.com"), nil)
+	resultCh := make(chan ReloadResult, 1)
+	reload <- ReloadRequest{ID: "rotate", Source: ReloadSourceFileWatch, Result: resultCh}
+	if result := <-resultCh; result.Outcome != ReloadAppliedLive {
+		t.Fatalf("reload outcome = %+v", result)
+	}
+
+	certBParsed, _, _ := loadLeafForTest(t, certB, keyB)
+	got := srv.LiveCertSummaries()
+	if len(got) != 1 || got[0].Subject != certBParsed.Subject.CommonName {
+		t.Fatalf("summaries after rotation = %+v, want certificate B", got)
+	}
+}
+
+// TestLiveCertSummariesReportsACME proves the ACME branch never consults a
+// listener's provider (which has no Summaries method): it is answered
+// entirely from configuration, exactly like InspectCerts' ACME marker.
+func TestLiveCertSummariesReportsACME(t *testing.T) {
+	addr := freePort(t)
+	cfg := &config.Config{
+		Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+		Servers: []config.ServerConfig{{
+			Listen:      addr,
+			ServerNames: []string{"acme.example.com"},
+			TLS: &config.TLSConfig{
+				Enabled: true,
+				ACME:    &config.ACMEConfig{Enabled: true, Email: "ops@example.com", Domains: []string{"acme.example.com"}},
+			},
+		}},
+	}
+	s := &Server{log: quietLogger(), listeners: map[string]*listenerEntry{}}
+	s.runtimeState.Store(&runtimeState{EffectiveConfig: cfg})
+
+	got := s.LiveCertSummaries()
+	if len(got) != 1 || got[0].Source != "acme" {
+		t.Fatalf("summaries = %+v, want one ACME marker", got)
+	}
+	if len(got[0].ServerNames) != 1 || got[0].ServerNames[0] != "acme.example.com" {
+		t.Fatalf("server names = %v, want [acme.example.com]", got[0].ServerNames)
 	}
 }

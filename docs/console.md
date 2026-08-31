@@ -251,7 +251,10 @@ that has vanished and a pool that is failing call for opposite responses.
 
 ### Certificates
 
-Shows every TLS certificate configured on a server block:
+Shows every TLS certificate currently live on a bound server block — the
+certificate actually installed in the running listener, not whatever bytes
+currently sit at the configured path, so a rejected candidate or an
+out-of-band file rewrite can never appear live (#100):
 
 - **File certificates** are parsed for subject, issuer, SANs, and an expiry
   countdown (red within 14 days, amber within 30).
