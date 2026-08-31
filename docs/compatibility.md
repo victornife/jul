@@ -159,10 +159,13 @@ plaintext on a non-loopback address stops working.**
 
 **Required migration — do one of these before upgrading:**
 
-1. **Terminate TLS in front of the admin listener.** A reverse proxy, a
-   systemd-activated socket or a loopback-bound sidecar. The gate is satisfied
-   by the connection being TLS, on any address.
-2. **Bind the admin listener to loopback** (`[admin] listen = "127.0.0.1:9090"`,
+1. **Terminate the listener with [`[admin.tls]`](configuration.md#admintls)**
+   (#336). The admin listener presents a certificate itself; no external
+   component is required and the gate is satisfied on any address. Certificate
+   content and same-path rotation hot-apply without a rebind.
+2. **Terminate TLS in front of the admin listener** — a reverse proxy, a
+   systemd-activated socket or a loopback-bound sidecar.
+3. **Bind the admin listener to loopback** (`[admin] listen = "127.0.0.1:9090"`,
    which is the default) and reach it through an SSH tunnel. Scrape
    `/metrics` over loopback, or through the same terminator.
 

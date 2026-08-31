@@ -432,13 +432,16 @@ func metricsDetail(on bool) string {
 // rule the trusted-proxy and backend-TLS rows already follow: the panel says
 // what the posture *is*, not what the configuration *says*.
 func adminTransportDetail(a config.AdminConfig) string {
-	if !a.Enabled {
+	switch {
+	case !a.Enabled:
 		return ""
-	}
-	if addrIsLoopback(a.Listen) {
+	case adminListenerTerminatesTLS(a):
+		return "TLS-terminated listener; remote administration is permitted on any address"
+	case addrIsLoopback(a.Listen):
 		return "loopback listener; cleartext is refused on any other address"
+	default:
+		return "plaintext non-loopback listener; every authenticated route is refused, /metrics included. Enable [admin.tls] or bind to loopback"
 	}
-	return "non-loopback listener; every authenticated route requires TLS, /metrics included"
 }
 
 // externalAPIDetail reports how much of the admin surface is a supported

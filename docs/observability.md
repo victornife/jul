@@ -34,10 +34,12 @@ replayed against a mutation.
 
 Two supported topologies:
 
+- **Terminate the admin listener with [`[admin.tls]`](configuration.md#admintls)**
+  (#336) and scrape `https://`. This is the first-class answer: no external
+  component is required and it works on any bind address.
 - **Scrape over loopback.** Run the scraper on the same host, or bind the admin
   listener to loopback and expose it through an SSH tunnel or a
   loopback-bound sidecar.
-- **Terminate TLS in front of the admin listener** and scrape `https://`.
 
 There is no override and no configuration key. See
 [compatibility.md](compatibility.md#admin-transport-security-adr-0019-281) for

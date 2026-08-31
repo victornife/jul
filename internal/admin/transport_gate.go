@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"jul/internal/adminapi"
+	"jul/internal/config"
 )
 
 // requiredTransport is the constant returned in the insecure_transport error's
@@ -81,10 +82,19 @@ func (s *Server) transportIsSecure(r *http.Request) bool {
 	}
 	// No connection to inspect. net/http sets LocalAddrContextKey on every
 	// connection it serves, so this is an in-process call rather than a network
-	// request — but rather than assume that, fall back to the static property
-	// of the listener this server was configured to bind. A wildcard or
-	// non-loopback bind is refused, so the fallback never widens the gate.
-	return addrIsLoopback(s.currentAdminConfig().Listen)
+	// request — but rather than assume that, fall back to the static properties
+	// of the listener this server was configured to bind. Neither clause widens
+	// the gate: a plaintext wildcard or non-loopback bind is still refused.
+	cfg := s.currentAdminConfig()
+	return adminListenerTerminatesTLS(cfg) || addrIsLoopback(cfg.Listen)
+}
+
+// adminListenerTerminatesTLS reports whether [admin.tls] terminates the
+// listener itself (#336). A request arriving on such a listener carries
+// r.TLS, so this is consulted only on the no-connection path above and by the
+// Console status projection.
+func adminListenerTerminatesTLS(cfg config.AdminConfig) bool {
+	return cfg.TLS != nil && cfg.TLS.Enabled
 }
 
 // addrIsLoopback reports whether a host:port address names a loopback

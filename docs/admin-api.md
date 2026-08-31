@@ -57,11 +57,16 @@ The refusal carries only `"required": "tls_or_loopback"`. It is returned before
 authentication, so anything it disclosed would be disclosed to an anonymous
 caller; the listen address is a configuration value and is deliberately absent.
 
-**Two supported remedies:**
+**Three supported remedies:**
 
-- terminate TLS in front of the admin listener (a reverse proxy, a
-  systemd-activated socket, a sidecar), or
-- bind the listener to loopback and reach it through an SSH tunnel.
+- **Terminate the listener with [`[admin.tls]`](configuration.md#admintls)** (#336).
+  This is the first-class answer: the admin listener presents a certificate
+  itself, no external component is required, and the gate is satisfied on any
+  address. Certificate content and same-path rotation hot-apply without a
+  rebind.
+- **Terminate TLS in front of the listener** — a reverse proxy, a
+  systemd-activated socket, a loopback-bound sidecar.
+- **Bind the listener to loopback** and reach it through an SSH tunnel.
 
 See [compatibility.md](compatibility.md#admin-transport-security-adr-0019-281)
 for the migration, and [observability.md](observability.md#scraping-metrics)

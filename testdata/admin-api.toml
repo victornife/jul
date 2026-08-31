@@ -9,13 +9,11 @@
 #     admin credential — reads as well as writes, and /metrics — is refused
 #     with 403 insecure_transport on a listener that is neither TLS-terminated
 #     nor loopback-bound. There is no override and no configuration key.
-#     To administer this server remotely, tunnel to loopback:
+#     To administer this server remotely, either enable [admin.tls] so the
+#     listener presents a certificate itself (#336), or tunnel to loopback:
 #
 #         ssh -N -L 9090:127.0.0.1:9090 operator@host
 #         curl -H "Authorization: Bearer $JUL_TOKEN" http://127.0.0.1:9090/api/v1/status
-#
-#     or terminate TLS in front of the listener, which satisfies the gate on
-#     any address.
 #
 #  2. Named principals with least privilege, so a scrape token is not an admin
 #     token. This matters more than it looks: the legacy single-token identity

@@ -56,20 +56,39 @@ func TestStatusReportsAdminTransportPosture(t *testing.T) {
 
 	exposed := statusRows(t, &config.Config{Admin: config.AdminConfig{Enabled: true, Listen: "0.0.0.0:9090"}})
 	row = exposed["Admin transport security"]
-	if !strings.Contains(row.Detail, "requires TLS") {
-		t.Fatalf("a non-loopback listener must say TLS is required, got %q", row.Detail)
+	if !strings.Contains(row.Detail, "refused") {
+		t.Fatalf("a plaintext non-loopback listener must say requests are refused, got %q", row.Detail)
 	}
 	if !strings.Contains(row.Detail, "/metrics") {
-		t.Fatalf("a non-loopback listener must name /metrics, the consequence most likely to be found in production: %q", row.Detail)
+		t.Fatalf("a plaintext non-loopback listener must name /metrics, the consequence most likely to be found in production: %q", row.Detail)
+	}
+	if !strings.Contains(row.Detail, "[admin.tls]") {
+		t.Fatalf("the panel must name the remedy now that #336 shipped it: %q", row.Detail)
+	}
+
+	// A TLS-terminated listener satisfies the gate on any address (#336), and
+	// the panel must not tell that operator to fix something that is not broken.
+	terminated := statusRows(t, &config.Config{Admin: config.AdminConfig{
+		Enabled: true,
+		Listen:  "0.0.0.0:9090",
+		TLS:     &config.AdminTLSConfig{Enabled: true, Cert: "admin.pem", Key: "admin-key.pem"},
+	}})
+	row = terminated["Admin transport security"]
+	if !row.Active {
+		t.Fatal("the row is inactive for a TLS-terminated listener")
+	}
+	if !strings.Contains(row.Detail, "TLS-terminated") || strings.Contains(row.Detail, "refused") {
+		t.Fatalf("a TLS-terminated listener reports %q", row.Detail)
 	}
 
 	// Bounded metadata only, matching the rule the trusted-proxy and
 	// backend-TLS rows already follow: the panel reports the posture, never
-	// the address.
-	for _, rows := range []map[string]FeatureStatus{loopback, exposed} {
-		for _, addr := range []string{"127.0.0.1:9090", "0.0.0.0:9090"} {
-			if strings.Contains(rows["Admin transport security"].Detail, addr) {
-				t.Fatalf("the status detail projects the listen address: %q", rows["Admin transport security"].Detail)
+	// the address, and never a certificate path.
+	for _, rows := range []map[string]FeatureStatus{loopback, exposed, terminated} {
+		detail := rows["Admin transport security"].Detail
+		for _, leak := range []string{"127.0.0.1:9090", "0.0.0.0:9090", "admin.pem", "admin-key.pem"} {
+			if strings.Contains(detail, leak) {
+				t.Fatalf("the status detail projects a configuration value: %q", detail)
 			}
 		}
 	}

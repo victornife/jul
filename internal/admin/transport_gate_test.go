@@ -179,30 +179,66 @@ func TestTransportGateExemptsOnlyTheProbes(t *testing.T) {
 
 // TestTransportGateFallsBackToTheConfiguredListener covers a request with no
 // connection to inspect. The fallback is the static property of the listener
-// the server was configured to bind, and it never widens the gate: a wildcard
-// or public bind is refused exactly as a wildcard or public connection is.
+// the server was configured to bind, and it never widens the gate: a plaintext
+// wildcard or public bind is refused exactly as such a connection is.
 func TestTransportGateFallsBackToTheConfiguredListener(t *testing.T) {
 	cases := []struct {
-		listen  string
+		name    string
+		cfg     config.AdminConfig
 		refused bool
 	}{
-		{"127.0.0.1:9090", false},
-		{"localhost:9090", false},
-		{"[::1]:9090", false},
-		{"0.0.0.0:9090", true},
-		{":9090", true},
-		{"203.0.113.7:9090", true},
+		{"loopback", config.AdminConfig{Listen: "127.0.0.1:9090"}, false},
+		{"localhost", config.AdminConfig{Listen: "localhost:9090"}, false},
+		{"ipv6 loopback", config.AdminConfig{Listen: "[::1]:9090"}, false},
+		{"wildcard", config.AdminConfig{Listen: "0.0.0.0:9090"}, true},
+		{"port only", config.AdminConfig{Listen: ":9090"}, true},
+		{"public address", config.AdminConfig{Listen: "203.0.113.7:9090"}, true},
+		// #336's [admin.tls] terminates the listener itself, which satisfies
+		// §28.1 on any address.
+		{"tls terminated on a public address", config.AdminConfig{
+			Listen: "203.0.113.7:9090",
+			TLS:    &config.AdminTLSConfig{Enabled: true, Cert: "c.pem", Key: "k.pem"},
+		}, false},
+		// A declared-but-disabled block is still plaintext.
+		{"tls declared but disabled", config.AdminConfig{
+			Listen: "203.0.113.7:9090",
+			TLS:    &config.AdminTLSConfig{Enabled: false},
+		}, true},
 	}
 	for _, tc := range cases {
-		t.Run(tc.listen, func(t *testing.T) {
-			s := newTestServer(t, config.AdminConfig{Listen: tc.listen}, Deps{})
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServer(t, tc.cfg, Deps{})
 			rr := httptest.NewRecorder()
 			s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/status", nil))
 			refused := rr.Code == http.StatusForbidden
 			if refused != tc.refused {
-				t.Fatalf("listen %q: refused = %v, want %v (status %d)", tc.listen, refused, tc.refused, rr.Code)
+				t.Fatalf("refused = %v, want %v (status %d)", refused, tc.refused, rr.Code)
 			}
 		})
+	}
+}
+
+// TestTransportGateHonoursAConnectionOverTheConfiguration. The per-connection
+// local address is the authority, not the configured bind: a wildcard listener
+// accepts loopback and remote connections alike, and only the connection knows
+// which one this is.
+func TestTransportGateHonoursAConnectionOverTheConfiguration(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{Listen: "0.0.0.0:9090"}, Deps{})
+	h := s.routes()
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, withLocalAddr(httptest.NewRequest(http.MethodGet, "/api/status", nil), "127.0.0.1:9090"))
+	if rr.Code == http.StatusForbidden {
+		t.Fatal("a loopback connection to a wildcard listener was refused")
+	}
+
+	// And the reverse: a loopback *configuration* does not excuse a connection
+	// that actually arrived on a public address.
+	s = newTestServer(t, config.AdminConfig{Listen: "127.0.0.1:9090"}, Deps{})
+	rr = httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, withLocalAddr(httptest.NewRequest(http.MethodGet, "/api/status", nil), "203.0.113.7:9090"))
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("a public connection was accepted because the configuration said loopback (status %d)", rr.Code)
 	}
 }
 
