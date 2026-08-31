@@ -88,6 +88,352 @@
         ]
       }
     },
+    "/api/v1/config": {
+      "get": {
+        "operationId": "getConfig",
+        "summary": "Configuration metadata: serving and persisted versions, authority, drift and any staged restart. Returns no configuration bytes.",
+        "tags": [
+          "configuration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "config:read"
+        ]
+      }
+    },
+    "/api/v1/config/applies/{apply_id}": {
+      "get": {
+        "operationId": "getApplyResult",
+        "summary": "The exact outcome of one managed transaction. Answers 202 while pending or finalizing and 200 once terminal; branch on `terminal`, never on the status code alone.",
+        "tags": [
+          "configuration"
+        ],
+        "parameters": [
+          {
+            "name": "apply_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyResultResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — The addressed resource does not exist. Returned only to a caller that already holds the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "status:read",
+          "config:apply",
+          "history:rollback"
+        ]
+      }
+    },
+    "/api/v1/config/history": {
+      "get": {
+        "operationId": "listConfigHistory",
+        "summary": "Configuration history as safe metadata, newest first. Paginated with limit and cursor; returns no snapshot bodies. The only v1 collection that paginates, because it is the only unbounded one.",
+        "tags": [
+          "configuration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "history:read"
+        ]
+      }
+    },
+    "/api/v1/config/pending-restart": {
+      "get": {
+        "operationId": "getPendingRestart",
+        "summary": "The staged planned restart, if any: which subsystems require it, the staged version, and whether it can be discarded.",
+        "tags": [
+          "configuration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingRestartResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "config:read",
+          "config:write",
+          "config:apply"
+        ]
+      }
+    },
     "/api/v1/status": {
       "get": {
         "operationId": "getStatus",
@@ -337,6 +683,76 @@
   },
   "components": {
     "schemas": {
+      "ApplyResultResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "apply_id": {
+            "type": "string"
+          },
+          "boot_id": {
+            "type": "string"
+          },
+          "completed_at": {
+            "type": "string"
+          },
+          "deadline": {
+            "type": "string"
+          },
+          "degraded": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Degradation"
+            }
+          },
+          "mode": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "persisted_version": {
+            "type": "string"
+          },
+          "restore_error": {
+            "type": "string"
+          },
+          "restored": {
+            "type": "boolean"
+          },
+          "serving_version": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "terminal": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "api_version",
+          "apply_id",
+          "boot_id",
+          "degraded",
+          "ok",
+          "restored",
+          "state",
+          "terminal"
+        ],
+        "additionalProperties": false
+      },
       "ApplySummary": {
         "type": "object",
         "properties": {
@@ -479,6 +895,46 @@
           "config_schema_version",
           "endpoints",
           "ledger_retention"
+        ],
+        "additionalProperties": false
+      },
+      "ConfigResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "config_authority": {
+            "type": "string"
+          },
+          "config_authority_source": {
+            "type": "string"
+          },
+          "config_inconsistent_reason": {
+            "type": "string"
+          },
+          "config_state": {
+            "type": "string"
+          },
+          "drift": {
+            "$ref": "#/components/schemas/DriftState"
+          },
+          "pending_restart": {
+            "$ref": "#/components/schemas/PendingRestartState"
+          },
+          "persisted_version": {
+            "type": "string"
+          },
+          "serving_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_version",
+          "config_authority",
+          "config_authority_source",
+          "drift",
+          "pending_restart"
         ],
         "additionalProperties": false
       },
@@ -749,6 +1205,75 @@
         ],
         "additionalProperties": false
       },
+      "HistoryEntry": {
+        "type": "object",
+        "properties": {
+          "apply_id": {
+            "type": "string"
+          },
+          "candidate_version": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "metadata_error": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "previous_version": {
+            "type": "string"
+          },
+          "recorded_at": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "id",
+          "recorded_at",
+          "size_bytes"
+        ],
+        "additionalProperties": false
+      },
+      "HistoryListResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HistoryEntry"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_version",
+          "entries",
+          "limit"
+        ],
+        "additionalProperties": false
+      },
       "LedgerRetention": {
         "type": "object",
         "properties": {
@@ -768,6 +1293,61 @@
           "min_age_seconds",
           "min_terminal_records",
           "policy"
+        ],
+        "additionalProperties": false
+      },
+      "PendingRestartResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "config_authority": {
+            "type": "string"
+          },
+          "config_authority_source": {
+            "type": "string"
+          },
+          "config_inconsistent_reason": {
+            "type": "string"
+          },
+          "config_state": {
+            "type": "string"
+          },
+          "discard_available": {
+            "type": "boolean"
+          },
+          "pending": {
+            "type": "boolean"
+          },
+          "persisted_version": {
+            "type": "string"
+          },
+          "serving_version": {
+            "type": "string"
+          },
+          "staged_at": {
+            "type": "string"
+          },
+          "staged_version": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "subsystems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "api_version",
+          "config_authority",
+          "config_authority_source",
+          "discard_available",
+          "pending"
         ],
         "additionalProperties": false
       },
