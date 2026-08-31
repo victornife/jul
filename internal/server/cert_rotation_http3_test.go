@@ -38,21 +38,37 @@ func h3ClientTrusting(t *testing.T, certPath string) *http3.Transport {
 	return &http3.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "a.example.com"}}
 }
 
-// getH3 issues one HTTP/3 GET against addr using tr, retrying briefly since
-// the QUIC accept loop starts asynchronously (matches TestHTTP3EndToEnd).
+// getH3 issues an HTTP/3 GET against addr using tr, retrying with a short
+// per-attempt timeout over a generous overall deadline. Unlike TCP, QUIC has
+// no immediate refusal for "nothing is listening yet": a client dialing
+// before the accept loop has started just gets silence until its own
+// handshake timeout fires, so a single long-timeout attempt can consume the
+// entire retry budget by itself (observed on Windows CI, where listener
+// startup is measurably slower than on Linux). Many short attempts survive
+// that; a long per-attempt timeout with only a handful of retries does not.
 func getH3(t *testing.T, tr *http3.Transport, addr string) (*http.Response, error) {
 	t.Helper()
-	client := &http.Client{Transport: tr, Timeout: 3 * time.Second}
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	var resp *http.Response
 	var err error
 	for {
+		client := &http.Client{Transport: tr, Timeout: 500 * time.Millisecond}
 		resp, err = client.Get("https://" + addr + "/")
 		if err == nil || time.Now().After(deadline) {
 			return resp, err
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// getH3Once issues exactly one bounded HTTP/3 GET, for an assertion that
+// expects a deterministic, fast failure (a TLS handshake the client's own
+// certificate verification rejects) rather than a "listener not ready yet"
+// condition that would need retrying.
+func getH3Once(t *testing.T, tr *http3.Transport, addr string) (*http.Response, error) {
+	t.Helper()
+	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
+	return client.Get("https://" + addr + "/")
 }
 
 // TestReloadRotatesHTTP3CertificateWithoutRebind (#100 acceptance criterion:
@@ -107,10 +123,12 @@ func TestReloadRotatesHTTP3CertificateWithoutRebind(t *testing.T) {
 	}
 
 	// A client that only trusts A must now be refused: the live provider no
-	// longer serves A on new handshakes.
+	// longer serves A on new handshakes. The listener has been up and serving
+	// since before rotation, so this is a deterministic certificate-mismatch
+	// rejection, not a "not ready yet" condition — one bounded attempt proves it.
 	trAAfter := h3ClientTrusting(t, certA)
 	defer func() { _ = trAAfter.Close() }()
-	if _, err := getH3(t, trAAfter, addr); err == nil {
+	if _, err := getH3Once(t, trAAfter, addr); err == nil {
 		t.Fatal("expected a client trusting only the old certificate to fail after rotation")
 	}
 
