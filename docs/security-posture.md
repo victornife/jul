@@ -54,7 +54,10 @@ When running with the legacy shared token (RBAC disabled):
 - Do not expose the admin listener to untrusted networks under any circumstances.
 - If remote access is required, configure [`[admin.tls]`](configuration.md#admin) with an
   operator-supplied certificate (#336) — never bind off-loopback in cleartext.
-  An SSH tunnel or a mutual-TLS proxy in front remains a valid alternative.
+  Optionally add [`[admin.tls.client_auth]`](configuration.md#admin) to require a
+  client certificate as well; it composes with the token/RBAC check rather than
+  replacing it. An SSH tunnel or a mutual-TLS proxy in front remains a valid
+  alternative.
 - For CI/automation tokens, prefer a scoped RBAC principal; otherwise use a
   dedicated instance or restrict network access so only the automation host can
   reach the admin port.
@@ -73,7 +76,7 @@ console = true
 
 | Control | Recommendation |
 | --- | --- |
-| Bind address | `127.0.0.1` (loopback) by default. Remote access is supported by terminating TLS with `[admin.tls]` (#336) — certificate content and same-path rotation hot-apply, with no rebind. An SSH tunnel or a mutual-TLS proxy in front remains a valid alternative to a raw off-loopback bind. |
+| Bind address | `127.0.0.1` (loopback) by default. Remote access is supported by terminating TLS with `[admin.tls]` (#336) — certificate content and same-path rotation hot-apply, with no rebind — optionally with `[admin.tls.client_auth]` requiring a client certificate as well, composing with the token/RBAC check. An SSH tunnel or a mutual-TLS proxy in front remains a valid alternative to a raw off-loopback bind. |
 | Token strength | Minimum 32 random bytes (256-bit); use a password manager or `openssl rand -base64 32`. |
 | Token storage | Use `${env:}`, `${file:}`, or `${secret:}` references. See [docs/secrets.md](secrets.md). |
 | Token rotation | Rotate through the validated configuration lifecycle; legacy shared-token cutover remains tracked by #95. RBAC token IDs can be revoked independently. |

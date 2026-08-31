@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 297 configurable leaves.
+Coverage: 302 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -354,6 +354,70 @@ Cert is the path to the PEM certificate file the admin listener presents.
 | Subsystem | `tls` |
 | Why | a candidate certificate provider is built and validated during preflight, then swapped atomically into the admin listener's existing dynamic provider on the next successful reload, reusing #100's seam (#336) |
 | Flags | secret |
+
+## `admin.tls.client_auth.ca_file` {#admin-tls-client_auth-ca_file}
+
+CAFile is the PEM bundle of certificate authorities that client certificates are verified against.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `mtls` |
+| Why | the client CA pool is read and installed when the admin listener is created; the fingerprint digests the file contents so an in-place rotation is detected |
+| Flags | startup-consumed, secret |
+
+## `admin.tls.client_auth.crl_file` {#admin-tls-client_auth-crl_file}
+
+CRLFile, when set, is a PEM- or DER-encoded certificate revocation list.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `mtls` |
+| Why | the revocation list is read and installed when the admin listener is created; the fingerprint digests the file contents so an in-place rotation is detected |
+| Flags | startup-consumed, secret |
+
+## `admin.tls.client_auth.forward_certificate` {#admin-tls-client_auth-forward_certificate}
+
+ForwardCertificate conveys the verified client certificate to backends with the RFC 9440 Client-Cert header: "none" (default), "leaf", or "chain" (which adds Client-Cert-Chain).
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `validation_rejected_reserved` |
+| Subsystem | `mtls` |
+| Why | the admin API has no backend to forward a client certificate to; Validate rejects a non-none value, so no running process can have consumed it |
+| Flags | reserved |
+
+## `admin.tls.client_auth.mode` {#admin-tls-client_auth-mode}
+
+Mode selects enforcement at the TLS handshake: "none" — off (the default).
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `mtls` |
+| Why | the client-certificate policy is written into the admin listener's tls.Config when it is created |
+| Flags | startup-consumed |
+| Allowed values | `none`, `request`, `require` |
+| Constraint | exact lowercase enum |
+| Zero/empty semantics | omitted selects the documented default where supported |
+| Active when | client_auth configured |
+
+## `admin.tls.client_auth.verify_san` {#admin-tls-client_auth-verify_san}
+
+VerifySAN, when non-empty, is an allow-list of subject alternative names (DNS name, URI, email, or IP).
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `mtls` |
+| Why | the SAN allow-list is captured by the admin listener's verify callback when it is created |
+| Flags | startup-consumed |
 
 ## `admin.tls.enabled` {#admin-tls-enabled}
 

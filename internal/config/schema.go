@@ -1330,8 +1330,8 @@ type AdminConfig struct {
 	PluginUploadEnabled *bool `toml:"plugin_upload_enabled"`
 
 	// TLS terminates the admin listener with an operator-supplied certificate
-	// (#336). Nil means plaintext, the existing default. Optional
-	// client-certificate authentication is a later, separate tranche.
+	// and, optionally, requires or requests a client certificate (#336). Nil
+	// means plaintext, the existing default.
 	TLS *AdminTLSConfig `toml:"tls"`
 }
 
@@ -1340,10 +1340,7 @@ type AdminConfig struct {
 // than a second one: Cert/Key content and same-path rotation hot-apply,
 // while Enabled is a structural transition that stays restart-required,
 // matching servers.*.tls's own split. There is no ACME option here: an
-// operator-supplied certificate is the bounded starting point. Client-
-// certificate authentication is a later tranche of this issue, not this
-// field: shipping a validated-but-unwired client_auth block would be a
-// closed-world contract this code does not actually keep.
+// operator-supplied certificate is the bounded starting point.
 type AdminTLSConfig struct {
 	// Enabled terminates the admin listener with TLS instead of plaintext.
 	// Turning it on or off changes the socket's protocol, a structural
@@ -1357,6 +1354,15 @@ type AdminTLSConfig struct {
 	Key string `toml:"key"`
 	// MinVersion is one of "1.2" or "1.3", defaulting like servers.*.tls.
 	MinVersion string `toml:"min_version"`
+	// ClientAuth optionally requires or requests a client certificate,
+	// composing with — not replacing — the existing bearer-token/RBAC layer:
+	// the handshake itself gates the connection, and every request that
+	// reaches the handler still goes through the normal auth chokepoint. It
+	// reuses servers.*.tls.client_auth's exact vocabulary and validation.
+	// ForwardCertificate must stay "none": the admin API has no backend to
+	// forward a client certificate to. Applied only on restart, like the
+	// data plane's mutual TLS.
+	ClientAuth *ClientAuthConfig `toml:"client_auth"`
 }
 
 // ConsoleEnabled reports whether the web console should be served: it defaults

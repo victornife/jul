@@ -109,6 +109,54 @@ func clientAuthForAddr(servers []config.ServerConfig, addr string, onResult func
 	}, nil
 }
 
+// ClientAuthBundle is the resolved mutual-TLS configuration for one TLS
+// listener, exported for direct reuse by a single-target listener that has no
+// per-server-block aggregation to do — the admin listener (#336). A nil Mode
+// (tls.NoClientCert) means client authentication is off.
+type ClientAuthBundle struct {
+	Mode   tls.ClientAuthType
+	Pool   *x509.CertPool
+	Verify func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error
+}
+
+// NewSingleClientAuthBundle builds a ClientAuthBundle directly from one
+// ClientAuthConfig, reusing the exact CA-loading, CRL-loading and
+// verification-callback logic clientAuthForAddr uses for the data plane, but
+// without its per-address aggregation across multiple server blocks — the
+// admin listener has exactly one client_auth block, not many (#336). It
+// returns (nil, nil) when ca is inactive (nil or mode "none").
+func NewSingleClientAuthBundle(ca *config.ClientAuthConfig, onResult func(string)) (*ClientAuthBundle, error) {
+	if !ca.Active() {
+		return nil, nil
+	}
+	caCerts, err := loadCABundle(ca.CAFile)
+	if err != nil {
+		return nil, fmt.Errorf("ca_file: %w", err)
+	}
+	pool := x509.NewCertPool()
+	for _, c := range caCerts {
+		pool.AddCert(c)
+	}
+	var sanAllow []string
+	for _, s := range ca.VerifySAN {
+		if s = strings.TrimSpace(s); s != "" {
+			sanAllow = append(sanAllow, strings.ToLower(s))
+		}
+	}
+	var revoked map[string]bool
+	if f := strings.TrimSpace(ca.CRLFile); f != "" {
+		revoked, err = loadCRL(f, caCerts)
+		if err != nil {
+			return nil, fmt.Errorf("crl_file: %w", err)
+		}
+	}
+	return &ClientAuthBundle{
+		Mode:   clientAuthMode(ca.Mode),
+		Pool:   pool,
+		Verify: makeClientCertVerifier(sanAllow, revoked, onResult),
+	}, nil
+}
+
 // authStrength ranks client-auth modes so the aggregation can pick the
 // strongest across blocks sharing a listen address.
 func authStrength(m tls.ClientAuthType) int {

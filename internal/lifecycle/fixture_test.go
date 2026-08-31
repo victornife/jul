@@ -61,6 +61,12 @@ func fullConfig() *config.Config {
 				Cert:       "admin-cert.pem",
 				Key:        "admin-key.pem",
 				MinVersion: "1.3",
+				ClientAuth: &config.ClientAuthConfig{
+					Mode:      "require",
+					CAFile:    "/etc/admin-ca.pem",
+					VerifySAN: []string{"admin.example.com"},
+					CRLFile:   "/etc/admin-crl.pem",
+				},
 			},
 			RBAC: config.AdminRBACConfig{
 				Enabled:     true,

@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 350,
-    "schema_leaves": 297,
+    "schema_paths": 356,
+    "schema_leaves": 302,
     "resources": 9
   },
   "capability_build_tags": {
@@ -387,6 +387,82 @@
       "secret": true,
       "description": "Cert is the path to the PEM certificate file the admin listener presents",
       "anchor": "admin-tls-cert"
+    },
+    "admin.tls.client_auth.ca_file": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": false,
+      "subsystem": "mtls",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the client CA pool is read and installed when the admin listener is created; the fingerprint digests the file contents so an in-place rotation is detected",
+      "startup_consumed": true,
+      "secret": true,
+      "description": "CAFile is the PEM bundle of certificate authorities that client certificates are verified against",
+      "anchor": "admin-tls-client_auth-ca_file"
+    },
+    "admin.tls.client_auth.crl_file": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": false,
+      "subsystem": "mtls",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the revocation list is read and installed when the admin listener is created; the fingerprint digests the file contents so an in-place rotation is detected",
+      "startup_consumed": true,
+      "secret": true,
+      "description": "CRLFile, when set, is a PEM- or DER-encoded certificate revocation list",
+      "anchor": "admin-tls-client_auth-crl_file"
+    },
+    "admin.tls.client_auth.forward_certificate": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": false,
+      "subsystem": "mtls",
+      "lifecycle_class": "validation_rejected_reserved",
+      "lifecycle_reason": "the admin API has no backend to forward a client certificate to; Validate rejects a non-none value, so no running process can have consumed it",
+      "reserved": true,
+      "description": "ForwardCertificate conveys the verified client certificate to backends with the RFC 9440 Client-Cert header: \"none\" (default), \"leaf\", or \"chain\" (which adds Client-Cert-Chain)",
+      "anchor": "admin-tls-client_auth-forward_certificate"
+    },
+    "admin.tls.client_auth.mode": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": false,
+      "subsystem": "mtls",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the client-certificate policy is written into the admin listener's tls.Config when it is created",
+      "startup_consumed": true,
+      "value_kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects the documented default where supported",
+      "active_when": "client_auth configured",
+      "allowed": [
+        "none",
+        "request",
+        "require"
+      ],
+      "description": "Mode selects enforcement at the TLS handshake: \"none\" — off (the default)",
+      "anchor": "admin-tls-client_auth-mode"
+    },
+    "admin.tls.client_auth.verify_san": {
+      "kind": "list",
+      "scalar": "string",
+      "go_type": "[]string",
+      "optional": false,
+      "dynamic": false,
+      "subsystem": "mtls",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the SAN allow-list is captured by the admin listener's verify callback when it is created",
+      "startup_consumed": true,
+      "description": "VerifySAN, when non-empty, is an allow-list of subject alternative names (DNS name, URI, email, or IP)",
+      "anchor": "admin-tls-client_auth-verify_san"
     },
     "admin.tls.enabled": {
       "kind": "scalar",

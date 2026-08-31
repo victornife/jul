@@ -208,6 +208,58 @@ func TestClientAuthForAddrBadCAFile(t *testing.T) {
 	}
 }
 
+// TestNewSingleClientAuthBundleInactive proves the admin listener's
+// single-target constructor (#336) mirrors clientAuthForAddr's (nil, nil)
+// contract when client_auth is off.
+func TestNewSingleClientAuthBundleInactive(t *testing.T) {
+	for _, ca := range []*config.ClientAuthConfig{nil, {Mode: "none"}, {}} {
+		bundle, err := NewSingleClientAuthBundle(ca, nil)
+		if err != nil || bundle != nil {
+			t.Errorf("NewSingleClientAuthBundle(%+v) = (%v, %v), want (nil, nil)", ca, bundle, err)
+		}
+	}
+}
+
+// TestNewSingleClientAuthBundleBuildsPoolAndMode proves the single-target
+// constructor reuses the exact same CA-loading and mode-mapping logic
+// clientAuthForAddr uses for the data plane (#336), without its per-address
+// aggregation.
+func TestNewSingleClientAuthBundleBuildsPoolAndMode(t *testing.T) {
+	dir := t.TempDir()
+	ca := newCA(t)
+	caFile := writePEM(t, dir, "ca.pem", ca.pem)
+
+	bundle, err := NewSingleClientAuthBundle(&config.ClientAuthConfig{Mode: "require", CAFile: caFile}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle == nil {
+		t.Fatal("expected a bundle")
+	}
+	if bundle.Mode != tls.RequireAndVerifyClientCert {
+		t.Errorf("Mode = %v, want RequireAndVerifyClientCert", bundle.Mode)
+	}
+	if bundle.Pool == nil || len(bundle.Pool.Subjects()) != 1 { //nolint:staticcheck // Subjects is deprecated but adequate for a test assertion.
+		t.Error("expected a CA pool with exactly one subject")
+	}
+}
+
+func TestNewSingleClientAuthBundleBadCAFile(t *testing.T) {
+	if _, err := NewSingleClientAuthBundle(&config.ClientAuthConfig{Mode: "require", CAFile: "/no/such/ca.pem"}, nil); err == nil {
+		t.Fatal("expected an error for an unreadable ca_file")
+	}
+}
+
+func TestNewSingleClientAuthBundleBadCRLFile(t *testing.T) {
+	dir := t.TempDir()
+	ca := newCA(t)
+	caFile := writePEM(t, dir, "ca.pem", ca.pem)
+	c := &config.ClientAuthConfig{Mode: "require", CAFile: caFile, CRLFile: "/no/such/crl.pem"}
+	if _, err := NewSingleClientAuthBundle(c, nil); err == nil {
+		t.Fatal("expected an error for an unreadable crl_file")
+	}
+}
+
 func TestLoadCABundleMultiCert(t *testing.T) {
 	dir := t.TempDir()
 	ca1 := newCA(t)

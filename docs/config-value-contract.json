@@ -270,7 +270,7 @@
     },
     {
       "go_field": "ClientAuthConfig.Mode",
-      "path": "servers[].tls.client_auth.mode",
+      "path": "servers[].tls.client_auth.mode / admin.tls.client_auth.mode",
       "kind": "enum",
       "constraint": "exact lowercase enum",
       "zero_semantics": "omitted selects the documented default where supported",

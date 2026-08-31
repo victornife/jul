@@ -256,16 +256,16 @@
     }
   ],
   "counts": {
-    "schema_paths": 350,
-    "schema_leaves": 297,
-    "registry_entries": 297,
-    "startup_consumed": 59,
+    "schema_paths": 356,
+    "schema_leaves": 302,
+    "registry_entries": 302,
+    "startup_consumed": 63,
     "by_class": {
       "hot_reload": 224,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
-      "restart_required": 59,
-      "validation_rejected_reserved": 2
+      "restart_required": 63,
+      "validation_rejected_reserved": 3
     }
   },
   "conditions": [
@@ -607,6 +607,71 @@
       "ignored": false,
       "reserved": false,
       "secret_digested": true
+    },
+    {
+      "path": "admin.tls.client_auth.ca_file",
+      "class": "restart_required",
+      "subsystem": "mtls",
+      "reason": "the client CA pool is read and installed when the admin listener is created; the fingerprint digests the file contents so an in-place rotation is detected",
+      "startup_consumed": true,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": true
+    },
+    {
+      "path": "admin.tls.client_auth.crl_file",
+      "class": "restart_required",
+      "subsystem": "mtls",
+      "reason": "the revocation list is read and installed when the admin listener is created; the fingerprint digests the file contents so an in-place rotation is detected",
+      "startup_consumed": true,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": true
+    },
+    {
+      "path": "admin.tls.client_auth.forward_certificate",
+      "class": "validation_rejected_reserved",
+      "subsystem": "mtls",
+      "reason": "the admin API has no backend to forward a client certificate to; Validate rejects a non-none value, so no running process can have consumed it",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": true,
+      "secret_digested": false
+    },
+    {
+      "path": "admin.tls.client_auth.mode",
+      "class": "restart_required",
+      "subsystem": "mtls",
+      "reason": "the client-certificate policy is written into the admin listener's tls.Config when it is created",
+      "startup_consumed": true,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "admin.tls.client_auth.verify_san",
+      "class": "restart_required",
+      "subsystem": "mtls",
+      "reason": "the SAN allow-list is captured by the admin listener's verify callback when it is created",
+      "startup_consumed": true,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
     },
     {
       "path": "admin.tls.enabled",

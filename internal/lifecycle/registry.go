@@ -327,11 +327,21 @@ func adminEntries() []Entry {
 		hot("admin.rbac.roles.*.permissions", SubRBAC, reasonRBACSwap),
 		// admin.tls: the same hot-content/restart-structural split as
 		// servers.*.tls, reusing #100's rotation seam rather than a second one
-		// (#336). Client-certificate authentication is a later tranche.
+		// (#336).
 		restart("admin.tls.enabled", SubTLS, "turning TLS on or off for the admin listener changes the socket's protocol, a structural transition"),
 		secretDigest(hot("admin.tls.cert", SubTLS, "a candidate certificate provider is built and validated during preflight, then swapped atomically into the admin listener's existing dynamic provider on the next successful reload, reusing #100's seam (#336)")),
 		secretDigest(hot("admin.tls.key", SubTLS, "a candidate certificate provider is built and validated during preflight, then swapped atomically into the admin listener's existing dynamic provider on the next successful reload, reusing #100's seam (#336)")),
 		restart("admin.tls.min_version", SubTLS, "the minimum protocol version is written into the admin listener's tls.Config when it is created"),
+		// admin.tls.client_auth: restart-required in the first tranche, like
+		// the data plane's servers.*.tls.client_auth — handshake-policy changes
+		// have connection-epoch semantics that a hot answer would pre-empt
+		// (#336). One admin listener, not one per server block, so a plain
+		// restart() entry is enough; no address-keyed bindBound grouping.
+		restart("admin.tls.client_auth.mode", SubMTLS, "the client-certificate policy is written into the admin listener's tls.Config when it is created"),
+		secretDigest(restart("admin.tls.client_auth.ca_file", SubMTLS, "the client CA pool is read and installed when the admin listener is created; the fingerprint digests the file contents so an in-place rotation is detected")),
+		secretDigest(restart("admin.tls.client_auth.crl_file", SubMTLS, "the revocation list is read and installed when the admin listener is created; the fingerprint digests the file contents so an in-place rotation is detected")),
+		restart("admin.tls.client_auth.verify_san", SubMTLS, "the SAN allow-list is captured by the admin listener's verify callback when it is created"),
+		reserved("admin.tls.client_auth.forward_certificate", SubMTLS, "the admin API has no backend to forward a client certificate to; Validate rejects a non-none value, so no running process can have consumed it"),
 	)
 	return out
 }
