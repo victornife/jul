@@ -811,11 +811,11 @@ func validateClientAuth(ca *ClientAuthConfig, where string) []error {
 	return errs
 }
 
-// validateAdminTLS checks the optional [admin.tls] block (#336): the same
-// enabled/cert/key/min_version/client_auth vocabulary as servers.*.tls,
-// reusing validateClientAuth directly, plus the one admin-specific rule —
-// there is no backend to forward a client certificate to, so
-// forward_certificate must stay unset/"none".
+// validateAdminTLS checks the optional [admin.tls] block (#336): enabled/cert/key/
+// min_version mirror servers.*.tls, but the admin listener currently supports
+// only operator-supplied cert/key termination (no ACME and no client_auth in
+// this tranche). Structural transitions (enabled/min_version) remain
+// restart-required; cert/key content is validated during admin preflight.
 func validateAdminTLS(t *AdminTLSConfig) []error {
 	if t == nil || !t.Enabled {
 		return nil
