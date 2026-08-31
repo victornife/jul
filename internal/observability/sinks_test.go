@@ -6,6 +6,7 @@ package observability
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -82,6 +83,18 @@ func TestBuildAccessSinksRejectsExplicitEmptyEnabledSet(t *testing.T) {
 	_, _, err := BuildAccessSinks(config.AccessLogConfig{Enabled: config.Bool(true), Sinks: []string{}}, newBase())
 	if err == nil {
 		t.Fatal("enabled access log with explicit empty sinks must fail")
+	}
+}
+
+// TestBuildAccessSinksRejectsEmptyFilePath is a defense-in-depth check: config
+// validation already rejects a "file" sink with no path, but BuildAccessSinks
+// must not rely solely on that upstream gate — a misconfigured candidate that
+// somehow reached here must still fail before any write, not silently probe
+// the process's current working directory.
+func TestBuildAccessSinksRejectsEmptyFilePath(t *testing.T) {
+	_, _, err := BuildAccessSinks(config.AccessLogConfig{Sinks: []string{"file"}, File: ""}, newBase())
+	if err == nil {
+		t.Fatal("expected an error for a file sink with no configured path")
 	}
 }
 
@@ -190,5 +203,133 @@ func TestBuildAccessSinksRollsBackOnError(t *testing.T) {
 	}
 	if sinks != nil || closers != nil {
 		t.Error("failed build must return no sinks or closers")
+	}
+}
+
+// TestBuildAccessSinksFailedFileSinkLeavesNoRealFile pins #98's fix: probing
+// writability must never touch the real target path, so a candidate build
+// that ultimately fails (e.g. Abort after a later sink error) leaves no
+// artifact at the configured file path — only a temp sentinel that is removed
+// immediately.
+func TestBuildAccessSinksFailedFileSinkLeavesNoRealFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "access.log")
+	cfg := config.AccessLogConfig{Sinks: []string{"file", "bogus"}, File: path}
+	if _, _, err := BuildAccessSinks(cfg, newBase()); err == nil {
+		t.Fatal("expected error for unknown sink after file sink")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("a failed candidate build created the real log file: stat err = %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("a failed candidate build left %d artifact(s) in %s: %v", len(entries), dir, entries)
+	}
+}
+
+// TestProbeWritableDirRejectsEmptyPath pins a Copilot review finding on #376:
+// an empty path must not silently probe the process's current working
+// directory (which is normally writable, masking a misconfiguration that
+// config validation already rejects elsewhere).
+func TestProbeWritableDirRejectsEmptyPath(t *testing.T) {
+	if err := probeWritableDir(""); err == nil {
+		t.Fatal("expected an error for an empty path")
+	}
+	if err := probeWritableDir("   "); err == nil {
+		t.Fatal("expected an error for a whitespace-only path")
+	}
+}
+
+// TestProbeWritableDirLeavesNoSentinelBehind pins the other half of the same
+// review finding: the temporary sentinel must actually be gone afterward, not
+// merely attempted-and-ignored.
+func TestProbeWritableDirLeavesNoSentinelBehind(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "access.log")
+	if err := probeWritableDir(path); err != nil {
+		t.Fatalf("probeWritableDir: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("probeWritableDir left %d artifact(s) behind: %v", len(entries), entries)
+	}
+}
+
+// TestProbeWritableDirMkdirAllFailure covers the directory-creation failure
+// branch: a path component that already exists as a regular file can never
+// become a directory, on any platform or privilege level.
+func TestProbeWritableDirMkdirAllFailure(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := probeWritableDir(filepath.Join(blocker, "nested", "access.log"))
+	if err == nil {
+		t.Fatal("expected an error when a path component is a regular file")
+	}
+	if !strings.Contains(err.Error(), "cannot create directory") {
+		t.Fatalf("error does not identify itself as a directory-creation failure: %v", err)
+	}
+}
+
+// TestProbeWritableDirCreateTempFailure covers the "directory exists but is
+// not writable" branch, mirroring the root/skip-guarded pattern already used
+// elsewhere in this repo for permission-based tests
+// (internal/apicontract/apicontractgen/main_test.go).
+func TestProbeWritableDirCreateTempFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: file mode does not deny writes")
+	}
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "readonly")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(sub, 0o555); err != nil {
+		t.Skipf("cannot make directory read-only on this platform: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sub, 0o755) })
+
+	err := probeWritableDir(filepath.Join(sub, "access.log"))
+	if err == nil {
+		t.Skip("the platform ignored the directory mode")
+	}
+	if !strings.Contains(err.Error(), "not writable") {
+		t.Fatalf("error does not identify itself as a writability failure: %v", err)
+	}
+}
+
+// TestProbeWritableDirCloseFailure and TestProbeWritableDirRemoveFailure cover
+// the close/remove failure branches via probeCloseFile/probeRemoveFile — a
+// real close or remove failure on a just-created temp file is impractical to
+// trigger portably, so these inject the failure deterministically instead.
+func TestProbeWritableDirCloseFailure(t *testing.T) {
+	orig := probeCloseFile
+	// Actually close the file so no locked handle is left behind (Windows
+	// cannot remove/clean up a still-open file) while still reporting a failure.
+	probeCloseFile = func(f *os.File) error { _ = f.Close(); return errors.New("injected close failure") }
+	defer func() { probeCloseFile = orig }()
+
+	err := probeWritableDir(filepath.Join(t.TempDir(), "access.log"))
+	if err == nil || !strings.Contains(err.Error(), "closing writability probe") {
+		t.Fatalf("expected a close-failure error, got %v", err)
+	}
+}
+
+func TestProbeWritableDirRemoveFailure(t *testing.T) {
+	orig := probeRemoveFile
+	probeRemoveFile = func(string) error { return errors.New("injected remove failure") }
+	defer func() { probeRemoveFile = orig }()
+
+	err := probeWritableDir(filepath.Join(t.TempDir(), "access.log"))
+	if err == nil || !strings.Contains(err.Error(), "removing writability probe") {
+		t.Fatalf("expected a remove-failure error, got %v", err)
 	}
 }

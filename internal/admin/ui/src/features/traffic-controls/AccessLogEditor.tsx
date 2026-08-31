@@ -128,10 +128,6 @@ export function AccessLogEditor({ current, onClose }: AccessLogEditorProps) {
           Console access-record tail entries only. Application, reload, security, audit, health,
           metrics, and tracing remain independent.
         </p>
-        <p className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-xs text-jul-warning">
-          Access-log middleware and sinks are wired at startup. Any change in this block is staged
-          as <strong>restart required</strong> until generation-safe sink reload is implemented.
-        </p>
 
         <Toggle
           label="Enable request access logging"

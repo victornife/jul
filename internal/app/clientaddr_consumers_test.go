@@ -26,7 +26,7 @@ func identityChain(t *testing.T, f *HandlerFactory, trusted []string, h http.Han
 	if err != nil {
 		t.Fatalf("NewPolicy: %v", err)
 	}
-	return middleware.Chain(h, f.globalChain(policy, nil)...)
+	return middleware.Chain(h, f.globalChain(policy, nil, nil)...)
 }
 
 func request(remoteAddr, xff string) *http.Request {
@@ -347,10 +347,7 @@ func mustPolicyChain(t *testing.T, f *HandlerFactory, trusted []string, sink mid
 	if err != nil {
 		t.Fatalf("NewPolicy: %v", err)
 	}
-	saved := f.AccessSinks
-	t.Cleanup(func() { f.AccessSinks = saved })
-	f.AccessSinks = []middleware.AccessSink{sink}
-	return f.globalChain(policy, nil)
+	return f.globalChain(policy, nil, []middleware.AccessSink{sink})
 }
 
 type recordingSink struct{ records []middleware.AccessRecord }

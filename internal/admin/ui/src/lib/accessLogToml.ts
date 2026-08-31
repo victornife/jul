@@ -40,9 +40,6 @@ export function accessLogWarnings(draft: AccessLogDraft): string[] {
   if (draft.sinks.includes("file") && !draft.file.trim()) {
     warnings.push("The file sink requires a path, even while access logging is disabled.");
   }
-  warnings.push(
-    "Access-log enablement and sink settings are wired at process startup and require a restart to take effect.",
-  );
   return warnings;
 }
 

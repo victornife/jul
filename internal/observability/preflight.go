@@ -5,16 +5,14 @@ package observability
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"jul/internal/config"
 )
 
 // PreflightAccessSinks validates that an AccessLogConfig can be applied at the
 // next process startup without building the real sinks. For the "file" sink it
-// proves the target directory is writable by creating and immediately removing
-// a temporary sentinel file. It does not retain any file handle.
+// proves the target directory is writable via probeWritableDir. It does not
+// retain any file handle.
 func PreflightAccessSinks(cfg config.AccessLogConfig) error {
 	if !cfg.IsEnabled() {
 		return nil
@@ -28,16 +26,9 @@ func PreflightAccessSinks(cfg config.AccessLogConfig) error {
 			// silently here so preflight is not the first to report the error.
 			continue
 		}
-		dir := filepath.Dir(cfg.File)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("[observability.access_log] file sink: cannot create directory %q: %w", dir, err)
+		if err := probeWritableDir(cfg.File); err != nil {
+			return fmt.Errorf("[observability.access_log] file sink: %w", err)
 		}
-		tmp, err := os.CreateTemp(dir, ".preflight-*")
-		if err != nil {
-			return fmt.Errorf("[observability.access_log] file sink: directory %q not writable: %w", dir, err)
-		}
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
 		break // path is unique; only one file sink can be configured
 	}
 	return nil
