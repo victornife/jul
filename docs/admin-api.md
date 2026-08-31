@@ -206,6 +206,26 @@ discloses nothing: the verdict is a property of the listener, identical for
 every request and every principal, and reached without consulting the credential
 or the target.
 
+## A deployment that satisfies the contract
+
+[`testdata/admin-api.toml`](../testdata/admin-api.toml) is a complete,
+`jul check`-valid configuration showing the shape that works: a loopback admin
+listener, managed authority, and named principals with least privilege — in
+particular a `prometheus` principal holding `metrics:read` and nothing else, so
+the scrape credential is not the admin credential.
+
+```console
+$ jul check -config testdata/admin-api.toml
+```
+
+To administer it from elsewhere, tunnel to loopback rather than exposing the
+listener:
+
+```console
+$ ssh -N -L 9090:127.0.0.1:9090 operator@host
+$ curl -H "Authorization: Bearer $JUL_ADMIN_TOKEN" http://127.0.0.1:9090/healthz
+```
+
 ## Generated clients
 
 `generated/openapi.json` is suitable input for a client generator. Two caveats:

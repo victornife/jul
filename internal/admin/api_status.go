@@ -383,6 +383,8 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		{Group: "Security", Name: "Web application firewall (WAF)", Active: wafLocs > 0, Detail: wafDetail},
 		{Group: "Security", Name: "Trusted client address", Active: trustedListeners > 0, Detail: clientAddrDetail},
 		{Group: "Security", Name: "Secret references", Active: secretRefs > 0, Detail: countDetailIf(secretRefs, "reference")},
+		{Group: "Security", Name: "Admin transport security", Active: c.Admin.Enabled, Detail: adminTransportDetail(c.Admin)},
+		{Group: "Security", Name: "Supported external admin API", Active: c.Admin.Enabled, Detail: externalAPIDetail(c.Admin)},
 
 		{Group: "Protocols", Name: "HTTP/3 (QUIC)", Active: http3Servers > 0, Detail: countDetailIf(http3Servers, "server block")},
 		{Group: "Protocols", Name: "Cleartext HTTP/2 (h2c)", Active: h2cServers > 0, Detail: countDetailIf(h2cServers, "server block")},
@@ -413,11 +415,41 @@ func countDetailIf(n int, unit string) string {
 }
 
 // metricsDetail describes the Prometheus surface when it is wired.
+//
+// It names the transport requirement because /metrics requires metrics:read and
+// is therefore inside ADR 0019 §28.1's gate: an operator whose scrape stopped
+// working should be able to see why from the Status panel rather than from a
+// 403 in a Prometheus log.
 func metricsDetail(on bool) string {
 	if on {
-		return "exposed at /metrics"
+		return "exposed at /metrics; requires metrics:read, so scraping needs loopback or TLS"
 	}
 	return ""
+}
+
+// adminTransportDetail reports the transport posture of the admin listener as
+// bounded metadata. It never projects the listen address itself, matching the
+// rule the trusted-proxy and backend-TLS rows already follow: the panel says
+// what the posture *is*, not what the configuration *says*.
+func adminTransportDetail(a config.AdminConfig) string {
+	if !a.Enabled {
+		return ""
+	}
+	if addrIsLoopback(a.Listen) {
+		return "loopback listener; cleartext is refused on any other address"
+	}
+	return "non-loopback listener; every authenticated route requires TLS, /metrics included"
+}
+
+// externalAPIDetail reports how much of the admin surface is a supported
+// contract, so "is this endpoint stable?" has an answer visible from the
+// Console rather than only from the generated document.
+func externalAPIDetail(a config.AdminConfig) string {
+	if !a.Enabled {
+		return ""
+	}
+	return fmt.Sprintf("%s published in the %s contract; %s internal to the Console and not stable",
+		countUnit(externalOperationCount, "operation"), apiVersionNamespace, countUnit(internalRouteCount, "route"))
 }
 
 // pluginDetail summarizes declared plugins and how many locations reference one.

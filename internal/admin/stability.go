@@ -14,6 +14,11 @@ package admin
 // answer per route rather than a shrug.
 type RouteStability uint8
 
+// apiVersionNamespace is the external API version namespace. It is stated once
+// here so the Console status row, the documentation and the generator cannot
+// disagree about which namespace is the supported one.
+const apiVersionNamespace = "/api/v1"
+
 const (
 	// StabilityInternal is the fail-closed zero value: served, but not part of
 	// the supported external contract, absent from the generated OpenAPI
@@ -125,6 +130,29 @@ func ExternalRoutes() []ExternalRoute {
 		}
 	}
 	return out
+}
+
+// externalOperationCount and internalRouteCount summarise the classification
+// for the Console Status panel.
+//
+// They are filled in init() rather than by a package-level initializer that
+// walks Catalog: the Catalog literal holds handler closures that reach
+// runtimeStatus, so a variable whose initializer reads Catalog and which
+// runtimeStatus then reads would be an initialization cycle. init() runs after
+// every package variable is initialized, so it can read Catalog safely.
+var (
+	externalOperationCount int
+	internalRouteCount     int
+)
+
+func init() {
+	for _, spec := range Catalog {
+		if spec.Stability.External() {
+			externalOperationCount += len(spec.Methods)
+			continue
+		}
+		internalRouteCount++
+	}
 }
 
 // permissionsFor returns the permission strings required for one method, in

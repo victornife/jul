@@ -146,6 +146,7 @@ func TestStatusAPI(t *testing.T) {
 		Compression: config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip", "br"}},
 		RateLimit:   config.RateLimitConfig{Enabled: true, Rate: 100},
 		Cache:       config.CacheConfig{Enabled: true},
+		Admin:       config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090"},
 	}
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		Metrics:    http.NewServeMux(),
@@ -171,6 +172,7 @@ func TestStatusAPI(t *testing.T) {
 		"Access control (auth)", "Trusted client address", "HTTP/3 (QUIC)",
 		"gRPC transcoding", "Upstream pools", "Active health checks", "Service discovery",
 		"Prometheus metrics", "Access log", "Backend dial-failure accounting",
+		"Admin transport security", "Supported external admin API",
 	}
 	for _, name := range wantActive {
 		if v, ok := active[name]; !ok {

@@ -1,0 +1,82 @@
+# Supported external admin API — a deployment that satisfies the contract.
+#
+#   jul -check -config testdata/admin-api.toml
+#
+# Two things this file demonstrates, both of which are contract requirements
+# rather than preferences (ADR 0019 §24, §28.1; docs/admin-api.md).
+#
+#  1. The admin listener is bound to LOOPBACK. Every route that consumes an
+#     admin credential — reads as well as writes, and /metrics — is refused
+#     with 403 insecure_transport on a listener that is neither TLS-terminated
+#     nor loopback-bound. There is no override and no configuration key.
+#     To administer this server remotely, tunnel to loopback:
+#
+#         ssh -N -L 9090:127.0.0.1:9090 operator@host
+#         curl -H "Authorization: Bearer $JUL_TOKEN" http://127.0.0.1:9090/api/v1/status
+#
+#     or terminate TLS in front of the listener, which satisfies the gate on
+#     any address.
+#
+#  2. Named principals with least privilege, so a scrape token is not an admin
+#     token. This matters more than it looks: the legacy single-token identity
+#     authenticates as a wildcard principal holding read AND write, so a token
+#     used only to scrape /metrics would carry full control-plane access.
+
+[global]
+log_level = "info"
+log_format = "json"
+
+# Managed authority: this deployment's configuration is owned by Jul and is
+# written through the admin API. Omit it (or set "file_owned") and every
+# mutating endpoint answers 409 config_authority_read_only.
+config_authority = "managed"
+
+[[servers]]
+listen = "127.0.0.1:8080"
+
+[[servers.locations]]
+match = { type = "prefix", path = "/" }
+return = 200
+
+[admin]
+enabled = true
+
+# Loopback. This is the default, and it is what makes the transport gate a
+# no-op for this deployment rather than a wall.
+listen = "127.0.0.1:9090"
+
+# The Console is a convenience, not part of the external contract. Its routes
+# are classified internal and may change shape in any release.
+console = true
+
+[admin.rbac]
+enabled = true
+
+# A monitoring identity that can scrape /metrics and nothing else. /metrics is
+# external *authenticated*: it requires metrics:read, which is why it needs a
+# principal at all, and why that principal should not be the admin.
+[[admin.rbac.roles]]
+name = "scraper"
+permissions = ["metrics:read"]
+
+# An automation identity for a deployment pipeline: it may read state, prepare
+# a change and apply it, but it cannot read raw configuration bytes and cannot
+# roll back.
+[[admin.rbac.roles]]
+name = "deployer"
+permissions = ["status:read", "config:read", "config:write", "config:apply"]
+
+[[admin.rbac.principals]]
+name = "prometheus"
+role = "scraper"
+token = "${env:JUL_SCRAPE_TOKEN}"
+
+[[admin.rbac.principals]]
+name = "ci"
+role = "deployer"
+token = "${env:JUL_DEPLOY_TOKEN}"
+
+[[admin.rbac.principals]]
+name = "operator"
+role = "admin"
+token = "${env:JUL_ADMIN_TOKEN}"
