@@ -50,7 +50,9 @@ func TestPreflightAccessSinksEnabledProvesFileDirectory(t *testing.T) {
 // error path: a probeWritableDir failure must surface, not be swallowed.
 func TestPreflightAccessSinksReportsUnwritableDirectory(t *testing.T) {
 	orig := probeCloseFile
-	probeCloseFile = func(*os.File) error { return errors.New("injected close failure") }
+	// Actually close the file so no locked handle is left behind (Windows
+	// cannot remove/clean up a still-open file) while still reporting a failure.
+	probeCloseFile = func(f *os.File) error { _ = f.Close(); return errors.New("injected close failure") }
 	defer func() { probeCloseFile = orig }()
 
 	path := filepath.Join(t.TempDir(), "logs", "access.log")

@@ -312,7 +312,9 @@ func TestProbeWritableDirCreateTempFailure(t *testing.T) {
 // trigger portably, so these inject the failure deterministically instead.
 func TestProbeWritableDirCloseFailure(t *testing.T) {
 	orig := probeCloseFile
-	probeCloseFile = func(*os.File) error { return errors.New("injected close failure") }
+	// Actually close the file so no locked handle is left behind (Windows
+	// cannot remove/clean up a still-open file) while still reporting a failure.
+	probeCloseFile = func(f *os.File) error { _ = f.Close(); return errors.New("injected close failure") }
 	defer func() { probeCloseFile = orig }()
 
 	err := probeWritableDir(filepath.Join(t.TempDir(), "access.log"))
