@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "categories": [
+    {
+      "id": "cache-compression",
+      "status": "represented",
+      "fixtures": [
+        "security-cache-boundaries"
+      ],
+      "evidence": [
+        "NGX_HTTP_GZIP",
+        "NGX_LOCATION_CACHE"
+      ],
+      "rationale": "The corpus proves direct gzip classification and an explicit blocking NGINX cache-policy boundary. This is migration evidence, not a stateful cache conformance suite.",
+      "deferred_dimensions": [
+        "decoded compression-byte parity",
+        "shared/distributed cache directives",
+        "stateful cache/Vary/range replay"
+      ],
+      "revisit_trigger": "Add a selected-dimension fixture only when deterministic cache reset/state orchestration or a concrete migration incident justifies the maintenance cost."
+    },
+    {
+      "id": "core-http-routing",
+      "status": "represented",
+      "fixtures": [
+        "approximate-alias",
+        "blocking-dynamic-proxy",
+        "core-multifile-return",
+        "routing-cors-policy"
+      ],
+      "rationale": "Core fixtures cover multi-file servers, exact/prefix/regex locations, static files, returns, redirects, method constraints, response headers, CORS, and safe blocking of dynamic proxy targets.",
+      "deferred_dimensions": [
+        "full NGINX location-precedence cross-product",
+        "proxy_pass URI edge matrix beyond the classified approximation",
+        "rewrite control-flow beyond static supported flags"
+      ],
+      "revisit_trigger": "Expand when a supported importer mapping changes or a representative source estate exposes a routing distinction not already classified."
+    },
+    {
+      "id": "operations",
+      "status": "represented",
+      "fixtures": [
+        "core-multifile-return",
+        "operations-boundaries"
+      ],
+      "rationale": "The corpus covers bounded include provenance plus explicit ignored/blocking evidence for process settings, event limits, custom logs, resolver behavior, and variable maps.",
+      "deferred_dimensions": [
+        "live log-sink parity",
+        "resolver/DNS runtime replay",
+        "worker/process tuning equivalence"
+      ],
+      "revisit_trigger": "Operational runtime replay requires a separately selected, deterministic local dependency or a concrete importer support change."
+    },
+    {
+      "id": "protocol-gateways",
+      "status": "represented",
+      "fixtures": [
+        "fastcgi-gateway",
+        "protocol-boundaries"
+      ],
+      "evidence": [
+        "issue #259 H1/H2/H3 client-identity E2E"
+      ],
+      "rationale": "FastCGI translation is represented by a strict-valid candidate, while NGINX stream and mail configurations are explicit blocking evidence rather than silently omitted capability claims.",
+      "deferred_dimensions": [
+        "H2/H3 migration replay",
+        "L4 runtime replay",
+        "WebSocket runtime replay",
+        "gRPC/uWSGI protocol backends"
+      ],
+      "revisit_trigger": "Add protocol-specific local backends only after a migration use case selects the lane; existing product protocol E2E remains authoritative for runtime capability itself."
+    },
+    {
+      "id": "security",
+      "status": "represented",
+      "fixtures": [
+        "realip-blocking",
+        "realip-supported",
+        "security-cache-boundaries"
+      ],
+      "evidence": [
+        "fixture admission secret/private-key scan",
+        "issue #259 client-address runtime and spoofing E2E",
+        "safe replay sensitive-header rejection"
+      ],
+      "rationale": "The corpus covers IPv4/IPv6 trusted proxies, supported and blocking real-IP forms, TLS references/protocols, security headers, and blocking authentication, ACL, body-limit, rate-limit, and cache controls.",
+      "deferred_dimensions": [
+        "WAF/module-specific migration replay",
+        "generated certificate mTLS replay",
+        "multi-proxy forwarded-chain runtime comparison"
+      ],
+      "revisit_trigger": "Add a security runtime fixture when generated test credentials and asserted dimensions can remain bounded, synthetic, and independent of product-level E2E already owned elsewhere."
+    },
+    {
+      "id": "upstreams-resiliency",
+      "status": "represented",
+      "fixtures": [
+        "blocking-dynamic-proxy",
+        "upstream-weighted"
+      ],
+      "rationale": "The corpus covers named weighted upstreams, least-connections translation, ignored connection-pool tuning, proxy routing, and blocking variable-derived destinations.",
+      "deferred_dimensions": [
+        "WebSocket/gRPC upstream runtime replay",
+        "active-health migration replay",
+        "backend TLS/private-CA migration replay",
+        "retry/circuit behavior pending resilience programme closure"
+      ],
+      "revisit_trigger": "Expand after the relevant runtime contract is stable and a deterministic local backend can assert one migration semantic without becoming a general gateway conformance suite."
+    }
+  ]
+}

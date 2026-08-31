@@ -1,0 +1,195 @@
+{
+  "schema_version": 1,
+  "id": "security-cache-boundaries",
+  "tier": "core",
+  "description": "Security and cache boundary fixture proving TLS references and gzip are visible while authentication, ACLs, request limits, rate limiting, and NGINX cache policy remain blocking.",
+  "origin": {
+    "kind": "repository_authored",
+    "license": "AGPL-3.0-only",
+    "source": "victornife/jul#154"
+  },
+  "categories": [
+    "cache-compression",
+    "security",
+    "tls"
+  ],
+  "build_tags": [
+    "importer"
+  ],
+  "root": "nginx/nginx.conf",
+  "follow_includes": false,
+  "expected_assessment": {
+    "status": "manual_action_required",
+    "ready": false,
+    "complete": true,
+    "files_read": 1,
+    "sources": [
+      "nginx.conf"
+    ],
+    "results": [
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_EVENTS",
+        "class": "informational",
+        "risk": "operational",
+        "context": "main",
+        "directive": "events"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_HTTP",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "http"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_GZIP",
+        "class": "supported",
+        "risk": "performance",
+        "context": "http",
+        "directive": "gzip"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_BODY_LIMIT",
+        "class": "blocking",
+        "risk": "security",
+        "context": "http",
+        "directive": "client_max_body_size"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "server",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_NAME",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "server_name"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_TLS_CERT",
+        "class": "supported",
+        "risk": "security",
+        "context": "server",
+        "directive": "ssl_certificate"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_TLS_KEY",
+        "class": "supported",
+        "risk": "security",
+        "context": "server",
+        "directive": "ssl_certificate_key"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_TLS_PROTOCOLS",
+        "class": "supported",
+        "risk": "security",
+        "context": "server",
+        "directive": "ssl_protocols"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_AUTH",
+        "class": "blocking",
+        "risk": "security",
+        "context": "server",
+        "directive": "auth_basic"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_AUTH_FILE",
+        "class": "blocking",
+        "risk": "security",
+        "context": "server",
+        "directive": "auth_basic_user_file"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_ALLOW",
+        "class": "blocking",
+        "risk": "security",
+        "context": "server",
+        "directive": "allow"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_DENY",
+        "class": "blocking",
+        "risk": "security",
+        "context": "server",
+        "directive": "deny"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LOCATION",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "location"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_BODY_LIMIT",
+        "class": "blocking",
+        "risk": "security",
+        "context": "location",
+        "directive": "client_max_body_size"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_RATE_LIMIT",
+        "class": "blocking",
+        "risk": "availability",
+        "context": "location",
+        "directive": "limit_req"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_CACHE",
+        "class": "blocking",
+        "risk": "security",
+        "context": "location",
+        "directive": "proxy_cache"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_ADD_HEADER",
+        "class": "supported",
+        "risk": "security",
+        "context": "location",
+        "directive": "add_header"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_RETURN",
+        "class": "supported",
+        "risk": "routing",
+        "context": "location",
+        "directive": "return"
+      }
+    ]
+  },
+  "expected_candidate": {
+    "required": false
+  }
+}

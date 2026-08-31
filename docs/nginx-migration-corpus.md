@@ -7,28 +7,32 @@ evidence. It does not produce a compatibility percentage and it never labels an
 entire configuration equivalent. Every runtime verdict is limited to the
 response dimensions named by one scenario.
 
-## Current tranche
+## Completed evidence baseline
 
-The first tranche establishes the core contract and runs on every full-tag test
-lane:
+Issue #154 closes with a bounded evidence programme rather than an open-ended
+parity mandate. The checked-in baseline contains:
 
-- strict, versioned fixture manifests;
-- repository-authored sanitized NGINX source trees;
-- exact semantic assessment goldens covering source, finding code, class, risk,
-  context, directive, source catalogue, completeness, and readiness;
-- selected canonical Jul TOML assertions plus authoritative parse/validation;
-- a loopback-only real Jul server replay for supported fixtures;
-- a pinned, isolated official NGINX 1.28.3 reference runtime for the first
-  multi-file core fixture;
-- explicit `equivalent_for_asserted_dimensions`, `expected_difference`,
-  `unexpected_difference`, `not_executed`, and `blocking_source` verdicts;
-- supported, approximated, and blocking fixtures in the core lane.
+- **11 repository-owned fixtures**: 9 in the core tier and 2 in the full tier;
+- exact schema-v2 assessment goldens with provenance for 127 directive results;
+- strict-valid candidate assertions for every non-blocking fixture;
+- supported, approximated, ignored, informational, and blocking evidence;
+- safe real-Jul replay plus a pinned, isolated official NGINX 1.28.3 reference
+  lane for the reviewed HTTP scenarios;
+- a machine-checked minimum-category matrix in
+  `testdata/nginx-corpus/coverage.json`;
+- a deterministic, non-scoring aggregate in
+  `testdata/nginx-corpus/inventory.json`;
+- explicit deferred dimensions and objective revisit triggers instead of a
+  universal compatibility claim.
 
-The pinned reference lane currently executes the multi-file return/header fixture.
-Protocol-heavy lanes and broader corpus categories remain follow-up work within
-#154. For fixtures not yet selected by that lane, `reference` remains a reviewed
-NGINX-side expectation rather than a captured process response. The real Jul
-observation must still match the separately recorded Jul expectation exactly.
+The pinned reference lane executes the multi-file return/header fixture and the
+routing/CORS/`limit_except` fixture. Other fixtures provide assessment and
+candidate evidence unless their manifest contains an approved runtime scenario. A
+reviewed NGINX-side expectation is not represented as a captured process result, and a Jul observation must still
+match its separately declared expectation exactly.
+
+The final acceptance record is
+[NGINX migration corpus closure](audit/2026-08-31-nginx-migration-corpus-closure.md).
 
 ## Corpus admission policy
 
@@ -143,19 +147,64 @@ The Go reference test compares the real NGINX response only with the manifest's
 expectation and classifies the approved NGINX-to-Jul relationship. This keeps a
 reference-runtime failure distinct from an importer or Jul-runtime regression.
 
-## Category inventory and explicit deferrals
+## Machine-checked category inventory
 
-| Minimum category | Current evidence | Deferred boundary |
+`coverage.json` is the reviewed closure contract for the six minimum categories
+from #154. `inventory.json` is generated from that matrix and every fixture
+manifest. CI fails if a fixture, classification, risk, code, verdict, category
+disposition, or deferred dimension changes without deliberate review.
+
+| Minimum category | Represented evidence | Intentionally deferred dimensions |
 | --- | --- | --- |
-| Core HTTP routing | Multi-file server/listen/name, exact locations, returns, redirects, static response header, alias approximation, dynamic proxy blocker. | Full precedence matrix, rewrite/proxy URI and request predicates expand in later fixtures. |
-| Upstreams and resiliency | Dynamic proxy target blocking is represented. | Weighted pools, health, retries, WebSocket, gRPC and backend TLS need deterministic local backends. |
-| Security | Secret/private-key fixture admission checks and sensitive-header replay rejection are enforced. | TLS, mTLS, auth, ACL, limits, WAF and real-IP behavior need generated certs or dedicated fixtures. |
-| Cache and compression | Explicitly deferred. | Stateful cache/Vary/range behavior needs deterministic setup and reset semantics. |
-| Protocol/application gateways | Explicitly deferred. | FastCGI, uWSGI, gRPC and L4 require protocol-specific local backends and build-tag lanes. |
-| Operations | Include-tree provenance is represented. | Logs, maps, resolver, process settings, zones, Lua and conditional behavior expand as blocking/approximate fixtures. |
+| Core HTTP routing | Multi-file servers, exact/prefix/regex locations, returns, redirects, alias approximation, method constraints, static response headers/CORS, and dynamic-proxy blocking. | Full location-precedence cross-product, broader `proxy_pass` URI edge matrix, and non-static rewrite control flow. |
+| Upstreams and resiliency | Named weighted pools, least-connections, proxy routing, ignored pool tuning, and variable-derived destination blocking. | Active-health, backend-TLS/private-CA, retry/circuit, and WebSocket/gRPC upstream migration replay. |
+| Security | IPv4/IPv6 trusted proxies, supported and blocking real-IP forms, TLS references/protocols, security headers, and blocking auth/ACL/body/rate/cache controls. | Generated-certificate mTLS, multi-proxy chain comparison, and WAF/module-specific replay. Product-level client-identity spoofing and H1/H2/H3 parity remain owned by #259. |
+| Cache and compression | Direct gzip classification and explicit blocking NGINX cache-policy evidence. | Stateful cache/Vary/range replay, decoded compression-byte comparison, and shared/distributed cache directives. |
+| Protocol/application gateways | Strict-valid FastCGI candidate plus explicit blocking stream and mail fixtures. | Migration-specific H2/H3, WebSocket, gRPC/uWSGI, and L4 runtime replay. |
+| Operations | Include-tree provenance plus ignored/blocking process, event, log, resolver, and variable-map evidence. | Live log-sink, resolver/DNS, and worker/process tuning parity. |
 
-A deferral is not a compatibility claim. It identifies the fixture/runtime work
-still required before #154 can close.
+“Represented” means the category has executable migration evidence. It does not
+mean every directive or runtime mode in that category is supported. The full
+rationale and revisit trigger for each deferred dimension live in
+`coverage.json`; prose cannot silently broaden the claim.
+
+## Protocol-lane decisions
+
+- The PR lane runs every assessment/candidate golden and all approved real-Jul
+  scenarios under the `importer` tag. Full-tag and race jobs exercise the same
+  code alongside the repository's protocol packages.
+- The dedicated Docker lane runs a digest-pinned NGINX process for the selected
+  HTTP reference scenarios. Missing Docker is a failure when the lane is
+  required.
+- FastCGI is represented at import and strict-candidate level. A real FastCGI
+  comparison is deferred until a migration-specific semantic can be asserted
+  without duplicating the product runtime suite.
+- H2/H3 client-identity parity and spoofing are already real-server obligations
+  of #259. They are evidence for the runtime capability, not a reason to claim
+  that every imported NGINX protocol configuration is equivalent.
+- WebSocket, gRPC, uWSGI, and L4 migration replay require a separately selected
+  fixture/backend lane. Stream and mail are currently blocking source evidence,
+  so executing them as if Jul had imported them would be misleading.
+
+## Deterministic aggregate report
+
+Generate the current non-scoring inventory with:
+
+```bash
+go run -tags importer scripts/nginx-corpus-report.go
+```
+
+Check or deliberately refresh the committed artifact with:
+
+```bash
+go run -tags importer scripts/nginx-corpus-report.go -check
+go run -tags importer scripts/nginx-corpus-report.go -write
+```
+
+`-write` is never an automatic golden update. Review fixture additions, class
+and risk changes, code frequency, verdicts, coverage dispositions, and deferred
+dimensions together. Counts describe only this repository-owned corpus; they are
+not a compatibility score or market claim.
 
 ## Running the core lane
 
@@ -190,17 +239,29 @@ real Jul process starts.
 5. Require a candidate only when the assessment is expected to be ready.
 6. Add runtime scenarios only for a required candidate and assert the minimum
    dimensions needed to prove the behavior.
-7. Run the core lane and the repository full-tag/race gates.
+7. Update `coverage.json` when the fixture changes minimum-category evidence.
+8. Regenerate `inventory.json` with the explicit `-write` command and review the
+   aggregate diff.
+9. Run the core lane, pinned reference lane, and repository full-tag/race gates.
 
 A fixture update is a contract change: review the source, assessment projection,
-candidate assertions, runtime verdict, and licensing/privacy metadata together.
+candidate assertions, runtime verdict, coverage disposition, aggregate report,
+and licensing/privacy metadata together.
 
-### Corpus-discovered local redirect boundary
+### Corpus-discovered selected differences
 
-NGINX expands a local `return 30x /path` target to an absolute
-`Location` by default, using the request/server authority. Jul preserves
-`/path`. The importer therefore reports
-`NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT` as `approximated`, and the corpus
-records the selected-dimension runtime relationship as
-`expected_difference` rather than claiming equivalence.
+#### Local redirect authority
+
+NGINX expands a local `return 30x /path` target to an absolute `Location` by
+default, using the request/server authority. Jul preserves `/path`. The importer
+therefore reports `NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT` as `approximated`,
+and the corpus records `expected_difference`.
+
+#### `limit_except` denial status
+
+For the supported narrow form, NGINX denies excluded methods with 403. Jul
+translates the allowed methods into a route predicate, so an excluded request
+does not match and resolves to 404. The assessment remains `approximated` under
+`NGX_LOCATION_LIMIT_EXCEPT`, and the real NGINX/Jul scenarios pin the
+selected-dimension difference.
 

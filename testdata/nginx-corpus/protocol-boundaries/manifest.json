@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "id": "protocol-boundaries",
+  "tier": "full",
+  "description": "Negative protocol fixture proving that stream TCP and mail configuration remain explicit blocking evidence while an independent HTTP candidate stays structurally valid.",
+  "origin": {
+    "kind": "repository_authored",
+    "license": "AGPL-3.0-only",
+    "source": "victornife/jul#154"
+  },
+  "categories": [
+    "mail",
+    "protocol-gateways",
+    "stream"
+  ],
+  "build_tags": [
+    "importer"
+  ],
+  "root": "nginx/nginx.conf",
+  "follow_includes": false,
+  "expected_assessment": {
+    "status": "manual_action_required",
+    "ready": false,
+    "complete": true,
+    "files_read": 1,
+    "sources": [
+      "nginx.conf"
+    ],
+    "results": [
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_EVENTS",
+        "class": "informational",
+        "risk": "operational",
+        "context": "main",
+        "directive": "events"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_HTTP",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "http"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "server",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_NAME",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "server_name"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LOCATION",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "location"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_RETURN",
+        "class": "supported",
+        "risk": "routing",
+        "context": "location",
+        "directive": "return"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_STREAM",
+        "class": "blocking",
+        "risk": "routing",
+        "context": "main",
+        "directive": "stream"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_UNSUPPORTED",
+        "class": "blocking",
+        "risk": "routing",
+        "context": "stream",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_UNSUPPORTED",
+        "class": "blocking",
+        "risk": "routing",
+        "context": "stream",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_UNSUPPORTED",
+        "class": "blocking",
+        "risk": "routing",
+        "context": "stream",
+        "directive": "proxy_pass"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_MAIL",
+        "class": "blocking",
+        "risk": "routing",
+        "context": "main",
+        "directive": "mail"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIL_UNSUPPORTED",
+        "class": "blocking",
+        "risk": "routing",
+        "context": "mail",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIL_UNSUPPORTED",
+        "class": "blocking",
+        "risk": "routing",
+        "context": "mail",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIL_UNSUPPORTED",
+        "class": "blocking",
+        "risk": "routing",
+        "context": "mail",
+        "directive": "protocol"
+      }
+    ]
+  },
+  "expected_candidate": {
+    "required": false
+  }
+}

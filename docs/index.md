@@ -48,6 +48,7 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 - **[Observability](observability.md)** — logs, metrics, tracing, probes and
   runtime surfaces.
 - **[Diagnostics and support bundles](diagnostics.md)** — deterministic local checks, bounded archives, privacy limits, and review-before-sharing guidance.
+- **[NGINX migration corpus](nginx-migration-corpus.md)** — bounded importer evidence, exact fixture inventory, selected-dimension E2E, and explicit residuals.
 - **[Prometheus contract](metrics-contract.json)** — metric names, types, labels
   and release state.
 - **[Security model](../SECURITY.md)** and **[security posture](security-posture.md)**

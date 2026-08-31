@@ -207,6 +207,28 @@ exactly one disposition, and CI fails when one is missing. Follow this order:
 A stale artifact fails with the exact regeneration command, so a missing
 regeneration is never a guess.
 
+### Adding NGINX migration evidence
+
+Treat `testdata/nginx-corpus/` as a reviewed compatibility contract, not a bag
+of parser examples. A fixture change must update its origin/license README,
+strict manifest, assessment/candidate golden, `coverage.json` when category
+evidence changes, and the generated `inventory.json`. Never add proprietary
+configuration, production endpoints, credentials, private keys, arbitrary
+traffic, or an externally derived sample without explicit license/privacy
+review.
+
+Run:
+
+```bash
+go run -tags importer scripts/nginx-corpus-report.go -write
+make nginx-corpus-check
+make nginx-migration-e2e
+```
+
+Review the inventory diff; do not use `-write` as an automatic blanket golden
+update. See [the corpus guide](docs/nginx-migration-corpus.md) for the scenario,
+sanitization, comparison, protocol-decision, and deferral rules.
+
 ### Changelog entries
 
 Add an entry to `CHANGELOG.md` under `[Unreleased]` for every user-visible

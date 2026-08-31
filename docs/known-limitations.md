@@ -450,15 +450,25 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 
 ## NGINX importer ([nginx-importer.md](nginx-importer.md))
 
-- **`include` is not followed.** The importer processes a single file; split
-  configs must be concatenated or imported individually.
-- **`stream`, `mail`, and Lua are not translated.** Module-specific directives
-  are reported as untranslated and must be ported manually.
-- **Many directives are not mapped.** `proxy_set_header`,
-  `client_max_body_size`, `autoindex`, and others are reported for manual
-  porting. `add_header` and `limit_except` are mapped for their common,
-  unambiguous shapes only (see [nginx-importer.md](nginx-importer.md#location-block)).
-  Translation is a best-effort aid, not a 1:1 converter.
+- **Include traversal is explicit and root-confined.** The default import reads
+  one file. `--follow-includes --root <dir>` resolves explicit files and globs
+  under bounded depth/file/byte limits, rejects cycles and lexical/symlink
+  escape, and never offers an unrestricted host-root mode. Estates that include
+  files outside one safe root must first be staged into a bounded tree.
+- **`stream`, `mail`, Lua, and dynamic variable-driven behavior are not
+  translated.** They produce blocking assessment evidence and require manual
+  design; Jul does not manufacture a candidate that pretends the behavior was
+  preserved.
+- **Many directives are mapped only in bounded forms.** For example, static
+  `add_header ... always`, narrow `limit_except`, canonical real-IP policies,
+  and static proxy targets are supported or explicitly approximate; unsupported
+  auth, ACL, body/rate/cache, logging, resolver, and module forms remain
+  blocking.
+- **Corpus evidence is selected-dimension evidence, not universal parity.** The
+  machine-checked [migration corpus](nginx-migration-corpus.md) records covered
+  categories, exact fixture results, and deferred protocol/stateful dimensions.
+  Translation remains a best-effort aid, not a 1:1 converter or cutover
+  certificate.
 
 ---
 

@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "id": "realip-blocking",
+  "tier": "core",
+  "description": "Negative client-identity fixture proving that PROXY-protocol real-IP selection and non-recursive chain evaluation remain blocking and never silently emit a trust policy.",
+  "origin": {
+    "kind": "repository_authored",
+    "license": "AGPL-3.0-only",
+    "source": "victornife/jul#154"
+  },
+  "categories": [
+    "client-identity",
+    "security"
+  ],
+  "build_tags": [
+    "importer"
+  ],
+  "root": "nginx/nginx.conf",
+  "follow_includes": false,
+  "expected_assessment": {
+    "status": "manual_action_required",
+    "ready": false,
+    "complete": true,
+    "files_read": 1,
+    "sources": [
+      "nginx.conf"
+    ],
+    "results": [
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_EVENTS",
+        "class": "informational",
+        "risk": "operational",
+        "context": "main",
+        "directive": "events"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_HTTP",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "http"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "server",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_NAME",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "server_name"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_REALIP_TRUST_SOURCE",
+        "class": "supported",
+        "risk": "security",
+        "context": "server",
+        "directive": "set_real_ip_from"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_REALIP_HEADER",
+        "class": "blocking",
+        "risk": "security",
+        "context": "server",
+        "directive": "real_ip_header"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_REALIP_RECURSIVE",
+        "class": "blocking",
+        "risk": "security",
+        "context": "server",
+        "directive": "real_ip_recursive"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LOCATION",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "location"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_RETURN",
+        "class": "supported",
+        "risk": "routing",
+        "context": "location",
+        "directive": "return"
+      }
+    ]
+  },
+  "expected_candidate": {
+    "required": false
+  }
+}

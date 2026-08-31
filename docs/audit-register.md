@@ -8,6 +8,7 @@ live issue tracker.
 
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
+| [2026-08-31 NGINX migration corpus closure](audit/2026-08-31-nginx-migration-corpus-closure.md) | PR #352 merge `ec098502` plus the #154 closure tranche | Current bounded migration-corpus and selected-dimension E2E evidence | Closure contract; exact-head CI and merge are recorded on #154 and its closure PR |
 | [2026-08-07 response-cache recertification](audit/2026-08-07-cache-recertification.md) | Post-#131/#132/#133 cache tree | Current cache conformance and retained-GA evidence | Complete; #107/#134 closed |
 | [2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md) | `66c71b2c...` | Dated programme-opening audit and historical finding source | Superseded for current issue state by #62 and later implementation evidence; not rewritten retrospectively |
 | [Stage 0/1 programme closure](audit/2026-08-05-stage-0-1-programme-closure.md) | `0de8541e...` | Exact-SHA programme-foundation disposition | Complete, with residuals transferred explicitly |
