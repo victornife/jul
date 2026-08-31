@@ -1,6 +1,7 @@
 .PHONY: build test bench fuzz soak format format-check lint vulncheck clean \
         console-dev console-build console-check build-console build-full license-check \
-        hooks waf-churn security-gates lifecycle-generate config-contract-generate generated-check \
+hooks waf-churn security-gates lifecycle-generate config-contract-generate \
+	api-contract-generate generated-check \
         nginx-corpus-check nginx-migration-e2e
 
 # ── Default ──────────────────────────────────────────────────────────
@@ -93,11 +94,19 @@ lifecycle-generate:
 config-contract-generate:
 	go generate ./internal/configcontract
 
+# The external API contract (internal/apicontract) generates
+# docs/generated/openapi.json from the admin route catalog and the Go DTOs in
+# internal/adminapi. Only routes classified external appear in it.
+# Never hand-edit it; change a source and regenerate.
+api-contract-generate:
+	go generate ./internal/apicontract
+
 # Non-mutating drift gate. Fails when a generated artifact does not match what
 # its source renders, printing the exact regeneration command.
 generated-check:
 	go run ./internal/lifecycle/lifecyclegen -out docs -check
 	go run ./internal/configcontract/configcontractgen -out docs -check
+	go run ./internal/apicontract/apicontractgen -out docs -check
 
 # Full-tag Go gates (build, lint, test, vulncheck, license).
 # Closest local equivalent to the merge gate; does not cover race, coverage

@@ -14,6 +14,39 @@ registry. No build tag is required:
 GET http://127.0.0.1:9090/metrics
 ```
 
+### Scraping /metrics
+
+`/metrics` requires the `metrics:read` permission, so it is an **authenticated**
+route, and it is therefore inside the admin transport gate:
+
+> **Scraping `/metrics` requires either a loopback connection or TLS.** A
+> plaintext scrape of a non-loopback address is refused with
+> `403 insecure_transport`, before authentication.
+
+This is a change in behavior. A Prometheus server scraping Jul.IA over plaintext
+on a LAN or container-network address stops working; a scrape over loopback, or
+through a TLS terminator, is unaffected. The reason it covers a read-only
+endpoint is that the legacy single-token identity authenticates as a wildcard
+principal holding read *and* write, so in exactly the deployments least likely
+to have issued a dedicated scrape token, the token used for `/metrics` **is**
+the admin token — and a token disclosed by a permitted plaintext read can be
+replayed against a mutation.
+
+Two supported topologies:
+
+- **Scrape over loopback.** Run the scraper on the same host, or bind the admin
+  listener to loopback and expose it through an SSH tunnel or a
+  loopback-bound sidecar.
+- **Terminate TLS in front of the admin listener** and scrape `https://`.
+
+There is no override and no configuration key. See
+[compatibility.md](compatibility.md#admin-transport-security-adr-0019-281) for
+the migration and [admin-api.md](admin-api.md#transport-tls-or-loopback-on-every-authenticated-route)
+for the full contract.
+
+`/healthz` and `/readyz` are exempt: they are unauthenticated, so there is no
+credential to protect, and liveness checking keeps working unchanged.
+
 ### Compatibility contract
 
 The released baseline was reconstructed from tag `v1.32.0` at commit

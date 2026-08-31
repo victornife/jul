@@ -29,7 +29,13 @@ bump (with a deprecation period, below):
    loading across MINOR/PATCH upgrades.
 2. **CLI** — documented subcommands and flags (`jul`, `-config`, `-check`,
    `-version`, `import`, `lint`, …).
-3. **Supported external Admin API** — only endpoints explicitly classified in a versioned external contract are stable. Existing unversioned Console `/api/*` routes remain internal unless separately listed; #150 owns the first supported `/api/v1` subset.
+3. **Supported external Admin API** — only endpoints explicitly classified in the
+   versioned external contract are stable. The classification lives in the route
+   catalog, its machine form is
+   [`generated/openapi.json`](generated/openapi.json), and the guide is
+   [admin-api.md](admin-api.md). Existing unversioned Console `/api/*` routes are
+   **internal**: they are served, they are not supported, and they may change
+   shape in any release.
 4. **Prometheus metric names and labels** — the `jul_*` series documented for the
    feature. Renames/removals are MAJOR; **new** series/labels are MINOR.
 5. **Observable wire behaviour** — documented headers, status codes, and proxy
@@ -119,6 +125,70 @@ configurable to anything else.
 No file gains a `config_authority` value on upgrade; it must be declared
 explicitly to opt into `managed`.
 
+### Admin transport security (ADR 0019 §28.1)
+
+No configuration key changed. The following **observable behavior** changed
+because the previous behavior contradicted a contract Jul.IA claims: loopback is
+the documented assumption for the admin listener, and the listener nevertheless
+accepted bearer credentials in cleartext from anywhere. This is a security
+correctness fix, not a feature toggle, and it is **deliberately not
+configurable**.
+
+> **A request received on an admin listener that is neither TLS-terminated nor
+> bound to loopback is refused with `403 insecure_transport`, before
+> authentication and before any side effect, on every route that consumes an
+> admin credential.**
+
+- **Applies to** every authenticated route — reads as well as writes, the
+  existing `/api/…` routes as well as any future `/api/v1` route, and
+  **`/metrics`**, which requires `metrics:read`.
+- **Exempt:** `/healthz` and `/readyz` only. They are genuinely credential-free.
+- **No override.** There is no server-side bypass and no flag, for the same
+  reason there is no `--insecure` on the client: the thing being protected is a
+  bearer token that grants full read and write access.
+
+**Who is affected.** A deployment that binds the admin listener to a
+non-loopback address — `0.0.0.0`, a LAN address, a container-network address —
+and speaks plaintext HTTP to it. That deployment stops working at upgrade. A
+loopback-bound listener, the default and the documented shape, is unaffected.
+
+**The largest single consequence is `/metrics`**, and it is called out
+separately because it is the one most likely to be discovered in production
+rather than in review: **every Prometheus deployment scraping Jul.IA over
+plaintext on a non-loopback address stops working.**
+
+**Required migration — do one of these before upgrading:**
+
+1. **Terminate TLS in front of the admin listener.** A reverse proxy, a
+   systemd-activated socket or a loopback-bound sidecar. The gate is satisfied
+   by the connection being TLS, on any address.
+2. **Bind the admin listener to loopback** (`[admin] listen = "127.0.0.1:9090"`,
+   which is the default) and reach it through an SSH tunnel. Scrape
+   `/metrics` over loopback, or through the same terminator.
+
+**Why the narrow version was rejected.** An earlier design gated only mutating
+requests on the new namespace and exempted reads and every existing route. That
+was not merely incomplete, it was ineffective: the legacy single-token identity
+authenticates as a wildcard principal holding both read and write, so a token
+disclosed by a permitted plaintext *read* could simply be replayed against an
+exempt mutation. Keeping the exemption would have preserved the disclosure path
+that makes the rest of the control theatre.
+
+**Semver.** Item 3 above places the supported admin API and observable status
+codes inside the GA contract, so this ships **inside the v1 line as a security
+correctness fix**, under the same rule as the response-cache changes and the
+authority default above, rather than as a MAJOR bump. It is named here and in
+the changelog rather than hidden.
+
+**A future exemption is possible and is not promised.** Scoping the gate by the
+route's *required* permission is implementable — a route's required permission
+is static metadata, known before any credential is examined — so `/metrics`
+could be exempted on the ground that `metrics:read` alone grants no
+configuration access. It is not exempted today because in precisely the
+deployments least likely to have issued a dedicated scrape token, the token used
+for `/metrics` **is** the admin token. Reversing the decision is additive and
+would be a MINOR change.
+
 ### Generated configuration contract artifacts (ADR 0019 §21-23)
 
 `docs/generated/config.schema.json`, `config-metadata.json` and
@@ -151,8 +221,15 @@ until an explicit publication and maturity decision says so.
 
 Existing Console routes are implementation surfaces for the embedded UI. This
 policy does not accidentally freeze all of them as an external automation API.
-The supported versioned subset, common errors, auth/RBAC and deprecation rules
-are owned by #150.
+The classification is machine-enforced: the route catalog carries a stability
+field whose zero value is *internal*, every internal route records why it is
+not external, and a guard test holds that inventory and the catalog to exact-set
+equality. See [admin-api.md](admin-api.md).
+
+The `/api/v1` configuration operations are not published yet. Their contract is
+fixed by ADR 0019 §24 and their delivery is tracked on
+[#150](https://github.com/victornife/jul/issues/150); publishing a `v1` path is
+a one-way door, so nothing is declared stable ahead of being implemented.
 
 ## What it does not cover
 

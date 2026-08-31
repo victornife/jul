@@ -53,6 +53,9 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
   and release state.
 - **[Security model](../SECURITY.md)** and **[security posture](security-posture.md)**
   — threat boundaries and production hardening.
+- **[Supported external admin API](admin-api.md)** and
+  **[generated OpenAPI contract](generated/openapi.json)** — which admin routes
+  are supported, the error envelope, and the loopback-or-TLS requirement.
 - **[Compatibility policy](compatibility.md)** — SemVer, deprecation and stable
   contract boundaries.
 - **[Release process](release.md)** and **[soak evidence](soak-evidence.md)**.
