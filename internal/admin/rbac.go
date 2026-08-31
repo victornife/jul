@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"jul/internal/adminapi"
 	"jul/internal/config"
 	"jul/internal/rbac"
 )
@@ -212,11 +213,41 @@ func legacyIdentity(token string) rbac.Identity {
 
 // writeRBACUnavailable writes the fail-closed 503 used when the desired mode is
 // RBAC but no valid policy is installed (Blocked).
-func writeRBACUnavailable(w http.ResponseWriter) {
+//
+// On an external route it renders the §26 envelope instead: the condition is the
+// same, only the audience differs.
+func writeRBACUnavailable(w http.ResponseWriter, r *http.Request) {
+	if _, external := externalContract(r.Context()); external {
+		writeAPIError(w, r, adminapi.New(adminapi.CodeStorageUnavailable).WithDetails(adminapi.Details{}))
+		return
+	}
 	writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 		"error":   "rbac_unavailable",
 		"message": "RBAC is enabled but no valid policy is installed; check server logs for details.",
 	})
+}
+
+// writeUnauthenticated writes the 401 for a missing, invalid, disabled or
+// expired credential. It carries no signal about whether the addressed resource
+// exists (ADR 0019 §28).
+func writeUnauthenticated(w http.ResponseWriter, r *http.Request, reason string) {
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	if _, external := externalContract(r.Context()); external {
+		msg := "No valid credential was presented."
+		if reason != "" {
+			msg = reason
+		}
+		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeUnauthenticated, "%s", msg))
+		return
+	}
+	if reason != "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error":   "unauthorized",
+			"message": reason,
+		})
+		return
+	}
+	http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
 }
 
 // checkLegacyToken performs the constant-time legacy shared-token comparison.
@@ -246,27 +277,22 @@ func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http
 
 		switch snap.mode {
 		case authModeBlocked:
-			writeRBACUnavailable(w)
+			writeRBACUnavailable(w, r)
 			return
 
 		case authModeRBAC:
 			bearer := r.Header.Get("Authorization")
 			authID, err := snap.policy.Authenticate(bearer, now)
 			if err == rbac.ErrDisabled {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				writeJSON(w, http.StatusUnauthorized, map[string]string{
-					"error":   "unauthorized",
-					"message": "principal is disabled or expired",
-				})
+				writeUnauthenticated(w, r, "The principal is disabled or expired.")
 				return
 			}
 			if err != nil {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
+				writeUnauthenticated(w, r, "")
 				return
 			}
 			if !snap.policy.Authorize(authID, perm) {
-				writeForbidden(w, perm, authID)
+				writeForbidden(w, r, perm, authID)
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), authID)))
@@ -274,8 +300,7 @@ func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http
 
 		default: // authModeLegacy, authModeOpen
 			if !checkLegacyToken(r, snap.cfg.Token) {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
+				writeUnauthenticated(w, r, "")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), legacyIdentity(snap.cfg.Token))))
@@ -305,23 +330,18 @@ func (s *Server) requireAnyPermission(perms []rbac.Permission, next http.Handler
 
 		switch snap.mode {
 		case authModeBlocked:
-			writeRBACUnavailable(w)
+			writeRBACUnavailable(w, r)
 			return
 
 		case authModeRBAC:
 			bearer := r.Header.Get("Authorization")
 			authID, err := snap.policy.Authenticate(bearer, now)
 			if err == rbac.ErrDisabled {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				writeJSON(w, http.StatusUnauthorized, map[string]string{
-					"error":   "unauthorized",
-					"message": "principal is disabled or expired",
-				})
+				writeUnauthenticated(w, r, "The principal is disabled or expired.")
 				return
 			}
 			if err != nil {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
+				writeUnauthenticated(w, r, "")
 				return
 			}
 			for _, perm := range perms {
@@ -330,13 +350,12 @@ func (s *Server) requireAnyPermission(perms []rbac.Permission, next http.Handler
 					return
 				}
 			}
-			writeForbiddenAny(w, perms, authID)
+			writeForbiddenAny(w, r, perms, authID)
 			return
 
 		default: // authModeLegacy, authModeOpen
 			if !checkLegacyToken(r, snap.cfg.Token) {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
+				writeUnauthenticated(w, r, "")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), legacyIdentity(snap.cfg.Token))))
@@ -354,20 +373,18 @@ func (s *Server) authWithRBAC(next http.Handler) http.Handler {
 
 		switch snap.mode {
 		case authModeBlocked:
-			writeRBACUnavailable(w)
+			writeRBACUnavailable(w, r)
 			return
 
 		case authModeRBAC:
 			bearer := r.Header.Get("Authorization")
 			id, err := snap.policy.Authenticate(bearer, now)
 			if err == rbac.ErrDisabled {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				http.Error(w, `{"error":"unauthorized","message":"principal is disabled or expired"}`, http.StatusUnauthorized)
+				writeUnauthenticated(w, r, "The principal is disabled or expired.")
 				return
 			}
 			if err != nil {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
+				writeUnauthenticated(w, r, "")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), id)))
@@ -375,8 +392,7 @@ func (s *Server) authWithRBAC(next http.Handler) http.Handler {
 
 		case authModeLegacy:
 			if !checkLegacyToken(r, snap.cfg.Token) {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
+				writeUnauthenticated(w, r, "")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), legacyIdentity(snap.cfg.Token))))
@@ -392,7 +408,16 @@ func (s *Server) authWithRBAC(next http.Handler) http.Handler {
 // writeForbidden writes a structured 403 JSON response. It does NOT reveal
 // whether another principal/token exists; it only reports the required
 // permission and the authenticated principal's role.
-func writeForbidden(w http.ResponseWriter, required rbac.Permission, id rbac.Identity) {
+//
+// On an external route it renders the §26 envelope, whose `details` carries the
+// required permission and deliberately not the principal or the role — those
+// are Console affordances, not part of the published contract.
+func writeForbidden(w http.ResponseWriter, r *http.Request, required rbac.Permission, id rbac.Identity) {
+	if _, external := externalContract(r.Context()); external {
+		writeAPIError(w, r, adminapi.New(adminapi.CodeForbidden).
+			WithDetails(adminapi.Details{RequiredPermission: string(required)}))
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusForbidden)
 	body := map[string]string{
@@ -410,13 +435,18 @@ func writeForbidden(w http.ResponseWriter, required rbac.Permission, id rbac.Ide
 // whether another principal/token exists. The accepted permissions are listed
 // under "required_any" so the caller can see which capability would grant
 // access.
-func writeForbiddenAny(w http.ResponseWriter, accepted []rbac.Permission, id rbac.Identity) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusForbidden)
+func writeForbiddenAny(w http.ResponseWriter, r *http.Request, accepted []rbac.Permission, id rbac.Identity) {
 	acceptedStrings := make([]string, 0, len(accepted))
 	for _, p := range accepted {
 		acceptedStrings = append(acceptedStrings, string(p))
 	}
+	if _, external := externalContract(r.Context()); external {
+		writeAPIError(w, r, adminapi.New(adminapi.CodeForbidden).
+			WithDetails(adminapi.Details{RequiredPermission: strings.Join(acceptedStrings, " or ")}))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
 	body := map[string]any{
 		"error":        "forbidden",
 		"required_any": acceptedStrings,

@@ -3,6 +3,6 @@
 
 //go:build http3
 
-package main
+package buildcaps
 
 func init() { tagHTTP3 = true }

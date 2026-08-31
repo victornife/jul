@@ -1,8 +1,8 @@
 // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 // SPDX-License-Identifier: agpl
 
-//go:build brotli
+//go:build consul
 
-package main
+package buildcaps
 
-func init() { tagBrotli = true }
+func init() { tagConsul = true }

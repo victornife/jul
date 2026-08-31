@@ -1,8 +1,8 @@
 // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 // SPDX-License-Identifier: agpl
 
-//go:build otel
+//go:build kubernetes
 
-package main
+package buildcaps
 
-func init() { tagOTel = true }
+func init() { tagKubernetes = true }

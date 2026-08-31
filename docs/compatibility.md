@@ -229,9 +229,10 @@ field whose zero value is *internal*, every internal route records why it is
 not external, and a guard test holds that inventory and the catalog to exact-set
 equality. See [admin-api.md](admin-api.md).
 
-The `/api/v1` configuration operations are not published yet. Their contract is
-fixed by ADR 0019 §24 and their delivery is tracked on
-[#150](https://github.com/victornife/jul/issues/150); publishing a `v1` path is
+The `/api/v1` surface opens incrementally. `GET /api/v1/status` and
+`GET /api/v1/capabilities` are published and stable; the remaining operations
+ADR 0019 §24 fixes land as they are implemented, tracked on
+[#150](https://github.com/victornife/jul/issues/150). Publishing a `v1` path is
 a one-way door, so nothing is declared stable ahead of being implemented.
 
 ## What it does not cover

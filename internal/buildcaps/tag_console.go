@@ -1,8 +1,8 @@
 // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 // SPDX-License-Identifier: agpl
 
-//go:build grpc
+//go:build console
 
-package main
+package buildcaps
 
-func init() { tagGRPC = true }
+func init() { tagConsole = true }

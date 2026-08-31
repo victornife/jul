@@ -1,8 +1,8 @@
 // Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 // SPDX-License-Identifier: agpl
 
-//go:build zstd
+//go:build brotli
 
-package main
+package buildcaps
 
-func init() { tagZstd = true }
+func init() { tagBrotli = true }

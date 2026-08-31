@@ -880,7 +880,7 @@ func (s *Server) authorizeConfigCandidate(w http.ResponseWriter, r *http.Request
 	id, ok := rbacIdentityFromRequest(r)
 	if ok && !id.Legacy && !id.Has(rbac.ConfigApply) {
 		s.recordAudit(r, action, "config", "failure", "rejected: lacks config:apply")
-		writeForbidden(w, rbac.ConfigApply, id)
+		writeForbidden(w, r, rbac.ConfigApply, id)
 		return false
 	}
 	if err := s.requireAdminManageForCandidate(r, action, next); err != nil {
@@ -906,7 +906,7 @@ func (s *Server) authorizeConfigTransition(w http.ResponseWriter, r *http.Reques
 	id, ok := rbacIdentityFromRequest(r)
 	if ok && !id.Legacy && !id.Has(rbac.ConfigApply) {
 		s.recordAudit(r, action, "config", "failure", "rejected: lacks config:apply")
-		writeForbidden(w, rbac.ConfigApply, id)
+		writeForbidden(w, r, rbac.ConfigApply, id)
 		return false
 	}
 	if !s.authorizeTrustTransition(w, r, action, current, next) {
@@ -941,7 +941,7 @@ func (s *Server) authorizeTrustTransition(w http.ResponseWriter, r *http.Request
 		return true
 	}
 	s.recordAudit(r, action, "config", "failure", "rejected: lacks config:trust for a trusted-proxy change")
-	writeForbidden(w, rbac.ConfigTrust, id)
+	writeForbidden(w, r, rbac.ConfigTrust, id)
 	return false
 }
 

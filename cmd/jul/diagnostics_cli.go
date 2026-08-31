@@ -12,12 +12,10 @@ import (
 	"os/signal"
 	"time"
 
+	"jul/internal/buildcaps"
 	"jul/internal/diagnostics"
 	"jul/internal/doctor"
-	"jul/internal/plugins"
-	"jul/internal/stream"
 	"jul/internal/supportbundle"
-	"jul/internal/waf"
 )
 
 func dispatchDiagnosticsSubcommand(args []string) (handled bool, code int) {
@@ -169,29 +167,18 @@ func cmdSupportBundle(args []string) int {
 }
 
 func diagnosticCapabilities() map[string]bool {
-	return map[string]bool{
-		"waf":          waf.Compiled,
-		"stream_proxy": stream.Compiled,
-		"wasm_plugins": plugins.Compiled,
-		"acme":         tagACME,
-		"grpc":         tagGRPC,
-		"http3":        tagHTTP3,
-		"otel":         tagOTel,
-		"console":      tagConsole,
-		"brotli":       tagBrotli,
-		"zstd":         tagZstd,
-		"importer":     tagImporter,
-		"consul":       tagConsul,
-		"kubernetes":   tagKubernetes,
+	out := make(map[string]bool, 13)
+	for _, f := range buildcaps.Compiled().Named() {
+		out[f.Name] = f.Enabled
 	}
+	return out
 }
 
 func diagnosticBuildProfile(capabilities map[string]bool) string {
-	keys := []string{"waf", "stream_proxy", "wasm_plugins", "acme", "grpc", "http3", "otel", "console", "brotli", "zstd", "importer", "consul", "kubernetes"}
 	anyEnabled := false
 	allEnabled := true
-	for _, key := range keys {
-		enabled := capabilities[key]
+	for _, f := range buildcaps.Compiled().Named() {
+		enabled := capabilities[f.Name]
 		anyEnabled = anyEnabled || enabled
 		allEnabled = allEnabled && enabled
 	}
