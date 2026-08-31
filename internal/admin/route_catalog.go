@@ -324,6 +324,38 @@ var Catalog = []RouteSpec{
 		},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Streams) },
 	},
+	{
+		Pattern:    "/api/v1/config/export",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.ConfigRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID: "exportConfig",
+				Summary: "The whole configuration as a redacted structured projection, captured at one revision. " +
+					"Exact bytes are never returned: raw export is local-only in v1.",
+				Response: "ConfigExportResponse",
+				Errors:   []string{"storage_unavailable"},
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1ConfigExport) },
+	},
+	{
+		Pattern:    "/api/v1/config/history/{id}/diff",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.HistoryRollback,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID: "diffHistoryRevision",
+				Summary: "What rolling back to a stored revision would change, against the persisted configuration, " +
+					"with the base_version to bind the rollback to what was reviewed.",
+				Response: "HistoryDiffResponse",
+				Errors:   []string{"not_found", "internal_error", "storage_unavailable"},
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1HistoryDiff) },
+	},
 
 	// ── Identity (authenticated, any credential) ─────────────────────────────
 	// Returns the caller's own server-derived identity so the Console can

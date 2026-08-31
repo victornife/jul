@@ -150,6 +150,8 @@ route it asked for.
 | `/api/v1/listeners` | GET | external | `config:read` |
 | `/api/v1/listeners/{addr}/client_address` | GET | external | `config:read` |
 | `/api/v1/streams` | GET | external | `status:read` |
+| `/api/v1/config/export` | GET | external | `config:read` |
+| `/api/v1/config/history/{id}/diff` | GET | external | `history:rollback` |
 
 The probes and the scrape target keep their **current unversioned paths**.
 Moving a liveness probe or a Prometheus target under `/api/v1` would break every
@@ -390,6 +392,71 @@ directions:
   by server name is the only stable choice here; leaving it unsorted would
   publish Go's randomized map iteration as if it were an ordering, and a client
   diffing two reads would see phantom changes.
+
+### `GET /api/v1/config/export`
+
+The whole configuration as a redacted structured projection, captured at one
+revision. It exists because reading the four collections separately can straddle
+a reload and produce a document that never existed; everything here comes from a
+single read, so one `base_version` describes all of it.
+
+**This is an allow-list, and that is the point.** A field appears because it was
+reviewed and published, not because it exists in the configuration. The export
+composes the DTOs already published under their own operations — listeners,
+routes, upstreams, streams — plus a `global` block that names its scalars one by
+one. Nothing is reflected from the configuration wholesale.
+
+The inverse design, marshalling the configuration and stripping what looks
+sensitive, fails **open**: every field added to the schema afterwards is exported
+until someone remembers to strip it, and nothing tells you it happened. The
+allow-list fails closed — a new field is simply absent until it is published on
+purpose. A test asserts `ExportGlobal` embeds no configuration type, because an
+embedded struct would silently convert the one design into the other.
+
+`secret_ref_count` is published; no reference expression and no resolved value
+ever is. A change in the count is therefore visible without the values being
+readable.
+
+`redacted` is always `true`. It is stated rather than implied so a client cannot
+mistake this document for the file — and **exact bytes are not available
+remotely in v1**. Raw export stays on the internal `/api/config` route under
+`config:raw`, because a configuration file may hold literal secret values, and
+reconciling that with #150's "no secret readback" non-goal is a decision about
+secret handling on its own terms rather than a table row (ADR 0019 §24, §36).
+The practical cost is that `jul export --raw` is local-only, which is acceptable
+because the deployment that needs exact bytes — the managed-to-file-owned
+handoff — is one where the operator has filesystem access to the file anyway.
+
+### `GET /api/v1/config/history/{id}/diff`
+
+What rolling back to a stored revision would change.
+
+The permission is `history:rollback`, not `history:read`, because this is a
+rollback preview and the operation is shaped so a rollback-only principal can
+use it: it reads the snapshot server-side and accepts **no request body**, so
+that principal can see exactly what its rollback would do without holding
+`config:write` and without submitting arbitrary candidate TOML.
+
+The same reasoning is why the snapshot body never crosses the API. The diff is
+the answer the operator actually needs, and the body would be a second raw
+readback path — which is exactly why `GET /api/v1/config/history/{id}` is absent
+from v1.
+
+`base_version` is derived identically to the rollback's own concurrency check,
+so the value the preview reports is what a subsequent rollback is validated
+against. A client passes it back to bind the rollback to the configuration the
+operator reviewed; if the persisted configuration moved underneath them, the
+rollback is refused rather than applied to something unexamined.
+
+The baseline is the **persisted** configuration, not the live runtime. The two
+are identical except while a staged restart or external divergence is pending,
+and a hot rollback is already refused in that state.
+
+A credential change is reported as a change — "rotate", with no `before` or
+`after` — because `before`/`after` are free-form values and a comparator that
+put a credential in either would put it on the wire. Withholding the value must
+not withhold the fact: an operator reviewing a rollback needs to see a rotation
+coming. A test asserts both halves.
 
 ## What is deliberately not published
 
