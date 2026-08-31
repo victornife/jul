@@ -36,9 +36,23 @@ func TestRepositoryCoverageMatrixAndInventoryGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read inventory golden: %v", err)
 	}
+	actual = normalizeGoldenNewlines(actual)
+	expected = normalizeGoldenNewlines(expected)
 	if !bytes.Equal(actual, expected) {
 		t.Fatalf("inventory golden drift; run `go run -tags importer scripts/nginx-corpus-report.go -write` and review the diff\n--- want\n%s\n--- got\n%s", expected, actual)
 	}
+}
+
+func TestNormalizeGoldenNewlines(t *testing.T) {
+	input := []byte("{\r\n  \"fixture_count\": 11\r\n}\r\n")
+	want := []byte("{\n  \"fixture_count\": 11\n}\n")
+	if got := normalizeGoldenNewlines(input); !bytes.Equal(got, want) {
+		t.Fatalf("normalized golden = %q, want %q", got, want)
+	}
+}
+
+func normalizeGoldenNewlines(data []byte) []byte {
+	return bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 }
 
 func TestCoverageDecodeStrictness(t *testing.T) {
