@@ -71,7 +71,9 @@ silent collector edit.
 The request `host` label is present in the contract but emitted with an empty
 value by default because `Host` is client-controlled. Set
 `[observability.metrics].host_label = true` only when the host set is bounded;
-changing it requires a restart.
+the flag hot-reloads (#91) — an atomic flip read by the metrics middleware on
+each request, never a registry rebuild — so existing counters/histograms/gauges
+are never reset and previously recorded host-labeled series are not deleted.
 
 ### Exported Jul.IA metric families
 

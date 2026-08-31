@@ -259,12 +259,12 @@
     "schema_paths": 356,
     "schema_leaves": 302,
     "registry_entries": 302,
-    "startup_consumed": 56,
+    "startup_consumed": 54,
     "by_class": {
-      "hot_reload": 231,
+      "hot_reload": 233,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
-      "restart_required": 56,
+      "restart_required": 54,
       "validation_rejected_reserved": 3
     }
   },
@@ -961,10 +961,10 @@
     },
     {
       "path": "global.log_format",
-      "class": "restart_required",
+      "class": "hot_reload",
       "subsystem": "log_format",
-      "reason": "the slog handler encoding is chosen once when the logger is built at startup",
-      "startup_consumed": true,
+      "reason": "the slog handler encoding is a swappable delegate behind DynamicHandler; OnReloaded installs the new one atomically on each successful reload without rebuilding the logger (#91)",
+      "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,
       "deprecated": false,
@@ -1117,10 +1117,10 @@
     },
     {
       "path": "observability.metrics.host_label",
-      "class": "restart_required",
+      "class": "hot_reload",
       "subsystem": "metrics",
-      "reason": "the Prometheus registry and its label set are built once at startup",
-      "startup_consumed": true,
+      "reason": "an atomic flag read by the metrics middleware on each request; OnReloaded flips it on every successful reload without rebuilding the registry or resetting any collector (#91)",
+      "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,
       "deprecated": false,

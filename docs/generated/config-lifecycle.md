@@ -20,9 +20,9 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 | Schema paths (containers included) | 356 |
 | Schema leaves (configurable values) | 302 |
 | Registry entries | 302 |
-| Startup-consumed entries | 56 |
-| Class `hot_reload` | 231 |
-| Class `restart_required` | 56 |
+| Startup-consumed entries | 54 |
+| Class `hot_reload` | 233 |
+| Class `restart_required` | 54 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 3 |
@@ -170,7 +170,7 @@ value is compared as a digest so no secret material leaves the process.
 | `global.access_log` | `ignored_deprecated` | `access_log` | deprecated, ignored | superseded by observability.access_log; no runtime consumer reads it |
 | `global.config_authority` | `restart_required` | `config_authority` | startup | authority is resolved once at startup and wires the file watcher, SIGHUP, and the managed baseline before any writer exists; changing it moves ownership of the configuration file and cannot be hot-applied (ADR 0019 §9.2) |
 | `global.error_log` | `ignored_deprecated` | `error_log` | deprecated, ignored | structured process logs are written to stderr; no runtime consumer reads it |
-| `global.log_format` | `restart_required` | `log_format` | startup | the slog handler encoding is chosen once when the logger is built at startup |
+| `global.log_format` | `hot_reload` | `log_format` | — | the slog handler encoding is a swappable delegate behind DynamicHandler; OnReloaded installs the new one atomically on each successful reload without rebuilding the logger (#91) |
 | `global.log_level` | `hot_reload` | `log_level` | — | the level var is updated by OnReloaded on each successful reload |
 | `global.redact_min_secret_length` | `hot_reload` | `redact` | — | the redaction state is rebuilt and installed atomically on each successful reload |
 | `global.reload_timeout` | `hot_reload` | `reload_timeout` | — | the threshold is read from the effective config at the start of each reload |
@@ -182,7 +182,7 @@ value is compared as a digest so no secret material leaves the process.
 | `observability.access_log.rotate_keep` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
 | `observability.access_log.rotate_max_mb` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
 | `observability.access_log.sinks` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
-| `observability.metrics.host_label` | `restart_required` | `metrics` | startup | the Prometheus registry and its label set are built once at startup |
+| `observability.metrics.host_label` | `hot_reload` | `metrics` | — | an atomic flag read by the metrics middleware on each request; OnReloaded flips it on every successful reload without rebuilding the registry or resetting any collector (#91) |
 | `observability.tracing.enabled` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |
 | `observability.tracing.endpoint` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |
 | `observability.tracing.exporter` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |

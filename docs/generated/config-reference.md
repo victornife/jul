@@ -721,11 +721,10 @@ LogFormat is "text" (human readable, default in dev) or "json".
 | | |
 | --- | --- |
 | Type | `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `log_format` |
-| Why | the slog handler encoding is chosen once when the logger is built at startup |
+| Why | the slog handler encoding is a swappable delegate behind DynamicHandler; OnReloaded installs the new one atomically on each successful reload without rebuilding the logger (#91) |
 | Default | text |
-| Flags | startup-consumed |
 | Allowed values | `text`, `json` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted defaults to text |
@@ -900,10 +899,9 @@ HostLabel adds the request Host as the "host" label on jul_http_requests_total a
 | | |
 | --- | --- |
 | Type | `bool` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `metrics` |
-| Why | the Prometheus registry and its label set are built once at startup |
-| Flags | startup-consumed |
+| Why | an atomic flag read by the metrics middleware on each request; OnReloaded flips it on every successful reload without rebuilding the registry or resetting any collector (#91) |
 
 ## `observability.tracing.enabled` {#observability-tracing-enabled}
 

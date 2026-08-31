@@ -248,11 +248,14 @@ func TestExternalDivergenceBlocksHotApply(t *testing.T) {
 		t.Fatalf("admin server did not become ready")
 	}
 
-	// Externally edit the file with a restart-required change (log_format).
-	// The watcher will attempt to reload it, fail because it is restart-required,
-	// and leave the runtime serving the previous config while disk diverges.
+	// Externally edit the file with a restart-required change (cache.enabled:
+	// cache enablement stays restart-bound, gated separately in #93).
+	// log_format is hot-reloadable now (#91), so it no longer serves this
+	// purpose. The watcher will attempt to reload it, fail because it is
+	// restart-required, and leave the runtime serving the previous config
+	// while disk diverges.
 	diverged := baseCfg()
-	diverged.Global.LogFormat = "json"
+	diverged.Cache.Enabled = true
 	writeCfg(diverged)
 
 	// Poll the pending-restart endpoint until the divergence is detected.

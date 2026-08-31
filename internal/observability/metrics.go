@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -30,8 +31,9 @@ type Metrics struct {
 	// It is opt-in (default off) because Host is client-controlled and an
 	// unbounded label would let a flood of distinct Host headers explode metric
 	// cardinality. When disabled the label is emitted with an empty value so the
-	// metric shape is stable for dashboards.
-	hostLabelEnabled bool
+	// metric shape is stable for dashboards. Atomic so it hot-reloads (#91)
+	// without replacing the registry or resetting any collector.
+	hostLabelEnabled atomic.Bool
 
 	requests    *prometheus.CounterVec
 	duration    *prometheus.HistogramVec
@@ -172,8 +174,17 @@ type MetricsOption func(*Metrics)
 // is client-controlled, so an attacker sending many distinct values could
 // otherwise drive unbounded metric cardinality.
 func WithHostLabel(on bool) MetricsOption {
-	return func(m *Metrics) { m.hostLabelEnabled = on }
+	return func(m *Metrics) { m.hostLabelEnabled.Store(on) }
 }
+
+// SetHostLabel atomically changes whether future requests record the Host
+// label (#91). It never touches the registry or any existing collector value:
+// requests beginning after the call use the new mode; an in-flight request
+// finalizes its labels with whichever mode Middleware observed when it read
+// the flag, which is race-free but not linearizable with the exact moment of
+// the call — the same documented behavior an atomic load anywhere else in a
+// concurrent request path has.
+func (m *Metrics) SetHostLabel(on bool) { m.hostLabelEnabled.Store(on) }
 
 // NewMetrics creates and registers the collectors on a private registry.
 func NewMetrics(opts ...MetricsOption) *Metrics {
@@ -494,7 +505,7 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		next.ServeHTTP(rec.Writer(), r)
 
 		host := hostLabel(r.Host)
-		if !m.hostLabelEnabled {
+		if !m.hostLabelEnabled.Load() {
 			// Opt-out (default): collapse the client-controlled Host to a single
 			// empty series so per-host cardinality cannot grow unbounded.
 			host = ""

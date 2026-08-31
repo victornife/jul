@@ -76,7 +76,7 @@ describe("issue #81 action and race contract", () => {
     expect(recommendPatchAction(allNew, { state: "none", subsystems: [] })).toBe("hot");
   });
 
-  it("stages a server-classified global.log_format change", () => {
+  it("stages a server-classified global.config_authority change", () => {
     expect(
       recommendPatchAction(
         {
@@ -84,11 +84,11 @@ describe("issue #81 action and race contract", () => {
           can_stage_restart: true,
           changes: [],
           hot_paths: [],
-          restart_required_paths: ["global.log_format"],
+          restart_required_paths: ["global.config_authority"],
           new_listener_only_paths: [],
           ignored_deprecated_paths: [],
           validation_rejected_paths: [],
-          pending_subsystems: ["logging"],
+          pending_subsystems: ["config_authority"],
         },
         { state: "none", subsystems: [] },
       ),

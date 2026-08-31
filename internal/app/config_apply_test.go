@@ -59,11 +59,13 @@ func mutationBaseline(t *testing.T, raw []byte) *admin.MutationBaseline {
 }
 
 // restartRequiredConfigRaw returns a config raw that differs from the seed
-// produced by validConfigRaw in a restart-required field (log_format).
+// produced by validConfigRaw in a restart-required field (cache.enabled:
+// cache enablement stays restart-bound, gated separately in #93). log_format
+// is hot-reloadable now (#91), so it no longer serves this purpose.
 func restartRequiredConfigRaw(t *testing.T, listen string) []byte {
 	t.Helper()
 	cfg := config.ProxyTarget("127.0.0.1:9000", listen)
-	cfg.Global.LogFormat = "json"
+	cfg.Cache.Enabled = true
 	raw, err := config.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("marshal config: %v", err)
@@ -596,7 +598,7 @@ func TestCoordinatorApplyRawRestartRequiredCanStage(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "server.toml")
 	seed := config.ProxyTarget("127.0.0.1:9000", ":8080")
-	seed.Global.LogFormat = "json"
+	seed.Cache.Enabled = true
 	seedRaw, err := config.Marshal(seed)
 	if err != nil {
 		t.Fatalf("marshal seed: %v", err)
@@ -618,7 +620,7 @@ func TestCoordinatorApplyRawRestartRequiredCanStage(t *testing.T) {
 
 	// Change a restart-required field.
 	next := config.ProxyTarget("127.0.0.1:9000", ":8080")
-	next.Global.LogFormat = "text"
+	next.Cache.Enabled = false
 	nextRaw, err := config.Marshal(next)
 	if err != nil {
 		t.Fatalf("marshal next: %v", err)

@@ -19,14 +19,14 @@ func TestNewMetricsDefaults(t *testing.T) {
 	if m.startTime.IsZero() {
 		t.Error("startTime not set")
 	}
-	if m.hostLabelEnabled {
+	if m.hostLabelEnabled.Load() {
 		t.Error("hostLabel should be off by default")
 	}
 }
 
 func TestWithHostLabel(t *testing.T) {
 	m := NewMetrics(WithHostLabel(true))
-	if !m.hostLabelEnabled {
+	if !m.hostLabelEnabled.Load() {
 		t.Error("hostLabel should be on")
 	}
 }
