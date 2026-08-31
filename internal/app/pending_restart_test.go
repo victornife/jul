@@ -59,11 +59,26 @@ func TestPendingRestartCheckResolveError(t *testing.T) {
 	}
 }
 
+// admin.token is hot-reloadable (#95), so these tests exercise the last
+// remaining restart-required, secret-digested value field instead:
+// admin.tls.client_auth.ca_file. The CA pool is read and installed only when
+// the admin listener is created, so an in-place rotation still requires a
+// restart, and the fingerprint must still catch it through the digest.
 func TestPendingRestartCheckDetectsSecretRotation(t *testing.T) {
-	t.Setenv("PENDING_TOKEN_A", "token-alpha")
+	caA := filepath.Join(t.TempDir(), "ca-a.pem")
+	caB := filepath.Join(t.TempDir(), "ca-b.pem")
+	if err := os.WriteFile(caA, []byte("ca-alpha"), 0o600); err != nil {
+		t.Fatalf("write ca a: %v", err)
+	}
+	if err := os.WriteFile(caB, []byte("ca-beta"), 0o600); err != nil {
+		t.Fatalf("write ca b: %v", err)
+	}
+	t.Setenv("PENDING_CA_PATH", caA)
 
 	startupRaw := &config.Config{
-		Admin: config.AdminConfig{Token: "${env:PENDING_TOKEN_A}"},
+		Admin: config.AdminConfig{
+			TLS: &config.AdminTLSConfig{ClientAuth: &config.ClientAuthConfig{Mode: "require", CAFile: "${env:PENDING_CA_PATH}"}},
+		},
 		Servers: []config.ServerConfig{{
 			Listen:    freePort(t),
 			Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
@@ -75,13 +90,13 @@ func TestPendingRestartCheckDetectsSecretRotation(t *testing.T) {
 	}
 	startupFP := lifecycle.ComputeFingerprint(startup.Effective)
 
-	// Change only the secret value, not the reference.
-	t.Setenv("PENDING_TOKEN_A", "token-beta")
+	// Change only the secret reference's target, not the reference text.
+	t.Setenv("PENDING_CA_PATH", caB)
 	loadFn := func() (*config.Config, error) { return startupRaw, nil }
 
 	got := pendingRestartCheck(startup, startupFP, server.LiveSnapshot{}, loadFn, testLogger(t))
-	if !slices.Contains(got, "admin") {
-		t.Fatalf("secret rotation should report admin subsystem, got %v", got)
+	if !slices.Contains(got, "mtls") {
+		t.Fatalf("secret rotation should report mtls subsystem, got %v", got)
 	}
 }
 
@@ -172,15 +187,20 @@ func TestPendingRestartCheckUsesLiveSnapshotForRebind(t *testing.T) {
 	}
 }
 
+// admin.token is hot-reloadable (#95); admin.tls.client_auth.ca_file remains
+// the restart-required, file-backed secret exercising this path (its content
+// is digested directly, with no ${file:...} indirection needed).
 func TestPendingRestartCheckDetectsFileBackedSecretRotation(t *testing.T) {
 	tmp := t.TempDir()
-	secretPath := filepath.Join(tmp, "admin-token.txt")
-	if err := os.WriteFile(secretPath, []byte("alpha"), 0o600); err != nil {
+	caPath := filepath.Join(tmp, "admin-ca.pem")
+	if err := os.WriteFile(caPath, []byte("alpha"), 0o600); err != nil {
 		t.Fatalf("write secret: %v", err)
 	}
 
 	startupRaw := &config.Config{
-		Admin: config.AdminConfig{Token: "${file:" + secretPath + "}"},
+		Admin: config.AdminConfig{
+			TLS: &config.AdminTLSConfig{ClientAuth: &config.ClientAuthConfig{Mode: "require", CAFile: caPath}},
+		},
 		Servers: []config.ServerConfig{{
 			Listen:    freePort(t),
 			Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
@@ -192,15 +212,15 @@ func TestPendingRestartCheckDetectsFileBackedSecretRotation(t *testing.T) {
 	}
 	startupFP := lifecycle.ComputeFingerprint(startup.Effective)
 
-	// Rotate the file contents without changing the reference.
-	if err := os.WriteFile(secretPath, []byte("beta"), 0o600); err != nil {
+	// Rotate the file contents without changing the reference (path).
+	if err := os.WriteFile(caPath, []byte("beta"), 0o600); err != nil {
 		t.Fatalf("rotate secret: %v", err)
 	}
 	loadFn := func() (*config.Config, error) { return startupRaw, nil }
 
 	got := pendingRestartCheck(startup, startupFP, server.LiveSnapshot{}, loadFn, testLogger(t))
-	if !slices.Contains(got, "admin") {
-		t.Fatalf("file-backed secret rotation should report admin subsystem, got %v", got)
+	if !slices.Contains(got, "mtls") {
+		t.Fatalf("file-backed secret rotation should report mtls subsystem, got %v", got)
 	}
 }
 

@@ -59,8 +59,8 @@ the file is written. This means:
 - Changes to **hot-reloadable** fields (routes, handlers, upstreams,
   compression, rate limiting, etc.) apply exactly as they do through the
   Console.
-- Changes to **restart-required** fields (cache, egress, admin listener/token/
-  rate limits/history/plugin-upload/audit, tracing, ACME, log
+- Changes to **restart-required** fields (cache, egress, admin listener/rate
+  limits/history/plugin-upload/audit, tracing, ACME, log
   format, listener bind settings) are **rejected at swap time** — the swap is
   aborted, `LastReload.Outcome=not_applied` is recorded
   with the reason, and the old config remains authoritative. The file on disk
@@ -71,7 +71,10 @@ the file is written. This means:
   token hashes) are rebuilt into a prepared authentication snapshot and
   installed with a single atomic store at the reload Publish boundary, so
   enabling, disabling, or repolicying RBAC takes effect on the next successful
-  reload without a restart.
+  reload without a restart. **`admin.token` is hot-reloadable** (#95) through
+  the same prepared authentication snapshot: a new token is live for the very
+  next request after a successful reload, and the prior token is rejected —
+  no restart, no overlap window.
 - **New-listener-only** fields (a new listen address, or a new L4 listener)
   apply to brand-new listeners without a restart; changing the same property on
   an already-bound listener is treated as restart-required.
@@ -815,11 +818,13 @@ applied dynamically on the next successful reload.
   handler reloads. Scalar policy/capacity hot reload is separately planned in
   #92; enable/disable and disk-path replacement remain gated in #93.
 - **Egress allow-list** — the outbound dial policy is built once at startup.
-- **Admin server** — listener, token, rate limits, history, plugin-upload, and
-  audit-log settings are baked in at startup. Token rotation in particular does
-  not revoke the old token until restart. The RBAC policy and its
-  `admin.rbac.enabled` toggle are the exception: they hot-reload via the
-  prepared atomic authentication snapshot (see [config-lifecycle.yaml](config-lifecycle.yaml)).
+- **Admin server** — listener, rate limits, history, plugin-upload, and
+  audit-log settings are baked in at startup. `admin.token` and the RBAC policy
+  (including its `admin.rbac.enabled` toggle) are the exception: both hot-reload
+  via the same prepared atomic authentication snapshot, so a rotated token or
+  policy is live for the very next request after a successful reload and the
+  prior token is rejected immediately — no restart, no overlap window (#95;
+  see [config-lifecycle.yaml](config-lifecycle.yaml)).
 - **Metrics host label** — set when the Prometheus registry is created.
 
 Adding a brand-new `listen` address is *not* restart-required: the reload binds

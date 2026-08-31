@@ -79,10 +79,10 @@ counts:
   schema_paths: 356
   schema_leaves: 302
   registry_entries: 302
-  startup_consumed: 57
+  startup_consumed: 56
   by_class:
-    hot_reload: 230
-    restart_required: 57
+    hot_reload: 231
+    restart_required: 56
     new_listener_only: 8
     ignored_deprecated: 4
     validation_rejected_reserved: 3
@@ -256,10 +256,9 @@ fields:
     reason: "the minimum protocol version is written into the admin listener's tls.Config when it is created"
     startup_consumed: true
   - path: "admin.token"
-    class: restart_required
+    class: hot_reload
     subsystem: admin
-    reason: "the shared bearer token is captured when the admin listener is created; rotating it must not appear to succeed while the old token still grants access"
-    startup_consumed: true
+    reason: "the shared bearer token is resolved into the same immutable authentication snapshot the RBAC fields below install atomically at Publish; the prior token is rejected for every request after the swap"
     secret_digested: true
   - path: "cache.default_ttl"
     class: restart_required

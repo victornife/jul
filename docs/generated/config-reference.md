@@ -466,10 +466,10 @@ Token, when set, requires `Authorization: Bearer <token>`.
 | | |
 | --- | --- |
 | Type | `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `admin` |
-| Why | the shared bearer token is captured when the admin listener is created; rotating it must not appear to succeed while the old token still grants access |
-| Flags | startup-consumed, secret |
+| Why | the shared bearer token is resolved into the same immutable authentication snapshot the RBAC fields below install atomically at Publish; the prior token is rejected for every request after the swap |
+| Flags | secret |
 
 ## `cache.default_ttl` {#cache-default_ttl}
 
