@@ -198,8 +198,13 @@ func TestSupportBundleCoverageGeneratorBoundaries(t *testing.T) {
 	limits.PerCollectorTimeout = time.Millisecond
 	lateSuccess := NewGenerator([]Collector{CollectorFunc{
 		ID: "late-success",
-		Fn: func(context.Context, Snapshot) ([]Artifact, error) {
-			time.Sleep(5 * time.Millisecond)
+		Fn: func(ctx context.Context, _ Snapshot) ([]Artifact, error) {
+			// Wait for the deadline itself (not a fixed sleep) so this is not a
+			// race against OS timer/scheduler resolution on slower CI runners:
+			// ctx.Err() is guaranteed set before Done() closes. The collector
+			// still returns (nil, nil), simulating one that ignores its own
+			// context, to exercise the generator's post-hoc ctx.Err() check.
+			<-ctx.Done()
 			return nil, nil
 		},
 	}}, limits, 1)
