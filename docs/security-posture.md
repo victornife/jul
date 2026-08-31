@@ -52,9 +52,13 @@ When running with the legacy shared token (RBAC disabled):
 - Treat the admin token as a root credential with no audit trail — or enable
   `[admin.rbac]` to get named principals and attribution.
 - Do not expose the admin listener to untrusted networks under any circumstances.
-- If remote access is required, configure [`[admin.tls]`](configuration.md#admin) with an
+- If remote access is required, configure [`[admin.tls]`](configuration.md#admintls) with an
   operator-supplied certificate (#336) — never bind off-loopback in cleartext.
-  Optionally add [`[admin.tls.client_auth]`](configuration.md#admin) to require a
+  This is enforced, not merely advised: a request that consumes an admin
+  credential over a non-loopback, non-TLS connection is refused with
+  `403 insecure_transport` before authentication (ADR 0019 §28.1); only
+  `/healthz` and `/readyz` are exempt.
+  Optionally add [`[admin.tls.client_auth]`](configuration.md#admintlsclient_auth) to require a
   client certificate as well; it composes with the token/RBAC check rather than
   replacing it. An SSH tunnel or a mutual-TLS proxy in front remains a valid
   alternative.
