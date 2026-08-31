@@ -434,6 +434,202 @@
         ]
       }
     },
+    "/api/v1/routes": {
+      "get": {
+        "operationId": "listRoutes",
+        "summary": "Every route in declaration order, each carrying its durable route_id when it has one and the revision-scoped selector always, with the base_version those selectors are scoped to.",
+        "tags": [
+          "routes"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "status:read"
+        ]
+      }
+    },
+    "/api/v1/routes/{route_id}": {
+      "get": {
+        "operationId": "getRoute",
+        "summary": "One route, resolved from its durable id alone. A route without a route_id is collection-only and is not addressable here.",
+        "tags": [
+          "routes"
+        ],
+        "parameters": [
+          {
+            "name": "route_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — The addressed resource does not exist. Returned only to a caller that already holds the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "status:read"
+        ]
+      }
+    },
     "/api/v1/status": {
       "get": {
         "operationId": "getStatus",
@@ -492,6 +688,202 @@
           },
           "500": {
             "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "status:read"
+        ]
+      }
+    },
+    "/api/v1/upstreams": {
+      "get": {
+        "operationId": "listUpstreams",
+        "summary": "Every upstream pool in configuration order, with each backend's configured weight and live eligibility state.",
+        "tags": [
+          "upstreams"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpstreamsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "status:read"
+        ]
+      }
+    },
+    "/api/v1/upstreams/{name}": {
+      "get": {
+        "operationId": "getUpstream",
+        "summary": "One upstream pool, addressed by its natural key.",
+        "tags": [
+          "upstreams"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "The server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpstreamResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — The addressed resource does not exist. Returned only to a caller that already holds the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1392,6 +1784,135 @@
         "type": "string",
         "description": "Prometheus text exposition format. The format is owned by Prometheus and is not restated here; the set of metric names and labels Jul emits is documented in docs/metrics-contract.json."
       },
+      "Route": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "auth": {
+            "type": "boolean"
+          },
+          "cache": {
+            "type": "boolean"
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rate_limit": {
+            "type": "boolean"
+          },
+          "require_client_cert": {
+            "type": "boolean"
+          },
+          "route_id": {
+            "type": "string"
+          },
+          "selector": {
+            "$ref": "#/components/schemas/RouteSelector"
+          },
+          "target": {
+            "type": "string"
+          },
+          "tls": {
+            "type": "boolean"
+          },
+          "upstream": {
+            "type": "string"
+          },
+          "waf": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action",
+          "auth",
+          "cache",
+          "rate_limit",
+          "require_client_cert",
+          "selector",
+          "tls",
+          "waf"
+        ],
+        "additionalProperties": false
+      },
+      "RouteResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "base_version": {
+            "type": "string"
+          },
+          "route": {
+            "$ref": "#/components/schemas/Route"
+          }
+        },
+        "required": [
+          "api_version",
+          "base_version",
+          "route"
+        ],
+        "additionalProperties": false
+      },
+      "RouteSelector": {
+        "type": "object",
+        "properties": {
+          "listen": {
+            "type": "string"
+          },
+          "match_ordinal": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "match_type": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "server_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "listen",
+          "match_ordinal",
+          "match_type",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "RoutesResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "base_version": {
+            "type": "string"
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Route"
+            }
+          }
+        },
+        "required": [
+          "api_version",
+          "base_version",
+          "routes"
+        ],
+        "additionalProperties": false
+      },
       "StatusResponse": {
         "type": "object",
         "properties": {
@@ -1444,6 +1965,96 @@
           "ledger_retention",
           "pending_restart",
           "ready"
+        ],
+        "additionalProperties": false
+      },
+      "Upstream": {
+        "type": "object",
+        "properties": {
+          "backends": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpstreamBackend"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "strategy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "backends",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "UpstreamBackend": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "in_flight": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "state": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "address",
+          "in_flight",
+          "weight"
+        ],
+        "additionalProperties": false
+      },
+      "UpstreamResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "base_version": {
+            "type": "string"
+          },
+          "upstream": {
+            "$ref": "#/components/schemas/Upstream"
+          }
+        },
+        "required": [
+          "api_version",
+          "base_version",
+          "upstream"
+        ],
+        "additionalProperties": false
+      },
+      "UpstreamsResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "base_version": {
+            "type": "string"
+          },
+          "upstreams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Upstream"
+            }
+          }
+        },
+        "required": [
+          "api_version",
+          "base_version",
+          "upstreams"
         ],
         "additionalProperties": false
       },
