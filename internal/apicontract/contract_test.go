@@ -306,6 +306,11 @@ func TestGenerationIsDeterministic(t *testing.T) {
 // TestCommittedArtifactIsCurrent is the in-test half of `make generated-check`.
 // It fails in `go test` as well as in the generated-check lane, so the mistake
 // is caught by whichever the developer runs first.
+//
+// The comparison is byte-exact, including line endings, and stays that way
+// deliberately: normalising here would let a CRLF-committed artifact pass on
+// Windows and then fail the Linux gate, which is a worse failure than this one.
+// `.gitattributes` pins docs/generated/** to LF so every checkout agrees.
 func TestCommittedArtifactIsCurrent(t *testing.T) {
 	want, err := Generate()
 	if err != nil {
@@ -316,9 +321,15 @@ func TestCommittedArtifactIsCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read committed artifact: %v", err)
 	}
-	if string(got) != string(want) {
-		t.Fatalf("docs/%s is stale. Regenerate it with:\n\n    make api-contract-generate\n", ArtifactPath)
+	if string(got) == string(want) {
+		return
 	}
+	if strings.ReplaceAll(string(got), "\r\n", "\n") == string(want) {
+		t.Fatalf("docs/%s differs from the generator only in line endings.\n"+
+			"The generator emits LF; this checkout has CRLF. Confirm .gitattributes pins docs/generated/** to LF "+
+			"and re-check out the file.", ArtifactPath)
+	}
+	t.Fatalf("docs/%s is stale. Regenerate it with:\n\n    %s\n", ArtifactPath, RegenerateCommand)
 }
 
 // TestDocumentIsValidJSONAndDeclaresOpenAPI31 is the cheap structural
