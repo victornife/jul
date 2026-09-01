@@ -1,0 +1,684 @@
+# server.everything.toml — every Jul.IA feature enabled and configured at once.
+#
+# Purpose: a single config to exercise the whole feature surface for manual
+# testing. It is deliberately not a production template — secrets are read
+# from testdata/ files and env vars, ports are non-privileged, and a couple of
+# blocks (ACME, Consul/Kubernetes discovery, FastCGI/uWSGI) reference services
+# this repo does not ship, so those specific paths will not fully succeed
+# end-to-end without that external service running. Every other block is
+# reachable against the companion scripts below.
+#
+# Build (every optional feature):
+#   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul ./cmd/jul
+#
+# Run (principal tokens need >= 32 chars for entropy):
+#   JUL_ADMIN_TOKEN=dev-admin-token-please-rotate-me-0001 \
+#   JUL_ALICE_TOKEN=alice-operator-token-please-rotate-0001 \
+#   JUL_CI_TOKEN=ci-deployer-token-please-rotate-me-0001 \
+#     ./jul -config server.everything.toml
+#
+# Companion backends (start before jul to exercise proxying/health checks):
+#   go run scripts/burn-in-backend.go             # HTTP backend :8081/:8082 (health)
+#   go run scripts/stream-echo-backend.go          # TCP echo backend :55432 for [[stream]]
+#   go run scripts/grpc-echo-server.go             # gRPC backend :50051 for transcoding/passthrough
+#
+# Known-external-dependency blocks (config is valid and "activated"; the
+# runtime call will only fully succeed with the named external service up):
+#   - [servers.tls.acme] on the "acme-demo" server needs a public, DNS-resolvable
+#     domain and ports 80/443 reachable by the ACME CA — impossible from a plain
+#     laptop, so certificate issuance will fail at handshake time (config still
+#     validates and every other block starts normally; issuance is lazy).
+#   - consul_pool / k8s_pool discovery needs a reachable Consul agent /
+#     Kubernetes API; each keeps a static `servers` seed so routing still works
+#     if discovery can't resolve anything.
+#   - php_fpm / uwsgi_app point at placeholder sockets; swap in a real
+#     PHP-FPM/uWSGI backend to exercise them.
+#   - auth.jwt's jwks_url and secure_backend's backend TLS target a self-signed
+#     local endpoint, so the handshake/JWKS fetch will fail verification unless
+#     you trust testdata/tls/localhost.crt or swap in a real issuer.
+
+[global]
+worker_threads = "auto"
+log_level = "info"
+log_format = "json"
+shutdown_timeout = "30s"
+
+# ---------------------------------------------------------------------------
+# Observability: tracing, metrics tuning, structured multi-sink access log.
+# ---------------------------------------------------------------------------
+[observability]
+
+[observability.tracing]
+enabled = true
+exporter = "otlp-grpc"
+endpoint = "localhost:4317"
+sample_ratio = 1.0
+service_name = "jul-everything"
+insecure = true
+
+[observability.metrics]
+host_label = true
+
+[observability.access_log]
+enabled = true
+sinks = ["stdout", "file"]
+file = "jul-data/access.log"
+format = "json"
+rotate_max_mb = 250
+rotate_keep = 5
+
+# ---------------------------------------------------------------------------
+# Egress allow-list — bounds every auxiliary fetch (JWKS, forward-auth,
+# discovery, ACME/OCSP, plugin fetch) to these destinations.
+# ---------------------------------------------------------------------------
+[egress]
+enabled = true
+allow = ["127.0.0.1", "::1", "localhost", ".internal", "10.0.0.0/8"]
+
+# ---------------------------------------------------------------------------
+# Admin API + console: TLS, mTLS, RBAC, history, plugin upload.
+# ---------------------------------------------------------------------------
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token = "${env:JUL_ADMIN_TOKEN}"
+console = true
+history_dir = "./jul-data/config-history"
+history_keep = 50
+plugin_upload_dir = "./jul-data/plugins"
+plugin_upload_enabled = true
+plugin_upload_max_size = 32
+
+[admin.tls]
+enabled = true
+cert = "testdata/tls/localhost.crt"
+key = "testdata/tls/localhost.key"
+min_version = "1.3"
+
+[admin.tls.client_auth]
+mode = "request"
+ca_file = "testdata/tls/clients-ca.pem"
+
+[admin.rbac]
+enabled = true
+default_role = "admin"
+
+[[admin.rbac.roles]]
+name = "deployer"
+permissions = ["status:read", "config:read", "config:write", "config:apply", "reload:trigger"]
+
+[[admin.rbac.principals]]
+name = "alice"
+role = "operator"
+token = "${env:JUL_ALICE_TOKEN}"
+
+[[admin.rbac.principals]]
+name = "ci-deployer"
+role = "deployer"
+token = "${env:JUL_CI_TOKEN}"
+expires_at = "2027-12-31T00:00:00Z"
+
+[[admin.rbac.principals]]
+name = "bob"
+role = "viewer"
+token = "${file:testdata/secrets/rbac-bob-token.txt}"
+disabled = false
+
+# ---------------------------------------------------------------------------
+# Compression: every encoder, precompressed sidecars.
+# ---------------------------------------------------------------------------
+[compression]
+enabled = true
+encoders = ["zstd", "br", "gzip"]
+level = 0
+min_size = "8b"
+types = [
+  "text/*",
+  "application/json",
+  "application/javascript",
+  "application/x-javascript",
+  "text/xml",
+  "application/xml",
+  "image/svg+xml",
+  "application/wasm",
+]
+precompressed = true
+
+# ---------------------------------------------------------------------------
+# Rate + connection limiting (global default; overridden per-location below).
+# ---------------------------------------------------------------------------
+[rate_limit]
+enabled = true
+key = "ip"
+rate = 200
+burst = 400
+max_conns = 2048
+
+# ---------------------------------------------------------------------------
+# Response cache: memory + disk tiers, stale-while-revalidate, stale-if-error.
+# ---------------------------------------------------------------------------
+[cache]
+enabled = true
+memory_max_size = "64m"
+disk_path = "jul-data/cache-disk"
+disk_max_size = "256m"
+default_ttl = "60s"
+stale_while_revalidate = "30s"
+stale_if_error = "30s"
+
+# ---------------------------------------------------------------------------
+# WAF: embedded CRS + a custom rule file + an inline tuning rule.
+# ---------------------------------------------------------------------------
+[waf]
+enabled = true
+crs_enabled = true
+mode = "block"
+block_status = 403
+paranoia = 1
+directives_files = ["testdata/waf/local-rules.conf"]
+inline_rules = "SecRule REQUEST_HEADERS:X-Waf-Allow \"@streq 1\" \"id:9001,phase:1,pass,nolog\""
+request_body_limit = "128kb"
+response_body_check = false
+
+# ---------------------------------------------------------------------------
+# WASM plugins: middleware (header inject, kv counter, fetch) + terminal handler.
+# ---------------------------------------------------------------------------
+[plugins.header-inject]
+path = "./testdata/plugins/header-inject.wasm"
+type = "middleware"
+memory_limit = "16m"
+timeout = "100ms"
+config = { header = "X-Plugin", value = "header-inject" }
+
+[plugins.kv-counter]
+path = "./testdata/plugins/kv-counter.wasm"
+type = "middleware"
+kv = true
+kv_max_entries = 1024
+kv_max_bytes = "1m"
+fetch = true
+allowed_hosts = ["127.0.0.1"]
+fetch_timeout = "5s"
+max_fetch_response = "1m"
+
+[plugins.request-block]
+path = "./testdata/plugins/request-block.wasm"
+type = "handler"
+
+# ---------------------------------------------------------------------------
+# Upstream pools
+# ---------------------------------------------------------------------------
+
+# Primary HTTP backend: active health checks + full resilience/admission control.
+[[upstreams]]
+name = "backend"
+strategy = "round_robin"
+servers = [
+  { address = "127.0.0.1:8081", weight = 2 },
+  { address = "127.0.0.1:8083", weight = 1 },
+]
+
+  [upstreams.health_check]
+  enabled = true
+  type = "http"
+  path = "/healthz"
+  interval = "5s"
+  timeout = "2s"
+  healthy_threshold = 2
+  unhealthy_threshold = 3
+  expect_status = [200]
+
+  [upstreams.resilience]
+  max_active_requests         = 500
+  max_active_per_backend      = 300
+  max_pending_requests        = 100
+  pending_timeout              = "2s"
+  max_connections_per_backend = 128
+  retry_attempts               = 2
+  retry_deadline                = "3s"
+  retry_backoff_initial          = "20ms"
+  retry_backoff_max               = "500ms"
+  retry_budget_percent             = 10
+  max_fails                         = 3
+  fail_timeout                       = "10s"
+  circuit_half_open_probes            = 1
+
+# Backend reached over outbound mutual TLS.
+[[upstreams]]
+name = "secure_backend"
+strategy = "least_conn"
+servers = ["127.0.0.1:8443"]
+
+  [upstreams.backend_tls]
+  ca_file              = "testdata/tls/clients-ca.pem"
+  ca_mode              = "system_and_file"
+  client_cert          = "testdata/tls/client.crt"
+  client_key           = "testdata/tls/client.key"
+  server_name          = "localhost"
+  min_version          = "1.2"
+  insecure_skip_verify = false
+
+# gRPC backend, used by both transcoding and native passthrough below.
+[[upstreams]]
+name = "grpc_backend"
+strategy = "round_robin"
+servers = ["127.0.0.1:50051"]
+
+# FastCGI / uWSGI placeholder pools.
+[[upstreams]]
+name = "php_fpm"
+strategy = "least_conn"
+servers = [{ address = "127.0.0.1:9001" }]
+
+  [upstreams.resilience]
+  max_active_requests = 64
+
+[[upstreams]]
+name = "uwsgi_app"
+strategy = "round_robin"
+servers = ["127.0.0.1:9002"]
+
+# Service discovery: DNS, DNS SRV, Consul, Kubernetes (each seeded so routing
+# still works before/without a successful resolve).
+[[upstreams]]
+name = "dns_pool"
+strategy = "round_robin"
+servers = ["127.0.0.1:8081"]
+
+  [upstreams.discovery]
+  type = "dns"
+  target = "localhost:8081"
+  refresh = "15s"
+
+[[upstreams]]
+name = "dns_srv_pool"
+strategy = "least_conn"
+servers = ["127.0.0.1:8081"]
+
+  [upstreams.discovery]
+  type = "dns_srv"
+  target = "_http._tcp.localhost"
+  refresh = "15s"
+
+[[upstreams]]
+name = "consul_pool"
+strategy = "round_robin"
+servers = ["127.0.0.1:8081"]
+
+  [upstreams.discovery]
+  type = "consul"
+  refresh = "15s"
+    [upstreams.discovery.consul]
+    address      = "http://127.0.0.1:8500"
+    service      = "backend"
+    tag          = "primary"
+    datacenter   = "dc1"
+    token        = "${env:JUL_CONSUL_TOKEN}"
+    passing_only = true
+
+[[upstreams]]
+name = "k8s_pool"
+strategy = "round_robin"
+servers = ["127.0.0.1:8081"]
+
+  [upstreams.discovery]
+  type = "kubernetes"
+  refresh = "15s"
+    [upstreams.discovery.kubernetes]
+    namespace                = "default"
+    service                  = "backend"
+    port                     = "http"
+    api_server               = "https://127.0.0.1:6443"
+    token                    = "${env:JUL_K8S_TOKEN}"
+    ca_file                  = "testdata/tls/clients-ca.pem"
+    insecure_skip_tls_verify = false
+
+# L4 stream pools.
+[[upstreams]]
+name = "tcp_pool"
+strategy = "least_conn"
+servers = ["127.0.0.1:55432", "127.0.0.1:55433"]
+
+  [upstreams.resilience]
+  max_fails    = 10
+  fail_timeout = "3s"
+
+[[upstreams]]
+name = "sni_api_pool"
+servers = ["127.0.0.1:19443"]
+
+[[upstreams]]
+name = "sni_fallback_pool"
+servers = ["127.0.0.1:19444"]
+
+[[upstreams]]
+name = "udp_pool"
+servers = ["127.0.0.1:25353"]
+
+# ---------------------------------------------------------------------------
+# Server 1 — plain HTTP (:8080): the core routing/feature showcase.
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["localhost", "example.com"]
+client_max_body_size = "16m"
+max_header_bytes = "1m"
+read_header_timeout = "10s"
+read_timeout = "30s"
+write_timeout = "30s"
+idle_timeout = "60s"
+plugins = ["header-inject"]
+
+  [servers.client_address]
+  trusted_proxies   = ["127.0.0.1/32", "::1/128"]
+  forwarded_headers = ["x-forwarded-for"]
+  max_hops          = 5
+
+  # Static file serving + try_files fallback.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/static/" }
+  root = "testdata/www"
+  index = ["index.html"]
+  try_files = ["$uri", "$uri/", "/index.html"]
+  cache_control = "public, max-age=60"
+
+  # Directory listing + dotfile exposure, for local testing only.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/browse/" }
+  root = "testdata/www"
+  directory_listing = true
+  allow_hidden = true
+
+  # Reverse proxy with cache, header rewriting, response headers, CORS,
+  # per-location resilience/rate-limit overrides, and a KV-counter plugin.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/api/" }
+  proxy_pass = "http://backend"
+  cache = true
+  plugins = ["kv-counter"]
+
+    [servers.locations.headers]
+    Host            = "$host"
+    X-Real-IP       = "$remote_addr"
+    X-Forwarded-For = "$proxy_add_x_forwarded_for"
+
+    [[servers.locations.response_headers]]
+    op    = "set"
+    name  = "X-Frame-Options"
+    value = "DENY"
+
+    [[servers.locations.response_headers]]
+    op    = "remove"
+    name  = "X-Powered-By"
+
+    [servers.locations.cors]
+    enabled           = true
+    allowed_origins   = ["https://app.example.test"]
+    allowed_methods   = ["GET", "POST"]
+    allowed_headers   = ["Content-Type", "Authorization"]
+    exposed_headers   = ["X-Request-Id"]
+    allow_credentials = true
+    max_age           = "10m"
+
+    [servers.locations.resilience]
+    max_connections_per_backend = 64
+    retry_attempts               = 1
+    retry_deadline                = "2s"
+
+    [servers.locations.rate_limit]
+    enabled = true
+    key     = "header:X-Api-Key"
+    rate    = 50
+    burst   = 100
+
+  # HTTP Basic auth.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/basic-auth/" }
+  proxy_pass = "http://backend"
+    [servers.locations.auth.basic]
+    file  = "testdata/htpasswd"
+    realm = "Everything Basic"
+
+  # JWT bearer auth against a JWKS endpoint.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/jwt/" }
+  proxy_pass = "http://backend"
+    [servers.locations.auth.jwt]
+    jwks_url   = "https://127.0.0.1:8443/.well-known/jwks.json"
+    timeout    = "5s"
+    issuer     = "https://issuer.example.test"
+    audience   = "jul-everything"
+    algorithms = ["RS256", "ES256"]
+
+  # Forward-auth delegation.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/forward-auth/" }
+  proxy_pass = "http://backend"
+    [servers.locations.auth.forward_auth]
+    url                    = "http://127.0.0.1:8081/auth"
+    auth_response_headers  = ["X-User"]
+    timeout                = "5s"
+
+  # CIDR allow/deny gate, no credential method.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/cidr/" }
+  proxy_pass = "http://backend"
+    [servers.locations.auth]
+    allow = ["127.0.0.0/8"]
+    deny  = ["127.0.0.2/32"]
+
+  # gRPC <-> JSON transcoding, streaming enabled.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/v1/" }
+    [servers.locations.grpc_transcode]
+    target                     = "grpc_backend"
+    descriptor_set              = "testdata/grpc/api.pb"
+    preserve_proto_field_names  = false
+    streaming                   = true
+    stream_mode                 = "ndjson"
+    max_message_size            = "4m"
+
+  # FastCGI.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/php/" }
+  fastcgi_pass = "php_fpm"
+    [servers.locations.fastcgi_params]
+    SCRIPT_FILENAME = "/var/www/index.php"
+
+  # uWSGI.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/uwsgi/" }
+  uwsgi_pass = "uwsgi_app"
+
+  # Redirect.
+  [[servers.locations]]
+  match = { type = "exact", path = "/old-path" }
+  redirect = "/new-path"
+  return = 301
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/new-path" }
+  return = 200
+
+  # Explicit deny.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/denied/" }
+  deny = true
+
+  # Regex rewrite in front of a proxy action.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/rewrite/" }
+  proxy_pass = "http://backend"
+  rewrites = [
+    { pattern = "^/rewrite/(.*)$", replacement = "/api/$1", flag = "break" },
+  ]
+
+  # Per-location WAF override: detect-only against this noisy route.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/waf-detect/" }
+  proxy_pass = "http://backend"
+    [servers.locations.waf]
+    enabled     = true
+    crs_enabled = true
+    mode        = "detect"
+
+  # Per-location rate-limit override: disabled baseline for comparison.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/no-ratelimit/" }
+  proxy_pass = "http://backend"
+    [servers.locations.rate_limit]
+    enabled = false
+
+  # Service-discovery-backed routes.
+  [[servers.locations]]
+  match = { type = "prefix", path = "/discovery-dns/" }
+  proxy_pass = "http://dns_pool"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/discovery-consul/" }
+  proxy_pass = "http://consul_pool"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/discovery-k8s/" }
+  proxy_pass = "http://k8s_pool"
+
+  # Terminal WASM handler plugin (no root/proxy_pass on this location).
+  [[servers.locations]]
+  match = { type = "exact", path = "/blocked" }
+  plugin = "request-block"
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 200
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+  index = ["index.html"]
+  try_files = ["$uri", "$uri/", "/index.html"]
+
+# ---------------------------------------------------------------------------
+# Server 2 — TLS + mTLS + HTTP/3 (:8443).
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "127.0.0.1:8443"
+server_names = ["localhost"]
+
+  [servers.tls]
+  enabled     = true
+  cert        = "testdata/tls/localhost.crt"
+  key         = "testdata/tls/localhost.key"
+  min_version = "1.3"
+
+    [servers.tls.client_auth]
+    mode    = "request"
+    ca_file = "testdata/tls/clients-ca.pem"
+
+  [servers.http3]
+  enabled         = true
+  alt_svc_max_age = 86400
+
+  [servers.client_address]
+  trusted_proxies   = ["127.0.0.1/32"]
+  forwarded_headers = ["x-forwarded-for"]
+  max_hops          = 5
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/secure/" }
+  proxy_pass = "http://secure_backend"
+  require_client_cert = true
+    [servers.locations.headers]
+    X-Client-CN = "$ssl_client_cn"
+    [servers.locations.auth.basic]
+    file  = "testdata/htpasswd"
+    realm = "Everything TLS"
+
+  # Placeholder JWKS document referenced by the /jwt/ location above.
+  [[servers.locations]]
+  match = { type = "exact", path = "/.well-known/jwks.json" }
+  return = 404
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 200
+
+# ---------------------------------------------------------------------------
+# Server 3 — native gRPC passthrough over h2c (:8095).
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "127.0.0.1:8095"
+h2c = true
+server_names = ["grpc-pass"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://grpc_backend"
+  grpc = true
+
+# ---------------------------------------------------------------------------
+# Server 4 — plain HTTP that only redirects to HTTPS.
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "127.0.0.1:8079"
+server_names = ["localhost"]
+redirect_https = 308
+
+# ---------------------------------------------------------------------------
+# Servers 5/6 — ACME automatic HTTPS demo (see the header note: needs a real
+# public domain + ports 80/443 to actually issue a certificate).
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "0.0.0.0:8446"
+server_names = ["example.com"]
+
+  [servers.tls.acme]
+  enabled       = true
+  email         = "${file:testdata/secrets/acme-email.txt}"
+  ca            = "letsencrypt-staging"
+  domains       = ["example.com"]
+  challenge     = "http-01"
+  cache_dir     = "./jul-data/certs"
+  ocsp_stapling = true
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+
+[[servers]]
+listen = "0.0.0.0:8090"
+server_names = ["example.com"]
+redirect_https = 308
+
+# ---------------------------------------------------------------------------
+# L4 stream proxy (requires the `stream` build tag): TCP LB, TLS SNI routing,
+# UDP relay, and PROXY protocol in both directions.
+# ---------------------------------------------------------------------------
+[[stream]]
+listen = "127.0.0.1:15432"
+proxy_pass = "tcp_pool"
+connect_timeout = "5s"
+idle_timeout = "1h"
+
+[[stream]]
+listen = "127.0.0.1:15443"
+  [stream.sni_routes]
+  "api.example.com" = "sni_api_pool"
+  "db.example.com"  = "sni_fallback_pool"
+  "*"               = "tcp_pool"
+
+[[stream]]
+listen = "127.0.0.1:15353"
+protocol = "udp"
+proxy_pass = "udp_pool"
+idle_timeout = "30s"
+
+[[stream]]
+listen = "127.0.0.1:16379"
+proxy_pass = "127.0.0.1:16380"
+proxy_protocol = "out"
+
+[[stream]]
+listen = "127.0.0.1:16380"
+proxy_pass = "tcp_pool"
+proxy_protocol = "in"
+trusted_proxies = ["127.0.0.1/32"]
