@@ -1167,7 +1167,12 @@ error-tolerant serving (`stale_if_error`).
 
 Enable `[cache].enabled` globally, then opt individual locations in with
 `cache = true`. Cache entries survive config reloads but are lost on restart
-unless `disk_path` is configured.
+unless `disk_path` is configured. `memory_max_size`, `disk_max_size`,
+`default_ttl`, `stale_while_revalidate`, and `stale_if_error` are all
+hot-reloadable (#92): a change applies atomically at the next successful
+reload, resizing the memory/disk stores in place (evicting strict LRU
+entries/files immediately if a cap is lowered) without resetting counters or
+rebuilding the cache. `enabled` and `disk_path` remain restart-required.
 
 ```toml
 [cache]

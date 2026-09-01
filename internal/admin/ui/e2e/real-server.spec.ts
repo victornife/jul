@@ -61,19 +61,24 @@ function assertShape<T>(schema: z.ZodType<T>, data: unknown, endpoint: string): 
 
 /**
  * Returns a copy of the raw TOML with a restart-required [cache] change.
- * If the config already contains a [cache] block, the memory_max_size field
- * is replaced; otherwise a new [cache] block is appended. This keeps the
- * stage_restart tests valid regardless of whether the server returns a minimal
- * or canonical raw view.
+ * disk_path stays restart-bound after #92 (unlike the now-hot scalar policy
+ * fields such as memory_max_size), so replacing it is what still exercises
+ * the restart-required path. If the config already contains a [cache] block,
+ * the disk_path field is replaced; otherwise a new [cache] block is appended.
+ * This keeps the stage_restart tests valid regardless of whether the server
+ * returns a minimal or canonical raw view.
  */
-function withCacheMemoryMaxSize(raw: string, value: string): string {
+function withCacheDiskPath(raw: string, value: string): string {
   if (raw.includes("[cache]")) {
-    return raw.replace(
-      /memory_max_size\s*=\s*['"][^'"]*['"]/,
-      `memory_max_size = "${value}"`,
-    );
+    if (/disk_path\s*=\s*['"][^'"]*['"]/.test(raw)) {
+      return raw.replace(
+        /disk_path\s*=\s*['"][^'"]*['"]/,
+        `disk_path = "${value}"`,
+      );
+    }
+    return raw.replace("[cache]", `[cache]\ndisk_path = "${value}"`);
   }
-  return `${raw}\n[cache]\nenabled = true\nmemory_max_size = "${value}"\n`;
+  return `${raw}\n[cache]\nenabled = true\ndisk_path = "${value}"\n`;
 }
 
 /**
@@ -294,9 +299,9 @@ test(
     const cfg = RawConfigSchema.parse(cfgData);
     const baseVersion = cfg.base_version ?? "";
 
-    // Changing cache.memory_max_size crosses CacheRestartRequired and should be
+    // Changing cache.disk_path crosses CacheRestartRequired and should be
     // rejected without writing anything.
-    const candidate = withCacheMemoryMaxSize(cfg.raw ?? "", "64m");
+    const candidate = withCacheDiskPath(cfg.raw ?? "", "./jul-data/cache-e2e-1");
 
     const applyResp = await request.post(
       `${baseVersion ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}` : "/api/config/apply"}`,
@@ -489,7 +494,7 @@ test(
     const cfgData: unknown = await cfgResp.json();
     const original = RawConfigSchema.parse(cfgData);
     const baseVersion = original.base_version ?? "";
-    const candidate = withCacheMemoryMaxSize(original.raw ?? "", "64m");
+    const candidate = withCacheDiskPath(original.raw ?? "", "./jul-data/cache-e2e-2");
 
     const applyUrl = baseVersion
       ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}`
@@ -509,7 +514,7 @@ test(
     const afterResp = await request.get("/api/config");
     expect(afterResp.status()).toBe(200);
     const after = RawConfigSchema.parse(await afterResp.json());
-    expect(after.raw ?? "").not.toContain('memory_max_size = "64m"');
+    expect(after.raw ?? "").not.toContain('disk_path = "./jul-data/cache-e2e-2"');
   },
 );
 
@@ -669,8 +674,8 @@ test(
     const original = RawConfigSchema.parse(cfgData);
     const baseVersion = original.base_version ?? "";
 
-    // 3. Build a candidate with a restart-required change (cache.memory_max_size).
-    const candidate = withCacheMemoryMaxSize(original.raw ?? "", "64m");
+    // 3. Build a candidate with a restart-required change (cache.disk_path).
+    const candidate = withCacheDiskPath(original.raw ?? "", "./jul-data/cache-e2e-3");
     const applyUrl = baseVersion
       ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}&mode=stage_restart`
       : "/api/config/apply?mode=stage_restart";
@@ -772,7 +777,7 @@ test(
     const cfgData: unknown = await cfgResp.json();
     const original = RawConfigSchema.parse(cfgData);
     const baseVersion = original.base_version ?? "";
-    const candidate = withCacheMemoryMaxSize(original.raw ?? "", "64m");
+    const candidate = withCacheDiskPath(original.raw ?? "", "./jul-data/cache-e2e-4");
 
     const stageUrl = baseVersion
       ? `/api/config/apply?base_version=${encodeURIComponent(baseVersion)}&mode=stage_restart`
@@ -786,7 +791,7 @@ test(
     expect(stage1.ok).toBe(true);
 
     // 3. Update the staged config with a slightly different candidate.
-    const candidateV2 = withCacheMemoryMaxSize(original.raw ?? "", "128m");
+    const candidateV2 = withCacheDiskPath(original.raw ?? "", "./jul-data/cache-e2e-5");
     const cfgResp2 = await request.get("/api/config");
     const latestCfg = RawConfigSchema.parse(await cfgResp2.json());
     const updateUrl = latestCfg.base_version

@@ -220,3 +220,40 @@ func (d *diskStore) purge() {
 	d.items = make(map[string]*list.Element)
 	d.curBytes = 0
 }
+
+// Resize atomically changes the disk byte cap (#92). Increasing it never
+// deletes. Decreasing it deletes least-recently-used cache-owned files, in
+// eviction order, until curBytes <= maxBytes.
+//
+// Unlike evictLocked's passive, best-effort os.Remove (silently ignored — it
+// runs on the normal set path, where a stray leftover file merely wastes a
+// little disk until the next eviction pass), a failed removal here is not
+// swallowed: it would silently misreport the new cap as enforced. Chosen,
+// documented behavior: stop this resize pass at the first removal failure
+// (the failed file's index entry is retained, so curBytes still reflects
+// reality and a later resize/eviction can retry it) and report the count so
+// the caller can surface it through Cache's bounded failure counter/logs —
+// never silently claiming the limit is enforced when it is not.
+func (d *diskStore) Resize(maxBytes int64) (evictedCount int, evictedBytes int64, failedRemovals int) {
+	if maxBytes <= 0 {
+		maxBytes = 512 << 20
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.maxBytes = maxBytes
+	for d.curBytes > d.maxBytes && d.ll.Len() > 0 {
+		el := d.ll.Back()
+		it := el.Value.(*diskItem)
+		if err := os.Remove(d.path(it.hash)); err != nil && !os.IsNotExist(err) {
+			d.log.Warn("cache: disk eviction failed to remove file", "dir", d.dir, "error", err)
+			failedRemovals++
+			break
+		}
+		d.ll.Remove(el)
+		delete(d.items, it.hash)
+		d.curBytes -= it.size
+		evictedCount++
+		evictedBytes += it.size
+	}
+	return evictedCount, evictedBytes, failedRemovals
+}

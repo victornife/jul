@@ -52,7 +52,7 @@ export interface PendingRawDraft {
   readonly baseVersion: string;
   readonly previewDiff: ConfigDiff;
   readonly lifecycle: PatchLifecycle;
-  readonly recommendedAction: "stage_restart" | "update_staged" | "none";
+  readonly recommendedAction: RecommendedConfigAction;
   readonly pendingRestart: PendingRestartSnapshot;
   readonly candidateState: "memory_only";
 }

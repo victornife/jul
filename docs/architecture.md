@@ -143,7 +143,7 @@ unit-tested independently of a full process boot.
 3. **Preflight** — `Preflight.Apply` is the admin-write validation gate:
    validate → TLS → handler dry-run → stream dry-run → bind probes →
    restart-required checks (ACME, listeners, tracing, cache,
-   egress, admin, metrics).
+   egress, admin).
 4. **Admin deps** — `BuildAdminDeps` wires the Console and admin API, then
    `admin.New` starts the admin listener.
 

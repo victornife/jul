@@ -111,3 +111,31 @@ func (m *memStore) purge() {
 	m.items = make(map[string]*list.Element)
 	m.curBytes = 0
 }
+
+// Resize atomically changes the byte cap (#92). Increasing it never evicts.
+// Decreasing it evicts least-recently-used entries, in eviction order, until
+// curBytes <= maxBytes, and returns their count/total size. Eviction runs
+// under the lock exactly like set's; victims are forwarded to onEvict (the
+// disk overflow tier) outside the lock, for the same reason set does it that
+// way: the hook performs disk I/O and must not block other cache operations
+// nor invert the mem/disk lock order.
+func (m *memStore) Resize(maxBytes int64) (evictedCount int, evictedBytes int64) {
+	if maxBytes <= 0 {
+		maxBytes = 64 << 20
+	}
+	m.mu.Lock()
+	m.maxBytes = maxBytes
+	victims := m.evictLocked()
+	m.mu.Unlock()
+
+	if m.onEvict != nil {
+		for _, it := range victims {
+			m.onEvict(it.key, it.entry)
+		}
+	}
+	for _, it := range victims {
+		evictedCount++
+		evictedBytes += it.size
+	}
+	return evictedCount, evictedBytes
+}

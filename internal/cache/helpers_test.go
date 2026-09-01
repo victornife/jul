@@ -12,6 +12,15 @@ import (
 	"jul/internal/config"
 )
 
+// newPolicyCache builds a bare *Cache carrying only a scalar policy snapshot,
+// for unit tests that exercise freshness/revalidation decisions directly
+// without a full New(cfg) (#92: the scalar fields moved behind Cache.Policy).
+func newPolicyCache(pol CachePolicy) *Cache {
+	c := &Cache{}
+	c.policy.Store(&pol)
+	return c
+}
+
 func TestCacheWriterFlush(t *testing.T) {
 	rec := httptest.NewRecorder()
 	cw := &cacheWriter{ResponseWriter: rec, limit: 1024}

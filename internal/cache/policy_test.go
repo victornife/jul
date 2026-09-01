@@ -389,7 +389,7 @@ func TestResponsePolicyMatrix(t *testing.T) {
 func TestFreshnessPrecedence(t *testing.T) {
 	now := time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC)
 	date := now.Format(http.TimeFormat)
-	c := &Cache{defaultTTL: 30 * time.Second}
+	c := newPolicyCache(CachePolicy{DefaultTTL: 30 * time.Second})
 
 	cases := []struct {
 		name    string
@@ -460,7 +460,7 @@ func TestFreshnessPrecedence(t *testing.T) {
 // origin said must never be served stale.
 func TestFreshnessStaleWindowIsZeroWhenRevalidationIsMandatory(t *testing.T) {
 	now := time.Now()
-	c := &Cache{defaultTTL: time.Minute, swr: time.Minute}
+	c := newPolicyCache(CachePolicy{DefaultTTL: time.Minute, StaleWhileRevalidate: time.Minute})
 
 	for _, cc := range []string{"must-revalidate", "proxy-revalidate", "no-cache"} {
 		h := ccHeader(cc + ", max-age=60")
@@ -482,7 +482,7 @@ func TestFreshnessStaleWindowIsZeroWhenRevalidationIsMandatory(t *testing.T) {
 // TestStaleOnErrorWindowContract pins which setting wins when the origin and
 // Jul's configuration disagree about serving stale after a failed validation.
 func TestStaleOnErrorWindowContract(t *testing.T) {
-	c := &Cache{sif: time.Minute}
+	c := newPolicyCache(CachePolicy{StaleIfError: time.Minute})
 	cases := []struct {
 		name  string
 		entry *Entry

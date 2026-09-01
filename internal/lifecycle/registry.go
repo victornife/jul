@@ -163,6 +163,7 @@ const (
 	reasonRBACSwap              = "the admin RBAC policy is rebuilt and atomically swapped after each successful reload"
 	reasonAdminStartup          = "the admin listener and its resources are created once at startup"
 	reasonCacheStartup          = "the response cache backend is created once at startup and retains its counters and LRU state across reloads"
+	reasonCacheScalarPolicyHot  = "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)"
 	reasonAccessLogHot          = "a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98)"
 	reasonTracingStartup        = "the tracer provider and exporter are created once at startup"
 	reasonBindFrozen            = "the value is read once when the socket binds; an address kept across the reload keeps the value it bound with"
@@ -352,17 +353,21 @@ func adminEntries() []Entry {
 }
 
 func cacheEntries() []Entry {
-	// The cache stays restart-bound in this issue. Prepared-resource swapping is
-	// tracked by #92/#93 and must not be pre-authorized here.
-	return restartGroup(SubCache, reasonCacheStartup,
-		"cache.default_ttl",
-		"cache.disk_max_size",
+	// cache.enabled and cache.disk_path stay restart-bound: enabling/disabling
+	// the cache and replacing its disk backend are explicit non-goals of #92,
+	// deferred to #93.
+	out := restartGroup(SubCache, reasonCacheStartup,
 		"cache.disk_path",
 		"cache.enabled",
+	)
+	out = append(out, hotGroup(SubCache, reasonCacheScalarPolicyHot,
+		"cache.default_ttl",
+		"cache.disk_max_size",
 		"cache.memory_max_size",
 		"cache.stale_if_error",
 		"cache.stale_while_revalidate",
-	)
+	)...)
+	return out
 }
 
 func compressionEntries() []Entry {

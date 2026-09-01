@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"jul/internal/background"
@@ -30,12 +31,14 @@ type Cache struct {
 	mem  *memStore
 	disk *diskStore
 
-	defaultTTL time.Duration
-	swr        time.Duration
-	// sif is stale-if-error: extra grace period to keep serving stale when
-	// a background revalidation encounters an upstream error.
-	sif      time.Duration
-	maxEntry int64
+	// policy is the atomically-swappable scalar snapshot (#92): default TTL,
+	// stale-while-revalidate, stale-if-error, and the per-entry capture limit.
+	// Every request-path read loads exactly one snapshot via Policy() so a
+	// single cache decision never mixes values from two configurations.
+	policy atomic.Pointer[CachePolicy]
+	// diskEvictionFailures counts disk files a capacity reduction failed to
+	// remove (#92); see DiskEvictionFailures.
+	diskEvictionFailures atomic.Int64
 
 	log *slog.Logger
 
@@ -107,13 +110,11 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		logger = slog.Default()
 	}
 	c := &Cache{
-		defaultTTL: cfg.DefaultTTL.Std(),
-		swr:        cfg.StaleWhileRevalidate.Std(),
-		sif:        cfg.StaleIfError.Std(),
-		maxEntry:   cfg.MemoryMaxSize.Bytes(),
-		log:        logger,
-		calls:      make(map[revalidateKey]*revalidateCall),
+		log:   logger,
+		calls: make(map[revalidateKey]*revalidateCall),
 	}
+	pol := policyFromConfig(cfg)
+	c.policy.Store(&pol)
 	if cfg.DiskPath != "" {
 		d, err := newDiskStore(cfg.DiskPath, cfg.DiskMaxSize.Bytes(), logger)
 		if err != nil {
@@ -484,7 +485,7 @@ func (c *Cache) serveUnsafe(w http.ResponseWriter, r *http.Request, next http.Ha
 // wrapper, so enabling the cache neither removes nor invents an optional
 // ResponseWriter interface.
 func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.Handler, now time.Time) {
-	cw := &cacheWriter{ResponseWriter: w, limit: c.maxEntry}
+	cw := &cacheWriter{ResponseWriter: w, limit: c.Policy().MaxEntryBytes}
 	w.Header().Set("X-Cache", stateMiss)
 	// Captured after X-Cache is set, so that field cancels out of the stored
 	// entry the same way any other outer-layer pre-set field does (#332),
@@ -598,7 +599,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req *http.Reque
 		call.finish(nil, outcomeCanceled, context.Canceled)
 	}()
 
-	rec := &recorder{header: http.Header{}, limit: c.maxEntry}
+	rec := &recorder{header: http.Header{}, limit: c.Policy().MaxEntryBytes}
 	next.ServeHTTP(rec, req)
 	now := c.clock()
 
@@ -786,6 +787,7 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, e *Entry, state st
 // resolves to zero, which makes the response uncacheable rather than silently
 // falling through to a longer lifetime.
 func (c *Cache) freshness(status int, h http.Header, p responsePolicy, now time.Time) (ttl, swr time.Duration, ok bool) {
+	pol := c.Policy()
 	if !cacheableStatus[status] {
 		return 0, 0, false
 	}
@@ -805,7 +807,7 @@ func (c *Cache) freshness(status int, h http.Header, p responsePolicy, now time.
 		return 0, 0, false
 	}
 
-	ttl = c.defaultTTL
+	ttl = pol.DefaultTTL
 	switch {
 	case p.HasSMaxAge:
 		ttl = p.SMaxAge
@@ -838,14 +840,14 @@ func (c *Cache) freshness(status int, h http.Header, p responsePolicy, now time.
 		// 304 then saves the body. Give it the configured default so it is
 		// retained and aged like anything else.
 		if ttl <= 0 {
-			ttl = c.defaultTTL
+			ttl = pol.DefaultTTL
 		}
 		if ttl <= 0 {
 			return 0, 0, false
 		}
 	}
 
-	swr = c.swr
+	swr = pol.StaleWhileRevalidate
 	if p.HasSWR {
 		swr = p.SWR
 	}
@@ -879,5 +881,5 @@ func (c *Cache) staleOnErrorWindow(e *Entry) time.Duration {
 	if e.RequiresValidation {
 		return 0
 	}
-	return c.sif
+	return c.Policy().StaleIfError
 }

@@ -324,7 +324,7 @@ func TestHandlerStaleIfError(t *testing.T) {
 }
 
 func TestFreshnessRules(t *testing.T) {
-	c := &Cache{defaultTTL: 30 * time.Second}
+	c := newPolicyCache(CachePolicy{DefaultTTL: 30 * time.Second})
 	now := time.Now()
 	fresh := func(status int, h http.Header) (time.Duration, time.Duration, bool) {
 		return c.freshness(status, h, parseResponsePolicy(h), now)
