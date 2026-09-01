@@ -20,9 +20,9 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 | Schema paths (containers included) | 356 |
 | Schema leaves (configurable values) | 302 |
 | Registry entries | 302 |
-| Startup-consumed entries | 54 |
-| Class `hot_reload` | 233 |
-| Class `restart_required` | 54 |
+| Startup-consumed entries | 49 |
+| Class `hot_reload` | 238 |
+| Class `restart_required` | 49 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 3 |
@@ -152,13 +152,13 @@ value is compared as a digest so no secret material leaves the process.
 | `admin.tls.key` | `hot_reload` | `tls` | digest | a candidate certificate provider is built and validated during preflight, then swapped atomically into the admin listener's existing dynamic provider on the next successful reload, reusing #100's seam (#336) |
 | `admin.tls.min_version` | `restart_required` | `tls` | startup | the minimum protocol version is written into the admin listener's tls.Config when it is created |
 | `admin.token` | `hot_reload` | `admin` | digest | the shared bearer token is resolved into the same immutable authentication snapshot the RBAC fields below install atomically at Publish; the prior token is rejected for every request after the swap |
-| `cache.default_ttl` | `restart_required` | `cache` | startup | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
-| `cache.disk_max_size` | `restart_required` | `cache` | startup | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
+| `cache.default_ttl` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| `cache.disk_max_size` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.disk_path` | `restart_required` | `cache` | startup | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
 | `cache.enabled` | `restart_required` | `cache` | startup | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
-| `cache.memory_max_size` | `restart_required` | `cache` | startup | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
-| `cache.stale_if_error` | `restart_required` | `cache` | startup | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
-| `cache.stale_while_revalidate` | `restart_required` | `cache` | startup | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
+| `cache.memory_max_size` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| `cache.stale_if_error` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| `cache.stale_while_revalidate` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `compression.enabled` | `hot_reload` | `compression` | — | the compression middleware is rebuilt with the handler tree on each successful reload |
 | `compression.encoders` | `hot_reload` | `compression` | — | the compression middleware is rebuilt with the handler tree on each successful reload |
 | `compression.level` | `hot_reload` | `compression` | — | the compression middleware is rebuilt with the handler tree on each successful reload |

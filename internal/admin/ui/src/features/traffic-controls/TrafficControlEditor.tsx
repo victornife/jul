@@ -64,7 +64,7 @@ const TITLES: Record<TrafficEditorKind, { title: string; subtitle: string }> = {
   cache: {
     title: "Cache",
     subtitle:
-      "Cache remains a complete-table, raw, stage-only path. The candidate is pinned to the exact configuration version used to generate it and never enters browser storage.",
+      "Cache remains a complete-table, raw path. A scalar-only change (memory/disk size, TTL, stale windows) applies live; enabling/disabling the cache or changing the disk path stages for the next restart. The candidate is pinned to the exact configuration version used to generate it and never enters browser storage.",
   },
   rate_limit: {
     title: "Rate limiting",
@@ -268,12 +268,8 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
         throw new Error(details || "The cache candidate is invalid.");
       }
       const action = recommendPatchAction(preview.lifecycle, pendingSnapshot);
-      if (action !== "stage_restart" && action !== "update_staged") {
-        throw new Error(
-          action === "hot"
-            ? "The server unexpectedly classified the cache change as hot-applicable; cache changes must be staged for restart."
-            : "The server did not offer a safe stage-restart action for this cache candidate.",
-        );
+      if (action !== "hot" && action !== "stage_restart" && action !== "update_staged") {
+        throw new Error("The server did not offer a safe apply action for this cache candidate.");
       }
       setPendingDraft({
         kind: "toml",

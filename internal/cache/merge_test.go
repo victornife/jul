@@ -29,7 +29,7 @@ func canonical(h http.Header) http.Header {
 func mergeFixture(t *testing.T) (*Cache, *Entry, time.Time) {
 	t.Helper()
 	now := time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC)
-	c := &Cache{defaultTTL: time.Minute, swr: 30 * time.Second}
+	c := newPolicyCache(CachePolicy{DefaultTTL: time.Minute, StaleWhileRevalidate: 30 * time.Second})
 	stored := &Entry{
 		Status: http.StatusOK,
 		Header: canonical(http.Header{

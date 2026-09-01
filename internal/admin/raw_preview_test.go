@@ -36,8 +36,8 @@ path = "/"
 	candidateRaw := []byte(`
 [cache]
 enabled = true
-memory_max_size = "96m"
-disk_path = "/tmp/jul-cache"
+memory_max_size = "64m"
+disk_path = "/tmp/jul-cache-2"
 disk_max_size = "2g"
 default_ttl = "1m"
 stale_while_revalidate = "10s"
@@ -77,7 +77,7 @@ path = "/"
 	}
 	found := false
 	for _, path := range preview.Lifecycle.RestartRequired {
-		if path == "cache.memory_max_size" {
+		if path == "cache.disk_path" {
 			found = true
 		}
 	}

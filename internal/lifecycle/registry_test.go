@@ -335,12 +335,38 @@ func TestDeprecatedLogFieldsAreIgnored(t *testing.T) {
 	}
 }
 
-// TestCacheStaysRestartRequired pins the #89 non-goal: the response cache is not
-// pre-authorized for hot reload before #92/#93 land.
-func TestCacheStaysRestartRequired(t *testing.T) {
-	for _, e := range Registry {
-		if strings.HasPrefix(e.Path, "cache.") && e.Class != RestartRequiredClass {
-			t.Errorf("%s = %s, want restart_required until the prepared cache seam lands", e.Path, e.Class)
+// TestCacheEnableAndDiskPathStayRestartRequired pins the #93 non-goal: cache
+// enablement and disk-backend replacement are not pre-authorized for hot
+// reload. The five scalar policy/capacity fields hot-reload as of #92.
+func TestCacheEnableAndDiskPathStayRestartRequired(t *testing.T) {
+	for _, path := range []string{"cache.enabled", "cache.disk_path"} {
+		e, ok := Lookup(path)
+		if !ok {
+			t.Fatalf("%s has no registry entry", path)
+		}
+		if e.Class != RestartRequiredClass {
+			t.Errorf("%s = %s, want restart_required until #93 lands", path, e.Class)
+		}
+	}
+}
+
+// TestCacheScalarPolicyIsHot pins #92: the five scalar policy/capacity fields
+// hot-reload through the cache's own atomic policy snapshot and store resize,
+// never rebuilding the cache or resetting its counters/LRU state.
+func TestCacheScalarPolicyIsHot(t *testing.T) {
+	for _, path := range []string{
+		"cache.default_ttl",
+		"cache.disk_max_size",
+		"cache.memory_max_size",
+		"cache.stale_if_error",
+		"cache.stale_while_revalidate",
+	} {
+		e, ok := Lookup(path)
+		if !ok {
+			t.Fatalf("%s has no registry entry", path)
+		}
+		if e.Class != HotReloadClass {
+			t.Errorf("%s = %s, want hot_reload", path, e.Class)
 		}
 	}
 }

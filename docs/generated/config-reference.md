@@ -478,10 +478,9 @@ DefaultTTL is applied when upstream gives no explicit freshness.
 | | |
 | --- | --- |
 | Type | `duration` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `cache` |
-| Why | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
-| Flags | startup-consumed |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | Constraint | non-negative |
 | Zero/empty semantics | 0 disables that optional window/default |
 | Active when | always |
@@ -493,10 +492,9 @@ DiskMaxSize is the disk tier cap.
 | | |
 | --- | --- |
 | Type | `size` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `cache` |
-| Why | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
-| Flags | startup-consumed |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 512 MiB when disk_path is set |
 | Active when | always |
@@ -532,10 +530,9 @@ MemoryMaxSize is the in-memory tier cap.
 | | |
 | --- | --- |
 | Type | `size` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `cache` |
-| Why | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
-| Flags | startup-consumed |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 64 MiB when enabled |
 | Active when | always |
@@ -547,10 +544,9 @@ StaleIfError extends the stale-serving window when a background revalidation enc
 | | |
 | --- | --- |
 | Type | `duration` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `cache` |
-| Why | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
-| Flags | startup-consumed |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | Constraint | non-negative |
 | Zero/empty semantics | 0 disables that optional window/default |
 | Active when | always |
@@ -562,10 +558,9 @@ StaleWhileRevalidate serves stale entries for this grace period after expiry whi
 | | |
 | --- | --- |
 | Type | `duration` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `cache` |
-| Why | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
-| Flags | startup-consumed |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | Constraint | non-negative |
 | Zero/empty semantics | 0 disables that optional window/default |
 | Active when | always |

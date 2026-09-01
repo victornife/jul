@@ -810,10 +810,17 @@ now format is too.
   (`enabled` and `alt_svc_max_age`) and `h2c` are likewise decided when the
   address binds.
 - **Tracing** — the OpenTelemetry pipeline is wired once at startup.
-- **Response cache** — the recertified cache backend (LRU/disk tiers and
-  counters) is built once at startup and remains process-scoped across ordinary
-  handler reloads. Scalar policy/capacity hot reload is separately planned in
-  #92; enable/disable and disk-path replacement remain gated in #93.
+- **Response cache** — the cache backend (LRU/disk tiers and counters) is
+  built once at startup and remains process-scoped across ordinary handler
+  reloads. Its five scalar policy/capacity fields (`default_ttl`,
+  `disk_max_size`, `memory_max_size`, `stale_if_error`,
+  `stale_while_revalidate`) hot-reload through an atomically-swapped policy
+  snapshot and in-place memory/disk store resize (#92): a lowered cap evicts
+  strict LRU entries/files immediately at Publish, a raised one never evicts,
+  and existing entries' `ExpiresAt`/`StaleUntil` timestamps are never
+  retroactively changed — only entries created or revalidated after the swap
+  observe the new policy. `enable`/`disable` and disk-path replacement remain
+  restart-required, gated separately in #93.
 - **Egress allow-list** — the outbound dial policy is built once at startup.
 - **Admin server** — listener, rate limits, history, plugin-upload, and
   audit-log settings are baked in at startup. `admin.token` and the RBAC policy

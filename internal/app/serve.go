@@ -1051,6 +1051,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// Hot-reload the metrics Host label mode (#91): an atomic flag flip,
 		// never a registry rebuild, so no counter/histogram/gauge resets.
 		metrics.SetHostLabel(c.Observability.Metrics.HostLabel)
+		// Hot-reload cache scalar policy/capacity (#92): installing the
+		// candidate policy and any capacity-driven eviction/deletion are both
+		// committed effects that must only happen after Publish, exactly like
+		// the swaps above — a pre-Publish failure never reaches OnReloaded at
+		// all, leaving live cache state untouched. responseCache.
+		// PrepareCacheUpdate/Commit are both safe no-ops when caching is
+		// disabled (a nil *Cache).
+		responseCache.PrepareCacheUpdate(c.Cache).Commit()
 		// Apply worker_threads on reload. When set to a positive integer, cap
 		// GOMAXPROCS; when "auto" or empty, restore the initial container-aware
 		// default captured at process startup (R5-08).

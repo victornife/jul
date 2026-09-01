@@ -96,7 +96,8 @@ export function TrafficControlsPanel() {
         <h1 className="text-xl font-semibold">Global & Traffic Controls</h1>
         <p className="max-w-3xl text-sm text-jul-muted">
           Guided global, compression, rate-limit, and server-limit edits use sparse typed patches.
-          Cache stays a complete raw table that is saved for the next restart. Every action is chosen
+          Cache stays a complete raw table; a scalar-only change applies live, while enabling/disabling
+          the cache or changing its disk path is saved for the next restart. Every action is chosen
           from the server lifecycle assessment and finalized through the correlated Config workflow.
         </p>
       </div>

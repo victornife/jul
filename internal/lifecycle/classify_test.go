@@ -196,7 +196,7 @@ func TestClassifyMixedCandidate(t *testing.T) {
 	before := fullConfig()
 	after := fullConfig()
 	after.Servers[0].Locations[0].Root = "/srv2" // hot
-	after.Cache.DefaultTTL = config.Duration(1)  // restart
+	after.Cache.Enabled = false                  // restart (#92 left cache.enabled restart-required)
 	after.Global.AccessLog = "/ignored.log"      // ignored
 
 	res, err := Classify(before, after, Live{BoundHTTPAddrs: []string{":8443"}})
@@ -206,7 +206,7 @@ func TestClassifyMixedCandidate(t *testing.T) {
 	if res.CanApplyHot {
 		t.Fatal("a candidate carrying a restart-required edit cannot apply hot")
 	}
-	if !reflect.DeepEqual(res.RestartRequired, []string{"cache.default_ttl"}) {
+	if !reflect.DeepEqual(res.RestartRequired, []string{"cache.enabled"}) {
 		t.Fatalf("restart-required = %v", res.RestartRequired)
 	}
 	if !reflect.DeepEqual(res.IgnoredDeprecated, []string{"global.access_log"}) {

@@ -79,10 +79,10 @@ counts:
   schema_paths: 356
   schema_leaves: 302
   registry_entries: 302
-  startup_consumed: 54
+  startup_consumed: 49
   by_class:
-    hot_reload: 233
-    restart_required: 54
+    hot_reload: 238
+    restart_required: 49
     new_listener_only: 8
     ignored_deprecated: 4
     validation_rejected_reserved: 3
@@ -261,15 +261,13 @@ fields:
     reason: "the shared bearer token is resolved into the same immutable authentication snapshot the RBAC fields below install atomically at Publish; the prior token is rejected for every request after the swap"
     secret_digested: true
   - path: "cache.default_ttl"
-    class: restart_required
+    class: hot_reload
     subsystem: cache
-    reason: "the response cache backend is created once at startup and retains its counters and LRU state across reloads"
-    startup_consumed: true
+    reason: "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)"
   - path: "cache.disk_max_size"
-    class: restart_required
+    class: hot_reload
     subsystem: cache
-    reason: "the response cache backend is created once at startup and retains its counters and LRU state across reloads"
-    startup_consumed: true
+    reason: "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)"
   - path: "cache.disk_path"
     class: restart_required
     subsystem: cache
@@ -281,20 +279,17 @@ fields:
     reason: "the response cache backend is created once at startup and retains its counters and LRU state across reloads"
     startup_consumed: true
   - path: "cache.memory_max_size"
-    class: restart_required
+    class: hot_reload
     subsystem: cache
-    reason: "the response cache backend is created once at startup and retains its counters and LRU state across reloads"
-    startup_consumed: true
+    reason: "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)"
   - path: "cache.stale_if_error"
-    class: restart_required
+    class: hot_reload
     subsystem: cache
-    reason: "the response cache backend is created once at startup and retains its counters and LRU state across reloads"
-    startup_consumed: true
+    reason: "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)"
   - path: "cache.stale_while_revalidate"
-    class: restart_required
+    class: hot_reload
     subsystem: cache
-    reason: "the response cache backend is created once at startup and retains its counters and LRU state across reloads"
-    startup_consumed: true
+    reason: "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)"
   - path: "compression.enabled"
     class: hot_reload
     subsystem: compression
