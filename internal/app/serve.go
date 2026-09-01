@@ -80,9 +80,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	//
 	// Wrap the log sink so any secret value resolved from a ${env:}/${file:}
 	// reference (SEC-1) is masked even if a message or attribute interpolates it.
-	// NewDynamicLogger returns a set-level function for hot-reload of log_level
-	// without rebuilding the handler. Log format (text vs json) is restart-bound.
-	log, setLogLevel := observability.NewDynamicLogger(redact.Writer(options.logOutput), cfg.Global.LogLevel, cfg.Global.LogFormat)
+	// NewDynamicLogger returns set-level and set-format functions for hot-reload
+	// of log_level and log_format (#91) without rebuilding the handler or the
+	// *slog.Logger every package below already captured.
+	log, setLogLevel, setLogFormat := observability.NewDynamicLogger(redact.Writer(options.logOutput), cfg.Global.LogLevel, cfg.Global.LogFormat)
 	log.Info("starting "+productName, "version", version, "config", src.Name())
 
 	// Apply worker_threads at startup. "auto" or empty leaves the Go runtime
@@ -1039,9 +1040,17 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// listeners. Stream binding errors are reported as a degraded reload result
 	// but do not roll back the HTTP swap (the listener sets are independent).
 	srv.OnReloaded = func(c *config.Config) (adminErr, streamErr error) {
-		// Hot-reload log level without rebuilding the handler. Log format changes
-		// are restart-required and blocked by lifecycle checks before here.
+		// Hot-reload log level and log format without rebuilding the handler or
+		// the *slog.Logger (#91). Canonical format values are already validated
+		// by configuration validation before this ever runs, and building a
+		// text/JSON handler cannot fail, so — like log level — this applies
+		// unconditionally on every successful reload; a pre-Publish failure
+		// never reaches OnReloaded at all, leaving the active format untouched.
 		setLogLevel(c.Global.LogLevel)
+		setLogFormat(c.Global.LogFormat)
+		// Hot-reload the metrics Host label mode (#91): an atomic flag flip,
+		// never a registry rebuild, so no counter/histogram/gauge resets.
+		metrics.SetHostLabel(c.Observability.Metrics.HostLabel)
 		// Apply worker_threads on reload. When set to a positive integer, cap
 		// GOMAXPROCS; when "auto" or empty, restore the initial container-aware
 		// default captured at process startup (R5-08).

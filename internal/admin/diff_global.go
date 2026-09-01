@@ -18,8 +18,8 @@ import (
 	"jul/internal/rbac"
 )
 
-// diffGlobalSettings compares the [global] block. All fields are hot-reloadable
-// except log_format which is restart-required (gated before diff is shown).
+// diffGlobalSettings compares the [global] block. Every field here is
+// hot-reloadable.
 func diffGlobalSettings(before, after *config.Config, d *ConfigDiff) {
 	b, a := before.Global, after.Global
 	if b.LogLevel != a.LogLevel {
@@ -27,7 +27,7 @@ func diffGlobalSettings(before, after *config.Config, d *ConfigDiff) {
 	}
 	d.cover("global.log_level")
 	if b.LogFormat != a.LogFormat {
-		d.mod(DiffEntry{Kind: "global", Name: "global", Before: orNone(b.LogFormat), After: orNone(a.LogFormat), Detail: "Change log format — restart required to apply"}, "global log_format")
+		d.mod(DiffEntry{Kind: "global", Name: "global", Before: orNone(b.LogFormat), After: orNone(a.LogFormat), Detail: "Change log format (hot-reloadable)"}, "global log_format")
 	}
 	d.cover("global.log_format")
 	if b.WorkerThreads != a.WorkerThreads {
@@ -894,8 +894,8 @@ func rbacHasAdminCapable(cfg config.AdminRBACConfig, legacyToken string) bool {
 	return false
 }
 
-// diffGlobalMetrics compares the [observability.metrics] block. Changes are
-// restart-required (the Prometheus registry is built once at startup).
+// diffGlobalMetrics compares the [observability.metrics] block. host_label is
+// an atomic flag flip and hot-reloadable (#91).
 func diffGlobalMetrics(before, after *config.Config, d *ConfigDiff) {
 	b, a := before.Observability.Metrics, after.Observability.Metrics
 	if b == a {
@@ -907,7 +907,7 @@ func diffGlobalMetrics(before, after *config.Config, d *ConfigDiff) {
 		if !a.HostLabel {
 			action = "Disable"
 		}
-		d.mod(DiffEntry{Kind: "metrics", Name: "global", Detail: fmt.Sprintf("%s host_label on metrics — restart required to apply", action)}, "metrics host_label")
+		d.mod(DiffEntry{Kind: "metrics", Name: "global", Detail: fmt.Sprintf("%s host_label on metrics (hot-reloadable)", action)}, "metrics host_label")
 		if a.HostLabel {
 			d.warn("Enabling host_label adds the request Host as a Prometheus label; unbounded host cardinality can exhaust memory — only enable when the host set is bounded.")
 		}

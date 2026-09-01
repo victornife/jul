@@ -378,7 +378,6 @@ func TestPlannedRestartStoreExternalDivergenceState(t *testing.T) {
 func TestPreflightStageRestartAcceptsRestartRequiredChange(t *testing.T) {
 	addr := freePort(t)
 	base := &config.Config{
-		Global: config.GlobalConfig{LogFormat: "text"},
 		Servers: []config.ServerConfig{{
 			Listen:    addr,
 			Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
@@ -388,8 +387,9 @@ func TestPreflightStageRestartAcceptsRestartRequiredChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("clone: %v", err)
 	}
-	// log_format is restart-required; hot mode would reject it.
-	next.Global.LogFormat = "json"
+	// cache.enabled is restart-required (gated separately in #93); log_format
+	// is hot-reloadable now (#91).
+	next.Cache.Enabled = true
 
 	p := Preflight{
 		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
@@ -415,13 +415,13 @@ func TestPreflightStageRestartAcceptsRestartRequiredChange(t *testing.T) {
 	// Lifecycle should contain the changed field.
 	found := false
 	for _, e := range res.Lifecycle {
-		if e.Subsystem == "log_format" {
+		if e.Subsystem == "cache" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("lifecycle does not contain log_format change; got %v", res.Lifecycle)
+		t.Errorf("lifecycle does not contain cache change; got %v", res.Lifecycle)
 	}
 }
 
@@ -467,7 +467,7 @@ func TestCoordinatorApplyStageRestartStagesFile(t *testing.T) {
 	path := filepath.Join(tmp, "server.toml")
 
 	base := config.ProxyTarget("127.0.0.1:9000", ":8080")
-	base.Global.LogFormat = "text"
+	base.Cache.Enabled = false
 	seedRaw, err := config.Marshal(base)
 	if err != nil {
 		t.Fatalf("marshal seed: %v", err)
@@ -490,7 +490,7 @@ func TestCoordinatorApplyStageRestartStagesFile(t *testing.T) {
 
 	// Change a restart-required field.
 	next := config.ProxyTarget("127.0.0.1:9000", ":8080")
-	next.Global.LogFormat = "json"
+	next.Cache.Enabled = true
 	nextRaw, err := config.Marshal(next)
 	if err != nil {
 		t.Fatalf("marshal next: %v", err)
@@ -575,7 +575,7 @@ func TestStageFirstBackupEqualsOriginal(t *testing.T) {
 	store := NewFilePlannedRestartStore(configPath)
 
 	base := config.ProxyTarget("127.0.0.1:9000", ":8080")
-	base.Global.LogFormat = "text"
+	base.Cache.Enabled = false
 	p := testPreflight()
 	p.StartupFP = lifecycle.ComputeFingerprint(base)
 
@@ -589,7 +589,7 @@ func TestStageFirstBackupEqualsOriginal(t *testing.T) {
 
 	// Stage a restart-required change.
 	next := config.ProxyTarget("127.0.0.1:9000", ":8080")
-	next.Global.LogFormat = "json"
+	next.Cache.Enabled = true
 	nextRaw, _ := config.Marshal(next)
 
 	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, nextRaw, ApplyStageRestart)
@@ -629,7 +629,7 @@ func TestStageDiscardRoundtripRestoresExactBytes(t *testing.T) {
 
 	store := NewFilePlannedRestartStore(configPath)
 	base := config.ProxyTarget("127.0.0.1:9000", ":8080")
-	base.Global.LogFormat = "text"
+	base.Cache.Enabled = false
 	p := testPreflight()
 	p.StartupFP = lifecycle.ComputeFingerprint(base)
 
@@ -643,7 +643,7 @@ func TestStageDiscardRoundtripRestoresExactBytes(t *testing.T) {
 	}
 
 	next := config.ProxyTarget("127.0.0.1:9000", ":8080")
-	next.Global.LogFormat = "json"
+	next.Cache.Enabled = true
 	nextRaw, _ := config.Marshal(next)
 
 	if _, err := c.ApplyRaw(admin.ApplyRequestContext{}, nextRaw, ApplyStageRestart); err != nil {
@@ -687,7 +687,7 @@ func TestStageRestartUpdatesSecondCandidate(t *testing.T) {
 
 	store := NewFilePlannedRestartStore(configPath)
 	base := config.ProxyTarget("127.0.0.1:9000", ":8080")
-	base.Global.LogFormat = "text"
+	base.Cache.Enabled = false
 	p := testPreflight()
 	p.StartupFP = lifecycle.ComputeFingerprint(base)
 
@@ -701,7 +701,7 @@ func TestStageRestartUpdatesSecondCandidate(t *testing.T) {
 
 	// First stage succeeds.
 	v1 := config.ProxyTarget("127.0.0.1:9000", ":8080")
-	v1.Global.LogFormat = "json"
+	v1.Cache.Enabled = true
 	v1Raw, _ := config.Marshal(v1)
 	if _, err := c.ApplyRaw(admin.ApplyRequestContext{}, v1Raw, ApplyStageRestart); err != nil {
 		t.Fatalf("first stage: %v", err)
@@ -709,7 +709,7 @@ func TestStageRestartUpdatesSecondCandidate(t *testing.T) {
 
 	// Second stage (update) replaces the pending candidate.
 	v2 := config.ProxyTarget("127.0.0.1:9001", ":8080")
-	v2.Global.LogFormat = "json"
+	v2.Cache.Enabled = true
 	v2Raw, _ := config.Marshal(v2)
 	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, v2Raw, ApplyStageRestart)
 	if err != nil {

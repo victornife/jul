@@ -305,7 +305,7 @@ and `rate_limit_global_set`. They use pointer/list presence, validate a copy
 before assigning, defensively copy request slices, and then rely on the shared
 marshal/reparse/default/validate executor. Operation summaries contain stable
 field names only. Preview and apply continue to use the closed-world lifecycle
-registry, so `global.log_format` remains restart-required and `max_conns` is
+registry; `global.log_format` is hot-reloadable (#91) and `max_conns` is
 conditional on retained versus all-new listener addresses.
 
 The current Console forms for Global settings and Traffic Controls still use

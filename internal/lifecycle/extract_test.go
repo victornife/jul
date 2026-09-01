@@ -20,11 +20,24 @@ func renderValues(values map[string]any) string {
 	return fmt.Sprint(values)
 }
 
-func TestComputeFingerprintCapturesLogFormat(t *testing.T) {
+// TestLogFormatIsNotStartupConsumed proves global.log_format is no longer in
+// the startup fingerprint now that it hot-reloads through DynamicHandler
+// (#91); a rotated format must not force a restart.
+func TestLogFormatIsNotStartupConsumed(t *testing.T) {
+	fp := ComputeFingerprint(fullConfig())
+	if _, ok := fp.Values["global.log_format"]; ok {
+		t.Fatal("log_format is applied by OnReloaded and must not be in the startup fingerprint")
+	}
+}
+
+// TestComputeFingerprintCapturesCacheEnabled proves a genuinely
+// restart-required field is still captured in the startup fingerprint (cache
+// enablement stays restart-bound, gated separately in #93).
+func TestComputeFingerprintCapturesCacheEnabled(t *testing.T) {
 	cfg := fullConfig()
 	fp := ComputeFingerprint(cfg)
-	if fp.Values["global.log_format"] != "text" {
-		t.Fatalf("global.log_format = %v, want \"text\"", fp.Values["global.log_format"])
+	if fp.Values["cache.enabled"] != true {
+		t.Fatalf("cache.enabled = %v, want true", fp.Values["cache.enabled"])
 	}
 }
 

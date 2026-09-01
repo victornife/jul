@@ -209,6 +209,14 @@ func TestGlobalSetBatchLifecycleAndRoundTrip(t *testing.T) {
 			LogLevel:  ptr("error"),
 			LogFormat: ptr("json"),
 		},
+	}, {
+		// log_format is hot-reloadable now (#91), so global_set alone no
+		// longer produces a mixed hot+restart batch; h2c is still
+		// restart-required (bind-time), so pairing it here still proves a
+		// mixed batch stages instead of partially applying.
+		Op:      "server_toggle_h2c",
+		Listen:  ":8080",
+		Enabled: boolPtr(true),
 	}})
 	if err != nil {
 		t.Fatalf("mixed execute: %v", err)
@@ -216,8 +224,8 @@ func TestGlobalSetBatchLifecycleAndRoundTrip(t *testing.T) {
 	if mixed.Lifecycle.CanApplyHot || !mixed.Lifecycle.CanStageRestart {
 		t.Fatalf("mixed lifecycle = %+v, want complete candidate staged", mixed.Lifecycle)
 	}
-	if !hasPath(mixed.Lifecycle.RestartRequired, "global.log_format") {
-		t.Fatalf("restart paths = %v, want global.log_format", mixed.Lifecycle.RestartRequired)
+	if !hasPath(mixed.Lifecycle.RestartRequired, "servers.*.h2c") {
+		t.Fatalf("restart paths = %v, want servers.*.h2c", mixed.Lifecycle.RestartRequired)
 	}
 	if mixed.CandidateConfig.Global.LogLevel != "error" || mixed.CandidateConfig.Global.LogFormat != "json" {
 		t.Fatalf("mixed candidate was partially constructed: %+v", mixed.CandidateConfig.Global)

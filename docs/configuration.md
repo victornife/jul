@@ -175,7 +175,9 @@ patches retain their established complete-replacement behavior and reject
 `max_conns`; the global operation is sparse and accepts it.
 
 Operation summaries are deterministic field-name lists and never contain
-configured values. `global.log_format` remains restart-required. A changed
+configured values. `global.log_format` is hot-reloadable (#91): the slog handler
+encoding swaps atomically on the next successful reload without rebuilding the
+logger. A changed
 `max_conns` requires staging whenever any currently bound desired address is
 retained; it can apply live only when all affected desired listeners are new in
 the same complete candidate. Mixed hot/restart batches stage the whole

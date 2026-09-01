@@ -283,7 +283,7 @@ func globalEntries() []Entry {
 		ignored("global.access_log", SubAccessLog, "superseded by observability.access_log; no runtime consumer reads it", true),
 		restart("global.config_authority", SubConfigAuthority, "authority is resolved once at startup and wires the file watcher, SIGHUP, and the managed baseline before any writer exists; changing it moves ownership of the configuration file and cannot be hot-applied (ADR 0019 \u00a79.2)"),
 		ignored("global.error_log", SubErrorLog, "structured process logs are written to stderr; no runtime consumer reads it", true),
-		restart("global.log_format", SubLogFormat, "the slog handler encoding is chosen once when the logger is built at startup"),
+		hot("global.log_format", SubLogFormat, "the slog handler encoding is a swappable delegate behind DynamicHandler; OnReloaded installs the new one atomically on each successful reload without rebuilding the logger (#91)"),
 		hot("global.log_level", SubLogLevel, "the level var is updated by OnReloaded on each successful reload"),
 		hot("global.redact_min_secret_length", SubRedact, "the redaction state is rebuilt and installed atomically on each successful reload"),
 		hot("global.reload_timeout", SubReloadTimeout, "the threshold is read from the effective config at the start of each reload"),
@@ -392,7 +392,7 @@ func observabilityEntries() []Entry {
 		"observability.access_log.rotate_max_mb",
 		"observability.access_log.sinks",
 	)
-	out = append(out, restart("observability.metrics.host_label", SubMetrics, "the Prometheus registry and its label set are built once at startup"))
+	out = append(out, hot("observability.metrics.host_label", SubMetrics, "an atomic flag read by the metrics middleware on each request; OnReloaded flips it on every successful reload without rebuilding the registry or resetting any collector (#91)"))
 	out = append(out, restartGroup(SubTracing, reasonTracingStartup,
 		"observability.tracing.enabled",
 		"observability.tracing.endpoint",

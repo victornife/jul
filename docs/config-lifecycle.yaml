@@ -79,10 +79,10 @@ counts:
   schema_paths: 356
   schema_leaves: 302
   registry_entries: 302
-  startup_consumed: 56
+  startup_consumed: 54
   by_class:
-    hot_reload: 231
-    restart_required: 56
+    hot_reload: 233
+    restart_required: 54
     new_listener_only: 8
     ignored_deprecated: 4
     validation_rejected_reserved: 3
@@ -347,10 +347,9 @@ fields:
     deprecated: true
     ignored: true
   - path: "global.log_format"
-    class: restart_required
+    class: hot_reload
     subsystem: log_format
-    reason: "the slog handler encoding is chosen once when the logger is built at startup"
-    startup_consumed: true
+    reason: "the slog handler encoding is a swappable delegate behind DynamicHandler; OnReloaded installs the new one atomically on each successful reload without rebuilding the logger (#91)"
   - path: "global.log_level"
     class: hot_reload
     subsystem: log_level
@@ -396,10 +395,9 @@ fields:
     subsystem: access_log
     reason: "a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98)"
   - path: "observability.metrics.host_label"
-    class: restart_required
+    class: hot_reload
     subsystem: metrics
-    reason: "the Prometheus registry and its label set are built once at startup"
-    startup_consumed: true
+    reason: "an atomic flag read by the metrics middleware on each request; OnReloaded flips it on every successful reload without rebuilding the registry or resetting any collector (#91)"
   - path: "observability.tracing.enabled"
     class: restart_required
     subsystem: tracing

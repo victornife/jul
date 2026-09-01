@@ -93,11 +93,11 @@ listener and refuses same-address sibling risk before preview.
 
 The sparse global operations use the same path. `global_set`,
 `compression_set`, and `rate_limit_global_set` first produce one canonical
-complete candidate, then the registry classifies it. `global.log_format`
-therefore stages the complete candidate, not only that field. A changed global
+complete candidate, then the registry classifies it. A changed global
 `max_conns` stages whenever any desired address is already bound; only an
-all-new affected listener set can adopt it during live bind. Compression and
-global rate/key/burst changes remain hot. Operation summaries contain field
+all-new affected listener set can adopt it during live bind. `global.log_format`,
+`observability.metrics.host_label`, and compression/global rate/key/burst
+changes are all hot (#91). Operation summaries contain field
 names only, and a stage update preserves the original pre-stage rollback base.
 
 For the strongest guarantees, use the Console or admin API for configuration
@@ -790,19 +790,16 @@ using schema-derived extractors, so a field cannot be added to the registry
 without being diffed. The runtime rejects the following categories with `restart_required` at apply
 time (admin path) or at swap time (SIGHUP/file-watch):
 
-- **Log format** — the base structured logger's text/JSON encoding is built
-  once at startup and requires a restart. Log *level* is hot-reloadable.
-  `[observability.access_log]` (`enabled`, sink selection, file/format,
-  rotation) is fully hot-reloadable (#98): a candidate sink generation is
-  built and validated before Publish, committed with the new handler
-  generation, and the previous generation's file/syslog resources close only
-  after its own requests drain. The permanent Console Operations-Log tail is
-  never recreated by an access-log change.
 - **ACME issued-domain set / issuer** — frozen when the autocert manager is
   built at startup.
 
 `global.worker_threads` is *not* restart-required: the GOMAXPROCS cap is
-applied dynamically on the next successful reload.
+applied dynamically on the next successful reload. `global.log_format` is also
+*not* restart-required (#91): the base structured logger's text/JSON encoding
+is a swappable delegate (`DynamicHandler`) that `OnReloaded` installs
+atomically on every successful reload, without rebuilding the `*slog.Logger`
+or any package reference to it — log *level* was already hot-reloadable, and
+now format is too.
 - **Listener bind-time settings** — for an address the server already holds,
   the socket is bound once and reused. Changing read/read-header/write/idle
   timeouts, max header bytes, h2c, HTTP/3, or the global connection cap cannot
@@ -825,10 +822,18 @@ applied dynamically on the next successful reload.
   policy is live for the very next request after a successful reload and the
   prior token is rejected immediately — no restart, no overlap window (#95;
   see [config-lifecycle.yaml](config-lifecycle.yaml)).
-- **Metrics host label** — set when the Prometheus registry is created.
 
 Adding a brand-new `listen` address is *not* restart-required: the reload binds
 it fresh. Only changes to an address the server is already serving are gated.
+Neither is `[observability.metrics].host_label` (#91): it is an atomic flag the
+metrics middleware reads per request, flipped by `OnReloaded` on every
+successful reload with no registry rebuild and no counter/histogram/gauge
+reset. `[observability.access_log]` (`enabled`, sink selection, file/format,
+rotation) is fully hot-reloadable too (#98): a candidate sink generation is
+built and validated before Publish, committed with the new handler generation,
+and the previous generation's file/syslog resources close only after its own
+requests drain. The permanent Console Operations-Log tail is never recreated
+by an access-log change.
 
 ### L4 stream listeners {:#l4-stream-listeners-are-not-affected}
 
