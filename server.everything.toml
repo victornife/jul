@@ -14,12 +14,22 @@
 # Run (principal tokens need >= 32 chars for entropy; the discovery tokens can
 # be any placeholder string since consul_pool/k8s_pool have no real service to
 # authenticate against here):
-#   JUL_ADMIN_TOKEN=dev-admin-token-please-rotate-me-0001 \
-#   JUL_ALICE_TOKEN=alice-operator-token-please-rotate-0001 \
-#   JUL_CI_TOKEN=ci-deployer-token-please-rotate-me-0001 \
-#   JUL_CONSUL_TOKEN=consultoken \
-#   JUL_K8S_TOKEN=k8stoken \
-#     ./jul -config server.everything.toml
+#
+#   bash / zsh:
+#     JUL_ADMIN_TOKEN=dev-admin-token-please-rotate-me-0001 \
+#     JUL_ALICE_TOKEN=alice-operator-token-please-rotate-0001 \
+#     JUL_CI_TOKEN=ci-deployer-token-please-rotate-me-0001 \
+#     JUL_CONSUL_TOKEN=consultoken \
+#     JUL_K8S_TOKEN=k8stoken \
+#       ./jul -config server.everything.toml
+#
+#   PowerShell:
+#     $env:JUL_ADMIN_TOKEN="dev-admin-token-please-rotate-me-0001"
+#     $env:JUL_ALICE_TOKEN="alice-operator-token-please-rotate-0001"
+#     $env:JUL_CI_TOKEN="ci-deployer-token-please-rotate-me-0001"
+#     $env:JUL_CONSUL_TOKEN="consultoken"
+#     $env:JUL_K8S_TOKEN="k8stoken"
+#     .\jul.exe -config server.everything.toml
 #
 # Companion backends (start before jul to exercise proxying/health checks):
 #   go run scripts/burn-in-backend.go             # HTTP backend :8081/:8082 (health)
