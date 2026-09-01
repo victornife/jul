@@ -170,11 +170,8 @@ test(
     await expect(page).toHaveURL(/\/config$/);
     await applyConfigAction("Apply live");
 
-    const preStageResp = await request.get("/api/config");
-    expect(preStageResp.status()).toBe(200);
-    const preStage = RawConfigSchema.parse(await preStageResp.json());
-    const preStageRaw = preStage.raw ?? "";
-
+    // log_format is hot-reloadable (#91): the slog handler encoding is a
+    // swappable delegate, so this change applies live rather than staging.
     const globalEditor = await openTrafficEditor("Global settings", "Edit global settings");
     const logFormat = globalEditor.getByLabel("Log format");
     const currentFormat = await logFormat.inputValue();
@@ -182,14 +179,34 @@ test(
     await waitForConfigQuiescence();
     await globalEditor.getByRole("button", { name: "Review changes" }).click();
     await expect(page).toHaveURL(/\/config$/);
+    await applyConfigAction("Apply live");
+
+    // Snapshot after the (permanent) log_format apply and before the staged
+    // restart below, so discarding the staged restart is checked against the
+    // config it actually needs to restore.
+    const preStageResp = await request.get("/api/config");
+    expect(preStageResp.status()).toBe(200);
+    const preStage = RawConfigSchema.parse(await preStageResp.json());
+    const preStageRaw = preStage.raw ?? "";
+
+    // max_conns is listener-level and restart-required for a retained listener
+    // (unlike the global rate itself), so it is what still exercises the
+    // stage/update-staged flow below.
+    const limiterForStage = await openTrafficEditor("Rate limiting", "Edit rate limiting");
+    const maxConns = limiterForStage.getByLabel("Maximum concurrent connections");
+    const currentMax = Number(await maxConns.inputValue()) || 0;
+    await maxConns.fill(String(currentMax + 17));
+    await waitForConfigQuiescence();
+    await limiterForStage.getByRole("button", { name: "Review changes" }).click();
+    await expect(page).toHaveURL(/\/config$/);
     await applyConfigAction("Save for next restart");
     await expect(page.getByText("Restart required — configuration staged")).toBeVisible();
     await expectStaticOK(request, "Jul static OK");
 
     const stagedLimiter = await openTrafficEditor("Rate limiting", "Edit rate limiting");
-    const maxConns = stagedLimiter.getByLabel("Maximum concurrent connections");
-    const currentMax = Number(await maxConns.inputValue()) || 0;
-    await maxConns.fill(String(currentMax + 17));
+    const maxConns2 = stagedLimiter.getByLabel("Maximum concurrent connections");
+    const currentMax2 = Number(await maxConns2.inputValue()) || 0;
+    await maxConns2.fill(String(currentMax2 + 17));
     await waitForConfigQuiescence();
     await stagedLimiter.getByRole("button", { name: "Review changes" }).click();
     await expect(page).toHaveURL(/\/config$/);

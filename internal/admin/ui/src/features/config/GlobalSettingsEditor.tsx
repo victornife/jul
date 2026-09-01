@@ -145,7 +145,6 @@ export function GlobalSettingsEditor({ current, onClose }: GlobalSettingsEditorP
           label="Log format"
           metadata={current.lifecycle.log_format}
           error={fieldError("global.log_format", "log_format")}
-          hint="Changing the process logger format is saved for the next process restart."
         >
           <select
             className={inputClass}
