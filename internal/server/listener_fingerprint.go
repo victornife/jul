@@ -25,7 +25,7 @@ import (
 // ACMERestartRequired.
 //
 // Frozen settings covered: read/write/idle/header timeouts, max header bytes,
-// h2c, HTTP/3 (and its Alt-Svc max-age), whether the listener is TLS at all,
+// h2c, whether HTTP/3 is enabled at all, whether the listener is TLS at all,
 // the TLS minimum version, the mutual-TLS bundle (mode, CA file, SAN allow-list,
 // CRL file), and the per-listener connection cap (rate_limit.max_conns). Only
 // addresses present in BOTH old and next are compared: a newly added address is
@@ -86,20 +86,19 @@ func listenerBindFingerprint(cfg *config.Config, addr string) string {
 	_, minVer, tlsOK := tlsBindingsForAddr(cfg.Servers, addr)
 	fmt.Fprintf(&b, "tls=%t;", tlsOK)
 	if tlsOK {
-		// TLS minimum version, the mutual-TLS bundle, and HTTP/3 are wired into
-		// the TLS listener at bind time, so a change to any of them forces a
-		// rebind. The static certificate identity (cert/key/SNI mapping) is
-		// deliberately NOT part of this fingerprint: #100 hot-swaps it into the
-		// existing dynamicCertProvider without a rebind (see
-		// prepareCertRotation and listenerEntry.certFingerprint), while an
-		// ACME domain-set change is still gated separately by
-		// ACMERestartRequired so its restart reason stays specific.
+		// TLS minimum version, the mutual-TLS bundle, and whether HTTP/3 is
+		// enabled at all are wired into the TLS listener at bind time, so a
+		// change to any of them forces a rebind. The static certificate
+		// identity (cert/key/SNI mapping) is deliberately NOT part of this
+		// fingerprint: #100 hot-swaps it into the existing
+		// dynamicCertProvider without a rebind (see prepareCertRotation and
+		// listenerEntry.certFingerprint), and an ACME domain-set change is
+		// still gated separately by ACMERestartRequired so its restart reason
+		// stays specific. The Alt-Svc max-age is likewise NOT part of this
+		// fingerprint: #161 hot-swaps it into the existing
+		// listenerEntry.altSvc without a rebind (see updateAltSvcState).
 		fmt.Fprintf(&b, "minver=%d;mtls=%s;", minVer, mtlsConfigFingerprint(cfg.Servers, addr))
-		if s.http3EnabledForAddr(addr) {
-			fmt.Fprintf(&b, "h3=1,ma=%d;", s.http3MaxAgeForAddr(addr))
-		} else {
-			b.WriteString("h3=0;")
-		}
+		fmt.Fprintf(&b, "h3=%t;", s.http3EnabledForAddr(addr))
 	} else {
 		// h2c only takes effect on a plaintext listener (bind enables it solely
 		// on the non-TLS path), so it is part of the fingerprint only when the

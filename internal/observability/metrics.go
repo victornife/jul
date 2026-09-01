@@ -65,18 +65,22 @@ type Metrics struct {
 	pluginPanics       *prometheus.CounterVec
 	listenerConns      prometheus.Gauge
 	http3Conns         prometheus.Gauge
-	streamConns        *prometheus.GaugeVec
-	streamBytes        *prometheus.CounterVec
-	streamUDPEvicted   *prometheus.CounterVec
-	streamUDPReject    prometheus.Counter
-	streamDialFailures *prometheus.CounterVec
-	httpDialFailures   *prometheus.CounterVec
-	certExpiry         *prometheus.GaugeVec
-	certRenewals       prometheus.Counter
-	mtlsHandshakes     *prometheus.CounterVec
-	wafEvents          *prometheus.CounterVec
-	egressDecisions    *prometheus.CounterVec
-	egressDNSAnswers   *prometheus.CounterVec
+	// http3AltSvcTransitions counts HTTP/3 Alt-Svc advertisement changes,
+	// labeled by the bounded destination state ("advertise"/"clear"). No
+	// address, port, or max-age value is ever a label (#161).
+	http3AltSvcTransitions *prometheus.CounterVec
+	streamConns            *prometheus.GaugeVec
+	streamBytes            *prometheus.CounterVec
+	streamUDPEvicted       *prometheus.CounterVec
+	streamUDPReject        prometheus.Counter
+	streamDialFailures     *prometheus.CounterVec
+	httpDialFailures       *prometheus.CounterVec
+	certExpiry             *prometheus.GaugeVec
+	certRenewals           prometheus.Counter
+	mtlsHandshakes         *prometheus.CounterVec
+	wafEvents              *prometheus.CounterVec
+	egressDecisions        *prometheus.CounterVec
+	egressDNSAnswers       *prometheus.CounterVec
 
 	// Reload and staged-restart metrics (P2-05).
 	reloadTotal      *prometheus.CounterVec
@@ -315,6 +319,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_http3_connections",
 			Help: "Current open HTTP/3 (QUIC) connections across all listeners.",
 		}),
+		http3AltSvcTransitions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_http3_altsvc_transitions_total",
+			Help: "HTTP/3 Alt-Svc advertisement changes, labeled by destination state (advertise/clear). Includes both a genuine transition (activation, degradation, cold-restart-disabled) and an ordinary hot-reload max-age refresh that keeps advertising.",
+		}, []string{"to"}),
 		streamConns: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "jul_stream_active_conns",
 			Help: "Current active L4 stream connections/sessions, labeled by protocol (tcp/udp).",
@@ -449,6 +457,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.pluginPanics,
 		m.listenerConns,
 		m.http3Conns,
+		m.http3AltSvcTransitions,
 		m.streamConns,
 		m.streamBytes,
 		m.streamUDPEvicted,
@@ -838,6 +847,14 @@ func (m *Metrics) ConnState(_ net.Conn, state http.ConnState) {
 // stays decoupled from observability.
 func (m *Metrics) HTTP3ConnDelta(delta int64) {
 	m.http3Conns.Add(float64(delta))
+}
+
+// ObserveAltSvcTransition counts a change to a listener's HTTP/3 Alt-Svc
+// advertisement, labeled by the bounded destination state ("advertise" or
+// "clear"). It is installed as Server.AltSvcTransitionHook so the server
+// package stays decoupled from observability (#161).
+func (m *Metrics) ObserveAltSvcTransition(to string) {
+	m.http3AltSvcTransitions.WithLabelValues(to).Inc()
 }
 
 // ObserveMTLSHandshake records a mutual-TLS handshake that presented a

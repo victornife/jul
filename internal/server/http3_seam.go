@@ -6,8 +6,6 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net"
 	"net/http"
 
 	"jul/internal/config"
@@ -30,6 +28,14 @@ type h3Listener interface {
 	// configured shutdown_timeout so HTTP/3 drains on the same budget as the
 	// TCP listeners.
 	Close(ctx context.Context) error
+
+	// SetOnExit installs a callback the accept loop invokes at most once, with
+	// the error that ended it, if it exits for any reason other than an
+	// intentional Close (#161: this is what lets a live H3 failure transition
+	// Alt-Svc to "clear" instead of continuing to advertise a dead listener).
+	// Must be called before Activate to avoid a race with the accept loop
+	// starting; the single serial reload loop already guarantees that order.
+	SetOnExit(func(error))
 }
 
 // CheckHTTP3 reports whether the configuration can be served by this binary with
@@ -78,38 +84,10 @@ func (s *Server) http3MaxAgeForAddr(addr string) int {
 	return 86400
 }
 
-// altSvcValue builds the Alt-Svc header value advertising HTTP/3 on the same
-// port as addr, for example `h3=":443"; ma=86400`. The host part of addr is
-// dropped because Alt-Svc advertises a port on the same authority; an addr
-// without an explicit port falls back to 443 (HTTPS).
-func altSvcValue(addr string, maxAge int) string {
-	_, port, err := net.SplitHostPort(addr)
-	if err != nil || port == "" {
-		port = "443"
-	}
-	if maxAge <= 0 {
-		maxAge = 86400
-	}
-	return fmt.Sprintf(`h3=":%s"; ma=%d`, port, maxAge)
-}
-
-// withAltSvc wraps next so every response carries the given Alt-Svc header,
-// advertising HTTP/3 to clients arriving over HTTP/1.1 or HTTP/2. The header is
-// set before the handler runs so it survives even when the handler writes its
-// own headers and body.
-func withAltSvc(next http.Handler, value string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Alt-Svc", value)
-		next.ServeHTTP(w, r)
-	})
-}
-
 // handlerForAddr returns the dynamic handler for addr, wrapped to advertise
-// HTTP/3 via Alt-Svc when altSvc is non-empty (i.e. a QUIC listener is running).
-func (s *Server) handlerForAddr(addr, altSvc string) http.Handler {
-	h := s.dynamicHandler(addr)
-	if altSvc != "" {
-		h = withAltSvc(h, altSvc)
-	}
-	return h
+// HTTP/3 via Alt-Svc according to state's current mode (#161). state is nil
+// for a non-TLS or non-HTTP/3 address, in which case altSvcMiddleware is a
+// no-op passthrough.
+func (s *Server) handlerForAddr(addr string, state *DynamicAltSvc) http.Handler {
+	return altSvcMiddleware(s.dynamicHandler(addr), state)
 }

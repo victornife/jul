@@ -1385,11 +1385,10 @@ AltSvcMaxAge is the Alt-Svc advertisement lifetime in seconds (the "ma" field), 
 | | |
 | --- | --- |
 | Type | `integer` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `http3` |
-| Why | the QUIC listener and its Alt-Svc advertisement are created when the address binds |
+| Why | the Alt-Svc advertisement is a per-listener atomic state (DynamicAltSvc) updated in place on each successful reload, without rebinding the TCP or UDP listener (#161) |
 | Requires | `http3` |
-| Flags | startup-consumed, per-address, conditional |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 86400 |
 | Active when | HTTP/3 enabled |
@@ -1403,7 +1402,7 @@ Enabled starts a parallel HTTP/3 (QUIC) listener for this server block.
 | Type | `bool` |
 | Lifecycle | `restart_required` |
 | Subsystem | `http3` |
-| Why | the QUIC listener and its Alt-Svc advertisement are created when the address binds |
+| Why | the QUIC listener is created when the address binds |
 | Requires | `http3` |
 | Flags | startup-consumed, per-address, conditional |
 

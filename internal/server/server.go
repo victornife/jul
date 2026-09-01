@@ -171,6 +171,19 @@ type Server struct {
 	// in builds compiled with the http3 tag.
 	HTTP3ConnHook func(int64)
 
+	// AltSvcTransitionHook, when set, is invoked with the bounded destination
+	// state ("advertise" or "clear", never "none") every time server code
+	// explicitly sets a listener's Alt-Svc advertisement, so the composition
+	// root can count activation/degradation events without this package
+	// importing observability (#161). This includes an ordinary hot-reload
+	// max-age refresh (still "advertise": the listener was already advertising
+	// and continues to) as well as a genuine transition (activation success,
+	// activation/runtime failure, cold-restart-disabled) — it is a bounded
+	// count of Set operations, not a state-change edge detector. No address,
+	// port or max-age value is ever passed — only the fixed, low-cardinality
+	// destination state.
+	AltSvcTransitionHook func(to string)
+
 	// MTLSResultHook, when set, is invoked once per mutual-TLS handshake that
 	// presents a client certificate which passed CA-chain verification, with
 	// "verified" or "rejected" (rejected covers a revoked serial or a
@@ -431,6 +444,23 @@ type listenerEntry struct {
 	// during Publish's commit), so no additional synchronization is needed
 	// beyond that serialization (#100).
 	certFingerprint string
+	// altSvc is the dynamic Alt-Svc advertisement state for this address
+	// (#161); nil unless HTTP/3 is enabled here. It starts at its zero value
+	// (AltSvcNone) until startServing's Activate call succeeds, and is
+	// updated in place — never rebuilding the TCP/UDP listener — by a hot
+	// alt_svc_max_age change (updateAltSvcState) or a live activation/accept
+	// failure (h3Degraded).
+	altSvc *DynamicAltSvc
+	// altSvcMaxAge is the max-age (seconds) computed at bind time, consulted
+	// only by startServing's initial successful-activation transition to
+	// AltSvcAdvertise; every later change goes through updateAltSvcState.
+	altSvcMaxAge int
+	// h3Degraded is set once if HTTP/3 activation fails, or the accept loop
+	// exits unexpectedly after activation succeeded. While set,
+	// updateAltSvcState leaves this address's Alt-Svc state at AltSvcClear
+	// regardless of candidate max-age; this issue does not attempt automatic
+	// recovery of a failed HTTP/3 listener.
+	h3Degraded atomic.Bool
 }
 
 // BoundListenerInfo is a read-only summary of a bound HTTP listener, used by
@@ -440,8 +470,17 @@ type BoundListenerInfo struct {
 	Addr        string
 	Fingerprint string
 	TLSEnabled  bool
-	// H3 is true when an HTTP/3 (QUIC) listener is active on this address.
+	// H3 is true when an HTTP/3 (QUIC) listener is configured on this address.
 	H3 bool
+	// H3Degraded is true when HTTP/3 was configured here but activation or
+	// the accept loop failed; Alt-Svc is cleared for this address until the
+	// process restarts (#161; no automatic recovery is attempted).
+	H3Degraded bool
+	// AltSvcMode is the bounded, secret-free current Alt-Svc advertisement
+	// state: "none", "advertise", or "clear" (#161). No address, port, or
+	// max-age value is ever a metric label, but this status field is safe to
+	// expose under the same policy as other authenticated status detail.
+	AltSvcMode string
 }
 
 // LiveSnapshot is a point-in-time, read-only view of the running server's
@@ -505,11 +544,14 @@ func copyListenerMap(src map[string]BoundListenerInfo) map[string]BoundListenerI
 func copyListenerMapFromEntries(src map[string]*listenerEntry) map[string]BoundListenerInfo {
 	out := make(map[string]BoundListenerInfo, len(src))
 	for addr, e := range src {
+		mode, _ := e.altSvc.Load()
 		out[addr] = BoundListenerInfo{
 			Addr:        addr,
 			Fingerprint: e.boundFingerprint,
 			TLSEnabled:  e.provider != nil,
 			H3:          e.h3 != nil,
+			H3Degraded:  e.h3Degraded.Load(),
+			AltSvcMode:  altSvcModeString(mode),
 		}
 	}
 	return out
@@ -662,11 +704,6 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 
 	entry := &listenerEntry{addr: addr}
 
-	// altSvc is the Alt-Svc header value advertising HTTP/3; empty unless an
-	// HTTP/3 listener is staged below, so HTTP/1.1 + HTTP/2 responses tell
-	// clients to upgrade to h3 on a subsequent request.
-	var altSvc string
-
 	bindings, minVer, tlsOK := tlsBindingsForAddr(cfg.Servers, addr)
 	if tlsOK {
 		provider, err := cv.certProviderFor(addr, bindings)
@@ -704,7 +741,10 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 
 		// Stage the parallel HTTP/3 (QUIC) listener on the same UDP address when
 		// enabled. Its accept loop is not started here, so QUIC connections do
-		// not reach the previous handler generation before Publish either.
+		// not reach the previous handler generation before Publish either. The
+		// Alt-Svc state stays AltSvcNone (DynamicAltSvc's zero value) until
+		// startServing's Activate call succeeds (#161): Jul never advertises an
+		// H3 listener that has not actually started.
 		if cv.http3EnabledForAddr(addr) {
 			h3, err := newStagedHTTP3WithTLS(addr, tlsConf, s.dynamicHandler(addr), s.HTTP3ConnHook, s.log)
 			if err != nil {
@@ -712,13 +752,28 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 				return nil, fmt.Errorf("http3 %s: %w", addr, err)
 			}
 			entry.h3 = h3
-			altSvc = altSvcValue(addr, cv.http3MaxAgeForAddr(addr))
+			entry.altSvc = &DynamicAltSvc{}
+			entry.altSvcMaxAge = cv.http3MaxAgeForAddr(addr)
+			h3.SetOnExit(func(exitErr error) {
+				s.log.Warn("http3 accept loop ended unexpectedly; clearing Alt-Svc advertisement", "addr", addr, "error", exitErr)
+				entry.h3Degraded.Store(true)
+				s.setAltSvc(entry.altSvc, AltSvcClear, "")
+			})
+		} else if http3Compiled {
+			// HTTP/3 is not enabled for this address in the current process, but
+			// this binary can serve it. A client may still be holding an Alt-Svc
+			// advertisement cached from before a restart that disabled it (or
+			// from a different process generation); Jul has no persisted prior
+			// state to consult, so it always emits an explicit clear rather than
+			// silently omitting the header (#161 cold-restart-disabled decision).
+			entry.altSvc = &DynamicAltSvc{}
+			s.setAltSvc(entry.altSvc, AltSvcClear, "")
 		}
 	}
 
 	httpd := &http.Server{
 		Addr:              addr,
-		Handler:           s.handlerForAddr(addr, altSvc),
+		Handler:           s.handlerForAddr(addr, entry.altSvc),
 		ReadHeaderTimeout: cv.readHeaderTimeout(addr),
 		ReadTimeout:       cv.readTimeout(addr),
 		WriteTimeout:      cv.writeTimeout(addr),
@@ -756,11 +811,16 @@ func (s *Server) startServing(entry *listenerEntry) {
 	if entry.h3 != nil {
 		if err := entry.h3.Activate(); err != nil {
 			s.log.Error("http3 activation failed", "addr", entry.addr, "error", err)
+			entry.h3Degraded.Store(true)
+			s.setAltSvc(entry.altSvc, AltSvcClear, "")
 			select {
 			case s.serveErr <- fmt.Errorf("http3 %s: %w", entry.addr, err):
 			default:
 			}
 			// http3 is optional; continue serving TCP.
+		} else {
+			// #161: only a successfully activated H3 listener is advertised.
+			s.setAltSvc(entry.altSvc, AltSvcAdvertise, altSvcHeaderValue(entry.addr, entry.altSvcMaxAge))
 		}
 	}
 

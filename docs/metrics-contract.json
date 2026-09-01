@@ -140,6 +140,15 @@
       "state": "released_v1.32.0"
     },
     {
+      "name": "jul_http3_altsvc_transitions_total",
+      "type": "counter",
+      "help": "HTTP/3 Alt-Svc advertisement changes, labeled by destination state (advertise/clear). Includes both a genuine transition (activation, degradation, cold-restart-disabled) and an ordinary hot-reload max-age refresh that keeps advertising.",
+      "labels": [
+        "to"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_http3_connections",
       "type": "gauge",
       "help": "Current open HTTP/3 (QUIC) connections across all listeners.",

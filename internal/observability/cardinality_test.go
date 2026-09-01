@@ -203,6 +203,8 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObservePluginPanic("plug")
 	m.ConnState(nil, http.StateNew)
 	m.HTTP3ConnDelta(1)
+	m.ObserveAltSvcTransition("advertise")
+	m.ObserveAltSvcTransition("clear")
 	m.ObserveMTLSHandshake("verified")
 	m.StreamConnDelta("tcp", 1)
 	m.ObserveStreamBytes("tcp", "up", 100)

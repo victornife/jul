@@ -143,6 +143,12 @@ func TestHTTP3ConnDelta(t *testing.T) {
 	m.HTTP3ConnDelta(-1)
 }
 
+func TestObserveAltSvcTransition(t *testing.T) {
+	m := NewMetrics()
+	m.ObserveAltSvcTransition("advertise")
+	m.ObserveAltSvcTransition("clear")
+}
+
 func TestObserveMTLSHandshake(t *testing.T) {
 	m := NewMetrics()
 	m.ObserveMTLSHandshake("verified")

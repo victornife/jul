@@ -275,6 +275,11 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// commit before the new handler generation becomes reachable, so a new
 	// vhost route can never be selected against a stale candidate mapping.
 	p.Runtime.Commit()
+	// Alt-Svc max-age hot reload (#161): unlike certificate rotation, building
+	// a header value cannot fail, so this has no Prepare/Abort phase and runs
+	// directly here, updating every retained HTTP/3 listener's advertised
+	// state in place without touching the TCP or UDP listener.
+	p.s.updateAltSvcState(p.Candidate.Effective)
 
 	prevGen := p.s.handlers.Load()
 	newGen := p.s.newGeneration(p.Handlers, snapshots, p.GenID)

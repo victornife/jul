@@ -68,9 +68,6 @@ var bindFingerprintPaths = []struct {
 	{"servers.*.http3.enabled", func(c *config.Config) {
 		c.Servers[0].HTTP3 = &config.HTTP3Config{Enabled: true, AltSvcMaxAge: 100}
 	}},
-	{"servers.*.http3.alt_svc_max_age", func(c *config.Config) {
-		c.Servers[0].HTTP3 = &config.HTTP3Config{Enabled: true, AltSvcMaxAge: 999}
-	}},
 	{"servers.*.h2c", func(c *config.Config) {
 		c.Servers[0].TLS = nil
 		c.Servers[0].H2C = true

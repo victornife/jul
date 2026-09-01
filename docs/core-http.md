@@ -456,6 +456,7 @@ Labels fall into three classes by what bounds them:
 | `jul_plugin_panics_total` | `plugin` | configured plugins |
 | `jul_listener_conns` | — | single series |
 | `jul_http3_connections` | — | single series |
+| `jul_http3_altsvc_transitions_total` | `to` | `advertise`/`clear` |
 | `jul_stream_active_conns` | `proto` | `tcp`/`udp` |
 | `jul_stream_backend_dial_failures_total` | `proto`, `reason` | `tcp`/`udp` × fixed (`timeout`/`refused`/`no_backend`/`other`) |
 | `jul_stream_bytes_total` | `proto`, `direction` | `tcp`/`udp` × `up`/`down` |

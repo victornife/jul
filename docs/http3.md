@@ -50,10 +50,42 @@ server_names = ["example.com"]
 | Header | Example | Meaning |
 | --- | --- | --- |
 | `Alt-Svc` | `h3=":443"; ma=86400` | "HTTP/3 is available on the same port for 24 hours" |
+| `Alt-Svc` | `clear` | "Stop trying HTTP/3 on this port" (RFC 7838 §3) |
 
-The header is added to every response from a server block that enables HTTP/3.
-`ma` is the `alt_svc_max_age` config value. Only one advertisement is sent per
-response; there is no multi-port or multi-protocol Alt-Svc list.
+The header is added to every response on an address whose HTTP/3 state is not
+`none`. `ma` is the `alt_svc_max_age` config value. Only one advertisement is
+sent per response; there is no multi-port or multi-protocol Alt-Svc list.
+
+Each listener's advertisement is one of three states, held in an atomic
+per-address value (`DynamicAltSvc`) rather than baked into the handler at
+bind time:
+
+| State | Header sent | When |
+| --- | --- | --- |
+| `none` | (no `Alt-Svc` header) | Before the QUIC listener's first successful `Activate`, and on any TLS address where HTTP/3 is not compiled in |
+| `advertise` | `Alt-Svc: h3="..."; ma=<seconds>` | The QUIC listener is up and accepting connections |
+| `clear` | `Alt-Svc: clear` | The QUIC accept loop ended unexpectedly at runtime, or (cold restart) HTTP/3 is compiled in but disabled for this address in the current process |
+
+**`alt_svc_max_age` hot-reloads (#161).** Changing it takes effect on the next
+response after a successful reload — `ReloadPlan.Publish()` refreshes every
+retained listener's advertised `ma` in place, without rebinding the TCP or UDP
+socket. `http3.enabled` itself is unaffected: starting or stopping the QUIC
+listener still requires a restart (see
+[reload-semantics.md](reload-semantics.md)), because whether a UDP socket
+exists at all is a bind-time decision.
+
+**Live failure handling.** If the QUIC accept loop exits for any reason other
+than an intentional shutdown, the listener is marked degraded, the
+advertisement flips to `clear` on the very next TCP/h2 response, and HTTP/3
+stays off for that address for the rest of the process's life — Jul does not
+attempt to reopen the QUIC socket. TCP/h2 traffic on the same address is
+unaffected.
+
+A client that already cached an `advertise` header from before a `clear` may
+still attempt HTTP/3 first and fall back to TCP per its own retry policy;
+Jul cannot force an immediate re-check. See
+[known-limitations.md](known-limitations.md) for this and the
+`alt_svc_max_age = 0` schema caveat.
 
 ### Build-time behaviour
 

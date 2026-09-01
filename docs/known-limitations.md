@@ -49,8 +49,11 @@ Field-level lifecycle authority is the Go registry rendered in
 unselected transitions may remain restart-required; the complete
 `stage_restart` workflow is an acceptable final product design. Static
 certificate/key rotation on a retained TLS listener hot-applies (#100);
-access-log sinks hot-apply (#98); remaining selected future candidates include
-admin credentials, selected cache scalars and Alt-Svc advertisement state.
+access-log sinks and log format/host label hot-apply (#98, #91); the admin
+token and selected cache scalars (policy, capacity) hot-apply (#95, #92); the
+HTTP/3 Alt-Svc advertisement (mode and max-age) hot-applies per listener
+without rebinding the QUIC socket (#161) — `http3.enabled` itself still
+requires a restart, since it changes whether a UDP listener exists at all.
 
 - **A same-path access-log rotation-setting change has a narrow, bounded
   overlap risk.** Changing `rotate_max_mb`/`rotate_keep` while `file` stays the
@@ -68,6 +71,28 @@ admin credentials, selected cache scalars and Alt-Svc advertisement state.
   new generations then use different, unrelated files. Only the narrow
   combination of a same-path rotation-setting change and a rotation actually
   firing during the bounded drain window is affected.
+
+- **HTTP/3 Alt-Svc is a client-cached hint, not a live capability probe.**
+  Once a client has seen `Alt-Svc: h3="..."; ma=<seconds>`, browsers may keep
+  trying HTTP/3 for up to `ma` seconds on their own schedule; Jul cannot force
+  an immediate re-check. A `alt_svc_max_age` reload takes effect on the next
+  response but does not retroactively shorten a max-age a client already
+  cached from a prior response. If the live QUIC accept loop fails at
+  runtime, Jul clears the advertisement (`Alt-Svc: clear`) on the very next
+  TCP/h2 response for that address and disables HTTP/3 for the rest of the
+  process's life (no automatic reconnection/retry of the QUIC listener) — a
+  client that already cached the old advertisement still tries HTTP/3 first
+  and falls back to TCP on failure, per its own Alt-Svc retry policy. On a
+  cold restart where `http3.enabled` is now `false` for a TLS address (a
+  restart-required change, #102), a binary built with HTTP/3 support has no
+  persisted memory of what the previous process generation advertised, so it
+  always emits an explicit `clear` rather than silently omitting the header;
+  a binary built without HTTP/3 support never emits an Alt-Svc header at all
+  for that address, since no client of it could have a cached advertisement
+  to invalidate. `alt_svc_max_age = 0` is indistinguishable from an omitted
+  value at parse time (the field is a plain `int`, not `*int`) and is coerced
+  to the `86400` default; `AltSvcClear` is the only supported mechanism for
+  signaling HTTP/3 unavailability (#161).
 
 ## Historical corrections
 
