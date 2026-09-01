@@ -20,9 +20,9 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 | Schema paths (containers included) | 356 |
 | Schema leaves (configurable values) | 302 |
 | Registry entries | 302 |
-| Startup-consumed entries | 49 |
-| Class `hot_reload` | 238 |
-| Class `restart_required` | 49 |
+| Startup-consumed entries | 48 |
+| Class `hot_reload` | 239 |
+| Class `restart_required` | 48 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 3 |
@@ -217,8 +217,8 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.error_log` | `ignored_deprecated` | `error_log` | deprecated, ignored | structured process logs are written to stderr; no runtime consumer reads it |
 | `servers.*.error_pages.*` | `hot_reload` | `error_pages` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.h2c` | `restart_required` | `h2c` | startup, per-address, cond. | h2c is negotiated by the plaintext listener created at bind time |
-| `servers.*.http3.alt_svc_max_age` | `restart_required` | `http3` | startup, per-address, cond. | the QUIC listener and its Alt-Svc advertisement are created when the address binds |
-| `servers.*.http3.enabled` | `restart_required` | `http3` | startup, per-address, cond. | the QUIC listener and its Alt-Svc advertisement are created when the address binds |
+| `servers.*.http3.alt_svc_max_age` | `hot_reload` | `http3` | — | the Alt-Svc advertisement is a per-listener atomic state (DynamicAltSvc) updated in place on each successful reload, without rebinding the TCP or UDP listener (#161) |
+| `servers.*.http3.enabled` | `restart_required` | `http3` | startup, per-address, cond. | the QUIC listener is created when the address binds |
 | `servers.*.idle_timeout` | `new_listener_only` | `listener_timeouts` | cond. | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
 | `servers.*.listen` | `new_listener_only` | `listener` | cond. | moving to a different address binds a new socket; the old address is drained |
 | `servers.*.locations.*.allow_hidden` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |

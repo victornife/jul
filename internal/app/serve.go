@@ -1035,6 +1035,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// This ensures recovery files are never removed if startup subsequently fails.
 
 	srv.HTTP3ConnHook = metrics.HTTP3ConnDelta
+	srv.AltSvcTransitionHook = metrics.ObserveAltSvcTransition
 	srv.MTLSResultHook = metrics.ObserveMTLSHandshake
 	// Drive L4 stream-proxy reloads from the same validated config as the HTTP
 	// listeners. Stream binding errors are reported as a degraded reload result

@@ -539,12 +539,18 @@ restart reason names the field that actually changed:
   the **mtls** bundle installed in the listener's `tls.Config` at bind time;
 - `servers.*.tls.acme.enabled`, `.email`, `.ca`, `.domains`, `.challenge`,
   `.cache_dir`, `.ocsp_stapling`, plus the reserved `.dns_provider`;
-- `servers.*.http3.enabled` and `servers.*.http3.alt_svc_max_age` — the
-  **http3** QUIC listener and its Alt-Svc advertisement;
+- `servers.*.http3.enabled` — the **http3** QUIC listener itself: whether a
+  UDP socket exists at all is a bind-time decision;
 - `servers.*.h2c`.
 
 All of them are compared per listen address, so adding or removing an unrelated
 listener never produces a restart-required verdict for an address nobody edited.
+
+`servers.*.http3.alt_svc_max_age` is the one HTTP/3 leaf that is **not** in
+this restart-required list: the Alt-Svc advertisement is a per-listener atomic
+state (`DynamicAltSvc`) updated in place on each successful reload, without
+touching the QUIC listener itself (#161). See "HTTP/3 Alt-Svc advertisement"
+below.
 
 ### Listener property changes
 
@@ -807,8 +813,8 @@ now format is too.
 - **TLS handshake parameters on an existing listener** — minimum TLS version,
   certificates, and the **mtls** client-authentication bundle (mode, CA bundle,
   SAN allow-list, CRL) are baked into the listener's TLS config. **http3**
-  (`enabled` and `alt_svc_max_age`) and `h2c` are likewise decided when the
-  address binds.
+  `enabled` and `h2c` are likewise decided when the address binds; `http3`
+  `alt_svc_max_age` is the one exception — see below.
 - **Tracing** — the OpenTelemetry pipeline is wired once at startup.
 - **Response cache** — the cache backend (LRU/disk tiers and counters) is
   built once at startup and remains process-scoped across ordinary handler
@@ -821,6 +827,20 @@ now format is too.
   retroactively changed — only entries created or revalidated after the swap
   observe the new policy. `enable`/`disable` and disk-path replacement remain
   restart-required, gated separately in #93.
+- **HTTP/3 Alt-Svc advertisement** — `servers.*.http3.alt_svc_max_age` is
+  *not* restart-required (#161): each listener's Alt-Svc state is a per-address
+  atomic (`DynamicAltSvc`) that `ReloadPlan.Publish()` refreshes in place after
+  every successful reload, so a new `ma` value is advertised on the next
+  response without rebinding the QUIC (UDP) socket. This only reprices an
+  advertisement already being sent — it cannot start or stop HTTP/3 itself,
+  which stays gated on the bind-time `enabled` field above. A live QUIC accept
+  loop failure (independent of any reload) also flips the advertisement to
+  `Alt-Svc: clear` and disables it for the rest of the process's life; a cold
+  restart that leaves `enabled = false` on an HTTP/3-capable binary always
+  emits an explicit `clear` too, since Jul keeps no persisted record of what a
+  prior process generation advertised. See
+  [known-limitations.md](known-limitations.md) for the client-caching and
+  max-age transition-boundary caveats.
 - **Egress allow-list** — the outbound dial policy is built once at startup.
 - **Admin server** — listener, rate limits, history, plugin-upload, and
   audit-log settings are baked in at startup. `admin.token` and the RBAC policy

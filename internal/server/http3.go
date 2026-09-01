@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
@@ -31,16 +32,30 @@ type h3Conn struct {
 	udp    *net.UDPConn
 
 	onConn func(int64)
+	// onExit is invoked at most once by acceptLoop, with the error that ended
+	// it, if that happens for any reason other than an intentional Close
+	// (#161). Set via SetOnExit before Activate; the single serial reload
+	// loop that calls both guarantees the happens-before order without
+	// further synchronization.
+	onExit func(error)
 	log    *slog.Logger
 
 	// activateOnce ensures the accept loop starts at most once.
 	activateOnce sync.Once
+	// closing is set before Close releases the listener, so acceptLoop can
+	// tell an intentional shutdown apart from an unexpected accept failure.
+	closing atomic.Bool
 }
+
+// SetOnExit installs f as the callback acceptLoop invokes if it ends for any
+// reason other than Close. Must be called before Activate.
+func (c *h3Conn) SetOnExit(f func(error)) { c.onExit = f }
 
 // Close gracefully drains in-flight HTTP/3 requests (bounded by ctx, which the
 // server lifecycle derives from the configured shutdown_timeout), stops
 // accepting new QUIC connections, and releases the UDP socket.
 func (c *h3Conn) Close(ctx context.Context) error {
+	c.closing.Store(true)      // acceptLoop's Accept error below is expected; suppress onExit.
 	_ = c.server.Shutdown(ctx) // GOAWAY + drain; marks the server closed
 	err := c.ln.Close()        // unblock acceptLoop
 	_ = c.udp.Close()          // release the socket
@@ -129,11 +144,18 @@ func newStagedHTTP3WithTLS(addr string, tlsTemplate *tls.Config, handler http.Ha
 
 // acceptLoop accepts QUIC connections and serves each with the HTTP/3 server,
 // adjusting the connection gauge around each connection's lifetime. It returns
-// when the listener is closed (Accept then errors).
+// when the listener is closed (Accept then errors). An error observed while
+// NOT in the middle of an intentional Close is unexpected — the listener
+// stopped serving without anyone asking it to — and is reported through
+// onExit exactly once (#161), so the caller can stop advertising Alt-Svc for
+// a listener that is no longer actually running.
 func (c *h3Conn) acceptLoop(onConn func(int64), log *slog.Logger) {
 	for {
 		conn, err := c.ln.Accept(context.Background())
 		if err != nil {
+			if !c.closing.Load() && c.onExit != nil {
+				c.onExit(err)
+			}
 			return // listener closed
 		}
 		if onConn != nil {

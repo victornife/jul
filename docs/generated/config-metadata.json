@@ -1628,11 +1628,8 @@
       "optional": false,
       "dynamic": true,
       "subsystem": "http3",
-      "lifecycle_class": "restart_required",
-      "lifecycle_reason": "the QUIC listener and its Alt-Svc advertisement are created when the address binds",
-      "startup_consumed": true,
-      "address_keyed": true,
-      "conditional": true,
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the Alt-Svc advertisement is a per-listener atomic state (DynamicAltSvc) updated in place on each successful reload, without rebinding the TCP or UDP listener (#161)",
       "capabilities": [
         "http3"
       ],
@@ -1651,7 +1648,7 @@
       "dynamic": true,
       "subsystem": "http3",
       "lifecycle_class": "restart_required",
-      "lifecycle_reason": "the QUIC listener and its Alt-Svc advertisement are created when the address binds",
+      "lifecycle_reason": "the QUIC listener is created when the address binds",
       "startup_consumed": true,
       "address_keyed": true,
       "conditional": true,

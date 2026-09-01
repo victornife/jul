@@ -111,13 +111,18 @@ func TestListenerRebindRequired(t *testing.T) {
 			s.HTTP3 = &config.HTTP3Config{Enabled: true}
 		})
 	})
-	t.Run("HTTP/3 alt-svc max-age", func(t *testing.T) {
-		seed := func() config.ServerConfig {
+	t.Run("HTTP/3 alt-svc max-age hot-applies (#161)", func(t *testing.T) {
+		old := cfg(func() config.ServerConfig {
 			s := tlsSrv()
 			s.HTTP3 = &config.HTTP3Config{Enabled: true, AltSvcMaxAge: 3600}
 			return s
-		}
-		requiresRestart(t, seed, func(s *config.ServerConfig) { s.HTTP3.AltSvcMaxAge = 7200 })
+		}())
+		next := cfg(func() config.ServerConfig {
+			s := tlsSrv()
+			s.HTTP3 = &config.HTTP3Config{Enabled: true, AltSvcMaxAge: 7200}
+			return s
+		}())
+		hotApplies(t, old, next)
 	})
 	t.Run("mutual TLS mode", func(t *testing.T) {
 		requiresRestart(t, mtlsSeed("request", "ca.pem"), func(s *config.ServerConfig) {

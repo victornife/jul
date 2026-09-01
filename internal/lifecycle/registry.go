@@ -461,9 +461,11 @@ func serverEntries() []Entry {
 		"servers.*.h2c")...)
 	out = append(out, bindBoundGroup(SubClientAddress, "the PROXY-protocol wrapper is installed when the address binds, ahead of the TLS wrap, so it is fixed for the listener's lifetime",
 		"servers.*.proxy_protocol")...)
-	out = append(out, bindBoundGroup(SubHTTP3, "the QUIC listener and its Alt-Svc advertisement are created when the address binds",
-		"servers.*.http3.alt_svc_max_age",
+	out = append(out, bindBoundGroup(SubHTTP3, "the QUIC listener is created when the address binds",
 		"servers.*.http3.enabled")...)
+	out = append(out,
+		hot("servers.*.http3.alt_svc_max_age", SubHTTP3, "the Alt-Svc advertisement is a per-listener atomic state (DynamicAltSvc) updated in place on each successful reload, without rebinding the TCP or UDP listener (#161)"),
+	)
 	out = append(out,
 		newListener("servers.*.idle_timeout", SubListenerTimes, reasonBindFrozen),
 		newListener("servers.*.read_header_timeout", SubListenerTimes, reasonBindFrozen),
