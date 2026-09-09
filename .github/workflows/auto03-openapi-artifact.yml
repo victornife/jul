@@ -6,21 +6,52 @@ on:
       - auto03-close-150-v1
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   generate:
+    if: github.event.head_commit.message != 'docs(api): regenerate AUTO-03 contract [auto03-generated]'
     runs-on: ubuntu-latest
     steps:
       - name: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: auto03-close-150-v1
       - name: setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
           cache: true
+      - name: format AUTO-03 Go changes
+        run: |
+          gofmt -w \
+            internal/admin/managed_apply_registry.go \
+            internal/admin/apiv1_idempotency.go \
+            internal/admin/apiv1_idempotency_test.go \
+            internal/admin/apiv1_apply_response.go \
+            internal/adminapi/v1_mutation.go \
+            internal/apicontract/build.go \
+            internal/apicontract/openapi.go \
+            internal/apicontract/schema_test.go
       - name: generate external API contract
         run: make api-contract-generate
+      - name: commit deterministic outputs
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/generated/openapi.json \
+            internal/admin/managed_apply_registry.go \
+            internal/admin/apiv1_idempotency.go \
+            internal/admin/apiv1_idempotency_test.go \
+            internal/admin/apiv1_apply_response.go \
+            internal/adminapi/v1_mutation.go \
+            internal/apicontract/build.go \
+            internal/apicontract/openapi.go \
+            internal/apicontract/schema_test.go
+          if ! git diff --cached --quiet; then
+            git commit -m 'docs(api): regenerate AUTO-03 contract [auto03-generated]'
+            git push origin HEAD:auto03-close-150-v1
+          fi
       - name: upload generated OpenAPI
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
