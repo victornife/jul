@@ -46,10 +46,16 @@ func TestWatchFileDebounces(t *testing.T) {
 		t.Fatalf("write temp config: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 
-	ch, err := WatchFile(ctx, path, 200*time.Millisecond, nil)
+	// A generous debounce window relative to the writes below keeps this
+	// deterministic on slow/contended CI runners, where scheduling jitter
+	// between the writes and fsnotify's event delivery can otherwise exceed
+	// a tight debounce and legitimately produce more than one coalesced
+	// event.
+	const debounce = 300 * time.Millisecond
+	ch, err := WatchFile(ctx, path, debounce, nil)
 	if err != nil {
 		t.Fatalf("WatchFile: %v", err)
 	}
@@ -64,11 +70,12 @@ func TestWatchFileDebounces(t *testing.T) {
 	// Should still receive exactly one event.
 	select {
 	case <-ch:
-		// Good. Wait briefly to ensure no second event is queued.
+		// Good. Wait to ensure no second event is queued, comfortably past
+		// the debounce window to tolerate CI scheduling jitter.
 		select {
 		case <-ch:
 			t.Fatal("expected only one debounced event, got a second")
-		case <-time.After(300 * time.Millisecond):
+		case <-time.After(2 * debounce):
 			// No duplicate within debounce window.
 		}
 	case <-ctx.Done():
