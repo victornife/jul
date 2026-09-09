@@ -5,51 +5,39 @@ package admin
 
 import (
 	"crypto/sha256"
-	"encoding/binary"
-	"encoding/json"
-	"mime"
+	"hash"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"jul/internal/adminapi"
 )
 
-type v1IdempotencyKey struct {
-	BootID    string
-	Principal string
-	Key       string
-}
+// v1IdempotencyAdmission is coordination only, not retained idempotency state.
+// The durable-within-a-boot binding lives exclusively on ManagedApplyRecord as
+// required by ADR 0019 §27.1. Serializing this low-rate control-plane admission
+// closes the pre-ledger race between two requests carrying the same key.
+var v1IdempotencyAdmission sync.Mutex
 
-type v1IdempotencyRecord struct {
+type v1IdempotencyMetadata struct {
+	Key         string
 	Fingerprint [32]byte
 	Method      string
 	Operation   string
-	ApplyID     string
-	Status      int
-	Header      http.Header
-	Body        []byte
-	Terminal    bool
-	CreatedAt   time.Time
-	CompletedAt time.Time
-	Ready       chan struct{}
-	readyClosed bool
+	Principal   string
 }
-
-var v1IdempotencyStore = struct {
-	sync.Mutex
-	records map[v1IdempotencyKey]*v1IdempotencyRecord
-}{records: map[v1IdempotencyKey]*v1IdempotencyRecord{}}
 
 func validV1IdempotencyKey(key string) bool {
 	if len(key) < 8 || len(key) > 128 {
 		return false
 	}
-	for i := range len(key) {
+	for i := 0; i < len(key); i++ {
 		c := key[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '_' || c == '-' {
 			continue
 		}
 		return false
@@ -57,34 +45,72 @@ func validV1IdempotencyKey(key string) bool {
 	return true
 }
 
-func canonicalV1ContentType(raw string) string {
-	mediaType, params, err := mime.ParseMediaType(raw)
-	if err != nil || mediaType == "" {
-		return strings.TrimSpace(raw)
+// writeLengthPrefixed implements the ADR's decimal-byte-length grammar exactly.
+func writeLengthPrefixed(h hash.Hash, value []byte) {
+	_, _ = h.Write([]byte(strconv.Itoa(len(value))))
+	_, _ = h.Write([]byte{':'})
+	_, _ = h.Write(value)
+}
+
+// canonicalV1Query parses and percent-decodes the query, then sorts by
+// (name,value) and emits each pair with independent decimal byte-length
+// prefixes. There is deliberately no separator whose decoded occurrence could
+// make two pair sets serialize identically.
+func canonicalV1Query(raw string) ([]byte, error) {
+	values, err := url.ParseQuery(raw)
+	if err != nil {
+		return nil, err
 	}
-	return mime.FormatMediaType(strings.ToLower(mediaType), params)
+	type pair struct{ name, value string }
+	pairs := make([]pair, 0)
+	for name, vals := range values {
+		if len(vals) == 0 {
+			pairs = append(pairs, pair{name: name})
+			continue
+		}
+		for _, value := range vals {
+			pairs = append(pairs, pair{name: name, value: value})
+		}
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].name == pairs[j].name {
+			return pairs[i].value < pairs[j].value
+		}
+		return pairs[i].name < pairs[j].name
+	})
+	var b strings.Builder
+	for _, p := range pairs {
+		b.WriteString(strconv.Itoa(len([]byte(p.name))))
+		b.WriteByte(':')
+		b.WriteString(p.name)
+		b.WriteString(strconv.Itoa(len([]byte(p.value))))
+		b.WriteByte(':')
+		b.WriteString(p.value)
+	}
+	return []byte(b.String()), nil
 }
 
 func v1RequestFingerprint(r *http.Request, body []byte) ([32]byte, *adminapi.Error) {
-	values, err := url.ParseQuery(r.URL.RawQuery)
+	query, err := canonicalV1Query(r.URL.RawQuery)
 	if err != nil {
 		return [32]byte{}, adminapi.Errorf(adminapi.CodeInvalidRequest, "query parameters are malformed").
 			WithDetails(adminapi.Details{Field: "query"})
 	}
 	bodyDigest := sha256.Sum256(body)
+	path := r.URL.Path
+	if path == "" {
+		path = "/"
+	}
 	parts := [][]byte{
 		[]byte(r.Method),
-		[]byte(r.URL.EscapedPath()),
-		[]byte(values.Encode()),
-		[]byte(canonicalV1ContentType(r.Header.Get("Content-Type"))),
+		[]byte(path),
+		query,
+		[]byte(strings.TrimSpace(r.Header.Get("Content-Type"))),
 		bodyDigest[:],
 	}
 	h := sha256.New()
-	var length [8]byte
 	for _, part := range parts {
-		binary.BigEndian.PutUint64(length[:], uint64(len(part)))
-		_, _ = h.Write(length[:])
-		_, _ = h.Write(part)
+		writeLengthPrefixed(h, part)
 	}
 	var out [32]byte
 	copy(out[:], h.Sum(nil))
@@ -98,7 +124,7 @@ func v1OperationTemplate(r *http.Request) string {
 	return r.URL.Path
 }
 
-func (s *Server) beginV1Idempotency(r *http.Request, body []byte) (*v1IdempotencyRecord, *adminapi.Error) {
+func (s *Server) v1IdempotencyMetadata(r *http.Request, body []byte) (*v1IdempotencyMetadata, *adminapi.Error) {
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if key == "" {
 		return nil, nil
@@ -116,108 +142,91 @@ func (s *Server) beginV1Idempotency(r *http.Request, body []byte) (*v1Idempotenc
 	if apiErr != nil {
 		return nil, apiErr
 	}
-	storeKey := v1IdempotencyKey{BootID: s.bootID(), Principal: ident.Principal, Key: key}
-
-	for {
-		v1IdempotencyStore.Lock()
-		s.pruneV1IdempotencyLocked(time.Now())
-		existing := v1IdempotencyStore.records[storeKey]
-		if existing == nil {
-			rec := &v1IdempotencyRecord{
-				Fingerprint: fingerprint,
-				Method:      r.Method,
-				Operation:   v1OperationTemplate(r),
-				CreatedAt:   time.Now(),
-				Ready:       make(chan struct{}),
-			}
-			v1IdempotencyStore.records[storeKey] = rec
-			v1IdempotencyStore.Unlock()
-			return rec, nil
-		}
-		if existing.Fingerprint != fingerprint {
-			details := adminapi.Details{
-				RecordedMethod:    existing.Method,
-				RecordedOperation: existing.Operation,
-			}
-			v1IdempotencyStore.Unlock()
-			return nil, adminapi.Errorf(adminapi.CodeIdempotencyKeyReused,
-				"Idempotency-Key is already bound to a different request.").WithDetails(details)
-		}
-		if existing.Terminal || existing.ApplyID != "" {
-			v1IdempotencyStore.Unlock()
-			return existing, nil
-		}
-		ready := existing.Ready
-		v1IdempotencyStore.Unlock()
-		select {
-		case <-ready:
-			continue
-		case <-r.Context().Done():
-			return nil, adminapi.Errorf(adminapi.CodeOperationTimeout,
-				"The in-flight idempotent operation did not publish its apply identity before this request ended.")
-		}
-	}
+	return &v1IdempotencyMetadata{
+		Key:         key,
+		Fingerprint: fingerprint,
+		Method:      r.Method,
+		Operation:   v1OperationTemplate(r),
+		Principal:   ident.Principal,
+	}, nil
 }
 
-func (s *Server) pruneV1IdempotencyLocked(now time.Time) {
-	retention := s.ledgerRetention()
-	terminal := 0
-	for _, rec := range v1IdempotencyStore.records {
-		if rec.Terminal {
-			terminal++
-		}
+// runIdempotentCanonicalV1 executes a new mutation at most once for a retained
+// principal/key binding. It returns true when it already wrote a fully projected
+// v1 response (terminal replay); callers must then skip ordinary projection.
+func (s *Server) runIdempotentCanonicalV1(
+	w http.ResponseWriter,
+	r *http.Request,
+	baseVersion string,
+	requestBody []byte,
+	handler func(http.ResponseWriter, *http.Request),
+) bool {
+	meta, apiErr := s.v1IdempotencyMetadata(r, requestBody)
+	if apiErr != nil {
+		writeAPIError(w, r, apiErr)
+		return false
 	}
-	if terminal <= retention.MinTerminalRecords {
-		return
+	if meta == nil {
+		s.runCanonicalV1(w, r, baseVersion, handler)
+		return false
 	}
-	minAge := time.Duration(retention.MinAgeSeconds) * time.Second
-	for key, rec := range v1IdempotencyStore.records {
-		if terminal <= retention.MinTerminalRecords {
-			break
-		}
-		if !rec.Terminal || rec.CompletedAt.IsZero() || now.Sub(rec.CompletedAt) < minAge {
-			continue
-		}
-		delete(v1IdempotencyStore.records, key)
-		terminal--
+	if s.deps.ManagedApplies == nil {
+		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInternalError,
+			"Idempotency requires the managed apply ledger, which is unavailable."))
+		return false
 	}
-}
 
-func completeV1Idempotency(rec *v1IdempotencyRecord, cap *v1Capture) {
-	if rec == nil {
-		return
+	v1IdempotencyAdmission.Lock()
+	defer v1IdempotencyAdmission.Unlock()
+
+	if existing, ok := s.deps.ManagedApplies.FindIdempotency(meta.Principal, meta.Key); ok {
+		if existing.IdempotencyFingerprint != meta.Fingerprint {
+			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeIdempotencyKeyReused,
+				"Idempotency-Key is already bound to a different request.").WithDetails(adminapi.Details{
+				RecordedMethod:    existing.IdempotencyMethod,
+				RecordedOperation: existing.IdempotencyOperation,
+			}))
+			return false
+		}
+		if existing.State != ManagedApplyTerminal {
+			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeIdempotencyKeyInUse,
+				"The idempotent operation is still in flight; poll its apply result.").
+				WithDetails(adminapi.Details{ApplyID: existing.ID}))
+			return false
+		}
+		response := s.v1ConfigApplyResponse(existing.Result, http.StatusOK)
+		response.IdempotentReplay = true
+		writeAPIJSON(w, http.StatusOK, response)
+		return true
 	}
-	applyID := extractV1ApplyID(cap.body.Bytes())
-	v1IdempotencyStore.Lock()
-	rec.ApplyID = applyID
-	rec.Status = cap.status
-	rec.Header = cap.header.Clone()
-	rec.Body = append(rec.Body[:0], cap.body.Bytes()...)
-	// A 202 with an apply id is deliberately non-terminal. A later duplicate is
-	// told to poll that exact transaction instead of re-executing the mutation.
-	rec.Terminal = cap.status != http.StatusAccepted || applyID == ""
-	if rec.Terminal {
-		rec.CompletedAt = time.Now()
+
+	cap := newV1Capture()
+	s.runCanonicalV1(cap, r, baseVersion, handler)
+	if cap.status > 0 && cap.status < http.StatusBadRequest {
+		applyID := extractV1ApplyID(cap.body.Bytes())
+		if applyID != "" {
+			if err := s.deps.ManagedApplies.BindIdempotency(
+				applyID,
+				meta.Key,
+				meta.Fingerprint,
+				meta.Method,
+				meta.Operation,
+				meta.Principal,
+			); err != nil {
+				cap.reset()
+				writeAPIError(cap, r, adminapi.Errorf(adminapi.CodeInternalError,
+					"The mutation completed but its idempotency binding could not be retained."))
+			}
+		}
 	}
-	if !rec.readyClosed {
-		close(rec.Ready)
-		rec.readyClosed = true
-	}
-	v1IdempotencyStore.Unlock()
+	writeCapturedV1(w, cap)
+	return false
 }
 
 func extractV1ApplyID(body []byte) string {
-	var decoded map[string]any
-	if json.Unmarshal(body, &decoded) != nil {
-		return ""
-	}
-	if id, _ := decoded["apply_id"].(string); id != "" {
-		return id
-	}
-	if reload, ok := decoded["reload"].(map[string]any); ok {
-		if id, _ := reload["id"].(string); id != "" {
-			return id
-		}
+	var result ConfigApplyResult
+	if jsonErr := json.Unmarshal(body, &result); jsonErr == nil && result.ApplyID != "" {
+		return result.ApplyID
 	}
 	return ""
 }
@@ -231,64 +240,10 @@ func writeCapturedV1(w http.ResponseWriter, cap *v1Capture) {
 	if w.Header().Get("Cache-Control") == "" {
 		w.Header().Set("Cache-Control", "no-store")
 	}
-	w.WriteHeader(cap.status)
+	status := cap.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	w.WriteHeader(status)
 	_, _ = w.Write(cap.body.Bytes())
-}
-
-func replayV1Idempotency(w http.ResponseWriter, r *http.Request, rec *v1IdempotencyRecord) {
-	if !rec.Terminal {
-		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeIdempotencyKeyInUse,
-			"The idempotent operation is still in flight; poll its apply result.").
-			WithDetails(adminapi.Details{ApplyID: rec.ApplyID}))
-		return
-	}
-	body := append([]byte(nil), rec.Body...)
-	var env adminapi.Envelope
-	if json.Unmarshal(body, &env) == nil && env.Error.Code != "" {
-		if requestID, ok := externalContract(r.Context()); ok {
-			env.Error.RequestID = requestID
-			body, _ = json.Marshal(env)
-			body = append(body, '\n')
-		}
-	}
-	for key, values := range rec.Header {
-		for _, value := range values {
-			w.Header().Add(key, value)
-		}
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Idempotent-Replay", "true")
-	w.WriteHeader(rec.Status)
-	_, _ = w.Write(body)
-}
-
-func (s *Server) runIdempotentCanonicalV1(
-	w http.ResponseWriter,
-	r *http.Request,
-	baseVersion string,
-	requestBody []byte,
-	handler func(http.ResponseWriter, *http.Request),
-) {
-	rec, apiErr := s.beginV1Idempotency(r, requestBody)
-	if apiErr != nil {
-		writeAPIError(w, r, apiErr)
-		return
-	}
-	if rec == nil {
-		s.runCanonicalV1(w, r, baseVersion, handler)
-		return
-	}
-
-	v1IdempotencyStore.Lock()
-	alreadyRan := rec.Status != 0 || rec.ApplyID != "" || rec.Terminal
-	v1IdempotencyStore.Unlock()
-	if alreadyRan {
-		replayV1Idempotency(w, r, rec)
-		return
-	}
-
-	cap := newV1Capture()
-	s.runCanonicalV1(cap, r, baseVersion, handler)
-	completeV1Idempotency(rec, cap)
-	writeCapturedV1(w, cap)
 }
