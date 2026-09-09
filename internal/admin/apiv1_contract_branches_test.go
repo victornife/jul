@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"jul/internal/adminapi"
@@ -67,7 +69,7 @@ func TestV1PlanStaleBaseAndCancelledAssessment(t *testing.T) {
 		"/api/v1/config/plan?base_version=definitely-stale", "application/toml", string(seed))
 	requireV1ErrorCode(t, rr, adminapi.CodeStaleBaseVersion)
 
-	req, err := http.NewRequest(http.MethodPost, "/api/v1/config/plan", stringsReader(string(seed)))
+	req, err := http.NewRequest(http.MethodPost, "/api/v1/config/plan", strings.NewReader(string(seed)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +77,7 @@ func TestV1PlanStaleBaseAndCancelledAssessment(t *testing.T) {
 	ctx, cancel := context.WithCancel(req.Context())
 	cancel()
 	req = req.WithContext(ctx)
-	rr = httptestRecorder()
+	rr = httptest.NewRecorder()
 	s.handleV1ConfigPlan(rr, req)
 	if rr.Code != http.StatusGatewayTimeout && rr.Code != http.StatusBadRequest {
 		t.Fatalf("cancelled plan status=%d body=%s", rr.Code, rr.Body.String())
@@ -83,8 +85,8 @@ func TestV1PlanStaleBaseAndCancelledAssessment(t *testing.T) {
 }
 
 func TestV1AdoptPreviewSuccessAndDriftFailure(t *testing.T) {
-	okServer := managedV1OperationServer(t, Deps{AdoptExternalPreview: func() (AdoptExternalAssessment, error) {
-		return AdoptExternalAssessment{OK: true}, nil
+	okServer := managedV1OperationServer(t, Deps{AdoptExternalPreview: func() (AdoptPreviewResult, error) {
+		return AdoptPreviewResult{OK: true}, nil
 	}})
 	rr := callV1OperationHandler(t, okServer.handleV1AdoptPreview, http.MethodPost,
 		"/api/v1/config/adopt-external/preview", "application/json", `{}`)
@@ -92,15 +94,10 @@ func TestV1AdoptPreviewSuccessAndDriftFailure(t *testing.T) {
 		t.Fatalf("success status=%d body=%s", rr.Code, rr.Body.String())
 	}
 
-	badServer := managedV1OperationServer(t, Deps{AdoptExternalPreview: func() (AdoptExternalAssessment, error) {
-		return AdoptExternalAssessment{}, errors.New("drift changed")
+	badServer := managedV1OperationServer(t, Deps{AdoptExternalPreview: func() (AdoptPreviewResult, error) {
+		return AdoptPreviewResult{}, errors.New("drift changed")
 	}})
 	rr = callV1OperationHandler(t, badServer.handleV1AdoptPreview, http.MethodPost,
 		"/api/v1/config/adopt-external/preview", "application/json", `{}`)
 	requireV1ErrorCode(t, rr, adminapi.CodeDriftDetected)
 }
-
-// Tiny wrappers keep this coverage file free of duplicated recorder/reader setup
-// while exercising the real handlers.
-func stringsReader(s string) *strings.Reader { return strings.NewReader(s) }
-func httptestRecorder() *httptest.ResponseRecorder { return httptest.NewRecorder() }
