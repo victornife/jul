@@ -27,12 +27,12 @@ const (
 // replay lifetime is exactly the ledger lifetime and exactly one boot scope
 // (ADR 0019 §27.1/§27.2).
 type ManagedApplyRecord struct {
-	ID        string            `json:"id"`
-	State     ManagedApplyState `json:"state"`
-	Operation ApplyOperation    `json:"operation"`
-	StartedAt time.Time         `json:"started_at"`
-	Deadline    time.Time       `json:"deadline,omitempty"`
-	CompletedAt time.Time       `json:"completed_at,omitempty"`
+	ID          string            `json:"id"`
+	State       ManagedApplyState `json:"state"`
+	Operation   ApplyOperation    `json:"operation"`
+	StartedAt   time.Time         `json:"started_at"`
+	Deadline    time.Time         `json:"deadline,omitempty"`
+	CompletedAt time.Time         `json:"completed_at,omitempty"`
 
 	Result ConfigApplyResult `json:"result"`
 
@@ -54,9 +54,9 @@ type ManagedApplyRecord struct {
 }
 
 var (
-	ErrManagedApplyIDMismatch = errors.New("managed apply: pending id reused with different operation")
-	ErrManagedApplyInvalidID = errors.New("managed apply: invalid id")
-	ErrManagedApplyRecordIncomplete = errors.New("managed apply: terminal record is incomplete")
+	ErrManagedApplyIDMismatch          = errors.New("managed apply: pending id reused with different operation")
+	ErrManagedApplyInvalidID           = errors.New("managed apply: invalid id")
+	ErrManagedApplyRecordIncomplete    = errors.New("managed apply: terminal record is incomplete")
 	ErrManagedApplyIdempotencyMismatch = errors.New("managed apply: idempotency metadata mismatch")
 )
 
@@ -74,7 +74,7 @@ type ManagedApplyRegistry struct {
 	byID  map[string]*ManagedApplyRecord
 	order []string
 
-	latest atomic.Pointer[ManagedApplyRecord]
+	latest    atomic.Pointer[ManagedApplyRecord]
 	finalized map[string]struct{}
 }
 

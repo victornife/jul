@@ -70,10 +70,22 @@ func TestV1RequestFingerprintCoversWholeWireRequest(t *testing.T) {
 		req  *http.Request
 		body []byte
 	}{
-		{"other query parameter", func() *http.Request { r, _ := makeRequest("http://example/api/v1/config/apply?base_version=v1&mode=stage_restart", "application/toml", "[global]\n"); return r }(), []byte("[global]\n")},
-		{"other path", func() *http.Request { r, _ := makeRequest("http://example/api/v1/config/patch/apply?base_version=v1&mode=hot", "application/toml", "[global]\n"); return r }(), []byte("[global]\n")},
-		{"other content type", func() *http.Request { r, _ := makeRequest("http://example/api/v1/config/apply?base_version=v1&mode=hot", "text/plain", "[global]\n"); return r }(), []byte("[global]\n")},
-		{"other exact body bytes", func() *http.Request { r, _ := makeRequest("http://example/api/v1/config/apply?base_version=v1&mode=hot", "application/toml", "[global] \n"); return r }(), []byte("[global] \n")},
+		{"other query parameter", func() *http.Request {
+			r, _ := makeRequest("http://example/api/v1/config/apply?base_version=v1&mode=stage_restart", "application/toml", "[global]\n")
+			return r
+		}(), []byte("[global]\n")},
+		{"other path", func() *http.Request {
+			r, _ := makeRequest("http://example/api/v1/config/patch/apply?base_version=v1&mode=hot", "application/toml", "[global]\n")
+			return r
+		}(), []byte("[global]\n")},
+		{"other content type", func() *http.Request {
+			r, _ := makeRequest("http://example/api/v1/config/apply?base_version=v1&mode=hot", "text/plain", "[global]\n")
+			return r
+		}(), []byte("[global]\n")},
+		{"other exact body bytes", func() *http.Request {
+			r, _ := makeRequest("http://example/api/v1/config/apply?base_version=v1&mode=hot", "application/toml", "[global] \n")
+			return r
+		}(), []byte("[global] \n")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
