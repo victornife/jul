@@ -1,4 +1,4 @@
-name: AUTO-03 OpenAPI artifact
+name: AUTO-03 Closure Gate
 
 on:
   push:
@@ -8,55 +8,178 @@ on:
 permissions:
   contents: write
 
+env:
+  FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+
 jobs:
-  generate:
+  closure:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: auto03-close-150-v1
+          fetch-depth: 0
+
       - name: setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
           cache: true
-      - name: format AUTO-03 Go changes
+
+      - name: apply reviewed AUTO-03 closure patch
+        shell: bash
         run: |
-          gofmt -w \
-            internal/admin/managed_apply_registry.go \
-            internal/admin/apiv1_idempotency.go \
-            internal/admin/apiv1_idempotency_test.go \
-            internal/admin/apiv1_apply_response.go \
-            internal/adminapi/v1_mutation.go \
-            internal/apicontract/build.go \
-            internal/apicontract/openapi.go \
-            internal/apicontract/schema_test.go
-      - name: generate external API contract
-        run: make api-contract-generate
-      - name: commit deterministic outputs
+          set -euo pipefail
+          base64 -d .github/auto03-closure.patch.gz.b64 | gzip -d > /tmp/auto03-closure.patch
+          if git apply --check /tmp/auto03-closure.patch; then
+            git apply /tmp/auto03-closure.patch
+            echo "Applied reviewed closure patch."
+          elif git apply --reverse --check /tmp/auto03-closure.patch; then
+            echo "Closure patch is already present on the branch."
+          else
+            echo "ERROR: closure patch neither applies nor is already present."
+            exit 1
+          fi
+
+      - name: format and deterministic generation
+        shell: bash
         run: |
+          set -euo pipefail
+          mapfile -t gofiles < <(git diff --name-only origin/main -- '*.go' | grep -v '^$' || true)
+          if ((${#gofiles[@]})); then
+            gofmt -w "${gofiles[@]}"
+          fi
+          make api-contract-generate
+          git diff --check
+
+      - name: targeted AUTO-03 tests
+        run: >-
+          go test -tags "${{ env.FULL_TAGS }}"
+          ./internal/admin ./internal/adminapi ./internal/apicontract ./internal/app ./internal/rbac
+
+      - name: AUTO-03 race gate
+        run: >-
+          go test -race -p 2 -tags "${{ env.FULL_TAGS }}"
+          ./internal/admin ./internal/adminapi ./internal/apicontract ./internal/app ./internal/rbac
+
+      - name: full test and coverage profile
+        run: go test -tags "${{ env.FULL_TAGS }}" -covermode=atomic -coverprofile=/tmp/auto03-cover.out ./...
+
+      - name: enforce AUTO-03 changed-production coverage above 90 percent
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          import subprocess
+          import sys
+          from collections import defaultdict
+
+          diff = subprocess.check_output(
+              ["git", "diff", "--unified=0", "origin/main", "--", "*.go"],
+              text=True,
+          )
+          added = defaultdict(set)
+          current = None
+          new_line = None
+          for line in diff.splitlines():
+              if line.startswith("+++ b/"):
+                  current = line[6:]
+                  if current.endswith("_test.go"):
+                      current = None
+                  continue
+              if line.startswith("@@"):
+                  m = re.search(r"\+(\d+)(?:,(\d+))?", line)
+                  new_line = int(m.group(1)) if m else None
+                  continue
+              if current is None or new_line is None:
+                  continue
+              if line.startswith("+") and not line.startswith("+++"):
+                  added[current].add(new_line)
+                  new_line += 1
+              elif line.startswith("-") and not line.startswith("---"):
+                  continue
+              else:
+                  new_line += 1
+
+          changed_statements = 0
+          covered_statements = 0
+          uncovered = []
+          block_re = re.compile(
+              r"^(?P<file>.+):(?P<sl>\d+)\.(?P<sc>\d+),(?P<el>\d+)\.(?P<ec>\d+) (?P<n>\d+) (?P<count>\d+)$"
+          )
+          with open("/tmp/auto03-cover.out", encoding="utf-8") as f:
+              next(f, None)
+              for raw in f:
+                  m = block_re.match(raw.strip())
+                  if not m:
+                      continue
+                  path = m.group("file")
+                  if path.startswith("jul/"):
+                      path = path[4:]
+                  lines = added.get(path)
+                  if not lines:
+                      continue
+                  sl, el = int(m.group("sl")), int(m.group("el"))
+                  if not any(sl <= ln <= el for ln in lines):
+                      continue
+                  n = int(m.group("n"))
+                  count = int(m.group("count"))
+                  changed_statements += n
+                  if count > 0:
+                      covered_statements += n
+                  else:
+                      uncovered.append((path, sl, el, n))
+
+          if changed_statements == 0:
+              print("ERROR: no changed production statements were found in the coverage profile.")
+              sys.exit(1)
+          pct = covered_statements * 100.0 / changed_statements
+          print(
+              f"AUTO-03 changed-production statement coverage: {pct:.2f}% "
+              f"({covered_statements}/{changed_statements}); required: >90.00%"
+          )
+          if uncovered:
+              print("Uncovered changed statement blocks:")
+              for path, sl, el, n in uncovered[:80]:
+                  print(f"  {path}:{sl}-{el} ({n} statements)")
+          if pct <= 90.0:
+              print("ERROR: AUTO-03 changed-production coverage must be strictly greater than 90%.")
+              sys.exit(1)
+          PY
+
+      - name: generated artifact drift gate
+        run: make generated-check
+
+      - name: docs structural gate
+        run: python3 scripts/docs-check.py
+
+      - name: commit verified closure implementation
+        shell: bash
+        run: |
+          set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add docs/generated/openapi.json \
-            internal/admin/managed_apply_registry.go \
+          git add \
+            internal/admin/api.go \
+            internal/admin/api_pending_restart.go \
             internal/admin/apiv1_idempotency.go \
             internal/admin/apiv1_idempotency_test.go \
-            internal/admin/apiv1_apply_response.go \
-            internal/adminapi/v1_mutation.go \
-            internal/apicontract/build.go \
-            internal/apicontract/openapi.go \
-            internal/apicontract/schema_test.go
+            internal/admin/finalized_audit_operation_test.go \
+            internal/admin/managed_apply_registry.go \
+            internal/admin/managed_apply_registry_test.go \
+            internal/admin/server.go \
+            internal/app/adopt.go \
+            internal/app/config_apply.go \
+            internal/app/config_apply_idempotency_test.go \
+            internal/app/config_apply_pending_test.go \
+            internal/app/serve.go \
+            docs/generated/openapi.json
           if ! git diff --cached --quiet; then
-            git commit -m 'docs(api): regenerate AUTO-03 contract [auto03-generated]'
+            git commit -m 'fix(auto03): finalize pre-side-effect idempotency admission'
             git push origin HEAD:auto03-close-150-v1
+          else
+            echo "Verified closure implementation already committed."
           fi
-      - name: pack branch snapshot
-        run: tar --exclude=.git -czf /tmp/auto03-source.tar.gz .
-      - name: upload branch snapshot
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: auto03-source-${{ github.sha }}
-          path: /tmp/auto03-source.tar.gz
-          if-no-files-found: error
-          retention-days: 1
