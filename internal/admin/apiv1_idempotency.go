@@ -6,7 +6,6 @@ package admin
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"mime"
 	"net/http"
@@ -69,7 +68,8 @@ func canonicalV1ContentType(raw string) string {
 func v1RequestFingerprint(r *http.Request, body []byte) ([32]byte, *adminapi.Error) {
 	values, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
-		return [32]byte{}, adminapi.Errorf(adminapi.CodeInvalidRequest, "query parameters are malformed").WithDetails(adminapi.Details{Field: "query"})
+		return [32]byte{}, adminapi.Errorf(adminapi.CodeInvalidRequest, "query parameters are malformed").
+			WithDetails(adminapi.Details{Field: "query"})
 	}
 	bodyDigest := sha256.Sum256(body)
 	parts := [][]byte{
@@ -105,7 +105,8 @@ func (s *Server) beginV1Idempotency(r *http.Request, body []byte) (*v1Idempotenc
 	}
 	if !validV1IdempotencyKey(key) {
 		return nil, adminapi.Errorf(adminapi.CodeInvalidRequest,
-			"Idempotency-Key must be 8-128 ASCII characters from [A-Za-z0-9_-]").WithDetails(adminapi.Details{Field: "Idempotency-Key"})
+			"Idempotency-Key must be 8-128 ASCII characters from [A-Za-z0-9_-]").
+			WithDetails(adminapi.Details{Field: "Idempotency-Key"})
 	}
 	ident, ok := rbacIdentityFromRequest(r)
 	if !ok || ident.Principal == "" {
@@ -124,17 +125,20 @@ func (s *Server) beginV1Idempotency(r *http.Request, body []byte) (*v1Idempotenc
 		if existing == nil {
 			rec := &v1IdempotencyRecord{
 				Fingerprint: fingerprint,
-				Method: r.Method,
-				Operation: v1OperationTemplate(r),
-				CreatedAt: time.Now(),
-				Ready: make(chan struct{}),
+				Method:      r.Method,
+				Operation:   v1OperationTemplate(r),
+				CreatedAt:   time.Now(),
+				Ready:       make(chan struct{}),
 			}
 			v1IdempotencyStore.records[storeKey] = rec
 			v1IdempotencyStore.Unlock()
 			return rec, nil
 		}
 		if existing.Fingerprint != fingerprint {
-			details := adminapi.Details{RecordedMethod: existing.Method, RecordedOperation: existing.Operation}
+			details := adminapi.Details{
+				RecordedMethod:    existing.Method,
+				RecordedOperation: existing.Operation,
+			}
 			v1IdempotencyStore.Unlock()
 			return nil, adminapi.Errorf(adminapi.CodeIdempotencyKeyReused,
 				"Idempotency-Key is already bound to a different request.").WithDetails(details)
@@ -149,7 +153,8 @@ func (s *Server) beginV1Idempotency(r *http.Request, body []byte) (*v1Idempotenc
 		case <-ready:
 			continue
 		case <-r.Context().Done():
-			return nil, adminapi.Errorf(adminapi.CodeOperationTimeout, "The in-flight idempotent operation did not publish its apply identity before this request ended.")
+			return nil, adminapi.Errorf(adminapi.CodeOperationTimeout,
+				"The in-flight idempotent operation did not publish its apply identity before this request ended.")
 		}
 	}
 }
@@ -233,7 +238,8 @@ func writeCapturedV1(w http.ResponseWriter, cap *v1Capture) {
 func replayV1Idempotency(w http.ResponseWriter, r *http.Request, rec *v1IdempotencyRecord) {
 	if !rec.Terminal {
 		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeIdempotencyKeyInUse,
-			"The idempotent operation is still in flight; poll its apply result.").WithDetails(adminapi.Details{ApplyID: rec.ApplyID}))
+			"The idempotent operation is still in flight; poll its apply result.").
+			WithDetails(adminapi.Details{ApplyID: rec.ApplyID}))
 		return
 	}
 	body := append([]byte(nil), rec.Body...)
@@ -256,7 +262,13 @@ func replayV1Idempotency(w http.ResponseWriter, r *http.Request, rec *v1Idempote
 	_, _ = w.Write(body)
 }
 
-func (s *Server) runIdempotentCanonicalV1(w http.ResponseWriter, r *http.Request, baseVersion string, requestBody []byte, handler func(http.ResponseWriter, *http.Request)) {
+func (s *Server) runIdempotentCanonicalV1(
+	w http.ResponseWriter,
+	r *http.Request,
+	baseVersion string,
+	requestBody []byte,
+	handler func(http.ResponseWriter, *http.Request),
+) {
 	rec, apiErr := s.beginV1Idempotency(r, requestBody)
 	if apiErr != nil {
 		writeAPIError(w, r, apiErr)
@@ -279,12 +291,4 @@ func (s *Server) runIdempotentCanonicalV1(w http.ResponseWriter, r *http.Request
 	s.runCanonicalV1(cap, r, baseVersion, handler)
 	completeV1Idempotency(rec, cap)
 	writeCapturedV1(w, cap)
-}
-
-func v1FingerprintHex(r *http.Request, body []byte) string {
-	fingerprint, err := v1RequestFingerprint(r, body)
-	if err != nil {
-		return ""
-	}
-	return hex.EncodeToString(fingerprint[:])
 }

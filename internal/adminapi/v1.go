@@ -59,9 +59,9 @@ type PendingRestartState struct {
 
 // StatusResponse is GET /api/v1/status.
 type StatusResponse struct {
-	APIVersion      string `json:"api_version"`
-	Ready           bool   `json:"ready"`
-	ServingVersion  string `json:"serving_version,omitempty"`
+	APIVersion       string `json:"api_version"`
+	Ready            bool   `json:"ready"`
+	ServingVersion   string `json:"serving_version,omitempty"`
 	PersistedVersion string `json:"persisted_version,omitempty"`
 	AuthorityState
 	Drift           DriftState          `json:"drift"`
@@ -102,9 +102,9 @@ type EndpointAvailability struct {
 
 // CapabilitiesResponse is GET /api/v1/capabilities (ADR 0019 §30).
 type CapabilitiesResponse struct {
-	APIVersion          string          `json:"api_version"`
-	ConfigSchemaVersion int             `json:"config_schema_version"`
-	Build               buildcaps.Flags `json:"build"`
+	APIVersion          string                 `json:"api_version"`
+	ConfigSchemaVersion int                    `json:"config_schema_version"`
+	Build               buildcaps.Flags        `json:"build"`
 	Endpoints           []EndpointAvailability `json:"endpoints"`
 	// ExitCodes is the exact ADR 0019 §33 table consumed by downstream automation.
 	// The local `jul capabilities` command uses the same source of truth.

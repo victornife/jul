@@ -148,7 +148,7 @@ func (s *Server) handleV1ConfigApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	restoreRequestBody(r, body)
-	s.runCanonicalV1(w, r, base, s.handleConfigApply)
+	s.runExternalMutationV1(w, r, base, body, s.handleConfigApply)
 }
 
 func (s *Server) handleV1ConfigPatchApply(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +173,7 @@ func (s *Server) handleV1ConfigPatchApply(w http.ResponseWriter, r *http.Request
 		return
 	}
 	restoreRequestBody(r, body)
-	s.runCanonicalV1(w, r, req.BaseVersion, s.handleConfigPatchApply)
+	s.runExternalMutationV1(w, r, req.BaseVersion, body, s.handleConfigPatchApply)
 }
 
 func (s *Server) handleV1Rollback(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +198,7 @@ func (s *Server) handleV1Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	restoreRequestBody(r, body)
-	s.runCanonicalV1(w, r, req.BaseVersion, s.handleConfigRollback)
+	s.runExternalMutationV1(w, r, req.BaseVersion, body, s.handleConfigRollback)
 }
 
 func (s *Server) handleV1AdoptPreview(w http.ResponseWriter, r *http.Request) {
@@ -240,7 +240,7 @@ func (s *Server) handleV1Adopt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	restoreRequestBody(r, body)
-	s.runCanonicalV1(w, r, req.BaseVersion, s.handleAdoptExternal)
+	s.runExternalMutationV1(w, r, req.BaseVersion, body, s.handleAdoptExternal)
 }
 
 func (s *Server) handleV1DiscardPendingRestart(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +255,7 @@ func (s *Server) handleV1DiscardPendingRestart(w http.ResponseWriter, r *http.Re
 		writeAPIError(w, r, apiErr)
 		return
 	}
-	s.runCanonicalV1(w, r, base, s.handleDiscardPendingRestart)
+	s.runExternalMutationV1(w, r, base, nil, s.handleDiscardPendingRestart)
 }
 
 func (s *Server) handleV1ClientAddressWrite(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +276,7 @@ func (s *Server) handleV1ClientAddressWrite(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	restoreRequestBody(r, body)
-	s.runCanonicalV1(w, r, req.BaseVersion, s.handleListenerClientAddress)
+	s.runExternalMutationV1(w, r, req.BaseVersion, body, s.handleListenerClientAddress)
 }
 
 func v1Findings(err error) []adminapi.Finding {

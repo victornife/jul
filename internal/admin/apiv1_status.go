@@ -55,9 +55,11 @@ func (s *Server) handleV1Capabilities(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-var externalEndpointList []adminapi.EndpointAvailability
-
-func init() {
+// externalEndpoints derives capability discovery from the final route catalog
+// every time rather than snapshotting it during package initialization. The v1
+// write closure augments Catalog in init(), so caching before all init work has
+// completed would publish a stale subset of the supported surface.
+func externalEndpoints() []adminapi.EndpointAvailability {
 	byPattern := map[string]*adminapi.EndpointAvailability{}
 	var order []string
 	for _, route := range ExternalRoutes() {
@@ -67,7 +69,7 @@ func init() {
 				Path:        route.Pattern,
 				Available:   true,
 				Stability:   route.Stability.String(),
-				Permissions: route.Permissions,
+				Permissions: append([]string(nil), route.Permissions...),
 				SunsetOn:    route.Sunset,
 			}
 			byPattern[route.Pattern] = e
@@ -75,15 +77,10 @@ func init() {
 		}
 		e.Methods = append(e.Methods, route.Method)
 	}
-	externalEndpointList = make([]adminapi.EndpointAvailability, 0, len(order))
-	for _, p := range order {
-		externalEndpointList = append(externalEndpointList, *byPattern[p])
+	out := make([]adminapi.EndpointAvailability, 0, len(order))
+	for _, pattern := range order {
+		out = append(out, *byPattern[pattern])
 	}
-}
-
-func externalEndpoints() []adminapi.EndpointAvailability {
-	out := make([]adminapi.EndpointAvailability, len(externalEndpointList))
-	copy(out, externalEndpointList)
 	return out
 }
 

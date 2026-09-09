@@ -12,16 +12,15 @@ import "reflect"
 // structs remain absent.
 func ExternalSchemaTypes() map[string]reflect.Type {
 	return map[string]reflect.Type{
-		"ConfigValidationResponse": reflect.TypeFor[v1ValidationResponse](),
-		"ConfigPlanResponse":       reflect.TypeFor[rawConfigPreviewResponse](),
-		"RouteTestRequest":         reflect.TypeFor[routeTestRequest](),
-		"RouteTestResponse":        reflect.TypeFor[routeTestResult](),
-		"PatchApplyRequest":        reflect.TypeFor[patchApplyRequest](),
-		"PatchPreviewResponse":     reflect.TypeFor[patchPreviewResponse](),
-		"ConfigApplyResult":        reflect.TypeFor[ConfigApplyResult](),
-		"ConfigRollbackRequest":    reflect.TypeFor[v1RollbackRequest](),
-		"AdoptExternalRequest":     reflect.TypeFor[AdoptExternalRequest](),
-		"AdoptPreviewResult":       reflect.TypeFor[AdoptPreviewResult](),
+		"ConfigValidationResponse":      reflect.TypeFor[v1ValidationResponse](),
+		"ConfigPlanResponse":            reflect.TypeFor[rawConfigPreviewResponse](),
+		"RouteTestRequest":              reflect.TypeFor[routeTestRequest](),
+		"RouteTestResponse":             reflect.TypeFor[routeTestResult](),
+		"PatchApplyRequest":             reflect.TypeFor[patchApplyRequest](),
+		"PatchPreviewResponse":          reflect.TypeFor[patchPreviewResponse](),
+		"ConfigRollbackRequest":         reflect.TypeFor[v1RollbackRequest](),
+		"AdoptExternalRequest":          reflect.TypeFor[AdoptExternalRequest](),
+		"AdoptPreviewResult":            reflect.TypeFor[AdoptPreviewResult](),
 		"ListenerClientAddressRequest": reflect.TypeFor[listenerClientAddressRequest](),
 	}
 }
