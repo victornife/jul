@@ -22,6 +22,7 @@ type rawConfigPreviewAssessment struct {
 	BaseVersion      string
 	Valid            bool
 	ValidationErrors []validationError
+	Lint             []config.Diagnostic
 	Diff             ConfigDiff
 	Lifecycle        lifecycle.Result
 }
@@ -31,14 +32,11 @@ type rawConfigPreviewResponse struct {
 	BaseVersion      string                `json:"base_version"`
 	Valid            bool                  `json:"valid"`
 	ValidationErrors []validationError     `json:"validation_errors"`
+	Lint             []config.Diagnostic   `json:"lint"`
 	Diff             ConfigDiff            `json:"diff"`
 	Lifecycle        patchLifecycleSummary `json:"lifecycle"`
 }
 
-// secretSafeRawValidationErrors preserves only a validator-derived field path.
-// The original summary/detail may contain a configured literal, so raw preview
-// never serializes either one. This keeps field-level UX where the validator can
-// identify a path without weakening the config:raw secret boundary.
 func secretSafeRawValidationErrors(err error) []validationError {
 	if err == nil {
 		return nil
@@ -64,9 +62,6 @@ func secretSafeRawValidationErrors(err error) []validationError {
 	return out
 }
 
-// previewRawCandidate is the value-free, side-effect-free raw candidate
-// assessment used by the cache editor. The caller binds before/base/live once;
-// candidate bytes never appear in the response or in an error.
 func previewRawCandidate(
 	ctx context.Context,
 	before *config.Config,
@@ -84,7 +79,6 @@ func previewRawCandidate(
 	}
 	candidateConfig, err := config.Parse(candidateRaw)
 	if err != nil {
-		// Do not echo parser text: a malformed line can contain a literal secret.
 		return out, errRawCandidateSyntax
 	}
 	candidate, err := config.NewCandidateContext(ctx, candidateConfig)
@@ -110,19 +104,21 @@ func previewRawCandidate(
 	if err != nil {
 		return out, err
 	}
+	lint := config.Lint(candidate.Effective)
+	if lint == nil {
+		lint = []config.Diagnostic{}
+	}
 	out = rawConfigPreviewAssessment{
 		BaseVersion:      baseVersion,
 		Valid:            len(validationErrors) == 0 && len(classification.ValidationRejected) == 0,
 		ValidationErrors: validationErrors,
+		Lint:             lint,
 		Diff:             diffConfigs(before, candidateConfig),
 		Lifecycle:        classification,
 	}
 	return out, nil
 }
 
-// handleConfigPreview classifies a raw candidate against the exact persisted or
-// managed-staged baseline named by X-Jul-Base-Version. It never persists,
-// reloads, logs, or returns candidate TOML.
 func (s *Server) handleConfigPreview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
@@ -194,6 +190,7 @@ func (s *Server) handleConfigPreview(w http.ResponseWriter, r *http.Request) {
 		BaseVersion:      assessment.BaseVersion,
 		Valid:            assessment.Valid,
 		ValidationErrors: assessment.ValidationErrors,
+		Lint:             assessment.Lint,
 		Diff:             assessment.Diff,
 		Lifecycle:        s.patchLifecycleProjection(assessment.Lifecycle, assessment.Valid),
 	})
