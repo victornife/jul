@@ -77,6 +77,31 @@ jobs:
           make api-contract-generate
           git diff --check
 
+      - name: pack patched coverage source
+        shell: bash
+        run: |
+          tar -czf /tmp/auto03-patched-src.tgz \
+            internal/admin/api_pending_restart.go \
+            internal/admin/apiv1_apply_response.go \
+            internal/admin/apiv1_idempotency.go \
+            internal/admin/apiv1_operations.go \
+            internal/admin/managed_apply_registry.go \
+            internal/admin/authority_gate.go \
+            internal/admin/raw_preview.go \
+            internal/admin/route_catalog_v1_write.go \
+            internal/apicontract/build.go \
+            internal/app/adopt.go \
+            internal/app/config_apply.go \
+            internal/app/serve.go
+
+      - name: upload patched coverage source
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: auto03-patched-source-${{ github.sha }}
+          path: /tmp/auto03-patched-src.tgz
+          if-no-files-found: error
+          retention-days: 1
+
       - name: targeted AUTO-03 tests
         run: >-
           go test -tags "${{ env.FULL_TAGS }}"
@@ -169,7 +194,7 @@ jobs:
               for path, sl, el, n in uncovered[:120]:
                   print(f"  {path}:{sl}-{el} ({n} statements)")
           if pct <= 90.0:
-              print("ERROR: AUTO-03 changed-production coverage must be strictly greater than 90%.00%" if False else "ERROR: AUTO-03 changed-production coverage must be strictly greater than 90%.")
+              print("ERROR: AUTO-03 changed-production coverage must be strictly greater than 90%.")
               sys.exit(1)
           PY
 
