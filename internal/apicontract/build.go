@@ -40,8 +40,8 @@ func Build() (*Document, error) {
 			Responses: map[string]*Response{},
 			SecuritySchemes: map[string]*SecurityScheme{
 				bearerSchemeName: {
-					Type:   "http",
-					Scheme: "bearer",
+					Type:        "http",
+					Scheme:      "bearer",
 					Description: "An admin bearer token issued out of band through configuration. There is no token-issuance endpoint and no credential example is published.",
 				},
 			},
@@ -101,7 +101,8 @@ func addSchemas(doc *Document) error {
 		meanings = append(meanings, fmt.Sprintf("- `%s` (%d): %s", c, spec.Status, spec.Meaning))
 	}
 	doc.Components.Schemas["ErrorCode"] = &Schema{
-		Type: "string", Enum: enum,
+		Type:        "string",
+		Enum:        enum,
 		Description: "The bounded external error-code catalogue. `code` is the machine contract; `message` is human text.\n\n" + strings.Join(meanings, "\n"),
 	}
 	if body, ok := doc.Components.Schemas["ErrorBody"]; ok {
@@ -111,7 +112,7 @@ func addSchemas(doc *Document) error {
 		doc.Components.Schemas[name] = &Schema{Type: "string", Description: ns.Description}
 	}
 	doc.Components.Schemas["RawTOML"] = &Schema{
-		Type: "string",
+		Type:        "string",
 		Description: "Exact candidate TOML bytes. The server hashes and processes the received bytes; clients retrying under Idempotency-Key must resend byte-identical content.",
 	}
 	return nil
@@ -211,7 +212,7 @@ func buildOperation(r admin.ExternalRoute, doc *Document) (*Operation, error) {
 	}
 	if r.Operation.RequestBody != "" {
 		if _, ok := doc.Components.Schemas[r.Operation.RequestBody]; !ok {
-			return nil, fmt.Errorf("operation %s names request schema %q, which is not registered", r.Operation.ID, r.Operation.RequestBody)
+			return nil, fmt.Errorf("operation %s names request schema %q, which is not registered in internal/adminapi.SchemaTypes or internal/admin.ExternalSchemaTypes", r.Operation.ID, r.Operation.RequestBody)
 		}
 		contentTypes := r.Operation.RequestContentTypes
 		if len(contentTypes) == 0 {
@@ -226,6 +227,7 @@ func buildOperation(r admin.ExternalRoute, doc *Document) (*Operation, error) {
 			description = fmt.Sprintf("Request body. Maximum accepted size: %d bytes; larger bodies return payload_too_large before unbounded allocation.", r.Operation.MaxBodyBytes)
 		}
 		op.RequestBody = &RequestBody{Required: true, Description: description, Content: content}
+		op.MaxBodyBytes = r.Operation.MaxBodyBytes
 	}
 
 	if err := addSuccessResponse(op, r, doc); err != nil {
@@ -246,13 +248,16 @@ func buildOperation(r admin.ExternalRoute, doc *Document) (*Operation, error) {
 		if !ok {
 			return nil, fmt.Errorf("operation %s lists error code %q, which is not in the catalogue", r.Operation.ID, c)
 		}
-		// Several bounded error codes intentionally share one HTTP status. The
-		// OpenAPI response at that status therefore references the common closed
-		// envelope; clients branch on error.code, not on prose or status alone.
+		op.ErrorCodes = append(op.ErrorCodes, string(c))
 		key := strconv.Itoa(spec.Status)
+		entry := fmt.Sprintf("`%s` — %s", c, spec.Meaning)
+		if existing := op.Responses[key]; existing != nil {
+			existing.Description += "\n\n" + entry
+			continue
+		}
 		op.Responses[key] = &Response{
-			Description: "Failure. Inspect error.code for the bounded machine-readable condition.",
-			Content: map[string]MediaType{"application/json": {Schema: &Schema{Ref: "#/components/schemas/ErrorEnvelope"}}},
+			Description: entry,
+			Content:     map[string]MediaType{"application/json": {Schema: &Schema{Ref: "#/components/schemas/ErrorEnvelope"}}},
 		}
 	}
 	return op, nil
@@ -271,7 +276,7 @@ func addSuccessResponse(op *Operation, r admin.ExternalRoute, doc *Document) err
 	if ns, ok := adminapi.NonJSONSchemas[name]; ok {
 		mediaType = ns.MediaType
 	} else if _, ok := doc.Components.Schemas[name]; !ok {
-		return fmt.Errorf("operation %s names response schema %q, which is not registered", r.Operation.ID, name)
+		return fmt.Errorf("operation %s names response schema %q, which is not registered in internal/adminapi.SchemaTypes or internal/admin.ExternalSchemaTypes", r.Operation.ID, name)
 	}
 	makeResponse := func(description string) *Response {
 		resp := &Response{Description: description, Content: map[string]MediaType{mediaType: {Schema: &Schema{Ref: "#/components/schemas/" + name}}}}
@@ -340,7 +345,7 @@ func checkResourcePaths(doc *Document) error {
 			continue
 		}
 		if _, ok := claimed[pattern]; !ok {
-			return fmt.Errorf("path %s addresses a resource, but no entry in the generated resource catalog claims it. Add the resource to internal/configcontract.ResourceCatalog with that ExternalPath, or remove the path", pattern)
+			return fmt.Errorf("path %s addresses a resource, but no entry in internal/configcontract.ResourceCatalog claims it; add the resource with that ExternalPath or remove the path", pattern)
 		}
 	}
 	return nil
@@ -352,7 +357,7 @@ func checkCatalogPathsAreServed(doc *Document) error {
 			continue
 		}
 		if _, ok := doc.Paths[res.ExternalPath]; !ok {
-			return fmt.Errorf("resource %q claims external path %s, but the contract publishes no such path", res.Kind, res.ExternalPath)
+			return fmt.Errorf("resource %q in internal/configcontract.ResourceCatalog claims external path %s, but the contract publishes no such path; serve it or clear that ExternalPath", res.Kind, res.ExternalPath)
 		}
 	}
 	return nil
