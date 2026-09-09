@@ -8,16 +8,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 
 	"jul/internal/adminapi"
 )
 
-// v1ValidationResponse is the success shape of config validation. Invalid
-// candidates use validation_failed so clients never have to inspect a success
-// body to decide whether a candidate is admissible.
 type v1ValidationResponse struct {
 	OK bool `json:"ok"`
 }
@@ -27,9 +23,6 @@ type v1RollbackRequest struct {
 	BaseVersion string `json:"base_version"`
 }
 
-// handleV1ConfigValidate validates an exact raw candidate through the canonical
-// parser/resolver/validator. It performs no persistence, history, apply-ledger
-// registration or runtime mutation.
 func (s *Server) handleV1ConfigValidate(w http.ResponseWriter, r *http.Request) {
 	if !requireExternalMethod(w, r, http.MethodPost) {
 		return
@@ -47,11 +40,6 @@ func (s *Server) handleV1ConfigValidate(w http.ResponseWriter, r *http.Request) 
 	writeAPIJSON(w, http.StatusOK, v1ValidationResponse{OK: true})
 }
 
-// handleV1ConfigPlan classifies a raw candidate against one authoritative
-// baseline using the same raw-preview engine as the Console. base_version is
-// optional for a first plan; when supplied it pins the assessment and stale
-// input is rejected. The response always supplies the exact base_version a
-// later mutation must submit.
 func (s *Server) handleV1ConfigPlan(w http.ResponseWriter, r *http.Request) {
 	if !requireExternalMethod(w, r, http.MethodPost) {
 		return
@@ -117,9 +105,6 @@ func (s *Server) handleV1RouteTest(w http.ResponseWriter, r *http.Request) {
 	writeAPIJSON(w, http.StatusOK, testRoute(state.Config, in))
 }
 
-// handleV1ConfigPatch is the side-effect-free structured patch preview. It
-// calls the canonical batch executor directly so v1's 1 MiB body policy does
-// not inherit the Console transport's historical 64 KiB decoding cap.
 func (s *Server) handleV1ConfigPatch(w http.ResponseWriter, r *http.Request) {
 	if !requireExternalMethod(w, r, http.MethodPost) {
 		return
@@ -145,8 +130,6 @@ func (s *Server) handleV1ConfigPatch(w http.ResponseWriter, r *http.Request) {
 	writeAPIJSON(w, http.StatusOK, s.patchPreviewResponse(execution))
 }
 
-// The mutating adapters do only v1 admission. The canonical Console handler is
-// then executed unchanged; v1Capture rewrites only its historical error shape.
 func (s *Server) handleV1ConfigApply(w http.ResponseWriter, r *http.Request) {
 	if !requireExternalMethod(w, r, http.MethodPost) {
 		return
@@ -222,9 +205,6 @@ func (s *Server) handleV1AdoptPreview(w http.ResponseWriter, r *http.Request) {
 	if !requireExternalMethod(w, r, http.MethodPost) {
 		return
 	}
-	// ADR 0019 treats this as a body-bearing operation. Decode the accepted
-	// request shape strictly even though the canonical assessment reads the
-	// external file itself; this pins unknown-field and size semantics.
 	var req AdoptExternalRequest
 	if _, apiErr := readV1JSON(w, r, &req); apiErr != nil {
 		writeAPIError(w, r, apiErr)
@@ -335,8 +315,6 @@ func (s *Server) writeV1PatchExecutionError(w http.ResponseWriter, r *http.Reque
 	writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInternalError, "The patch could not be assessed."))
 }
 
-// v1Capture is a minimal response writer used only to adapt the canonical
-// Console encoder. It never changes the canonical operation's control flow.
 type v1Capture struct {
 	header http.Header
 	status int
@@ -344,9 +322,21 @@ type v1Capture struct {
 }
 
 func newV1Capture() *v1Capture { return &v1Capture{header: make(http.Header)} }
+
 func (c *v1Capture) Header() http.Header { return c.header }
-func (c *v1Capture) WriteHeader(status int) { if c.status == 0 { c.status = status } }
-func (c *v1Capture) Write(p []byte) (int, error) { if c.status == 0 { c.status = http.StatusOK }; return c.body.Write(p) }
+
+func (c *v1Capture) WriteHeader(status int) {
+	if c.status == 0 {
+		c.status = status
+	}
+}
+
+func (c *v1Capture) Write(p []byte) (int, error) {
+	if c.status == 0 {
+		c.status = http.StatusOK
+	}
+	return c.body.Write(p)
+}
 
 func (s *Server) runCanonicalV1(w http.ResponseWriter, r *http.Request, baseVersion string, handler func(http.ResponseWriter, *http.Request)) {
 	cap := newV1Capture()
@@ -357,12 +347,14 @@ func (s *Server) runCanonicalV1(w http.ResponseWriter, r *http.Request, baseVers
 	if cap.status < 400 {
 		w.Header().Set("Content-Type", cap.header.Get("Content-Type"))
 		w.Header().Set("Cache-Control", "no-store")
-		if retry := cap.header.Get("Retry-After"); retry != "" { w.Header().Set("Retry-After", retry) }
+		if retry := cap.header.Get("Retry-After"); retry != "" {
+			w.Header().Set("Retry-After", retry)
+		}
 		w.WriteHeader(cap.status)
 		_, _ = w.Write(cap.body.Bytes())
 		return
 	}
-	// If a shared gate already emitted the external envelope, forward it as-is.
+
 	var env adminapi.Envelope
 	if json.Unmarshal(cap.body.Bytes(), &env) == nil && env.Error.Code != "" {
 		if _, ok := adminapi.Spec(env.Error.Code); ok {
@@ -377,50 +369,58 @@ func (s *Server) runCanonicalV1(w http.ResponseWriter, r *http.Request, baseVers
 	var body map[string]any
 	_ = json.Unmarshal(cap.body.Bytes(), &body)
 	message := "The operation was rejected."
-	if v, ok := body["message"].(string); ok && v != "" { message = v }
-	if v, ok := body["error"].(string); ok && v != "" { message = v }
+	if v, ok := body["message"].(string); ok && v != "" {
+		message = v
+	}
+	if v, ok := body["error"].(string); ok && v != "" {
+		message = v
+	}
 
 	switch cap.status {
 	case http.StatusBadRequest:
-		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInvalidRequest, message))
+		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInvalidRequest, "%s", message))
 	case http.StatusForbidden:
 		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeForbidden, "The principal is not authorized for this operation."))
 	case http.StatusNotFound:
-		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeNotFound, message))
+		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeNotFound, "%s", message))
 	case http.StatusConflict:
 		if current, ok := body["current_version"].(string); ok && current != "" {
-			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeStaleBaseVersion, message).WithDetails(adminapi.Details{BaseVersion: baseVersion, CurrentVersion: current}))
+			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeStaleBaseVersion, "%s", message).WithDetails(adminapi.Details{BaseVersion: baseVersion, CurrentVersion: current}))
 			return
 		}
 		if adminChange, _ := body["admin_change"].(bool); adminChange {
 			changes, _ := stringSlice(body["changes"])
-			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeAdminReachabilityConf, message).WithDetails(adminapi.Details{Changes: changes}))
+			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeAdminReachabilityConf, "%s", message).WithDetails(adminapi.Details{Changes: changes}))
 			return
 		}
 		if restart, _ := body["restart_required"].(bool); restart {
 			subsystems, _ := stringSlice(body["subsystems"])
-			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeRestartRequired, message).WithDetails(adminapi.Details{Subsystems: subsystems}))
+			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeRestartRequired, "%s", message).WithDetails(adminapi.Details{Subsystems: subsystems}))
 			return
 		}
-		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeDriftDetected, message))
+		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeDriftDetected, "%s", message))
 	case http.StatusNotImplemented:
 		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeNotImplemented, "This operation is unavailable in the current build."))
 	case http.StatusServiceUnavailable:
-		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeStorageUnavailable, message))
+		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeStorageUnavailable, "%s", message))
 	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
-		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeOperationTimeout, message))
+		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeOperationTimeout, "%s", message))
 	default:
-		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInternalError, fmt.Sprintf("The operation failed with HTTP %d.", cap.status)))
+		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInternalError, "The operation failed with HTTP %d.", cap.status))
 	}
 }
 
 func stringSlice(v any) ([]string, bool) {
 	items, ok := v.([]any)
-	if !ok { return nil, false }
+	if !ok {
+		return nil, false
+	}
 	out := make([]string, 0, len(items))
 	for _, item := range items {
 		s, ok := item.(string)
-		if !ok { return nil, false }
+		if !ok {
+			return nil, false
+		}
 		out = append(out, s)
 	}
 	return out, true
