@@ -134,7 +134,7 @@ func (errorReader) Read([]byte) (int, error) { return 0, errors.New("read failed
 
 func TestV1ApplyResponseProjectionExhaustive(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{BootID: func() string { return "boot-test" }})
-	stagedAt := time.Date(2026, 9, 9, 18, 0, 0, 0, time.UTC)
+	stagedAt := time.Date(2026, 9, 9, 18, 0, 0, 0, time.UTC).Format(time.RFC3339)
 	result := ConfigApplyResult{
 		ApplyID:             "rl_aaaaaaaaaaaa_1",
 		OK:                  true,
@@ -228,7 +228,7 @@ func TestV1MutationCaptureAndCanonicalErrorMapping(t *testing.T) {
 		{"drift", http.StatusConflict, map[string]any{"message": "drift"}, http.StatusConflict, adminapi.CodeDriftDetected},
 		{"not implemented", http.StatusNotImplemented, map[string]any{}, http.StatusNotImplemented, adminapi.CodeNotImplemented},
 		{"unavailable", http.StatusServiceUnavailable, map[string]any{"error": "storage"}, http.StatusServiceUnavailable, adminapi.CodeStorageUnavailable},
-		{"request timeout", http.StatusRequestTimeout, map[string]any{"error": "timeout"}, http.StatusRequestTimeout, adminapi.CodeOperationTimeout},
+		{"request timeout", http.StatusRequestTimeout, map[string]any{"error": "timeout"}, http.StatusGatewayTimeout, adminapi.CodeOperationTimeout},
 		{"gateway timeout", http.StatusGatewayTimeout, map[string]any{"error": "timeout"}, http.StatusGatewayTimeout, adminapi.CodeOperationTimeout},
 		{"default", http.StatusTeapot, map[string]any{"error": "teapot"}, http.StatusInternalServerError, adminapi.CodeInternalError},
 	}
@@ -255,7 +255,7 @@ func TestV1MutationCaptureAndCanonicalErrorMapping(t *testing.T) {
 		s.runCanonicalV1(rr, req, "", func(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeValidationFailed, "invalid"))
 		})
-		if rr.Code != http.StatusUnprocessableEntity || decodeEnvelope(t, rr).Error.Code != adminapi.CodeValidationFailed {
+		if rr.Code != http.StatusBadRequest || decodeEnvelope(t, rr).Error.Code != adminapi.CodeValidationFailed {
 			t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 		}
 	})
@@ -341,7 +341,7 @@ func TestV1WriteHandlersProtocolAndSideEffectFreeOperations(t *testing.T) {
 
 	t.Run("validation failure", func(t *testing.T) {
 		rr := v1Request(t, s, http.MethodPost, "/api/v1/config/validate", "application/toml", []byte("not toml = ["))
-		if rr.Code != http.StatusUnprocessableEntity || decodeEnvelope(t, rr).Error.Code != adminapi.CodeValidationFailed {
+		if rr.Code != http.StatusBadRequest || decodeEnvelope(t, rr).Error.Code != adminapi.CodeValidationFailed {
 			t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 		}
 	})

@@ -477,6 +477,7 @@ func applyRequestContext(r *http.Request, op ApplyOperation) ApplyRequestContext
 		Operation:      op,
 		Resource:       "config",
 		SourceIP:       adminClientIP(r),
+		Idempotency:    v1IdempotencyFromRequest(r),
 		StartedAt:      time.Now().UTC(),
 		RequestContext: r.Context(),
 	}

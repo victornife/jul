@@ -266,6 +266,25 @@ func (r *ManagedApplyRegistry) BeginPending(rec ManagedApplyRecord) error {
 	return nil
 }
 
+// AbortPending removes a pre-side-effect idempotency reservation when the
+// mutation fails before its durable commit point. It refuses to remove a record
+// that has already progressed beyond pending, so a committed/in-flight
+// transaction can never lose its replay attribution accidentally.
+func (r *ManagedApplyRegistry) AbortPending(id string) bool {
+	if !validManagedApplyID(id) {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.byID[id]
+	if !ok || rec.State != ManagedApplyPending {
+		return false
+	}
+	delete(r.byID, id)
+	delete(r.finalized, id)
+	return true
+}
+
 func (r *ManagedApplyRegistry) ClaimFinalization(rec ManagedApplyRecord) (bool, error) {
 	if !validManagedApplyID(rec.ID) {
 		return false, ErrManagedApplyInvalidID

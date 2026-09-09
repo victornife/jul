@@ -29,6 +29,30 @@ func wireProductionLedger(c *ConfigApplyCoordinator) (*admin.ManagedApplyRegistr
 	startedCh := make(chan admin.ManagedApplyStart, 4)
 	completedCh := make(chan admin.ManagedApplyFinalization, 4)
 
+	c.OnManagedApplyAdmitted = func(admission admin.ManagedApplyAdmission) error {
+		meta := admission.Context.Idempotency
+		if meta == nil {
+			return nil
+		}
+		return registry.BeginPending(admin.ManagedApplyRecord{
+			ID:                     admission.ApplyID,
+			State:                  admin.ManagedApplyPending,
+			Operation:              admission.Context.Operation,
+			StartedAt:              admission.Context.StartedAt,
+			Deadline:               admission.Context.Deadline,
+			Result:                 admin.ConfigApplyResult{ApplyID: admission.ApplyID, Mode: admission.Mode},
+			OwnerTokenID:           admission.Context.TokenID,
+			IdempotencyKey:         meta.Key,
+			IdempotencyFingerprint: meta.Fingerprint,
+			IdempotencyMethod:      meta.Method,
+			IdempotencyOperation:   meta.Operation,
+			IdempotencyPrincipal:   meta.Principal,
+		})
+	}
+	c.OnManagedApplyAdmissionAborted = func(applyID string) {
+		registry.AbortPending(applyID)
+	}
+
 	c.OnManagedApplyStarted = func(start admin.ManagedApplyStart) error {
 		startedCh <- start
 		applyID := start.Result.ApplyID

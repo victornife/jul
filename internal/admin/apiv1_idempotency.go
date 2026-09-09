@@ -4,8 +4,8 @@
 package admin
 
 import (
+	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"hash"
 	"net/http"
 	"net/url"
@@ -22,6 +22,34 @@ import (
 // required by ADR 0019 §27.1. Serializing this low-rate control-plane admission
 // closes the pre-ledger race between two requests carrying the same key.
 var v1IdempotencyAdmission sync.Mutex
+
+type v1IdempotencyRequestKey struct{}
+
+func withV1Idempotency(r *http.Request, meta *v1IdempotencyMetadata) *http.Request {
+	if meta == nil {
+		return r
+	}
+	binding := &ManagedApplyIdempotency{
+		Key:         meta.Key,
+		Fingerprint: meta.Fingerprint,
+		Method:      meta.Method,
+		Operation:   meta.Operation,
+		Principal:   meta.Principal,
+	}
+	return r.WithContext(context.WithValue(r.Context(), v1IdempotencyRequestKey{}, binding))
+}
+
+func v1IdempotencyFromRequest(r *http.Request) *ManagedApplyIdempotency {
+	if r == nil {
+		return nil
+	}
+	binding, _ := r.Context().Value(v1IdempotencyRequestKey{}).(*ManagedApplyIdempotency)
+	if binding == nil {
+		return nil
+	}
+	cp := *binding
+	return &cp
+}
 
 type v1IdempotencyMetadata struct {
 	Key         string
@@ -194,34 +222,16 @@ func (s *Server) runIdempotentCanonicalV1(
 	}
 
 	cap := newV1Capture()
+	// Carry the already-validated binding into the canonical handler. The
+	// coordinator reserves it on the ManagedApplyRecord at the write
+	// linearization point, before the first side effect. There is deliberately
+	// no completion-time fallback binding here: if production wiring fails to
+	// reserve before a mutation, failing closed is safer than silently degrading
+	// the ADR's concurrency guarantee.
+	r = withV1Idempotency(r, meta)
 	s.runCanonicalV1(cap, r, baseVersion, handler)
-	if cap.status > 0 && cap.status < http.StatusBadRequest {
-		applyID := extractV1ApplyID(cap.body.Bytes())
-		if applyID != "" {
-			if err := s.deps.ManagedApplies.BindIdempotency(
-				applyID,
-				meta.Key,
-				meta.Fingerprint,
-				meta.Method,
-				meta.Operation,
-				meta.Principal,
-			); err != nil {
-				cap.reset()
-				writeAPIError(cap, r, adminapi.Errorf(adminapi.CodeInternalError,
-					"The mutation completed but its idempotency binding could not be retained."))
-			}
-		}
-	}
 	writeCapturedV1(w, cap)
 	return false
-}
-
-func extractV1ApplyID(body []byte) string {
-	var result ConfigApplyResult
-	if err := json.Unmarshal(body, &result); err == nil && result.ApplyID != "" {
-		return result.ApplyID
-	}
-	return ""
 }
 
 func writeCapturedV1(w http.ResponseWriter, cap *v1Capture) {

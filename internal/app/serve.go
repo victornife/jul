@@ -705,6 +705,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			}
 			return toAdminConfigApplyResult(res), err
 		}
+		deps.DiscardPendingRestartWithContext = func(ctx admin.ApplyRequestContext) (admin.ConfigApplyResult, error) {
+			res, err := coordinator.DiscardPlannedRestartWithContext(ctx)
+			if err == nil && res.OK {
+				metrics.ObserveStageRestart("discarded")
+				metrics.SetPendingRestart(false)
+			}
+			return toAdminConfigApplyResult(res), err
+		}
 		deps.PendingRestart = func() *admin.PendingRestartStatus {
 			return coordinator.PlannedRestartStatus()
 		}
@@ -834,6 +842,39 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// callback wired after adminSrv exists (below); this flag must be set
 		// before admin.New copies deps.
 		deps.ManagedHistoryActive = true
+
+		// ADR 0019 §27.1: reserve an idempotent request on the existing ledger
+		// before the first write-side effect, while the coordinator still holds
+		// its mutation lock. This is deliberately separate from the later
+		// OnManagedApplyStarted enrichment: the latter proves a real 202 is
+		// pollable, whereas this earlier record closes the concurrent-duplicate
+		// race before persistence.
+		coordinator.OnManagedApplyAdmitted = func(admission admin.ManagedApplyAdmission) error {
+			meta := admission.Context.Idempotency
+			if meta == nil {
+				return nil
+			}
+			if admission.ApplyID == "" {
+				return errors.New("managed apply admission has no apply id")
+			}
+			return managedApplies.BeginPending(admin.ManagedApplyRecord{
+				ID:                     admission.ApplyID,
+				State:                  admin.ManagedApplyPending,
+				Operation:              admission.Context.Operation,
+				StartedAt:              admission.Context.StartedAt,
+				Deadline:               admission.Context.Deadline,
+				Result:                 admin.ConfigApplyResult{ApplyID: admission.ApplyID, Mode: admission.Mode},
+				OwnerTokenID:           admission.Context.TokenID,
+				IdempotencyKey:         meta.Key,
+				IdempotencyFingerprint: meta.Fingerprint,
+				IdempotencyMethod:      meta.Method,
+				IdempotencyOperation:   meta.Operation,
+				IdempotencyPrincipal:   meta.Principal,
+			})
+		}
+		coordinator.OnManagedApplyAdmissionAborted = func(applyID string) {
+			managedApplies.AbortPending(applyID)
+		}
 
 		// AC-02: register the exact-ID pending ledger record the moment a
 		// managed apply persists its candidate and enqueues the reload, BEFORE

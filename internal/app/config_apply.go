@@ -170,6 +170,18 @@ type ConfigApplyCoordinator struct {
 	// inconsistent (fail-closed).
 	RefreshState func() error
 
+	// OnManagedApplyAdmitted reserves an idempotent mutation on the existing
+	// managed-apply ledger after validation/CAS succeeds but before the first
+	// write-side effect. It is invoked only when the request carries ADR 0019
+	// idempotency metadata. A non-nil error fails the mutation closed before any
+	// side effect; nil is valid only for callers without idempotency metadata.
+	OnManagedApplyAdmitted func(admin.ManagedApplyAdmission) error
+	// OnManagedApplyAdmissionAborted removes a pre-side-effect reservation when
+	// the mutation exits before its durable commit point. It is best-effort:
+	// production wires the bounded ledger directly and context-free callers may
+	// leave it nil.
+	OnManagedApplyAdmissionAborted func(applyID string)
+
 	// OnManagedApplyStarted is called once the candidate has been persisted and
 	// the correlated live reload has been enqueued, but BEFORE the synchronous
 	// HTTP path can return a 202 saved_not_live to the caller. The composition
@@ -620,6 +632,16 @@ func (c *ConfigApplyCoordinator) ApplyConfig(ctx admin.ApplyRequestContext, cfg 
 // marker consistency, disk digest, and live serving version before restoring
 // the backup. On success the watcher echo of the restoration is suppressed.
 func (c *ConfigApplyCoordinator) DiscardPlannedRestart() (ApplyResult, error) {
+	return c.DiscardPlannedRestartWithContext(admin.ApplyRequestContext{})
+}
+
+// DiscardPlannedRestartWithContext is the authenticated external form of the
+// planned-restart discard. When the request carries idempotency metadata it
+// reserves the key on the existing managed-apply ledger while applyMu/c.mu
+// still guard the mutation, immediately before the first discard side effect.
+// A successful discard is terminalized on that same ledger; a pre-commit
+// failure removes the provisional reservation so a safe retry can proceed.
+func (c *ConfigApplyCoordinator) DiscardPlannedRestartWithContext(reqCtx admin.ApplyRequestContext) (ApplyResult, error) {
 	if c.Authority == AuthorityFileOwned {
 		return ApplyResult{OK: false, AuthorityDenied: true, Message: "Configuration is file-owned; the running server does not write it."}, nil
 	}
@@ -640,15 +662,55 @@ func (c *ConfigApplyCoordinator) DiscardPlannedRestart() (ApplyResult, error) {
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	// Re-verify the HTTP handler's canonical baseline under the same mutation
+	// lock that protects the discard. This closes the preview-to-discard race:
+	// the public API has no force mode, so a stale base_version must fail before
+	// the idempotency record or any staging/history state can change.
+	if reqCtx.Baseline != nil {
+		changed, current, err := c.verifyBaselineLocked(*reqCtx.Baseline)
+		if err != nil {
+			c.mu.Unlock()
+			return ApplyResult{
+				OK:      false,
+				Mode:    ApplyHot,
+				Message: "The persisted configuration could not be verified safely.",
+			}, err
+		}
+		if changed {
+			c.mu.Unlock()
+			return c.conflictResult(ApplyHot, reqCtx.Baseline.Version, reqCtx.Baseline.Version, current), nil
+		}
+	}
 	if c.PlannedRestart == nil || !c.PlannedRestart.IsPending() {
+		c.mu.Unlock()
 		return ApplyResult{
 			OK:      true,
 			Mode:    ApplyHot,
 			Message: "No planned restart was pending.",
 		}, nil
 	}
+
+	applyID := ""
+	idempotencyReserved := false
+	idempotencyCommitted := false
+	if reqCtx.Idempotency != nil {
+		applyID = c.nextID()
+		if err := c.reserveManagedApplyIdempotency(reqCtx, applyID, ApplyHot); err != nil {
+			c.mu.Unlock()
+			return ApplyResult{
+				ApplyID: applyID,
+				OK:      false,
+				Mode:    ApplyHot,
+				Message: "The idempotency reservation could not be recorded; nothing was discarded.",
+			}, fmt.Errorf("reserve discard idempotency: %w", err)
+		}
+		idempotencyReserved = true
+	}
+	defer func() {
+		if idempotencyReserved && !idempotencyCommitted {
+			c.abortManagedApplyIdempotency(reqCtx, applyID)
+		}
+	}()
 
 	// File-backed safe discard.
 	if c.PlannedRestart.ConfigPath != "" {
@@ -658,16 +720,20 @@ func (c *ConfigApplyCoordinator) DiscardPlannedRestart() (ApplyResult, error) {
 		}
 		restoredBytes, err := c.PlannedRestart.DiscardSafe(liveVersion)
 		if err != nil {
+			c.mu.Unlock()
 			return ApplyResult{
+				ApplyID: applyID,
 				OK:      false,
 				Mode:    ApplyHot,
 				Message: "Discard failed: " + err.Error(),
 			}, err
 		}
+		idempotencyCommitted = true
 		// Suppress the watcher echo of the restoration write.
 		restoreDigest := sha256.Sum256(restoredBytes)
 		c.suppressWatcher(restoreDigest)
 		result := ApplyResult{
+			ApplyID: applyID,
 			OK:      true,
 			Mode:    ApplyHot,
 			Message: "Planned restart discarded and previous configuration restored.",
@@ -680,22 +746,35 @@ func (c *ConfigApplyCoordinator) DiscardPlannedRestart() (ApplyResult, error) {
 				result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline could not be rewound after discard"})
 			}
 		}
+		c.mu.Unlock()
+		if idempotencyReserved {
+			result = c.completeManagedApply(reqCtx, result, nil)
+		}
 		return result, nil
 	}
 
 	// In-memory discard (tests / no config path).
 	if _, ok := c.PlannedRestart.Discard(); !ok {
+		c.mu.Unlock()
 		return ApplyResult{
+			ApplyID: applyID,
 			OK:      true,
 			Mode:    ApplyHot,
 			Message: "No planned restart was pending.",
 		}, nil
 	}
-	return ApplyResult{
+	idempotencyCommitted = true
+	result := ApplyResult{
+		ApplyID: applyID,
 		OK:      true,
 		Mode:    ApplyHot,
 		Message: "Planned restart discarded.",
-	}, nil
+	}
+	c.mu.Unlock()
+	if idempotencyReserved {
+		result = c.completeManagedApply(reqCtx, result, nil)
+	}
+	return result, nil
 }
 
 // refreshStateLocked calls the RefreshState hook if configured and then
@@ -1205,6 +1284,26 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 		return c.conflictResult(ApplyStageRestart, persistedVersion, desiredVersion, currentVersion), nil
 	}
 
+	idempotencyReserved := false
+	idempotencyCommitted := false
+	defer func() {
+		if idempotencyReserved && !idempotencyCommitted {
+			c.abortManagedApplyIdempotency(reqCtx, id)
+		}
+	}()
+	if err := c.reserveManagedApplyIdempotency(reqCtx, id, ApplyStageRestart); err != nil {
+		return ApplyResult{
+			ApplyID:          id,
+			OK:               false,
+			Mode:             ApplyStageRestart,
+			Version:          persistedVersion,
+			PersistedVersion: persistedVersion,
+			DesiredVersion:   desiredVersion,
+			Message:          "The idempotency reservation could not be recorded; nothing was staged.",
+		}, fmt.Errorf("reserve managed stage idempotency: %w", err)
+	}
+	idempotencyReserved = reqCtx.Idempotency != nil
+
 	// Step 1+2: Write backup (baseRaw, fresh stage only) and prepared marker
 	// BEFORE writing the candidate to disk. StageManaged preserves the existing
 	// backup and base metadata when this is an update.
@@ -1281,6 +1380,7 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 			Message:          "Failed to persist staged configuration; sidecar marker preserved for reconciliation on restart.",
 		}, err
 	}
+	idempotencyCommitted = true
 	c.suppressWatcher(rawDigest)
 
 	// AC-06: promote the marker to "staged" WHILE STILL HOLDING c.mu, using the
@@ -1302,7 +1402,11 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 			// state/programming errors surface as a storage error.
 			if errors.Is(err, ErrStagedCandidateChanged) {
 				c.mu.Unlock()
-				return c.conflictResult(ApplyStageRestart, persistedVersion, desiredVersion, currentVersion), nil
+				conflict := c.conflictResult(ApplyStageRestart, persistedVersion, desiredVersion, currentVersion)
+				conflict.ApplyID = id
+				conflict.Persisted = true
+				conflict = c.completeManagedApply(reqCtx, conflict, baseline.Raw)
+				return conflict, nil
 			}
 			// ADR 0019 §11.2.3 row 5: the configuration rename already
 			// committed (step 4) — only the "prepared"->"staged" transition
@@ -1313,14 +1417,18 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 			// anyway. Steps 6-7 (baseline) still run below.
 			if rerr := c.PlannedRestart.Reconcile(); rerr != nil {
 				c.mu.Unlock()
-				return ApplyResult{
+				failure := ApplyResult{
+					ApplyID:          id,
 					OK:               false,
 					Mode:             ApplyStageRestart,
 					Version:          persistedVersion,
 					PersistedVersion: persistedVersion,
 					DesiredVersion:   desiredVersion,
+					Persisted:        true,
 					Message:          "Failed to promote or reconcile the staged marker after candidate write: " + err.Error(),
-				}, err
+				}
+				failure = c.completeManagedApply(reqCtx, failure, baseline.Raw)
+				return failure, err
 			}
 			stagePromotionDegraded = &DegradedEntry{Kind: DegradedStagingError, Message: "planned-restart promotion did not complete synchronously; the stage still converges at the next restart"}
 		}
@@ -1499,6 +1607,28 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		c.mu.Unlock()
 		return c.conflictResult(mode, persistedVersion, desiredVersion, currentVersion), nil
 	}
+
+	idempotencyReserved := false
+	idempotencyCommitted := false
+	defer func() {
+		if idempotencyReserved && !idempotencyCommitted {
+			c.abortManagedApplyIdempotency(reqCtx, id)
+		}
+	}()
+	if err := c.reserveManagedApplyIdempotency(reqCtx, id, mode); err != nil {
+		c.mu.Unlock()
+		return ApplyResult{
+			ApplyID:          id,
+			OK:               false,
+			Mode:             mode,
+			Version:          persistedVersion,
+			PersistedVersion: persistedVersion,
+			DesiredVersion:   desiredVersion,
+			Message:          "The idempotency reservation could not be recorded; nothing was changed.",
+		}, fmt.Errorf("reserve managed apply idempotency: %w", err)
+	}
+	idempotencyReserved = reqCtx.Idempotency != nil
+
 	// T-write step 1 (ADR 0019 §11.2): record the baseline transition before
 	// the configuration file changes. A failure here means nothing is
 	// attempted — the config write below never runs.
@@ -1526,6 +1656,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 			Message:          "Failed to persist configuration.",
 		}, err
 	}
+	idempotencyCommitted = true
 
 	// Mark a managed transaction as in-flight before releasing applyMu.
 	// The finalizer clears this only after any restoration is complete.
@@ -1802,6 +1933,31 @@ func (c *ConfigApplyCoordinator) provisionalResult(id string, mode ApplyMode, pe
 		},
 		Message: message,
 	}
+}
+
+// reserveManagedApplyIdempotency records the client binding at the write
+// linearization point. Callers invoke it only after all side-effect-free
+// validation/CAS gates have succeeded and while holding the same coordinator
+// mutation lock that guards the first write. A request without a key is a no-op.
+func (c *ConfigApplyCoordinator) reserveManagedApplyIdempotency(reqCtx admin.ApplyRequestContext, applyID string, mode ApplyMode) error {
+	if reqCtx.Idempotency == nil {
+		return nil
+	}
+	if c.OnManagedApplyAdmitted == nil {
+		return errors.New("managed apply idempotency admission is unavailable")
+	}
+	return c.OnManagedApplyAdmitted(admin.ManagedApplyAdmission{
+		Context: reqCtx,
+		ApplyID: applyID,
+		Mode:    string(mode),
+	})
+}
+
+func (c *ConfigApplyCoordinator) abortManagedApplyIdempotency(reqCtx admin.ApplyRequestContext, applyID string) {
+	if reqCtx.Idempotency == nil || applyID == "" || c.OnManagedApplyAdmissionAborted == nil {
+		return
+	}
+	c.OnManagedApplyAdmissionAborted(applyID)
 }
 
 // notifyManagedApplyStarted registers the provisional pending record for a

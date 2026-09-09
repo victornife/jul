@@ -387,8 +387,33 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 		Origin:           origin,
 	}
 
+	idempotencyReserved := false
+	idempotencyCommitted := false
+	defer func() {
+		if idempotencyReserved && !idempotencyCommitted {
+			c.abortManagedApplyIdempotency(reqCtx, id)
+		}
+	}()
+	if err := c.reserveManagedApplyIdempotency(reqCtx, id, mode); err != nil {
+		return ApplyResult{
+			ApplyID:          id,
+			OK:               false,
+			Mode:             mode,
+			Version:          persistedVersion,
+			PersistedVersion: persistedVersion,
+			DesiredVersion:   desiredVersion,
+			Message:          "The idempotency reservation could not be recorded; nothing was adopted.",
+		}, fmt.Errorf("reserve adoption idempotency: %w", err)
+	}
+	idempotencyReserved = reqCtx.Idempotency != nil
+
 	if mode == ApplyStageRestart {
-		if err := c.adoptAndStageLocked(origin, bst.BaselineRawSHA256, prevRaw, raw, persistedVersion, desiredVersion, pfResult, &result); err != nil {
+		committed, err := c.adoptAndStageLockedWithCommit(origin, bst.BaselineRawSHA256, prevRaw, raw, persistedVersion, desiredVersion, pfResult, &result)
+		idempotencyCommitted = committed
+		if err != nil {
+			if committed {
+				result = c.completeManagedApply(reqCtx, result, prevRaw)
+			}
 			return result, err
 		}
 		result.PendingRestart = c.plannedRestartStatus()
@@ -409,6 +434,7 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 	if err := c.ManagedBaseline.CommitMarkerOnly(raw, persistedVersion); err != nil {
 		return ApplyResult{OK: false, Mode: mode, Message: "Failed to record the adopted baseline; nothing was changed."}, fmt.Errorf("%w: commit managed baseline marker: %v", admin.ErrConfigStorageUnavailable, err)
 	}
+	idempotencyCommitted = true
 	if err := c.ManagedBaseline.CommitSnapshotOnly(raw); err != nil {
 		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after adoption"})
 		c.retryBaselineWriteLocked(raw, c.ManagedBaseline.CommitSnapshotOnly)
@@ -522,9 +548,18 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 // origin and baselineDigest are the values AdoptExternal already computed
 // from the managed-baseline status before the digest fence.
 func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest string, prevRaw, candidateRaw []byte, persistedVersion, desiredVersion string, pfResult *PreflightResult, result *ApplyResult) error {
+	_, err := c.adoptAndStageLockedWithCommit(origin, baselineDigest, prevRaw, candidateRaw, persistedVersion, desiredVersion, pfResult, result)
+	return err
+}
+
+// adoptAndStageLockedWithCommit is the production form used by the external
+// idempotency admission path. The bool reports whether the T-mark commit point
+// was crossed, so a post-commit error is terminalized instead of aborting the
+// idempotency reservation as though no mutation happened.
+func (c *ConfigApplyCoordinator) adoptAndStageLockedWithCommit(origin, baselineDigest string, prevRaw, candidateRaw []byte, persistedVersion, desiredVersion string, pfResult *PreflightResult, result *ApplyResult) (bool, error) {
 	if c.PlannedRestart == nil {
 		result.Message = "Planned-restart staging is not available."
-		return nil
+		return false, nil
 	}
 
 	// Step 1: the retained snapshot must actually be the bytes the baseline
@@ -534,7 +569,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 			c.ManagedBaseline.MarkInconsistent(ReasonSnapshotDigestMismatch)
 			result.OK = false
 			result.Message = "The managed baseline snapshot could not be verified; nothing was staged."
-			return fmt.Errorf("%w: baseline snapshot digest mismatch before adopt-and-stage", admin.ErrConfigStorageUnavailable)
+			return false, fmt.Errorf("%w: baseline snapshot digest mismatch before adopt-and-stage", admin.ErrConfigStorageUnavailable)
 		}
 	}
 
@@ -542,7 +577,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 	if err := c.PlannedRestart.WriteAdoptBackup(prevRaw); err != nil {
 		result.OK = false
 		result.Message = "Failed to back up the previous configuration; nothing was staged."
-		return fmt.Errorf("%w: write adopt backup: %v", admin.ErrConfigStorageUnavailable, err)
+		return false, fmt.Errorf("%w: write adopt backup: %v", admin.ErrConfigStorageUnavailable, err)
 	}
 
 	// Step 3: the commit point.
@@ -553,11 +588,11 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 			c.ManagedBaseline.MarkInconsistent(ReasonCleanupIncomplete)
 			result.OK = false
 			result.Message = "Failed to commit the baseline, and cleanup of the orphaned backup also failed."
-			return fmt.Errorf("%w: clear orphaned backup after baseline commit failure: %v", admin.ErrConfigStorageUnavailable, clearErr)
+			return false, fmt.Errorf("%w: clear orphaned backup after baseline commit failure: %v", admin.ErrConfigStorageUnavailable, clearErr)
 		}
 		result.OK = false
 		result.Message = "Failed to commit the adopted baseline; nothing was staged."
-		return fmt.Errorf("%w: commit managed baseline marker: %v", admin.ErrConfigStorageUnavailable, err)
+		return false, fmt.Errorf("%w: commit managed baseline marker: %v", admin.ErrConfigStorageUnavailable, err)
 	}
 
 	liveVersion := ""
@@ -583,7 +618,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 			c.ManagedBaseline.MarkInconsistent(ReasonCleanupIncomplete)
 			result.OK = false
 			result.Message = "The baseline committed, but cleanup of the abandoned stage failed; managed writes are refused until resolved."
-			return fmt.Errorf("%w: clear abandoned backup after prepared-marker failure: %v", admin.ErrConfigStorageUnavailable, clearErr)
+			return true, fmt.Errorf("%w: clear abandoned backup after prepared-marker failure: %v", admin.ErrConfigStorageUnavailable, clearErr)
 		}
 		if snapErr := c.ManagedBaseline.CommitSnapshotOnly(candidateRaw); snapErr != nil {
 			result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after adoption"})
@@ -593,7 +628,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 		result.AppOutcome = "owned_not_serving"
 		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedStagingIncomplete, Message: "planned-restart marker could not be written after adoption"})
 		result.Message = "External configuration adopted, but no restart could be staged; a restart is not scheduled."
-		return nil
+		return true, nil
 	}
 
 	// Step 5.
@@ -611,7 +646,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 				c.ManagedBaseline.MarkInconsistent(ReasonCleanupIncomplete)
 				result.OK = false
 				result.Message = "The external file changed while staging the adoption, and cleanup of the abandoned stage failed; managed writes are refused until resolved."
-				return fmt.Errorf("%w: clear staged artifacts after adoption mismatch: %v", admin.ErrConfigStorageUnavailable, cleanupErr)
+				return true, fmt.Errorf("%w: clear staged artifacts after adoption mismatch: %v", admin.ErrConfigStorageUnavailable, cleanupErr)
 			}
 			if snapErr := c.ManagedBaseline.CommitSnapshotOnly(candidateRaw); snapErr != nil {
 				result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after adoption"})
@@ -629,7 +664,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 				DegradedEntry{Kind: DegradedDriftAfterAdopt, Message: "the file no longer matches the adopted candidate"},
 			)
 			result.Message = "External configuration adopted, but the file changed while staging; no restart is scheduled."
-			return nil
+			return true, nil
 		}
 		// Row 5: an ordinary I/O failure transitioning "prepared" -> "staged"
 		// itself (not a verified mismatch). The marker is still durably
@@ -641,7 +676,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 			c.ManagedBaseline.MarkInconsistent(ReasonCleanupIncomplete)
 			result.OK = false
 			result.Message = "The baseline committed, but the staged restart could not be verified or repaired; managed writes are refused until resolved."
-			return fmt.Errorf("%w: reconcile planned restart after promotion failure: %v", admin.ErrConfigStorageUnavailable, rerr)
+			return true, fmt.Errorf("%w: reconcile planned restart after promotion failure: %v", admin.ErrConfigStorageUnavailable, rerr)
 		}
 		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedStagingError, Message: "planned-restart promotion did not complete synchronously; the stage still converges at the next restart"})
 	}
@@ -653,5 +688,5 @@ func (c *ConfigApplyCoordinator) adoptAndStageLocked(origin, baselineDigest stri
 		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedBaselineError, Message: "baseline snapshot could not be written after staging"})
 		c.retryBaselineWriteLocked(candidateRaw, c.ManagedBaseline.CommitSnapshotOnly)
 	}
-	return nil
+	return true, nil
 }

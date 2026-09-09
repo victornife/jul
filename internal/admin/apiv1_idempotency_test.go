@@ -4,11 +4,14 @@
 package admin
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"jul/internal/adminapi"
 	"jul/internal/rbac"
@@ -173,10 +176,23 @@ func TestV1IdempotencyPendingThenTerminalReplay(t *testing.T) {
 		return r.WithContext(rbac.WithIdentity(r.Context(), ident))
 	}
 
-	handler := func(w http.ResponseWriter, _ *http.Request) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
 		calls++
+		binding := v1IdempotencyFromRequest(r)
+		if binding == nil {
+			t.Fatal("validated idempotency binding did not reach the canonical mutation")
+		}
 		result := ConfigApplyResult{ApplyID: id, Mode: "hot", OK: false}
-		if err := reg.BeginPending(ManagedApplyRecord{ID: id, Operation: ApplyOperationConfigApply, Result: result}); err != nil {
+		if err := reg.BeginPending(ManagedApplyRecord{
+			ID:                     id,
+			Operation:              ApplyOperationConfigApply,
+			Result:                 result,
+			IdempotencyKey:         binding.Key,
+			IdempotencyFingerprint: binding.Fingerprint,
+			IdempotencyMethod:      binding.Method,
+			IdempotencyOperation:   binding.Operation,
+			IdempotencyPrincipal:   binding.Principal,
+		}); err != nil {
 			t.Fatalf("begin pending: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -235,5 +251,194 @@ func TestV1IdempotencyPendingThenTerminalReplay(t *testing.T) {
 	}
 	if conflict.Error.Code != adminapi.CodeIdempotencyKeyReused || conflict.Error.Details.RecordedOperation != "/api/v1/config/apply" {
 		t.Fatalf("reuse conflict = %+v", conflict.Error)
+	}
+}
+
+func TestV1IdempotencyUsesPrincipalAcrossCredentialRotation(t *testing.T) {
+	reg := NewManagedApplyRegistry(0, 0)
+	s := &Server{deps: Deps{ManagedApplies: reg, BootID: func() string { return "abcdef123456" }}}
+	const key = "rotation-key-123"
+	const id = "rl_abcdef123456_7"
+	calls := 0
+
+	request := func(tokenID string) *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "http://example/api/v1/config/apply?base_version=v1&mode=hot", strings.NewReader("[global]\n"))
+		r.Pattern = "/api/v1/config/apply"
+		r.Header.Set("Content-Type", "application/toml")
+		r.Header.Set("Idempotency-Key", key)
+		ident := rbac.Identity{Principal: "alice", TokenID: tokenID, Permissions: []rbac.Permission{rbac.ConfigApply}}
+		return r.WithContext(rbac.WithIdentity(r.Context(), ident))
+	}
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		binding := v1IdempotencyFromRequest(r)
+		if binding == nil {
+			t.Fatal("missing idempotency binding")
+		}
+		if err := reg.BeginPending(ManagedApplyRecord{
+			ID:                     id,
+			Operation:              ApplyOperationConfigApply,
+			Result:                 ConfigApplyResult{ApplyID: id, Mode: "hot", OK: true},
+			IdempotencyKey:         binding.Key,
+			IdempotencyFingerprint: binding.Fingerprint,
+			IdempotencyMethod:      binding.Method,
+			IdempotencyOperation:   binding.Operation,
+			IdempotencyPrincipal:   binding.Principal,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.Complete(ManagedApplyRecord{
+			ID: id, Operation: ApplyOperationConfigApply,
+			Result: ConfigApplyResult{ApplyID: id, Mode: "hot", OK: true, AppOutcome: "applied"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		writeAPIJSON(w, http.StatusOK, ConfigApplyResult{ApplyID: id, Mode: "hot", OK: true})
+	}
+
+	first := httptest.NewRecorder()
+	s.runIdempotentCanonicalV1(first, request("token-before-rotation"), "v1", []byte("[global]\n"), handler)
+	second := httptest.NewRecorder()
+	projected := s.runIdempotentCanonicalV1(second, request("token-after-rotation"), "v1", []byte("[global]\n"), handler)
+	if !projected || calls != 1 {
+		t.Fatalf("same principal after token rotation did not replay: projected=%v calls=%d body=%s", projected, calls, second.Body.String())
+	}
+}
+
+func TestV1IdempotencyConcurrentDuplicateExecutesOnce(t *testing.T) {
+	reg := NewManagedApplyRegistry(0, 0)
+	s := &Server{deps: Deps{ManagedApplies: reg, BootID: func() string { return "abcdef123456" }}}
+	const key = "concurrent-key-123"
+	const id = "rl_abcdef123456_9"
+	var calls atomic.Int32
+	entered := make(chan struct{})
+	release := make(chan struct{})
+
+	request := func() *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "http://example/api/v1/config/apply?base_version=v1&mode=hot", strings.NewReader("[global]\n"))
+		r.Pattern = "/api/v1/config/apply"
+		r.Header.Set("Content-Type", "application/toml")
+		r.Header.Set("Idempotency-Key", key)
+		ident := rbac.Identity{Principal: "alice", TokenID: "tok-1", Permissions: []rbac.Permission{rbac.ConfigApply}}
+		return r.WithContext(rbac.WithIdentity(r.Context(), ident))
+	}
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		binding := v1IdempotencyFromRequest(r)
+		if binding == nil {
+			t.Error("missing idempotency binding")
+			return
+		}
+		if err := reg.BeginPending(ManagedApplyRecord{
+			ID:                     id,
+			Operation:              ApplyOperationConfigApply,
+			Result:                 ConfigApplyResult{ApplyID: id, Mode: "hot"},
+			IdempotencyKey:         binding.Key,
+			IdempotencyFingerprint: binding.Fingerprint,
+			IdempotencyMethod:      binding.Method,
+			IdempotencyOperation:   binding.Operation,
+			IdempotencyPrincipal:   binding.Principal,
+		}); err != nil {
+			t.Error(err)
+			return
+		}
+		close(entered)
+		<-release
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(ConfigApplyResult{ApplyID: id, Mode: "hot"})
+	}
+
+	type outcome struct {
+		code int
+		body string
+	}
+	out := make(chan outcome, 2)
+	call := func() {
+		rr := httptest.NewRecorder()
+		s.runIdempotentCanonicalV1(rr, request(), "v1", []byte("[global]\n"), handler)
+		out <- outcome{code: rr.Code, body: rr.Body.String()}
+	}
+	go call()
+	<-entered
+	go call()
+	close(release)
+	first := <-out
+	second := <-out
+
+	if calls.Load() != 1 {
+		t.Fatalf("canonical mutation executed %d times, want exactly once", calls.Load())
+	}
+	codes := map[int]int{first.code: 1}
+	codes[second.code]++
+	if codes[http.StatusAccepted] != 1 || codes[http.StatusConflict] != 1 {
+		t.Fatalf("duplicate outcomes = (%d %s) and (%d %s), want one 202 and one 409", first.code, first.body, second.code, second.body)
+	}
+}
+
+func TestV1IdempotencyBootAndEvictionBoundReplay(t *testing.T) {
+	old := time.Now().Add(-time.Hour)
+	reg := NewManagedApplyRegistry(1, time.Millisecond)
+	fingerprint := sha256.Sum256([]byte("request-one"))
+	firstID := "rl_abcdef123456_1"
+	if err := reg.BeginPending(ManagedApplyRecord{
+		ID: firstID, Operation: ApplyOperationConfigApply,
+		IdempotencyKey: "eviction-key-1", IdempotencyFingerprint: fingerprint,
+		IdempotencyMethod: http.MethodPost, IdempotencyOperation: "/api/v1/config/apply", IdempotencyPrincipal: "alice",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Complete(ManagedApplyRecord{
+		ID: firstID, Operation: ApplyOperationConfigApply, CompletedAt: old,
+		Result: ConfigApplyResult{ApplyID: firstID, Mode: "hot", OK: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	secondID := "rl_abcdef123456_2"
+	if err := reg.BeginPending(ManagedApplyRecord{ID: secondID, Operation: ApplyOperationConfigApply}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Complete(ManagedApplyRecord{
+		ID: secondID, Operation: ApplyOperationConfigApply, CompletedAt: old,
+		Result: ConfigApplyResult{ApplyID: secondID, Mode: "hot", OK: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reg.Prune(time.Now())
+	if _, ok := reg.FindIdempotency("alice", "eviction-key-1"); ok {
+		t.Fatal("evicted terminal record retained its idempotency binding")
+	}
+
+	freshBoot := NewManagedApplyRegistry(1, time.Millisecond)
+	if _, ok := freshBoot.FindIdempotency("alice", "eviction-key-1"); ok {
+		t.Fatal("idempotency binding survived a new boot-scoped registry")
+	}
+}
+
+func TestV1IdempotencyRejectsMalformedQueryBeforeExecution(t *testing.T) {
+	s := &Server{deps: Deps{ManagedApplies: NewManagedApplyRegistry(0, 0)}}
+	r := httptest.NewRequest(http.MethodPost, "http://example/api/v1/config/apply", strings.NewReader("[global]\n"))
+	r.URL.RawQuery = "base_version=%zz"
+	r.Pattern = "/api/v1/config/apply"
+	r.Header.Set("Content-Type", "application/toml")
+	r.Header.Set("Idempotency-Key", "malformed-query-key")
+	ident := rbac.Identity{Principal: "alice", TokenID: "tok-1", Permissions: []rbac.Permission{rbac.ConfigApply}}
+	r = r.WithContext(rbac.WithIdentity(r.Context(), ident))
+	called := false
+	rr := httptest.NewRecorder()
+	s.runIdempotentCanonicalV1(rr, r, "v1", []byte("[global]\n"), func(http.ResponseWriter, *http.Request) { called = true })
+	if called {
+		t.Fatal("malformed query reached the canonical mutation")
+	}
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	var env adminapi.Envelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Error.Code != adminapi.CodeInvalidRequest || env.Error.Details.Field != "query" {
+		t.Fatalf("error = %+v", env.Error)
 	}
 }
