@@ -193,7 +193,7 @@ func TestV1PatchPreviewAdmissionAndErrorProjectionBranches(t *testing.T) {
 	}
 	withStorage := managedV1OperationServer(t, Deps{
 		ReadConfigRaw: func() ([]byte, error) { return append([]byte(nil), seed...), nil },
-		LoadConfig: func() (*config.Config, error) { return config.Parse(seed) },
+		LoadConfig:    func() (*config.Config, error) { return config.Parse(seed) },
 	})
 
 	t.Run("malformed JSON", func(t *testing.T) {
@@ -242,7 +242,7 @@ func TestV1PlanValidationAndStorageFailureBranches(t *testing.T) {
 	}
 	server := managedV1OperationServer(t, Deps{
 		ReadConfigRaw: func() ([]byte, error) { return append([]byte(nil), seed...), nil },
-		LoadConfig: func() (*config.Config, error) { return config.Parse(seed) },
+		LoadConfig:    func() (*config.Config, error) { return config.Parse(seed) },
 	})
 
 	rr := callV1OperationHandler(t, server.handleV1ConfigPlan, http.MethodPost,
