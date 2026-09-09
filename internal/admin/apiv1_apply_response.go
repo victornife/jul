@@ -22,8 +22,8 @@ func (s *Server) runExternalMutationV1(
 	handler func(http.ResponseWriter, *http.Request),
 ) {
 	cap := newV1Capture()
-	s.runIdempotentCanonicalV1(cap, r, baseVersion, requestBody, handler)
-	if cap.status < http.StatusBadRequest {
+	projectedReplay := s.runIdempotentCanonicalV1(cap, r, baseVersion, requestBody, handler)
+	if cap.status < http.StatusBadRequest && !projectedReplay {
 		s.projectV1MutationCapture(cap, r)
 	}
 	writeCapturedV1(w, cap)
