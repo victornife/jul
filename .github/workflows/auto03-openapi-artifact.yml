@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   generate:
-    if: github.event.head_commit.message != 'docs(api): regenerate AUTO-03 contract [auto03-generated]'
     runs-on: ubuntu-latest
     steps:
       - name: checkout
