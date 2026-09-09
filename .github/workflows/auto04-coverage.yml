@@ -1,0 +1,44 @@
+name: AUTO-04 coverage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: auto04-coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+
+jobs:
+  auto04-coverage:
+    name: AUTO-04 >=90% statement coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: full-tag AUTO-04 tests and coverage
+        run: |
+          go test -count=1 -covermode=atomic -coverprofile=auto04-cover.out \
+            -tags "$FULL_TAGS" ./cmd/jul ./internal/adminclient
+          python3 scripts/check-auto04-coverage.py \
+            --coverprofile auto04-cover.out --floor 90.0
+      - name: lean AUTO-04 tests
+        run: go test -count=1 ./cmd/jul ./internal/adminclient
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        if: always()
+        with:
+          name: auto04-cover-${{ github.sha }}
+          path: auto04-cover.out
+          if-no-files-found: error
+          retention-days: 14
