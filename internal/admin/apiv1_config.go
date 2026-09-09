@@ -57,8 +57,6 @@ func (s *Server) handleV1ApplyGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("apply_id")
 	if !validManagedApplyID(id) {
 		s.observeManagedApplyLookup("invalid")
-		// The client built a bad request, which is a usage error rather than a
-		// missing resource.
 		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInvalidRequest,
 			"%q is not a valid apply id", id).WithDetails(adminapi.Details{Field: "apply_id"}))
 		return
@@ -75,20 +73,10 @@ func (s *Server) handleV1ApplyGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A principal admitted only via history:rollback — a rollback-only custom
-	// role holding neither status:read nor config:apply — may read only the
-	// rollback records it owns, never the result of an unrelated transaction it
-	// could otherwise probe by id. The same rule as the internal route, because
-	// an external alias that relaxed it would be exactly the authorization
-	// drift ADR 0019 §24 warns about.
 	ident, _ := rbacIdentityFromRequest(r)
 	if !ident.Has(rbac.StatusRead) && !ident.Has(rbac.ConfigApply) {
 		if rec.Operation != ApplyOperationRollback ||
 			rec.OwnerTokenID == "" || rec.OwnerTokenID != ident.TokenID {
-			// The caller holds the permission it was admitted through, so the
-			// denial is ownership, not a missing grant. Reporting a permission
-			// it already has would send it to fix the wrong thing, and naming
-			// the record would confirm the record exists.
 			s.observeManagedApplyLookup("forbidden")
 			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeForbidden,
 				"This managed apply record is not accessible to the current credential."))
@@ -105,16 +93,11 @@ func (s *Server) handleV1ApplyGet(w http.ResponseWriter, r *http.Request) {
 		s.observeManagedApplyLookup("terminal")
 		writeAPIJSON(w, http.StatusOK, out)
 	default:
-		// A state outside the bounded enum is a server consistency error. It is
-		// never reported as a completed transaction.
 		s.observeManagedApplyLookup("invalid")
 		writeAPIError(w, r, adminapi.New(adminapi.CodeInternalError))
 	}
 }
 
-// writeApplyNotFound reports an unknown or evicted apply id. It carries the
-// kind but not the id: the id came from the caller, so echoing it adds nothing,
-// and the ledger's bounds already tell a client why a record may be gone.
 func (s *Server) writeApplyNotFound(w http.ResponseWriter, r *http.Request) {
 	writeAPIError(w, r, adminapi.Errorf(adminapi.CodeNotFound,
 		"No managed apply record with that id. It may never have existed, or it may have been evicted — "+
@@ -153,8 +136,6 @@ func (s *Server) applyResultResponse(rec ManagedApplyRecord) adminapi.ApplyResul
 	return out
 }
 
-// recordDegradations maps a record's provenance failures onto ADR 0019 §33.2's
-// closed set. It returns an empty, non-nil slice on a clean success.
 func recordDegradations(rec ManagedApplyRecord) []adminapi.Degradation {
 	out := []adminapi.Degradation{}
 	if rec.HistoryError != "" {
@@ -166,9 +147,6 @@ func recordDegradations(rec ManagedApplyRecord) []adminapi.Degradation {
 	return out
 }
 
-// applyOutcome reads the terminal reload outcome, which lives on the reload
-// result rather than on the apply result. It is empty until a reload has
-// produced one, which is exactly the state in which a client must keep polling.
 func applyOutcome(rec ManagedApplyRecord) string {
 	if rec.Result.Reload == nil {
 		return ""
@@ -178,15 +156,12 @@ func applyOutcome(rec ManagedApplyRecord) string {
 
 // handleV1HistoryList serves GET /api/v1/config/history: safe metadata for the
 // stored snapshots, newest first, paginated.
-//
-// History is the only v1 collection that paginates, because it is the only one
-// whose size is unbounded (ADR 0019 §24a).
 func (s *Server) handleV1HistoryList(w http.ResponseWriter, r *http.Request) {
 	if !requireExternalMethod(w, r, http.MethodGet) {
 		return
 	}
 
-	limit, apiErr := historyLimit(r.URL.Query().Get("limit"))
+	limit, clamped, apiErr := historyLimit(r.URL.Query().Get("limit"))
 	if apiErr != nil {
 		writeAPIError(w, r, apiErr)
 		return
@@ -194,16 +169,11 @@ func (s *Server) handleV1HistoryList(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := s.hist.list()
 	if err != nil {
-		// The store could not be read. That is not the caller's fault and not a
-		// validation failure; the error class is what a client acts on, and the
-		// message deliberately carries no path.
 		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeStorageUnavailable,
 			"The configuration history store could not be read."))
 		return
 	}
 
-	// s.hist.list() returns newest first already; the cursor names the last
-	// entry of the previous page, so the next page starts after it.
 	if cursor := r.URL.Query().Get("cursor"); cursor != "" {
 		entries = historyAfter(entries, cursor)
 		if entries == nil {
@@ -215,9 +185,10 @@ func (s *Server) handleV1HistoryList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := adminapi.HistoryListResponse{
-		APIVersion: adminapi.APIVersion,
-		Entries:    []adminapi.HistoryEntry{},
-		Limit:      limit,
+		APIVersion:   adminapi.APIVersion,
+		Entries:      []adminapi.HistoryEntry{},
+		Limit:        limit,
+		LimitClamped: clamped,
 	}
 	for i, e := range entries {
 		if i == limit {
@@ -240,29 +211,27 @@ func (s *Server) handleV1HistoryList(w http.ResponseWriter, r *http.Request) {
 	writeAPIJSON(w, http.StatusOK, out)
 }
 
-// historyLimit applies §24a's default and cap. An out-of-range value is a
-// usage error rather than being silently clamped: a client asking for 1000
-// entries and receiving 200 without being told has a paging bug it cannot see.
-func historyLimit(raw string) (int, *adminapi.Error) {
+// historyLimit parses an optional integer and normalizes syntactically valid
+// values to the published [1,200] effective range. Clamping is observable in
+// the response; malformed/non-integer forms remain invalid_request.
+func historyLimit(raw string) (limit int, clamped bool, apiErr *adminapi.Error) {
 	if raw == "" {
-		return adminapi.HistoryLimitDefault, nil
+		return adminapi.HistoryLimitDefault, false, nil
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil {
-		return 0, adminapi.Errorf(adminapi.CodeInvalidRequest, "limit must be an integer").
+		return 0, false, adminapi.Errorf(adminapi.CodeInvalidRequest, "limit must be an integer").
 			WithDetails(adminapi.Details{Field: "limit"})
 	}
-	if n < 1 || n > adminapi.HistoryLimitMax {
-		return 0, adminapi.Errorf(adminapi.CodeInvalidRequest,
-			"limit must be between 1 and %d", adminapi.HistoryLimitMax).
-			WithDetails(adminapi.Details{Field: "limit"})
+	if n < adminapi.HistoryLimitMin {
+		return adminapi.HistoryLimitMin, true, nil
 	}
-	return n, nil
+	if n > adminapi.HistoryLimitMax {
+		return adminapi.HistoryLimitMax, true, nil
+	}
+	return n, false, nil
 }
 
-// historyAfter returns the entries following the cursor entry, or nil when the
-// cursor names no known entry. An empty (but non-nil) result means the cursor
-// named the last entry, which is the end of the listing rather than an error.
 func historyAfter(entries []historyEntry, cursor string) []historyEntry {
 	for i, e := range entries {
 		if e.ID == cursor {

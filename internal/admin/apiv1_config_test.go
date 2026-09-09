@@ -126,8 +126,6 @@ func TestV1ApplyGetUnknownIDIsNotFound(t *testing.T) {
 	if env.Error.Details.Kind != "managed_apply" {
 		t.Fatalf("details = %+v", env.Error.Details)
 	}
-	// The message must explain eviction, because "not found" for a record that
-	// existed an hour ago is otherwise indistinguishable from a client bug.
 	if !strings.Contains(env.Error.Message, "evicted") {
 		t.Errorf("the message does not mention eviction: %q", env.Error.Message)
 	}
@@ -167,8 +165,6 @@ func TestV1ApplyGetKeepsTheOwnershipRule(t *testing.T) {
 	}
 
 	reg := NewManagedApplyRegistry(0, 0)
-	// An apply owned by somebody else, which a rollback-only principal must not
-	// be able to probe by id.
 	if err := reg.BeginPending(ManagedApplyRecord{
 		ID: "rl_cccccccccccc_1", State: ManagedApplyPending,
 		Operation: ApplyOperationConfigApply, OwnerTokenID: "other-token-id", StartedAt: time.Now(),
@@ -187,8 +183,6 @@ func TestV1ApplyGetKeepsTheOwnershipRule(t *testing.T) {
 	if env.Error.Code != adminapi.CodeForbidden {
 		t.Fatalf("code = %q", env.Error.Code)
 	}
-	// The refusal must not confirm the record exists, and must not name a
-	// permission the caller already holds.
 	if strings.Contains(env.Error.Message, "rl_cccccccccccc_1") {
 		t.Error("the refusal confirmed the record exists")
 	}
@@ -197,8 +191,6 @@ func TestV1ApplyGetKeepsTheOwnershipRule(t *testing.T) {
 	}
 }
 
-// historyServer writes n snapshots and returns a server whose history store
-// holds them.
 func historyServer(t *testing.T, n int) *Server {
 	t.Helper()
 	dir := t.TempDir()
@@ -207,14 +199,11 @@ func historyServer(t *testing.T, n int) *Server {
 		if _, err := s.hist.snapshot(fmt.Appendf(nil, "[global]\nlog_level = \"info\" # %d\n", i)); err != nil {
 			t.Fatalf("snapshot %d: %v", i, err)
 		}
-		// The id encodes a timestamp; keep them distinct and ordered.
 		time.Sleep(2 * time.Millisecond)
 	}
 	return s
 }
 
-// TestV1HistoryListPaginates covers §24a's rule for the only unbounded v1
-// collection: newest first, default 50, cap 200, opaque cursor.
 func TestV1HistoryListPaginates(t *testing.T) {
 	s := historyServer(t, 7)
 
@@ -222,13 +211,12 @@ func TestV1HistoryListPaginates(t *testing.T) {
 	if len(first.Entries) != 3 {
 		t.Fatalf("first page has %d entries, want 3", len(first.Entries))
 	}
-	if first.Limit != 3 {
-		t.Fatalf("limit = %d", first.Limit)
+	if first.Limit != 3 || first.LimitClamped {
+		t.Fatalf("first page limit metadata = %+v", first)
 	}
 	if first.NextCursor == "" {
 		t.Fatal("no cursor with more entries remaining")
 	}
-	// Newest first, by id, which is monotonic by construction.
 	for i := 1; i < len(first.Entries); i++ {
 		if first.Entries[i-1].ID < first.Entries[i].ID {
 			t.Fatalf("entries are not newest-first: %q before %q", first.Entries[i-1].ID, first.Entries[i].ID)
@@ -240,7 +228,6 @@ func TestV1HistoryListPaginates(t *testing.T) {
 	if len(second.Entries) != 3 {
 		t.Fatalf("second page has %d entries, want 3", len(second.Entries))
 	}
-	// The pages must not overlap.
 	seen := map[string]bool{}
 	for _, e := range append(append([]adminapi.HistoryEntry{}, first.Entries...), second.Entries...) {
 		if seen[e.ID] {
@@ -259,25 +246,60 @@ func TestV1HistoryListPaginates(t *testing.T) {
 	}
 }
 
-func TestV1HistoryListDefaultAndCap(t *testing.T) {
-	s := historyServer(t, 2)
+func TestV1HistoryListDefaultAndClamp(t *testing.T) {
+	s := historyServer(t, 4)
 
-	def := decodeInto[adminapi.HistoryListResponse](t, getV1(t, s, "/api/v1/config/history", ""))
-	if def.Limit != adminapi.HistoryLimitDefault {
-		t.Fatalf("default limit = %d, want %d", def.Limit, adminapi.HistoryLimitDefault)
+	cases := []struct {
+		query   string
+		want    int
+		clamped bool
+	}{
+		{"", 50, false},
+		{"1", 1, false},
+		{"50", 50, false},
+		{"200", 200, false},
+		{"0", 1, true},
+		{"-1", 1, true},
+		{"201", 200, true},
+		{"1000", 200, true},
+	}
+	for _, tc := range cases {
+		path := "/api/v1/config/history"
+		if tc.query != "" {
+			path += "?limit=" + tc.query
+		}
+		rr := getV1(t, s, path, "")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("limit=%q produced %d: %s", tc.query, rr.Code, rr.Body.String())
+		}
+		got := decodeInto[adminapi.HistoryListResponse](t, rr)
+		if got.Limit != tc.want || got.LimitClamped != tc.clamped {
+			t.Errorf("limit=%q got limit=%d clamped=%v; want %d/%v", tc.query, got.Limit, got.LimitClamped, tc.want, tc.clamped)
+		}
 	}
 
-	// An out-of-range limit is reported, not silently clamped: a client asking
-	// for 1000 and receiving 200 without being told has a paging bug it cannot
-	// see.
-	for _, bad := range []string{"0", "-1", "201", "abc", "1e3"} {
-		rr := getV1(t, s, "/api/v1/config/history?limit="+bad, "")
+	lower := decodeInto[adminapi.HistoryListResponse](t, getV1(t, s, "/api/v1/config/history?limit=0", ""))
+	if len(lower.Entries) > 1 {
+		t.Fatalf("lower-clamped page has %d entries, want at most 1", len(lower.Entries))
+	}
+	if lower.NextCursor == "" {
+		t.Fatal("lower-clamped first page should expose a continuation cursor")
+	}
+	continued := decodeInto[adminapi.HistoryListResponse](t,
+		getV1(t, s, "/api/v1/config/history?limit=0&cursor="+lower.NextCursor, ""))
+	if continued.Limit != 1 || !continued.LimitClamped {
+		t.Fatalf("clamped cursor continuation lost normalization metadata: %+v", continued)
+	}
+
+	for _, malformed := range []string{"abc", "1e3"} {
+		rr := getV1(t, s, "/api/v1/config/history?limit="+malformed, "")
 		if rr.Code != http.StatusBadRequest {
-			t.Errorf("limit=%s produced %d, want 400", bad, rr.Code)
+			t.Errorf("limit=%s produced %d, want 400", malformed, rr.Code)
 			continue
 		}
-		if env := decodeEnvelope(t, rr); env.Error.Details.Field != "limit" {
-			t.Errorf("limit=%s: details.field = %q", bad, env.Error.Details.Field)
+		env := decodeEnvelope(t, rr)
+		if env.Error.Code != adminapi.CodeInvalidRequest || env.Error.Details.Field != "limit" {
+			t.Errorf("limit=%s: envelope = %+v", malformed, env.Error)
 		}
 	}
 }
@@ -293,8 +315,6 @@ func TestV1HistoryListRejectsAnUnknownCursor(t *testing.T) {
 	}
 }
 
-// TestV1HistoryListCarriesNoBodiesOrActors: a snapshot is a configuration file
-// and may hold literal secrets, and attribution belongs to the audit API.
 func TestV1HistoryListCarriesNoBodiesOrActors(t *testing.T) {
 	const secret = "super-secret-upstream-password"
 	dir := t.TempDir()
@@ -323,8 +343,6 @@ func TestV1HistoryListCarriesNoBodiesOrActors(t *testing.T) {
 	}
 }
 
-// TestV1HistoryListEmptyIsAnArrayNotNull: a client iterating the result must
-// not have to special-case null.
 func TestV1HistoryListEmptyIsAnArrayNotNull(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{HistoryDir: t.TempDir(), HistoryKeep: 50}, Deps{})
 	rr := getV1(t, s, "/api/v1/config/history", "")
@@ -333,9 +351,6 @@ func TestV1HistoryListEmptyIsAnArrayNotNull(t *testing.T) {
 	}
 }
 
-// TestV1HistoryStorageFailureIsReportedAsUnavailable, not as a validation
-// error: the caller did nothing wrong and retrying the same request is the
-// correct response.
 func TestV1HistoryStorageFailureIsReportedAsUnavailable(t *testing.T) {
 	dir := t.TempDir()
 	s := newTestServer(t, config.AdminConfig{HistoryDir: dir, HistoryKeep: 50}, Deps{})
@@ -366,9 +381,6 @@ func TestV1HistoryStorageFailureIsReportedAsUnavailable(t *testing.T) {
 	}
 }
 
-// TestV1ConfigReadRoutesAreSideEffectFree: every operation in this group is a
-// read, and a read that mutated would be the worst possible surprise in a CLI
-// that runs them to decide whether to mutate.
 func TestV1ConfigReadRoutesAreSideEffectFree(t *testing.T) {
 	var writes int
 	s := newTestServer(t, config.AdminConfig{HistoryDir: t.TempDir(), HistoryKeep: 50}, Deps{
@@ -397,7 +409,6 @@ func TestV1ConfigReadRoutesAreSideEffectFree(t *testing.T) {
 	}
 }
 
-// TestV1ConfigGroupRejectsNonGET keeps the whole group on one convention.
 func TestV1ConfigGroupRejectsNonGET(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{HistoryDir: t.TempDir()}, Deps{
 		ManagedApplies: NewManagedApplyRegistry(0, 0),

@@ -8,39 +8,20 @@ import (
 	"flag"
 	"fmt"
 
+	"jul/internal/adminapi"
 	"jul/internal/buildcaps"
 )
 
 // capabilitiesOutput is the stable JSON contract of `jul capabilities`.
-// Fields are additive; existing keys are never renamed or removed.
 type capabilitiesOutput struct {
-	Product   string          `json:"product"`
-	Version   string          `json:"version"`
-	Features  buildcaps.Flags `json:"features"`
-	ExitCodes []capExitCode   `json:"exit_codes"`
-}
-
-// capExitCode is one row of the canonical exit-code table.
-type capExitCode struct {
-	Code    int    `json:"code"`
-	Meaning string `json:"meaning"`
-}
-
-// exitCodes is the canonical exit-code contract for every jul subcommand.
-// The same table is part of `jul capabilities --json` output and is referenced
-// in docs/configuration.md.
-var exitCodes = []capExitCode{
-	{0, "success / clean shutdown / healthy probe"},
-	{1, "error / validation failed / unhealthy probe / fmt would change the file"},
-	{2, "usage or config error (bad flags, missing required argument, disabled admin), or lint -strict warnings"},
+	Product   string              `json:"product"`
+	Version   string              `json:"version"`
+	Features  buildcaps.Flags     `json:"features"`
+	ExitCodes []adminapi.ExitCode `json:"exit_codes"`
 }
 
 // cmdCapabilities reports which optional features are compiled into this binary
-// and the canonical exit-code contract. Intended for CI pipelines, deployment
-// automation, and diagnostic tooling that need to confirm what the binary
-// supports before running a full server.
-//
-// Exit codes: 0 ok, 2 usage error.
+// and the canonical ADR 0019 §33 exit-code contract.
 func cmdCapabilities(args []string) int {
 	fs := flag.NewFlagSet("capabilities", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -53,7 +34,7 @@ func cmdCapabilities(args []string) int {
 		Product:   productName,
 		Version:   version,
 		Features:  buildcaps.Compiled(),
-		ExitCodes: exitCodes,
+		ExitCodes: adminapi.ExitCodes(),
 	}
 
 	if *jsonOut || !isTTY(stdout) {
@@ -63,7 +44,6 @@ func cmdCapabilities(args []string) int {
 		return 0
 	}
 
-	// Human-readable output for interactive use.
 	fmt.Fprintf(stdout, "%s %s\n", out.Product, out.Version)
 	fmt.Fprintf(stdout, "\ncompiled features:\n")
 	for _, row := range out.Features.Named() {

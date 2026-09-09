@@ -176,3 +176,43 @@ func TestManagedApplyRegistry_RetainsWithinCapacity(t *testing.T) {
 		t.Fatal("record within capacity was evicted despite being under cap")
 	}
 }
+
+func TestManagedApplyRegistryAbortPendingOnlyRemovesPendingReservation(t *testing.T) {
+	r := NewManagedApplyRegistry(0, 0)
+	const pendingID = "rl_abcdef123456_31"
+	if err := r.BeginPending(ManagedApplyRecord{
+		ID: pendingID, Operation: ApplyOperationConfigApply,
+		IdempotencyKey: "pending-key-31", IdempotencyPrincipal: "alice",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !r.AbortPending(pendingID) {
+		t.Fatal("AbortPending did not remove a pending reservation")
+	}
+	if _, ok := r.Get(pendingID); ok {
+		t.Fatal("pending reservation remained after AbortPending")
+	}
+	if r.AbortPending(pendingID) {
+		t.Fatal("AbortPending reported success for a missing record")
+	}
+	if r.AbortPending("not-an-apply-id") {
+		t.Fatal("AbortPending accepted an invalid apply id")
+	}
+
+	const terminalID = "rl_abcdef123456_32"
+	if err := r.BeginPending(ManagedApplyRecord{ID: terminalID, Operation: ApplyOperationConfigApply}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Complete(ManagedApplyRecord{
+		ID: terminalID, Operation: ApplyOperationConfigApply,
+		Result: ConfigApplyResult{ApplyID: terminalID, Mode: "hot", OK: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r.AbortPending(terminalID) {
+		t.Fatal("AbortPending removed a terminal record")
+	}
+	if _, ok := r.Get(terminalID); !ok {
+		t.Fatal("terminal record disappeared")
+	}
+}

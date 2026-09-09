@@ -15,13 +15,8 @@ import (
 	"jul/internal/configcontract"
 )
 
-// bearerSchemeName is the security scheme every authenticated operation
-// references.
 const bearerSchemeName = "adminToken"
 
-// Build renders the external contract. It returns an error rather than an
-// approximation whenever the catalog and the DTOs disagree, so a mistake stops
-// the generator instead of reaching the published document.
 func Build() (*Document, error) {
 	doc := &Document{
 		OpenAPI: "3.1.0",
@@ -31,16 +26,11 @@ func Build() (*Document, error) {
 			Description: strings.Join([]string{
 				"The supported, versioned external administration API.",
 				"",
-				"Only the operations described here are part of the compatibility contract. The admin listener serves many " +
-					"other routes; they exist for the Console and may change shape in any release, and being served is not the " +
-					"same as being supported. See docs/compatibility.md.",
+				"Only the operations described here are part of the compatibility contract. The admin listener serves many other routes; they exist for the Console and may change shape in any release.",
 				"",
-				"Every authenticated route requires a transport that is either TLS-terminated or bound to loopback. A request " +
-					"that arrives in cleartext on a non-loopback listener is refused with 403 insecure_transport before " +
-					"authentication, on reads as well as writes, and the refusal is not configurable.",
+				"Every authenticated route requires a transport that is either TLS-terminated or bound to loopback. Cleartext non-loopback requests are refused before authentication.",
 				"",
-				"This document is generated from the Go route catalog and the Go request and response types. It is not edited " +
-					"by hand and an edit to it will be overwritten; change the source and regenerate.",
+				"Request bodies, query/header parameters, response types and errors are generated from the authoritative Go route catalog and Go wire types. This document is never hand-edited.",
 			}, "\n"),
 			License: &License{Name: "GNU Affero General Public License v3.0 or later", Identifier: "AGPL-3.0-or-later"},
 		},
@@ -50,11 +40,9 @@ func Build() (*Document, error) {
 			Responses: map[string]*Response{},
 			SecuritySchemes: map[string]*SecurityScheme{
 				bearerSchemeName: {
-					Type:   "http",
-					Scheme: "bearer",
-					Description: "An admin bearer token. Tokens are issued out of band through the configuration file; there is no " +
-						"token-issuance API. No example is given here, and none should be copied from documentation into a " +
-						"deployment: an example that resembles a credential is a credential someone will paste into a configuration file.",
+					Type:        "http",
+					Scheme:      "bearer",
+					Description: "An admin bearer token issued out of band through configuration. There is no token-issuance endpoint and no credential example is published.",
 				},
 			},
 		},
@@ -80,15 +68,19 @@ func Build() (*Document, error) {
 	return doc, nil
 }
 
-// addSchemas reflects every registered DTO into a component.
 func addSchemas(doc *Document) error {
 	types := adminapi.SchemaTypes()
+	for name, typ := range admin.ExternalSchemaTypes() {
+		if _, exists := types[name]; exists {
+			return fmt.Errorf("schema %s is registered by both adminapi and admin", name)
+		}
+		types[name] = typ
+	}
 	names := make([]string, 0, len(types))
 	for name := range types {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-
 	for _, name := range names {
 		s, err := schemaFor(types[name], name)
 		if err != nil {
@@ -97,8 +89,6 @@ func addSchemas(doc *Document) error {
 		doc.Components.Schemas[name] = s
 	}
 
-	// The error code catalogue is a component of its own so a generated client
-	// gets an enum it can switch on exhaustively, rather than a bare string.
 	codes := errorCodes()
 	enum := make([]string, 0, len(codes))
 	var meanings []string
@@ -111,48 +101,36 @@ func addSchemas(doc *Document) error {
 		meanings = append(meanings, fmt.Sprintf("- `%s` (%d): %s", c, spec.Status, spec.Meaning))
 	}
 	doc.Components.Schemas["ErrorCode"] = &Schema{
-		Type: "string",
-		Enum: enum,
-		Description: "The bounded external error-code catalogue. `code` is the machine contract; the accompanying `message` " +
-			"is for humans and may change in any release. Each code maps to exactly one HTTP status.\n\n" +
-			strings.Join(meanings, "\n"),
+		Type:        "string",
+		Enum:        enum,
+		Description: "The bounded external error-code catalogue. `code` is the machine contract; `message` is human text.\n\n" + strings.Join(meanings, "\n"),
 	}
-	// The envelope's own code field refers to that enum rather than repeating
-	// it, which is what keeps one definition of the catalogue in the document.
 	if body, ok := doc.Components.Schemas["ErrorBody"]; ok {
 		body.Properties["code"] = &Schema{Ref: "#/components/schemas/ErrorCode"}
 	}
-
 	for name, ns := range adminapi.NonJSONSchemas {
 		doc.Components.Schemas[name] = &Schema{Type: "string", Description: ns.Description}
+	}
+	doc.Components.Schemas["RawTOML"] = &Schema{
+		Type:        "string",
+		Description: "Exact candidate TOML bytes. The server hashes and processes the received bytes; clients retrying under Idempotency-Key must resend byte-identical content.",
 	}
 	return nil
 }
 
-// addErrorResponses creates one reusable response per catalogue code. An
-// operation references the ones it can return, so the document enumerates the
-// conditions a client must handle rather than describing a generic failure.
 func addErrorResponses(doc *Document) {
 	for _, c := range errorCodes() {
 		spec, _ := adminapi.Spec(c)
 		doc.Components.Responses[errorResponseName(c)] = &Response{
 			Description: fmt.Sprintf("`%s` — %s", c, spec.Meaning),
 			Headers: map[string]Header{
-				"X-Request-ID": {
-					Description: "The server-minted correlation identifier, identical to the envelope's request_id. A " +
-						"client-supplied value is never reflected.",
-					Schema: &Schema{Type: "string"},
-				},
+				"X-Request-ID": {Description: "Server-minted correlation identifier, identical to error.request_id.", Schema: &Schema{Type: "string"}},
 			},
-			Content: map[string]MediaType{
-				"application/json": {Schema: &Schema{Ref: "#/components/schemas/ErrorEnvelope"}},
-			},
+			Content: map[string]MediaType{"application/json": {Schema: &Schema{Ref: "#/components/schemas/ErrorEnvelope"}}},
 		}
 	}
 }
 
-// errorResponseName turns a snake_case code into the CamelCase component name
-// its response is registered under.
 func errorResponseName(c adminapi.Code) string {
 	parts := strings.Split(string(c), "_")
 	var b strings.Builder
@@ -166,12 +144,6 @@ func errorResponseName(c adminapi.Code) string {
 	return b.String()
 }
 
-// addPaths renders every externally classified route. Nothing else reaches the
-// document: an internal route has no ExternalOperation, so it cannot be
-// rendered even by mistake.
-//
-// The routes are a parameter rather than being read from the catalog here so a
-// test can drive the per-method branches without mutating the global catalog.
 func addPaths(doc *Document, routes []admin.ExternalRoute) error {
 	for _, r := range routes {
 		op, err := buildOperation(r, doc)
@@ -215,26 +187,47 @@ func buildOperation(r admin.ExternalRoute, doc *Document) (*Operation, error) {
 		Responses:   map[string]*Response{},
 	}
 	if r.Sunset != "" {
-		op.Description = "Deprecated. This operation keeps working until " + r.Sunset +
-			" and responds with Deprecation and Sunset headers. Migrate before that date."
+		op.Description = "Deprecated. This operation keeps working until " + r.Sunset + " and responds with Deprecation and Sunset headers."
 	}
 	if r.Public {
-		// An explicit empty security requirement is how OpenAPI says "this
-		// operation takes no credential", overriding a document-level default.
 		op.Security = []map[string][]string{{}}
 	} else {
 		op.Security = []map[string][]string{{bearerSchemeName: {}}}
 	}
 
-	// Path parameters are derived from the pattern rather than declared, so a
-	// renamed segment cannot leave a stale parameter behind.
 	for _, name := range pathParameters(r.Pattern) {
+		op.Parameters = append(op.Parameters, Parameter{Name: name, In: "path", Required: true, Schema: &Schema{Type: "string"}})
+	}
+	for _, p := range r.Operation.Parameters {
+		if p.In != "query" && p.In != "header" {
+			return nil, fmt.Errorf("operation %s parameter %s has unsupported location %q", r.Operation.ID, p.Name, p.In)
+		}
+		if p.Type != "string" && p.Type != "integer" && p.Type != "boolean" {
+			return nil, fmt.Errorf("operation %s parameter %s has unsupported type %q", r.Operation.ID, p.Name, p.Type)
+		}
 		op.Parameters = append(op.Parameters, Parameter{
-			Name:     name,
-			In:       "path",
-			Required: true,
-			Schema:   &Schema{Type: "string"},
+			Name: p.Name, In: p.In, Required: p.Required, Description: p.Description,
+			Schema: &Schema{Type: p.Type, Enum: p.Enum, Default: p.Default},
 		})
+	}
+	if r.Operation.RequestBody != "" {
+		if _, ok := doc.Components.Schemas[r.Operation.RequestBody]; !ok {
+			return nil, fmt.Errorf("operation %s names request schema %q, which is not registered in internal/adminapi.SchemaTypes or internal/admin.ExternalSchemaTypes", r.Operation.ID, r.Operation.RequestBody)
+		}
+		contentTypes := r.Operation.RequestContentTypes
+		if len(contentTypes) == 0 {
+			contentTypes = []string{"application/json"}
+		}
+		content := make(map[string]MediaType, len(contentTypes))
+		for _, contentType := range contentTypes {
+			content[contentType] = MediaType{Schema: &Schema{Ref: "#/components/schemas/" + r.Operation.RequestBody}}
+		}
+		description := "Request body."
+		if r.Operation.MaxBodyBytes > 0 {
+			description = fmt.Sprintf("Request body. Maximum accepted size: %d bytes; larger bodies return payload_too_large before unbounded allocation.", r.Operation.MaxBodyBytes)
+		}
+		op.RequestBody = &RequestBody{Required: true, Description: description, Content: content}
+		op.MaxBodyBytes = r.Operation.MaxBodyBytes
 	}
 
 	if err := addSuccessResponse(op, r, doc); err != nil {
@@ -255,11 +248,16 @@ func buildOperation(r admin.ExternalRoute, doc *Document) (*Operation, error) {
 		if !ok {
 			return nil, fmt.Errorf("operation %s lists error code %q, which is not in the catalogue", r.Operation.ID, c)
 		}
-		op.Responses[strconv.Itoa(spec.Status)] = &Response{
-			Description: fmt.Sprintf("`%s` — %s", c, spec.Meaning),
-			Content: map[string]MediaType{
-				"application/json": {Schema: &Schema{Ref: "#/components/schemas/ErrorEnvelope"}},
-			},
+		op.ErrorCodes = append(op.ErrorCodes, string(c))
+		key := strconv.Itoa(spec.Status)
+		entry := fmt.Sprintf("`%s` — %s", c, spec.Meaning)
+		if existing := op.Responses[key]; existing != nil {
+			existing.Description += "\n\n" + entry
+			continue
+		}
+		op.Responses[key] = &Response{
+			Description: entry,
+			Content:     map[string]MediaType{"application/json": {Schema: &Schema{Ref: "#/components/schemas/ErrorEnvelope"}}},
 		}
 	}
 	return op, nil
@@ -274,33 +272,29 @@ func addSuccessResponse(op *Operation, r admin.ExternalRoute, doc *Document) err
 	if name == "" {
 		return fmt.Errorf("operation %s names no response schema", r.Operation.ID)
 	}
-
 	mediaType := "application/json"
 	if ns, ok := adminapi.NonJSONSchemas[name]; ok {
 		mediaType = ns.MediaType
 	} else if _, ok := doc.Components.Schemas[name]; !ok {
-		return fmt.Errorf("operation %s names response schema %q, which is not registered in internal/adminapi", r.Operation.ID, name)
+		return fmt.Errorf("operation %s names response schema %q, which is not registered in internal/adminapi.SchemaTypes or internal/admin.ExternalSchemaTypes", r.Operation.ID, name)
 	}
-
-	resp := &Response{
-		Description: "Success.",
-		Content: map[string]MediaType{
-			mediaType: {Schema: &Schema{Ref: "#/components/schemas/" + name}},
-		},
-	}
-	if !r.Public {
-		resp.Headers = map[string]Header{
-			"X-Request-ID": {
-				Description: "The server-minted correlation identifier for this request.",
-				Schema:      &Schema{Type: "string"},
-			},
+	makeResponse := func(description string) *Response {
+		resp := &Response{Description: description, Content: map[string]MediaType{mediaType: {Schema: &Schema{Ref: "#/components/schemas/" + name}}}}
+		if !r.Public {
+			resp.Headers = map[string]Header{"X-Request-ID": {Description: "Server-minted correlation identifier for this request.", Schema: &Schema{Type: "string"}}}
 		}
+		return resp
 	}
-	op.Responses[strconv.Itoa(status)] = resp
+	op.Responses[strconv.Itoa(status)] = makeResponse("Success.")
+	for _, alternate := range r.Operation.AdditionalSuccessStatuses {
+		if alternate < 200 || alternate >= 300 || alternate == status {
+			return fmt.Errorf("operation %s has invalid additional success status %d", r.Operation.ID, alternate)
+		}
+		op.Responses[strconv.Itoa(alternate)] = makeResponse("Accepted/non-terminal success. Follow the operation's terminal fields and polling contract rather than inferring completion from HTTP status alone.")
+	}
 	return nil
 }
 
-// pathParameters extracts {name} segments from a route pattern, in order.
 func pathParameters(pattern string) []string {
 	var out []string
 	rest := pattern
@@ -339,20 +333,6 @@ func tagsFor(pattern string) []string {
 	}
 }
 
-// checkResourcePaths holds the document to the generated resource catalog
-// (ADR 0019 §21, §29). A per-resource external path exists in the document
-// because the catalog says the resource has a durable identity addressable at
-// that path — not because someone wrote the path down in two places.
-//
-// It applies to per-resource collection addressing — /api/v1/<collection>/{id} —
-// and not to operation identities such as /api/v1/config/applies/{apply_id} or
-// the history id, which name operations rather than configuration resources and
-// deliberately have no entry in the resource catalog (ADR 0019 §21).
-//
-// The check is one-directional on purpose: the catalog may name a path this
-// build has not published yet, and that is the ordinary state while the
-// external surface is being filled in. What must never happen is the reverse —
-// a per-resource path in the published contract that no resource claims.
 func checkResourcePaths(doc *Document) error {
 	claimed := make(map[string]string)
 	for _, res := range configcontract.ResourceCatalog {
@@ -365,34 +345,24 @@ func checkResourcePaths(doc *Document) error {
 			continue
 		}
 		if _, ok := claimed[pattern]; !ok {
-			return fmt.Errorf("path %s addresses a resource, but no entry in the generated resource catalog claims it.\n"+
-				"Add the resource to internal/configcontract.ResourceCatalog with that ExternalPath, or remove the path: "+
-				"a per-resource URI that no resource claims is a second, unchecked identity model", pattern)
+			return fmt.Errorf("path %s addresses a resource, but no entry in internal/configcontract.ResourceCatalog claims it; add the resource with that ExternalPath or remove the path", pattern)
 		}
 	}
 	return nil
 }
 
-// checkCatalogPathsAreServed holds the catalog to the document: the other
-// direction, and a different failure. A catalog entry naming a path nothing
-// serves documents an identity clients cannot use, which is worse than an
-// undocumented one because it reads as a promise.
 func checkCatalogPathsAreServed(doc *Document) error {
 	for _, res := range configcontract.ResourceCatalog {
 		if res.ExternalPath == "" {
 			continue
 		}
 		if _, ok := doc.Paths[res.ExternalPath]; !ok {
-			return fmt.Errorf("resource %q claims external path %s, but the contract publishes no such path.\n"+
-				"Serve it, or clear the ExternalPath in internal/configcontract.ResourceCatalog: a catalog entry "+
-				"naming an unserved address documents an identity clients cannot use", res.Kind, res.ExternalPath)
+			return fmt.Errorf("resource %q in internal/configcontract.ResourceCatalog claims external path %s, but the contract publishes no such path; serve it or clear that ExternalPath", res.Kind, res.ExternalPath)
 		}
 	}
 	return nil
 }
 
-// isResourceAddressPath reports whether a pattern addresses one element of a v1
-// collection: exactly /api/v1/<collection>/{param}.
 func isResourceAddressPath(pattern string) bool {
 	rest, ok := strings.CutPrefix(pattern, "/api/v1/")
 	if !ok {

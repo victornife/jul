@@ -20,6 +20,8 @@ func TestFinalizedAuditOperation(t *testing.T) {
 		{ApplyOperationLegacyRaw, "config.raw.finalized"},
 		{ApplyOperationSettings, "config.settings.finalized"},
 		{ApplyOperationRollback, "config.rollback.finalized"},
+		{ApplyOperationAdoptExternal, "config.adopt_external.finalized"},
+		{ApplyOperationDiscardPending, "config.pending_restart.discard.finalized"},
 		{ApplyOperation(""), "config.apply.finalized"},
 		{ApplyOperation("something.unknown"), "config.apply.finalized"},
 	}

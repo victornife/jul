@@ -49,13 +49,26 @@ type Purger interface {
 type ApplyOperation string
 
 const (
-	ApplyOperationConfigApply   ApplyOperation = "config.apply"
-	ApplyOperationPatchApply    ApplyOperation = "config.patch"
-	ApplyOperationLegacyRaw     ApplyOperation = "config.raw"
-	ApplyOperationSettings      ApplyOperation = "config.settings"
-	ApplyOperationRollback      ApplyOperation = "config.rollback"
-	ApplyOperationAdoptExternal ApplyOperation = "config.adopt_external"
+	ApplyOperationConfigApply    ApplyOperation = "config.apply"
+	ApplyOperationPatchApply     ApplyOperation = "config.patch"
+	ApplyOperationLegacyRaw      ApplyOperation = "config.raw"
+	ApplyOperationSettings       ApplyOperation = "config.settings"
+	ApplyOperationRollback       ApplyOperation = "config.rollback"
+	ApplyOperationAdoptExternal  ApplyOperation = "config.adopt_external"
+	ApplyOperationDiscardPending ApplyOperation = "config.pending_restart.discard"
 )
+
+// ManagedApplyIdempotency is the private ADR 0019 §27.1 binding carried from
+// the authenticated external request into the managed-apply coordinator. It is
+// never serialized; the retained copy lives on ManagedApplyRecord and shares
+// that ledger's boot-scoped retention.
+type ManagedApplyIdempotency struct {
+	Key         string
+	Fingerprint [32]byte
+	Method      string
+	Operation   string
+	Principal   string
+}
 
 // ApplyRequestContext carries the authenticated caller from an admin HTTP
 // request through to the managed apply coordinator so async finalizers can
@@ -73,6 +86,12 @@ type ApplyRequestContext struct {
 	// or serialize it; TokenID remains the public audit identifier.
 	TokenDigest string
 	SourceIP    string
+
+	// Idempotency is present only for an external /api/v1 mutation carrying a
+	// valid Idempotency-Key. The coordinator consumes it at the write
+	// linearization point so the pending ledger binding is registered before
+	// any side effect under the same mutation lock (ADR 0019 §27.1).
+	Idempotency *ManagedApplyIdempotency `json:"-"`
 
 	// Baseline is the exact persisted configuration snapshot against which the
 	// HTTP handler performed concurrency, authorization, and reachability
@@ -261,6 +280,17 @@ type ManagedApplyFinalization struct {
 	FinalizationError string
 }
 
+// ManagedApplyAdmission is the pre-side-effect idempotency reservation signal.
+// It is emitted only when Context.Idempotency is non-nil, after validation/CAS
+// has succeeded but before the first write-side effect, while the coordinator
+// still holds the mutation lock that guards that write. The composition root
+// creates the pending ManagedApplyRecord from it.
+type ManagedApplyAdmission struct {
+	Context ApplyRequestContext
+	ApplyID string
+	Mode    string
+}
+
 // ManagedApplyStart is the provisional pending-registration signal for a
 // managed configuration apply (AC-02). The composition root turns it into a
 // pending terminal-ledger record the moment the candidate is persisted and the
@@ -434,6 +464,11 @@ type Deps struct {
 	// state, disk digest mismatch, or changed serving version) returns a
 	// non-nil error and leaves all files untouched.
 	DiscardPendingRestart func() (ConfigApplyResult, error)
+	// DiscardPendingRestartWithContext is the authenticated/context-bearing form
+	// used by /api/v1 so idempotency can be reserved before the discard side
+	// effect. The legacy zero-context closure above remains for internal callers
+	// and tests that do not participate in the external contract.
+	DiscardPendingRestartWithContext func(ApplyRequestContext) (ConfigApplyResult, error)
 	// PendingRestart returns the current managed planned-restart status, or nil
 	// when a staged restart is pending. This is the structured source of truth
 	// for the overview banner and the /api/config/pending-restart endpoint.
@@ -747,6 +782,10 @@ func finalizedAuditOperation(op ApplyOperation) string {
 		return "config.settings.finalized"
 	case ApplyOperationRollback:
 		return "config.rollback.finalized"
+	case ApplyOperationAdoptExternal:
+		return "config.adopt_external.finalized"
+	case ApplyOperationDiscardPending:
+		return "config.pending_restart.discard.finalized"
 	default:
 		return "config.apply.finalized"
 	}

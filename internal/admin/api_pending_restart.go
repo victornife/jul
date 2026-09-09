@@ -8,7 +8,10 @@ package admin
 //   GET  /api/config/pending-restart         — read current staged status
 //   POST /api/config/pending-restart/discard — discard and restore previous
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 // handlePendingRestart returns the current managed planned-restart status.
 // When no staged restart is pending it returns {pending: false} rather than
@@ -45,7 +48,7 @@ func (s *Server) handleDiscardPendingRestart(w http.ResponseWriter, r *http.Requ
 	if s.denyIfFileOwned(w, r, "config.stage_restart.discarded") {
 		return
 	}
-	if s.deps.DiscardPendingRestart == nil {
+	if s.deps.DiscardPendingRestart == nil && s.deps.DiscardPendingRestartWithContext == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
@@ -55,16 +58,54 @@ func (s *Server) handleDiscardPendingRestart(w http.ResponseWriter, r *http.Requ
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
-	// Snapshot the staged config into history BEFORE discarding it so the
-	// operator can recover the staged candidate via expert history if needed
-	// (M-04 fix: discard must be reversible through history).
+	// Read the staged bytes before the discard, but defer the history write
+	// until after the coordinator has reserved any external idempotency key.
+	// The read is side-effect free; recordHistory is not. This ordering preserves
+	// M-04 reversibility without violating ADR 0019 §27.1's requirement that the
+	// key be registered before every side effect.
+	var stagedBytes []byte
 	if s.deps.ReadConfigRaw != nil {
-		if stagedBytes, err := s.deps.ReadConfigRaw(); err == nil {
-			s.recordHistory(stagedBytes)
+		if raw, err := s.deps.ReadConfigRaw(); err == nil {
+			stagedBytes = raw
 		}
 	}
 
-	result, err := s.deps.DiscardPendingRestart()
+	var (
+		result ConfigApplyResult
+		err    error
+	)
+	if s.deps.DiscardPendingRestartWithContext != nil {
+		reqCtx := applyRequestContext(r, ApplyOperationDiscardPending)
+		s.bindManagedApplyDeadline(&reqCtx)
+		// /api/v1 makes base_version mandatory. Bind the contextual discard to
+		// the exact authorized raw-first snapshot and let the coordinator verify
+		// it again at the mutation linearization point. Internal Console callers
+		// retain their historical no-force-check behavior.
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			state, stateErr := s.currentWriteState(false)
+			if stateErr != nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cannot load current configuration: " + stateErr.Error()})
+				return
+			}
+			base := strings.TrimSpace(r.URL.Query().Get("base_version"))
+			if base == "" || base != state.Version {
+				writeJSON(w, http.StatusConflict, conflictResponse{
+					OK:             false,
+					Conflict:       true,
+					Message:        "The configuration changed since this discard was prepared; reload and try again.",
+					CurrentVersion: state.Version,
+				})
+				return
+			}
+			reqCtx.Baseline = &state
+			if len(stagedBytes) == 0 {
+				stagedBytes = append([]byte(nil), state.Raw...)
+			}
+		}
+		result, err = s.deps.DiscardPendingRestartWithContext(reqCtx)
+	} else {
+		result, err = s.deps.DiscardPendingRestart()
+	}
 	if err != nil {
 		s.recordAudit(r, "config.stage_restart.discarded", "config", "failure",
 			"discard failed: "+err.Error())
@@ -76,6 +117,19 @@ func (s *Server) handleDiscardPendingRestart(w http.ResponseWriter, r *http.Requ
 			"message": "Discard failed: " + err.Error(),
 		})
 		return
+	}
+	if result.Conflict || !result.OK {
+		s.recordAudit(r, "config.stage_restart.discarded", "config", "failure", result.Message)
+		writeJSON(w, http.StatusConflict, conflictResponse{
+			OK:             false,
+			Conflict:       result.Conflict,
+			Message:        result.Message,
+			CurrentVersion: result.CurrentVersion,
+		})
+		return
+	}
+	if len(stagedBytes) > 0 {
+		s.recordHistory(stagedBytes)
 	}
 	s.recordAudit(r, "config.stage_restart.discarded", "config", "success",
 		"staged restart discarded; previous configuration restored")

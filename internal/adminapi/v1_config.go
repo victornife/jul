@@ -129,8 +129,12 @@ type HistoryListResponse struct {
 	// Entries are newest first, by history id, which is monotonic by
 	// construction.
 	Entries []HistoryEntry `json:"entries"`
-	// Limit is the page size actually applied, after the default and the cap.
+	// Limit is the effective page size actually applied after the default and
+	// normalization to the published [1,200] server range.
 	Limit int `json:"limit"`
+	// LimitClamped reports whether a syntactically valid integer was normalized
+	// to the published range. It is omitted on ordinary in-range requests.
+	LimitClamped bool `json:"limit_clamped,omitempty"`
 	// NextCursor is supplied when more entries exist. **Treat it as opaque**:
 	// its format is not part of the contract and may change. Pass it back
 	// verbatim as `?cursor=`; never construct one.
@@ -140,6 +144,7 @@ type HistoryListResponse struct {
 // History pagination bounds, published so a client knows them without
 // discovering them (ADR 0019 §24a).
 const (
+	HistoryLimitMin     = 1
 	HistoryLimitDefault = 50
 	HistoryLimitMax     = 200
 )
