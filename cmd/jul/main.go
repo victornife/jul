@@ -36,9 +36,14 @@ func main() {
 }
 
 func run() int {
-	// Local diagnostics are kept in a separate dispatch seam so the existing
-	// command router remains stable while doctor and support-bundle evolve
-	// together. All other subcommands retain their established dispatch path.
+	// AUTO-04 remote automation commands are isolated behind their own dispatch
+	// seam. They are additive and never fall through into the local file-based
+	// command/legacy flag paths.
+	if handled, code := dispatchRemoteSubcommand(os.Args[1:]); handled {
+		return code
+	}
+	// Local diagnostics are kept in a separate dispatch seam so doctor and
+	// support-bundle remain local even though `jul diagnostics` is remote.
 	if handled, code := dispatchDiagnosticsSubcommand(os.Args[1:]); handled {
 		return code
 	}
@@ -53,7 +58,7 @@ func run() int {
 		checkOnly   bool
 		showVersion bool
 	)
-	flag.Usage = extendedUsage
+	flag.Usage = remoteExtendedUsage
 	flag.StringVar(&configPath, "config", "server.toml", "path to the TOML configuration file")
 	flag.BoolVar(&checkOnly, "check", false, "validate the configuration and exit")
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
