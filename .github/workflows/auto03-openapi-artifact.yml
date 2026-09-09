@@ -1,0 +1,30 @@
+name: AUTO-03 OpenAPI artifact
+
+on:
+  push:
+    branches:
+      - auto03-close-150-v1
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: generate external API contract
+        run: make api-contract-generate
+      - name: upload generated OpenAPI
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: auto03-openapi-${{ github.sha }}
+          path: docs/generated/openapi.json
+          if-no-files-found: error
+          retention-days: 1
