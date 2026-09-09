@@ -15,6 +15,11 @@ export default mergeConfig(
       globals: true,
       include: ["src/**/*.{test,spec}.{ts,tsx}"],
       setupFiles: ["src/test/setup.ts"],
+      // Node's built-in Web Storage API (stable since Node 24) shadows jsdom's
+      // window.localStorage with a stub that throws without --localstorage-file,
+      // while window.sessionStorage is unaffected. Disable it so jsdom's own
+      // Storage implementation is used in tests.
+      execArgv: ["--no-experimental-webstorage"],
       coverage: {
         provider: "v8",
         reporter: ["text", "html"],
