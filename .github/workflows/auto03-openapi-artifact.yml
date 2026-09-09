@@ -51,10 +51,12 @@ jobs:
             git commit -m 'docs(api): regenerate AUTO-03 contract [auto03-generated]'
             git push origin HEAD:auto03-close-150-v1
           fi
-      - name: upload generated OpenAPI
+      - name: pack branch snapshot
+        run: tar --exclude=.git -czf /tmp/auto03-source.tar.gz .
+      - name: upload branch snapshot
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: auto03-openapi-${{ github.sha }}
-          path: docs/generated/openapi.json
+          name: auto03-source-${{ github.sha }}
+          path: /tmp/auto03-source.tar.gz
           if-no-files-found: error
           retention-days: 1
