@@ -1,0 +1,34 @@
+name: AUTO-03 one-shot format fix
+
+on:
+  push:
+    branches:
+      - auto03-close-150-v1
+    paths:
+      - .github/workflows/auto03-format-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: auto03-close-150-v1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: format and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          gofmt -w internal/admin/apiv1_operations_coverage_test.go
+          rm .github/workflows/auto03-format-fix.yml
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add internal/admin/apiv1_operations_coverage_test.go .github/workflows/auto03-format-fix.yml
+          git commit -m 'style(auto03): gofmt coverage tests'
+          git push origin HEAD:auto03-close-150-v1
