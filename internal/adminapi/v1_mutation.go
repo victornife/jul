@@ -22,6 +22,10 @@ type ConfigApplyResponse struct {
 	Mode       string `json:"mode,omitempty"`
 	Outcome    string `json:"outcome,omitempty"`
 
+	// IdempotentReplay is true only when this terminal result was returned from
+	// the retained idempotency binding rather than by executing the mutation.
+	IdempotentReplay bool `json:"idempotent_replay,omitempty"`
+
 	PersistedVersion string `json:"persisted_version,omitempty"`
 	DesiredVersion   string `json:"desired_version,omitempty"`
 	ServingVersion   string `json:"serving_version,omitempty"`
