@@ -6,6 +6,8 @@
 package apicontract
 
 import (
+	"encoding/json"
+
 	"jul/internal/admin"
 	"jul/internal/adminapi"
 )
@@ -50,18 +52,20 @@ type PathItem struct {
 }
 
 type Operation struct {
-	OperationID string                `json:"operationId"`
-	Summary     string                `json:"summary"`
-	Description string                `json:"description,omitempty"`
-	Tags        []string              `json:"tags,omitempty"`
-	Deprecated  bool                  `json:"deprecated,omitempty"`
-	Parameters  []Parameter           `json:"parameters,omitempty"`
-	RequestBody *RequestBody          `json:"requestBody,omitempty"`
-	Responses   map[string]*Response  `json:"responses"`
-	Security    []map[string][]string `json:"security,omitempty"`
-	Stability   string                `json:"x-jul-stability"`
-	Permissions []string              `json:"x-jul-permissions,omitempty"`
-	Sunset      string                `json:"x-jul-sunset,omitempty"`
+	OperationID  string                `json:"operationId"`
+	Summary      string                `json:"summary"`
+	Description  string                `json:"description,omitempty"`
+	Tags         []string              `json:"tags,omitempty"`
+	Deprecated   bool                  `json:"deprecated,omitempty"`
+	Parameters   []Parameter           `json:"parameters,omitempty"`
+	RequestBody  *RequestBody          `json:"requestBody,omitempty"`
+	Responses    map[string]*Response  `json:"responses"`
+	Security     []map[string][]string `json:"security,omitempty"`
+	Stability    string                `json:"x-jul-stability"`
+	Permissions  []string              `json:"x-jul-permissions,omitempty"`
+	Sunset       string                `json:"x-jul-sunset,omitempty"`
+	MaxBodyBytes int64                 `json:"x-jul-max-body-bytes,omitempty"`
+	ErrorCodes   []string              `json:"x-jul-error-codes,omitempty"`
 }
 
 type Parameter struct {
@@ -106,17 +110,39 @@ type SecurityScheme struct {
 }
 
 type Schema struct {
-	Ref                  string             `json:"$ref,omitempty"`
-	Type                 string             `json:"type,omitempty"`
-	Format               string             `json:"format,omitempty"`
-	Description          string             `json:"description,omitempty"`
-	Enum                 []string           `json:"enum,omitempty"`
-	Default              any                `json:"default,omitempty"`
-	Items                *Schema            `json:"items,omitempty"`
-	Properties           map[string]*Schema `json:"properties,omitempty"`
-	Required             []string           `json:"required,omitempty"`
-	AdditionalProperties *bool              `json:"additionalProperties,omitempty"`
+	Ref                        string             `json:"$ref,omitempty"`
+	Type                       string             `json:"type,omitempty"`
+	Format                     string             `json:"format,omitempty"`
+	Description                string             `json:"description,omitempty"`
+	Enum                       []string           `json:"enum,omitempty"`
+	Default                    any                `json:"default,omitempty"`
+	Items                      *Schema            `json:"items,omitempty"`
+	Properties                 map[string]*Schema `json:"properties,omitempty"`
+	Required                   []string           `json:"required,omitempty"`
+	AdditionalProperties       *bool              `json:"-"`
+	AdditionalPropertiesSchema *Schema            `json:"-"`
+}
+
+// MarshalJSON renders JSON Schema's additionalProperties union without making
+// the rest of the Go model untyped. Typed objects use the boolean form (`false`)
+// while deliberate dynamic maps use a schema describing their value type.
+func (s Schema) MarshalJSON() ([]byte, error) {
+	type schemaAlias Schema
+	var additional any
+	switch {
+	case s.AdditionalPropertiesSchema != nil:
+		additional = s.AdditionalPropertiesSchema
+	case s.AdditionalProperties != nil:
+		additional = *s.AdditionalProperties
+	}
+	return json.Marshal(struct {
+		schemaAlias
+		AdditionalProperties any `json:"additionalProperties,omitempty"`
+	}{
+		schemaAlias:          schemaAlias(s),
+		AdditionalProperties: additional,
+	})
 }
 
 func externalRoutes() []admin.ExternalRoute { return admin.ExternalRoutes() }
-func errorCodes() []adminapi.Code { return adminapi.Codes() }
+func errorCodes() []adminapi.Code            { return adminapi.Codes() }
