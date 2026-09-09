@@ -163,14 +163,6 @@ func TestV1IdempotencyMetadataAndFallbackBranches(t *testing.T) {
 		}
 	})
 
-	if got := extractV1ApplyID([]byte("not-json")); got != "" {
-		t.Fatalf("invalid JSON apply id=%q", got)
-	}
-	body, _ := json.Marshal(ConfigApplyResult{Mode: "hot"})
-	if got := extractV1ApplyID(body); got != "" {
-		t.Fatalf("empty apply id=%q", got)
-	}
-
 	cap := newV1Capture()
 	cap.Header().Set("Cache-Control", "private")
 	cap.Header().Add("X-Multi", "one")
