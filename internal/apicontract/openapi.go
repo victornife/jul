@@ -145,4 +145,4 @@ func (s Schema) MarshalJSON() ([]byte, error) {
 }
 
 func externalRoutes() []admin.ExternalRoute { return admin.ExternalRoutes() }
-func errorCodes() []adminapi.Code            { return adminapi.Codes() }
+func errorCodes() []adminapi.Code           { return adminapi.Codes() }
