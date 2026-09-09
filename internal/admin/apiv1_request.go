@@ -15,16 +15,11 @@ import (
 	"jul/internal/adminapi"
 )
 
-// v1MaxBodyBytes is ADR 0019 §24a's published cap for every body-bearing v1
-// request. Keep the cap in this one shared layer so previews and mutations
-// cannot drift from each other.
+// v1MaxBodyBytes is ADR 0019 §24a's published cap for every body-bearing v1 request.
 const v1MaxBodyBytes int64 = 1 << 20
 
 var errV1TrailingJSON = errors.New("request body must contain exactly one JSON value")
 
-// readV1Body validates Content-Type and reads at most the published body cap.
-// The extra byte distinguishes an exact-boundary body from an over-boundary one
-// without allocating an unbounded request.
 func readV1Body(w http.ResponseWriter, r *http.Request, accepted ...string) ([]byte, *adminapi.Error) {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType == "" {
@@ -46,9 +41,10 @@ func readV1Body(w http.ResponseWriter, r *http.Request, accepted ...string) ([]b
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
+			limit := v1MaxBodyBytes
 			return nil, adminapi.Errorf(adminapi.CodePayloadTooLarge,
 				"request body exceeds the published %d byte limit", v1MaxBodyBytes).
-				WithDetails(adminapi.Details{Limit: int(v1MaxBodyBytes)})
+				WithDetails(adminapi.Details{LimitBytes: &limit})
 		}
 		return nil, adminapi.Errorf(adminapi.CodeInvalidRequest, "request body could not be read")
 	}
@@ -56,8 +52,10 @@ func readV1Body(w http.ResponseWriter, r *http.Request, accepted ...string) ([]b
 }
 
 func unsupportedMediaType(accepted []string) *adminapi.Error {
+	values := append([]string(nil), accepted...)
 	return adminapi.Errorf(adminapi.CodeUnsupportedMediaType,
-		"Content-Type must be one of: %s", strings.Join(accepted, ", "))
+		"Content-Type must be one of: %s", strings.Join(values, ", ")).
+		WithDetails(adminapi.Details{Accepted: values})
 }
 
 func readV1TOML(w http.ResponseWriter, r *http.Request) ([]byte, *adminapi.Error) {
@@ -84,9 +82,6 @@ func readV1JSON(w http.ResponseWriter, r *http.Request, dst any) ([]byte, *admin
 	return body, nil
 }
 
-// restoreRequestBody lets a v1 adapter perform the common bounded/media-type
-// admission once and then call the canonical internal operation with the exact
-// same bytes. The canonical handler remains the sole owner of business logic.
 func restoreRequestBody(r *http.Request, body []byte) {
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.ContentLength = int64(len(body))
