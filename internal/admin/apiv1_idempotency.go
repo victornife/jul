@@ -5,6 +5,7 @@ package admin
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"hash"
 	"net/http"
 	"net/url"
@@ -45,17 +46,12 @@ func validV1IdempotencyKey(key string) bool {
 	return true
 }
 
-// writeLengthPrefixed implements the ADR's decimal-byte-length grammar exactly.
 func writeLengthPrefixed(h hash.Hash, value []byte) {
 	_, _ = h.Write([]byte(strconv.Itoa(len(value))))
 	_, _ = h.Write([]byte{':'})
 	_, _ = h.Write(value)
 }
 
-// canonicalV1Query parses and percent-decodes the query, then sorts by
-// (name,value) and emits each pair with independent decimal byte-length
-// prefixes. There is deliberately no separator whose decoded occurrence could
-// make two pair sets serialize identically.
 func canonicalV1Query(raw string) ([]byte, error) {
 	values, err := url.ParseQuery(raw)
 	if err != nil {
@@ -151,9 +147,6 @@ func (s *Server) v1IdempotencyMetadata(r *http.Request, body []byte) (*v1Idempot
 	}, nil
 }
 
-// runIdempotentCanonicalV1 executes a new mutation at most once for a retained
-// principal/key binding. It returns true when it already wrote a fully projected
-// v1 response (terminal replay); callers must then skip ordinary projection.
 func (s *Server) runIdempotentCanonicalV1(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -225,7 +218,7 @@ func (s *Server) runIdempotentCanonicalV1(
 
 func extractV1ApplyID(body []byte) string {
 	var result ConfigApplyResult
-	if jsonErr := json.Unmarshal(body, &result); jsonErr == nil && result.ApplyID != "" {
+	if err := json.Unmarshal(body, &result); err == nil && result.ApplyID != "" {
 		return result.ApplyID
 	}
 	return ""
