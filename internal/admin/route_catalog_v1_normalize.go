@@ -6,13 +6,10 @@ package admin
 import (
 	"net/http"
 
+	"jul/internal/adminapi"
 	"jul/internal/rbac"
 )
 
-// The read surface landed before the write closure, so client_address is the
-// one route whose second method arrives in v1WriteCatalog. Normalize it into a
-// single ServeMux pattern before any init function or server construction sees
-// Catalog. All other closure entries are new patterns.
 var v1CatalogNormalized = func() bool {
 	_ = v1WriteCatalogRegistered
 	const pattern = "/api/v1/listeners/{addr}/client_address"
