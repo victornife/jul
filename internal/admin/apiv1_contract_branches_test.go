@@ -36,7 +36,7 @@ func TestV1MutationAuthorityDenialsCoverEveryWriteAdapter(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rr := callV1OperationHandler(t, tc.handler, tc.method, tc.path, tc.contentType, tc.body)
-			requireV1ErrorCode(t, rr, adminapi.CodeConfigAuthorityReadOnly)
+			requireV1ErrorCode(t, rr, adminapi.CodeConfigAuthorityRO)
 		})
 	}
 }
