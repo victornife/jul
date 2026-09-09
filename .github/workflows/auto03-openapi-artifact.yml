@@ -43,6 +43,21 @@ jobs:
             exit 1
           fi
 
+      - name: normalize closure test fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("internal/admin/apiv1_closure_test.go")
+          text = p.read_text()
+          old = "stagedAt := time.Date(2026, 9, 9, 18, 0, 0, 0, time.UTC)"
+          new = old + ".Format(time.RFC3339)"
+          if old in text and new not in text:
+              text = text.replace(old, new)
+              p.write_text(text)
+          PY
+
       - name: format and deterministic generation
         shell: bash
         run: |
@@ -143,7 +158,7 @@ jobs:
           )
           if uncovered:
               print("Uncovered changed statement blocks:")
-              for path, sl, el, n in uncovered[:80]:
+              for path, sl, el, n in uncovered[:120]:
                   print(f"  {path}:{sl}-{el} ({n} statements)")
           if pct <= 90.0:
               print("ERROR: AUTO-03 changed-production coverage must be strictly greater than 90%.")
@@ -165,6 +180,7 @@ jobs:
           git add \
             internal/admin/api.go \
             internal/admin/api_pending_restart.go \
+            internal/admin/apiv1_closure_test.go \
             internal/admin/apiv1_idempotency.go \
             internal/admin/apiv1_idempotency_test.go \
             internal/admin/finalized_audit_operation_test.go \
