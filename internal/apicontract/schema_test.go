@@ -100,8 +100,8 @@ type requiredProbe struct {
 	Omitempty  string  `json:"omitempty_field,omitempty"`
 	Omitzero   Nested  `json:"omitzero_field,omitzero"`
 	Pointer    *string `json:"pointer_field"`
-	unexported string
-	Skipped    string `json:"-"`
+	unexported string  //nolint:unused // deliberate: proves reflection skips unexported fields
+	Skipped    string  `json:"-"`
 }
 
 type Nested struct {
