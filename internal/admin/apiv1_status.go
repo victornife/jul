@@ -18,6 +18,10 @@ import (
 	"jul/internal/server"
 )
 
+// externalEndpointList is derived from Catalog after the v1 write closure has
+// finished augmenting it. It is immutable after package initialization.
+var externalEndpointList []adminapi.EndpointAvailability
+
 func (s *Server) handleV1Status(w http.ResponseWriter, r *http.Request) {
 	if !requireExternalMethod(w, r, http.MethodGet) {
 		return
@@ -47,7 +51,7 @@ func (s *Server) handleV1Capabilities(w http.ResponseWriter, r *http.Request) {
 		APIVersion:          adminapi.APIVersion,
 		ConfigSchemaVersion: configcontract.ContractVersion,
 		Build:               s.buildCapabilities(),
-		Endpoints:           externalEndpoints(),
+		Endpoints:           externalEndpointList,
 		ExitCodes:           adminapi.ExitCodes(),
 		AuthorityState:      authorityState(authority),
 		BootID:              s.bootID(),
@@ -55,11 +59,10 @@ func (s *Server) handleV1Capabilities(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// externalEndpoints derives capability discovery from the final route catalog
-// every time rather than snapshotting it during package initialization. The v1
-// write closure augments Catalog in init(), so caching before all init work has
-// completed would publish a stale subset of the supported surface.
-func externalEndpoints() []adminapi.EndpointAvailability {
+// refreshExternalEndpointList derives capability discovery from the final
+// external route catalog. It is called by the catalog-closing init function,
+// after all v1 write routes and the client-address PATCH have been installed.
+func refreshExternalEndpointList() {
 	byPattern := map[string]*adminapi.EndpointAvailability{}
 	var order []string
 	for _, route := range ExternalRoutes() {
@@ -81,7 +84,7 @@ func externalEndpoints() []adminapi.EndpointAvailability {
 	for _, pattern := range order {
 		out = append(out, *byPattern[pattern])
 	}
-	return out
+	externalEndpointList = out
 }
 
 func authorityState(a ConfigAuthorityStatus) adminapi.AuthorityState {

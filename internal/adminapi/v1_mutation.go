@@ -28,7 +28,7 @@ type ConfigApplyResponse struct {
 	ConfigState      string `json:"config_state,omitempty"`
 	Origin           string `json:"origin,omitempty"`
 
-	PendingRestart *PendingRestartState `json:"pending_restart,omitempty"`
+	PendingRestart  *PendingRestartState `json:"pending_restart,omitempty"`
 	RestartRequired bool                 `json:"restart_required,omitempty"`
 	CanStage        bool                 `json:"can_stage,omitempty"`
 

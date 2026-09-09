@@ -179,15 +179,15 @@ var v1WriteCatalog = []RouteSpec{
 		Permission: rbac.ConfigAdopt,
 		Stability:  StabilityExternal,
 		Operations: map[string]ExternalOperation{http.MethodPost: {
-			ID:                  "adoptExternal",
-			Summary:             "Adopt the externally modified file as the managed baseline after digest re-verification and explicit confirmation.",
-			RequestBody:         "AdoptExternalRequest",
-			RequestContentTypes: []string{"application/json"},
-			MaxBodyBytes:        v1BodyLimit,
-			Parameters:          []ExternalParameter{v1IdempotencyParameter()},
-			Response:            "ConfigApplyResponse",
+			ID:                        "adoptExternal",
+			Summary:                   "Adopt the externally modified file as the managed baseline after digest re-verification and explicit confirmation.",
+			RequestBody:               "AdoptExternalRequest",
+			RequestContentTypes:       []string{"application/json"},
+			MaxBodyBytes:              v1BodyLimit,
+			Parameters:                []ExternalParameter{v1IdempotencyParameter()},
+			Response:                  "ConfigApplyResponse",
 			AdditionalSuccessStatuses: []int{http.StatusAccepted},
-			Errors: []string{"invalid_request", "validation_failed", "stale_base_version", "drift_detected", "config_authority_read_only", "pending_restart_conflict", "restart_required", "idempotency_key_reused", "idempotency_key_in_flight", "operation_timeout", "not_implemented", "payload_too_large", "unsupported_media_type"},
+			Errors:                    []string{"invalid_request", "validation_failed", "stale_base_version", "drift_detected", "config_authority_read_only", "pending_restart_conflict", "restart_required", "idempotency_key_reused", "idempotency_key_in_flight", "operation_timeout", "not_implemented", "payload_too_large", "unsupported_media_type"},
 		}},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Adopt) },
 	},
@@ -268,4 +268,5 @@ func init() {
 			spec.Operations[http.MethodGet] = op
 		}
 	}
+	refreshExternalEndpointList()
 }
