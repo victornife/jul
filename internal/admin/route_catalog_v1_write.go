@@ -6,6 +6,7 @@ package admin
 import (
 	"net/http"
 
+	"jul/internal/adminapi"
 	"jul/internal/rbac"
 )
 
@@ -129,23 +130,53 @@ var v1WriteCatalog = []RouteSpec{
 		}},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1DiscardPendingRestart) },
 	},
-	{
-		Pattern: "/api/v1/listeners/{addr}/client_address", Methods: []string{http.MethodPatch}, Permission: rbac.ConfigTrust,
-		Stability: StabilityExternal,
-		Operations: map[string]ExternalOperation{http.MethodPatch: {
-			ID: "updateListenerClientAddress", Summary: "Atomically update the trusted-proxy/client-address policy for every server block on one listener.",
-			RequestBody: "ListenerClientAddressRequest", RequestContentTypes: []string{"application/json"}, MaxBodyBytes: v1BodyLimit,
-			Parameters: []ExternalParameter{{Name: "mode", In: "query", Type: "string", Default: "hot", Enum: []string{"hot", "stage_restart"}}, v1IdempotencyParameter()},
-			Response: "ConfigApplyResult", AdditionalSuccessStatuses: []int{http.StatusAccepted}, Errors: []string{"not_found", "validation_failed", "operation_failed", "stale_base_version", "drift_detected", "config_authority_read_only", "pending_restart_conflict", "restart_required", "idempotency_key_reused", "idempotency_key_in_flight", "operation_timeout", "not_implemented", "payload_too_large", "unsupported_media_type"},
-		}},
-		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1ClientAddressWrite) },
-	},
 }
 
-// Package-variable initialization runs after Catalog itself is initialized and
-// before init() computes the classification counters. This keeps Catalog the
-// one runtime authority while letting the closure slice remain reviewable.
-var v1WriteCatalogRegistered = func() bool {
+func init() {
 	Catalog = append(Catalog, v1WriteCatalog...)
-	return true
-}()
+
+	const clientAddressPattern = "/api/v1/listeners/{addr}/client_address"
+	for i := range Catalog {
+		spec := &Catalog[i]
+		switch spec.Pattern {
+		case clientAddressPattern:
+			patchOp := ExternalOperation{
+				ID: "updateListenerClientAddress", Summary: "Atomically update the trusted-proxy/client-address policy for every server block on one listener.",
+				RequestBody: "ListenerClientAddressRequest", RequestContentTypes: []string{"application/json"}, MaxBodyBytes: v1BodyLimit,
+				Parameters: []ExternalParameter{{Name: "mode", In: "query", Type: "string", Default: "hot", Enum: []string{"hot", "stage_restart"}}, v1IdempotencyParameter()},
+				Response: "ConfigApplyResult", AdditionalSuccessStatuses: []int{http.StatusAccepted}, Errors: []string{"not_found", "validation_failed", "operation_failed", "stale_base_version", "drift_detected", "config_authority_read_only", "pending_restart_conflict", "restart_required", "idempotency_key_reused", "idempotency_key_in_flight", "operation_timeout", "not_implemented", "payload_too_large", "unsupported_media_type"},
+			}
+			spec.Methods = []string{http.MethodGet, http.MethodPatch}
+			spec.Permission = ""
+			spec.Permissions = map[string]rbac.Permission{http.MethodGet: rbac.ConfigRead, http.MethodPatch: rbac.ConfigTrust}
+			if spec.Operations == nil {
+				spec.Operations = map[string]ExternalOperation{}
+			}
+			spec.Operations[http.MethodPatch] = patchOp
+			spec.Handler = func(s *Server) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch r.Method {
+					case http.MethodGet:
+						s.handleV1ClientAddress(w, r)
+					case http.MethodPatch:
+						s.handleV1ClientAddressWrite(w, r)
+					default:
+						w.Header().Set("Allow", "GET, PATCH")
+						writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInvalidRequest, "this operation accepts GET or PATCH, not %s", r.Method))
+					}
+				})
+			}
+		case "/api/v1/config/history":
+			op := spec.Operations[http.MethodGet]
+			op.Parameters = []ExternalParameter{
+				{Name: "limit", In: "query", Type: "integer", Default: 50, Description: "Requested page size. Omitted means 50. Syntactically valid integers below 1 are normalized to 1; values above 200 are normalized to 200. The response reports the effective limit and limit_clamped. No OpenAPI minimum/maximum is imposed because out-of-range integers are valid normalized input."},
+				{Name: "cursor", In: "query", Type: "string", Description: "Opaque continuation cursor returned by the previous page. Do not construct or inspect it."},
+			}
+			spec.Operations[http.MethodGet] = op
+		case "/api/v1/config/applies/{apply_id}":
+			op := spec.Operations[http.MethodGet]
+			op.AdditionalSuccessStatuses = []int{http.StatusAccepted}
+			spec.Operations[http.MethodGet] = op
+		}
+	}
+}
