@@ -8,7 +8,7 @@ Checks performed:
 3. No placeholder URLs (example/jul) remain in docs.
 4. Version and date are consistent across roadmap and status docs.
 5. No future "Updated" dates in living doc headers.
-6. Top-level config keys from schema.go appear in configuration.md (warning only).
+6. Cross-artifact semantic claims agree with their existing machine authorities.
 """
 import json
 import os
@@ -16,6 +16,8 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+from semantic_drift import check_repository as check_semantic_drift_repository
 
 try:
     import tomllib  # Python 3.11+
@@ -208,60 +210,13 @@ def check_future_dates(path: Path, text: str):
             warn(path, line, f"future date: {match.group(1)}")
 
 
-def check_schema_doc_drift():
-    """Warn when a top-level config key from schema.go is missing from configuration.md."""
-    schema_path = ROOT / "internal" / "config" / "schema.go"
-    if not schema_path.exists():
-        warn(schema_path, 0, "schema.go not found, skipping schema-doc drift check")
-        return
-
-    schema_text = schema_path.read_text(encoding="utf-8")
-    # Extract toml tags from fields of the root Config struct only.
-    # We start brace_depth at 1 to account for the opening brace of
-    # `type Config struct {`, and stop when it returns to 0.
-    keys: set[str] = set()
-    in_config_struct = False
-    brace_depth = 0
-    for line in schema_text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("type Config struct"):
-            in_config_struct = True
-            brace_depth = 1  # account for the opening brace on this line
-            continue
-        if in_config_struct:
-            brace_depth += stripped.count("{")
-            brace_depth -= stripped.count("}")
-            if brace_depth <= 0:
-                break
-            m = re.search(r'`toml:"([^"]+)"`', stripped)
-            if m:
-                # Strip struct-tag options like ",omitempty" so the key is just
-                # the field name (e.g. "upstreams,omitempty" -> "upstreams").
-                key = m.group(1).split(",", 1)[0].strip()
-                if key:
-                    keys.add(key)
-
-    if not keys:
-        warn(schema_path, 0, "no toml keys found in Config struct")
-        return
-
-    config_doc = DOCS / "configuration.md"
-    if not config_doc.exists():
-        warn(config_doc, 0, "configuration.md not found, skipping schema-doc drift check")
-        return
-    doc_text = config_doc.read_text(encoding="utf-8")
-    doc_lower = _slugify(doc_text)
-    doc_joined = "".join(doc_lower)
-
-    for key in sorted(keys):
-        key_slug = _slugify(key)
-        key_joined = "".join(key_slug)
-        # A well-documented key appears as [key], [[key]], or in backticks: `key`,
-        # or as heading text, or as table header matching the slug.
-        if key_joined not in doc_joined:
-            needle = re.compile(rf"(\\[\\[{re.escape(key)}\\]\\]|\\[{re.escape(key)}\\]|`{re.escape(key)}`)")
-            if not needle.search(doc_text):
-                error(config_doc, 0, f"schema key '{key}' not found in configuration.md")
+def check_semantic_drift():
+    """Cross-check objective human-facing claims against existing authorities."""
+    findings = check_semantic_drift_repository(ROOT)
+    for finding in findings:
+        error(ROOT / finding.consumer, finding.line, finding.message())
+    if not findings:
+        ok("cross-artifact semantic claims agree with authoritative projections")
 
 
 def check_balanced_fences(path: Path, text: str):
@@ -616,7 +571,6 @@ def check_lifecycle_manifest():
             ok(f"reload-semantics.md covers restart-required subsystem '{subsystem}'")
 
 
-
 # Standard banner required on Year 3–5 horizon specs so they cannot be read as
 # committed delivery schedules.
 HORIZON_BANNER_TEXT = "Concept horizon — not committed"
@@ -926,7 +880,6 @@ def check_finding_uniqueness():
         ok(f"no conflicting finding statuses in {current_audit.name}")
 
 
-
 def check_readme_go_version():
     """README may show exact Go patch or deliberately coarser major.minor, never a stale patch."""
     go_mod = ROOT / "go.mod"
@@ -1019,7 +972,7 @@ def main():
         check_denylist(md, text)
 
     check_version_consistency(md_files)
-    check_schema_doc_drift()
+    check_semantic_drift()
     check_feature_status_manifest()
     check_lifecycle_manifest()
     check_finding_uniqueness()
@@ -1038,4 +991,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
