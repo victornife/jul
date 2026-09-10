@@ -41,12 +41,13 @@ func (s *Server) requestAdminSnapshot(r *http.Request) *authSnapshot {
 	return s.currentAuth()
 }
 
-// PrepareAdminRuntime extends #95's prepared snapshot with #157 operational
-// validation. The caller builds auth first; this function validates/normalizes
-// only the AdminConfig stored in that same immutable snapshot.
+// PrepareAdminRuntime is an importable form of the #157 operational prepare
+// rule used by focused tests and future composition-root wiring. Production's
+// existing shared admin Prepare hook performs the same reversible preflight in
+// PrepareTLS before Publish, so no second live state is introduced here.
 func (s *Server) PrepareAdminRuntime(cfg config.AdminConfig, prepared *PreparedAuth) (*PreparedAuth, error) {
 	cfg.PluginUploadDir = normalizePluginUploadDir(cfg.PluginUploadDir)
-	if pluginUploadEnabled(cfg) {
+	if pluginUploadEnabled(cfg) && cfg.PluginUploadMaxSize > 0 {
 		if err := preflightPluginUploadDir(cfg.PluginUploadDir); err != nil {
 			return nil, err
 		}
@@ -59,8 +60,10 @@ func (s *Server) PrepareAdminRuntime(cfg config.AdminConfig, prepared *PreparedA
 	return &PreparedAuth{snapshot: &out}, nil
 }
 
+// Nil means the documented/default-enabled state. A non-positive size still
+// disables the endpoint and is checked by the caller.
 func pluginUploadEnabled(cfg config.AdminConfig) bool {
-	return cfg.PluginUploadEnabled != nil && *cfg.PluginUploadEnabled
+	return cfg.PluginUploadEnabled == nil || *cfg.PluginUploadEnabled
 }
 
 func normalizePluginUploadDir(raw string) string {
@@ -76,17 +79,18 @@ func normalizePluginUploadDir(raw string) string {
 }
 
 // preflightPluginUploadDir leaves no live directory or final upload artifact.
-// Existing directories receive a reversible probe. Missing paths are exercised
-// beneath their nearest real ancestor in a temporary sibling tree and removed.
+// Existing directories receive a reversible os.Root-confined probe. Missing
+// paths are exercised beneath their nearest existing ancestor in a temporary
+// sibling tree and removed before return.
 func preflightPluginUploadDir(raw string) error {
 	dir := normalizePluginUploadDir(raw)
 	fi, err := os.Lstat(dir)
 	if err == nil {
+		// Reject a configured final component that is itself a symlink. Ancestor
+		// path aliases are intentionally allowed (notably /var -> /private/var on
+		// macOS); os.Root provides confinement for descendant operations.
 		if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
 			return fmt.Errorf("[admin] plugin_upload_dir %q must be a real directory", dir)
-		}
-		if err := requireUnaliasedDirectory(dir); err != nil {
-			return fmt.Errorf("[admin] plugin_upload_dir %q: %w", dir, err)
 		}
 		return probePluginUploadDirectory(dir)
 	}
@@ -98,15 +102,14 @@ func preflightPluginUploadDir(raw string) error {
 	if err != nil {
 		return fmt.Errorf("[admin] plugin_upload_dir %q: %w", dir, err)
 	}
-	if err := requireUnaliasedDirectory(ancestor); err != nil {
-		return fmt.Errorf("[admin] plugin_upload_dir %q: unsafe parent: %w", dir, err)
-	}
 	probeRoot, err := os.MkdirTemp(ancestor, ".jul-upload-preflight-*")
 	if err != nil {
 		return fmt.Errorf("[admin] plugin_upload_dir %q: parent is not writable: %w", dir, err)
 	}
 	defer func() { _ = os.RemoveAll(probeRoot) }()
-	_ = os.Chmod(probeRoot, 0o700)
+	if err := os.Chmod(probeRoot, 0o700); err != nil {
+		return fmt.Errorf("[admin] plugin_upload_dir %q: secure probe directory: %w", dir, err)
+	}
 	rel, err := filepath.Rel(ancestor, dir)
 	if err != nil || rel == "." || rel == "" || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("[admin] plugin_upload_dir %q: unsafe relative path", dir)
@@ -139,25 +142,6 @@ func nearestExistingDirectory(path string) (string, error) {
 	}
 }
 
-func requireUnaliasedDirectory(path string) error {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return err
-	}
-	resolvedAbs, err := filepath.Abs(resolved)
-	if err != nil {
-		return err
-	}
-	pathAbs, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
-	if filepath.Clean(resolvedAbs) != filepath.Clean(pathAbs) {
-		return errors.New("symbolic-link path components are not allowed")
-	}
-	return nil
-}
-
 func probePluginUploadDirectory(dir string) error {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -184,7 +168,8 @@ func nextPluginTempName(kind string) string {
 }
 
 // openPluginUploadRoot anchors a request to the captured directory generation.
-// os.Root rejects relative names and symlinks that escape the root.
+// The configured final component must not be a symlink. Once open, os.Root
+// confines every descendant lookup and rename even if the path is raced.
 func openPluginUploadRoot(dir string) (*os.Root, error) {
 	dir = normalizePluginUploadDir(dir)
 	before, err := os.Lstat(dir)
@@ -192,14 +177,13 @@ func openPluginUploadRoot(dir string) (*os.Root, error) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, err
 		}
-		_ = os.Chmod(dir, 0o700)
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return nil, err
+		}
 		before, err = os.Lstat(dir)
 	}
 	if err != nil || before.Mode()&os.ModeSymlink != 0 || !before.IsDir() {
 		return nil, errors.New("upload directory is not a safe directory")
-	}
-	if err := requireUnaliasedDirectory(dir); err != nil {
-		return nil, err
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -218,9 +202,9 @@ func openPluginUploadRoot(dir string) (*os.Root, error) {
 	return root, nil
 }
 
-// writePluginUploadFile writes a restrictive temporary file and atomically
-// renames it inside the captured os.Root. Unsafe pre-existing destinations are
-// rejected; temp files are removed on every pre-rename failure.
+// writePluginUploadFile writes a 0600 temporary file and atomically renames it
+// inside the captured os.Root. Unsafe pre-existing destinations are rejected;
+// temporary files are removed on every pre-rename failure.
 func writePluginUploadFile(root *os.Root, name string, data []byte) error {
 	if root == nil {
 		return errors.New("upload root unavailable")
@@ -232,6 +216,7 @@ func writePluginUploadFile(root *os.Root, name string, data []byte) error {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
+
 	tmp := nextPluginTempName("write")
 	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -258,6 +243,7 @@ func writePluginUploadFile(root *os.Root, name string, data []byte) error {
 	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
+
 	var renameErr error
 	for i := 0; i < 5; i++ {
 		if renameErr = root.Rename(tmp, name); renameErr == nil {
