@@ -52,7 +52,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testMatch: "e2e/smoke.spec.ts",
+      testMatch: ["e2e/smoke.spec.ts", "e2e/issue160-degraded-health.spec.ts"],
       use: { ...devices["Desktop Chrome"], baseURL },
     },
     {
