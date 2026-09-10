@@ -30,19 +30,20 @@ func (s *Server) routes() http.Handler {
 		}
 		mux.Handle(spec.Pattern, h)
 	}
-	// The runtime snapshot wrapper is outermost so every request — including the
-	// public root and refusals before authentication — receives exactly one
-	// immutable admin generation. Downstream middleware/handlers must reuse it.
 	return s.captureAdminRuntimeSnapshot(
 		s.requireSecureTransport(s.observeConsole(s.limiter.rateLimit(mux))),
 	)
 }
 
 // handleConsoleOrRoot keeps one stable mux registration and selects the UI at
-// request time from the pinned admin generation. This makes console on→off→on a
-// pointer-swap operation without rebuilding routes or the listener.
+// request time from the pinned admin generation. In lean builds the Console
+// handler is never constructed: the stub intentionally reports misuse through
+// the logger, and several tests construct Server with a nil logger.
 func (s *Server) handleConsoleOrRoot() http.Handler {
-	console := s.handleConsoleV2()
+	var console http.Handler
+	if consoleV2Compiled {
+		console = s.handleConsoleV2()
+	}
 	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/config", "/ui":
@@ -53,7 +54,7 @@ func (s *Server) handleConsoleOrRoot() http.Handler {
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		snap := s.requestAdminSnapshot(r)
-		if consoleV2Compiled && snap.cfg.ConsoleEnabled() {
+		if console != nil && snap.cfg.ConsoleEnabled() {
 			console.ServeHTTP(w, r)
 			return
 		}
