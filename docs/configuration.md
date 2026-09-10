@@ -1860,3 +1860,10 @@ Full candidate TOML remains a `config:raw` capability and memory-only UI state.
 The versioned browser-storage handoff contains only established non-secret
 structured operations and preview metadata. Literal candidate persistence was
 intentionally not implemented because it would weaken the raw/secret boundary.
+
+## Admin Console/upload reloadability
+
+On a running admin server, `admin.console`, `admin.plugin_upload_enabled`, `admin.plugin_upload_max_size` and `admin.plugin_upload_dir` are hot-reloadable. They are published as one immutable request-generation policy with admin authentication/RBAC. The upload directory is preflighted before Publish; changing it does not migrate files. `admin.enabled` and `admin.listen` remain restart-required.
+
+See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
+

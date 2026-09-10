@@ -411,3 +411,12 @@ Run: `go test -tags wasmplugins -fuzz='FuzzPluginInvoke|FuzzHostAllowed' -fuzzti
 | ⑦ Threat model | **Met** | 7-row threat table above |
 | ⑧ Parser/input fuzzing | **Met** | `FuzzPluginInvoke`, `FuzzHostAllowed` in `internal/plugins/fuzz_test.go` |
 | ⑨ Console surface | **Met** | Plugins panel (declare, attach, detach, upload) shipped in Console v2 |
+
+## Hot upload policy (HR-06B)
+
+`[admin].plugin_upload_enabled`, `plugin_upload_max_size` and `plugin_upload_dir` are hot-reloadable on an existing admin server. A request captures all three values once before multipart processing. If uploads are disabled, Jul rejects the request with `403` **before reading the request body**. Tightening/loosening the size cap or switching directories affects new requests after Publish; an upload already in flight finishes under the generation that admitted it.
+
+Changing directory `A → B` does not migrate, copy or delete plugin files. Disabling uploads also leaves existing files intact and does not activate/deactivate plugins: activation remains configuration-driven. Candidate storage is checked before Publish with reversible probes that do not create the configured final directory. Request writes are confined with `os.Root`, use owner-only temporary/final files on Unix, reject symlink/special-file destinations and retain atomic replacement semantics.
+
+See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
+
