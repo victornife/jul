@@ -17,11 +17,20 @@ import {
 
 const consoleOffOp = { op: "admin_console_set", enabled: false } as const;
 const consoleOnOp = { op: "admin_console_set", enabled: true } as const;
+const consoleMarker = "<title>Jul.IA Console</title>";
 
 async function currentBaseVersion(request: import("@playwright/test").APIRequestContext) {
   const response = await request.get("/api/config");
   expect(response.status()).toBe(200);
   return RawConfigSchema.parse(await response.json()).base_version ?? "";
+}
+
+async function rootServesConsole(
+  request: import("@playwright/test").APIRequestContext,
+): Promise<boolean> {
+  const response = await request.get("/");
+  if (response.status() !== 200) return false;
+  return (await response.text()).includes(consoleMarker);
 }
 
 async function restoreConsole(request: import("@playwright/test").APIRequestContext): Promise<void> {
@@ -30,9 +39,10 @@ async function restoreConsole(request: import("@playwright/test").APIRequestCont
     headers: { "Content-Type": "application/json" },
     data: JSON.stringify({ base_version: baseVersion, ops: [consoleOnOp] }),
   });
-  if (![200, 204].includes(response.status())) {
+  if (![200, 202, 204].includes(response.status())) {
     throw new Error(`failed to restore Console: ${String(response.status())} ${await response.text()}`);
   }
+  await expect.poll(() => rootServesConsole(request)).toBe(true);
 }
 
 test.describe("HR-06B admin runtime", () => {
@@ -118,19 +128,18 @@ test.describe("HR-06B admin runtime", () => {
       expect([200, 202]).toContain(confirmed.status());
       disabled = true;
 
+      // The confirmed response may precede the async Publish result. Poll the
+      // observable cutover rather than assuming a 200/202 response means the
+      // next request has already crossed the generation boundary.
+      await expect.poll(() => rootServesConsole(request)).toBe(false);
+
       // API reachability is independent from Console rendering.
       const overview = await request.get("/api/runtime/overview");
       expect(overview.status()).toBe(200);
-      const disabledRoot = await request.get("/");
-      expect(disabledRoot.status()).toBe(200);
-      expect(await disabledRoot.text()).not.toContain("<title>Jul.IA Console</title>");
 
       await restoreConsole(request);
       disabled = false;
-
-      const enabledRoot = await request.get("/");
-      expect(enabledRoot.status()).toBe(200);
-      expect(await enabledRoot.text()).toContain("<title>Jul.IA Console</title>");
+      expect(await rootServesConsole(request)).toBe(true);
     } finally {
       if (disabled) await restoreConsole(request);
     }
