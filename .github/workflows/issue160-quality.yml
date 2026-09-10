@@ -6,7 +6,11 @@ on:
       - 'internal/admin/**'
       - 'internal/app/**'
       - 'internal/server/**'
+      - 'internal/config/**'
       - 'internal/lifecycle/**'
+      - 'internal/observability/**'
+      - 'docs/**'
+      - 'CHANGELOG.md'
       - '.github/workflows/issue160-quality.yml'
   push:
     branches: [main, issue-160-hot-audit-sink]
@@ -14,7 +18,11 @@ on:
       - 'internal/admin/**'
       - 'internal/app/**'
       - 'internal/server/**'
+      - 'internal/config/**'
       - 'internal/lifecycle/**'
+      - 'internal/observability/**'
+      - 'docs/**'
+      - 'CHANGELOG.md'
       - '.github/workflows/issue160-quality.yml'
 
 permissions:
@@ -28,41 +36,183 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
           cache: true
+      - name: Fetch comparison base
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
       - name: Formatting
         run: |
-          files="internal/admin/audit.go internal/admin/audit_sink_runtime.go internal/admin/audit_admin_runtime.go internal/admin/audit_sink_test.go internal/admin/audit_sink_runtime_test.go internal/admin/admin_health.go internal/admin/rbac.go internal/admin/runtime_snapshot.go internal/admin/patch.go internal/admin/patch_types.go internal/admin/patch_admin_runtime.go internal/admin/admin_runtime_status.go internal/server/server.go internal/server/reload_plan.go internal/app/serve.go internal/lifecycle/registry.go"
-          test -z "$(gofmt -d $files)"
-      - name: Lifecycle generated drift
+          changed="$(git diff --name-only origin/main...HEAD -- '*.go')"
+          if [ -n "$changed" ]; then
+            test -z "$(gofmt -d $changed)"
+          fi
+      - name: Lifecycle and generated drift
         run: |
           make lifecycle-generate
           git diff --exit-code
-      - name: Targeted tests
+          make generated-check
+      - name: Source invariants
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          production = [p for p in Path('internal/admin').glob('audit*.go') if not p.name.endswith('_test.go')]
+          banned = ('ensureAuditSinkWritable', 'sinkPath', 'sinkErr', 'writeErr', 'lumberjack')
+          for p in production:
+              text = p.read_text()
+              for term in banned:
+                  if term in text:
+                      raise SystemExit(f'obsolete audit sink term {term!r} remains in {p}')
+
+          lifecycle = Path('docs/config-lifecycle.yaml').read_text()
+          expected = {
+              'admin.audit_log_file': 'hot_reload',
+              'admin.audit_log_rotate_max_mb': 'hot_reload',
+              'admin.audit_log_rotate_keep': 'hot_reload',
+              'admin.history_dir': 'restart_required',
+              'admin.history_keep': 'restart_required',
+              'admin.enabled': 'restart_required',
+              'admin.listen': 'restart_required',
+          }
+          lines = lifecycle.splitlines()
+          observed = {}
+          for i, line in enumerate(lines):
+              stripped = line.strip()
+              if stripped.startswith('- path: '):
+                  path = stripped.split(':', 1)[1].strip().strip('"')
+                  for candidate in lines[i+1:i+6]:
+                      c = candidate.strip()
+                      if c.startswith('class:'):
+                          observed[path] = c.split(':', 1)[1].strip()
+                          break
+          for path, want in expected.items():
+              got = observed.get(path)
+              if got != want:
+                  raise SystemExit(f'{path}: lifecycle={got!r}, want {want!r}')
+
+          leftovers = list(Path('scripts').glob('issue160*')) + [p for p in Path('.github/workflows').glob('issue160-*') if p.name != 'issue160-quality.yml']
+          if leftovers:
+              raise SystemExit('temporary #160 scaffolding remains: ' + ', '.join(map(str, leftovers)))
+          print('HR-07C source/lifecycle invariants: OK')
+          PY
+      - name: Vet
+        run: go vet -tags "${FULL_TAGS}" ./internal/admin ./internal/app ./internal/server ./internal/config ./internal/lifecycle ./internal/observability
+      - name: Full-tag targeted tests
         run: go test -count=1 -tags "${FULL_TAGS}" ./internal/admin ./internal/app ./internal/server ./internal/config ./internal/lifecycle ./internal/observability
       - name: Race
         run: go test -race -count=1 -p 2 -tags "console" ./internal/admin ./internal/app ./internal/server ./internal/config ./internal/lifecycle ./internal/observability
-      - name: HR-07C owned Go coverage >= 90%
+      - name: Filesystem leak and shutdown contracts
+        run: go test -count=1 ./internal/admin -run 'TestIssue160NoGoroutineOrOwnerLeakAcrossChurn|TestIssue160Filesystem|TestAuditSinkShutdown|TestAuditSinkBlocked'
+      - name: HR-07C benchmark smoke
+        run: go test -run '^$' -bench 'BenchmarkIssue160' -benchtime=10x -count=1 ./internal/admin
+      - name: HR-07C added Go production statements >= 90%
         run: |
-          go test -count=1 -tags "${FULL_TAGS}" -coverprofile=/tmp/admin.cover ./internal/admin
+          go test -count=1 -tags "${FULL_TAGS}" -covermode=atomic -coverpkg=./internal/admin,./internal/server,./internal/app,./internal/lifecycle -coverprofile=/tmp/hr07c.cover ./internal/admin ./internal/server ./internal/app ./internal/lifecycle
+          git diff --unified=0 origin/main...HEAD -- '*.go' > /tmp/hr07c.diff
           python3 - <<'PY'
           from pathlib import Path
-          owned = {'jul/internal/admin/audit_sink_runtime.go', 'jul/internal/admin/audit_admin_runtime.go'}
-          total = covered = 0
-          for line in Path('/tmp/admin.cover').read_text().splitlines()[1:]:
-              loc, count = line.rsplit(' ', 1)
-              path_and_range, stmts = loc.rsplit(' ', 1)
-              path = path_and_range.split(':', 1)[0]
-              if path not in owned:
+          import re
+
+          added = {}
+          current = None
+          for line in Path('/tmp/hr07c.diff').read_text().splitlines():
+              if line.startswith('+++ b/'):
+                  current = line[6:]
+                  if current.endswith('_test.go'):
+                      current = None
+                  elif current.startswith(('internal/admin/', 'internal/server/', 'internal/app/', 'internal/lifecycle/')):
+                      added.setdefault(current, set())
+                  else:
+                      current = None
                   continue
+              if current is None or not line.startswith('@@'):
+                  continue
+              m = re.search(r'\+(\d+)(?:,(\d+))?', line)
+              if not m:
+                  continue
+              start = int(m.group(1)); count = int(m.group(2) or '1')
+              added[current].update(range(start, start + count))
+
+          total = covered = 0
+          seen = set()
+          for line in Path('/tmp/hr07c.cover').read_text().splitlines()[1:]:
+              span, stmts, count = line.rsplit(' ', 2)
+              path, coords = span.split(':', 1)
+              if path.startswith('jul/'):
+                  path = path[4:]
+              if path not in added or not added[path]:
+                  continue
+              m = re.match(r'(\d+)\.\d+,(\d+)\.\d+', coords)
+              if not m:
+                  continue
+              lo, hi = int(m.group(1)), int(m.group(2))
+              if not any(lo <= n <= hi for n in added[path]):
+                  continue
+              key = (path, coords, int(stmts))
+              if key in seen:
+                  continue
+              seen.add(key)
               n = int(stmts)
               total += n
               if int(count) > 0:
                   covered += n
-          pct = 100.0 if total == 0 else covered * 100.0 / total
-          print(f'HR-07C owned Go statements: {covered}/{total} = {pct:.4f}%')
+          if total == 0:
+              raise SystemExit('no added HR-07C production statements found in coverage profile')
+          pct = covered * 100.0 / total
+          print(f'HR-07C added Go production statements: {covered}/{total} = {pct:.4f}%')
           if pct < 90.0:
-              raise SystemExit(f'HR-07C owned Go coverage {pct:.4f}% < 90.0%')
+              raise SystemExit(f'HR-07C added Go production coverage {pct:.4f}% < 90.0%')
           PY
+      - name: Documentation contracts
+        run: |
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+
+  console-audit-sink:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: internal/admin/ui/package.json
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: Install
+        run: pnpm --dir internal/admin/ui install --frozen-lockfile
+      - name: Typecheck and lint
+        run: |
+          pnpm --dir internal/admin/ui run typecheck
+          pnpm --dir internal/admin/ui run lint
+      - name: HR-07C frontend coverage >= 90% in all dimensions
+        run: |
+          pnpm --dir internal/admin/ui exec vitest run src/features/plugins/AdminRuntimeSettingsDrawer.test.tsx --coverage.enabled --coverage.include=src/features/plugins/AdminRuntimeSettingsDrawer.tsx --coverage.reporter=json-summary --coverage.reportsDirectory=/tmp/hr07c-ui-cov
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/hr07c-ui-cov/coverage-summary.json').read_text())
+          targets = [v for k, v in data.items() if k.endswith('AdminRuntimeSettingsDrawer.tsx')]
+          if len(targets) != 1:
+              raise SystemExit(f'expected one drawer coverage entry, found {len(targets)}')
+          target = targets[0]
+          for dim in ('lines', 'statements', 'functions', 'branches'):
+              pct = float(target[dim]['pct'])
+              print(f'HR-07C frontend {dim}: {pct:.4f}%')
+              if pct < 90.0:
+                  raise SystemExit(f'HR-07C frontend {dim} coverage {pct:.4f}% < 90.0%')
+          PY
+      - name: Build current Console
+        run: pnpm --dir internal/admin/ui run build
+      - name: Real-server and browser acceptance
+        run: |
+          pnpm --dir internal/admin/ui exec playwright install --with-deps chromium
+          pnpm --dir internal/admin/ui exec playwright test --project=real-server issue160-audit-sink.spec.ts
