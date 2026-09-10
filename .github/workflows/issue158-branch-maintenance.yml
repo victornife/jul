@@ -10,8 +10,8 @@ permissions:
 
 jobs:
   maintain:
-    runs-on: ubuntu-latest
     if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -26,140 +26,25 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
-
       - name: Apply deterministic source edits
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("internal/admin/routes.go")
-          s = p.read_text()
-          old = "func (s *Server) routes() http.Handler {\n\tmux := http.NewServeMux()\n"
-          new = "func (s *Server) routes() http.Handler {\n\tif s.limiter == nil {\n\t\ts.limiter = newAdminLimiter(s.log)\n\t}\n\tmux := http.NewServeMux()\n"
-          if new not in s:
-              if old not in s:
-                  raise SystemExit("routes initializer anchor not found")
-              s = s.replace(old, new, 1)
-          p.write_text(s)
-
-          p = Path("internal/admin/route_catalog.go")
-          s = p.read_text()
-          anchor = "\tOperations map[string]ExternalOperation\n"
-          addition = anchor + "\tLimitClasses map[string]limitKind\n"
-          if "LimitClasses map[string]limitKind" not in s:
-              if anchor not in s:
-                  raise SystemExit("RouteSpec anchor not found")
-              s = s.replace(anchor, addition, 1)
-          replacements = {
-              "\t\tPattern:    \"/api/config/validate\",\n\t\tMethods:    []string{http.MethodPost},\n\t\tPermission: rbac.ConfigWrite,\n\t\tHandler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigValidate) },":
-              "\t\tPattern:      \"/api/config/validate\",\n\t\tMethods:      []string{http.MethodPost},\n\t\tPermission:   rbac.ConfigWrite,\n\t\tLimitClasses: map[string]limitKind{http.MethodPost: limitApply},\n\t\tHandler:      func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigValidate) },",
-              "\t\tPattern:    \"/api/config/diff\",\n\t\tMethods:    []string{http.MethodPost},\n\t\tPermission: rbac.ConfigWrite,\n\t\tHandler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigDiff) },":
-              "\t\tPattern:      \"/api/config/diff\",\n\t\tMethods:      []string{http.MethodPost},\n\t\tPermission:   rbac.ConfigWrite,\n\t\tLimitClasses: map[string]limitKind{http.MethodPost: limitApply},\n\t\tHandler:      func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigDiff) },",
-          }
-          for old_block, new_block in replacements.items():
-              if new_block not in s:
-                  if old_block not in s:
-                      raise SystemExit("legacy limiter route anchor not found")
-                  s = s.replace(old_block, new_block, 1)
-          p.write_text(s)
-
-          p = Path("internal/admin/ratelimit.go")
-          s = p.read_text()
-          begin = s.index("func limitClassForSpec(spec RouteSpec, method string) limitKind {")
-          end = s.index("\nfunc (l *adminLimiter) maybeLogRejection", begin)
-          replacement = '''func limitClassForSpec(spec RouteSpec, method string) limitKind {
-          if explicit, ok := spec.LimitClasses[method]; ok {
-              return explicit
-          }
-          if safeMethod(method) {
-              return limitRead
-          }
-          perm := permissionForMethod(spec, method)
-          if perm == rbac.ConfigApply || perm == rbac.HistoryRollback || perm == rbac.ConfigAdopt || hasPermission(spec.AnyPermissions, rbac.ConfigApply) || hasPermission(spec.AnyPermissions, rbac.HistoryRollback) || hasPermission(spec.AnyPermissions, rbac.ConfigAdopt) {
-              return limitApply
-          }
-          if op, ok := spec.Operations[method]; ok {
-              switch op.ID {
-              case "validateConfig", "planConfig", "previewConfigPatch", "applyConfig", "applyConfigPatch", "rollbackConfig", "previewAdoptExternal", "adoptExternal", "discardPendingRestart":
-                  return limitApply
-              }
-          }
-          return limitWrite
-          }
-          '''
-          s = s[:begin] + replacement + s[end:]
-          p.write_text(s)
-
-          p = Path("internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.tsx")
-          s = p.read_text()
-          helper = '''function integerValue(value: string): number | null {
-            const parsed = Number(value);
-            return Number.isInteger(parsed) ? parsed : null;
-          }
-
-          '''
-          s = s.replace(helper, "")
-          p.write_text(s)
-
-          p = Path("internal/lifecycle/registry.go")
-          s = p.read_text()
-          for line in (
-              '\t\t"admin.max_event_conns",\n',
-              '\t\t"admin.rate_limit_apply_per_min",\n',
-              '\t\t"admin.rate_limit_read_per_min",\n',
-              '\t\t"admin.rate_limit_write_per_min",\n',
-          ):
-              s = s.replace(line, "", 1)
-          marker = '\t\thot("admin.plugin_upload_dir", SubAdmin, "candidate storage is preflighted before Publish and each upload is confined to the directory captured at request start"),\n'
-          hot = marker + '\t\thot("admin.rate_limit_read_per_min", SubAdmin, "new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload"),\n\t\thot("admin.rate_limit_write_per_min", SubAdmin, "new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload"),\n\t\thot("admin.rate_limit_apply_per_min", SubAdmin, "new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload"),\n\t\thot("admin.max_event_conns", SubAdmin, "new SSE admissions use the captured per-client connection cap while existing leases and connection counts survive policy reload"),\n'
-          if 'hot("admin.max_event_conns", SubAdmin' not in s:
-              if marker not in s:
-                  raise SystemExit("lifecycle anchor not found")
-              s = s.replace(marker, hot, 1)
-          p.write_text(s)
-          Path("internal/lifecycle/admin_limits.go").unlink(missing_ok=True)
-          PY
-
-      - name: Format and generate
+        run: python3 scripts/issue158-maintain.py
+      - name: Format and regenerate lifecycle
         run: |
           gofmt -w internal/admin/ratelimit.go internal/admin/ratelimit_test.go internal/admin/issue158_transition_test.go internal/admin/issue158_patch_test.go internal/admin/routes.go internal/admin/route_catalog.go internal/admin/events.go internal/admin/logs.go internal/admin/admin_runtime_status.go internal/admin/patch_admin_runtime.go internal/admin/patch.go internal/admin/patch_types.go internal/lifecycle/registry.go
           make lifecycle-generate
-
-      - name: Verify targeted Go and frontend checks
+      - name: Verify targeted Go
+        run: go test -count=1 ./internal/admin
+      - name: Install Console dependencies
+        run: pnpm --dir internal/admin/ui install --frozen-lockfile
+      - name: Verify Console lint and types
         run: |
-          set +e
-          go test -count=1 ./internal/admin > /tmp/go.log 2>&1
-          go_rc=$?
-          pnpm --dir internal/admin/ui install --frozen-lockfile > /tmp/install.log 2>&1
-          install_rc=$?
-          lint_rc=99
-          type_rc=99
-          if [ "$install_rc" -eq 0 ]; then
-            pnpm --dir internal/admin/ui run lint > /tmp/lint.log 2>&1
-            lint_rc=$?
-            pnpm --dir internal/admin/ui run typecheck > /tmp/type.log 2>&1
-            type_rc=$?
-          fi
-          {
-            echo "GO_TEST_RC=$go_rc"
-            cat /tmp/go.log
-            echo "PNPM_INSTALL_RC=$install_rc"
-            echo "FRONTEND_LINT_RC=$lint_rc"
-            [ -f /tmp/lint.log ] && cat /tmp/lint.log
-            echo "FRONTEND_TYPECHECK_RC=$type_rc"
-            [ -f /tmp/type.log ] && cat /tmp/type.log
-          } > .issue158-diagnostics.txt
-          test "$go_rc" -eq 0
-          test "$install_rc" -eq 0
-          test "$lint_rc" -eq 0
-          test "$type_rc" -eq 0
-
-      - name: Commit branch maintenance output
-        if: success()
+          pnpm --dir internal/admin/ui run lint
+          pnpm --dir internal/admin/ui run typecheck
+      - name: Commit maintenance output
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A internal/admin internal/lifecycle docs/config-lifecycle.yaml docs/generated/config-lifecycle.json docs/generated/config-lifecycle.md .issue158-diagnostics.txt
+          git add -A internal/admin internal/lifecycle docs/config-lifecycle.yaml docs/generated/config-lifecycle.json docs/generated/config-lifecycle.md
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m "fix(admin): reconcile HR-07A route authority and CI (#158)"
+          git commit -m "fix(admin): reconcile HR-07A route authority and lifecycle (#158)"
           git push origin HEAD:issue-158-admin-rate-limits
