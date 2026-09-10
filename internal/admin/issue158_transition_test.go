@@ -12,46 +12,43 @@ import (
 )
 
 func TestAdminRateLimitHotLoosenPreservesCapacityInsteadOfRefilling(t *testing.T) {
-	cfg := limitTestConfig(240, 2, 30, 4)
-	s := newTestServer(t, cfg, Deps{})
+	l := newAdminLimiter(nil)
 	now := time.Unix(6000, 0)
-	s.limiter.now = func() time.Time { return now }
-	h := s.routes()
-	peer := "127.0.0.1:6000"
+	l.now = func() time.Time { return now }
+	peer := "127.0.0.1"
+	oldPolicy := adminLimitPolicy{writePerMin: 2}
+	_, _ = l.allow(peer, limitWrite, oldPolicy)
+	_, _ = l.allow(peer, limitWrite, oldPolicy)
 
-	_ = requestFrom(t, h, http.MethodPost, "/api/wizard", peer)
-	_ = requestFrom(t, h, http.MethodPost, "/api/wizard", peer)
-	now = now.Add(30 * time.Second) // one token under the old 2/min policy
-	cfg.RateLimitWritePerMin = 4
-	s.UpdateLiveAdminConfig(cfg)
-
-	if rr := requestFrom(t, h, http.MethodPost, "/api/wizard", peer); rr.Code == http.StatusTooManyRequests {
+	now = now.Add(30 * time.Second) // one token accrues under old 2/min policy
+	newPolicy := adminLimitPolicy{writePerMin: 4}
+	if ok, _ := l.allow(peer, limitWrite, newPolicy); !ok {
 		t.Fatal("elapsed old-policy capacity should remain usable after loosening")
 	}
-	if rr := requestFrom(t, h, http.MethodPost, "/api/wizard", peer); rr.Code != http.StatusTooManyRequests {
-		t.Fatalf("loosen reload refilled the bucket instead of preserving state: status=%d", rr.Code)
+	if ok, _ := l.allow(peer, limitWrite, newPolicy); ok {
+		t.Fatal("loosen reload refilled the bucket instead of preserving state")
 	}
 }
 
 func TestAdminRateLimitDelayedDisableReenableIsBoundedByNewBurst(t *testing.T) {
-	cfg := limitTestConfig(240, 2, 30, 4)
-	s := newTestServer(t, cfg, Deps{})
+	l := newAdminLimiter(nil)
 	now := time.Unix(7000, 0)
-	s.limiter.now = func() time.Time { return now }
-	h := s.routes()
-	peer := "127.0.0.1:7000"
+	l.now = func() time.Time { return now }
+	peer := "127.0.0.1"
+	oldPolicy := adminLimitPolicy{writePerMin: 2}
+	_, _ = l.allow(peer, limitWrite, oldPolicy)
+	_, _ = l.allow(peer, limitWrite, oldPolicy)
 
-	_ = requestFrom(t, h, http.MethodPost, "/api/wizard", peer)
-	_ = requestFrom(t, h, http.MethodPost, "/api/wizard", peer)
-	cfg.RateLimitWritePerMin = -1
-	s.UpdateLiveAdminConfig(cfg)
+	disabled := adminLimitPolicy{writePerMin: -1}
+	if ok, _ := l.allow(peer, limitWrite, disabled); !ok {
+		t.Fatal("disabled class unexpectedly rejected admission")
+	}
 	now = now.Add(10 * time.Minute)
-	cfg.RateLimitWritePerMin = 3
-	s.UpdateLiveAdminConfig(cfg)
+	newPolicy := adminLimitPolicy{writePerMin: 3}
 
 	allowed := 0
 	for i := 0; i < 5; i++ {
-		if rr := requestFrom(t, h, http.MethodPost, "/api/wizard", peer); rr.Code != http.StatusTooManyRequests {
+		if ok, _ := l.allow(peer, limitWrite, newPolicy); ok {
 			allowed++
 		}
 	}
@@ -94,15 +91,19 @@ func TestXTimeRateTighteningCharacterization(t *testing.T) {
 
 func TestAdminRouteCatalogueLimitClassificationMatrix(t *testing.T) {
 	want := map[string]limitKind{
-		"/api/v1/status":                limitRead,
-		"/api/v1/config/validate":       limitApply,
-		"/api/v1/config/plan":           limitApply,
-		"/api/v1/config/apply":          limitApply,
-		"/api/v1/config/patch/apply":    limitApply,
-		"/api/v1/config/rollback":       limitApply,
-		"/api/v1/config/adopt-external": limitApply,
-		"/api/config/validate":          limitApply,
-		"/api/config/diff":              limitApply,
+		"/api/v1/status":                        limitRead,
+		"/api/v1/config/validate":               limitApply,
+		"/api/v1/config/plan":                   limitApply,
+		"/api/v1/config/patch":                  limitApply,
+		"/api/v1/config/apply":                  limitApply,
+		"/api/v1/config/patch/apply":            limitApply,
+		"/api/v1/config/rollback":               limitApply,
+		"/api/v1/config/adopt-external/preview": limitApply,
+		"/api/v1/config/adopt-external":         limitApply,
+		"/api/v1/config/pending-restart/discard": limitApply,
+		"/api/config/validate":                  limitApply,
+		"/api/config/diff":                      limitApply,
+		"/api/wizard":                           limitWrite,
 	}
 	seen := make(map[string]bool, len(want))
 	for _, spec := range Catalog {
