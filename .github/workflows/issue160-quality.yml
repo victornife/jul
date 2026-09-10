@@ -215,4 +215,5 @@ jobs:
       - name: Real-server and browser acceptance
         run: |
           pnpm --dir internal/admin/ui exec playwright install --with-deps chromium
-          pnpm --dir internal/admin/ui exec playwright test --project=real-server issue160-audit-sink.spec.ts
+          pnpm --dir internal/admin/ui exec playwright test --project=real-server issue160-audit-sink.spec.ts issue160-transition-event.spec.ts issue160-mixed-resources.spec.ts
+          pnpm --dir internal/admin/ui exec playwright test --project=chromium issue160-degraded-health.spec.ts
