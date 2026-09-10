@@ -19,6 +19,7 @@ import (
 func TestAuditPublishDoesNotWaitForPhysicalWriterMutex(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	a := newAuditLog(16)
+	closeAuditLogOnCleanup(t, a)
 	p1, err := a.prepareTransition(mustAuditCfg(t, path, 10, 14))
 	if err != nil {
 		t.Fatal(err)
@@ -47,6 +48,7 @@ func TestAuditPublishDoesNotWaitForPhysicalWriterMutex(t *testing.T) {
 func TestAuditWriteFailureKeepsRingAndAdvancesGlobalID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	a := newAuditLogWithSink(16, path, 10, 14, nil)
+	closeAuditLogOnCleanup(t, a)
 	if a.currentSink == nil {
 		t.Fatal("sink not active")
 	}
@@ -73,6 +75,7 @@ func TestAuditPrepareFailureDoesNotPoisonHealthyLiveSink(t *testing.T) {
 	d := t.TempDir()
 	aPath := filepath.Join(d, "a.jsonl")
 	a := newAuditLogWithSink(16, aPath, 10, 14, nil)
+	closeAuditLogOnCleanup(t, a)
 	a.record(AuditEvent{Operation: "healthy", Result: "success"})
 	before := a.statusReport()
 	if before == nil || !before.Healthy {

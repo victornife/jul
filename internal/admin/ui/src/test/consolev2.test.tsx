@@ -81,14 +81,19 @@ describe("OverviewSchema", () => {
       status: [],
       audit_sink: {
         configured: true,
-        path: "/var/log/jul/audit.jsonl",
+        active: true,
         healthy: false,
-        error: "open /var/log/jul/audit.jsonl: permission denied",
         write_failures: 3,
+        rotate_failures: 1,
+        cleanup_failures: 0,
+        retirement_failures: 0,
+        last_failure_category: "write",
       },
     });
     expect(result.audit_sink?.configured).toBe(true);
+    expect(result.audit_sink?.active).toBe(true);
     expect(result.audit_sink?.healthy).toBe(false);
+    expect(result.audit_sink?.last_failure_category).toBe("write");
     expect(result.audit_sink?.write_failures).toBe(3);
   });
 });

@@ -40,6 +40,11 @@ func newTestServer(t *testing.T, cfg config.AdminConfig, deps Deps) *Server {
 	if s == nil {
 		t.Fatal("New returned nil for enabled config")
 	}
+	t.Cleanup(func() {
+		if s.audit != nil {
+			_ = s.audit.Close()
+		}
+	})
 	return s
 }
 

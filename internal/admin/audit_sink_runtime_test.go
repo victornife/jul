@@ -138,6 +138,7 @@ func TestAuditSinkSamePathSharesPhysicalOwner(t *testing.T) {
 func TestAuditSinkExactNoopDoesNotChurnGeneration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	a := newAuditLog(8)
+	closeAuditLogOnCleanup(t, a)
 	cfg := mustAuditCfg(t, path, 0, 0)
 	p, err := a.prepareTransition(cfg)
 	if err != nil {
@@ -317,6 +318,7 @@ func TestAuditSinkRotationCompatibilityAndRetention(t *testing.T) {
 func TestAuditSinkStatusRecoversOnSuccessfulWrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	a := newAuditLogWithSink(8, path, 1, 2, nil)
+	closeAuditLogOnCleanup(t, a)
 	a.mu.Lock()
 	a.activeFailure = auditFailureWrite
 	a.activeFailureAt = time.Now().UTC()
