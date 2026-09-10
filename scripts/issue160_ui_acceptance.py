@@ -296,8 +296,6 @@ test.describe.serial("HR-07C durable audit sink", () => {
       changed = true;
       await waitAudit(request, { file: pathA, rotate_max_mb: 1, rotate_keep: 2 });
 
-      // A rotation-only edit creates another auditable config transaction while
-      // keeping the same physical destination.
       await applyAudit(request, { rotate_keep: 3 });
       await waitAudit(request, { rotate_keep: 3 });
       await expect.poll(() => fileSize(pathA)).toBeGreaterThan(0);
@@ -322,8 +320,6 @@ test.describe.serial("HR-07C durable audit sink", () => {
       const bSize = await fileSize(pathB);
       const ringAtDisable = await ringMaxID(request);
 
-      // A rejected stale-base apply is auditable but has no config side effect;
-      // with durability disabled it must advance only the in-memory ring.
       const rejected = await request.post("/api/config/patch/apply", {
         headers: { "Content-Type": "application/json" },
         data: JSON.stringify({
@@ -350,20 +346,17 @@ test.describe.serial("HR-07C durable audit sink", () => {
 });
 ''')
 
-# Correct stale lifecycle prose now that HR-07C promotes only the audit path and
-# rotation fields. History/listener resources remain restart-bound.
 patch(
     "docs/reload-semantics.md",
     '''  admin read/write/apply limits plus the shared SSE cap) apply through the same\n  transaction.''',
     '''  admin read/write/apply limits plus the shared SSE cap, and the durable audit\n  sink path/rotation policy) apply through the same transaction.''',
 )
-patch(
-    "docs/reload-semantics.md",
-    '''  `admin.enabled`, `admin.listen`, admin history/audit resources,\n  tracing,''',
-    '''  `admin.enabled`, `admin.listen`, admin history resources,\n  tracing,''',
-)
+p = Path("docs/reload-semantics.md")
+s = p.read_text()
+if "admin history/audit resources" not in s:
+    raise SystemExit("restart-bound audit prose anchor missing")
+p.write_text(s.replace("admin history/audit resources", "admin history resources", 1))
 
-# Add focused operator/security cross-links rather than duplicating the design.
 for path, marker, text in [
     (
         "docs/console.md",
@@ -388,11 +381,9 @@ for path, marker, text in [
         raise SystemExit(f"heading marker missing in {path}")
     p.write_text(s[:idx] + text + s[idx:])
 
-# Changelog top entry for issue provenance.
 p = Path("CHANGELOG.md")
 s = p.read_text()
-anchor = "## "
-pos = s.find(anchor)
+pos = s.find("## ")
 if pos < 0:
     raise SystemExit("CHANGELOG release heading missing")
 line_end = s.find("\n", pos)
