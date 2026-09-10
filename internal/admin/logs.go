@@ -65,12 +65,12 @@ func (s *Server) handleLogsStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bound concurrent SSE streams per client to prevent resource exhaustion,
-	// sharing the same connection budget as /api/events (Milestone 1.6).
-	release, ok := s.limiter.acquireConn(adminClientIP(r))
+	// This endpoint shares the exact same per-transport-peer lease manager as
+	// /api/events. The policy comes from the request's pinned admin generation.
+	policy := adminLimitPolicyFromConfig(s.requestAdminSnapshot(r).cfg)
+	release, ok := s.limiter.acquireConn(adminClientIP(r), policy)
 	if !ok {
-		w.Header().Set("Retry-After", "5")
-		http.Error(w, "429 Too Many Requests", http.StatusTooManyRequests)
+		writeRateLimited(w, r, 5)
 		return
 	}
 	defer release()
