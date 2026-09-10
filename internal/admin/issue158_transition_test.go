@@ -4,7 +4,6 @@
 package admin
 
 import (
-	"net/http"
 	"testing"
 	"time"
 
@@ -91,19 +90,19 @@ func TestXTimeRateTighteningCharacterization(t *testing.T) {
 
 func TestAdminRouteCatalogueLimitClassificationMatrix(t *testing.T) {
 	want := map[string]limitKind{
-		"/api/v1/status":                        limitRead,
-		"/api/v1/config/validate":               limitApply,
-		"/api/v1/config/plan":                   limitApply,
-		"/api/v1/config/patch":                  limitApply,
-		"/api/v1/config/apply":                  limitApply,
-		"/api/v1/config/patch/apply":            limitApply,
-		"/api/v1/config/rollback":               limitApply,
-		"/api/v1/config/adopt-external/preview": limitApply,
-		"/api/v1/config/adopt-external":         limitApply,
+		"/api/v1/status":                         limitRead,
+		"/api/v1/config/validate":                limitApply,
+		"/api/v1/config/plan":                    limitApply,
+		"/api/v1/config/patch":                   limitApply,
+		"/api/v1/config/apply":                   limitApply,
+		"/api/v1/config/patch/apply":             limitApply,
+		"/api/v1/config/rollback":                limitApply,
+		"/api/v1/config/adopt-external/preview":  limitApply,
+		"/api/v1/config/adopt-external":          limitApply,
 		"/api/v1/config/pending-restart/discard": limitApply,
-		"/api/config/validate":                  limitApply,
-		"/api/config/diff":                      limitApply,
-		"/api/wizard":                           limitWrite,
+		"/api/config/validate":                   limitApply,
+		"/api/config/diff":                       limitApply,
+		"/api/wizard":                            limitWrite,
 	}
 	seen := make(map[string]bool, len(want))
 	for _, spec := range Catalog {

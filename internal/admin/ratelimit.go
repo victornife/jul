@@ -324,13 +324,22 @@ func hasPermission(perms []rbac.Permission, target rbac.Permission) bool {
 // assessment/mutation permissions use the stricter apply budget; other
 // mutations use write. Unknown methods are conservatively write.
 func limitClassForSpec(spec RouteSpec, method string) limitKind {
+	if explicit, ok := spec.LimitClasses[method]; ok {
+		return explicit
+	}
 	if safeMethod(method) {
 		return limitRead
 	}
 
 	perm := permissionForMethod(spec, method)
-	if perm == rbac.ConfigApply || perm == rbac.HistoryRollback || perm == rbac.ConfigWrite || hasPermission(spec.AnyPermissions, rbac.ConfigApply) || hasPermission(spec.AnyPermissions, rbac.HistoryRollback) || hasPermission(spec.AnyPermissions, rbac.ConfigWrite) {
+	if perm == rbac.ConfigApply || perm == rbac.HistoryRollback || perm == rbac.ConfigAdopt || hasPermission(spec.AnyPermissions, rbac.ConfigApply) || hasPermission(spec.AnyPermissions, rbac.HistoryRollback) || hasPermission(spec.AnyPermissions, rbac.ConfigAdopt) {
 		return limitApply
+	}
+	if op, ok := spec.Operations[method]; ok {
+		switch op.ID {
+		case "validateConfig", "planConfig", "previewConfigPatch", "applyConfig", "applyConfigPatch", "rollbackConfig", "previewAdoptExternal", "adoptExternal", "discardPendingRestart":
+			return limitApply
+		}
 	}
 	return limitWrite
 }

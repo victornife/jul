@@ -50,11 +50,6 @@ function SettingLabel({
   );
 }
 
-function integerValue(value: string): number | null {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) ? parsed : null;
-}
-
 export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["admin-runtime-settings"],
