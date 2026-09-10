@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -109,7 +110,7 @@ func TestAdminRuntimeSettingsProjectionUsesPinnedGeneration(t *testing.T) {
 	srv := New(oldCfg, testLogger(t), Deps{})
 	oldSnap := srv.currentAuth()
 	req := httptest.NewRequest(http.MethodGet, "/api/config/settings", nil)
-	req = withAdminRuntimeSnapshot(req, oldSnap)
+	req = req.WithContext(context.WithValue(req.Context(), adminRuntimeContextKey{}, oldSnap))
 
 	newCfg := oldCfg
 	newCfg.Console = &off
@@ -225,7 +226,7 @@ func TestPluginUploadMaxLimitIsPinnedAcrossPublish(t *testing.T) {
 	payload[4] = 0x01
 
 	oldReq := runtimeUploadRequest(t, "old-limit.wasm", payload)
-	oldReq = withAdminRuntimeSnapshot(oldReq, srv.currentAuth())
+	oldReq = oldReq.WithContext(context.WithValue(oldReq.Context(), adminRuntimeContextKey{}, srv.currentAuth()))
 	newCfg := oldCfg
 	newCfg.PluginUploadMaxSize = 1
 	srv.UpdateLiveAdminConfig(newCfg)
