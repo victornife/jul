@@ -30,10 +30,10 @@ func TestPrepareAdminRuntimeNilPreparedAndFailure(t *testing.T) {
 	srv := New(config.AdminConfig{Enabled: true}, testLogger(t), Deps{})
 	off := false
 	cfg := config.AdminConfig{
-		Enabled:                 true,
-		PluginUploadEnabled:     &off,
-		PluginUploadMaxSize:     1,
-		PluginUploadDir:         "  ",
+		Enabled:             true,
+		PluginUploadEnabled: &off,
+		PluginUploadMaxSize: 1,
+		PluginUploadDir:     "  ",
 	}
 	got, err := srv.PrepareAdminRuntime(cfg, nil)
 	if err != nil {
