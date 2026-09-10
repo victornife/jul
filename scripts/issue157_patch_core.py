@@ -154,10 +154,12 @@ p.write_text(text[:a] + new + text[b:])
 # Secret-safe settings GET and narrow typed edit operations.
 rep(
     "internal/admin/route_catalog.go",
+    "\t{\n\t\tPattern: \"/api/config/settings\",\n"
     "\t\tMethods: []string{http.MethodPost, http.MethodPut},\n"
     "\t\tPermissions: map[string]rbac.Permission{\n"
     "\t\t\thttp.MethodPost: rbac.ConfigApply,\n"
     "\t\t\thttp.MethodPut:  rbac.ConfigApply,\n",
+    "\t{\n\t\tPattern: \"/api/config/settings\",\n"
     "\t\tMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut},\n"
     "\t\tPermissions: map[string]rbac.Permission{\n"
     "\t\t\thttp.MethodGet:  rbac.ConfigRead,\n"
@@ -209,7 +211,6 @@ before_once('\t\twriteJSON(w, http.StatusBadRequest, map[string]string{"error": 
 before_once('\t\twriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid WASM module: magic number mismatch"})\n', '\t\ts.recordPluginUploadRejection(uploadRejectInvalidWASM)\n')
 before_once('\t\twriteJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("unsupported WASM version: %d", magic[4])})\n', '\t\ts.recordPluginUploadRejection(uploadRejectUnsupportedVersion)\n')
 before_once('\t\twriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename: valid WASM uploads must use a .wasm suffix"})\n', '\t\ts.recordPluginUploadRejection(uploadRejectInvalidFilename)\n')
-# Mark the post-buffer size rejection (the multipart-level 413 above is already marked).
 post = '\tif int64(len(data)) > maxBytes {\n\t\thttp.Error(w, fmt.Sprintf("file exceeds %d MB limit", maxMB), http.StatusRequestEntityTooLarge)\n'
 if post not in text:
     raise SystemExit("post-read oversize marker missing")
