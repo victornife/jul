@@ -298,20 +298,22 @@ func adminEntries() []Entry {
 		"admin.audit_log_file",
 		"admin.audit_log_rotate_keep",
 		"admin.audit_log_rotate_max_mb",
-		"admin.console",
 		"admin.enabled",
 		"admin.history_dir",
 		"admin.history_keep",
 		"admin.listen",
 		"admin.max_event_conns",
-		"admin.plugin_upload_dir",
-		"admin.plugin_upload_enabled",
-		"admin.plugin_upload_max_size",
 		"admin.rate_limit_apply_per_min",
 		"admin.rate_limit_read_per_min",
 		"admin.rate_limit_write_per_min",
 	}
 	out := restartGroup(SubAdmin, reasonAdminStartup, adminPaths...)
+	out = append(out,
+		hot("admin.console", SubAdmin, "the live admin server dispatches Console mode from one immutable per-request runtime snapshot published atomically"),
+		hot("admin.plugin_upload_enabled", SubAdmin, "new upload requests read admission state from the immutable admin runtime snapshot captured at request start"),
+		hot("admin.plugin_upload_max_size", SubAdmin, "each upload captures its size limit from the immutable admin runtime snapshot before body processing"),
+		hot("admin.plugin_upload_dir", SubAdmin, "candidate storage is preflighted before Publish and each upload is confined to the directory captured at request start"),
+	)
 	out = append(out,
 		// admin.token feeds the same immutable authSnapshot the RBAC fields
 		// below already install atomically at Publish (PrepareAuth/

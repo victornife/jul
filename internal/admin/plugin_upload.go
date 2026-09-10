@@ -53,6 +53,7 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	snap := s.requestAdminSnapshot(r)
 	cfg := snap.cfg
 	if (cfg.PluginUploadEnabled != nil && !*cfg.PluginUploadEnabled) || cfg.PluginUploadMaxSize <= 0 {
+		s.recordPluginUploadRejection(uploadRejectDisabled)
 		http.Error(w, "plugin upload disabled", http.StatusForbidden)
 		return
 	}
@@ -65,9 +66,11 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	if err := r.ParseMultipartForm(maxBytes); err != nil {
 		if err.Error() == "multipart: message too large" || err.Error() == "http: request body too large" {
+			s.recordPluginUploadRejection(uploadRejectTooLarge)
 			http.Error(w, fmt.Sprintf("file exceeds %d MB limit", maxMB), http.StatusRequestEntityTooLarge)
 			return
 		}
+		s.recordPluginUploadRejection(uploadRejectInvalidMultipart)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart form"})
 		return
 	}
@@ -75,6 +78,7 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 
 	file, header, err := r.FormFile("wasm")
 	if err != nil {
+		s.recordPluginUploadRejection(uploadRejectMissingFile)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing 'wasm' file field"})
 		return
 	}
@@ -82,24 +86,29 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 
 	name := filepath.Base(header.Filename)
 	if !validPluginFilename(name) {
+		s.recordPluginUploadRejection(uploadRejectInvalidFilename)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename: use a simple filename with letters, digits, '.', '_' or '-'"})
 		return
 	}
 
 	magic := make([]byte, 8)
 	if _, err := io.ReadFull(file, magic); err != nil {
+		s.recordPluginUploadRejection(uploadRejectInvalidWASM)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file too short to be a valid WASM module"})
 		return
 	}
 	if string(magic[:4]) != string(wasmMagic) {
+		s.recordPluginUploadRejection(uploadRejectInvalidWASM)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid WASM module: magic number mismatch"})
 		return
 	}
 	if magic[4] != 0x01 {
+		s.recordPluginUploadRejection(uploadRejectUnsupportedVersion)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("unsupported WASM version: %d", magic[4])})
 		return
 	}
 	if !strings.HasSuffix(name, ".wasm") || strings.TrimSuffix(name, ".wasm") == "" {
+		s.recordPluginUploadRejection(uploadRejectInvalidFilename)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename: valid WASM uploads must use a .wasm suffix"})
 		return
 	}
@@ -125,10 +134,12 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if int64(len(data)) > maxBytes {
+		s.recordPluginUploadRejection(uploadRejectTooLarge)
 		http.Error(w, fmt.Sprintf("file exceeds %d MB limit", maxMB), http.StatusRequestEntityTooLarge)
 		return
 	}
 	if len(data) < 8 {
+		s.recordPluginUploadRejection(uploadRejectInvalidWASM)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file too short to be a valid WASM module"})
 		return
 	}
@@ -136,12 +147,14 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	root, err := openPluginUploadRoot(dir)
 	if err != nil {
 		s.log.Error("plugin upload: failed to open captured upload directory", "error", err)
+		s.recordPluginUploadRejection(uploadRejectStorageUnavailable)
 		http.Error(w, "failed to prepare upload directory", http.StatusInternalServerError)
 		return
 	}
 	defer root.Close()
 	if err := writePluginUploadFile(root, name, data); err != nil {
 		s.log.Error("plugin upload: atomic confined write failed", "name", name, "error", err)
+		s.recordPluginUploadRejection(uploadRejectStorageUnavailable)
 		http.Error(w, "failed to store upload", http.StatusInternalServerError)
 		return
 	}

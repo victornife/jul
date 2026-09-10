@@ -19,19 +19,10 @@ type PreparedTLS struct {
 	fingerprint string
 }
 
-// PrepareTLS is the existing no-side-effect admin resource preparation hook
-// used by both managed and source-driven reload paths. #157 also validates the
-// candidate plugin-upload directory here because this hook already sits after
-// config resolution and before Publish. The upload probe is reversible and
-// creates neither the live candidate directory nor any final file.
+// PrepareTLS builds only candidate TLS certificate state. Operational admin
+// policy (Console/upload) is prepared by PrepareAdminRuntime before the common
+// Publish boundary.
 func (s *Server) PrepareTLS(cfg config.AdminConfig) (*PreparedTLS, error) {
-	uploadEnabled := (cfg.PluginUploadEnabled == nil || *cfg.PluginUploadEnabled) && cfg.PluginUploadMaxSize > 0
-	if uploadEnabled {
-		if err := preflightPluginUploadDir(cfg.PluginUploadDir); err != nil {
-			return nil, err
-		}
-	}
-
 	if s.certProvider == nil || cfg.TLS == nil || !cfg.TLS.Enabled {
 		return nil, nil
 	}

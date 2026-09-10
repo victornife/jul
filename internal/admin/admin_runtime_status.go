@@ -8,8 +8,6 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
-
-	"jul/internal/config"
 )
 
 const (
@@ -30,16 +28,16 @@ const (
 // path nor a filename/token. Generation is diagnostic correlation metadata and
 // must never be used as a metric label.
 type AdminRuntimeStatus struct {
-	Generation             string `json:"generation"`
-	ConsoleCompiled        bool   `json:"console_compiled"`
-	ConsoleConfigured      bool   `json:"console_configured"`
-	ConsoleEffective       bool   `json:"console_effective"`
-	PluginsCompiled        bool   `json:"plugins_compiled"`
-	UploadEnabled          bool   `json:"upload_enabled"`
-	UploadMaxSizeMB        int    `json:"upload_max_size_mb"`
-	UploadDirectoryHealth  string `json:"upload_directory_health"`
-	PreparationFailure     string `json:"preparation_failure,omitempty"`
-	LastUploadRejection    string `json:"last_upload_rejection,omitempty"`
+	Generation            string `json:"generation"`
+	ConsoleCompiled       bool   `json:"console_compiled"`
+	ConsoleConfigured     bool   `json:"console_configured"`
+	ConsoleEffective      bool   `json:"console_effective"`
+	PluginsCompiled       bool   `json:"plugins_compiled"`
+	UploadEnabled         bool   `json:"upload_enabled"`
+	UploadMaxSizeMB       int    `json:"upload_max_size_mb"`
+	UploadDirectoryHealth string `json:"upload_directory_health"`
+	PreparationFailure    string `json:"preparation_failure,omitempty"`
+	LastUploadRejection   string `json:"last_upload_rejection,omitempty"`
 }
 
 // AdminRuntimeSettingsProjection is the non-secret configuration surface used
@@ -47,15 +45,15 @@ type AdminRuntimeStatus struct {
 // projection includes the configured upload directory so an operator can edit
 // it without fetching raw TOML (which may contain credentials elsewhere).
 type AdminRuntimeSettingsProjection struct {
-	Console                 bool                                `json:"console"`
-	ConsoleCompiled         bool                                `json:"console_compiled"`
-	ConsoleEffective        bool                                `json:"console_effective"`
-	PluginUploadEnabled     bool                                `json:"plugin_upload_enabled"`
-	PluginUploadMaxSizeMB   int                                 `json:"plugin_upload_max_size_mb"`
-	PluginUploadDir         string                              `json:"plugin_upload_dir"`
-	PluginUploadEffective   bool                                `json:"plugin_upload_effective"`
-	UploadDirectoryHealth   string                              `json:"upload_directory_health"`
-	Lifecycle               map[string]LifecycleFieldProjection `json:"lifecycle"`
+	Console               bool                                `json:"console"`
+	ConsoleCompiled       bool                                `json:"console_compiled"`
+	ConsoleEffective      bool                                `json:"console_effective"`
+	PluginUploadEnabled   bool                                `json:"plugin_upload_enabled"`
+	PluginUploadMaxSizeMB int                                 `json:"plugin_upload_max_size_mb"`
+	PluginUploadDir       string                              `json:"plugin_upload_dir"`
+	PluginUploadEffective bool                                `json:"plugin_upload_effective"`
+	UploadDirectoryHealth string                              `json:"upload_directory_health"`
+	Lifecycle             map[string]LifecycleFieldProjection `json:"lifecycle"`
 }
 
 func (s *Server) adminRuntimeStatus(r *http.Request) *AdminRuntimeStatus {
@@ -152,11 +150,11 @@ type adminRuntimePrepareError struct {
 	err      error
 }
 
-func (e *adminRuntimePrepareError) Error() string { return "admin runtime prepare (" + e.category + "): " + e.err.Error() }
+func (e *adminRuntimePrepareError) Error() string {
+	return "admin runtime prepare (" + e.category + "): " + e.err.Error()
+}
 func (e *adminRuntimePrepareError) Unwrap() error { return e.err }
 
 func newAdminRuntimePrepareError(category string, err error) error {
 	return &adminRuntimePrepareError{category: category, err: err}
 }
-
-var _ = config.AdminConfig{}

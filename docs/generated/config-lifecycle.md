@@ -121,15 +121,15 @@ value is compared as a digest so no secret material leaves the process.
 | `admin.audit_log_file` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.audit_log_rotate_keep` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.audit_log_rotate_max_mb` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
-| `admin.console` | `hot_reload` | `admin` | — | the live admin server reads this value from the immutable admin generation pinned once per request and Publish swaps the complete generation atomically (#157) |
+| `admin.console` | `hot_reload` | `admin` | — | the live admin server dispatches Console mode from one immutable per-request runtime snapshot published atomically |
 | `admin.enabled` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.history_dir` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.history_keep` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.listen` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.max_event_conns` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
-| `admin.plugin_upload_dir` | `hot_reload` | `admin` | — | the live admin server reads this value from the immutable admin generation pinned once per request and Publish swaps the complete generation atomically (#157) |
-| `admin.plugin_upload_enabled` | `hot_reload` | `admin` | — | the live admin server reads this value from the immutable admin generation pinned once per request and Publish swaps the complete generation atomically (#157) |
-| `admin.plugin_upload_max_size` | `hot_reload` | `admin` | — | the live admin server reads this value from the immutable admin generation pinned once per request and Publish swaps the complete generation atomically (#157) |
+| `admin.plugin_upload_dir` | `hot_reload` | `admin` | — | candidate storage is preflighted before Publish and each upload is confined to the directory captured at request start |
+| `admin.plugin_upload_enabled` | `hot_reload` | `admin` | — | new upload requests read admission state from the immutable admin runtime snapshot captured at request start |
+| `admin.plugin_upload_max_size` | `hot_reload` | `admin` | — | each upload captures its size limit from the immutable admin runtime snapshot before body processing |
 | `admin.rate_limit_apply_per_min` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.rate_limit_read_per_min` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.rate_limit_write_per_min` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |

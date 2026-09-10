@@ -516,8 +516,9 @@ var Catalog = []RouteSpec{
 	},
 	{
 		Pattern: "/api/config/settings",
-		Methods: []string{http.MethodPost, http.MethodPut},
+		Methods: []string{http.MethodGet, http.MethodPost, http.MethodPut},
 		Permissions: map[string]rbac.Permission{
+			http.MethodGet:  rbac.ConfigRead,
 			http.MethodPost: rbac.ConfigApply,
 			http.MethodPut:  rbac.ConfigApply,
 		},

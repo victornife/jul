@@ -24,6 +24,9 @@ import (
 // description of the change for the audit log, or an error when the target is
 // not found or the operation is unknown.
 func applyPatch(c *config.Config, req patchRequest) (string, error) {
+	if req.Op == "admin_console_set" || req.Op == "admin_plugin_upload_set" {
+		return applyAdminRuntimePatch(c, req)
+	}
 	switch req.Op {
 	case "route_set_target":
 		loc, err := findLocation(c, req.locationTarget())

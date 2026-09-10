@@ -5734,6 +5734,22 @@
                 "plugin_name": {
                   "type": "string"
                 },
+                "plugin_upload": {
+                  "type": "object",
+                  "properties": {
+                    "directory": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "max_size_mb": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  },
+                  "additionalProperties": false
+                },
                 "predicates": {
                   "type": "object",
                   "properties": {

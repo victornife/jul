@@ -32,10 +32,13 @@ const (
 // Console and upload policy because cfg already contains the complete effective
 // AdminConfig. Requests pin this exact object once at mux entry.
 type authSnapshot struct {
-	mode   authMode
-	cfg    config.AdminConfig
-	policy *rbac.Policy
-	gen    string
+	mode            authMode
+	cfg             config.AdminConfig
+	policy          *rbac.Policy
+	gen             string
+	consoleCompiled bool
+	pluginsCompiled bool
+	uploadDirHealth string
 }
 
 type PreparedAuth struct {
@@ -61,6 +64,12 @@ func authGeneration(cfg config.AdminConfig, p *rbac.Policy) string {
 	_, _ = h.Write([]byte(cfg.Listen))
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write([]byte(strconv.FormatBool(cfg.ConsoleEnabled())))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(strconv.FormatBool(pluginUploadEnabled(cfg))))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(strconv.Itoa(cfg.PluginUploadMaxSize)))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(normalizePluginUploadDir(cfg.PluginUploadDir)))
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write([]byte(strconv.FormatBool(cfg.RBAC.Enabled)))
 	_, _ = h.Write([]byte{0})
@@ -89,14 +98,14 @@ func deriveAuthSnapshot(cfg config.AdminConfig, p *rbac.Policy, gen string) *aut
 
 func (s *Server) installAuth(cfg config.AdminConfig, p *rbac.Policy) {
 	gen := strconv.FormatUint(s.authGen.Add(1), 10)
-	s.authState.Store(deriveAuthSnapshot(cfg, p, gen))
+	s.authState.Store(s.completeAdminRuntimeSnapshot(deriveAuthSnapshot(cfg, p, gen)))
 }
 
 func (s *Server) currentAuth() *authSnapshot {
 	if a := s.authState.Load(); a != nil {
 		return a
 	}
-	return deriveAuthSnapshot(s.cfg, nil, "0")
+	return s.completeAdminRuntimeSnapshot(deriveAuthSnapshot(s.cfg, nil, "0"))
 }
 
 func (s *Server) UpdateAuth(cfg config.AdminConfig, p *rbac.Policy) {

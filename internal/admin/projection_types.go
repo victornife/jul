@@ -491,7 +491,8 @@ type RuntimeOverview struct {
 	// AdminHealth reports admin subsystem degradation (F-05). It is present only
 	// when the admin subsystem is unhealthy, so the console can show a top-level
 	// degraded banner. A healthy admin subsystem omits the field entirely.
-	AdminHealth *AdminHealthStatus `json:"admin_health,omitempty"`
+	AdminHealth  *AdminHealthStatus  `json:"admin_health,omitempty"`
+	AdminRuntime *AdminRuntimeStatus `json:"admin_runtime,omitempty"`
 	// CertRisk surfaces real certificate health (counts, expiry, errors) so the
 	// Overview "Certificates" card is truthful rather than just reporting TLS
 	// configuration presence. Omitted when no TLS server blocks are configured.

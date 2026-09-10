@@ -114,7 +114,7 @@ fields:
   - path: "admin.console"
     class: hot_reload
     subsystem: admin
-    reason: "the live admin server reads this value from the immutable admin generation pinned once per request and Publish swaps the complete generation atomically (#157)"
+    reason: "the live admin server dispatches Console mode from one immutable per-request runtime snapshot published atomically"
   - path: "admin.enabled"
     class: restart_required
     subsystem: admin
@@ -143,15 +143,15 @@ fields:
   - path: "admin.plugin_upload_dir"
     class: hot_reload
     subsystem: admin
-    reason: "the live admin server reads this value from the immutable admin generation pinned once per request and Publish swaps the complete generation atomically (#157)"
+    reason: "candidate storage is preflighted before Publish and each upload is confined to the directory captured at request start"
   - path: "admin.plugin_upload_enabled"
     class: hot_reload
     subsystem: admin
-    reason: "the live admin server reads this value from the immutable admin generation pinned once per request and Publish swaps the complete generation atomically (#157)"
+    reason: "new upload requests read admission state from the immutable admin runtime snapshot captured at request start"
   - path: "admin.plugin_upload_max_size"
     class: hot_reload
     subsystem: admin
-    reason: "the live admin server reads this value from the immutable admin generation pinned once per request and Publish swaps the complete generation atomically (#157)"
+    reason: "each upload captures its size limit from the immutable admin runtime snapshot before body processing"
   - path: "admin.rate_limit_apply_per_min"
     class: restart_required
     subsystem: admin

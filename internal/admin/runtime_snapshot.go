@@ -41,23 +41,35 @@ func (s *Server) requestAdminSnapshot(r *http.Request) *authSnapshot {
 	return s.currentAuth()
 }
 
-// PrepareAdminRuntime is an importable form of the #157 operational prepare
-// rule used by focused tests and future composition-root wiring. Production's
-// existing shared admin Prepare hook performs the same reversible preflight in
-// PrepareTLS before Publish, so no second live state is introduced here.
+// PrepareAdminRuntime is the typed #157 candidate-resource seam shared by
+// managed, SIGHUP and file-watch reloads. It normalizes and validates candidate
+// upload storage without publishing policy or creating the configured final directory.
 func (s *Server) PrepareAdminRuntime(cfg config.AdminConfig, prepared *PreparedAuth) (*PreparedAuth, error) {
 	cfg.PluginUploadDir = normalizePluginUploadDir(cfg.PluginUploadDir)
 	if pluginUploadEnabled(cfg) && cfg.PluginUploadMaxSize > 0 {
 		if err := preflightPluginUploadDir(cfg.PluginUploadDir); err != nil {
-			return nil, err
+			s.recordAdminPrepareFailure(adminPrepareFailureUploadDirectory)
+			return nil, newAdminRuntimePrepareError(adminPrepareFailureUploadDirectory, err)
 		}
 	}
+	s.clearAdminPrepareFailure()
 	if prepared == nil || prepared.snapshot == nil {
 		return prepared, nil
 	}
 	out := *prepared.snapshot
 	out.cfg = cfg
-	return &PreparedAuth{snapshot: &out}, nil
+	return &PreparedAuth{snapshot: s.completeAdminRuntimeSnapshot(&out)}, nil
+}
+
+func (s *Server) completeAdminRuntimeSnapshot(in *authSnapshot) *authSnapshot {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.consoleCompiled = consoleV2Compiled
+	out.pluginsCompiled = s.deps.PluginsCompiled
+	out.uploadDirHealth = inspectPluginUploadDirHealth(out.cfg.PluginUploadDir)
+	return &out
 }
 
 // Nil means the documented/default-enabled state. A non-positive size still
