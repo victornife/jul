@@ -1,0 +1,52 @@
+name: issue-157 docs and focused matrix
+
+on:
+  push:
+    branches:
+      - issue-157-hot-admin-runtime
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          package_json_file: internal/admin/ui/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+      - name: apply documentation reconciliation
+        run: python3 scripts/issue157_patch_docs.py
+      - name: focused Go matrix
+        run: |
+          go test ./internal/admin ./internal/app ./internal/config ./internal/lifecycle ./internal/plugins
+          go test -tags "console wasmplugins" ./internal/admin ./internal/app ./internal/config ./internal/lifecycle ./internal/plugins
+          go test -race -p 2 -tags "console wasmplugins" ./internal/admin ./internal/app ./internal/config ./internal/lifecycle ./internal/plugins
+      - name: Console verification
+        run: |
+          pnpm --dir internal/admin/ui install --frozen-lockfile
+          pnpm --dir internal/admin/ui run typecheck
+          pnpm --dir internal/admin/ui run lint
+          pnpm --dir internal/admin/ui run test:coverage
+      - name: docs and generated drift
+        run: |
+          python3 scripts/docs-check.py
+          make generated-check
+      - name: commit verified docs and remove temporary scaffolding
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/issue-157-docs-tests.yml scripts/issue157_patch_docs.py
+          git add -A
+          git commit -m "docs: document HR-06B runtime cutover and safety (#157)"
+          git push origin HEAD:issue-157-hot-admin-runtime
