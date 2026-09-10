@@ -1,0 +1,182 @@
+name: HR-07C platform fix
+
+on:
+  push:
+    branches: [issue-160-hot-audit-sink]
+    paths:
+      - '.github/workflows/hr07c-platform-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: issue-160-hot-audit-sink
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: internal/admin/ui/package.json
+      - name: Apply platform-safe test fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one replacement, found {count}')
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              'internal/admin/ui/src/test/consolev2.test.tsx',
+              '''      audit_sink: {
+                configured: true,
+                path: "/var/log/jul/audit.jsonl",
+                healthy: false,
+                error: "open /var/log/jul/audit.jsonl: permission denied",
+                write_failures: 3,
+              },''',
+              '''      audit_sink: {
+                configured: true,
+                active: true,
+                healthy: false,
+                generation: 4,
+                write_failures: 3,
+                rotate_failures: 1,
+                cleanup_failures: 0,
+                retirement_failures: 0,
+                last_failure_category: "write",
+                last_failure_at: "2026-09-10T18:00:00Z",
+              },''')
+          replace_once(
+              'internal/admin/ui/src/test/consolev2.test.tsx',
+              '''    expect(result.audit_sink?.configured).toBe(true);
+              expect(result.audit_sink?.healthy).toBe(false);
+              expect(result.audit_sink?.write_failures).toBe(3);''',
+              '''    expect(result.audit_sink?.configured).toBe(true);
+              expect(result.audit_sink?.active).toBe(true);
+              expect(result.audit_sink?.healthy).toBe(false);
+              expect(result.audit_sink?.last_failure_category).toBe("write");
+              expect(result.audit_sink?.write_failures).toBe(3);''')
+
+          replace_once(
+              'internal/admin/server_test.go',
+              '''\tif s == nil {
+          \t\tt.Fatal("New returned nil for enabled config")
+          \t}
+          \treturn s''',
+              '''\tif s == nil {
+          \t\tt.Fatal("New returned nil for enabled config")
+          \t}
+          \tt.Cleanup(func() {
+          \t\tif s.audit != nil {
+          \t\t\t_ = s.audit.Close()
+          \t\t}
+          \t})
+          \treturn s''')
+
+          for path, marker in [
+              ('internal/admin/audit_sink_runtime_test.go', 'func TestAuditSinkExactNoopDoesNotChurnGeneration(t *testing.T) {'),
+              ('internal/admin/audit_sink_runtime_test.go', 'func TestAuditSinkStatusRecoversOnSuccessfulWrite(t *testing.T) {'),
+              ('internal/admin/issue160_runtime_contract_test.go', 'func TestAuditPublishDoesNotWaitForPhysicalWriterMutex(t *testing.T) {'),
+              ('internal/admin/issue160_runtime_contract_test.go', 'func TestAuditWriteFailureKeepsRingAndAdvancesGlobalID(t *testing.T) {'),
+              ('internal/admin/issue160_runtime_contract_test.go', 'func TestAuditPrepareFailureDoesNotPoisonHealthyLiveSink(t *testing.T) {'),
+          ]:
+              p = Path(path)
+              text = p.read_text()
+              start = text.find(marker)
+              if start < 0:
+                  raise SystemExit(f'{path}: marker missing: {marker}')
+              next_func = text.find('\nfunc ', start + len(marker))
+              end = len(text) if next_func < 0 else next_func
+              block = text[start:end]
+              if 'closeAuditLogOnCleanup(t, a)' in block:
+                  continue
+              candidates = ['\ta := newAuditLogWithSink(', '\ta := newAuditLog(']
+              pos = -1
+              for candidate in candidates:
+                  pos = block.find(candidate)
+                  if pos >= 0:
+                      break
+              if pos < 0:
+                  raise SystemExit(f'{path}: audit construction missing in {marker}')
+              line_end = block.find('\n', pos)
+              block = block[:line_end+1] + '\tcloseAuditLogOnCleanup(t, a)\n' + block[line_end+1:]
+              p.write_text(text[:start] + block + text[end:])
+
+          Path('internal/admin/issue160_test_cleanup_test.go').write_text('''// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+          // SPDX-License-Identifier: agpl
+
+          package admin
+
+          import "testing"
+
+          func closeAuditLogOnCleanup(t *testing.T, a *auditLog) {
+          \tt.Helper()
+          \tif a == nil {
+          \t\treturn
+          \t}
+          \tt.Cleanup(func() { _ = a.Close() })
+          }
+          ''')
+
+          Path('internal/admin/testmain_test.go').write_text('''// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+          // SPDX-License-Identifier: agpl
+
+          package admin
+
+          import (
+          \t"os"
+          \t"path/filepath"
+          \t"runtime"
+          \t"testing"
+          )
+
+          // TestMain canonicalizes the macOS temporary directory before tests
+          // create audit destinations. macOS exposes /var as a symlink to
+          // /private/var, while the production audit contract deliberately
+          // rejects symlinked parent components. Tests should exercise that
+          // contract from the canonical filesystem path rather than weakening it.
+          func TestMain(m *testing.M) {
+          \tif runtime.GOOS == "darwin" {
+          \t\tif resolved, err := filepath.EvalSymlinks(os.TempDir()); err == nil {
+          \t\t\t_ = os.Setenv("TMPDIR", resolved)
+          \t\t}
+          \t}
+          \tos.Exit(m.Run())
+          }
+          ''')
+          PY
+
+          gofmt -w internal/admin/server_test.go internal/admin/audit_sink_runtime_test.go internal/admin/issue160_runtime_contract_test.go internal/admin/issue160_test_cleanup_test.go internal/admin/testmain_test.go
+      - name: Validate affected suites
+        shell: bash
+        run: |
+          go test -count=1 ./internal/admin
+          go test -count=1 -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" ./internal/admin
+          GOOS=windows GOARCH=amd64 go test -c -o /tmp/admin-windows.test ./internal/admin
+          GOOS=darwin GOARCH=arm64 go test -c -o /tmp/admin-darwin.test ./internal/admin
+          pnpm --dir internal/admin/ui install --frozen-lockfile
+          pnpm --dir internal/admin/ui exec vitest run src/test/consolev2.test.tsx
+      - name: Commit validated fixes
+        shell: bash
+        run: |
+          git config user.name "Marmitakus"
+          git config user.email "72155289+victornife@users.noreply.github.com"
+          git rm .github/workflows/hr07c-platform-fix.yml
+          git add internal/admin/server_test.go internal/admin/audit_sink_runtime_test.go internal/admin/issue160_runtime_contract_test.go internal/admin/issue160_test_cleanup_test.go internal/admin/testmain_test.go internal/admin/ui/src/test/consolev2.test.tsx
+          git commit -m "test(hr07c): make audit coverage portable across platforms"
+          git push origin HEAD:issue-160-hot-audit-sink
