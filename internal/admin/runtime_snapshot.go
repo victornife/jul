@@ -5,15 +5,12 @@ package admin
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -25,9 +22,10 @@ const defaultPluginUploadDir = "./jul-data/plugins"
 
 type adminRuntimeContextKey struct{}
 
-// captureAdminRuntimeSnapshot loads the live generation exactly once for a
-// request and pins it in context. Every downstream auth/Console/upload decision
-// then observes the same immutable generation even if Publish races the request.
+// captureAdminRuntimeSnapshot pins the already-existing #95 immutable snapshot
+// to one request. The snapshot already contains the complete effective
+// AdminConfig and auth policy, so #157 deliberately does not introduce a second
+// runtime authority.
 func (s *Server) captureAdminRuntimeSnapshot(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		snap := s.currentAuth()
@@ -45,52 +43,18 @@ func (s *Server) requestAdminSnapshot(r *http.Request) *authSnapshot {
 	return s.currentAuth()
 }
 
-// prepareAdminRuntimeSnapshot validates operational state that must be safe
-// before Publish and returns the same prepared snapshot used by authentication.
-func (s *Server) prepareAdminRuntimeSnapshot(cfg config.AdminConfig, prepared *PreparedAuth) (*PreparedAuth, error) {
-	if prepared == nil || prepared.snapshot == nil {
-		return prepared, nil
-	}
+// PrepareAdminRuntime validates the candidate operational upload policy before
+// Publish and returns a prepared snapshot whose AdminConfig contains a single
+// normalized upload-directory interpretation. No final upload target is created
+// during preparation.
+func (s *Server) PrepareAdminRuntime(cfg config.AdminConfig, p *rbac.Policy) (*PreparedAuth, error) {
 	cfg.PluginUploadDir = normalizePluginUploadDir(cfg.PluginUploadDir)
 	if pluginUploadEnabled(cfg) {
 		if err := preflightPluginUploadDir(cfg.PluginUploadDir); err != nil {
 			return nil, err
 		}
 	}
-	out := *prepared.snapshot
-	out.cfg = cfg
-	out.consoleCompiled = consoleV2Compiled
-	out.pluginsCompiled = s.deps.PluginsCompiled
-	out.runtimeGen = adminRuntimeGeneration(cfg, out.gen, out.consoleCompiled, out.pluginsCompiled)
-	return &PreparedAuth{snapshot: &out}, nil
-}
-
-func (s *Server) completeAdminRuntimeSnapshot(in *authSnapshot) *authSnapshot {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	out.cfg.PluginUploadDir = normalizePluginUploadDir(out.cfg.PluginUploadDir)
-	out.consoleCompiled = consoleV2Compiled
-	out.pluginsCompiled = s.deps.PluginsCompiled
-	out.runtimeGen = adminRuntimeGeneration(out.cfg, out.gen, out.consoleCompiled, out.pluginsCompiled)
-	return &out
-}
-
-func adminRuntimeGeneration(cfg config.AdminConfig, authGen string, consoleCompiled, pluginsCompiled bool) string {
-	h := sha256.New()
-	part := func(v string) {
-		_, _ = h.Write([]byte(v))
-		_, _ = h.Write([]byte{0})
-	}
-	part(authGen)
-	part(strconv.FormatBool(cfg.ConsoleEnabled()))
-	part(strconv.FormatBool(pluginUploadEnabled(cfg)))
-	part(strconv.Itoa(cfg.PluginUploadMaxSize))
-	part(normalizePluginUploadDir(cfg.PluginUploadDir))
-	part(strconv.FormatBool(consoleCompiled))
-	part(strconv.FormatBool(pluginsCompiled))
-	return hex.EncodeToString(h.Sum(nil)[:16])
+	return PrepareAuth(cfg, p), nil
 }
 
 func pluginUploadEnabled(cfg config.AdminConfig) bool {
