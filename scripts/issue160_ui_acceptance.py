@@ -120,6 +120,14 @@ describe("AdminRuntimeSettingsDrawer HR-07C audit sink", () => {
 '''
 p.write_text(s)
 
+# Register the HR-07C spec in the real-server project. Keeping it in the normal
+# project means ordinary PR CI also executes it, not just this one-off gate.
+patch(
+    "internal/admin/ui/playwright.config.ts",
+    '''        "e2e/issue158-admin-runtime.spec.ts",\n''',
+    '''        "e2e/issue158-admin-runtime.spec.ts",\n        "e2e/issue160-audit-sink.spec.ts",\n''',
+)
+
 # Real-server Playwright acceptance. It uses the same managed fixture as HR-06B/07A,
 # verifies browser preview + live apply, actual JSONL files, global ring continuity,
 # path cutover, rotation-only update, disable, and restoration.
