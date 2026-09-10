@@ -40,37 +40,47 @@ jobs:
                   raise SystemExit(f'{path}: expected one replacement, found {count}')
               p.write_text(text.replace(old, new, 1))
 
-          replace_once(
-              'internal/admin/ui/src/test/consolev2.test.tsx',
-              '''      audit_sink: {
-                configured: true,
-                path: "/var/log/jul/audit.jsonl",
-                healthy: false,
-                error: "open /var/log/jul/audit.jsonl: permission denied",
-                write_failures: 3,
-              },''',
-              '''      audit_sink: {
-                configured: true,
-                active: true,
-                healthy: false,
-                generation: 4,
-                write_failures: 3,
-                rotate_failures: 1,
-                cleanup_failures: 0,
-                retirement_failures: 0,
-                last_failure_category: "write",
-                last_failure_at: "2026-09-10T18:00:00Z",
-              },''')
-          replace_once(
-              'internal/admin/ui/src/test/consolev2.test.tsx',
-              '''    expect(result.audit_sink?.configured).toBe(true);
-              expect(result.audit_sink?.healthy).toBe(false);
-              expect(result.audit_sink?.write_failures).toBe(3);''',
-              '''    expect(result.audit_sink?.configured).toBe(true);
-              expect(result.audit_sink?.active).toBe(true);
-              expect(result.audit_sink?.healthy).toBe(false);
-              expect(result.audit_sink?.last_failure_category).toBe("write");
-              expect(result.audit_sink?.write_failures).toBe(3);''')
+          # Update only the degraded-audit fixture by locating its test block;
+          # do not depend on incidental indentation or neighboring fixtures.
+          ui = Path('internal/admin/ui/src/test/consolev2.test.tsx')
+          text = ui.read_text()
+          marker = 'it("parses a degraded audit_sink health report", () => {'
+          start = text.find(marker)
+          if start < 0:
+              raise SystemExit('degraded audit_sink fixture marker missing')
+          end = text.find('\n  });', start)
+          if end < 0:
+              raise SystemExit('degraded audit_sink fixture end missing')
+          end += len('\n  });')
+          block = text[start:end]
+          for forbidden in [
+              '        path: "/var/log/jul/audit.jsonl",\n',
+              '        error: "open /var/log/jul/audit.jsonl: permission denied",\n',
+          ]:
+              if forbidden not in block:
+                  raise SystemExit(f'expected legacy fixture line missing: {forbidden!r}')
+              block = block.replace(forbidden, '', 1)
+          if '        active: true,\n' not in block:
+              block = block.replace('        configured: true,\n', '        configured: true,\n        active: true,\n', 1)
+          if '        last_failure_category: "write",\n' not in block:
+              block = block.replace(
+                  '        write_failures: 3,\n',
+                  '        write_failures: 3,\n        rotate_failures: 1,\n        cleanup_failures: 0,\n        retirement_failures: 0,\n        last_failure_category: "write",\n',
+                  1,
+              )
+          if '    expect(result.audit_sink?.active).toBe(true);\n' not in block:
+              block = block.replace(
+                  '    expect(result.audit_sink?.configured).toBe(true);\n',
+                  '    expect(result.audit_sink?.configured).toBe(true);\n    expect(result.audit_sink?.active).toBe(true);\n',
+                  1,
+              )
+          if '    expect(result.audit_sink?.last_failure_category).toBe("write");\n' not in block:
+              block = block.replace(
+                  '    expect(result.audit_sink?.healthy).toBe(false);\n',
+                  '    expect(result.audit_sink?.healthy).toBe(false);\n    expect(result.audit_sink?.last_failure_category).toBe("write");\n',
+                  1,
+              )
+          ui.write_text(text[:start] + block + text[end:])
 
           replace_once(
               'internal/admin/server_test.go',
@@ -105,12 +115,9 @@ jobs:
               block = text[start:end]
               if 'closeAuditLogOnCleanup(t, a)' in block:
                   continue
-              candidates = ['\ta := newAuditLogWithSink(', '\ta := newAuditLog(']
-              pos = -1
-              for candidate in candidates:
-                  pos = block.find(candidate)
-                  if pos >= 0:
-                      break
+              pos = block.find('\ta := newAuditLogWithSink(')
+              if pos < 0:
+                  pos = block.find('\ta := newAuditLog(')
               if pos < 0:
                   raise SystemExit(f'{path}: audit construction missing in {marker}')
               line_end = block.find('\n', pos)
