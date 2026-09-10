@@ -48,6 +48,7 @@ jobs:
           PY
       - name: Build real Jul and run HR-07C Playwright
         run: |
+          pnpm --dir internal/admin/ui run build
           pnpm --dir internal/admin/ui exec playwright install --with-deps chromium
           pnpm --dir internal/admin/ui exec playwright test --project=real-server issue160-audit-sink.spec.ts
       - name: Commit materialized acceptance
