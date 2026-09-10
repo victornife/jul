@@ -25,43 +25,38 @@ func (s *Server) routes() http.Handler {
 		default:
 			h = s.requirePermission(spec.Permission, spec.Handler(s))
 		}
-		// An externally classified route is marked *outside* authentication, so
-		// a refusal that happens before a credential is examined still carries
-		// a correlation id and still renders the §26 envelope. The
-		// authentication and authorization checks themselves are the same ones
-		// every internal route runs — only the rendering of their refusal
-		// differs (ADR 0019 §24).
 		if spec.Stability.External() && !spec.Public {
 			h = s.withExternalContract(h)
 		}
 		mux.Handle(spec.Pattern, h)
 	}
-	// Admin API security hardening (Console v2 Milestone 1.6): per-client rate
-	// limiting wraps the whole mux so every endpoint is protected. The SSE
-	// connection cap is enforced inside handleEvents via the same limiter.
-	// The console-health observer (Milestone 5.7) wraps the limited mux so it
-	// records the real per-request latency and status of every admin call.
-	//
-	// ADR 0019 §28.1's transport gate wraps everything, outermost, because it
-	// must run before route lookup and before authentication: it is a property
-	// of the listener, so it is answered without consulting the credential or
-	// the target. Placing it inside the mux would make it a per-route decision
-	// and reintroduce the ordering the record forbids.
-	return s.requireSecureTransport(s.observeConsole(s.limiter.rateLimit(mux)))
+	// The runtime snapshot wrapper is outermost so every request — including the
+	// public root and refusals before authentication — receives exactly one
+	// immutable admin generation. Downstream middleware/handlers must reuse it.
+	return s.captureAdminRuntimeSnapshot(
+		s.requireSecureTransport(s.observeConsole(s.limiter.rateLimit(mux))),
+	)
 }
 
-// handleConsoleOrRoot returns the console v2 SPA handler when compiled in and
-// enabled, otherwise the legacy config page. This is a single public "/" entry.
+// handleConsoleOrRoot keeps one stable mux registration and selects the UI at
+// request time from the pinned admin generation. This makes console on→off→on a
+// pointer-swap operation without rebuilding routes or the listener.
 func (s *Server) handleConsoleOrRoot() http.Handler {
-	if consoleV2Compiled && s.cfg.ConsoleEnabled() {
-		return s.handleConsoleV2()
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	console := s.handleConsoleV2()
+	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/config", "/ui":
 			s.handleConfigPage(w, r)
 		default:
 			s.handleRoot(w, r)
 		}
+	})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		snap := s.requestAdminSnapshot(r)
+		if consoleV2Compiled && snap.cfg.ConsoleEnabled() {
+			console.ServeHTTP(w, r)
+			return
+		}
+		fallback.ServeHTTP(w, r)
 	})
 }
