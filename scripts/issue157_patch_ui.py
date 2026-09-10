@@ -4,12 +4,14 @@ from pathlib import Path
 p = Path("internal/admin/ui/src/api/client.ts")
 text = p.read_text()
 
+
 def rep(old: str, new: str, n: int = 1) -> None:
     global text
     got = text.count(old)
     if got != n:
         raise SystemExit(f"client.ts marker count {got}, want {n}: {old[:100]!r}")
     text = text.replace(old, new, n)
+
 
 admin_health = '''export type AdminHealthStatus = z.infer<typeof AdminHealthStatusSchema>;
 '''
@@ -86,3 +88,18 @@ export function fetchAdminRuntimeSettings(): Promise<AdminRuntimeSettingsProject
 )
 
 p.write_text(text)
+
+# Keep the settings drawer compatible with exactOptionalPropertyTypes: a value
+# looked up in a lifecycle map is explicitly `T | undefined`, not an omitted prop.
+drawer = Path("internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.tsx")
+d = drawer.read_text()
+d = d.replace("  type AdminRuntimeSettingsProjection,\n", "")
+d = d.replace(
+    "function LifecycleBadge({ field }: { field?: LifecycleFieldProjection }) {",
+    "function LifecycleBadge({ field }: { field: LifecycleFieldProjection | undefined }) {",
+)
+d = d.replace(
+    "  field?: LifecycleFieldProjection;\n",
+    "  field: LifecycleFieldProjection | undefined;\n",
+)
+drawer.write_text(d)
