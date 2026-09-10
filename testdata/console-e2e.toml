@@ -405,9 +405,12 @@ token = 'jul-e2e-test-token'
 console = true
 history_dir = './jul-data/config-history'
 history_keep = 50
-rate_limit_read_per_min = 240
-rate_limit_write_per_min = 60
-rate_limit_apply_per_min = 30
+# This fixture is shared by a stateful real-server suite. Keep limiter budgets
+# well above suite traffic so unrelated acceptance tests cannot couple through
+# token-bucket exhaustion; limiter behavior has dedicated unit/security gates.
+rate_limit_read_per_min = 6000
+rate_limit_write_per_min = 6000
+rate_limit_apply_per_min = 6000
 max_event_conns = 4
 audit_log_file = ''
 audit_log_rotate_max_mb = 0
