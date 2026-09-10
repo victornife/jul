@@ -1,0 +1,44 @@
+name: HR-07C raw rollback acceptance once
+on:
+  push:
+    branches: [issue-160-hot-audit-sink]
+permissions:
+  contents: write
+jobs:
+  verify:
+    if: ${{ !contains(github.event.head_commit.message, '[issue160-raw-rollback-verified]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: issue-160-hot-audit-sink
+          fetch-depth: 0
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: internal/admin/ui/package.json
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: Format and verify source
+        run: |
+          pnpm --dir internal/admin/ui install --frozen-lockfile
+          pnpm --dir internal/admin/ui exec prettier --write e2e/issue160-audit-sink.spec.ts
+          pnpm --dir internal/admin/ui run typecheck
+          pnpm --dir internal/admin/ui run lint
+          pnpm --dir internal/admin/ui run build
+      - name: Run real-server HR-07C acceptance
+        run: |
+          pnpm --dir internal/admin/ui exec playwright install --with-deps chromium
+          pnpm --dir internal/admin/ui exec playwright test --project=real-server issue160-audit-sink.spec.ts
+      - name: Commit verified source
+        run: |
+          git checkout -- testdata/console-e2e.toml
+          rm .github/workflows/issue160-raw-rollback-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -s -m "test(console): verify HR-07C raw apply rollback [issue160-raw-rollback-verified]"
+          git push origin HEAD:issue-160-hot-audit-sink
