@@ -10,7 +10,12 @@ import { expect, test } from "@playwright/test";
 import { readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AdminRuntimeSettingsProjectionSchema, RawConfigSchema } from "../src/api/client.ts";
+import {
+  AdminRuntimeSettingsProjectionSchema,
+  HistoryEntrySchema,
+  RawConfigSchema,
+} from "../src/api/client.ts";
+import { z } from "zod";
 
 type Settings = ReturnType<typeof AdminRuntimeSettingsProjectionSchema.parse>;
 
@@ -85,6 +90,45 @@ async function fileSize(path: string): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+function withAuditSink(raw: string, file: string, maxMB: number, keep: number): string {
+  const lines = raw.split("\n");
+  const admin = lines.findIndex((line) => line.trim() === "[admin]");
+  if (admin < 0) throw new Error("fixture has no [admin] section");
+  let end = lines.length;
+  for (let i = admin + 1; i < lines.length; i += 1) {
+    if (/^\s*\[/.test(lines[i] ?? "")) {
+      end = i;
+      break;
+    }
+  }
+  const keys = new Set(["audit_log_file", "audit_log_rotate_max_mb", "audit_log_rotate_keep"]);
+  const body = lines
+    .slice(admin + 1, end)
+    .filter((line) => !keys.has((line.split("=", 1)[0] ?? "").trim()));
+  body.push(`audit_log_file = ${JSON.stringify(file)}`);
+  body.push(`audit_log_rotate_max_mb = ${String(maxMB)}`);
+  body.push(`audit_log_rotate_keep = ${String(keep)}`);
+  return [...lines.slice(0, admin + 1), ...body, ...lines.slice(end)].join("\n");
+}
+
+async function postRollbackWithConflictRetry(
+  request: import("@playwright/test").APIRequestContext,
+  id: string,
+) {
+  let response = await request.post("/api/config/rollback", {
+    headers: { "Content-Type": "application/json" },
+    data: JSON.stringify({ id }),
+  });
+  for (let i = 0; i < 3 && response.status() === 409; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    response = await request.post("/api/config/rollback", {
+      headers: { "Content-Type": "application/json" },
+      data: JSON.stringify({ id }),
+    });
+  }
+  return response;
 }
 
 test.describe.serial("HR-07C durable audit sink", () => {
@@ -231,6 +275,80 @@ test.describe.serial("HR-07C durable audit sink", () => {
         await waitAudit(request, original);
       }
       await Promise.all([rm(pathA, { force: true }), rm(pathB, { force: true })]);
+    }
+  });
+
+  test("managed raw apply and history rollback use the same hot audit transition without losing ring continuity", async ({
+    request,
+  }) => {
+    const initialResp = await request.get("/api/config");
+    expect(initialResp.status()).toBe(200);
+    const initial = RawConfigSchema.parse(await initialResp.json());
+    const originalRaw = initial.raw ?? "";
+    const originalSettings = await settings(request);
+    const path = join(tmpdir(), `jul-hr07c-raw-${process.pid}-${Date.now()}.jsonl`);
+    await rm(path, { force: true });
+    const beforeRing = await ringMaxID(request);
+    let applied = false;
+    try {
+      const candidate = withAuditSink(originalRaw, path, 9, 6);
+      expect(candidate).not.toBe(originalRaw);
+      const applyUrl = initial.base_version
+        ? `/api/config/apply?base_version=${encodeURIComponent(initial.base_version)}`
+        : "/api/config/apply";
+      const applyResp = await request.post(applyUrl, {
+        headers: { "Content-Type": "application/toml" },
+        data: candidate,
+      });
+      expect(applyResp.status()).toBe(200);
+      applied = true;
+      await waitAudit(request, { file: path, rotate_max_mb: 9, rotate_keep: 6 });
+
+      const preview = await request.post("/api/config/patch/preview", {
+        headers: { "Content-Type": "application/json" },
+        data: JSON.stringify({
+          base_version: await baseVersion(request),
+          ops: [{ op: "admin_audit_sink_set", audit_sink: { rotate_keep: 7 } }],
+        }),
+      });
+      expect(preview.status()).toBe(200);
+      await expect.poll(() => fileSize(path)).toBeGreaterThan(0);
+      const afterApplyRing = await ringMaxID(request);
+      expect(afterApplyRing).toBeGreaterThan(beforeRing);
+
+      const historyResp = await request.get("/api/config/history");
+      expect(historyResp.status()).toBe(200);
+      const history = z.array(HistoryEntrySchema).parse(await historyResp.json());
+      expect(history.length).toBeGreaterThan(0);
+      const rollbackResp = await postRollbackWithConflictRetry(request, history[0].id);
+      expect([200, 204]).toContain(rollbackResp.status());
+
+      await waitAudit(request, {
+        file: originalSettings.audit_log_file,
+        rotate_max_mb: originalSettings.audit_log_rotate_max_mb,
+        rotate_keep: originalSettings.audit_log_rotate_keep,
+      });
+      const afterRollbackRing = await ringMaxID(request);
+      expect(afterRollbackRing).toBeGreaterThan(afterApplyRing);
+      const durableIDs = await auditIDs(path);
+      expect(durableIDs.length).toBeGreaterThan(0);
+      expect([...durableIDs].sort((a, b) => a - b)).toEqual(durableIDs);
+      applied = false;
+    } finally {
+      if (applied) {
+        const current = await request.get("/api/config");
+        if (current.status() === 200) {
+          const parsed = RawConfigSchema.parse(await current.json());
+          const restoreUrl = parsed.base_version
+            ? `/api/config/apply?base_version=${encodeURIComponent(parsed.base_version)}`
+            : "/api/config/apply";
+          await request.post(restoreUrl, {
+            headers: { "Content-Type": "application/toml" },
+            data: originalRaw,
+          });
+        }
+      }
+      await rm(path, { force: true });
     }
   });
 });
