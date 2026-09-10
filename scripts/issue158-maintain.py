@@ -1,12 +1,14 @@
 from pathlib import Path
 
 # Some historical tests/embedders build Server directly. Establish the same
-# stable-manager invariant before the mux is constructed.
+# stable-manager invariant before the mux is constructed. Current branch may
+# already contain the invariant from the first HR-07A core pass, so this edit is
+# deliberately idempotent.
 p = Path("internal/admin/routes.go")
 s = p.read_text()
-old = "func (s *Server) routes() http.Handler {\n\tmux := http.NewServeMux()\n"
-new = "func (s *Server) routes() http.Handler {\n\tif s.limiter == nil {\n\t\ts.limiter = newAdminLimiter(s.log)\n\t}\n\tmux := http.NewServeMux()\n"
-if new not in s:
+if "if s.limiter == nil {" not in s:
+    old = "func (s *Server) routes() http.Handler {\n\tmux := http.NewServeMux()\n"
+    new = "func (s *Server) routes() http.Handler {\n\tif s.limiter == nil {\n\t\ts.limiter = newAdminLimiter(s.log)\n\t}\n\tmux := http.NewServeMux()\n"
     if old not in s:
         raise SystemExit("routes initializer anchor not found")
     s = s.replace(old, new, 1)
@@ -44,24 +46,24 @@ s = p.read_text()
 begin = s.index("func limitClassForSpec(spec RouteSpec, method string) limitKind {")
 end = s.index("\nfunc (l *adminLimiter) maybeLogRejection", begin)
 replacement = '''func limitClassForSpec(spec RouteSpec, method string) limitKind {
-	if explicit, ok := spec.LimitClasses[method]; ok {
-		return explicit
-	}
-	if safeMethod(method) {
-		return limitRead
-	}
+\tif explicit, ok := spec.LimitClasses[method]; ok {
+\t\treturn explicit
+\t}
+\tif safeMethod(method) {
+\t\treturn limitRead
+\t}
 
-	perm := permissionForMethod(spec, method)
-	if perm == rbac.ConfigApply || perm == rbac.HistoryRollback || perm == rbac.ConfigAdopt || hasPermission(spec.AnyPermissions, rbac.ConfigApply) || hasPermission(spec.AnyPermissions, rbac.HistoryRollback) || hasPermission(spec.AnyPermissions, rbac.ConfigAdopt) {
-		return limitApply
-	}
-	if op, ok := spec.Operations[method]; ok {
-		switch op.ID {
-		case "validateConfig", "planConfig", "previewConfigPatch", "applyConfig", "applyConfigPatch", "rollbackConfig", "previewAdoptExternal", "adoptExternal", "discardPendingRestart":
-			return limitApply
-		}
-	}
-	return limitWrite
+\tperm := permissionForMethod(spec, method)
+\tif perm == rbac.ConfigApply || perm == rbac.HistoryRollback || perm == rbac.ConfigAdopt || hasPermission(spec.AnyPermissions, rbac.ConfigApply) || hasPermission(spec.AnyPermissions, rbac.HistoryRollback) || hasPermission(spec.AnyPermissions, rbac.ConfigAdopt) {
+\t\treturn limitApply
+\t}
+\tif op, ok := spec.Operations[method]; ok {
+\t\tswitch op.ID {
+\t\tcase "validateConfig", "planConfig", "previewConfigPatch", "applyConfig", "applyConfigPatch", "rollbackConfig", "previewAdoptExternal", "adoptExternal", "discardPendingRestart":
+\t\t\treturn limitApply
+\t\t}
+\t}
+\treturn limitWrite
 }
 '''
 s = s[:begin] + replacement + s[end:]
