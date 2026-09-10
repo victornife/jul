@@ -43,6 +43,7 @@ type authSnapshot struct {
 
 type PreparedAuth struct {
 	snapshot *authSnapshot
+	audit    *preparedAuditSink
 }
 
 func PrepareAuth(cfg config.AdminConfig, p *rbac.Policy) *PreparedAuth {

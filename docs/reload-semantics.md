@@ -58,12 +58,12 @@ the file is written. This means:
 
 - Changes to **hot-reloadable** fields (routes, handlers, upstreams,
   compression, global rate limiting, admin Console/plugin-upload policy, and
-  admin read/write/apply limits plus the shared SSE cap) apply through the same
-  transaction. Admin admission policy is carried by the immutable request
+  admin read/write/apply limits plus the shared SSE cap, and the durable audit
+  sink path/rotation policy) apply through the same transaction. Admin admission policy is carried by the immutable request
   generation while token buckets and active SSE leases remain process-stable,
   so reload neither resets abuse state nor disconnects existing streams.
 - Changes to **restart-required** fields (cache/egress fields that retain that
-  lifecycle, `admin.enabled`, `admin.listen`, admin history/audit resources,
+  lifecycle, `admin.enabled`, `admin.listen`, admin history resources,
   tracing, ACME, and retained-listener bind settings) are **rejected at swap time** — the swap is
   aborted, `LastReload.Outcome=not_applied` is recorded
   with the reason, and the old config remains authoritative. The file on disk

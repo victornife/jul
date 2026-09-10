@@ -9,6 +9,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+- **HR-07C / #160 — hot-reloadable durable audit sink.** The audit ring and global event IDs are process-stable while path/rotation changes publish a prepared durable sink generation, with same-path single-owner rotation, bounded post-Publish retirement, secret-safe health, typed Console editing, and deterministic failure/concurrency coverage.
+
 > **Release state:** the selected correction tranche through
 > `9a936d0cc1bc3f7086f38ca87741d9d09f950e25` is published as prerelease
 > `v1.32.1-rc.1`. Release run `30999192141` completed the tag-ref preflight,

@@ -6,6 +6,9 @@ vulnerability reporting, and per-feature threat notes. This page covers the
 where the known gaps are, what the roadmap addresses, and how to harden a
 production deployment today.
 
+
+> **Audit sink path safety.** HR-07C prepares the candidate destination before Publish, rejects unsafe final symlinks/special files, identity-checks the opened regular file, and exposes only bounded failure categories outside the authenticated `config:read` settings surface. See [audit sink hot reload](audit-sink-hot-reload.md).
+
 ## Admin authentication model
 
 ### Current state

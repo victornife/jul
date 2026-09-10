@@ -21,7 +21,9 @@ vi.mock("@/api/client.ts", async () => {
 });
 
 vi.mock("@/lib/useRunPatchBatch.ts", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/useRunPatchBatch.ts")>("@/lib/useRunPatchBatch.ts");
+  const actual = await vi.importActual<typeof import("@/lib/useRunPatchBatch.ts")>(
+    "@/lib/useRunPatchBatch.ts",
+  );
   return {
     ...actual,
     useRunPatchBatch: () => ({
@@ -57,6 +59,10 @@ const baseSettings = {
   rate_limit_write_per_min: 60,
   rate_limit_apply_per_min: 30,
   max_event_conns: 4,
+  audit_log_file: "/tmp/audit-a.jsonl",
+  audit_log_rotate_max_mb: 100,
+  audit_log_rotate_keep: 14,
+  audit_sink: { configured: true, active: true, healthy: true, generation: 7 },
   lifecycle: {
     console: hot,
     plugin_upload_enabled: hot,
@@ -66,6 +72,9 @@ const baseSettings = {
     rate_limit_write_per_min: hot,
     rate_limit_apply_per_min: hot,
     max_event_conns: hot,
+    audit_log_file: hot,
+    audit_log_rotate_max_mb: hot,
+    audit_log_rotate_keep: hot,
   },
 };
 
@@ -75,7 +84,10 @@ function Wrapper({ children }: { readonly children: ReactNode }) {
 }
 
 function renderDrawer(onClose = vi.fn()) {
-  return { onClose, ...render(<AdminRuntimeSettingsDrawer onClose={onClose} />, { wrapper: Wrapper }) };
+  return {
+    onClose,
+    ...render(<AdminRuntimeSettingsDrawer onClose={onClose} />, { wrapper: Wrapper }),
+  };
 }
 
 function rateInput(label: string): HTMLInputElement {
@@ -142,7 +154,9 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
     fireEvent.change(spinbutton(3), { target: { value: "2" } });
 
     expect(screen.getByText(/Existing event\/log streams remain connected/)).toBeInTheDocument();
-    expect(screen.getByText(/cannot open another stream until their active count falls below/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/cannot open another stream until their active count falls below/),
+    ).toBeInTheDocument();
   });
 
   it("treats zero as canonical cap 4 when deciding whether to warn on tightening", async () => {
@@ -211,10 +225,12 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
     await screen.findByText("Admin request admission");
 
     fireEvent.click(screen.getByLabelText(/Accept authenticated WASM uploads/));
-    expect(screen.getByText(/blocks new request bodies before multipart parsing/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/blocks new request bodies before multipart parsing/),
+    ).toBeInTheDocument();
 
     fireEvent.change(spinbutton(4), { target: { value: "22" } });
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "/tmp/next" } });
+    fireEvent.change(screen.getByLabelText("Upload directory"), { target: { value: "/tmp/next" } });
     expect(screen.getByText(/does not copy, migrate, or delete files/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
@@ -248,5 +264,101 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
     await screen.findByText("Admin request admission");
     expect(screen.getByText("preview failed")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preparing preview…" })).toBeDisabled();
+  });
+});
+
+describe("AdminRuntimeSettingsDrawer HR-07C audit sink", () => {
+  beforeEach(() => {
+    mocks.run.mockClear();
+    mocks.fetchSettings.mockReset();
+    mocks.fetchSettings.mockResolvedValue(baseSettings);
+    mocks.runnerError = null;
+    mocks.runnerBusy = false;
+  });
+
+  it("submits a sparse path switch and warns that old files are not migrated", async () => {
+    renderDrawer();
+    await screen.findByText("Durable audit sink");
+
+    fireEvent.change(screen.getByLabelText("Audit file"), {
+      target: { value: "/tmp/audit-b.jsonl" },
+    });
+    expect(screen.getByText(/not copied, moved, merged, or deleted/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    await waitFor(() => {
+      expect(mocks.run).toHaveBeenCalledWith([
+        { op: "admin_audit_sink_set", audit_sink: { file: "/tmp/audit-b.jsonl" } },
+      ]);
+    });
+  });
+
+  it("disables only durable persistence and explains ring/file retention", async () => {
+    renderDrawer();
+    await screen.findByText("Durable audit sink");
+
+    fireEvent.change(screen.getByLabelText("Audit file"), { target: { value: "" } });
+    expect(screen.getByText(/in-memory audit ring and event IDs continue/)).toBeInTheDocument();
+    expect(screen.getByText(/existing audit files\/backups are retained/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    await waitFor(() => {
+      expect(mocks.run).toHaveBeenCalledWith([
+        { op: "admin_audit_sink_set", audit_sink: { file: "" } },
+      ]);
+    });
+  });
+
+  it("submits rotation-only changes without path churn and shows retention semantics", async () => {
+    renderDrawer();
+    await screen.findByText("Durable audit sink");
+
+    fireEvent.change(screen.getByLabelText(/Rotate max MB/), { target: { value: "64" } });
+    fireEvent.change(screen.getByLabelText(/Backups to keep/), { target: { value: "9" } });
+    expect(screen.getByText(/Preview never prunes backups/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    await waitFor(() => {
+      expect(mocks.run).toHaveBeenCalledWith([
+        {
+          op: "admin_audit_sink_set",
+          audit_sink: { rotate_max_mb: 64, rotate_keep: 9 },
+        },
+      ]);
+    });
+  });
+
+  it("renders bounded active health and never exposes filesystem detail", async () => {
+    mocks.fetchSettings.mockResolvedValue({
+      ...baseSettings,
+      audit_sink: {
+        configured: true,
+        active: true,
+        healthy: false,
+        generation: 11,
+        write_failures: 2,
+        last_failure_category: "write",
+        last_failure_at: "2026-09-10T16:00:00Z",
+      },
+    });
+    renderDrawer();
+    await screen.findByText("Durable audit sink");
+
+    expect(screen.getByText(/Status: Degraded/)).toBeInTheDocument();
+    expect(screen.getByText(/generation 11/)).toBeInTheDocument();
+    expect(screen.getByText(/write/)).toBeInTheDocument();
+    expect(screen.queryByText(/permission denied|\/tmp\/secret/i)).not.toBeInTheDocument();
+  });
+
+  it("validates rotation values and exposes lifecycle badges for all three fields", async () => {
+    renderDrawer();
+    await screen.findByText("Durable audit sink");
+
+    expect(screen.getAllByText("Hot reload").length).toBeGreaterThanOrEqual(3);
+    fireEvent.change(screen.getByLabelText(/Rotate max MB/), { target: { value: "1.5" } });
+    expect(
+      screen.getByText(/Rotation values must be non-negative whole numbers/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review changes" })).toBeDisabled();
   });
 });

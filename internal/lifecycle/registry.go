@@ -295,9 +295,6 @@ func globalEntries() []Entry {
 
 func adminEntries() []Entry {
 	adminPaths := []string{
-		"admin.audit_log_file",
-		"admin.audit_log_rotate_keep",
-		"admin.audit_log_rotate_max_mb",
 		"admin.enabled",
 		"admin.history_dir",
 		"admin.history_keep",
@@ -305,6 +302,9 @@ func adminEntries() []Entry {
 	}
 	out := restartGroup(SubAdmin, reasonAdminStartup, adminPaths...)
 	out = append(out,
+		hot("admin.audit_log_file", SubAdmin, "the durable audit writer is fully prepared before Publish and atomically selected for new audit events while the process-lifetime ring and event IDs remain unchanged"),
+		hot("admin.audit_log_rotate_keep", SubAdmin, "path and rotation policy publish as one prepared durable-sink generation; existing audit events and files are not migrated"),
+		hot("admin.audit_log_rotate_max_mb", SubAdmin, "path and rotation policy publish as one prepared durable-sink generation; existing audit events and files are not migrated"),
 		hot("admin.console", SubAdmin, "the live admin server dispatches Console mode from one immutable per-request runtime snapshot published atomically"),
 		hot("admin.plugin_upload_enabled", SubAdmin, "new upload requests read admission state from the immutable admin runtime snapshot captured at request start"),
 		hot("admin.plugin_upload_max_size", SubAdmin, "each upload captures its size limit from the immutable admin runtime snapshot before body processing"),

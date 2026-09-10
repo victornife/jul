@@ -5,6 +5,9 @@ merged-but-unreleased constraints, restart-bound/deferred behavior and historica
 corrections. A limitation is not a place to hide a correctness defect, and a
 closed issue must not remain phrased as future work.
 
+
+> **Audit sink retention boundary.** Hot path switches do not migrate, merge, or delete files at the previous destination. Rotation retention is applied only by later active rotations; Preview/Prepare never prune historical backups. Disabling durability preserves existing files and the process-lifetime in-memory audit ring. See [audit sink hot reload](audit-sink-hot-reload.md).
+
 ## Active correctness or security defects
 
 No repository-wide P0/P1 defect is being declared by this document at the issue

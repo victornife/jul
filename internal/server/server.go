@@ -100,14 +100,24 @@ type ReloadRequest struct {
 // PreparedCommit is a no-fail commit artifact built before Publish. Commit
 // installs immutable prepared state; Abort releases it when preparation fails.
 type PreparedCommit struct {
-	commitFn func()
-	abortFn  func()
-	once     sync.Once
+	commitFn   func()
+	abortFn    func()
+	retireFn   func(context.Context)
+	once       sync.Once
+	retireOnce sync.Once
+	committed  atomic.Bool
 }
 
-// NewPreparedCommit creates an exactly-once prepared artifact.
+// NewPreparedCommit creates an exactly-once prepared artifact without a
+// post-Publish resource retirement.
 func NewPreparedCommit(commit, abort func()) *PreparedCommit {
-	return &PreparedCommit{commitFn: commit, abortFn: abort}
+	return NewPreparedCommitWithRetire(commit, abort, nil)
+}
+
+// NewPreparedCommitWithRetire creates a prepared admin artifact whose retired
+// resource is drained by ReloadPlan's existing bounded retirement phase.
+func NewPreparedCommitWithRetire(commit, abort func(), retire func(context.Context)) *PreparedCommit {
+	return &PreparedCommit{commitFn: commit, abortFn: abort, retireFn: retire}
 }
 
 // Commit installs the prepared artifact exactly once.
@@ -117,6 +127,7 @@ func (p *PreparedCommit) Commit() {
 			if p.commitFn != nil {
 				p.commitFn()
 			}
+			p.committed.Store(true)
 		})
 	}
 }
@@ -130,6 +141,20 @@ func (p *PreparedCommit) Abort() {
 			}
 		})
 	}
+}
+
+// Retire runs post-Publish cleanup exactly once. It is a no-op for an aborted
+// artifact and is intentionally separate from Commit so Publish cannot block on
+// filesystem drain/close.
+func (p *PreparedCommit) Retire(ctx context.Context) {
+	if p == nil || !p.committed.Load() {
+		return
+	}
+	p.retireOnce.Do(func() {
+		if p.retireFn != nil {
+			p.retireFn(ctx)
+		}
+	})
 }
 
 // HandlerFactory prepares a new handler generation for cfg without committing

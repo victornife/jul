@@ -88,9 +88,7 @@ function HealthChip({
       onClick={onClick}
       role={interactive ? "button" : undefined}
       tabIndex={interactive ? 0 : undefined}
-      aria-label={
-        interactive ? `${label}: ${value}${tooltip ? `. ${tooltip}` : ""}` : undefined
-      }
+      aria-label={interactive ? `${label}: ${value}${tooltip ? `. ${tooltip}` : ""}` : undefined}
       onKeyDown={
         interactive
           ? (e) => {
@@ -122,7 +120,10 @@ function MetricCard({
   const display = typeof value === "number" ? compactNumber(value) : value;
   const raw = typeof value === "number" ? value.toLocaleString() : value;
   return (
-    <div className="rounded-lg border border-jul-border bg-jul-surface p-4" title={`${label}: ${raw}`}>
+    <div
+      className="rounded-lg border border-jul-border bg-jul-surface p-4"
+      title={`${label}: ${raw}`}
+    >
       <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">{label}</div>
       <div className="mt-2 flex items-baseline gap-2">
         <div className="text-2xl font-bold text-jul-text">{display}</div>
@@ -282,7 +283,13 @@ export function OverviewPanel() {
   // degraded / action needed" at a glance; details live in the grids below.
   const errRate = stats?.errorRate ?? 0;
   const p95 = stats?.latencyP95Ms ?? 0;
-  const summary: Array<{ label: string; value: string; tone: Tone; tooltip?: string; onClick?: () => void }> = [];
+  const summary: Array<{
+    label: string;
+    value: string;
+    tone: Tone;
+    tooltip?: string;
+    onClick?: () => void;
+  }> = [];
   if (stats?.available) {
     summary.push({
       label: "Traffic",
@@ -313,7 +320,9 @@ export function OverviewPanel() {
       value: anyInactive ? "attention" : "healthy",
       tone: anyInactive ? "warn" : "ok",
       tooltip: `${String(healthyCount)} healthy / ${String(unhealthyCount)} unhealthy`,
-      onClick: () => { void navigate("/apps"); },
+      onClick: () => {
+        void navigate("/apps");
+      },
     });
   }
   // Certificate risk from the real cert health data returned by the overview.
@@ -344,7 +353,9 @@ export function OverviewPanel() {
       value,
       tone,
       tooltip: `${String(cr.count)} certs — ${detailText}`,
-      onClick: () => { void navigate("/tls"); },
+      onClick: () => {
+        void navigate("/tls");
+      },
     });
   }
 
@@ -380,12 +391,9 @@ export function OverviewPanel() {
           role="alert"
           className="rounded-lg border border-jul-warning/40 bg-jul-warning/10 px-4 py-3 text-sm text-jul-warning"
         >
-          <span className="font-semibold">L4 stream proxy reload failed.</span>{" "}
-          The previously bound stream listeners are still serving the last good
-          configuration.{" "}
-          <span className="text-jul-muted">
-            {data.stream_status.replace(/^failed:\s*/, "")}
-          </span>
+          <span className="font-semibold">L4 stream proxy reload failed.</span> The previously bound
+          stream listeners are still serving the last good configuration.{" "}
+          <span className="text-jul-muted">{data.stream_status.replace(/^failed:\s*/, "")}</span>
         </div>
       )}
 
@@ -398,9 +406,9 @@ export function OverviewPanel() {
           role="alert"
           className="rounded-lg border border-jul-warning/40 bg-jul-warning/10 px-4 py-3 text-sm text-jul-warning"
         >
-          <span className="font-semibold">Admin subsystem degraded.</span>{" "}
-          The admin reload failed after the last configuration apply. The server
-          is still running but the admin subsystem may be serving stale policy.{" "}
+          <span className="font-semibold">Admin subsystem degraded.</span> The admin reload failed
+          after the last configuration apply. The server is still running but the admin subsystem
+          may be serving stale policy.{" "}
           {data.admin_health.detail && (
             <span className="text-jul-muted">{data.admin_health.detail}</span>
           )}
@@ -416,11 +424,13 @@ export function OverviewPanel() {
           role="alert"
           className="rounded-lg border border-jul-danger/40 bg-jul-danger/10 px-4 py-3 text-sm text-jul-danger"
         >
-          <span className="font-semibold">Durable audit trail degraded.</span>{" "}
-          Audit events are still recorded in memory, but the durable log is not
-          being written, so the trail will not survive a restart.{" "}
-          {data.audit_sink.error && (
-            <span className="text-jul-muted">{data.audit_sink.error}</span>
+          <span className="font-semibold">Durable audit trail degraded.</span> Audit events are
+          still recorded in memory, but the durable log is not being written, so the trail will not
+          survive a restart.{" "}
+          {data.audit_sink.last_failure_category && (
+            <span className="text-jul-muted">
+              Failure category: {data.audit_sink.last_failure_category}.
+            </span>
           )}
         </div>
       )}
@@ -434,9 +444,9 @@ export function OverviewPanel() {
           role="alert"
           className="rounded-lg border border-jul-danger/40 bg-jul-danger/10 px-4 py-3 text-sm text-jul-danger"
         >
-          <span className="font-semibold">Inconsistent staged-restart state.</span>{" "}
-          The staged configuration and backup files are in an inconsistent state. Hot applies are
-          blocked. Check the server logs and see the troubleshooting guide for recovery steps.
+          <span className="font-semibold">Inconsistent staged-restart state.</span> The staged
+          configuration and backup files are in an inconsistent state. Hot applies are blocked.
+          Check the server logs and see the troubleshooting guide for recovery steps.
         </div>
       )}
       {!data.pending_restart_status?.inconsistent &&
@@ -446,12 +456,16 @@ export function OverviewPanel() {
             role="alert"
             className="rounded-lg border border-jul-warning/40 bg-jul-warning/10 px-4 py-3 text-sm text-jul-warning"
           >
-            <span className="font-semibold">Configuration on disk differs from runtime.</span>{" "}
-            The process was not built from the current on-disk config. Restart the server to apply
-            the changes.
+            <span className="font-semibold">Configuration on disk differs from runtime.</span> The
+            process was not built from the current on-disk config. Restart the server to apply the
+            changes.
             {(data.pending_restart_status.subsystems?.length ?? 0) > 0 && (
               <span className="ml-1 text-jul-muted">
-                Affected: <span className="font-mono">{data.pending_restart_status.subsystems?.join(", ")}</span>.
+                Affected:{" "}
+                <span className="font-mono">
+                  {data.pending_restart_status.subsystems?.join(", ")}
+                </span>
+                .
               </span>
             )}
           </div>
@@ -497,7 +511,14 @@ export function OverviewPanel() {
       {summary.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {summary.map((s) => (
-            <HealthChip key={s.label} label={s.label} value={s.value} tone={s.tone} tooltip={s.tooltip ?? ""} {...(s.onClick ? { onClick: s.onClick } : {})} />
+            <HealthChip
+              key={s.label}
+              label={s.label}
+              value={s.value}
+              tone={s.tone}
+              tooltip={s.tooltip ?? ""}
+              {...(s.onClick ? { onClick: s.onClick } : {})}
+            />
           ))}
         </div>
       )}
@@ -710,15 +731,15 @@ export function OverviewPanel() {
                 data.last_managed_apply.ok
                   ? "bg-jul-success/15 text-jul-success"
                   : data.last_managed_apply.restored
-                  ? "bg-jul-warning/15 text-jul-warning"
-                  : "bg-jul-danger/15 text-jul-danger"
+                    ? "bg-jul-warning/15 text-jul-warning"
+                    : "bg-jul-danger/15 text-jul-danger"
               }`}
             >
               {data.last_managed_apply.ok
                 ? data.last_managed_apply.outcome
                 : data.last_managed_apply.restored
-                ? "failed — restored"
-                : "failed"}
+                  ? "failed — restored"
+                  : "failed"}
             </span>
             {data.last_managed_apply.final_disk_version && (
               <span className="font-mono text-xs text-jul-muted">

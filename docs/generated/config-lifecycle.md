@@ -20,9 +20,9 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 | Schema paths (containers included) | 356 |
 | Schema leaves (configurable values) | 302 |
 | Registry entries | 302 |
-| Startup-consumed entries | 40 |
-| Class `hot_reload` | 247 |
-| Class `restart_required` | 40 |
+| Startup-consumed entries | 37 |
+| Class `hot_reload` | 250 |
+| Class `restart_required` | 37 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 3 |
@@ -118,9 +118,9 @@ value is compared as a digest so no secret material leaves the process.
 
 | Path | Class | Subsystem | Flags | Why |
 | --- | --- | --- | --- | --- |
-| `admin.audit_log_file` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
-| `admin.audit_log_rotate_keep` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
-| `admin.audit_log_rotate_max_mb` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
+| `admin.audit_log_file` | `hot_reload` | `admin` | — | the durable audit writer is fully prepared before Publish and atomically selected for new audit events while the process-lifetime ring and event IDs remain unchanged |
+| `admin.audit_log_rotate_keep` | `hot_reload` | `admin` | — | path and rotation policy publish as one prepared durable-sink generation; existing audit events and files are not migrated |
+| `admin.audit_log_rotate_max_mb` | `hot_reload` | `admin` | — | path and rotation policy publish as one prepared durable-sink generation; existing audit events and files are not migrated |
 | `admin.console` | `hot_reload` | `admin` | — | the live admin server dispatches Console mode from one immutable per-request runtime snapshot published atomically |
 | `admin.enabled` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.history_dir` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
