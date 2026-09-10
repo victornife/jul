@@ -38,15 +38,15 @@ type AdminRuntimeStatus struct {
 	PreparationFailure    string `json:"preparation_failure,omitempty"`
 	LastUploadRejection   string `json:"last_upload_rejection,omitempty"`
 
-	RateLimitReadPerMin  int `json:"rate_limit_read_per_min"`
-	RateLimitWritePerMin int `json:"rate_limit_write_per_min"`
-	RateLimitApplyPerMin int `json:"rate_limit_apply_per_min"`
-	MaxEventConns        int `json:"max_event_conns"`
-	TrackedLimiterClients int `json:"tracked_limiter_clients"`
-	SSEActiveTotal        int `json:"sse_active_total"`
-	SSEActiveClients      int `json:"sse_active_clients"`
-	SSEOverCapClients     int `json:"sse_over_cap_clients"`
-	SSEMaxPerClient       int `json:"sse_max_per_client"`
+	RateLimitReadPerMin   int    `json:"rate_limit_read_per_min"`
+	RateLimitWritePerMin  int    `json:"rate_limit_write_per_min"`
+	RateLimitApplyPerMin  int    `json:"rate_limit_apply_per_min"`
+	MaxEventConns         int    `json:"max_event_conns"`
+	TrackedLimiterClients int    `json:"tracked_limiter_clients"`
+	SSEActiveTotal        int    `json:"sse_active_total"`
+	SSEActiveClients      int    `json:"sse_active_clients"`
+	SSEOverCapClients     int    `json:"sse_over_cap_clients"`
+	SSEMaxPerClient       int    `json:"sse_max_per_client"`
 	RateReadRejected      uint64 `json:"rate_read_rejected"`
 	RateWriteRejected     uint64 `json:"rate_write_rejected"`
 	RateApplyRejected     uint64 `json:"rate_apply_rejected"`

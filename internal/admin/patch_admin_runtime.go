@@ -25,9 +25,9 @@ type adminPluginUploadPatch struct {
 // canonical public contract where zero means default after canonicalization and
 // negative is invalid.
 type adminLimitsPatch struct {
-	ReadPerMin   *int `json:"read_per_min,omitempty"`
-	WritePerMin  *int `json:"write_per_min,omitempty"`
-	ApplyPerMin  *int `json:"apply_per_min,omitempty"`
+	ReadPerMin    *int `json:"read_per_min,omitempty"`
+	WritePerMin   *int `json:"write_per_min,omitempty"`
+	ApplyPerMin   *int `json:"apply_per_min,omitempty"`
 	MaxEventConns *int `json:"max_event_conns,omitempty"`
 }
 

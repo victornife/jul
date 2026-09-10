@@ -150,6 +150,7 @@ type patchRequest struct {
 	Global *globalPatch `json:"global,omitempty"`
 
 	AdminPluginUpload *adminPluginUploadPatch `json:"plugin_upload,omitempty"`
+	AdminLimits       *adminLimitsPatch       `json:"admin_limits,omitempty"`
 
 	// compression_set payload: the supported global [compression] fields. Every
 	// field tracks presence so explicit false/zero/empty values remain distinct

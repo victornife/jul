@@ -20,9 +20,9 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 | Schema paths (containers included) | 356 |
 | Schema leaves (configurable values) | 302 |
 | Registry entries | 302 |
-| Startup-consumed entries | 44 |
-| Class `hot_reload` | 243 |
-| Class `restart_required` | 44 |
+| Startup-consumed entries | 40 |
+| Class `hot_reload` | 247 |
+| Class `restart_required` | 40 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 3 |
@@ -126,13 +126,13 @@ value is compared as a digest so no secret material leaves the process.
 | `admin.history_dir` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.history_keep` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.listen` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
-| `admin.max_event_conns` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
+| `admin.max_event_conns` | `hot_reload` | `admin` | — | new SSE admissions use the captured per-client connection cap while existing leases and connection counts survive policy reload |
 | `admin.plugin_upload_dir` | `hot_reload` | `admin` | — | candidate storage is preflighted before Publish and each upload is confined to the directory captured at request start |
 | `admin.plugin_upload_enabled` | `hot_reload` | `admin` | — | new upload requests read admission state from the immutable admin runtime snapshot captured at request start |
 | `admin.plugin_upload_max_size` | `hot_reload` | `admin` | — | each upload captures its size limit from the immutable admin runtime snapshot before body processing |
-| `admin.rate_limit_apply_per_min` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
-| `admin.rate_limit_read_per_min` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
-| `admin.rate_limit_write_per_min` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
+| `admin.rate_limit_apply_per_min` | `hot_reload` | `admin` | — | new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload |
+| `admin.rate_limit_read_per_min` | `hot_reload` | `admin` | — | new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload |
+| `admin.rate_limit_write_per_min` | `hot_reload` | `admin` | — | new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload |
 | `admin.rbac.default_role` | `hot_reload` | `rbac` | — | the admin RBAC policy is rebuilt and atomically swapped after each successful reload |
 | `admin.rbac.enabled` | `hot_reload` | `rbac` | — | the admin RBAC policy is rebuilt and atomically swapped after each successful reload |
 | `admin.rbac.principals.*.disabled` | `hot_reload` | `rbac` | — | the admin RBAC policy is rebuilt and atomically swapped after each successful reload |
