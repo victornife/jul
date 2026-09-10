@@ -428,6 +428,16 @@ func TestFastCGISessionFailureIsRetried(t *testing.T) {
 	if got := attempts.Load(); got != 2 {
 		t.Fatalf("%d session attempts, want 2", got)
 	}
+
+	// A successful TCP DialContext can return once the handshake is queued in
+	// the listener backlog, before the fake backend's Accept goroutine has been
+	// scheduled. The first synthetic session failure closes that connection
+	// immediately, so observing the accept counters synchronously races the
+	// server goroutine even though the retry already opened a fresh connection.
+	deadline := time.Now().Add(time.Second)
+	for firstHits.Load()+secondHits.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 	if got := firstHits.Load() + secondHits.Load(); got != 2 {
 		t.Fatalf("backends were dialled %d times, want 2: the failed session must be retried on a fresh connection", got)
 	}
