@@ -63,6 +63,7 @@ export default defineConfig({
         "e2e/real-server.spec.ts",
         "e2e/issue82-phase5.spec.ts",
         "e2e/issue157-admin-runtime.spec.ts",
+        "e2e/issue158-admin-runtime.spec.ts",
       ],
       use: {
         baseURL: realServerURL,
