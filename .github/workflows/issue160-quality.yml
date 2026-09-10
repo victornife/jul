@@ -1,0 +1,68 @@
+name: HR-07C audit sink quality
+
+on:
+  pull_request:
+    paths:
+      - 'internal/admin/**'
+      - 'internal/app/**'
+      - 'internal/server/**'
+      - 'internal/lifecycle/**'
+      - '.github/workflows/issue160-quality.yml'
+  push:
+    branches: [main, issue-160-hot-audit-sink]
+    paths:
+      - 'internal/admin/**'
+      - 'internal/app/**'
+      - 'internal/server/**'
+      - 'internal/lifecycle/**'
+      - '.github/workflows/issue160-quality.yml'
+
+permissions:
+  contents: read
+
+env:
+  FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+
+jobs:
+  go-audit-sink:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Formatting
+        run: |
+          files="internal/admin/audit.go internal/admin/audit_sink_runtime.go internal/admin/audit_admin_runtime.go internal/admin/audit_sink_test.go internal/admin/audit_sink_runtime_test.go internal/admin/admin_health.go internal/admin/rbac.go internal/admin/runtime_snapshot.go internal/admin/patch.go internal/admin/patch_types.go internal/admin/patch_admin_runtime.go internal/admin/admin_runtime_status.go internal/server/server.go internal/server/reload_plan.go internal/app/serve.go internal/lifecycle/registry.go"
+          test -z "$(gofmt -d $files)"
+      - name: Lifecycle generated drift
+        run: |
+          make lifecycle-generate
+          git diff --exit-code
+      - name: Targeted tests
+        run: go test -count=1 -tags "${FULL_TAGS}" ./internal/admin ./internal/app ./internal/server ./internal/config ./internal/lifecycle ./internal/observability
+      - name: Race
+        run: go test -race -count=1 -p 2 -tags "console" ./internal/admin ./internal/app ./internal/server ./internal/config ./internal/lifecycle ./internal/observability
+      - name: HR-07C owned Go coverage >= 90%
+        run: |
+          go test -count=1 -tags "${FULL_TAGS}" -coverprofile=/tmp/admin.cover ./internal/admin
+          python3 - <<'PY'
+          from pathlib import Path
+          owned = {'jul/internal/admin/audit_sink_runtime.go', 'jul/internal/admin/audit_admin_runtime.go'}
+          total = covered = 0
+          for line in Path('/tmp/admin.cover').read_text().splitlines()[1:]:
+              loc, count = line.rsplit(' ', 1)
+              path_and_range, stmts = loc.rsplit(' ', 1)
+              path = path_and_range.split(':', 1)[0]
+              if path not in owned:
+                  continue
+              n = int(stmts)
+              total += n
+              if int(count) > 0:
+                  covered += n
+          pct = 100.0 if total == 0 else covered * 100.0 / total
+          print(f'HR-07C owned Go statements: {covered}/{total} = {pct:.4f}%')
+          if pct < 90.0:
+              raise SystemExit(f'HR-07C owned Go coverage {pct:.4f}% < 90.0%')
+          PY
