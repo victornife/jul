@@ -1,0 +1,39 @@
+name: issue-157 patch ui
+
+on:
+  push:
+    branches:
+      - issue-157-hot-admin-runtime
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          package_json_file: internal/admin/ui/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+      - name: patch and verify Console
+        run: |
+          python3 scripts/issue157_patch_ui.py
+          pnpm --dir internal/admin/ui install --frozen-lockfile
+          pnpm --dir internal/admin/ui run typecheck
+          pnpm --dir internal/admin/ui run lint
+          pnpm --dir internal/admin/ui run test:coverage
+          pnpm --dir internal/admin/ui run build
+      - name: commit verified Console and remove temporary scaffolding
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/issue-157-patch-ui.yml scripts/issue157_patch_ui.py
+          git add -A
+          git commit -m "feat(console): add hot admin runtime settings UX (#157)"
+          git push origin HEAD:issue-157-hot-admin-runtime
