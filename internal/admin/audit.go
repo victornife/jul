@@ -85,7 +85,6 @@ type auditLog struct {
 
 	activeFailure      auditFailureCategory
 	activeFailureAt    time.Time
-	activeFailureErr   error // operator-log detail only; never serialized
 	lastFailure        auditFailureCategory
 	lastFailureAt      time.Time
 	writeFailures      uint64
