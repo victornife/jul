@@ -265,7 +265,7 @@ changed mid-request. Two keys, two questions.
 | `jul_upstream_backends` | gauge | `pool` | Current backend count (tracks discovery) |
 | `jul_discovery_errors_total` | counter | `pool` | Failed/empty resolves (last-good kept) |
 
-These complement the existing `jul_upstream_healthy` gauge and
+These complement the existing `jul_upstream_backends_healthy` gauge and
 `jul_upstream_probes_total` counter from active health checking, so a dashboard
 can show both how many backends discovery currently sees and how many of them are
 passing their probes.

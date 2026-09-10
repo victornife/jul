@@ -155,6 +155,43 @@ configure it, they must be able to read about it.**
 7. **Match code and docs.** When a default or behavior changes, update the doc
    in the same PR.
 
+### Semantic authorities and drift correction
+
+Human-facing docs may repeat objective facts for operator usability, but they do
+not become another source of truth. `scripts/docs-check.py` runs the
+cross-artifact guard against the existing authorities below:
+
+| Fact | Authority | Change/regenerate |
+| --- | --- | --- |
+| Configuration structure/defaults/value metadata | `docs/generated/config-metadata.json` and the config-contract sources behind it | edit the real config/config-contract source; run `make config-contract-generate` |
+| Lifecycle/restart classification | `internal/lifecycle` via `docs/generated/config-lifecycle.json` | edit the lifecycle registry; run `make lifecycle-generate` |
+| Metrics | `docs/metrics-contract.json`, backed by the runtime contract tests | change the #126-owned runtime/contract source; run its owner tests |
+| Product maturity/delivery | `docs/feature-status.yaml` | make the explicit product-status decision there, then update the human projection |
+| Build capabilities | shipped `jul capabilities --json` plus generated capability metadata | change the existing build-capability source, never a docs allowlist |
+| External API | `docs/generated/openapi.json` | change the API route/DTO authority; run `make api-contract-generate` |
+| Remote CLI commands | shipped `jul --help` | change the CLI implementation/help surface |
+| Remote CLI exits | `internal/adminapi.ExitCodes()` via `jul capabilities --json` | change the admin API exit contract and owner tests |
+| Current programme execution | GitHub issue `#62` | update the tracker rather than duplicating current execution state in prose |
+
+When `docs-check` reports semantic drift, fix the stale consumer unless the
+machine authority is itself intentionally changing. Generated files under
+`docs/generated/` must never be hand-edited. The guard is read-only and
+network-free: it consumes committed projections and the locally built shipped
+CLI. It deliberately ignores subjective prose and historical review archives.
+
+For a full contract check after changing an authority, run:
+
+```bash
+make generated-check
+python3 scripts/docs-check.py
+python3 scripts/test_docs_check.py
+python3 scripts/test_semantic_drift.py
+```
+
+The #128-specific CI lane additionally measures `scripts/semantic_drift.py` with
+branch coverage and fails below 90%. Do not weaken an owner check or add a broad
+suppression list to silence a real mismatch.
+
 ### Adding a new feature
 
 When adding a new feature, include **all** of these in your PR:

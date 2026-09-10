@@ -1065,7 +1065,7 @@ servers = ["127.0.0.1:3000", "127.0.0.1:3001"]
 | `expect_status` | array | Acceptable HTTP status codes for `http` probes (default `[200]`) |
 | `expect_body` | string | Optional: `http` probe body must contain this substring |
 
-Metrics: `jul_upstream_healthy{pool,backend}` (1 healthy / 0 unhealthy),
+Metrics: `jul_upstream_backends_healthy{pool}` (aggregate healthy backend count),
 `jul_upstream_probes_total{pool,result}`, and
 `jul_upstream_probe_duration_seconds{pool}`.
 

@@ -1,6 +1,6 @@
 # Active Health Checks
 
-> **Maturity:** Beta (see [status.md](status.md)).
+> **Maturity:** GA (see [status.md](status.md)).
 
 Jul.IA supports **active** health checking for upstream pools: the server periodically probes each backend and ejects unhealthy backends from the balancer rotation. This complements the built-in **passive** health checking (which parks a backend after `max_fails` consecutive request failures).
 
