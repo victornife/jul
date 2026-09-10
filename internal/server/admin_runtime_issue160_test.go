@@ -96,12 +96,14 @@ func TestIssue160MixedHotAdminFieldsPublishAsOneGeneration(t *testing.T) {
 	trafficAddr := freePort(t)
 	uploadDisabled := false
 	uploadEnabled := true
+	consoleEnabled := true
+	consoleDisabled := false
 	initial := cfgWith(trafficAddr)
 	initial.Admin = config.AdminConfig{
 		Enabled:              true,
 		Listen:               "127.0.0.1:19090",
 		Token:                "issue160-token",
-		Console:              true,
+		Console:              &consoleEnabled,
 		PluginUploadEnabled:  &uploadDisabled,
 		PluginUploadDir:      t.TempDir(),
 		RateLimitReadPerMin:  240,
@@ -114,7 +116,7 @@ func TestIssue160MixedHotAdminFieldsPublishAsOneGeneration(t *testing.T) {
 	}
 	candidate := cfgWith(trafficAddr)
 	candidate.Admin = initial.Admin
-	candidate.Admin.Console = false
+	candidate.Admin.Console = &consoleDisabled
 	candidate.Admin.PluginUploadEnabled = &uploadEnabled
 	candidate.Admin.PluginUploadDir = t.TempDir()
 	candidate.Admin.RateLimitReadPerMin = 17
@@ -151,7 +153,7 @@ func TestIssue160MixedHotAdminFieldsPublishAsOneGeneration(t *testing.T) {
 	if prepared.Load() != 1 || committed.Load() != 1 {
 		t.Fatalf("prepared=%d committed=%d, want exactly one admin generation", prepared.Load(), committed.Load())
 	}
-	if seen.Console || seen.PluginUploadEnabled == nil || !*seen.PluginUploadEnabled || seen.RateLimitReadPerMin != 17 || seen.MaxEventConns != 2 || seen.AuditLogFile != candidate.Admin.AuditLogFile || seen.AuditLogRotateMaxMB != 32 || seen.AuditLogRotateKeep != 5 {
+	if seen.Console == nil || *seen.Console || seen.PluginUploadEnabled == nil || !*seen.PluginUploadEnabled || seen.RateLimitReadPerMin != 17 || seen.MaxEventConns != 2 || seen.AuditLogFile != candidate.Admin.AuditLogFile || seen.AuditLogRotateMaxMB != 32 || seen.AuditLogRotateKeep != 5 {
 		t.Fatalf("prepared mixed-hot snapshot mismatch: %+v", seen)
 	}
 

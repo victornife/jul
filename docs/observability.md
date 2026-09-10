@@ -5,6 +5,9 @@ Jul.IA exposes three layers of observability: **metrics** (Prometheus at
 with pluggable access-log sinks). All three are served from the admin listener
 (`[admin]`), which should be bound to loopback in production.
 
+
+> **Durable audit sink (HR-07C).** Runtime status reports whether the durable sink is configured/active, current active health, generation, cumulative write/rotation/retention-cleanup/retirement failure counters, and the bounded category/time of the last observed failure. Public readiness exposes only the bounded `audit_sink` reason. #160 intentionally adds no Prometheus family: the existing status/health surfaces already provide the required operator signal, avoiding path/error labels and unnecessary cardinality. See [audit sink hot reload](audit-sink-hot-reload.md).
+
 ## Prometheus metrics
 
 The `/metrics` endpoint on the admin listener exports a private Prometheus

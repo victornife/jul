@@ -462,3 +462,44 @@ func TestAuditSinkOversizedEventFailsWithoutWriting(t *testing.T) {
 	}
 	_ = owner.release(context.Background(), true)
 }
+
+func TestAuditSinkRecoveredHealthPreservesLastFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	a := newAuditLogWithSink(8, path, 10, 4, nil)
+	owner := a.currentSink.owner
+	base := owner.file
+	failed := true
+	owner.file = &auditFaultFile{base: base, writeFn: func(p []byte) (int, error) {
+		if failed {
+			failed = false
+			return 0, errors.New("one-shot")
+		}
+		return base.Write(p)
+	}}
+	a.record(AuditEvent{Operation: "fail", Result: "success"})
+	a.record(AuditEvent{Operation: "recover", Result: "success"})
+	st := a.statusReport()
+	if st == nil || !st.Healthy || st.WriteFailures != 1 || st.LastFailureCategory != string(auditFailureWrite) || st.LastFailureAt.IsZero() {
+		t.Fatalf("recovered status=%+v", st)
+	}
+	_ = a.Close()
+}
+
+func TestAuditSinkRetiredCloseFailureIsHistoricalButNotActive(t *testing.T) {
+	d := t.TempDir()
+	a := newAuditLogWithSink(8, filepath.Join(d, "a.jsonl"), 10, 4, nil)
+	old := a.currentSink.owner
+	base := old.file
+	old.file = &auditFaultFile{base: base, closeFn: func() error { _ = base.Close(); return errors.New("close-history") }}
+	p, err := a.prepareTransition(mustAuditCfg(t, filepath.Join(d, "b.jsonl"), 10, 4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.commit()
+	p.retire(context.Background())
+	st := a.statusReport()
+	if st == nil || !st.Healthy || st.RetireFailures != 1 || st.LastFailureCategory != string(auditFailureClose) || st.LastFailureAt.IsZero() {
+		t.Fatalf("status=%+v", st)
+	}
+	_ = a.Close()
+}

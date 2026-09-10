@@ -202,8 +202,11 @@ func (a *auditLog) setStartupSinkFailure(cfg auditSinkConfig, category auditFail
 	defer a.mu.Unlock()
 	a.sinkCfg = cfg
 	a.sinkConfigured = cfg.publicPath != ""
+	now := time.Now().UTC()
 	a.activeFailure = category
-	a.activeFailureAt = time.Now().UTC()
+	a.activeFailureAt = now
+	a.lastFailure = category
+	a.lastFailureAt = now
 }
 
 func (a *auditLog) prepareTransition(cfg auditSinkConfig) (*preparedAuditSink, error) {
@@ -368,13 +371,13 @@ func (a *auditLog) statusReport() *AuditSinkStatus {
 		RotateFailures:  a.rotateFailures,
 		CleanupFailures: a.cleanupFailures,
 		RetireFailures:  a.retirementFailures,
-		LastFailureAt:   a.activeFailureAt,
+		LastFailureAt:   a.lastFailureAt,
 	}
 	if a.currentSink != nil {
 		st.Generation = a.currentSink.id
 	}
-	if a.activeFailure != "" {
-		st.LastFailureCategory = string(a.activeFailure)
+	if a.lastFailure != "" {
+		st.LastFailureCategory = string(a.lastFailure)
 	}
 	return st
 }
@@ -428,6 +431,9 @@ func (a *auditLog) completeWrite(gen *auditSinkGeneration, result auditWriteResu
 	}
 	shouldRelease := gen.retired && gen.releaseRequested && gen.inflight == 0
 	if result.err != nil {
+		now := time.Now().UTC()
+		a.lastFailure = result.category
+		a.lastFailureAt = now
 		switch result.category {
 		case auditFailureRotate:
 			a.rotateFailures++
@@ -438,7 +444,7 @@ func (a *auditLog) completeWrite(gen *auditSinkGeneration, result auditWriteResu
 		}
 		if a.currentSink == gen {
 			a.activeFailure = result.category
-			a.activeFailureAt = time.Now().UTC()
+			a.activeFailureAt = now
 		}
 	} else if a.currentSink == gen {
 		a.activeFailure = ""
@@ -465,6 +471,8 @@ func (a *auditLog) completeWrite(gen *auditSinkGeneration, result auditWriteResu
 func (a *auditLog) noteRetirementFailure(category auditFailureCategory, err error) {
 	a.mu.Lock()
 	a.retirementFailures++
+	a.lastFailure = category
+	a.lastFailureAt = time.Now().UTC()
 	a.mu.Unlock()
 	if a.log != nil {
 		a.log.Warn("retired audit sink could not close cleanly", "category", category, "err", err)
