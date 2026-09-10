@@ -1,0 +1,36 @@
+name: HR-07C UI patch once
+on:
+  push:
+    branches: [issue-160-hot-audit-sink]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[issue160-ui-materialized]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: issue-160-hot-audit-sink
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: Apply patch and format
+        run: |
+          python3 scripts/issue160_ui_patch.py
+          gofmt -w internal/admin/consolev2_test.go
+          corepack enable
+          pnpm --dir internal/admin/ui install --frozen-lockfile
+          pnpm --dir internal/admin/ui exec prettier --write src/api/client.ts src/features/plugins/AdminRuntimeSettingsDrawer.tsx
+      - name: Commit materialized UI
+        run: |
+          rm scripts/issue160_ui_patch.py .github/workflows/issue160-ui-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -s -m "feat(console): manage hot audit sink settings [issue160-ui-materialized]"
+          git push origin HEAD:issue-160-hot-audit-sink
