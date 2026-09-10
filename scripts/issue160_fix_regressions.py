@@ -54,5 +54,23 @@ patch(
     '''    if (normalizedAuditFile !== data.audit_log_file.trim()) auditSink.file = normalizedAuditFile;\n    if (parsedAuditMax !== data.audit_log_rotate_max_mb) auditSink.rotate_max_mb = parsedAuditMax;\n    if (parsedAuditKeep !== data.audit_log_rotate_keep) auditSink.rotate_keep = parsedAuditKeep;\n''',
     '''    if (normalizedAuditFile !== (data.audit_log_file ?? "").trim())\n      auditSink.file = normalizedAuditFile;\n    if (parsedAuditMax !== (data.audit_log_rotate_max_mb ?? 100))\n      auditSink.rotate_max_mb = parsedAuditMax;\n    if (parsedAuditKeep !== (data.audit_log_rotate_keep ?? 14))\n      auditSink.rotate_keep = parsedAuditKeep;\n''',
 )
+# Both path fields are first-class labelled controls. This keeps the drawer
+# accessible and lets existing tests target the upload path semantically now
+# that the audit path is also editable in the same surface.
+patch(
+    "internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.tsx",
+    '''            <input type="text" value={directory} onChange={(event) => { setDirectory(event.target.value); }} className="w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text" />''',
+    '''            <input aria-label="Upload directory" type="text" value={directory} onChange={(event) => { setDirectory(event.target.value); }} className="w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text" />''',
+)
+patch(
+    "internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.tsx",
+    '''              <input type="text" value={auditFile} onChange={(event) => setAuditFile(event.target.value)} className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text" />''',
+    '''              <input aria-label="Audit file" type="text" value={auditFile} onChange={(event) => setAuditFile(event.target.value)} className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text" />''',
+)
+patch(
+    "internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.test.tsx",
+    '''    fireEvent.change(screen.getByRole("textbox"), { target: { value: "/tmp/next" } });''',
+    '''    fireEvent.change(screen.getByLabelText("Upload directory"), { target: { value: "/tmp/next" } });''',
+)
 
 print("HR-07C regression fixes applied")
