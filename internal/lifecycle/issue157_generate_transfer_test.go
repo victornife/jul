@@ -4,8 +4,6 @@
 package lifecycle
 
 import (
-	"bytes"
-	"compress/gzip"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -36,15 +34,7 @@ func TestIssue157GenerateTransfer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var compressed bytes.Buffer
-		zw := gzip.NewWriter(&compressed)
-		if _, err := zw.Write(data); err != nil {
-			t.Fatal(err)
-		}
-		if err := zw.Close(); err != nil {
-			t.Fatal(err)
-		}
-		fmt.Printf("ISSUE157_GENERATED_BEGIN %s\n%s\nISSUE157_GENERATED_END %s\n", filepath.Base(path), base64.StdEncoding.EncodeToString(compressed.Bytes()), filepath.Base(path))
+		fmt.Printf("ISSUE157_RAW_BEGIN %s\n%s\nISSUE157_RAW_END %s\n", filepath.Base(path), base64.StdEncoding.EncodeToString(data), filepath.Base(path))
 	}
 	t.Fatal("intentional transfer stop; remove helper after generated mirrors are committed")
 }
