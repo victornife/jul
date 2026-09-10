@@ -89,8 +89,8 @@ export function fetchAdminRuntimeSettings(): Promise<AdminRuntimeSettingsProject
 
 p.write_text(text)
 
-# Keep the settings drawer compatible with exactOptionalPropertyTypes: a value
-# looked up in a lifecycle map is explicitly `T | undefined`, not an omitted prop.
+# Keep the settings drawer compatible with exactOptionalPropertyTypes and the
+# repo's no-confusing-void-expression handler rule.
 drawer = Path("internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.tsx")
 d = drawer.read_text()
 d = d.replace("  type AdminRuntimeSettingsProjection,\n", "")
@@ -102,4 +102,25 @@ d = d.replace(
     "  field?: LifecycleFieldProjection;\n",
     "  field: LifecycleFieldProjection | undefined;\n",
 )
+for old, new in (
+    (
+        "onChange={(event) => setConfirmDisable(event.target.checked)}",
+        "onChange={(event) => { setConfirmDisable(event.target.checked); }}",
+    ),
+    (
+        "onChange={(event) => setUploadEnabled(event.target.checked)}",
+        "onChange={(event) => { setUploadEnabled(event.target.checked); }}",
+    ),
+    (
+        "onChange={(event) => setMaxSize(event.target.value)}",
+        "onChange={(event) => { setMaxSize(event.target.value); }}",
+    ),
+    (
+        "onChange={(event) => setDirectory(event.target.value)}",
+        "onChange={(event) => { setDirectory(event.target.value); }}",
+    ),
+):
+    if old not in d:
+        raise SystemExit(f"drawer handler marker missing: {old}")
+    d = d.replace(old, new, 1)
 drawer.write_text(d)
