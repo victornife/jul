@@ -96,6 +96,16 @@ type createdAuditDir struct {
 }
 
 type auditFileOwner struct {
+	// lifeMu never protects disk I/O. Publish may retain/activate a same-path
+	// owner even while a slow physical write holds mu.
+	lifeMu sync.Mutex
+	refs   int
+	live   bool
+	closed bool
+
+	// mu serializes the physical stream. Tickets are allocated under auditLog.mu
+	// and therefore preserve global event order even though the disk write occurs
+	// after the event linearization lock is released.
 	mu   sync.Mutex
 	cond *sync.Cond
 
@@ -108,9 +118,6 @@ type auditFileOwner struct {
 
 	nextTicket uint64
 	turn       uint64
-	refs       int
-	committed  bool
-	closed     bool
 	firstWrite bool
 
 	createdFile bool
@@ -137,7 +144,7 @@ func newAuditLogWithSink(capacity int, path string, maxMB, keep int, log *slog.L
 	a.log = log
 	cfg, err := resolveAuditSinkConfig(path, maxMB, keep)
 	if err != nil {
-		a.setStartupSinkFailure(auditSinkConfig{publicPath: path}, auditFailurePath, err)
+		a.setStartupSinkFailure(auditSinkConfig{publicPath: path}, auditFailurePath)
 		return a
 	}
 	if !cfg.enabled() {
@@ -150,7 +157,7 @@ func newAuditLogWithSink(capacity int, path string, maxMB, keep int, log *slog.L
 		if errors.As(err, &pe) {
 			cat = auditFailurePath
 		}
-		a.setStartupSinkFailure(cfg, cat, err)
+		a.setStartupSinkFailure(cfg, cat)
 		auditLogWarn(log, "audit sink unavailable; durable trail disabled", cfg.publicPath, err)
 		return a
 	}
@@ -158,19 +165,18 @@ func newAuditLogWithSink(capacity int, path string, maxMB, keep int, log *slog.L
 	return a
 }
 
-func (a *auditLog) setStartupSinkFailure(cfg auditSinkConfig, category auditFailureCategory, err error) {
+func (a *auditLog) setStartupSinkFailure(cfg auditSinkConfig, category auditFailureCategory) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sinkCfg = cfg
 	a.sinkConfigured = cfg.publicPath != ""
 	a.activeFailure = category
 	a.activeFailureAt = time.Now().UTC()
-	a.activeFailureErr = err
 }
 
 func (a *auditLog) prepareTransition(cfg auditSinkConfig) (*preparedAuditSink, error) {
 	a.mu.Lock()
-	if a.sinkConfigured && a.sinkCfg.equal(cfg) && a.currentSink != nil {
+	if (!a.sinkConfigured && !cfg.enabled()) || (a.sinkConfigured && a.sinkCfg.equal(cfg) && a.currentSink != nil) {
 		a.mu.Unlock()
 		return nil, nil
 	}
@@ -195,13 +201,25 @@ func (a *auditLog) prepareTransition(cfg auditSinkConfig) (*preparedAuditSink, e
 	return &preparedAuditSink{log: a, candidate: candidate, cfg: cfg}, nil
 }
 
-func (p *preparedAuditSink) commit() {
+func (p *preparedAuditSink) commit() { p.commitWith(nil) }
+
+// commitWith is the exact audit-event publication barrier. publishAdmin is
+// bounded in-memory work; it executes while audit events are unable to assign an
+// ID/select a sink. The candidate writer was already opened and validated.
+func (p *preparedAuditSink) commitWith(publishAdmin func()) {
 	if p == nil {
+		if publishAdmin != nil {
+			publishAdmin()
+		}
 		return
 	}
 	p.once.Do(func() {
 		a := p.log
 		a.mu.Lock()
+		defer a.mu.Unlock()
+		if publishAdmin != nil {
+			publishAdmin()
+		}
 		p.old = a.currentSink
 		a.nextSinkGeneration++
 		if p.candidate != nil {
@@ -212,7 +230,6 @@ func (p *preparedAuditSink) commit() {
 		a.sinkCfg = p.cfg
 		a.sinkConfigured = p.cfg.enabled()
 		a.activeFailure = ""
-		a.activeFailureErr = nil
 		a.activeFailureAt = time.Time{}
 		if p.old != nil {
 			p.old.retired = true
@@ -221,7 +238,6 @@ func (p *preparedAuditSink) commit() {
 			}
 		}
 		p.committed = true
-		a.mu.Unlock()
 	})
 }
 
@@ -361,7 +377,6 @@ func (a *auditLog) completeWrite(gen *auditSinkGeneration, result auditWriteResu
 		}
 		if a.currentSink == gen {
 			a.activeFailure = result.category
-			a.activeFailureErr = result.err
 			a.activeFailureAt = time.Now().UTC()
 		}
 		auditLogWarn(a.log, "audit sink persistence failed", gen.cfg.publicPath, result.err)
@@ -369,7 +384,6 @@ func (a *auditLog) completeWrite(gen *auditSinkGeneration, result auditWriteResu
 	}
 	if a.currentSink == gen {
 		a.activeFailure = ""
-		a.activeFailureErr = nil
 		a.activeFailureAt = time.Time{}
 	}
 }
@@ -384,15 +398,15 @@ func (a *auditLog) noteRetirementFailure(category auditFailureCategory, err erro
 }
 
 func (o *auditFileOwner) retain() {
-	o.mu.Lock()
+	o.lifeMu.Lock()
 	o.refs++
-	o.mu.Unlock()
+	o.lifeMu.Unlock()
 }
 
 func (o *auditFileOwner) activate() {
-	o.mu.Lock()
-	o.committed = true
-	o.mu.Unlock()
+	o.lifeMu.Lock()
+	o.live = true
+	o.lifeMu.Unlock()
 }
 
 // allocateTicket is called only while auditLog.mu is held. That global event
@@ -422,18 +436,24 @@ func (o *auditFileOwner) writeLocked(cfg auditSinkConfig, p []byte) auditWriteRe
 		return auditWriteResult{category: auditFailureWrite, err: fmt.Errorf("audit event length %d exceeds maximum file size %d", len(p), max)}
 	}
 	rotate := o.size+int64(len(p)) > max
-	// Preserve lumberjack v2.2.1's first-open boundary: because the historical
-	// startup probe created the final file before lumberjack's lazy first Write,
-	// an existing-size + first-write value exactly equal to MaxSize rotated.
+	// Preserve lumberjack v2.2.1's lazy first-open boundary after Jul's old
+	// startup probe: exact equality rotates for the first write, while an already
+	// open stream rotates only on greater-than.
 	if o.firstWrite && o.size+int64(len(p)) >= max {
 		rotate = true
 	}
+	var cleanupErr error
 	if rotate {
-		if err := o.rotateLocked(cfg.keep); err != nil {
+		var err error
+		cleanupErr, err = o.rotateLocked(cfg.keep)
+		if err != nil {
 			return auditWriteResult{category: auditFailureRotate, err: err}
 		}
 	}
 	o.firstWrite = false
+	if o.file == nil {
+		return auditWriteResult{category: auditFailureWrite, err: errors.New("audit file unavailable")}
+	}
 	n, err := o.file.Write(p)
 	if err == nil && n != len(p) {
 		err = io.ErrShortWrite
@@ -442,33 +462,55 @@ func (o *auditFileOwner) writeLocked(cfg auditSinkConfig, p []byte) auditWriteRe
 	if err != nil {
 		return auditWriteResult{category: auditFailureWrite, err: err}
 	}
+	if cleanupErr != nil {
+		// Persistence succeeded; retention compliance degraded independently.
+		return auditWriteResult{category: auditFailureCleanup, err: cleanupErr, durable: true}
+	}
 	return auditWriteResult{durable: true}
 }
 
-func (o *auditFileOwner) rotateLocked(keep int) error {
+func (o *auditFileOwner) rotateLocked(keep int) (cleanupErr error, rotateErr error) {
 	if o.file == nil {
-		return errors.New("audit file is not open")
+		return nil, errors.New("audit file is not open")
 	}
+	oldSize := o.size
 	if err := o.file.Close(); err != nil {
-		return fmt.Errorf("close before rotation: %w", err)
+		return nil, fmt.Errorf("close before rotation: %w", err)
 	}
 	o.file = nil
 	backup, err := o.nextBackupNameLocked()
 	if err != nil {
-		return err
+		_ = o.reopenExistingLocked(oldSize)
+		return nil, err
 	}
 	if err := o.root.Rename(o.base, backup); err != nil {
-		return fmt.Errorf("rename audit file for rotation: %w", err)
+		_ = o.reopenExistingLocked(oldSize)
+		return nil, fmt.Errorf("rename audit file for rotation: %w", err)
 	}
 	f, err := o.root.OpenFile(o.base, os.O_CREATE|os.O_EXCL|os.O_WRONLY|os.O_APPEND, o.mode.Perm())
 	if err != nil {
-		return fmt.Errorf("open audit file after rotation: %w", err)
+		// Best-effort rollback restores the historical active name. We never
+		// truncate or discard the backup if rollback itself is unsafe/fails.
+		if rollbackErr := o.root.Rename(backup, o.base); rollbackErr == nil {
+			_ = o.reopenExistingLocked(oldSize)
+		}
+		return nil, fmt.Errorf("open audit file after rotation: %w", err)
 	}
 	o.file = f
 	o.size = 0
 	if err := o.pruneLocked(keep); err != nil {
-		return &auditCleanupError{err: err}
+		return &auditCleanupError{err: err}, nil
 	}
+	return nil, nil
+}
+
+func (o *auditFileOwner) reopenExistingLocked(size int64) error {
+	f, err := o.root.OpenFile(o.base, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return err
+	}
+	o.file = f
+	o.size = size
 	return nil
 }
 
@@ -654,45 +696,43 @@ func prepareAuditParent(parent string) (*os.Root, []createdAuditDir, error) {
 			return nil, nil, fmt.Errorf("prepared audit parent is unsafe")
 		}
 		if i >= len(parts)-len(missing) {
-			created = append(created, createdAuditDir{name: name, info: info})
+			created = append(created, createdAuditDir{name: filepath.Join(ancestor, name), info: info})
 		}
 	}
 	parentRoot, err := root.OpenRoot(rel)
-	if err != nil {
-		_ = root.Close()
-		return nil, nil, err
-	}
 	_ = root.Close()
-	// Created directory names must be relative to the final parent root's
-	// parent to remove them safely; cleanupCandidate handles them by absolute
-	// identity below, so store absolute names here.
-	for i := range created {
-		created[i].name = filepath.Join(ancestor, created[i].name)
+	if err != nil {
+		return nil, nil, err
 	}
 	return parentRoot, created, nil
 }
 
 func (o *auditFileOwner) release(ctx context.Context, committed bool) error {
-	o.mu.Lock()
+	o.lifeMu.Lock()
 	if o.refs > 0 {
 		o.refs--
 	}
 	if o.refs != 0 || o.closed {
-		o.mu.Unlock()
+		o.lifeMu.Unlock()
 		return nil
 	}
 	o.closed = true
+	shouldCleanup := !o.live && !committed
+	o.lifeMu.Unlock()
+
+	// Release is never invoked from Publish. For a committed generation all
+	// selected writes have already drained; for Abort the writer was unpublished.
+	o.mu.Lock()
 	file := o.file
 	o.file = nil
-	shouldCleanup := !o.committed && !committed
 	o.mu.Unlock()
 
-	var err error
+	var closeErr error
 	if file != nil {
 		done := make(chan error, 1)
 		go func() { done <- file.Close() }()
 		select {
-		case err = <-done:
+		case closeErr = <-done:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -701,11 +741,11 @@ func (o *auditFileOwner) release(ctx context.Context, committed bool) error {
 		o.cleanupCandidate()
 	}
 	if o.root != nil {
-		if closeErr := o.root.Close(); err == nil {
-			err = closeErr
+		if err := o.root.Close(); closeErr == nil {
+			closeErr = err
 		}
 	}
-	return err
+	return closeErr
 }
 
 func (o *auditFileOwner) cleanupCandidate() {
@@ -714,9 +754,10 @@ func (o *auditFileOwner) cleanupCandidate() {
 			_ = o.root.Remove(o.base)
 		}
 	}
-	// Missing parent directories are deliberately left as harmless empty
-	// candidate artifacts if they were created. A hard crash cannot run Abort,
-	// and deleting them later based on stale path identities would be riskier
-	// than leaving empty 0750 directories. The final candidate-owned file is
-	// the only object removed automatically and only under exact identity+size.
+	for i := len(o.createdDirs) - 1; i >= 0; i-- {
+		d := o.createdDirs[i]
+		if info, err := os.Lstat(d.name); err == nil && os.SameFile(info, d.info) && info.IsDir() {
+			_ = os.Remove(d.name) // removal succeeds only if the owned directory is still empty
+		}
+	}
 }
