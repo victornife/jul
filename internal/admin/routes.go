@@ -8,7 +8,8 @@ import "net/http"
 // routes builds the admin mux from the authoritative Catalog. Every entry is
 // either public (no auth) or wrapped with method-aware authorization so
 // authorization is explicit and complete — there is no implicit default access
-// level.
+// level. The admission wrapper is also bound here, once, so rate classification
+// cannot drift into a second path catalogue and reload never stacks middleware.
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	for _, spec := range Catalog {
@@ -25,13 +26,18 @@ func (s *Server) routes() http.Handler {
 		default:
 			h = s.requirePermission(spec.Permission, spec.Handler(s))
 		}
+
+		// Admission precedes authentication/authorization but follows the outer
+		// secure-transport gate. External contract setup wraps admission so an
+		// early 429 already has a server-minted request id and the v1 envelope.
+		h = s.limitRoute(spec, h)
 		if spec.Stability.External() && !spec.Public {
 			h = s.withExternalContract(h)
 		}
 		mux.Handle(spec.Pattern, h)
 	}
 	return s.captureAdminRuntimeSnapshot(
-		s.requireSecureTransport(s.observeConsole(s.limiter.rateLimit(mux))),
+		s.requireSecureTransport(s.observeConsole(mux)),
 	)
 }
 
