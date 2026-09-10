@@ -73,7 +73,7 @@ positive = explicit requests-per-minute limit
 
 The canonical defaults are read 240/min, write 60/min and apply 30/min. The three buckets are independent: changing one class does not reset another.
 
-The authoritative route catalogue supplies the admission context; no independent registered-path switch is maintained. Safe methods use the read budget. Configuration assessment/mutation permissions (`config:write`, `config:apply`, rollback) use the stricter apply budget, including external validate/plan/apply/patch/rollback/adoption equivalents. Other mutations use write. The catch-all/root catalogue entry preserves conservative treatment for unmatched requests, so an unknown path does not become an unlimited existence/authentication oracle.
+The authoritative route catalogue supplies the admission context; no independent registered-path switch is maintained. Safe methods use the read budget. Higher-cost configuration assessment/mutation operations—validate, plan/diff, patch preview/apply, apply, rollback and adoption—use the stricter apply budget. Other mutations use write. The catch-all/root catalogue entry preserves conservative treatment for unmatched requests, so an unknown path does not become an unlimited existence/authentication oracle.
 
 ### State-preserving transitions
 
