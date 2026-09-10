@@ -5356,6 +5356,23 @@
                   },
                   "additionalProperties": false
                 },
+                "audit_sink": {
+                  "type": "object",
+                  "properties": {
+                    "file": {
+                      "type": "string"
+                    },
+                    "rotate_keep": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "rotate_max_mb": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  },
+                  "additionalProperties": false
+                },
                 "auth": {
                   "type": "object",
                   "properties": {
