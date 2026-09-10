@@ -337,6 +337,7 @@ func (p *ReloadPlan) RetirePreparedRuntime() {
 		defer s.wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), grace)
 		defer cancel()
+		p.PreparedAdmin.Retire(ctx)
 		p.Runtime.Retire(ctx)
 	}()
 }

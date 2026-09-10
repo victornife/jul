@@ -937,12 +937,17 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			}
 			preparedTLS, err := adminSrv.PrepareTLS(adminCfg)
 			if err != nil {
+				adminSrv.AbortPreparedAdminRuntime(preparedRuntime)
 				return nil, err
 			}
-			return server.NewPreparedCommit(func() {
-				adminSrv.CommitPreparedAuth(preparedRuntime)
+			return server.NewPreparedCommitWithRetire(func() {
+				adminSrv.CommitPreparedAdminRuntime(preparedRuntime)
 				adminSrv.CommitPreparedTLS(preparedTLS)
-			}, nil), nil
+			}, func() {
+				adminSrv.AbortPreparedAdminRuntime(preparedRuntime)
+			}, func(retireCtx context.Context) {
+				adminSrv.RetirePreparedAdminRuntime(retireCtx, preparedRuntime)
+			}), nil
 		}
 		pf.PrepareAdmin = prepareAdmin
 		srv.PrepareAdmin = prepareAdmin

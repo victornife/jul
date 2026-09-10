@@ -70,6 +70,10 @@ type AdminRuntimeSettingsProjection struct {
 	RateLimitWritePerMin  int                                 `json:"rate_limit_write_per_min"`
 	RateLimitApplyPerMin  int                                 `json:"rate_limit_apply_per_min"`
 	MaxEventConns         int                                 `json:"max_event_conns"`
+	AuditLogFile          string                              `json:"audit_log_file"`
+	AuditLogRotateMaxMB   int                                 `json:"audit_log_rotate_max_mb"`
+	AuditLogRotateKeep    int                                 `json:"audit_log_rotate_keep"`
+	AuditSink             *AuditSinkStatus                    `json:"audit_sink,omitempty"`
 	Lifecycle             map[string]LifecycleFieldProjection `json:"lifecycle"`
 }
 
@@ -145,6 +149,10 @@ func (s *Server) handleAdminRuntimeSettingsRead(w http.ResponseWriter, r *http.R
 		RateLimitWritePerMin:  cfg.RateLimitWritePerMin,
 		RateLimitApplyPerMin:  cfg.RateLimitApplyPerMin,
 		MaxEventConns:         cfg.MaxEventConns,
+		AuditLogFile:          cfg.AuditLogFile,
+		AuditLogRotateMaxMB:   cfg.AuditLogRotateMaxMB,
+		AuditLogRotateKeep:    cfg.AuditLogRotateKeep,
+		AuditSink:             s.audit.statusReport(),
 		Lifecycle: map[string]LifecycleFieldProjection{
 			"console":                  lifecycleFieldProjection("admin.console"),
 			"plugin_upload_enabled":    lifecycleFieldProjection("admin.plugin_upload_enabled"),
@@ -154,6 +162,9 @@ func (s *Server) handleAdminRuntimeSettingsRead(w http.ResponseWriter, r *http.R
 			"rate_limit_write_per_min": lifecycleFieldProjection("admin.rate_limit_write_per_min"),
 			"rate_limit_apply_per_min": lifecycleFieldProjection("admin.rate_limit_apply_per_min"),
 			"max_event_conns":          lifecycleFieldProjection("admin.max_event_conns"),
+			"audit_log_file":           lifecycleFieldProjection("admin.audit_log_file"),
+			"audit_log_rotate_max_mb":  lifecycleFieldProjection("admin.audit_log_rotate_max_mb"),
+			"audit_log_rotate_keep":    lifecycleFieldProjection("admin.audit_log_rotate_keep"),
 		},
 	}
 	writeJSON(w, http.StatusOK, projection)

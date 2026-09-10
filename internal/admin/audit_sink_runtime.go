@@ -72,21 +72,21 @@ const (
 )
 
 type auditSinkGeneration struct {
-	id      uint64
-	cfg     auditSinkConfig
-	owner   *auditFileOwner
+	id       uint64
+	cfg      auditSinkConfig
+	owner    *auditFileOwner
 	inflight int
-	retired bool
-	drained chan struct{}
+	retired  bool
+	drained  chan struct{}
 }
 
 type preparedAuditSink struct {
-	log       *auditLog
-	candidate *auditSinkGeneration
-	cfg       auditSinkConfig
-	old       *auditSinkGeneration
-	committed bool
-	once      sync.Once
+	log        *auditLog
+	candidate  *auditSinkGeneration
+	cfg        auditSinkConfig
+	old        *auditSinkGeneration
+	committed  bool
+	once       sync.Once
 	retireOnce sync.Once
 }
 
@@ -531,10 +531,12 @@ func (o *auditFileOwner) pruneLocked(keep int) error {
 }
 
 type auditCleanupError struct{ err error }
+
 func (e *auditCleanupError) Error() string { return "audit retention cleanup: " + e.err.Error() }
 func (e *auditCleanupError) Unwrap() error { return e.err }
 
 type auditPathError struct{ err error }
+
 func (e *auditPathError) Error() string { return "audit path validation: " + e.err.Error() }
 func (e *auditPathError) Unwrap() error { return e.err }
 

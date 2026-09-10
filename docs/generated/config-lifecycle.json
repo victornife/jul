@@ -259,12 +259,12 @@
     "schema_paths": 356,
     "schema_leaves": 302,
     "registry_entries": 302,
-    "startup_consumed": 40,
+    "startup_consumed": 37,
     "by_class": {
-      "hot_reload": 247,
+      "hot_reload": 250,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
-      "restart_required": 40,
+      "restart_required": 37,
       "validation_rejected_reserved": 3
     }
   },
@@ -285,10 +285,10 @@
   "fields": [
     {
       "path": "admin.audit_log_file",
-      "class": "restart_required",
+      "class": "hot_reload",
       "subsystem": "admin",
-      "reason": "the admin listener and its resources are created once at startup",
-      "startup_consumed": true,
+      "reason": "the durable audit writer is fully prepared before Publish and atomically selected for new audit events while the process-lifetime ring and event IDs remain unchanged",
+      "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,
       "deprecated": false,
@@ -298,10 +298,10 @@
     },
     {
       "path": "admin.audit_log_rotate_keep",
-      "class": "restart_required",
+      "class": "hot_reload",
       "subsystem": "admin",
-      "reason": "the admin listener and its resources are created once at startup",
-      "startup_consumed": true,
+      "reason": "path and rotation policy publish as one prepared durable-sink generation; existing audit events and files are not migrated",
+      "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,
       "deprecated": false,
@@ -311,10 +311,10 @@
     },
     {
       "path": "admin.audit_log_rotate_max_mb",
-      "class": "restart_required",
+      "class": "hot_reload",
       "subsystem": "admin",
-      "reason": "the admin listener and its resources are created once at startup",
-      "startup_consumed": true,
+      "reason": "path and rotation policy publish as one prepared durable-sink generation; existing audit events and files are not migrated",
+      "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,
       "deprecated": false,

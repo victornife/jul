@@ -52,13 +52,18 @@ func (s *Server) PrepareAdminRuntime(cfg config.AdminConfig, prepared *PreparedA
 			return nil, newAdminRuntimePrepareError(adminPrepareFailureUploadDirectory, err)
 		}
 	}
-	s.clearAdminPrepareFailure()
 	if prepared == nil || prepared.snapshot == nil {
+		s.clearAdminPrepareFailure()
 		return prepared, nil
 	}
 	out := *prepared.snapshot
 	out.cfg = cfg
-	return &PreparedAuth{snapshot: s.completeAdminRuntimeSnapshot(&out)}, nil
+	result := &PreparedAuth{snapshot: s.completeAdminRuntimeSnapshot(&out)}
+	if err := s.prepareAuditRuntime(cfg, result); err != nil {
+		return nil, err
+	}
+	s.clearAdminPrepareFailure()
+	return result, nil
 }
 
 func (s *Server) completeAdminRuntimeSnapshot(in *authSnapshot) *authSnapshot {
