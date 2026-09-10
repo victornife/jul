@@ -11,6 +11,11 @@ import "net/http"
 // level. The admission wrapper is also bound here, once, so rate classification
 // cannot drift into a second path catalogue and reload never stacks middleware.
 func (s *Server) routes() http.Handler {
+	// Some tests and embedders construct Server directly. Establish the same
+	// process-lifetime invariant as NewServer before building the stable mux.
+	if s.limiter == nil {
+		s.limiter = newAdminLimiter(s.log)
+	}
 	mux := http.NewServeMux()
 	for _, spec := range Catalog {
 		var h http.Handler

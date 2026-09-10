@@ -90,15 +90,15 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
   const uploadDisabling = Boolean(data?.plugin_upload_enabled && !uploadEnabled);
   const parsedMax = Number(maxSize);
   const maxValid = Number.isInteger(parsedMax) && parsedMax >= 0;
-  const parsedRead = integerValue(readPerMin);
-  const parsedWrite = integerValue(writePerMin);
-  const parsedApply = integerValue(applyPerMin);
-  const parsedConns = integerValue(maxEventConns);
-  const limitsValid = parsedRead !== null && parsedWrite !== null && parsedApply !== null && parsedConns !== null && parsedConns > 0;
-  const loweringSSE = Boolean(data && parsedConns !== null && parsedConns > 0 && parsedConns < data.max_event_conns);
+  const parsedRead = Number(readPerMin);
+  const parsedWrite = Number(writePerMin);
+  const parsedApply = Number(applyPerMin);
+  const parsedConns = Number(maxEventConns);
+  const limitsValid = Number.isInteger(parsedRead) && Number.isInteger(parsedWrite) && Number.isInteger(parsedApply) && Number.isInteger(parsedConns) && parsedConns > 0;
+  const loweringSSE = Boolean(data && parsedConns > 0 && parsedConns < data.max_event_conns);
 
   const ops = useMemo<ConfigPatch[]>(() => {
-    if (!data || !maxValid || !limitsValid || parsedRead === null || parsedWrite === null || parsedApply === null || parsedConns === null) return [];
+    if (!data || !maxValid || !limitsValid) return [];
     const next: ConfigPatch[] = [];
     if (consoleEnabled !== data.console) {
       next.push({ op: "admin_console_set", enabled: consoleEnabled });
@@ -119,7 +119,7 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
       next.push({ op: "admin_limits_set", admin_limits: limits });
     }
     return next;
-  }, [applyPerMin, consoleEnabled, data, directory, limitsValid, maxEventConns, maxValid, parsedApply, parsedConns, parsedMax, parsedRead, parsedWrite, readPerMin, uploadEnabled, writePerMin]);
+  }, [consoleEnabled, data, directory, limitsValid, maxValid, parsedApply, parsedConns, parsedMax, parsedRead, parsedWrite, uploadEnabled]);
 
   if (isLoading) {
     return (
@@ -202,7 +202,7 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
                     type="number"
                     step={1}
                     value={value as string}
-                    onChange={(event) => (setter as (value: string) => void)(event.target.value)}
+                    onChange={(event) => { (setter as (value: string) => void)(event.target.value); }}
                     className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
                   />
                 </label>
@@ -223,7 +223,7 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
               onChange={(event) => { setMaxEventConns(event.target.value); }}
               className="w-32 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
             />
-            {parsedConns !== null && parsedConns <= 0 && <p className="mt-1 text-xs text-jul-danger">Use a positive whole number. This setting has no unlimited mode.</p>}
+            {parsedConns <= 0 && <p className="mt-1 text-xs text-jul-danger">Use a positive whole number. This setting has no unlimited mode.</p>}
             <p className="mt-2 text-xs text-jul-muted">The cap is shared by event and live-log SSE streams for each transport peer.</p>
             {loweringSSE && (
               <p className="mt-3 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-2 text-xs text-jul-text">

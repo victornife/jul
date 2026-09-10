@@ -17,7 +17,7 @@ func TestAdminLimitsPatchSparseAndCanonicalValues(t *testing.T) {
 	req := patchRequest{
 		Op: "admin_limits_set",
 		AdminLimits: &adminLimitsPatch{
-			ReadPerMin: intPtr(-1),
+			ReadPerMin:    intPtr(-1),
 			MaxEventConns: intPtr(8),
 		},
 	}
@@ -39,7 +39,7 @@ func TestAdminLimitsPatchSparseAndCanonicalValues(t *testing.T) {
 func TestAdminLimitsPatchAllowsRateZeroDefault(t *testing.T) {
 	cfg := config.Config{Admin: limitTestConfig(240, 60, 30, 4)}
 	_, err := applyAdminRuntimePatch(&cfg, patchRequest{
-		Op: "admin_limits_set",
+		Op:          "admin_limits_set",
 		AdminLimits: &adminLimitsPatch{WritePerMin: intPtr(0)},
 	})
 	if err != nil {
@@ -53,13 +53,13 @@ func TestAdminLimitsPatchAllowsRateZeroDefault(t *testing.T) {
 func TestAdminLimitsPatchRejectsInvalidSSEAndEmptyPatch(t *testing.T) {
 	cfg := config.Config{Admin: limitTestConfig(240, 60, 30, 4)}
 	if _, err := applyAdminRuntimePatch(&cfg, patchRequest{
-		Op: "admin_limits_set",
+		Op:          "admin_limits_set",
 		AdminLimits: &adminLimitsPatch{MaxEventConns: intPtr(-1)},
 	}); err == nil {
 		t.Fatal("negative public max_event_conns must be rejected")
 	}
 	if _, err := applyAdminRuntimePatch(&cfg, patchRequest{
-		Op: "admin_limits_set",
+		Op:          "admin_limits_set",
 		AdminLimits: &adminLimitsPatch{},
 	}); err == nil {
 		t.Fatal("empty admin_limits_set patch must be rejected")

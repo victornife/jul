@@ -94,15 +94,15 @@ func TestXTimeRateTighteningCharacterization(t *testing.T) {
 
 func TestAdminRouteCatalogueLimitClassificationMatrix(t *testing.T) {
 	want := map[string]limitKind{
-		"/api/v1/status":              limitRead,
-		"/api/v1/config/validate":     limitApply,
-		"/api/v1/config/plan":         limitApply,
-		"/api/v1/config/apply":        limitApply,
-		"/api/v1/config/patch/apply":  limitApply,
-		"/api/v1/config/rollback":     limitApply,
+		"/api/v1/status":                limitRead,
+		"/api/v1/config/validate":       limitApply,
+		"/api/v1/config/plan":           limitApply,
+		"/api/v1/config/apply":          limitApply,
+		"/api/v1/config/patch/apply":    limitApply,
+		"/api/v1/config/rollback":       limitApply,
 		"/api/v1/config/adopt-external": limitApply,
-		"/api/config/validate":        limitApply,
-		"/api/config/diff":            limitApply,
+		"/api/config/validate":          limitApply,
+		"/api/config/diff":              limitApply,
 	}
 	seen := make(map[string]bool, len(want))
 	for _, spec := range Catalog {
@@ -130,13 +130,19 @@ func TestAdminLimiterStatsAreAggregateAndIdentityFree(t *testing.T) {
 	l := newAdminLimiter(nil)
 	p := adminLimitPolicy{maxConns: 1}
 	r1, ok := l.acquireConn("192.0.2.10", p)
-	if !ok { t.Fatal("client A denied") }
+	if !ok {
+		t.Fatal("client A denied")
+	}
 	defer r1()
 	r2, ok := l.acquireConn("192.0.2.11", adminLimitPolicy{maxConns: 2})
-	if !ok { t.Fatal("client B denied") }
+	if !ok {
+		t.Fatal("client B denied")
+	}
 	defer r2()
 	r3, ok := l.acquireConn("192.0.2.11", adminLimitPolicy{maxConns: 2})
-	if !ok { t.Fatal("client B second stream denied") }
+	if !ok {
+		t.Fatal("client B second stream denied")
+	}
 	defer r3()
 
 	st := l.stats(p)

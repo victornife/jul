@@ -1,6 +1,6 @@
 GO_TEST_RC=1
-go: downloading google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688
 go: downloading google.golang.org/protobuf v1.36.12
+go: downloading google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688
 go: downloading gopkg.in/natefinch/lumberjack.v2 v2.2.1
 go: downloading github.com/golang-jwt/jwt/v5 v5.3.1
 go: downloading golang.org/x/crypto v0.56.0
@@ -12,46 +12,28 @@ go: downloading github.com/cespare/xxhash/v2 v2.3.0
 go: downloading github.com/prometheus/common v0.70.1
 go: downloading github.com/prometheus/procfs v0.21.1
 go: downloading github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
---- FAIL: TestListenerClientAddressWritesEverySiblingBlock (0.00s)
-panic: runtime error: invalid memory address or nil pointer dereference [recovered, repanicked]
-[signal SIGSEGV: segmentation violation code=0x1 addr=0x8 pc=0x9bdca6]
-
-goroutine 44 [running]:
-testing.tRunner.func1.2({0xc411e0, 0x13a6340})
-	/opt/hostedtoolcache/go/1.26.6/x64/src/testing/testing.go:1974 +0x232
-testing.tRunner.func1()
-	/opt/hostedtoolcache/go/1.26.6/x64/src/testing/testing.go:1977 +0x349
-panic({0xc411e0?, 0x13a6340?})
-	/opt/hostedtoolcache/go/1.26.6/x64/src/runtime/panic.go:860 +0x13a
-jul/internal/admin.(*adminLimiter).allow(0x0, {0xd2b7ba, 0x9}, 0x1, {0x2?, 0x19ac76d19680?, 0x0?, 0x0?})
-	/home/runner/work/jul/jul/internal/admin/ratelimit.go:186 +0x66
-jul/internal/admin.(*Server).routes.(*Server).limitRoute.func5({0xdb0820, 0x19ac76b07ea0}, 0x19ac76d1edc0)
-	/home/runner/work/jul/jul/internal/admin/ratelimit.go:372 +0x23b
-net/http.HandlerFunc.ServeHTTP(0x19ac76b7e0c0?, {0xdb0820?, 0x19ac76b07ea0?}, 0x19ac76b77b20?)
-	/opt/hostedtoolcache/go/1.26.6/x64/src/net/http/server.go:2284 +0x29
-net/http.(*ServeMux).ServeHTTP(0x0?, {0xdb0820, 0x19ac76b07ea0}, 0x19ac76d1edc0)
-	/opt/hostedtoolcache/go/1.26.6/x64/src/net/http/server.go:2826 +0x1c7
-jul/internal/admin.(*Server).routes.(*Server).observeConsole.func7({0xdb0790, 0x19ac76ae49c0}, 0x19ac76d1edc0)
-	/home/runner/work/jul/jul/internal/admin/operational.go:122 +0xbd
-net/http.HandlerFunc.ServeHTTP(0x19ac76b72a88?, {0xdb0790?, 0x19ac76ae49c0?}, 0x130?)
-	/opt/hostedtoolcache/go/1.26.6/x64/src/net/http/server.go:2284 +0x29
-jul/internal/admin.(*Server).routes.(*Server).requireSecureTransport.func8({0xdb0790, 0x19ac76ae49c0}, 0x19ac76d1edc0)
-	/home/runner/work/jul/jul/internal/admin/transport_gate.go:67 +0x94
-net/http.HandlerFunc.ServeHTTP(0x19ac76d1ec80?, {0xdb0790?, 0x19ac76ae49c0?}, 0x13ed960?)
-	/opt/hostedtoolcache/go/1.26.6/x64/src/net/http/server.go:2284 +0x29
-jul/internal/admin.(*Server).routes.(*Server).captureAdminRuntimeSnapshot.func9({0xdb0790, 0x19ac76ae49c0}, 0x19ac76d1ec80)
-	/home/runner/work/jul/jul/internal/admin/runtime_snapshot.go:31 +0xb5
-net/http.HandlerFunc.ServeHTTP(0x19ac76b72a88?, {0xdb0790?, 0x19ac76ae49c0?}, 0xd?)
-	/opt/hostedtoolcache/go/1.26.6/x64/src/net/http/server.go:2284 +0x29
-jul/internal/admin.patchClientAddress(0x19ac76bfe008?, 0x19ac76b72a88, {0xd492c0, 0x21}, {0xd2abdc, 0xe}, {0xd8342a, 0x6a})
-	/home/runner/work/jul/jul/internal/admin/api_client_address_test.go:64 +0x2f7
-jul/internal/admin.TestListenerClientAddressWritesEverySiblingBlock(0x19ac76bfe008)
-	/home/runner/work/jul/jul/internal/admin/api_client_address_test.go:84 +0x15a
-testing.tRunner(0x19ac76bfe008, 0xd9e8c8)
-	/opt/hostedtoolcache/go/1.26.6/x64/src/testing/testing.go:2036 +0xea
-created by testing.(*T).Run in goroutine 1
-	/opt/hostedtoolcache/go/1.26.6/x64/src/testing/testing.go:2101 +0x4c5
-FAIL	jul/internal/admin	0.062s
+--- FAIL: TestAdminRateLimitHotLoosenPreservesCapacityInsteadOfRefilling (0.00s)
+    issue158_transition_test.go:32: loosen reload refilled the bucket instead of preserving state: status=400
+--- FAIL: TestAdminRateLimitDelayedDisableReenableIsBoundedByNewBurst (0.00s)
+    issue158_transition_test.go:59: re-enable manufactured 5 immediate admissions; new burst is 3
+--- FAIL: TestAdminRouteCatalogueLimitClassificationMatrix (0.00s)
+    issue158_transition_test.go:117: route POST /api/v1/config/adopt-external class=write want=apply
+--- FAIL: TestAdminRateLimitBlocksWriteFlood (0.00s)
+    ratelimit_test.go:62: fourth write status=400 want 429
+--- FAIL: TestAdminRateLimitPerClientIsolation (0.00s)
+    ratelimit_test.go:74: noisy client second request status=400 want 429
+--- FAIL: TestAdminRateLimitHotTightenClampsBeforeFirstAdmission (0.00s)
+    ratelimit_test.go:100: second post-tighten request status=400 want 429
+--- FAIL: TestAdminRateLimitDisableReenablePreservesExhaustedState (0.00s)
+    ratelimit_test.go:115: expected exhausted finite bucket, got 400
+2026/09/10 12:06:51 WARN admin rate limit exceeded class=read retry_after_s=60
+2026/09/10 12:06:51 http: TLS handshake error from 127.0.0.1:37236: tls: client didn't provide a certificate
+2026/09/10 12:06:51 http: TLS handshake error from 127.0.0.1:37238: tls: client didn't provide a certificate
+2026/09/10 12:06:51 http: TLS handshake error from 127.0.0.1:55094: tls: client didn't provide a certificate
+2026/09/10 12:06:51 http: TLS handshake error from 127.0.0.1:55104: tls: failed to verify certificate: x509: certificate signed by unknown authority (possibly because of "x509: ECDSA verification failure" while trying to verify candidate authority certificate "admin test CA")
+2026/09/10 12:06:51 http: TLS handshake error from 127.0.0.1:50058: tls: client didn't provide a certificate
+FAIL
+FAIL	jul/internal/admin	2.925s
 FAIL
 
 PNPM_INSTALL_RC=0
@@ -60,14 +42,8 @@ FRONTEND_LINT_RC=1
 $ eslint . --cache
 
 /home/runner/work/jul/jul/internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.tsx
-  101:47   error    Unnecessary conditional, the types have no overlap                                                                                                                    @typescript-eslint/no-unnecessary-condition
-  101:70   error    Unnecessary conditional, the types have no overlap                                                                                                                    @typescript-eslint/no-unnecessary-condition
-  101:94   error    Unnecessary conditional, the types have no overlap                                                                                                                    @typescript-eslint/no-unnecessary-condition
-  101:118  error    Unnecessary conditional, the types have no overlap                                                                                                                    @typescript-eslint/no-unnecessary-condition
-  122:6    warning  React Hook useMemo has unnecessary dependencies: 'applyPerMin', 'maxEventConns', 'readPerMin', and 'writePerMin'. Either exclude them or remove the dependency array  react-hooks/exhaustive-deps
-  205:42   error    Returning a void expression from an arrow function shorthand is forbidden. Please add braces to the arrow function                                                    @typescript-eslint/no-confusing-void-expression
+  53:10  error  'integerValue' is defined but never used  @typescript-eslint/no-unused-vars
 
-✖ 6 problems (5 errors, 1 warning)
-  1 error and 0 warnings potentially fixable with the `--fix` option.
+✖ 1 problem (1 error, 0 warnings)
 
 [ELIFECYCLE] Command failed with exit code 1.
