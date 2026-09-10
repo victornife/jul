@@ -59,13 +59,13 @@ patch(
 # that the audit path is also editable in the same surface.
 patch(
     "internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.tsx",
-    '''            <input type="text" value={directory} onChange={(event) => { setDirectory(event.target.value); }} className="w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text" />''',
-    '''            <input aria-label="Upload directory" type="text" value={directory} onChange={(event) => { setDirectory(event.target.value); }} className="w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text" />''',
+    '''            <input\n              type="text"\n              value={directory}\n              onChange={(event) => {\n                setDirectory(event.target.value);\n              }}\n              className="w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text"\n            />''',
+    '''            <input\n              aria-label="Upload directory"\n              type="text"\n              value={directory}\n              onChange={(event) => {\n                setDirectory(event.target.value);\n              }}\n              className="w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text"\n            />''',
 )
 patch(
     "internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.tsx",
-    '''              <input type="text" value={auditFile} onChange={(event) => setAuditFile(event.target.value)} className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text" />''',
-    '''              <input aria-label="Audit file" type="text" value={auditFile} onChange={(event) => setAuditFile(event.target.value)} className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text" />''',
+    '''              <input\n                type="text"\n                value={auditFile}\n                onChange={(event) => setAuditFile(event.target.value)}\n                className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text"\n              />''',
+    '''              <input\n                aria-label="Audit file"\n                type="text"\n                value={auditFile}\n                onChange={(event) => setAuditFile(event.target.value)}\n                className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text"\n              />''',
 )
 patch(
     "internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.test.tsx",
