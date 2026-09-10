@@ -72,8 +72,10 @@ func (s *Server) completeAdminRuntimeSnapshot(in *authSnapshot) *authSnapshot {
 	return &out
 }
 
-// Nil means the documented/default-enabled state. A non-positive size still
-// disables the endpoint and is checked by the caller.
+// Canonical parsed configurations materialize an omitted upload-enable flag as
+// false. Nil is tolerated here only for compatibility with directly constructed
+// in-memory AdminConfig values that predate that normalization. A non-positive
+// size still disables the endpoint and is checked by the caller.
 func pluginUploadEnabled(cfg config.AdminConfig) bool {
 	return cfg.PluginUploadEnabled == nil || *cfg.PluginUploadEnabled
 }
@@ -180,8 +182,10 @@ func nextPluginTempName(kind string) string {
 }
 
 // openPluginUploadRoot anchors a request to the captured directory generation.
-// The configured final component must not be a symlink. Once open, os.Root
-// confines every descendant lookup and rename even if the path is raced.
+// The configured final component must not be a symlink. The pre-open path,
+// opened root, and post-open path must all identify the same directory; once
+// open, os.Root confines every descendant lookup and rename even if the path is
+// raced afterwards.
 func openPluginUploadRoot(dir string) (*os.Root, error) {
 	dir = normalizePluginUploadDir(dir)
 	before, err := os.Lstat(dir)
@@ -207,7 +211,7 @@ func openPluginUploadRoot(dir string) (*os.Root, error) {
 		return nil, err
 	}
 	after, err := os.Lstat(dir)
-	if err != nil || after.Mode()&os.ModeSymlink != 0 || !after.IsDir() || !os.SameFile(rootInfo, after) {
+	if err != nil || after.Mode()&os.ModeSymlink != 0 || !after.IsDir() || !os.SameFile(before, rootInfo) || !os.SameFile(rootInfo, after) {
 		_ = root.Close()
 		return nil, errors.New("upload directory changed while opening")
 	}
