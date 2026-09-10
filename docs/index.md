@@ -107,8 +107,13 @@ delivery row where inheriting an older GA label would be misleading.
   provenance, guidance and bounded include traversal.
 - **[Configuration authority](reload-semantics.md#configuration-authority-managed-vs-file-owned)**
   — one writer at a time.
-- **Generated external API:** not yet the stable contract. Existing Console
-  routes remain internal unless explicitly classified by #150.
+- **[Generated external API contract](generated/openapi.json)** — the committed
+  machine authority for the supported versioned `/api/v1` surface. Unversioned
+  Console `/api/*` routes remain internal unless an operation is explicitly
+  published in that external contract.
+- **[Remote automation CLI](remote-cli.md)** — thin client over that supported
+  external surface; shipped command/help and capability output own its command
+  and exit-code contract.
 
 ## Architecture and contribution
 
