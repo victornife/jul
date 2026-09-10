@@ -29,7 +29,8 @@ func PreflightConfig(cfg config.AdminConfig) error {
 			return err
 		}
 	}
-	if cfg.PluginUploadEnabled == nil || *cfg.PluginUploadEnabled {
+	uploadEnabled := (cfg.PluginUploadEnabled == nil || *cfg.PluginUploadEnabled) && cfg.PluginUploadMaxSize > 0
+	if uploadEnabled {
 		if err := preflightPluginUploadDir(cfg.PluginUploadDir); err != nil {
 			return err
 		}
