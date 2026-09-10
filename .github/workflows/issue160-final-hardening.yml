@@ -19,6 +19,23 @@ jobs:
       - name: Apply final hardening
         run: |
           python3 scripts/issue160_final_hardening.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('internal/server/admin_runtime_issue160_test.go');s=p.read_text()
+          s=s.replace('\tuploadDisabled := false\n\tuploadEnabled := true\n','\tuploadDisabled := false\n\tuploadEnabled := true\n\tconsoleEnabled := true\n\tconsoleDisabled := false\n',1)
+          s=s.replace('\t\tConsole:              true,\n','\t\tConsole:              &consoleEnabled,\n',1)
+          s=s.replace('\tcandidate.Admin.Console = false\n','\tcandidate.Admin.Console = &consoleDisabled\n',1)
+          s=s.replace('if seen.Console || seen.PluginUploadEnabled == nil','if seen.Console == nil || *seen.Console || seen.PluginUploadEnabled == nil',1)
+          p.write_text(s)
+          p=Path('internal/admin/issue160_benchmark_test.go');s=p.read_text()
+          marker='func BenchmarkIssue160AuditRecordDisabled'
+          idx=s.index(marker)
+          s=s[:idx]+'func benchAuditCfg(path string, maxMB, keep int) auditSinkConfig { return auditSinkConfig{publicPath: path, resolvedPath: path, maxMB: maxMB, keep: keep} }\n\n'+s[idx:]
+          s=s.replace('mustAuditCfg(b, path, 100, 14+(i%2))','benchAuditCfg(path, 100, 14+(i%2))')
+          s=s.replace('mustAuditCfg(b, path, 100, 14)','benchAuditCfg(path, 100, 14)')
+          s=s.replace('mustAuditCfg(b, path, 1, 2)','benchAuditCfg(path, 1, 2)')
+          p.write_text(s)
+          PY
           gofmt -w internal/admin/audit.go internal/admin/audit_sink_runtime.go internal/admin/issue160_writer_matrix_test.go internal/admin/issue160_filesystem_linux_test.go internal/admin/issue160_leak_test.go internal/admin/issue160_benchmark_test.go internal/server/admin_runtime_issue160_test.go
       - name: Verify focused Go contracts
         run: |
