@@ -79,13 +79,17 @@ function renderDrawer(onClose = vi.fn()) {
 }
 
 function rateInput(label: string): HTMLInputElement {
-  return screen.getByLabelText(label) as HTMLInputElement;
+  const element = screen.getByLabelText(label);
+  if (!(element instanceof HTMLInputElement)) {
+    throw new Error("rate control is not an input");
+  }
+  return element;
 }
 
 function spinbutton(index: number): HTMLInputElement {
   const element = screen.getAllByRole("spinbutton")[index];
   if (!(element instanceof HTMLInputElement)) {
-    throw new Error(`spinbutton ${index} is not an input`);
+    throw new Error("spinbutton is not an input");
   }
   return element;
 }
