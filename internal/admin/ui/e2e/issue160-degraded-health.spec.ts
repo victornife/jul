@@ -16,11 +16,27 @@ const hot = {
   conditional: false,
 };
 
+const operatorIdentity = {
+  principal: "hr07c-operator",
+  role: "operator",
+  token_id: "hr07c",
+  permissions: ["config:read", "config:write", "config:apply", "admin:manage"],
+  legacy: false,
+};
+
 test("HR-07C degraded durable-sink health is understandable without raw filesystem detail", async ({
   page,
 }) => {
   await page.route("/api/**", (route) => json(route, { error: "not found" }, 404));
-  await page.route("/api/plugins", (route) => json(route, []));
+  await page.route("/api/admin/me", (route) => json(route, operatorIdentity));
+  await page.route("/api/plugins", (route) =>
+    json(route, {
+      compiled: false,
+      upload_enabled: false,
+      upload_max_size_mb: 32,
+      plugins: [],
+    }),
+  );
   await page.route("/api/admin/health", (route) =>
     json(route, { healthy: false, reason: "audit_sink", detail: "durable audit sink is degraded" }),
   );
@@ -70,8 +86,10 @@ test("HR-07C degraded durable-sink health is understandable without raw filesyst
   );
 
   await page.goto("/plugins");
+  await expect(page.getByRole("heading", { name: "Plugins" })).toBeVisible();
   await page.getByRole("button", { name: "Runtime settings" }).click();
   const dialog = page.getByRole("dialog", { name: "Admin runtime settings" });
+  await expect(dialog).toBeVisible();
   await expect(dialog.getByText(/Status: Degraded/)).toBeVisible();
   await expect(dialog.getByText(/generation 9/)).toBeVisible();
   await expect(dialog.getByText(/write/)).toBeVisible();
