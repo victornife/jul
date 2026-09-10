@@ -1,0 +1,30 @@
+name: HR-07C format once
+on:
+  push:
+    branches: [issue-160-hot-audit-sink]
+permissions:
+  contents: write
+jobs:
+  format:
+    if: ${{ !contains(github.event.head_commit.message, '[issue160-formatted]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: issue-160-hot-audit-sink
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: Format and generate
+        run: |
+          gofmt -w internal/admin/audit.go internal/admin/audit_sink_runtime.go internal/admin/audit_admin_runtime.go internal/admin/audit_sink_test.go internal/admin/audit_sink_runtime_test.go internal/admin/admin_health.go internal/admin/rbac.go internal/admin/runtime_snapshot.go internal/admin/patch.go internal/admin/patch_types.go internal/admin/patch_admin_runtime.go internal/admin/admin_runtime_status.go internal/server/server.go internal/server/reload_plan.go internal/app/serve.go internal/lifecycle/registry.go
+          make lifecycle-generate
+      - name: Commit formatting
+        run: |
+          rm .github/workflows/issue160-format.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -s -m "chore: format HR-07C implementation [issue160-formatted]"
+          git push origin HEAD:issue-160-hot-audit-sink
