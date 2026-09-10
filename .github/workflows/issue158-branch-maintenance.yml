@@ -43,13 +43,66 @@ jobs:
               s = s.replace(anchor, replacement, 1)
           p.write_text(s)
 
+          # RouteSpec remains the single route authority. Legacy internal
+          # validate/diff need explicit per-method limiter metadata because they
+          # predate ExternalOperation IDs; versioned routes use their operation IDs.
+          p = Path('internal/admin/route_catalog.go')
+          s = p.read_text()
+          route_field_anchor = '\tOperations map[string]ExternalOperation\n'
+          route_field = route_field_anchor + '\t// LimitClasses is an explicit per-method admission override for routes whose\n\t// operational cost cannot be inferred from external operation metadata.\n\tLimitClasses map[string]limitKind\n'
+          if 'LimitClasses map[string]limitKind' not in s:
+              if route_field_anchor not in s:
+                  raise SystemExit('RouteSpec operations anchor not found')
+              s = s.replace(route_field_anchor, route_field, 1)
+          for path, handler in [
+              ('/api/config/validate', 'handleConfigValidate'),
+              ('/api/config/diff', 'handleConfigDiff'),
+          ]:
+              block = f'\t\tPattern:    "{path}",\n\t\tMethods:    []string{{http.MethodPost}},\n\t\tPermission: rbac.ConfigWrite,\n\t\tHandler:    func(s *Server) http.Handler {{ return http.HandlerFunc(s.{handler}) }},'
+              repl = f'\t\tPattern:      "{path}",\n\t\tMethods:      []string{{http.MethodPost}},\n\t\tPermission:   rbac.ConfigWrite,\n\t\tLimitClasses: map[string]limitKind{{http.MethodPost: limitApply}},\n\t\tHandler:      func(s *Server) http.Handler {{ return http.HandlerFunc(s.{handler}) }},'
+              if f'Pattern:      "{path}"' not in s:
+                  if block not in s:
+                      raise SystemExit(f'legacy route block not found: {path}')
+                  s = s.replace(block, repl, 1)
+          p.write_text(s)
+
+          p = Path('internal/admin/ratelimit.go')
+          s = p.read_text()
+          start = s.index('func limitClassForSpec(spec RouteSpec, method string) limitKind {')
+          end = s.index('\nfunc (l *adminLimiter) maybeLogRejection', start)
+          classifier = '''func limitClassForSpec(spec RouteSpec, method string) limitKind {
+	if explicit, ok := spec.LimitClasses[method]; ok {
+		return explicit
+	}
+	if safeMethod(method) {
+		return limitRead
+	}
+
+	perm := permissionForMethod(spec, method)
+	if perm == rbac.ConfigApply || perm == rbac.HistoryRollback || perm == rbac.ConfigAdopt || hasPermission(spec.AnyPermissions, rbac.ConfigApply) || hasPermission(spec.AnyPermissions, rbac.HistoryRollback) || hasPermission(spec.AnyPermissions, rbac.ConfigAdopt) {
+		return limitApply
+	}
+	if op, ok := spec.Operations[method]; ok {
+		switch op.ID {
+		case "validateConfig", "planConfig", "previewConfigPatch", "applyConfig", "applyConfigPatch", "rollbackConfig", "previewAdoptExternal", "adoptExternal", "discardPendingRestart":
+			return limitApply
+		}
+	}
+	return limitWrite
+}
+'''
+          s = s[:start] + classifier + s[end:]
+          p.write_text(s)
+
           p = Path('internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.tsx')
           s = p.read_text()
-          s = s.replace('  const parsedRead = integerValue(readPerMin);\n  const parsedWrite = integerValue(writePerMin);\n  const parsedApply = integerValue(applyPerMin);\n  const parsedConns = integerValue(maxEventConns);\n  const limitsValid = parsedRead !== null && parsedWrite !== null && parsedApply !== null && parsedConns !== null && parsedConns > 0;\n  const loweringSSE = Boolean(data && parsedConns !== null && parsedConns > 0 && parsedConns < data.max_event_conns);', '  const parsedRead = Number(readPerMin);\n  const parsedWrite = Number(writePerMin);\n  const parsedApply = Number(applyPerMin);\n  const parsedConns = Number(maxEventConns);\n  const limitsValid = Number.isInteger(parsedRead) && Number.isInteger(parsedWrite) && Number.isInteger(parsedApply) && Number.isInteger(parsedConns) && parsedConns > 0;\n  const loweringSSE = Boolean(data && parsedConns > 0 && parsedConns < data.max_event_conns);')
-          s = s.replace('    if (!data || !maxValid || !limitsValid || parsedRead === null || parsedWrite === null || parsedApply === null || parsedConns === null) return [];', '    if (!data || !maxValid || !limitsValid) return [];')
-          s = s.replace('  }, [applyPerMin, consoleEnabled, data, directory, limitsValid, maxEventConns, maxValid, parsedApply, parsedConns, parsedMax, parsedRead, parsedWrite, readPerMin, uploadEnabled, writePerMin]);', '  }, [consoleEnabled, data, directory, limitsValid, maxValid, parsedApply, parsedConns, parsedMax, parsedRead, parsedWrite, uploadEnabled]);')
-          s = s.replace('onChange={(event) => (setter as (value: string) => void)(event.target.value)}', 'onChange={(event) => { (setter as (value: string) => void)(event.target.value); }}')
-          s = s.replace('{parsedConns !== null && parsedConns <= 0 && <p className="mt-1 text-xs text-jul-danger">', '{parsedConns <= 0 && <p className="mt-1 text-xs text-jul-danger">')
+          helper = '''function integerValue(value: string): number | null {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
+'''
+          s = s.replace(helper, '')
           p.write_text(s)
 
           p = Path('internal/lifecycle/registry.go')
@@ -72,7 +125,7 @@ jobs:
 
       - name: Format and regenerate
         run: |
-          gofmt -w internal/admin/ratelimit.go internal/admin/ratelimit_test.go internal/admin/issue158_transition_test.go internal/admin/issue158_patch_test.go internal/admin/routes.go internal/admin/events.go internal/admin/logs.go internal/admin/admin_runtime_status.go internal/admin/patch_admin_runtime.go internal/admin/patch.go internal/admin/patch_types.go internal/lifecycle/registry.go
+          gofmt -w internal/admin/ratelimit.go internal/admin/ratelimit_test.go internal/admin/issue158_transition_test.go internal/admin/issue158_patch_test.go internal/admin/routes.go internal/admin/route_catalog.go internal/admin/events.go internal/admin/logs.go internal/admin/admin_runtime_status.go internal/admin/patch_admin_runtime.go internal/admin/patch.go internal/admin/patch_types.go internal/lifecycle/registry.go
           make lifecycle-generate
       - name: Capture targeted diagnostics
         shell: bash
@@ -85,8 +138,11 @@ jobs:
           if [ "$install_rc" -eq 0 ]; then
             pnpm --dir internal/admin/ui run lint > /tmp/frontend-lint.log 2>&1
             lint_rc=$?
+            pnpm --dir internal/admin/ui run typecheck > /tmp/frontend-typecheck.log 2>&1
+            typecheck_rc=$?
           else
             lint_rc=99
+            typecheck_rc=99
           fi
           {
             echo "GO_TEST_RC=$go_rc"
@@ -97,6 +153,9 @@ jobs:
             echo
             echo "FRONTEND_LINT_RC=$lint_rc"
             if [ -f /tmp/frontend-lint.log ]; then cat /tmp/frontend-lint.log; fi
+            echo
+            echo "FRONTEND_TYPECHECK_RC=$typecheck_rc"
+            if [ -f /tmp/frontend-typecheck.log ]; then cat /tmp/frontend-typecheck.log; fi
           } > .issue158-diagnostics.txt
       - name: Commit fixes, generated files and diagnostics
         run: |
@@ -104,5 +163,5 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A internal/admin internal/lifecycle docs/config-lifecycle.yaml docs/generated/config-lifecycle.json docs/generated/config-lifecycle.md .issue158-diagnostics.txt
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'fix(admin): reconcile HR-07A CI and lifecycle authority (#158)'
+          git commit -m 'fix(admin): reconcile HR-07A CI and route authority (#158)'
           git push origin HEAD:issue-158-admin-rate-limits
