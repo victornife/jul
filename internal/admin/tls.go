@@ -19,15 +19,19 @@ type PreparedTLS struct {
 	fingerprint string
 }
 
-// PrepareTLS builds and validates a candidate certificate provider for the
-// admin listener when [admin.tls]'s certificate content changed, reusing
-// #100's exact CertProvider/DynamicCertProvider seam rather than a second
-// one. It returns (nil, nil) when TLS was not enabled at startup (enabling it
-// is restart-required and never reaches here) or the certificate identity is
-// unchanged. A non-nil error means the candidate cert/key pair failed to
-// load, which must abort the whole apply before persistence, exactly like the
-// data plane's PreflightTLS.
+// PrepareTLS is the existing no-side-effect admin resource preparation hook
+// used by both managed and source-driven reload paths. #157 also validates the
+// candidate plugin-upload directory here because this hook already sits after
+// config resolution and before Publish. The upload probe is reversible and
+// creates neither the live candidate directory nor any final file.
 func (s *Server) PrepareTLS(cfg config.AdminConfig) (*PreparedTLS, error) {
+	uploadEnabled := (cfg.PluginUploadEnabled == nil || *cfg.PluginUploadEnabled) && cfg.PluginUploadMaxSize > 0
+	if uploadEnabled {
+		if err := preflightPluginUploadDir(cfg.PluginUploadDir); err != nil {
+			return nil, err
+		}
+	}
+
 	if s.certProvider == nil || cfg.TLS == nil || !cfg.TLS.Enabled {
 		return nil, nil
 	}
@@ -45,11 +49,6 @@ func (s *Server) PrepareTLS(cfg config.AdminConfig) (*PreparedTLS, error) {
 	return &PreparedTLS{provider: provider, fingerprint: fp}, nil
 }
 
-// CommitPreparedTLS installs the candidate certificate, if any, exactly once.
-// It must not fail: PrepareTLS already validated the candidate. New TLS
-// handshakes after this call observe the candidate certificate; a connection
-// already in progress may complete with the previous one, and no connection
-// is dropped or listener rebound (#100, #336).
 func (s *Server) CommitPreparedTLS(prepared *PreparedTLS) {
 	if prepared == nil || s.certProvider == nil {
 		return
