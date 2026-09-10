@@ -9,6 +9,9 @@ configuration editing with version history and one-click rollback, and a setup
 wizard. It ships **inside the single binary** (no external assets, no Node
 build) and is gated by the `console` build tag.
 
+
+> **Durable audit sink hot reload (HR-07C).** The Admin Runtime Settings drawer edits the audit JSONL path and rotation policy through the typed `admin_audit_sink_set` operation. Path switches never migrate or delete old files; disabling durability keeps the in-memory audit ring and monotonic IDs. Active health is bounded and secret-safe. See [audit sink hot reload](audit-sink-hot-reload.md).
+
 ## Enabling the console
 
 The console is served by the [admin listener](../docs/observability.md).

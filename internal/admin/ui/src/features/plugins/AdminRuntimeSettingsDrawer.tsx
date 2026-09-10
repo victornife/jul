@@ -80,9 +80,9 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
     setWritePerMin(String(data.rate_limit_write_per_min));
     setApplyPerMin(String(data.rate_limit_apply_per_min));
     setMaxEventConns(String(data.max_event_conns));
-    setAuditFile(data.audit_log_file ?? "");
-    setAuditRotateMaxMB(String(data.audit_log_rotate_max_mb ?? 100));
-    setAuditRotateKeep(String(data.audit_log_rotate_keep ?? 14));
+    setAuditFile(data.audit_log_file);
+    setAuditRotateMaxMB(String(data.audit_log_rotate_max_mb));
+    setAuditRotateKeep(String(data.audit_log_rotate_keep));
     setConfirmDisable(false);
   }, [data]);
 
@@ -113,12 +113,12 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
     Number.isInteger(parsedAuditKeep) &&
     parsedAuditKeep >= 0;
   const normalizedAuditFile = auditFile.trim();
-  const auditPathChanging = normalizedAuditFile !== (data?.audit_log_file ?? "").trim();
+  const auditPathChanging = normalizedAuditFile !== data?.audit_log_file.trim();
   const auditDisabling = Boolean(data?.audit_log_file && normalizedAuditFile === "");
   const auditRotationChanging = Boolean(
     data &&
-    (parsedAuditMax !== (data.audit_log_rotate_max_mb ?? 100) ||
-      parsedAuditKeep !== (data.audit_log_rotate_keep ?? 14)),
+    (parsedAuditMax !== data.audit_log_rotate_max_mb ||
+      parsedAuditKeep !== data.audit_log_rotate_keep),
   );
 
   const ops = useMemo<ConfigPatch[]>(() => {
@@ -148,19 +148,13 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
       next.push({ op: "admin_limits_set", admin_limits: limits });
     }
     const auditSink: { file?: string; rotate_max_mb?: number; rotate_keep?: number } = {};
-    if (normalizedAuditFile !== (data.audit_log_file ?? "").trim())
-      auditSink.file = normalizedAuditFile;
-    if (parsedAuditMax !== (data.audit_log_rotate_max_mb ?? 100))
-      auditSink.rotate_max_mb = parsedAuditMax;
-    if (parsedAuditKeep !== (data.audit_log_rotate_keep ?? 14))
-      auditSink.rotate_keep = parsedAuditKeep;
+    if (normalizedAuditFile !== data.audit_log_file.trim()) auditSink.file = normalizedAuditFile;
+    if (parsedAuditMax !== data.audit_log_rotate_max_mb) auditSink.rotate_max_mb = parsedAuditMax;
+    if (parsedAuditKeep !== data.audit_log_rotate_keep) auditSink.rotate_keep = parsedAuditKeep;
     if (Object.keys(auditSink).length > 0)
       next.push({ op: "admin_audit_sink_set", audit_sink: auditSink });
     return next;
   }, [
-    auditFile,
-    auditRotateKeep,
-    auditRotateMaxMB,
     consoleEnabled,
     data,
     directory,
@@ -423,7 +417,9 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
                 aria-label="Audit file"
                 type="text"
                 value={auditFile}
-                onChange={(event) => setAuditFile(event.target.value)}
+                onChange={(event) => {
+                  setAuditFile(event.target.value);
+                }}
                 className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text"
               />
             </label>
@@ -435,7 +431,9 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
                   min={0}
                   step={1}
                   value={auditRotateMaxMB}
-                  onChange={(event) => setAuditRotateMaxMB(event.target.value)}
+                  onChange={(event) => {
+                    setAuditRotateMaxMB(event.target.value);
+                  }}
                   className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
                 />
               </label>
@@ -446,7 +444,9 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
                   min={0}
                   step={1}
                   value={auditRotateKeep}
-                  onChange={(event) => setAuditRotateKeep(event.target.value)}
+                  onChange={(event) => {
+                    setAuditRotateKeep(event.target.value);
+                  }}
                   className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
                 />
               </label>
@@ -485,7 +485,9 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
                     ? "Degraded"
                     : "Configured, inactive"
                 : "Disabled"}
-              {data.audit_sink?.generation ? ` · generation ${data.audit_sink.generation}` : ""}
+              {data.audit_sink?.generation
+                ? ` · generation ${String(data.audit_sink.generation)}`
+                : ""}
               {data.audit_sink?.last_failure_category
                 ? ` · ${data.audit_sink.last_failure_category}`
                 : ""}
