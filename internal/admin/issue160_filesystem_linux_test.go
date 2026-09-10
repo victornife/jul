@@ -126,3 +126,22 @@ func TestIssue160FilesystemUnwritableParentFailsWithoutTouchingLiveSink(t *testi
 	}
 	_ = a.Close()
 }
+
+func TestIssue160FilesystemRejectsIntermediateSymlinkParent(t *testing.T) {
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real")
+	if err := os.MkdirAll(filepath.Join(realDir, "nested"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(link, "nested", "audit.jsonl")
+	if _, err := prepareAuditFileOwner(path); err == nil {
+		t.Fatal("intermediate symlink component accepted")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("rejected symlink path created an artifact: %v", err)
+	}
+}

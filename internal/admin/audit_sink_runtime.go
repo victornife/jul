@@ -23,6 +23,7 @@ const (
 	auditDefaultRotateMaxMB = 100
 	auditDefaultRotateKeep  = 14
 	auditBackupTimeFormat   = "2006-01-02T15-04-05.000"
+	auditSinkWarnInterval   = 30 * time.Second
 )
 
 type auditSinkConfig struct {
@@ -135,6 +136,14 @@ type auditFileOwner struct {
 	live   bool
 	closed bool
 
+	// healthMu is separate from the physical writer mutex so Publish/status
+	// never waits on disk I/O. The health state belongs to the physical owner,
+	// not a logical generation: same-path and rapid A -> B -> A reuse must keep
+	// an existing degradation until an ordered successful write proves recovery.
+	healthMu      sync.Mutex
+	healthFailure auditFailureCategory
+	healthAt      time.Time
+
 	// mu serializes the physical stream. Tickets are allocated under auditLog.mu
 	// and therefore preserve global event order even though the disk write occurs
 	// after the event linearization lock is released.
@@ -168,7 +177,10 @@ func newAuditLog(capacity int) *auditLog {
 	if capacity <= 0 {
 		capacity = auditCap
 	}
-	return &auditLog{buf: make([]AuditEvent, capacity)}
+	return &auditLog{
+		buf:        make([]AuditEvent, capacity),
+		sinkOwners: make(map[string]*auditFileOwner),
+	}
 }
 
 func newAuditLogWithSink(capacity int, path string, maxMB, keep int, log *slog.Logger) *auditLog {
@@ -215,16 +227,19 @@ func (a *auditLog) prepareTransition(cfg auditSinkConfig) (*preparedAuditSink, e
 		a.mu.Unlock()
 		return nil, nil
 	}
-	current := a.currentSink
 	if !cfg.enabled() {
 		a.mu.Unlock()
 		return &preparedAuditSink{log: a, cfg: cfg}, nil
 	}
-	if current != nil && current.cfg.path == cfg.path {
-		current.owner.retain()
-		candidate := &auditSinkGeneration{cfg: cfg, owner: current.owner, drained: make(chan struct{})}
-		a.mu.Unlock()
-		return &preparedAuditSink{log: a, candidate: candidate, cfg: cfg}, nil
+	if owner := a.sinkOwners[cfg.path]; owner != nil {
+		if owner.tryRetain() {
+			candidate := &auditSinkGeneration{cfg: cfg, owner: owner, drained: make(chan struct{})}
+			a.mu.Unlock()
+			return &preparedAuditSink{log: a, candidate: candidate, cfg: cfg}, nil
+		}
+		// refs==0 owners no longer write or rotate. Remove only this stale weak
+		// identity; a later prepared owner will be registered at Publish.
+		delete(a.sinkOwners, cfg.path)
 	}
 	a.mu.Unlock()
 
@@ -260,12 +275,18 @@ func (p *preparedAuditSink) commitWith(publishAdmin func()) {
 		if p.candidate != nil {
 			p.candidate.id = a.nextSinkGeneration
 			p.candidate.owner.activate()
+			if a.sinkOwners == nil {
+				a.sinkOwners = make(map[string]*auditFileOwner)
+			}
+			a.sinkOwners[p.candidate.cfg.path] = p.candidate.owner
+			a.activeFailure, a.activeFailureAt = p.candidate.owner.healthSnapshot()
+		} else {
+			a.activeFailure = ""
+			a.activeFailureAt = time.Time{}
 		}
 		a.currentSink = p.candidate
 		a.sinkCfg = p.cfg
 		a.sinkConfigured = p.cfg.enabled()
-		a.activeFailure = ""
-		a.activeFailureAt = time.Time{}
 		if p.old != nil {
 			p.old.retired = true
 			if p.old.inflight == 0 {
@@ -283,6 +304,7 @@ func (p *preparedAuditSink) abort() {
 	p.once.Do(func() {
 		if p.candidate != nil {
 			_ = p.candidate.owner.release(context.Background(), false)
+			p.log.forgetClosedAuditOwner(p.candidate.cfg.path, p.candidate.owner)
 		}
 	})
 }
@@ -322,8 +344,30 @@ func (a *auditLog) releaseGeneration(gen *auditSinkGeneration, ctx context.Conte
 	var releaseErr error
 	gen.releaseOnce.Do(func() {
 		releaseErr = gen.owner.release(ctx, true)
+		a.forgetClosedAuditOwner(gen.cfg.path, gen.owner)
 	})
 	return releaseErr
+}
+
+// forgetClosedAuditOwner removes only the exact weak registry entry after an
+// owner has reached zero references. Lock ordering is auditLog.mu -> lifeMu,
+// the same order as prepareTransition; release never acquires auditLog.mu while
+// holding lifeMu.
+func (a *auditLog) forgetClosedAuditOwner(path string, owner *auditFileOwner) {
+	if a == nil || owner == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sinkOwners[path] != owner {
+		return
+	}
+	owner.lifeMu.Lock()
+	closed := owner.closed
+	owner.lifeMu.Unlock()
+	if closed {
+		delete(a.sinkOwners, path)
+	}
 }
 
 func (a *auditLog) Close() error {
@@ -363,10 +407,14 @@ func (a *auditLog) statusReport() *AuditSinkStatus {
 	if !a.sinkConfigured {
 		return nil
 	}
+	activeFailure := a.activeFailure
+	if a.currentSink != nil {
+		activeFailure, _ = a.currentSink.owner.healthSnapshot()
+	}
 	st := &AuditSinkStatus{
 		Configured:      true,
 		Active:          a.currentSink != nil,
-		Healthy:         a.currentSink != nil && a.activeFailure == "",
+		Healthy:         a.currentSink != nil && activeFailure == "",
 		WriteFailures:   a.writeFailures,
 		RotateFailures:  a.rotateFailures,
 		CleanupFailures: a.cleanupFailures,
@@ -386,6 +434,36 @@ func auditLogWarn(log *slog.Logger, msg, path string, err error) {
 	if log != nil {
 		log.Warn(msg, "path", path, "err", err)
 	}
+}
+
+// allowSinkWarning rate-limits only repetitive operator-log emission. It never
+// suppresses failure accounting or a health transition.
+func (a *auditLog) allowSinkWarning(now time.Time) (bool, uint64) {
+	a.warnMu.Lock()
+	defer a.warnMu.Unlock()
+	if !a.lastSinkWarning.IsZero() && now.Before(a.lastSinkWarning.Add(auditSinkWarnInterval)) {
+		a.suppressedSinkWarnings++
+		return false, 0
+	}
+	suppressed := a.suppressedSinkWarnings
+	a.suppressedSinkWarnings = 0
+	a.lastSinkWarning = now
+	return true, suppressed
+}
+
+func (a *auditLog) warnPersistence(gen *auditSinkGeneration, result auditWriteResult) {
+	if a == nil || a.log == nil || gen == nil || result.err == nil {
+		return
+	}
+	allowed, suppressed := a.allowSinkWarning(time.Now())
+	if !allowed {
+		return
+	}
+	args := []any{"category", result.category, "path", gen.cfg.publicPath, "err", result.err}
+	if suppressed > 0 {
+		args = append(args, "suppressed", suppressed)
+	}
+	a.log.Warn("audit sink persistence failed", args...)
 }
 
 func (a *auditLog) record(ev AuditEvent) {
@@ -415,7 +493,9 @@ func (a *auditLog) record(ev AuditEvent) {
 	}
 	line, err := json.Marshal(ev)
 	if err != nil {
-		a.completeWrite(gen, auditWriteResult{category: auditFailureEncode, err: err})
+		result := auditWriteResult{category: auditFailureEncode, err: err}
+		gen.owner.skip(ticket, result)
+		a.completeWrite(gen, result)
 		return
 	}
 	line = append(line, '\n')
@@ -430,6 +510,7 @@ func (a *auditLog) completeWrite(gen *auditSinkGeneration, result auditWriteResu
 		close(gen.drained)
 	}
 	shouldRelease := gen.retired && gen.releaseRequested && gen.inflight == 0
+	activeOwner := a.currentSink != nil && a.currentSink.owner == gen.owner
 	if result.err != nil {
 		now := time.Now().UTC()
 		a.lastFailure = result.category
@@ -442,18 +523,16 @@ func (a *auditLog) completeWrite(gen *auditSinkGeneration, result auditWriteResu
 		default:
 			a.writeFailures++
 		}
-		if a.currentSink == gen {
-			a.activeFailure = result.category
-			a.activeFailureAt = now
+		if activeOwner {
+			a.activeFailure, a.activeFailureAt = gen.owner.healthSnapshot()
 		}
-	} else if a.currentSink == gen {
-		a.activeFailure = ""
-		a.activeFailureAt = time.Time{}
+	} else if activeOwner {
+		a.activeFailure, a.activeFailureAt = gen.owner.healthSnapshot()
 	}
 	a.mu.Unlock()
 
 	if result.err != nil {
-		auditLogWarn(a.log, "audit sink persistence failed", gen.cfg.publicPath, result.err)
+		a.warnPersistence(gen, result)
 	}
 	if shouldRelease {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -479,10 +558,32 @@ func (a *auditLog) noteRetirementFailure(category auditFailureCategory, err erro
 	}
 }
 
-func (o *auditFileOwner) retain() {
+func (o *auditFileOwner) tryRetain() bool {
 	o.lifeMu.Lock()
+	defer o.lifeMu.Unlock()
+	if o.closed {
+		return false
+	}
 	o.refs++
-	o.lifeMu.Unlock()
+	return true
+}
+
+func (o *auditFileOwner) healthSnapshot() (auditFailureCategory, time.Time) {
+	o.healthMu.Lock()
+	defer o.healthMu.Unlock()
+	return o.healthFailure, o.healthAt
+}
+
+func (o *auditFileOwner) noteOrderedHealth(result auditWriteResult) {
+	o.healthMu.Lock()
+	defer o.healthMu.Unlock()
+	if result.err == nil {
+		o.healthFailure = ""
+		o.healthAt = time.Time{}
+		return
+	}
+	o.healthFailure = result.category
+	o.healthAt = time.Now().UTC()
 }
 
 func (o *auditFileOwner) activate() {
@@ -506,10 +607,25 @@ func (o *auditFileOwner) write(ticket uint64, cfg auditSinkConfig, p []byte) aud
 		o.cond.Wait()
 	}
 	result := o.writeLocked(cfg, p)
+	// Update physical-owner health before advancing the turn. This makes health
+	// follow durable ticket order even if goroutines call completeWrite later in
+	// a different scheduler order.
+	o.noteOrderedHealth(result)
 	o.turn++
 	o.cond.Broadcast()
 	o.mu.Unlock()
 	return result
+}
+
+func (o *auditFileOwner) skip(ticket uint64, result auditWriteResult) {
+	o.mu.Lock()
+	for ticket != o.turn {
+		o.cond.Wait()
+	}
+	o.noteOrderedHealth(result)
+	o.turn++
+	o.cond.Broadcast()
+	o.mu.Unlock()
 }
 
 func (o *auditFileOwner) writeLocked(cfg auditSinkConfig, p []byte) auditWriteResult {
@@ -745,6 +861,42 @@ func prepareAuditFileOwnerAtRoot(root auditRootHandle, base, path string, create
 	return o, nil
 }
 
+// validateAuditDirChain rejects a symlink or non-directory in every existing
+// component of an absolute parent path. The caller also compares directory
+// identity around OpenRoot so a replacement race cannot silently redirect the
+// prepared root.
+func validateAuditDirChain(path string) (fs.FileInfo, error) {
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return nil, err
+		}
+		path = abs
+	}
+	volume := filepath.VolumeName(path)
+	rest := strings.TrimPrefix(path, volume)
+	rest = strings.TrimLeft(rest, string(filepath.Separator))
+	current := volume
+	if filepath.IsAbs(path) {
+		current = volume + string(filepath.Separator)
+	}
+	for _, part := range strings.Split(rest, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return nil, fmt.Errorf("audit parent component %q is not a regular directory", current)
+		}
+	}
+	return os.Lstat(path)
+}
+
 func prepareAuditParent(parent string) (auditRootHandle, []createdAuditDir, error) {
 	parent = filepath.Clean(parent)
 	missing := []string{}
@@ -767,9 +919,18 @@ func prepareAuditParent(parent string) (auditRootHandle, []createdAuditDir, erro
 		}
 		ancestor = next
 	}
+	ancestorInfo, err := validateAuditDirChain(ancestor)
+	if err != nil {
+		return nil, nil, err
+	}
 	root, err := os.OpenRoot(ancestor)
 	if err != nil {
 		return nil, nil, err
+	}
+	openedAncestor, err := root.Lstat(".")
+	if err != nil || !os.SameFile(ancestorInfo, openedAncestor) {
+		_ = root.Close()
+		return nil, nil, fmt.Errorf("audit parent identity changed while opening")
 	}
 	rel, err := filepath.Rel(ancestor, parent)
 	if err != nil {
@@ -796,10 +957,20 @@ func prepareAuditParent(parent string) (auditRootHandle, []createdAuditDir, erro
 			created = append(created, createdAuditDir{name: filepath.Join(ancestor, name), info: info})
 		}
 	}
+	parentInfo, err := root.Lstat(rel)
+	if err != nil || parentInfo.Mode()&os.ModeSymlink != 0 || !parentInfo.IsDir() {
+		_ = root.Close()
+		return nil, nil, fmt.Errorf("prepared audit parent identity is unsafe")
+	}
 	parentRoot, err := root.OpenRoot(rel)
 	_ = root.Close()
 	if err != nil {
 		return nil, nil, err
+	}
+	openedParent, err := parentRoot.Lstat(".")
+	if err != nil || !os.SameFile(parentInfo, openedParent) {
+		_ = parentRoot.Close()
+		return nil, nil, fmt.Errorf("prepared audit parent changed while opening")
 	}
 	return &osAuditRootHandle{root: parentRoot}, created, nil
 }

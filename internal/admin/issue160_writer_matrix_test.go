@@ -503,3 +503,176 @@ func TestAuditSinkRetiredCloseFailureIsHistoricalButNotActive(t *testing.T) {
 	}
 	_ = a.Close()
 }
+
+func TestAuditSinkRapidAtoBtoAReusesStillDrainingPhysicalOwner(t *testing.T) {
+	d := t.TempDir()
+	aPath := filepath.Join(d, "a.jsonl")
+	bPath := filepath.Join(d, "b.jsonl")
+	a := newAuditLogWithSink(16, aPath, 10, 4, nil)
+	oldA := a.currentSink.owner
+	base := oldA.file
+	started := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan struct{})
+	var once sync.Once
+	oldA.file = &auditFaultFile{base: base, writeFn: func(p []byte) (int, error) {
+		once.Do(func() { close(started) })
+		<-release
+		return base.Write(p)
+	}}
+	go func() {
+		a.record(AuditEvent{Operation: "a-before-switch", Result: "success"})
+		close(firstDone)
+	}()
+	<-started
+
+	toB, err := a.prepareTransition(mustAuditCfg(t, bPath, 10, 4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	toB.commit()
+	retiredA := make(chan struct{})
+	go func() {
+		toB.retire(context.Background())
+		close(retiredA)
+	}()
+
+	backToA, err := a.prepareTransition(mustAuditCfg(t, aPath, 5, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backToA == nil || backToA.candidate == nil || backToA.candidate.owner != oldA {
+		t.Fatal("rapid A->B->A opened a second physical owner for A")
+	}
+	backToA.commit()
+	backToA.retire(context.Background())
+	secondDone := make(chan struct{})
+	go func() {
+		a.record(AuditEvent{Operation: "a-after-return", Result: "success"})
+		close(secondDone)
+	}()
+
+	close(release)
+	<-firstDone
+	<-secondDone
+	<-retiredA
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if ids := readAuditIDs(t, aPath); len(ids) != 2 || ids[0] != 1 || ids[1] != 2 {
+		t.Fatalf("rapid A->B->A durable IDs=%v want [1 2]", ids)
+	}
+}
+
+func TestAuditSinkReusedOwnerCarriesLateFailureIntoCurrentGeneration(t *testing.T) {
+	d := t.TempDir()
+	aPath := filepath.Join(d, "a.jsonl")
+	bPath := filepath.Join(d, "b.jsonl")
+	a := newAuditLogWithSink(16, aPath, 10, 4, nil)
+	oldA := a.currentSink.owner
+	base := oldA.file
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	var once sync.Once
+	oldA.file = &auditFaultFile{base: base, writeFn: func([]byte) (int, error) {
+		once.Do(func() { close(started) })
+		<-release
+		return 0, errors.New("late A failure")
+	}}
+	go func() {
+		a.record(AuditEvent{Operation: "late-fail", Result: "success"})
+		close(done)
+	}()
+	<-started
+
+	toB, err := a.prepareTransition(mustAuditCfg(t, bPath, 10, 4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	toB.commit()
+	go toB.retire(context.Background())
+	backToA, err := a.prepareTransition(mustAuditCfg(t, aPath, 5, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backToA.candidate.owner != oldA {
+		t.Fatal("A owner not reused")
+	}
+	backToA.commit()
+	backToA.retire(context.Background())
+	close(release)
+	<-done
+	if st := a.statusReport(); st == nil || st.Healthy || st.LastFailureCategory != string(auditFailureWrite) {
+		t.Fatalf("late old-generation failure did not degrade reused current owner: %+v", st)
+	}
+	oldA.mu.Lock()
+	oldA.file = base
+	oldA.mu.Unlock()
+	a.record(AuditEvent{Operation: "recover-reused-a", Result: "success"})
+	if st := a.statusReport(); st == nil || !st.Healthy || st.LastFailureCategory != string(auditFailureWrite) {
+		t.Fatalf("ordered successful write did not recover active owner health: %+v", st)
+	}
+	_ = a.Close()
+}
+
+func TestAuditSinkSameOwnerPolicyPublishPreservesDegradationUntilSuccessfulWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	a := newAuditLogWithSink(8, path, 10, 4, nil)
+	owner := a.currentSink.owner
+	base := owner.file
+	owner.file = &auditFaultFile{base: base, writeFn: func([]byte) (int, error) { return 0, errors.New("injected write") }}
+	a.record(AuditEvent{Operation: "fail-before-policy", Result: "success"})
+	owner.mu.Lock()
+	owner.file = base
+	owner.mu.Unlock()
+
+	p, err := a.prepareTransition(mustAuditCfg(t, path, 5, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.commit()
+	p.retire(context.Background())
+	if st := a.statusReport(); st == nil || st.Healthy || st.LastFailureCategory != string(auditFailureWrite) {
+		t.Fatalf("same-owner publish hid active degradation: %+v", st)
+	}
+	a.record(AuditEvent{Operation: "health-proof", Result: "success"})
+	if st := a.statusReport(); st == nil || !st.Healthy || st.LastFailureCategory != string(auditFailureWrite) || st.WriteFailures != 1 {
+		t.Fatalf("successful write did not recover active health while preserving failure history: %+v", st)
+	}
+	_ = a.Close()
+}
+
+func TestAuditSinkWarningThrottleAccounting(t *testing.T) {
+	a := newAuditLog(8)
+	base := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	if ok, suppressed := a.allowSinkWarning(base); !ok || suppressed != 0 {
+		t.Fatalf("first warning ok=%v suppressed=%d", ok, suppressed)
+	}
+	if ok, _ := a.allowSinkWarning(base.Add(time.Second)); ok {
+		t.Fatal("second warning inside throttle window was emitted")
+	}
+	if ok, _ := a.allowSinkWarning(base.Add(2 * time.Second)); ok {
+		t.Fatal("third warning inside throttle window was emitted")
+	}
+	if ok, suppressed := a.allowSinkWarning(base.Add(auditSinkWarnInterval)); !ok || suppressed != 2 {
+		t.Fatalf("warning after window ok=%v suppressed=%d want true/2", ok, suppressed)
+	}
+}
+
+func TestAuditSinkEncodeFailureAdvancesTicketAndRingContinues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	a := newAuditLogWithSink(8, path, 10, 4, nil)
+	a.record(AuditEvent{Time: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC), Operation: "encode-fail", Result: "success"})
+	a.record(AuditEvent{Operation: "after-encode-fail", Result: "success"})
+	if got := a.snapshot("", "", 0); len(got) != 2 || got[0].ID != 2 || got[1].ID != 1 {
+		t.Fatalf("ring after encode failure=%+v", got)
+	}
+	if ids := readAuditIDs(t, path); len(ids) != 1 || ids[0] != 2 {
+		t.Fatalf("durable IDs after encode failure=%v want [2]", ids)
+	}
+	if st := a.statusReport(); st == nil || !st.Healthy || st.WriteFailures != 1 || st.LastFailureCategory != string(auditFailureEncode) {
+		t.Fatalf("status after encode recovery=%+v", st)
+	}
+	_ = a.Close()
+}

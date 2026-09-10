@@ -77,6 +77,11 @@ type auditLog struct {
 	sinkCfg            auditSinkConfig
 	sinkConfigured     bool
 	nextSinkGeneration uint64
+	// sinkOwners keeps a weak normalized-path -> physical-owner identity while
+	// any live or retiring generation can still use that owner. A rapid A -> B
+	// -> A therefore reuses the still-draining A writer instead of opening a
+	// second writer/rotator for the same path.
+	sinkOwners map[string]*auditFileOwner
 
 	activeFailure      auditFailureCategory
 	activeFailureAt    time.Time
@@ -88,6 +93,12 @@ type auditLog struct {
 	cleanupFailures    uint64
 	retirementFailures uint64
 	log                *slog.Logger
+
+	// warnMu bounds repetitive operator-log amplification from a broken
+	// durable sink. Failure counters and active health are never suppressed.
+	warnMu                 sync.Mutex
+	lastSinkWarning        time.Time
+	suppressedSinkWarnings uint64
 }
 
 // AuditSinkStatus is the bounded machine-safe view of the currently configured

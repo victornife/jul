@@ -28,11 +28,7 @@ type AdminHealthStatus struct {
 func (s *Server) AdminHealthStatus() error {
 	if s.audit != nil {
 		if st := s.audit.statusReport(); st != nil && !st.Healthy {
-			detail := "durable audit sink is degraded"
-			if st.LastFailureCategory != "" {
-				detail += " (" + st.LastFailureCategory + ")"
-			}
-			return &AdminHealthStatus{Healthy: false, Reason: "audit_sink", Detail: detail}
+			return &AdminHealthStatus{Healthy: false, Reason: "audit_sink", Detail: "durable audit sink is degraded"}
 		}
 	}
 	if s.deps.AdminHealth != nil {
