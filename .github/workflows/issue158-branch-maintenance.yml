@@ -20,64 +20,50 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
-      - name: Apply deterministic HR-07A source updates
-        shell: python
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          package_json_file: internal/admin/ui/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+      - name: Format all HR-07A Go changes
         run: |
-          from pathlib import Path
-
-          p = Path('internal/admin/patch.go')
-          s = p.read_text()
-          old = 'if req.Op == "admin_console_set" || req.Op == "admin_plugin_upload_set" {'
-          new = 'if req.Op == "admin_console_set" || req.Op == "admin_plugin_upload_set" || req.Op == "admin_limits_set" {'
-          if old not in s and new not in s:
-              raise SystemExit('patch.go dispatch anchor not found')
-          p.write_text(s.replace(old, new, 1))
-
-          p = Path('internal/admin/patch_types.go')
-          s = p.read_text()
-          anchor = '\tAdminPluginUpload *adminPluginUploadPatch `json:"plugin_upload,omitempty"`\n'
-          addition = anchor + '\tAdminLimits       *adminLimitsPatch       `json:"admin_limits,omitempty"`\n'
-          if 'AdminLimits       *adminLimitsPatch' not in s:
-              if anchor not in s:
-                  raise SystemExit('patch_types.go anchor not found')
-              s = s.replace(anchor, addition, 1)
-          p.write_text(s)
-
-          p = Path('internal/admin/ui/src/api/client.ts')
-          s = p.read_text()
-          union_anchor = '  | { op: "admin_console_set"; enabled: boolean }\n'
-          union_add = union_anchor + '  | { op: "admin_limits_set"; admin_limits: { read_per_min?: number; write_per_min?: number; apply_per_min?: number; max_event_conns?: number } }\n'
-          if 'op: "admin_limits_set"' not in s:
-              if union_anchor not in s:
-                  raise SystemExit('client ConfigPatch union anchor not found')
-              s = s.replace(union_anchor, union_add, 1)
-
-          settings_anchor = '  plugin_upload_dir: z.string(),\n'
-          settings_add = settings_anchor + '  rate_limit_read_per_min: z.number().int(),\n  rate_limit_write_per_min: z.number().int(),\n  rate_limit_apply_per_min: z.number().int(),\n  max_event_conns: z.number().int().positive(),\n'
-          if 'rate_limit_read_per_min: z.number().int()' not in s:
-              if settings_anchor not in s:
-                  raise SystemExit('settings schema anchor not found')
-              s = s.replace(settings_anchor, settings_add, 1)
-
-          status_anchor = '  last_upload_rejection: z.string().optional(),\n'
-          status_add = status_anchor + '  rate_limit_read_per_min: z.number().int(),\n  rate_limit_write_per_min: z.number().int(),\n  rate_limit_apply_per_min: z.number().int(),\n  max_event_conns: z.number().int().positive(),\n  tracked_limiter_clients: z.number().int().nonnegative(),\n  sse_active_total: z.number().int().nonnegative(),\n  sse_active_clients: z.number().int().nonnegative(),\n  sse_over_cap_clients: z.number().int().nonnegative(),\n  sse_max_per_client: z.number().int().nonnegative(),\n  rate_read_rejected: z.number().int().nonnegative(),\n  rate_write_rejected: z.number().int().nonnegative(),\n  rate_apply_rejected: z.number().int().nonnegative(),\n  sse_rejected: z.number().int().nonnegative(),\n'
-          if 'tracked_limiter_clients: z.number()' not in s:
-              if status_anchor not in s:
-                  raise SystemExit('status schema anchor not found')
-              s = s.replace(status_anchor, status_add, 1)
-          p.write_text(s)
-
-      - name: Format and generate lifecycle contracts
-        run: |
-          gofmt -w internal/admin/patch.go internal/admin/patch_types.go internal/admin/patch_admin_runtime.go internal/admin/ratelimit.go internal/admin/admin_runtime_status.go internal/lifecycle/admin_limits.go
+          gofmt -w internal/admin/ratelimit.go internal/admin/ratelimit_test.go internal/admin/routes.go internal/admin/events.go internal/admin/logs.go internal/admin/admin_runtime_status.go internal/admin/patch_admin_runtime.go internal/admin/patch.go internal/admin/patch_types.go internal/lifecycle/admin_limits.go
           make lifecycle-generate
-      - name: Commit generated/source updates
+      - name: Capture targeted diagnostics
+        shell: bash
         run: |
-          if git diff --quiet; then
+          set +e
+          go test -count=1 ./internal/admin > /tmp/go-test.log 2>&1
+          go_rc=$?
+          pnpm --dir internal/admin/ui install --frozen-lockfile > /tmp/pnpm-install.log 2>&1
+          install_rc=$?
+          if [ "$install_rc" -eq 0 ]; then
+            pnpm --dir internal/admin/ui run lint > /tmp/frontend-lint.log 2>&1
+            lint_rc=$?
+          else
+            lint_rc=99
+          fi
+          {
+            echo "GO_TEST_RC=$go_rc"
+            cat /tmp/go-test.log
+            echo
+            echo "PNPM_INSTALL_RC=$install_rc"
+            if [ "$install_rc" -ne 0 ]; then cat /tmp/pnpm-install.log; fi
+            echo
+            echo "FRONTEND_LINT_RC=$lint_rc"
+            if [ -f /tmp/frontend-lint.log ]; then cat /tmp/frontend-lint.log; fi
+          } > .issue158-diagnostics.txt
+          exit 0
+      - name: Commit formatting, generated files and diagnostics
+        run: |
+          if git diff --quiet && git status --porcelain | grep -qv '^?? .issue158-diagnostics.txt$'; then
             exit 0
           fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add internal/admin/patch.go internal/admin/patch_types.go internal/admin/ui/src/api/client.ts internal/admin/patch_admin_runtime.go internal/admin/ratelimit.go internal/admin/admin_runtime_status.go internal/lifecycle/admin_limits.go docs/config-lifecycle.yaml docs/generated/config-lifecycle.json docs/generated/config-lifecycle.md
-          git commit -m 'feat(admin): wire typed limits and regenerate lifecycle (#158)'
+          git add internal/admin/ratelimit.go internal/admin/ratelimit_test.go internal/admin/routes.go internal/admin/events.go internal/admin/logs.go internal/admin/admin_runtime_status.go internal/admin/patch_admin_runtime.go internal/admin/patch.go internal/admin/patch_types.go internal/lifecycle/admin_limits.go docs/config-lifecycle.yaml docs/generated/config-lifecycle.json docs/generated/config-lifecycle.md .issue158-diagnostics.txt
+          git commit -m 'chore: format HR-07A and capture diagnostics'
           git push origin HEAD:issue-158-admin-rate-limits
