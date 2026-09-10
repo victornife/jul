@@ -65,6 +65,9 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
   const [writePerMin, setWritePerMin] = useState("60");
   const [applyPerMin, setApplyPerMin] = useState("30");
   const [maxEventConns, setMaxEventConns] = useState("4");
+  const [auditFile, setAuditFile] = useState("");
+  const [auditRotateMaxMB, setAuditRotateMaxMB] = useState("100");
+  const [auditRotateKeep, setAuditRotateKeep] = useState("14");
   const [confirmDisable, setConfirmDisable] = useState(false);
 
   useEffect(() => {
@@ -77,6 +80,9 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
     setWritePerMin(String(data.rate_limit_write_per_min));
     setApplyPerMin(String(data.rate_limit_apply_per_min));
     setMaxEventConns(String(data.max_event_conns));
+    setAuditFile(data.audit_log_file);
+    setAuditRotateMaxMB(String(data.audit_log_rotate_max_mb));
+    setAuditRotateKeep(String(data.audit_log_rotate_keep));
     setConfirmDisable(false);
   }, [data]);
 
@@ -90,9 +96,30 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
   const parsedApply = Number(applyPerMin);
   const parsedConns = Number(maxEventConns);
   const connsValid = Number.isInteger(parsedConns) && parsedConns >= 0;
-  const limitsValid = Number.isInteger(parsedRead) && Number.isInteger(parsedWrite) && Number.isInteger(parsedApply) && connsValid;
+  const limitsValid =
+    Number.isInteger(parsedRead) &&
+    Number.isInteger(parsedWrite) &&
+    Number.isInteger(parsedApply) &&
+    connsValid;
   const effectiveConns = connsValid ? (parsedConns === 0 ? 4 : parsedConns) : null;
-  const loweringSSE = Boolean(data && effectiveConns !== null && effectiveConns < data.max_event_conns);
+  const loweringSSE = Boolean(
+    data && effectiveConns !== null && effectiveConns < data.max_event_conns,
+  );
+  const parsedAuditMax = Number(auditRotateMaxMB);
+  const parsedAuditKeep = Number(auditRotateKeep);
+  const auditRotationValid =
+    Number.isInteger(parsedAuditMax) &&
+    parsedAuditMax >= 0 &&
+    Number.isInteger(parsedAuditKeep) &&
+    parsedAuditKeep >= 0;
+  const normalizedAuditFile = auditFile.trim();
+  const auditPathChanging = normalizedAuditFile !== data?.audit_log_file.trim();
+  const auditDisabling = Boolean(data?.audit_log_file && normalizedAuditFile === "");
+  const auditRotationChanging = Boolean(
+    data &&
+    (parsedAuditMax !== data.audit_log_rotate_max_mb ||
+      parsedAuditKeep !== data.audit_log_rotate_keep),
+  );
 
   const ops = useMemo<ConfigPatch[]>(() => {
     if (!data || !maxValid || !limitsValid) return [];
@@ -107,7 +134,12 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
     if (Object.keys(upload).length > 0) {
       next.push({ op: "admin_plugin_upload_set", plugin_upload: upload });
     }
-    const limits: { read_per_min?: number; write_per_min?: number; apply_per_min?: number; max_event_conns?: number } = {};
+    const limits: {
+      read_per_min?: number;
+      write_per_min?: number;
+      apply_per_min?: number;
+      max_event_conns?: number;
+    } = {};
     if (parsedRead !== data.rate_limit_read_per_min) limits.read_per_min = parsedRead;
     if (parsedWrite !== data.rate_limit_write_per_min) limits.write_per_min = parsedWrite;
     if (parsedApply !== data.rate_limit_apply_per_min) limits.apply_per_min = parsedApply;
@@ -115,8 +147,32 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
     if (Object.keys(limits).length > 0) {
       next.push({ op: "admin_limits_set", admin_limits: limits });
     }
+    const auditSink: { file?: string; rotate_max_mb?: number; rotate_keep?: number } = {};
+    if (normalizedAuditFile !== data.audit_log_file.trim()) auditSink.file = normalizedAuditFile;
+    if (parsedAuditMax !== data.audit_log_rotate_max_mb) auditSink.rotate_max_mb = parsedAuditMax;
+    if (parsedAuditKeep !== data.audit_log_rotate_keep) auditSink.rotate_keep = parsedAuditKeep;
+    if (Object.keys(auditSink).length > 0)
+      next.push({ op: "admin_audit_sink_set", audit_sink: auditSink });
     return next;
-  }, [consoleEnabled, data, directory, limitsValid, maxValid, parsedApply, parsedConns, parsedMax, parsedRead, parsedWrite, uploadEnabled]);
+  }, [
+    auditFile,
+    auditRotateKeep,
+    auditRotateMaxMB,
+    consoleEnabled,
+    data,
+    directory,
+    limitsValid,
+    maxValid,
+    normalizedAuditFile,
+    parsedApply,
+    parsedAuditKeep,
+    parsedAuditMax,
+    parsedConns,
+    parsedMax,
+    parsedRead,
+    parsedWrite,
+    uploadEnabled,
+  ]);
 
   if (isLoading) {
     return (
@@ -131,7 +187,11 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
     return (
       <div className="fixed inset-0 z-50 bg-black/40">
         <div className="ml-auto h-full w-full max-w-xl bg-jul-bg p-6 shadow-xl">
-          <PanelError error={error} resource="admin runtime settings" onRetry={() => void refetch()} />
+          <PanelError
+            error={error}
+            resource="admin runtime settings"
+            onRetry={() => void refetch()}
+          />
           <button type="button" className="mt-4 text-sm text-jul-muted underline" onClick={onClose}>
             Close
           </button>
@@ -142,10 +202,21 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
 
   const previewError = describePatchBatchError(runner.error);
   const saveDisabled =
-    runner.busy || ops.length === 0 || !maxValid || !limitsValid || directory.trim() === "" || (consoleDisabling && !confirmDisable);
+    runner.busy ||
+    ops.length === 0 ||
+    !maxValid ||
+    !limitsValid ||
+    !auditRotationValid ||
+    directory.trim() === "" ||
+    (consoleDisabling && !confirmDisable);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40" role="dialog" aria-modal="true" aria-label="Admin runtime settings">
+    <div
+      className="fixed inset-0 z-50 bg-black/40"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Admin runtime settings"
+    >
       <div className="ml-auto flex h-full w-full max-w-xl flex-col overflow-y-auto border-l border-jul-border bg-jul-bg shadow-xl">
         <div className="flex items-start justify-between border-b border-jul-border p-5">
           <div>
@@ -154,7 +225,11 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
               Console, upload and admission policy publish as one request-generation snapshot.
             </p>
           </div>
-          <button type="button" onClick={onClose} className="text-sm text-jul-muted hover:text-jul-text">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-sm text-jul-muted hover:text-jul-text"
+          >
             Close
           </button>
         </div>
@@ -163,19 +238,38 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
           <section className="rounded-lg border border-jul-border bg-jul-surface p-4">
             <SettingLabel title="Web Console" field={data.lifecycle.console} />
             <label className="flex items-center gap-3 text-sm text-jul-text">
-              <input type="checkbox" checked={consoleEnabled} onChange={(event) => { setConsoleEnabled(event.target.checked); setConfirmDisable(false); }} />
+              <input
+                type="checkbox"
+                checked={consoleEnabled}
+                onChange={(event) => {
+                  setConsoleEnabled(event.target.checked);
+                  setConfirmDisable(false);
+                }}
+              />
               Serve the embedded Console on the existing admin listener
             </label>
             <p className="mt-2 text-xs text-jul-muted">
-              Build: {data.console_compiled ? "Console assets compiled" : "Console assets not compiled"}. Effective now: {data.console_effective ? "enabled" : "disabled"}.
+              Build:{" "}
+              {data.console_compiled ? "Console assets compiled" : "Console assets not compiled"}.
+              Effective now: {data.console_effective ? "enabled" : "disabled"}.
             </p>
             {consoleDisabling && (
               <div className="mt-3 rounded-md border border-jul-warning/50 bg-jul-warning/10 p-3 text-xs text-jul-text">
-                <strong>Disabling the Console removes this web UI after the apply is terminal.</strong>{" "}
-                The authenticated admin API remains available on the same listener. Re-enable it by setting
-                <code className="mx-1">[admin] console = true</code> in the configuration and reloading, or by using an authenticated config apply/patch API request.
+                <strong>
+                  Disabling the Console removes this web UI after the apply is terminal.
+                </strong>{" "}
+                The authenticated admin API remains available on the same listener. Re-enable it by
+                setting
+                <code className="mx-1">[admin] console = true</code> in the configuration and
+                reloading, or by using an authenticated config apply/patch API request.
                 <label className="mt-3 flex items-start gap-2">
-                  <input type="checkbox" checked={confirmDisable} onChange={(event) => { setConfirmDisable(event.target.checked); }} />
+                  <input
+                    type="checkbox"
+                    checked={confirmDisable}
+                    onChange={(event) => {
+                      setConfirmDisable(event.target.checked);
+                    }}
+                  />
                   <span>I understand how to re-enable the Console.</span>
                 </label>
               </div>
@@ -199,32 +293,51 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
                     type="number"
                     step={1}
                     value={value as string}
-                    onChange={(event) => { (setter as (value: string) => void)(event.target.value); }}
+                    onChange={(event) => {
+                      (setter as (value: string) => void)(event.target.value);
+                    }}
                     className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
                   />
                 </label>
               ))}
             </div>
             <p className="mt-2 text-xs text-jul-muted">
-              Positive values set an explicit limit. Zero means the canonical default. A negative request-rate value disables that class. Reload preserves accumulated client state; tighter limits govern the first new admission after Publish without resetting quotas.
+              Positive values set an explicit limit. Zero means the canonical default. A negative
+              request-rate value disables that class. Reload preserves accumulated client state;
+              tighter limits govern the first new admission after Publish without resetting quotas.
             </p>
           </section>
 
           <section className="rounded-lg border border-jul-border bg-jul-surface p-4">
-            <SettingLabel title="Concurrent event/log streams per client" field={data.lifecycle.max_event_conns} />
+            <SettingLabel
+              title="Concurrent event/log streams per client"
+              field={data.lifecycle.max_event_conns}
+            />
             <input
               type="number"
               min={0}
               step={1}
               value={maxEventConns}
-              onChange={(event) => { setMaxEventConns(event.target.value); }}
+              onChange={(event) => {
+                setMaxEventConns(event.target.value);
+              }}
               className="w-32 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
             />
-            {!connsValid && <p className="mt-1 text-xs text-jul-danger">Use a non-negative whole number. This setting has no unlimited mode.</p>}
-            <p className="mt-2 text-xs text-jul-muted">Zero selects the canonical default (4); positive values set the per-client cap. There is no unlimited mode. The cap is shared by event and live-log SSE streams for each transport peer.</p>
+            {!connsValid && (
+              <p className="mt-1 text-xs text-jul-danger">
+                Use a non-negative whole number. This setting has no unlimited mode.
+              </p>
+            )}
+            <p className="mt-2 text-xs text-jul-muted">
+              Zero selects the canonical default (4); positive values set the per-client cap. There
+              is no unlimited mode. The cap is shared by event and live-log SSE streams for each
+              transport peer.
+            </p>
             {loweringSSE && (
               <p className="mt-3 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-2 text-xs text-jul-text">
-                Existing event/log streams remain connected. The new per-client cap applies to new connections; clients already above the cap cannot open another stream until their active count falls below the configured limit.
+                Existing event/log streams remain connected. The new per-client cap applies to new
+                connections; clients already above the cap cannot open another stream until their
+                active count falls below the configured limit.
               </p>
             )}
           </section>
@@ -232,47 +345,174 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
           <section className="rounded-lg border border-jul-border bg-jul-surface p-4">
             <SettingLabel title="Plugin uploads" field={data.lifecycle.plugin_upload_enabled} />
             <label className="flex items-center gap-3 text-sm text-jul-text">
-              <input type="checkbox" checked={uploadEnabled} onChange={(event) => { setUploadEnabled(event.target.checked); }} />
+              <input
+                type="checkbox"
+                checked={uploadEnabled}
+                onChange={(event) => {
+                  setUploadEnabled(event.target.checked);
+                }}
+              />
               Accept authenticated WASM uploads
             </label>
             <p className="mt-2 text-xs text-jul-muted">
-              Effective now: {data.plugin_upload_effective ? "enabled" : "disabled"}. Directory health: {data.upload_directory_health}.
+              Effective now: {data.plugin_upload_effective ? "enabled" : "disabled"}. Directory
+              health: {data.upload_directory_health}.
             </p>
             {uploadDisabling && (
               <p className="mt-3 rounded-md border border-jul-border p-2 text-xs text-jul-muted">
-                Disabling uploads blocks new request bodies before multipart parsing. Existing uploaded files are retained; Jul does not delete them.
+                Disabling uploads blocks new request bodies before multipart parsing. Existing
+                uploaded files are retained; Jul does not delete them.
               </p>
             )}
           </section>
 
           <section className="rounded-lg border border-jul-border bg-jul-surface p-4">
-            <SettingLabel title="Maximum upload size" field={data.lifecycle.plugin_upload_max_size} />
+            <SettingLabel
+              title="Maximum upload size"
+              field={data.lifecycle.plugin_upload_max_size}
+            />
             <div className="flex items-center gap-2">
-              <input type="number" min={0} step={1} value={maxSize} onChange={(event) => { setMaxSize(event.target.value); }} className="w-32 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text" />
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={maxSize}
+                onChange={(event) => {
+                  setMaxSize(event.target.value);
+                }}
+                className="w-32 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
+              />
               <span className="text-sm text-jul-muted">MB</span>
             </div>
-            {!maxValid && <p className="mt-1 text-xs text-jul-danger">Use a non-negative whole number.</p>}
+            {!maxValid && (
+              <p className="mt-1 text-xs text-jul-danger">Use a non-negative whole number.</p>
+            )}
           </section>
 
           <section className="rounded-lg border border-jul-border bg-jul-surface p-4">
             <SettingLabel title="Upload directory" field={data.lifecycle.plugin_upload_dir} />
-            <input type="text" value={directory} onChange={(event) => { setDirectory(event.target.value); }} className="w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text" />
+            <input
+              type="text"
+              value={directory}
+              onChange={(event) => {
+                setDirectory(event.target.value);
+              }}
+              className="w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text"
+            />
             {directoryChanging && (
               <p className="mt-3 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-2 text-xs text-jul-text">
-                Jul validates the candidate directory before Publish, but does not copy, migrate, or delete files between directories. In-flight uploads finish against the directory generation they captured.
+                Jul validates the candidate directory before Publish, but does not copy, migrate, or
+                delete files between directories. In-flight uploads finish against the directory
+                generation they captured.
               </p>
             )}
           </section>
 
+          <section className="rounded-lg border border-jul-border bg-jul-surface p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-jul-text">Durable audit sink</span>
+              <LifecycleBadge field={data.lifecycle.audit_log_file} />
+            </div>
+            <label className="block text-xs text-jul-muted">
+              Audit file (empty = durable persistence disabled)
+              <input
+                type="text"
+                value={auditFile}
+                onChange={(event) => setAuditFile(event.target.value)}
+                className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text"
+              />
+            </label>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <label className="text-xs text-jul-muted">
+                Rotate max MB <LifecycleBadge field={data.lifecycle.audit_log_rotate_max_mb} />
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={auditRotateMaxMB}
+                  onChange={(event) => setAuditRotateMaxMB(event.target.value)}
+                  className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
+                />
+              </label>
+              <label className="text-xs text-jul-muted">
+                Backups to keep <LifecycleBadge field={data.lifecycle.audit_log_rotate_keep} />
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={auditRotateKeep}
+                  onChange={(event) => setAuditRotateKeep(event.target.value)}
+                  className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
+                />
+              </label>
+            </div>
+            {!auditRotationValid && (
+              <p className="mt-1 text-xs text-jul-danger">
+                Rotation values must be non-negative whole numbers. Zero selects the canonical
+                default.
+              </p>
+            )}
+            {auditPathChanging && !auditDisabling && (
+              <p className="mt-3 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-2 text-xs text-jul-text">
+                Existing audit files and backups at the previous path are not copied, moved, merged,
+                or deleted. New durable events use the new destination only after the committed
+                transition.
+              </p>
+            )}
+            {auditDisabling && (
+              <p className="mt-3 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-2 text-xs text-jul-text">
+                Durable persistence stops for new audit events after Publish. The in-memory audit
+                ring and event IDs continue, and existing audit files/backups are retained.
+              </p>
+            )}
+            {auditRotationChanging && (
+              <p className="mt-3 rounded-md border border-jul-border p-2 text-xs text-jul-muted">
+                The committed rotation policy governs the active sink. Preview never prunes backups;
+                existing backups are only subject to normal retention during later active rotations.
+              </p>
+            )}
+            <p className="mt-3 text-xs text-jul-muted">
+              Status:{" "}
+              {data.audit_sink
+                ? data.audit_sink.healthy
+                  ? "Healthy"
+                  : data.audit_sink.active
+                    ? "Degraded"
+                    : "Configured, inactive"
+                : "Disabled"}
+              {data.audit_sink?.generation ? ` · generation ${data.audit_sink.generation}` : ""}
+              {data.audit_sink?.last_failure_category
+                ? ` · ${data.audit_sink.last_failure_category}`
+                : ""}
+            </p>
+          </section>
+
           <p className="text-xs text-jul-muted">
-            Save opens the authoritative server-side lifecycle preview. No setting is persisted until you review and apply that preview; mixed restart-bound admin changes are never partially published.
+            Save opens the authoritative server-side lifecycle preview. No setting is persisted
+            until you review and apply that preview; mixed restart-bound admin changes are never
+            partially published.
           </p>
-          {previewError && <p className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-2 text-xs text-jul-danger">{previewError}</p>}
+          {previewError && (
+            <p className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-2 text-xs text-jul-danger">
+              {previewError}
+            </p>
+          )}
         </div>
 
         <div className="mt-auto flex justify-end gap-2 border-t border-jul-border p-5">
-          <button type="button" onClick={onClose} className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-text">Cancel</button>
-          <button type="button" disabled={saveDisabled} onClick={() => void runner.run(ops)} className="rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg disabled:opacity-50">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-text"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={saveDisabled}
+            onClick={() => void runner.run(ops)}
+            className="rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg disabled:opacity-50"
+          >
             {runner.busy ? "Preparing preview…" : "Review changes"}
           </button>
         </div>

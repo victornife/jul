@@ -502,8 +502,8 @@ func TestRuntimeOverviewAuditSinkDegraded(t *testing.T) {
 	if out.AuditSink.Healthy {
 		t.Error("audit_sink.healthy = true, want false for an unopenable sink")
 	}
-	if out.AuditSink.Error == "" {
-		t.Error("audit_sink.error should explain the degradation")
+	if out.AuditSink.LastFailureCategory == "" {
+		t.Error("audit_sink.last_failure_category should explain the degradation")
 	}
 }
 

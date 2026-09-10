@@ -354,10 +354,15 @@ export type TrafficSources = z.infer<typeof TrafficSourcesSchema>;
 // audit trail, surfaced so a broken sink is visible rather than silently dropped.
 export const AuditSinkStatusSchema = z.object({
   configured: z.boolean(),
-  path: z.string().optional(),
+  active: z.boolean(),
   healthy: z.boolean(),
-  error: z.string().optional(),
-  write_failures: z.number().optional(),
+  generation: z.number().int().nonnegative().optional(),
+  write_failures: z.number().int().nonnegative().optional(),
+  rotate_failures: z.number().int().nonnegative().optional(),
+  cleanup_failures: z.number().int().nonnegative().optional(),
+  retirement_failures: z.number().int().nonnegative().optional(),
+  last_failure_category: z.string().optional(),
+  last_failure_at: z.string().optional(),
 });
 export type AuditSinkStatus = z.infer<typeof AuditSinkStatusSchema>;
 
@@ -858,7 +863,6 @@ export const GlobalSettingsProjectionSchema = z.object({
 });
 export type GlobalSettingsProjection = z.infer<typeof GlobalSettingsProjectionSchema>;
 
-
 // Secret-safe HR-06B settings projection. The upload directory is configuration
 // data gated by config:read; it is intentionally absent from runtime metrics/status.
 export const AdminRuntimeSettingsProjectionSchema = z.object({
@@ -872,6 +876,10 @@ export const AdminRuntimeSettingsProjectionSchema = z.object({
   rate_limit_write_per_min: z.number().int(),
   rate_limit_apply_per_min: z.number().int(),
   max_event_conns: z.number().int().positive(),
+  audit_log_file: z.string(),
+  audit_log_rotate_max_mb: z.number().int().nonnegative(),
+  audit_log_rotate_keep: z.number().int().nonnegative(),
+  audit_sink: AuditSinkStatusSchema.optional(),
   plugin_upload_effective: z.boolean(),
   upload_directory_health: z.string(),
   lifecycle: z.record(z.string(), LifecycleFieldProjectionSchema).default({}),
@@ -1163,7 +1171,9 @@ export function fetchTrafficControls(): Promise<TrafficControls> {
 }
 
 export function fetchAdminRuntimeSettings(): Promise<AdminRuntimeSettingsProjection> {
-  return api<unknown>("/config/settings").then((d) => AdminRuntimeSettingsProjectionSchema.parse(d));
+  return api<unknown>("/config/settings").then((d) =>
+    AdminRuntimeSettingsProjectionSchema.parse(d),
+  );
 }
 
 export function fetchPlugins(): Promise<PluginsProjection> {
@@ -1680,7 +1690,19 @@ export type ConfigPatch =
   | { op: "upstream_remove"; upstream: string }
   | { op: "global_set"; global: GlobalPatch }
   | { op: "admin_console_set"; enabled: boolean }
-  | { op: "admin_limits_set"; admin_limits: { read_per_min?: number; write_per_min?: number; apply_per_min?: number; max_event_conns?: number } }
+  | {
+      op: "admin_limits_set";
+      admin_limits: {
+        read_per_min?: number;
+        write_per_min?: number;
+        apply_per_min?: number;
+        max_event_conns?: number;
+      };
+    }
+  | {
+      op: "admin_audit_sink_set";
+      audit_sink: { file?: string; rotate_max_mb?: number; rotate_keep?: number };
+    }
   | {
       op: "admin_plugin_upload_set";
       plugin_upload: { enabled?: boolean; max_size_mb?: number; directory?: string };
