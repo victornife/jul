@@ -28,9 +28,17 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v6.0.0
+        with:
+          go-version-file: go.mod
       - name: install test-only dependencies
         run: pip install pyyaml coverage==7.13.3
       - name: semantic drift behavioural tests and coverage gate
         run: |
           python -m coverage run --branch scripts/test_semantic_drift.py
           python -m coverage report --include='*/scripts/semantic_drift.py' --fail-under=90
+      - name: full docs checks are read-only
+        run: |
+          python scripts/test_docs_check.py
+          python scripts/docs-check.py
+          git diff --exit-code
