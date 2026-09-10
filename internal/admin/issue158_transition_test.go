@@ -4,6 +4,10 @@
 package admin
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -59,6 +63,45 @@ func TestAdminRateLimitDelayedDisableReenableIsBoundedByNewBurst(t *testing.T) {
 	}
 }
 
+func TestAdminRateLimitConcurrentRetuneUsesOneStableBucket(t *testing.T) {
+	l := newAdminLimiter(nil)
+	now := time.Unix(7500, 0)
+	l.now = func() time.Time { return now }
+	peer := "198.51.100.44"
+	policies := []adminLimitPolicy{
+		{writePerMin: 120},
+		{writePerMin: 7},
+		{writePerMin: -1},
+		{writePerMin: 60},
+		{writePerMin: 1},
+	}
+
+	var wg sync.WaitGroup
+	for worker := 0; worker < 16; worker++ {
+		wg.Add(1)
+		go func(offset int) {
+			defer wg.Done()
+			for i := 0; i < 200; i++ {
+				_, _ = l.allow(peer, limitWrite, policies[(i+offset)%len(policies)])
+			}
+		}(worker)
+	}
+	wg.Wait()
+
+	// Force one deterministic final retune after the concurrent phase. The
+	// same bucket must survive and expose the tightened dependency state.
+	_, _ = l.allow(peer, limitWrite, adminLimitPolicy{writePerMin: 1})
+	l.mu.Lock()
+	bucket := l.buckets[peer]
+	l.mu.Unlock()
+	if bucket == nil || bucket.write == nil || bucket.write.lim == nil {
+		t.Fatal("concurrent retunes replaced or lost the stable write bucket")
+	}
+	if got := bucket.write.lim.Burst(); got != 1 {
+		t.Fatalf("final burst=%d want 1", got)
+	}
+}
+
 // This is a black-box characterization of the exact x/time/rate dependency used
 // by Jul (v0.15.0 at #158 implementation time). It freezes the behavior relied
 // upon by the lazy tightening transaction without reaching into limiter internals.
@@ -88,6 +131,109 @@ func TestXTimeRateTighteningCharacterization(t *testing.T) {
 	second.CancelAt(now)
 	if got := lim.TokensAt(now); got > 0.000001 {
 		t.Fatalf("cancellation created excess tightened capacity: tokens=%.6f", got)
+	}
+}
+
+func TestAdminLimiterPublishDoesNotLockOrScanTrackedClients(t *testing.T) {
+	initial := limitTestConfig(240, 60, 30, 4)
+	s := newTestServer(t, initial, Deps{})
+	now := time.Unix(8100, 0)
+	s.limiter.now = func() time.Time { return now }
+	policy := adminLimitPolicyFromConfig(initial)
+	for i := 0; i < 4096; i++ {
+		peer := fmt.Sprintf("client-%d", i)
+		_, _ = s.limiter.allow(peer, limitRead, policy)
+	}
+	if got := len(s.limiter.buckets); got != 4096 {
+		t.Fatalf("tracked clients=%d want 4096", got)
+	}
+
+	candidate := initial
+	candidate.RateLimitReadPerMin = 5
+	candidate.MaxEventConns = 2
+	prepared := PrepareAuth(candidate, nil)
+	prepared, err := s.PrepareAdminRuntime(candidate, prepared)
+	if err != nil {
+		t.Fatalf("prepare candidate: %v", err)
+	}
+
+	// Hold the manager lock across Publish. A correct HR-07A publication only
+	// swaps the immutable request snapshot and therefore cannot wait for this
+	// lock or walk the 4096-client map.
+	s.limiter.mu.Lock()
+	done := make(chan struct{})
+	go func() {
+		s.CommitPreparedAuth(prepared)
+		close(done)
+	}()
+	blocked := false
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		blocked = true
+	}
+	s.limiter.mu.Unlock()
+	if blocked {
+		<-done
+		t.Fatal("Publish blocked on limiter state; publication must be independent of client population")
+	}
+
+	if got := s.currentAuth().cfg.RateLimitReadPerMin; got != 5 {
+		t.Fatalf("published read limit=%d want 5", got)
+	}
+	s.limiter.mu.Lock()
+	tracked := len(s.limiter.buckets)
+	s.limiter.mu.Unlock()
+	if tracked != 4096 {
+		t.Fatalf("Publish mutated tracked clients: got %d want 4096", tracked)
+	}
+}
+
+func TestAdminPrepareFailurePreservesPublishedPolicyAndLimiterState(t *testing.T) {
+	initial := limitTestConfig(240, 1, 30, 1)
+	s := newTestServer(t, initial, Deps{})
+	now := time.Unix(8200, 0)
+	s.limiter.now = func() time.Time { return now }
+	oldPolicy := adminLimitPolicyFromConfig(initial)
+	peer := "203.0.113.77"
+	if ok, _ := s.limiter.allow(peer, limitWrite, oldPolicy); !ok {
+		t.Fatal("failed to establish initial write token")
+	}
+	if ok, _ := s.limiter.allow(peer, limitWrite, oldPolicy); ok {
+		t.Fatal("initial write bucket should be exhausted")
+	}
+	release, ok := s.limiter.acquireConn(peer, oldPolicy)
+	if !ok {
+		t.Fatal("failed to establish initial SSE lease")
+	}
+	defer release()
+
+	badDir := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(badDir, []byte("x"), 0o600); err != nil {
+		t.Fatalf("create invalid upload target: %v", err)
+	}
+	enabled := true
+	candidate := initial
+	candidate.RateLimitWritePerMin = 100
+	candidate.MaxEventConns = 8
+	candidate.PluginUploadEnabled = &enabled
+	candidate.PluginUploadMaxSize = 1
+	candidate.PluginUploadDir = badDir
+	if _, err := s.PrepareAdminRuntime(candidate, PrepareAuth(candidate, nil)); err == nil {
+		t.Fatal("candidate with non-directory upload target unexpectedly prepared")
+	}
+
+	if got := s.currentAuth().cfg.RateLimitWritePerMin; got != initial.RateLimitWritePerMin {
+		t.Fatalf("failed Prepare changed published write policy: got %d want %d", got, initial.RateLimitWritePerMin)
+	}
+	if got := s.currentAuth().cfg.MaxEventConns; got != initial.MaxEventConns {
+		t.Fatalf("failed Prepare changed published SSE cap: got %d want %d", got, initial.MaxEventConns)
+	}
+	if ok, _ := s.limiter.allow(peer, limitWrite, oldPolicy); ok {
+		t.Fatal("failed Prepare reset the exhausted limiter bucket")
+	}
+	if got := s.limiter.stats(oldPolicy).SSEActiveTotal; got != 1 {
+		t.Fatalf("failed Prepare changed active SSE accounting: got %d want 1", got)
 	}
 }
 
