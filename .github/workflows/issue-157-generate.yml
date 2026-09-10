@@ -1,0 +1,31 @@
+name: issue-157 lifecycle generate
+
+on:
+  push:
+    branches:
+      - issue-157-hot-admin-runtime
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: generate lifecycle mirrors
+        run: make lifecycle-generate
+      - name: show generated diff
+        run: git diff -- docs/config-lifecycle.yaml docs/generated/config-lifecycle.md docs/generated/config-lifecycle.json
+      - uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08
+        with:
+          name: issue-157-lifecycle
+          path: |
+            docs/config-lifecycle.yaml
+            docs/generated/config-lifecycle.md
+            docs/generated/config-lifecycle.json
+          if-no-files-found: error
