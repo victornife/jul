@@ -50,7 +50,7 @@ jobs:
               }
               END { if (stmts > 0) printf "%.1f", hit*100/stmts; else print "0.0" }
             ' admin-cover.out)
-            echo "${suffix}: ${cov}% (floor: ${COVERAGE_FLOOR}%)"
+            echo "coverage ${suffix} = ${cov}% (floor ${COVERAGE_FLOOR}%)"
             awk -v t="$cov" -v f="$COVERAGE_FLOOR" 'BEGIN { exit (t >= f) ? 0 : 1 }'
           }
           check_file "internal/admin/ratelimit.go"
@@ -59,7 +59,7 @@ jobs:
         run: >-
           go test -count=1 -race -p 2 -tags "console"
           ./internal/admin
-          -run 'TestAdminRateLimit|TestAdminSSE|TestAdminRouteCatalogue|TestAdminLimits'
+          -run 'TestAdminRateLimit|TestAdminEventConn|TestAdminLimiter|TestAdminSSE|TestAdminRouteCatalogue|TestAdminLimits|TestXTimeRate'
 
   console-critical-path:
     name: Console admin admission coverage
