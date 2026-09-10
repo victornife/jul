@@ -1,0 +1,95 @@
+name: issue128-patch
+
+on:
+  push:
+    branches: [issue-128-semantic-drift]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: issue-128-semantic-drift
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml coverage==7.13.3
+      - name: Apply audited corrections
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text()
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f'{path}: expected {count} copies, found {actual}: {old[:80]!r}')
+              p.write_text(text.replace(old, new))
+
+          p = Path('scripts/semantic_drift.py')
+          s = p.read_text()
+          anchor = '''def _metric_consumers(root: Path) -> list[Path]:\n'''
+          helper = '''def _mask_historical_sections(text: str) -> str:\n    """Blank explicitly historical Markdown sections while preserving line numbers."""\n    lines = text.splitlines()\n    masked = list(lines)\n    cutoff = None\n    for i, line in enumerate(lines):\n        match = re.match(r"^(#{2,6})\\s+(.+?)\\s*$", line)\n        if not match:\n            if cutoff is not None:\n                masked[i] = ""\n            continue\n        level = len(match.group(1))\n        title = match.group(2).lower()\n        if cutoff is not None and level <= cutoff:\n            cutoff = None\n        if any(marker in title for marker in ("changelog", "historical", "release history", "previous review")):\n            cutoff = level\n            masked[i] = ""\n        elif cutoff is not None:\n            masked[i] = ""\n    return "\\n".join(masked) + ("\\n" if text.endswith("\\n") else "")\n\n\ndef _source_metric_candidate(name: str) -> bool:\n    return name.endswith(("_total", "_seconds", "_bytes", "_info", "_count", "_bucket", "_sum", "_requests", "_connections", "_backends", "_healthy"))\n\n\n'''
+          if helper not in s:
+              if anchor not in s: raise SystemExit('metric anchor missing')
+              s = s.replace(anchor, helper + anchor, 1)
+          old = '''        try:\n            text = path.read_text(encoding="utf-8")\n        except UnicodeDecodeError:\n            continue\n        for m in METRIC_RE.finditer(text):\n            name = m.group(0)\n            if name not in allowed:\n'''
+          new = '''        try:\n            raw_text = path.read_text(encoding="utf-8")\n        except UnicodeDecodeError:\n            continue\n        text = _mask_historical_sections(raw_text) if path.suffix.lower() == ".md" else raw_text\n        for m in METRIC_RE.finditer(text):\n            name = m.group(0)\n            if path.suffix.lower() in {".ts", ".tsx", ".js", ".jsx"} and not _source_metric_candidate(name):\n                continue\n            if name not in allowed:\n'''
+          if old not in s: raise SystemExit('metric scan block missing')
+          s = s.replace(old, new, 1)
+
+          old = '''        row = (_line(text, m.start()), m.group(1), path, m.group(0), True)\n        key = row[:3]\n'''
+          new = '''        local_line = text[text.rfind("\\n", 0, m.start()) + 1:text.find("\\n", m.end()) if text.find("\\n", m.end()) != -1 else len(text)].lower()\n        if any(marker in local_line for marker in (" absent", "not published", "not supported", " internal", " private", "historical")):\n            continue\n        row = (_line(text, m.start()), m.group(1), path, m.group(0), True)\n        key = row[:3]\n'''
+          if old not in s: raise SystemExit('api row block missing')
+          s = s.replace(old, new, 1)
+
+          pattern = re.compile(r'''    if section:\n        base = _line\(text, section\.start\(1\)\) - 1\n        for i, line in enumerate\(section\.group\(1\)\.splitlines\(\), 1\):\n            m = REMOTE_COMMAND_RE\.search\(line\)\n            if m:\n                commands\.append\(\(base \+ i, m\.group\(1\)\)\)\n''')
+          repl = '''    if section:\n        base = _line(text, section.start(1)) - 1\n        lines = section.group(1).splitlines()\n        in_command_table = False\n        for i, line in enumerate(lines, 1):\n            if line.lstrip().startswith("|"):\n                cells = [c.strip() for c in line.strip().strip("|").split("|")]\n                if cells and cells[0].lower() == "command":\n                    in_command_table = True\n                    continue\n                if in_command_table and cells and not all(re.fullmatch(r"[: -]+", c or "-") for c in cells):\n                    m = REMOTE_COMMAND_RE.search(cells[0])\n                    if m:\n                        commands.append((base + i, m.group(1)))\n            elif line.strip():\n                in_command_table = False\n'''
+          s2, n = pattern.subn(repl, s, count=1)
+          if n != 1: raise SystemExit(f'cli block replacements={n}')
+          p.write_text(s2)
+
+          replace('docs/health.md', '> **Maturity:** Beta (see [status.md](status.md)).', '> **Maturity:** GA (see [status.md](status.md)).')
+          replace('docs/stream.md', '| `connect_timeout` | `5s` | TCP backend dial deadline |', '| `connect_timeout` | `10s` | TCP backend dial deadline |')
+          replace('docs/stream.md', '| `idle_timeout` | `1h` | TCP connection idle timeout; UDP session idle reap |', '| `idle_timeout` | `5m` | TCP connection idle timeout; UDP session idle reap |')
+          replace('docs/stream.md', '| `max_udp_sessions` | `1024` | Per-listener UDP session cap |', '| `max_udp_sessions` | `10000` | Per-listener UDP session cap |')
+          replace('docs/configuration.md', 'Metrics: `jul_upstream_healthy{pool,backend}` (1 healthy / 0 unhealthy),', 'Metrics: `jul_upstream_backends_healthy{pool}` (aggregate healthy backend count),')
+          replace('docs/service-discovery.md', 'These complement the existing `jul_upstream_healthy` gauge and', 'These complement the existing `jul_upstream_backends_healthy` gauge and')
+          replace('docs/troubleshooting.md', '- `jul_upstream_healthy{pool}` — of those, how many pass active health checks.', '- `jul_upstream_backends_healthy{pool}` — of those, how many pass active health checks.')
+
+          admin = Path('docs/admin-api.md')
+          a = admin.read_text()
+          stale = re.compile(r'\*\*The `/api/v1` mutating surface is not published yet\.\*\* ADR 0019 §24 fixes its\nfull path set; the operations land incrementally, and a path appears here.*?(?=\n\n)', re.S)
+          replacement = '**The `/api/v1` read and mutating surfaces are published.** The committed generated OpenAPI is the machine authority for the supported method/path set; a path is externally supported only while it appears there.'
+          a2, n = stale.subn(replacement, a, count=1)
+          if n != 1: raise SystemExit(f'admin stale paragraph replacements={n}')
+          admin.write_text(a2)
+
+          changelog = Path('CHANGELOG.md')
+          c = changelog.read_text()
+          marker = '### Added\n'
+          if marker not in c: raise SystemExit('changelog Added marker missing')
+          entry = '- **Cross-artifact semantic drift guards (#128).** Documentation CI now compares objective configuration defaults/value claims, lifecycle references, metric consumers, feature maturity/build-capability claims, supported external API method/path claims, remote CLI commands/exit codes, and current authority links against their existing machine authorities. The guard is deterministic, offline and read-only; it replaces the legacy Python `schema.go` parser with generated configuration metadata and intentionally excludes historical material from current-claim enforcement.\n'
+          c = c.replace(marker, marker + entry, 1)
+          changelog.write_text(c)
+      - name: Verify focused guards
+        run: |
+          python scripts/test_semantic_drift.py
+          python -m coverage run --branch scripts/test_semantic_drift.py
+          python -m coverage report --include='*/scripts/semantic_drift.py' --fail-under=90
+          python scripts/docs-check.py
+      - name: Commit corrections
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/semantic_drift.py docs CHANGELOG.md
+          git commit -s -m 'fix(docs): resolve audited semantic drift'
+          git push origin HEAD:issue-128-semantic-drift
