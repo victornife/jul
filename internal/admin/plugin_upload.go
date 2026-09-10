@@ -48,8 +48,9 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The mux pinned this generation before authentication. Direct unit calls
-	// still get exactly one live load here. Nil upload_enabled preserves the
-	// established/default-enabled semantics from config normalization.
+	// still get exactly one live load here. Canonical parsed configurations
+	// materialize an omitted upload-enable flag as false; a nil value is only an
+	// internal compatibility case for directly constructed AdminConfig values.
 	snap := s.requestAdminSnapshot(r)
 	cfg := snap.cfg
 	if (cfg.PluginUploadEnabled != nil && !*cfg.PluginUploadEnabled) || cfg.PluginUploadMaxSize <= 0 {
