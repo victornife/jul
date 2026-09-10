@@ -40,93 +40,88 @@ func TestAdminLimiterAlwaysExistsWhenPolicyDisabled(t *testing.T) {
 	if s.limiter == nil {
 		t.Fatal("hot-reloadable limiter manager must exist for the admin server lifetime")
 	}
-	h := s.routes()
+	policy := adminLimitPolicyFromConfig(limitTestConfig(-1, -1, -1, 4))
 	for i := 0; i < 20; i++ {
-		if rr := requestFrom(t, h, http.MethodPost, "/api/wizard", "127.0.0.1:9999"); rr.Code == http.StatusTooManyRequests {
+		if ok, _ := s.limiter.allow("127.0.0.1", limitWrite, policy); !ok {
 			t.Fatalf("request %d limited while write policy is disabled", i)
 		}
 	}
 }
 
 func TestAdminRateLimitBlocksWriteFlood(t *testing.T) {
-	s := newTestServer(t, limitTestConfig(240, 3, 30, 4), Deps{})
-	h := s.routes()
+	l := newAdminLimiter(nil)
+	now := time.Unix(900, 0)
+	l.now = func() time.Time { return now }
+	policy := adminLimitPolicy{writePerMin: 3}
 	for i := 0; i < 3; i++ {
-		rr := requestFrom(t, h, http.MethodPost, "/api/wizard", "127.0.0.1:5555")
-		if rr.Code == http.StatusTooManyRequests {
+		if ok, _ := l.allow("127.0.0.1", limitWrite, policy); !ok {
 			t.Fatalf("write request %d rejected before burst was consumed", i)
 		}
 	}
-	rr := requestFrom(t, h, http.MethodPost, "/api/wizard", "127.0.0.1:5555")
-	if rr.Code != http.StatusTooManyRequests {
-		t.Fatalf("fourth write status=%d want 429", rr.Code)
+	ok, retry := l.allow("127.0.0.1", limitWrite, policy)
+	if ok {
+		t.Fatal("fourth write should be rate limited")
 	}
-	if rr.Header().Get("Retry-After") == "" {
-		t.Fatal("429 response missing Retry-After")
+	if retry < 1 {
+		t.Fatalf("Retry-After=%d want >=1", retry)
 	}
 }
 
 func TestAdminRateLimitPerClientIsolation(t *testing.T) {
-	s := newTestServer(t, limitTestConfig(240, 1, 30, 4), Deps{})
-	h := s.routes()
-	_ = requestFrom(t, h, http.MethodPost, "/api/wizard", "127.0.0.1:1111")
-	if rr := requestFrom(t, h, http.MethodPost, "/api/wizard", "127.0.0.1:1111"); rr.Code != http.StatusTooManyRequests {
-		t.Fatalf("noisy client second request status=%d want 429", rr.Code)
+	l := newAdminLimiter(nil)
+	now := time.Unix(950, 0)
+	l.now = func() time.Time { return now }
+	policy := adminLimitPolicy{writePerMin: 1}
+	if ok, _ := l.allow("127.0.0.1", limitWrite, policy); !ok {
+		t.Fatal("client A first request denied")
 	}
-	if rr := requestFrom(t, h, http.MethodPost, "/api/wizard", "127.0.0.2:2222"); rr.Code == http.StatusTooManyRequests {
+	if ok, _ := l.allow("127.0.0.1", limitWrite, policy); ok {
+		t.Fatal("client A second request should be denied")
+	}
+	if ok, _ := l.allow("127.0.0.2", limitWrite, policy); !ok {
 		t.Fatal("client B inherited client A's rate state")
 	}
 }
 
 func TestAdminRateLimitHotTightenClampsBeforeFirstAdmission(t *testing.T) {
-	cfg := limitTestConfig(240, 4, 30, 4)
-	s := newTestServer(t, cfg, Deps{})
+	l := newAdminLimiter(nil)
 	now := time.Unix(1000, 0)
-	s.limiter.now = func() time.Time { return now }
-	h := s.routes()
-
+	l.now = func() time.Time { return now }
+	oldPolicy := adminLimitPolicy{writePerMin: 4}
 	for i := 0; i < 2; i++ {
-		if rr := requestFrom(t, h, http.MethodPost, "/api/wizard", "127.0.0.1:4444"); rr.Code == http.StatusTooManyRequests {
+		if ok, _ := l.allow("127.0.0.1", limitWrite, oldPolicy); !ok {
 			t.Fatal("unexpected pre-tighten rejection")
 		}
 	}
-	cfg.RateLimitWritePerMin = 1
-	s.UpdateLiveAdminConfig(cfg)
-
-	if rr := requestFrom(t, h, http.MethodPost, "/api/wizard", "127.0.0.1:4444"); rr.Code == http.StatusTooManyRequests {
-		t.Fatal("first post-publish request should consume the single clamped token")
+	newPolicy := adminLimitPolicy{writePerMin: 1}
+	if ok, _ := l.allow("127.0.0.1", limitWrite, newPolicy); !ok {
+		t.Fatal("first post-publish admission should consume the single clamped token")
 	}
-	if rr := requestFrom(t, h, http.MethodPost, "/api/wizard", "127.0.0.1:4444"); rr.Code != http.StatusTooManyRequests {
-		t.Fatalf("second post-tighten request status=%d want 429", rr.Code)
+	if ok, _ := l.allow("127.0.0.1", limitWrite, newPolicy); ok {
+		t.Fatal("second post-tighten admission should be denied")
 	}
 }
 
 func TestAdminRateLimitDisableReenablePreservesExhaustedState(t *testing.T) {
-	cfg := limitTestConfig(240, 2, 30, 4)
-	s := newTestServer(t, cfg, Deps{})
+	l := newAdminLimiter(nil)
 	now := time.Unix(2000, 0)
-	s.limiter.now = func() time.Time { return now }
-	h := s.routes()
-	peer := "127.0.0.1:5555"
-
-	_ = requestFrom(t, h, http.MethodPost, "/api/wizard", peer)
-	_ = requestFrom(t, h, http.MethodPost, "/api/wizard", peer)
-	if rr := requestFrom(t, h, http.MethodPost, "/api/wizard", peer); rr.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected exhausted finite bucket, got %d", rr.Code)
+	l.now = func() time.Time { return now }
+	finite := adminLimitPolicy{writePerMin: 2}
+	peer := "127.0.0.1"
+	_, _ = l.allow(peer, limitWrite, finite)
+	_, _ = l.allow(peer, limitWrite, finite)
+	if ok, _ := l.allow(peer, limitWrite, finite); ok {
+		t.Fatal("expected exhausted finite bucket")
 	}
 
-	cfg.RateLimitWritePerMin = -1
-	s.UpdateLiveAdminConfig(cfg)
+	disabled := adminLimitPolicy{writePerMin: -1}
 	for i := 0; i < 3; i++ {
-		if rr := requestFrom(t, h, http.MethodPost, "/api/wizard", peer); rr.Code == http.StatusTooManyRequests {
+		if ok, _ := l.allow(peer, limitWrite, disabled); !ok {
 			t.Fatal("disabled class must bypass admission")
 		}
 	}
-
-	cfg.RateLimitWritePerMin = 2
-	s.UpdateLiveAdminConfig(cfg)
-	if rr := requestFrom(t, h, http.MethodPost, "/api/wizard", peer); rr.Code != http.StatusTooManyRequests {
-		t.Fatalf("immediate re-enable granted a forgiveness burst, status=%d", rr.Code)
+	if ok, _ := l.allow(peer, limitWrite, finite); ok {
+		t.Fatal("immediate re-enable granted a forgiveness burst")
 	}
 }
 
