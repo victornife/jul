@@ -20,11 +20,11 @@ type pluginUploadResponse struct {
 
 var wasmMagic = []byte{0x00, 0x61, 0x73, 0x6d}
 
+// validPluginFilename rejects path tricks and unusual directory-entry names.
+// The .wasm suffix itself is checked only after the WASM header so malformed
+// uploads preserve the established magic/version diagnostics.
 func validPluginFilename(name string) bool {
-	if name == "" || len(name) > 128 {
-		return false
-	}
-	if !strings.HasSuffix(name, ".wasm") || strings.HasPrefix(name, ".") || strings.TrimSuffix(name, ".wasm") == "" {
+	if name == "" || len(name) > 128 || strings.HasPrefix(name, ".") {
 		return false
 	}
 	if strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
@@ -82,7 +82,7 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 
 	name := filepath.Base(header.Filename)
 	if !validPluginFilename(name) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename: must be a simple <name>.wasm using letters, digits, '.', '_' or '-'"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename: use a simple filename with letters, digits, '.', '_' or '-'"})
 		return
 	}
 
@@ -97,6 +97,10 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	if magic[4] != 0x01 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("unsupported WASM version: %d", magic[4])})
+		return
+	}
+	if !strings.HasSuffix(name, ".wasm") || strings.TrimSuffix(name, ".wasm") == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename: valid WASM uploads must use a .wasm suffix"})
 		return
 	}
 
