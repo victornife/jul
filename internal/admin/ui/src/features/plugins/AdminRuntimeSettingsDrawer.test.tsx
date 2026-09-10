@@ -214,7 +214,7 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
     expect(screen.getByText(/blocks new request bodies before multipart parsing/)).toBeInTheDocument();
 
     fireEvent.change(spinbutton(4), { target: { value: "22" } });
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "/tmp/next" } });
+    fireEvent.change(screen.getByLabelText("Upload directory"), { target: { value: "/tmp/next" } });
     expect(screen.getByText(/does not copy, migrate, or delete files/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Review changes" }));

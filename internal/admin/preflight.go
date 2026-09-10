@@ -6,7 +6,6 @@ package admin
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"jul/internal/config"
 )
@@ -20,12 +19,6 @@ func PreflightConfig(cfg config.AdminConfig) error {
 	}
 	if cfg.HistoryDir != "" {
 		if err := probeWritable(cfg.HistoryDir, "[admin] history_dir"); err != nil {
-			return err
-		}
-	}
-	if cfg.AuditLogFile != "" {
-		dir := filepath.Dir(cfg.AuditLogFile)
-		if err := probeWritable(dir, "[admin] audit_log_file directory"); err != nil {
 			return err
 		}
 	}

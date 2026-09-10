@@ -275,8 +275,8 @@ func TestReadyzDegradedOnAdminHealthHook(t *testing.T) {
 	if !strings.Contains(body, "admin_reload") {
 		t.Errorf("readyz body should mention admin_reload, got %q", body)
 	}
-	if !strings.Contains(body, "rbac policy update failed") {
-		t.Errorf("readyz body should include detail, got %q", body)
+	if strings.Contains(body, "rbac policy update failed") {
+		t.Errorf("readyz body leaked admin health detail, got %q", body)
 	}
 }
 
