@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -230,15 +229,15 @@ func (l *adminLimiter) acquireConn(ip string, policy adminLimitPolicy) (release 
 }
 
 type adminLimiterStats struct {
-	TrackedClients   int
-	SSEActiveTotal   int
-	SSEActiveClients int
+	TrackedClients    int
+	SSEActiveTotal    int
+	SSEActiveClients  int
 	SSEOverCapClients int
-	SSEMaxPerClient  int
-	SSERejected      uint64
-	ReadRejected     uint64
-	WriteRejected    uint64
-	ApplyRejected    uint64
+	SSEMaxPerClient   int
+	SSERejected       uint64
+	ReadRejected      uint64
+	WriteRejected     uint64
+	ApplyRejected     uint64
 }
 
 // stats samples mutable process-lifetime accounting against one captured policy.
@@ -322,26 +321,15 @@ func hasPermission(perms []rbac.Permission, target rbac.Permission) bool {
 
 // limitClassForSpec derives the admission decision from the authoritative route
 // catalogue rather than a parallel path switch. Safe methods are reads. Config
-// validation/plan and managed configuration mutations use the stricter apply
-// budget; other mutations use write. Unknown methods are conservatively write.
+// assessment/mutation permissions use the stricter apply budget; other
+// mutations use write. Unknown methods are conservatively write.
 func limitClassForSpec(spec RouteSpec, method string) limitKind {
 	if safeMethod(method) {
 		return limitRead
 	}
 
 	perm := permissionForMethod(spec, method)
-	if perm == rbac.ConfigApply || perm == rbac.HistoryRollback || hasPermission(spec.AnyPermissions, rbac.ConfigApply) || hasPermission(spec.AnyPermissions, rbac.HistoryRollback) {
-		return limitApply
-	}
-	if op, ok := spec.Operations[method]; ok {
-		switch op.ID {
-		case "validateConfig", "planConfig", "applyConfig", "applyConfigPatch", "rollbackConfig", "adoptExternal", "discardPendingRestart":
-			return limitApply
-		}
-	}
-	// Internal validate/diff predate external operation metadata. Their ConfigWrite
-	// permission is intentionally kept in the historical high-impact budget.
-	if perm == rbac.ConfigWrite && (strings.Contains(spec.Pattern, "/config/validate") || strings.Contains(spec.Pattern, "/config/diff")) {
+	if perm == rbac.ConfigApply || perm == rbac.HistoryRollback || perm == rbac.ConfigWrite || hasPermission(spec.AnyPermissions, rbac.ConfigApply) || hasPermission(spec.AnyPermissions, rbac.HistoryRollback) || hasPermission(spec.AnyPermissions, rbac.ConfigWrite) {
 		return limitApply
 	}
 	return limitWrite
