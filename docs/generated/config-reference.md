@@ -30,10 +30,9 @@ AuditLogFile, when set, enables a durable append-only audit sink: every audit ev
 | | |
 | --- | --- |
 | Type | `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `admin` |
-| Why | the admin listener and its resources are created once at startup |
-| Flags | startup-consumed |
+| Why | the durable audit writer is fully prepared before Publish and atomically selected for new audit events while the process-lifetime ring and event IDs remain unchanged |
 
 ## `admin.audit_log_rotate_keep` {#admin-audit_log_rotate_keep}
 
@@ -42,11 +41,10 @@ AuditLogRotateKeep bounds how many rotated audit backups are retained; older bac
 | | |
 | --- | --- |
 | Type | `integer` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `admin` |
-| Why | the admin listener and its resources are created once at startup |
+| Why | path and rotation policy publish as one prepared durable-sink generation; existing audit events and files are not migrated |
 | Default | 14 |
-| Flags | startup-consumed |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 14 when audit_log_file is set |
 | Active when | always |
@@ -58,11 +56,10 @@ AuditLogRotateMaxMB is the size in megabytes at which the durable audit sink rot
 | | |
 | --- | --- |
 | Type | `integer` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `admin` |
-| Why | the admin listener and its resources are created once at startup |
+| Why | path and rotation policy publish as one prepared durable-sink generation; existing audit events and files are not migrated |
 | Default | 100 |
-| Flags | startup-consumed |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 100 when audit_log_file is set |
 | Active when | always |
