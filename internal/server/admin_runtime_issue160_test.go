@@ -94,26 +94,28 @@ func TestIssue160SourceReloadPublishesAuditSink(t *testing.T) {
 
 func TestIssue160MixedHotAdminFieldsPublishAsOneGeneration(t *testing.T) {
 	trafficAddr := freePort(t)
+	uploadDisabled := false
+	uploadEnabled := true
 	initial := cfgWith(trafficAddr)
 	initial.Admin = config.AdminConfig{
-		Enabled:               true,
-		Listen:                "127.0.0.1:19090",
-		Token:                 "issue160-token",
-		Console:               true,
-		PluginUploadEnabled:   false,
-		PluginUploadDir:       t.TempDir(),
-		RateLimitReadPerMin:   240,
-		RateLimitWritePerMin:  60,
-		RateLimitApplyPerMin:  30,
-		MaxEventConns:         4,
-		AuditLogFile:          filepath.Join(t.TempDir(), "a.jsonl"),
-		AuditLogRotateMaxMB:   100,
-		AuditLogRotateKeep:    14,
+		Enabled:              true,
+		Listen:               "127.0.0.1:19090",
+		Token:                "issue160-token",
+		Console:              true,
+		PluginUploadEnabled:  &uploadDisabled,
+		PluginUploadDir:      t.TempDir(),
+		RateLimitReadPerMin:  240,
+		RateLimitWritePerMin: 60,
+		RateLimitApplyPerMin: 30,
+		MaxEventConns:        4,
+		AuditLogFile:         filepath.Join(t.TempDir(), "a.jsonl"),
+		AuditLogRotateMaxMB:  100,
+		AuditLogRotateKeep:   14,
 	}
 	candidate := cfgWith(trafficAddr)
 	candidate.Admin = initial.Admin
 	candidate.Admin.Console = false
-	candidate.Admin.PluginUploadEnabled = true
+	candidate.Admin.PluginUploadEnabled = &uploadEnabled
 	candidate.Admin.PluginUploadDir = t.TempDir()
 	candidate.Admin.RateLimitReadPerMin = 17
 	candidate.Admin.MaxEventConns = 2
@@ -149,7 +151,7 @@ func TestIssue160MixedHotAdminFieldsPublishAsOneGeneration(t *testing.T) {
 	if prepared.Load() != 1 || committed.Load() != 1 {
 		t.Fatalf("prepared=%d committed=%d, want exactly one admin generation", prepared.Load(), committed.Load())
 	}
-	if seen.Console || !seen.PluginUploadEnabled || seen.RateLimitReadPerMin != 17 || seen.MaxEventConns != 2 || seen.AuditLogFile != candidate.Admin.AuditLogFile || seen.AuditLogRotateMaxMB != 32 || seen.AuditLogRotateKeep != 5 {
+	if seen.Console || seen.PluginUploadEnabled == nil || !*seen.PluginUploadEnabled || seen.RateLimitReadPerMin != 17 || seen.MaxEventConns != 2 || seen.AuditLogFile != candidate.Admin.AuditLogFile || seen.AuditLogRotateMaxMB != 32 || seen.AuditLogRotateKeep != 5 {
 		t.Fatalf("prepared mixed-hot snapshot mismatch: %+v", seen)
 	}
 
