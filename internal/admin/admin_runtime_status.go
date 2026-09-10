@@ -24,9 +24,8 @@ const (
 )
 
 // AdminRuntimeStatus is the bounded, secret-safe operational view of the admin
-// generation pinned to a request. It deliberately exposes neither the upload
-// path nor a filename/token. Generation is diagnostic correlation metadata and
-// must never be used as a metric label.
+// generation pinned to a request. Mutable limiter counters are sampled against
+// that same captured policy, never against a later global config load.
 type AdminRuntimeStatus struct {
 	Generation            string `json:"generation"`
 	ConsoleCompiled       bool   `json:"console_compiled"`
@@ -38,6 +37,20 @@ type AdminRuntimeStatus struct {
 	UploadDirectoryHealth string `json:"upload_directory_health"`
 	PreparationFailure    string `json:"preparation_failure,omitempty"`
 	LastUploadRejection   string `json:"last_upload_rejection,omitempty"`
+
+	RateLimitReadPerMin  int `json:"rate_limit_read_per_min"`
+	RateLimitWritePerMin int `json:"rate_limit_write_per_min"`
+	RateLimitApplyPerMin int `json:"rate_limit_apply_per_min"`
+	MaxEventConns        int `json:"max_event_conns"`
+	TrackedLimiterClients int `json:"tracked_limiter_clients"`
+	SSEActiveTotal        int `json:"sse_active_total"`
+	SSEActiveClients      int `json:"sse_active_clients"`
+	SSEOverCapClients     int `json:"sse_over_cap_clients"`
+	SSEMaxPerClient       int `json:"sse_max_per_client"`
+	RateReadRejected      uint64 `json:"rate_read_rejected"`
+	RateWriteRejected     uint64 `json:"rate_write_rejected"`
+	RateApplyRejected     uint64 `json:"rate_apply_rejected"`
+	SSERejected           uint64 `json:"sse_rejected"`
 }
 
 // AdminRuntimeSettingsProjection is the non-secret configuration surface used
@@ -53,6 +66,10 @@ type AdminRuntimeSettingsProjection struct {
 	PluginUploadDir       string                              `json:"plugin_upload_dir"`
 	PluginUploadEffective bool                                `json:"plugin_upload_effective"`
 	UploadDirectoryHealth string                              `json:"upload_directory_health"`
+	RateLimitReadPerMin   int                                 `json:"rate_limit_read_per_min"`
+	RateLimitWritePerMin  int                                 `json:"rate_limit_write_per_min"`
+	RateLimitApplyPerMin  int                                 `json:"rate_limit_apply_per_min"`
+	MaxEventConns         int                                 `json:"max_event_conns"`
 	Lifecycle             map[string]LifecycleFieldProjection `json:"lifecycle"`
 }
 
@@ -66,6 +83,8 @@ func (s *Server) adminRuntimeStatus(r *http.Request) *AdminRuntimeStatus {
 	if !uploadEnabled {
 		health = "disabled"
 	}
+	policy := adminLimitPolicyFromConfig(snap.cfg)
+	stats := s.limiter.stats(policy)
 	out := &AdminRuntimeStatus{
 		Generation:            snap.gen,
 		ConsoleCompiled:       snap.consoleCompiled,
@@ -75,6 +94,19 @@ func (s *Server) adminRuntimeStatus(r *http.Request) *AdminRuntimeStatus {
 		UploadEnabled:         uploadEnabled,
 		UploadMaxSizeMB:       snap.cfg.PluginUploadMaxSize,
 		UploadDirectoryHealth: health,
+		RateLimitReadPerMin:   policy.readPerMin,
+		RateLimitWritePerMin:  policy.writePerMin,
+		RateLimitApplyPerMin:  policy.applyPerMin,
+		MaxEventConns:         policy.maxConns,
+		TrackedLimiterClients: stats.TrackedClients,
+		SSEActiveTotal:        stats.SSEActiveTotal,
+		SSEActiveClients:      stats.SSEActiveClients,
+		SSEOverCapClients:     stats.SSEOverCapClients,
+		SSEMaxPerClient:       stats.SSEMaxPerClient,
+		RateReadRejected:      stats.ReadRejected,
+		RateWriteRejected:     stats.WriteRejected,
+		RateApplyRejected:     stats.ApplyRejected,
+		SSERejected:           stats.SSERejected,
 	}
 	if p := s.adminPrepareFailure.Load(); p != nil {
 		out.PreparationFailure = *p
@@ -109,11 +141,19 @@ func (s *Server) handleAdminRuntimeSettingsRead(w http.ResponseWriter, r *http.R
 		PluginUploadDir:       cfg.PluginUploadDir,
 		PluginUploadEffective: uploadEffective,
 		UploadDirectoryHealth: health,
+		RateLimitReadPerMin:   cfg.RateLimitReadPerMin,
+		RateLimitWritePerMin:  cfg.RateLimitWritePerMin,
+		RateLimitApplyPerMin:  cfg.RateLimitApplyPerMin,
+		MaxEventConns:         cfg.MaxEventConns,
 		Lifecycle: map[string]LifecycleFieldProjection{
-			"console":                lifecycleFieldProjection("admin.console"),
-			"plugin_upload_enabled":  lifecycleFieldProjection("admin.plugin_upload_enabled"),
-			"plugin_upload_max_size": lifecycleFieldProjection("admin.plugin_upload_max_size"),
-			"plugin_upload_dir":      lifecycleFieldProjection("admin.plugin_upload_dir"),
+			"console":                  lifecycleFieldProjection("admin.console"),
+			"plugin_upload_enabled":    lifecycleFieldProjection("admin.plugin_upload_enabled"),
+			"plugin_upload_max_size":   lifecycleFieldProjection("admin.plugin_upload_max_size"),
+			"plugin_upload_dir":        lifecycleFieldProjection("admin.plugin_upload_dir"),
+			"rate_limit_read_per_min":  lifecycleFieldProjection("admin.rate_limit_read_per_min"),
+			"rate_limit_write_per_min": lifecycleFieldProjection("admin.rate_limit_write_per_min"),
+			"rate_limit_apply_per_min": lifecycleFieldProjection("admin.rate_limit_apply_per_min"),
+			"max_event_conns":          lifecycleFieldProjection("admin.max_event_conns"),
 		},
 	}
 	writeJSON(w, http.StatusOK, projection)
