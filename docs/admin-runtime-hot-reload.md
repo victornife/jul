@@ -58,11 +58,11 @@ The Console settings drawer requires explicit acknowledgement before disabling t
 
 When uploads are disabled, `POST /api/plugins/upload` returns `403` before reading or parsing the multipart request body. This avoids spending bandwidth/memory/disk work on a feature that the captured generation did not admit.
 
-`plugin_upload_enabled = nil` preserves the documented default-enabled semantics; a non-positive `plugin_upload_max_size` still disables admission. A request captures its maximum size before body processing. Tightening or loosening the limit affects new requests after Publish and does not rewrite the policy of an upload already in flight.
+The canonical parser materializes an omitted `plugin_upload_enabled` as `false`: operators must explicitly opt in to uploads. A nil pointer may still occur in directly constructed in-memory `AdminConfig` values and is tolerated as an internal compatibility case; it is not the public configuration default. A non-positive `plugin_upload_max_size` also disables admission. A request captures its maximum size before body processing. Tightening or loosening the limit affects new requests after Publish and does not rewrite the policy of an upload already in flight.
 
 ### Storage and file safety
 
-The configured upload directory is normalized once into the prepared generation. An admitted request opens it using `os.Root`, verifies that the opened directory is still the configured directory, and confines descendant operations to that root. Final filenames remain simple `.wasm` names; path traversal is not accepted.
+The configured upload directory is normalized once into the prepared generation. An admitted request opens it using `os.Root`, verifies that the pre-open path, opened root and post-open path all identify the same directory, and confines descendant operations to that root. Final filenames remain simple `.wasm` names; path traversal is not accepted.
 
 Writes preserve the existing contract:
 
@@ -75,7 +75,7 @@ Writes preserve the existing contract:
 
 A directory change `A → B` does not copy, migrate or delete files. Requests already pinned to A finish against A; requests captured after Publish use B. Disabling uploads does not remove files already stored on disk and does not deactivate any plugin already referenced by the running configuration. Plugin activation remains configuration-driven, not upload-driven.
 
-Ancestor filesystem aliases needed by supported platforms (for example macOS `/var` resolving to `/private/var`) are tolerated; the configured final component itself cannot be a symlink. The request-time `os.Root` confinement and same-file checks defend the final write boundary against descendant escape/replacement races within the guarantees of the Go runtime and host filesystem.
+Ancestor filesystem aliases needed by supported platforms (for example macOS `/var` resolving to `/private/var`) are tolerated; the configured final component itself cannot be a symlink. The request-time `os.Root` confinement plus pre/open/post same-file checks defend the final write boundary against descendant escape and path-retarget races within the guarantees of the Go runtime and host filesystem.
 
 ## Safe projections and diagnostics
 
