@@ -97,6 +97,9 @@ test("HR-07C audit sink and access-log sink hot-apply together without partial p
       })
       .toBe(true);
 
+    // A successful raw apply is audited as config.apply.accepted. The event is
+    // recorded only after Publish returns, so seeing it in auditPath proves the
+    // transition event selected the new sink rather than the retired one.
     await expect
       .poll(async () => {
         try {
@@ -104,7 +107,10 @@ test("HR-07C audit sink and access-log sink hot-apply together without partial p
             .split("\n")
             .filter(Boolean)
             .map((line) => JSON.parse(line) as { operation?: string; result?: string })
-            .some((event) => event.operation === "config.apply" && event.result === "success");
+            .some(
+              (event) =>
+                event.operation === "config.apply.accepted" && event.result === "success",
+            );
         } catch {
           return false;
         }
