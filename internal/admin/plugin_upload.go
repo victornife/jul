@@ -12,7 +12,6 @@ import (
 	"strings"
 )
 
-// pluginUploadResponse is the JSON returned on a successful .wasm upload.
 type pluginUploadResponse struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
@@ -42,20 +41,18 @@ func validPluginFilename(name string) bool {
 	return true
 }
 
-// handlePluginUpload uses only the immutable admin generation pinned at request
-// entry. A request admitted before Publish may therefore complete under the old
-// enable/size/directory policy; a request entering after Publish observes the
-// candidate generation in full. Disabled requests are rejected before parsing
-// or buffering a multipart body.
 func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
 
+	// The mux pinned this generation before authentication. Direct unit calls
+	// still get exactly one live load here. Nil upload_enabled preserves the
+	// established/default-enabled semantics from config normalization.
 	snap := s.requestAdminSnapshot(r)
 	cfg := snap.cfg
-	if !pluginUploadEnabled(cfg) || cfg.PluginUploadMaxSize <= 0 {
+	if (cfg.PluginUploadEnabled != nil && !*cfg.PluginUploadEnabled) || cfg.PluginUploadMaxSize <= 0 {
 		http.Error(w, "plugin upload disabled", http.StatusForbidden)
 		return
 	}
@@ -63,6 +60,8 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	maxBytes := int64(maxMB) << 20
 	dir := normalizePluginUploadDir(cfg.PluginUploadDir)
 
+	// Disabled requests returned above without touching the body. An admitted
+	// request now owns this captured size/dir policy for its complete lifetime.
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	if err := r.ParseMultipartForm(maxBytes); err != nil {
 		if err.Error() == "multipart: message too large" || err.Error() == "http: request body too large" {
@@ -81,10 +80,6 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Validate the untrusted filename before any final path or upload-root write.
-	// filepath.Base preserves the established browser behavior while the strict
-	// validator rejects separators, dot traversal, hidden names and non-WASM
-	// suffixes.
 	name := filepath.Base(header.Filename)
 	if !validPluginFilename(name) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename: must be a simple <name>.wasm using letters, digits, '.', '_' or '-'"})
@@ -120,9 +115,6 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 		defer file.Close()
 	}
 
-	// Read one extra byte beyond the captured file policy. The outer
-	// MaxBytesReader bounds the complete request; this inner limit guarantees a
-	// direct/unit invocation can never silently truncate a module to maxBytes.
 	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
 		http.Error(w, "failed to read upload", http.StatusInternalServerError)
