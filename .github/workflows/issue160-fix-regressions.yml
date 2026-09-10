@@ -1,0 +1,37 @@
+name: HR-07C regression fix once
+on:
+  push:
+    branches: [issue-160-hot-audit-sink]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[issue160-regressions-fixed]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: issue-160-hot-audit-sink
+          fetch-depth: 0
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: internal/admin/ui/package.json
+      - name: Apply and verify focused fixes
+        run: |
+          python3 scripts/issue160_fix_regressions.py
+          gofmt -w internal/admin/preflight.go internal/admin/server_test.go
+          pnpm --dir internal/admin/ui install --frozen-lockfile
+          pnpm --dir internal/admin/ui exec prettier --write src/features/overview/OverviewPanel.tsx src/features/plugins/AdminRuntimeSettingsDrawer.tsx
+          pnpm --dir internal/admin/ui run typecheck
+          pnpm --dir internal/admin/ui exec vitest run src/features/plugins/AdminRuntimeSettingsDrawer.test.tsx
+      - name: Commit materialized fixes
+        run: |
+          rm scripts/issue160_fix_regressions.py .github/workflows/issue160-fix-regressions.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -s -m "fix(admin): close HR-07C regression gaps [issue160-regressions-fixed]"
+          git push origin HEAD:issue-160-hot-audit-sink
