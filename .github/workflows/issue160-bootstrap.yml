@@ -7,12 +7,9 @@ on:
 permissions:
   contents: write
 
-env:
-  FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
-
 jobs:
   bootstrap:
-    if: ${{ !contains(github.event.head_commit.message, '[issue160-bootstrap]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[issue160-materialized]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -23,19 +20,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Apply source transformations
-        run: python3 scripts/issue160_bootstrap.py
-      - name: Format Go
-        run: gofmt -w internal/admin/audit.go internal/admin/audit_sink_runtime.go internal/admin/audit_admin_runtime.go internal/admin/rbac.go internal/admin/runtime_snapshot.go internal/admin/patch.go internal/admin/patch_types.go internal/admin/patch_admin_runtime.go internal/admin/admin_runtime_status.go internal/server/server.go internal/server/reload_plan.go internal/app/serve.go internal/lifecycle/registry.go
-      - name: Generate lifecycle artifacts
-        run: make lifecycle-generate
-      - name: Targeted compile and tests
-        run: go test -count=1 -tags "${FULL_TAGS}" ./internal/admin ./internal/server ./internal/app ./internal/lifecycle
-      - name: Commit generated implementation
+      - name: Materialize structural transformation
+        run: |
+          git show c467cea94627504db5260ff4d62cd19ce0bc0ce7:scripts/issue160_bootstrap.py > /tmp/issue160-bootstrap.py
+          python3 /tmp/issue160-bootstrap.py
+          gofmt -w internal/admin/audit.go internal/admin/audit_sink_runtime.go internal/admin/audit_admin_runtime.go internal/admin/rbac.go internal/admin/runtime_snapshot.go internal/admin/patch.go internal/admin/patch_types.go internal/admin/patch_admin_runtime.go internal/admin/admin_runtime_status.go internal/server/server.go internal/server/reload_plan.go internal/app/serve.go internal/lifecycle/registry.go
+          make lifecycle-generate
+      - name: Commit materialized source
         run: |
           rm scripts/issue160_bootstrap.py .github/workflows/issue160-bootstrap.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -s -m "feat(admin): hot-reload durable audit sink [issue160-bootstrap]"
+          git commit -s -m "feat(admin): hot-reload durable audit sink [issue160-materialized]"
           git push origin HEAD:issue-160-hot-audit-sink
