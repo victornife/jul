@@ -23,7 +23,9 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Apply audited patch
-        run: python3 scripts/issue160_audit_fix.py
+        run: |
+          sed -i "s/f.write(r'''/f.write('''/g" scripts/issue160_audit_fix.py
+          python3 scripts/issue160_audit_fix.py
       - name: Format and verify admin package
         run: |
           gofmt -w internal/admin/audit.go internal/admin/admin_health.go internal/admin/audit_sink_runtime.go internal/admin/issue160_writer_matrix_test.go internal/admin/issue160_filesystem_linux_test.go
