@@ -634,7 +634,7 @@ func (o *auditFileOwner) writeLocked(cfg auditSinkConfig, p []byte) auditWriteRe
 		return auditWriteResult{category: auditFailureWrite, err: fmt.Errorf("audit event length %d exceeds maximum file size %d", len(p), max)}
 	}
 	rotate := o.size+int64(len(p)) > max
-	// Preserve lumberjack v2.2.1's lazy first-open boundary after Jul's old
+	// Preserve the legacy rotating writer's lazy first-open boundary after Jul's old
 	// startup probe: exact equality rotates for the first write, while an already
 	// open stream rotates only on greater-than.
 	if o.firstWrite && o.size+int64(len(p)) >= max {
