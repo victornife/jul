@@ -94,10 +94,10 @@ func TestAdminRateLimitConcurrentRetuneUsesOneStableBucket(t *testing.T) {
 	l.mu.Lock()
 	bucket := l.buckets[peer]
 	l.mu.Unlock()
-	if bucket == nil || bucket.write == nil || bucket.write.lim == nil {
+	if bucket == nil || bucket.write.limiter == nil {
 		t.Fatal("concurrent retunes replaced or lost the stable write bucket")
 	}
-	if got := bucket.write.lim.Burst(); got != 1 {
+	if got := bucket.write.limiter.Burst(); got != 1 {
 		t.Fatalf("final burst=%d want 1", got)
 	}
 }
