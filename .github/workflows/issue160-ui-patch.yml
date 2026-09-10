@@ -24,6 +24,7 @@ jobs:
           python3 scripts/issue160_ui_patch.py
           gofmt -w internal/admin/consolev2_test.go
           corepack enable
+          corepack prepare pnpm@11.8.0 --activate
           pnpm --dir internal/admin/ui install --frozen-lockfile
           pnpm --dir internal/admin/ui exec prettier --write src/api/client.ts src/features/plugins/AdminRuntimeSettingsDrawer.tsx
       - name: Commit materialized UI
