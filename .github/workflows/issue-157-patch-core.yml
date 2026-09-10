@@ -1,0 +1,35 @@
+name: issue-157 patch core
+
+on:
+  push:
+    branches:
+      - issue-157-hot-admin-runtime
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: patch source and generated contracts
+        run: |
+          python3 scripts/issue157_patch_core.py
+          gofmt -w internal/admin internal/app internal/lifecycle
+          make lifecycle-generate
+          make config-contract-generate
+          go test ./internal/admin ./internal/app ./internal/config ./internal/lifecycle ./internal/plugins
+          make generated-check
+      - name: commit verified changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/issue-157-patch-core.yml scripts/issue157_patch_core.py
+          git add -A
+          git commit -m "feat(admin): complete hot runtime policy integration (#157)"
+          git push origin HEAD:issue-157-hot-admin-runtime
