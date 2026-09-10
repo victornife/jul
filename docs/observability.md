@@ -364,3 +364,12 @@ to disable a specific limit.
 For a catalogue of in-tree benchmarks, how to run the harness, and production
 tuning recommendations (connection pooling, cache sizing, compression levels,
 worker limits), see [benchmarks.md](benchmarks.md).
+
+## Admin admission status (HR-07A)
+
+Authenticated admin runtime status reports the configured read/write/apply budgets and
+per-client SSE cap from one captured admin generation, then samples bounded mutable
+manager statistics: tracked clients, active SSE totals/clients, clients above the
+captured cap, maximum streams held by one client, and rejection counters by closed
+class. The process-wide active SSE total is not compared directly with a per-client
+cap. No client identity is emitted as a metric label.

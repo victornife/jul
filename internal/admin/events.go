@@ -104,12 +104,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bound concurrent SSE streams per client to prevent resource exhaustion
-	// (Console v2 Milestone 1.6). A nil limiter (limits disabled) admits all.
-	release, ok := s.limiter.acquireConn(adminClientIP(r))
+	// /api/events and /api/observability/logs/stream deliberately share one
+	// per-transport-peer lease budget. Admission uses this request's captured
+	// admin generation; later cap reductions never revoke an accepted lease.
+	policy := adminLimitPolicyFromConfig(s.requestAdminSnapshot(r).cfg)
+	release, ok := s.limiter.acquireConn(adminClientIP(r), policy)
 	if !ok {
-		w.Header().Set("Retry-After", "5")
-		http.Error(w, "429 Too Many Requests", http.StatusTooManyRequests)
+		writeRateLimited(w, r, 5)
 		return
 	}
 	defer release()

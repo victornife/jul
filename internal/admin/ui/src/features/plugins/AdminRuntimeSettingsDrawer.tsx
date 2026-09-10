@@ -61,6 +61,10 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
   const [uploadEnabled, setUploadEnabled] = useState(false);
   const [maxSize, setMaxSize] = useState("0");
   const [directory, setDirectory] = useState("");
+  const [readPerMin, setReadPerMin] = useState("240");
+  const [writePerMin, setWritePerMin] = useState("60");
+  const [applyPerMin, setApplyPerMin] = useState("30");
+  const [maxEventConns, setMaxEventConns] = useState("4");
   const [confirmDisable, setConfirmDisable] = useState(false);
 
   useEffect(() => {
@@ -69,6 +73,10 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
     setUploadEnabled(data.plugin_upload_enabled);
     setMaxSize(String(data.plugin_upload_max_size_mb));
     setDirectory(data.plugin_upload_dir);
+    setReadPerMin(String(data.rate_limit_read_per_min));
+    setWritePerMin(String(data.rate_limit_write_per_min));
+    setApplyPerMin(String(data.rate_limit_apply_per_min));
+    setMaxEventConns(String(data.max_event_conns));
     setConfirmDisable(false);
   }, [data]);
 
@@ -77,9 +85,17 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
   const uploadDisabling = Boolean(data?.plugin_upload_enabled && !uploadEnabled);
   const parsedMax = Number(maxSize);
   const maxValid = Number.isInteger(parsedMax) && parsedMax >= 0;
+  const parsedRead = Number(readPerMin);
+  const parsedWrite = Number(writePerMin);
+  const parsedApply = Number(applyPerMin);
+  const parsedConns = Number(maxEventConns);
+  const connsValid = Number.isInteger(parsedConns) && parsedConns >= 0;
+  const limitsValid = Number.isInteger(parsedRead) && Number.isInteger(parsedWrite) && Number.isInteger(parsedApply) && connsValid;
+  const effectiveConns = connsValid ? (parsedConns === 0 ? 4 : parsedConns) : null;
+  const loweringSSE = Boolean(data && effectiveConns !== null && effectiveConns < data.max_event_conns);
 
   const ops = useMemo<ConfigPatch[]>(() => {
-    if (!data || !maxValid) return [];
+    if (!data || !maxValid || !limitsValid) return [];
     const next: ConfigPatch[] = [];
     if (consoleEnabled !== data.console) {
       next.push({ op: "admin_console_set", enabled: consoleEnabled });
@@ -91,8 +107,16 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
     if (Object.keys(upload).length > 0) {
       next.push({ op: "admin_plugin_upload_set", plugin_upload: upload });
     }
+    const limits: { read_per_min?: number; write_per_min?: number; apply_per_min?: number; max_event_conns?: number } = {};
+    if (parsedRead !== data.rate_limit_read_per_min) limits.read_per_min = parsedRead;
+    if (parsedWrite !== data.rate_limit_write_per_min) limits.write_per_min = parsedWrite;
+    if (parsedApply !== data.rate_limit_apply_per_min) limits.apply_per_min = parsedApply;
+    if (parsedConns !== data.max_event_conns) limits.max_event_conns = parsedConns;
+    if (Object.keys(limits).length > 0) {
+      next.push({ op: "admin_limits_set", admin_limits: limits });
+    }
     return next;
-  }, [consoleEnabled, data, directory, maxValid, parsedMax, uploadEnabled]);
+  }, [consoleEnabled, data, directory, limitsValid, maxValid, parsedApply, parsedConns, parsedMax, parsedRead, parsedWrite, uploadEnabled]);
 
   if (isLoading) {
     return (
@@ -118,7 +142,7 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
 
   const previewError = describePatchBatchError(runner.error);
   const saveDisabled =
-    runner.busy || ops.length === 0 || !maxValid || directory.trim() === "" || (consoleDisabling && !confirmDisable);
+    runner.busy || ops.length === 0 || !maxValid || !limitsValid || directory.trim() === "" || (consoleDisabling && !confirmDisable);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40" role="dialog" aria-modal="true" aria-label="Admin runtime settings">
@@ -127,7 +151,7 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
           <div>
             <h2 className="text-lg font-semibold text-jul-text">Admin runtime settings</h2>
             <p className="mt-1 text-xs text-jul-muted">
-              Console mode and plugin-upload policy publish as one request-generation snapshot.
+              Console, upload and admission policy publish as one request-generation snapshot.
             </p>
           </div>
           <button type="button" onClick={onClose} className="text-sm text-jul-muted hover:text-jul-text">
@@ -139,14 +163,7 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
           <section className="rounded-lg border border-jul-border bg-jul-surface p-4">
             <SettingLabel title="Web Console" field={data.lifecycle.console} />
             <label className="flex items-center gap-3 text-sm text-jul-text">
-              <input
-                type="checkbox"
-                checked={consoleEnabled}
-                onChange={(event) => {
-                  setConsoleEnabled(event.target.checked);
-                  setConfirmDisable(false);
-                }}
-              />
+              <input type="checkbox" checked={consoleEnabled} onChange={(event) => { setConsoleEnabled(event.target.checked); setConfirmDisable(false); }} />
               Serve the embedded Console on the existing admin listener
             </label>
             <p className="mt-2 text-xs text-jul-muted">
@@ -158,11 +175,7 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
                 The authenticated admin API remains available on the same listener. Re-enable it by setting
                 <code className="mx-1">[admin] console = true</code> in the configuration and reloading, or by using an authenticated config apply/patch API request.
                 <label className="mt-3 flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={confirmDisable}
-                    onChange={(event) => { setConfirmDisable(event.target.checked); }}
-                  />
+                  <input type="checkbox" checked={confirmDisable} onChange={(event) => { setConfirmDisable(event.target.checked); }} />
                   <span>I understand how to re-enable the Console.</span>
                 </label>
               </div>
@@ -170,13 +183,56 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
           </section>
 
           <section className="rounded-lg border border-jul-border bg-jul-surface p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-jul-text">Admin request admission</span>
+              <LifecycleBadge field={data.lifecycle.rate_limit_read_per_min} />
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {[
+                ["Read / min", readPerMin, setReadPerMin],
+                ["Write / min", writePerMin, setWritePerMin],
+                ["Apply / min", applyPerMin, setApplyPerMin],
+              ].map(([label, value, setter]) => (
+                <label key={label as string} className="text-xs text-jul-muted">
+                  {label as string}
+                  <input
+                    type="number"
+                    step={1}
+                    value={value as string}
+                    onChange={(event) => { (setter as (value: string) => void)(event.target.value); }}
+                    className="mt-1 w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
+                  />
+                </label>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-jul-muted">
+              Positive values set an explicit limit. Zero means the canonical default. A negative request-rate value disables that class. Reload preserves accumulated client state; tighter limits govern the first new admission after Publish without resetting quotas.
+            </p>
+          </section>
+
+          <section className="rounded-lg border border-jul-border bg-jul-surface p-4">
+            <SettingLabel title="Concurrent event/log streams per client" field={data.lifecycle.max_event_conns} />
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={maxEventConns}
+              onChange={(event) => { setMaxEventConns(event.target.value); }}
+              className="w-32 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
+            />
+            {!connsValid && <p className="mt-1 text-xs text-jul-danger">Use a non-negative whole number. This setting has no unlimited mode.</p>}
+            <p className="mt-2 text-xs text-jul-muted">Zero selects the canonical default (4); positive values set the per-client cap. There is no unlimited mode. The cap is shared by event and live-log SSE streams for each transport peer.</p>
+            {loweringSSE && (
+              <p className="mt-3 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-2 text-xs text-jul-text">
+                Existing event/log streams remain connected. The new per-client cap applies to new connections; clients already above the cap cannot open another stream until their active count falls below the configured limit.
+              </p>
+            )}
+          </section>
+
+          <section className="rounded-lg border border-jul-border bg-jul-surface p-4">
             <SettingLabel title="Plugin uploads" field={data.lifecycle.plugin_upload_enabled} />
             <label className="flex items-center gap-3 text-sm text-jul-text">
-              <input
-                type="checkbox"
-                checked={uploadEnabled}
-                onChange={(event) => { setUploadEnabled(event.target.checked); }}
-              />
+              <input type="checkbox" checked={uploadEnabled} onChange={(event) => { setUploadEnabled(event.target.checked); }} />
               Accept authenticated WASM uploads
             </label>
             <p className="mt-2 text-xs text-jul-muted">
@@ -192,30 +248,15 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
           <section className="rounded-lg border border-jul-border bg-jul-surface p-4">
             <SettingLabel title="Maximum upload size" field={data.lifecycle.plugin_upload_max_size} />
             <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={maxSize}
-                onChange={(event) => { setMaxSize(event.target.value); }}
-                className="w-32 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
-              />
+              <input type="number" min={0} step={1} value={maxSize} onChange={(event) => { setMaxSize(event.target.value); }} className="w-32 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text" />
               <span className="text-sm text-jul-muted">MB</span>
             </div>
             {!maxValid && <p className="mt-1 text-xs text-jul-danger">Use a non-negative whole number.</p>}
-            <p className="mt-2 text-xs text-jul-muted">
-              Each admitted request keeps the limit it captured when the request began; a later tighten/loosen applies to new requests.
-            </p>
           </section>
 
           <section className="rounded-lg border border-jul-border bg-jul-surface p-4">
             <SettingLabel title="Upload directory" field={data.lifecycle.plugin_upload_dir} />
-            <input
-              type="text"
-              value={directory}
-              onChange={(event) => { setDirectory(event.target.value); }}
-              className="w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text"
-            />
+            <input type="text" value={directory} onChange={(event) => { setDirectory(event.target.value); }} className="w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text" />
             {directoryChanging && (
               <p className="mt-3 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-2 text-xs text-jul-text">
                 Jul validates the candidate directory before Publish, but does not copy, migrate, or delete files between directories. In-flight uploads finish against the directory generation they captured.
@@ -226,23 +267,12 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
           <p className="text-xs text-jul-muted">
             Save opens the authoritative server-side lifecycle preview. No setting is persisted until you review and apply that preview; mixed restart-bound admin changes are never partially published.
           </p>
-          {previewError && (
-            <p className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-2 text-xs text-jul-danger">
-              {previewError}
-            </p>
-          )}
+          {previewError && <p className="rounded-md border border-jul-danger/40 bg-jul-danger/10 p-2 text-xs text-jul-danger">{previewError}</p>}
         </div>
 
         <div className="mt-auto flex justify-end gap-2 border-t border-jul-border p-5">
-          <button type="button" onClick={onClose} className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-text">
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={saveDisabled}
-            onClick={() => void runner.run(ops)}
-            className="rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg disabled:opacity-50"
-          >
+          <button type="button" onClick={onClose} className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-text">Cancel</button>
+          <button type="button" disabled={saveDisabled} onClick={() => void runner.run(ops)} className="rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg disabled:opacity-50">
             {runner.busy ? "Preparing preview…" : "Review changes"}
           </button>
         </div>

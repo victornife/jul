@@ -56,7 +56,8 @@ type RouteSpec struct {
 	// Operations carries the per-method external metadata the OpenAPI
 	// generator cannot infer. It is required for every method of an external
 	// route and must be absent on an internal one.
-	Operations map[string]ExternalOperation
+	Operations   map[string]ExternalOperation
+	LimitClasses map[string]limitKind
 	// Sunset is the RFC 3339 date after which a StabilityDeprecated route may
 	// be removed. It is required on a deprecated route and empty otherwise.
 	Sunset string
@@ -597,10 +598,11 @@ var Catalog = []RouteSpec{
 
 	// ── Config write/preview (config:write) ───────────────────────────────────
 	{
-		Pattern:    "/api/config/validate",
-		Methods:    []string{http.MethodPost},
-		Permission: rbac.ConfigWrite,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigValidate) },
+		Pattern:      "/api/config/validate",
+		Methods:      []string{http.MethodPost},
+		Permission:   rbac.ConfigWrite,
+		LimitClasses: map[string]limitKind{http.MethodPost: limitApply},
+		Handler:      func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigValidate) },
 	},
 	{
 		Pattern:    "/api/config/preview",
@@ -609,10 +611,11 @@ var Catalog = []RouteSpec{
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPreview) },
 	},
 	{
-		Pattern:    "/api/config/diff",
-		Methods:    []string{http.MethodPost},
-		Permission: rbac.ConfigWrite,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigDiff) },
+		Pattern:      "/api/config/diff",
+		Methods:      []string{http.MethodPost},
+		Permission:   rbac.ConfigWrite,
+		LimitClasses: map[string]limitKind{http.MethodPost: limitApply},
+		Handler:      func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigDiff) },
 	},
 	{
 		Pattern:    "/api/config/patch",

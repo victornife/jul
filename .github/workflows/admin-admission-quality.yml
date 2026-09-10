@@ -1,0 +1,144 @@
+name: Admin admission quality
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "internal/admin/**"
+      - "internal/server/**"
+      - "testdata/console-e2e.toml"
+      - ".github/workflows/admin-admission-quality.yml"
+  push:
+    branches: [main]
+    paths:
+      - "internal/admin/**"
+      - "internal/server/**"
+      - "testdata/console-e2e.toml"
+      - ".github/workflows/admin-admission-quality.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+  COVERAGE_FLOOR: "90"
+
+jobs:
+  go-critical-path:
+    name: Go admin admission coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run admin tests with full-feature coverage
+        run: go test -count=1 -tags "${FULL_TAGS}" -coverprofile=admin-cover.out ./internal/admin
+      - name: Enforce critical production-file statement coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_file() {
+            local suffix="$1"
+            local cov
+            cov=$(awk -v suffix="$suffix" '
+              NR > 1 {
+                file=$1
+                sub(/:.*/, "", file)
+                if (length(file) >= length(suffix) && substr(file, length(file)-length(suffix)+1) == suffix) {
+                  stmts += $2
+                  if ($3 > 0) hit += $2
+                }
+              }
+              END { if (stmts > 0) printf "%.1f", hit*100/stmts; else print "0.0" }
+            ' admin-cover.out)
+            echo "coverage ${suffix} = ${cov}% (floor ${COVERAGE_FLOOR}%)"
+            awk -v t="$cov" -v f="$COVERAGE_FLOOR" 'BEGIN { exit (t >= f) ? 0 : 1 }'
+          }
+          check_file "internal/admin/ratelimit.go"
+          check_file "internal/admin/patch_admin_runtime.go"
+      - name: Server reload-source and mixed-candidate regressions
+        run: >-
+          go test -count=1 -tags "${FULL_TAGS}"
+          ./internal/server
+          -run '^TestIssue158'
+      - name: Targeted race regression
+        run: >-
+          go test -count=1 -race -p 2 -tags "console"
+          ./internal/admin
+          -run 'TestAdminRateLimit|TestAdminEventConn|TestAdminLimiter|TestAdminSSE|TestAdminRouteCatalogue|TestAdminLimits|TestXTimeRate'
+
+  console-critical-path:
+    name: Console admin admission coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: internal/admin/ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: internal/admin/ui/package.json
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Enforce HR-07A Console coverage
+        run: >-
+          pnpm exec vitest run src/features/plugins/AdminRuntimeSettingsDrawer.test.tsx
+          --coverage
+          --coverage.include=src/features/plugins/AdminRuntimeSettingsDrawer.tsx
+          --coverage.reporter=text
+          --coverage.thresholds.statements=90
+          --coverage.thresholds.lines=90
+          --coverage.thresholds.functions=90
+          --coverage.thresholds.branches=90
+
+  real-server-acceptance:
+    name: HR-07A real-server API and Console E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CONSOLE_UI: internal/admin/ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build Jul for real-server Console acceptance
+        run: go build -tags "console grpc" -o jul ./cmd/jul
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: internal/admin/ui/package.json
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+      - name: Install Console dependencies
+        run: pnpm --dir ${{ env.CONSOLE_UI }} install --frozen-lockfile
+      - name: Build Console SPA
+        run: pnpm --dir ${{ env.CONSOLE_UI }} run build
+      - name: Install Chromium
+        run: |
+          for attempt in 1 2 3; do
+            timeout 5m pnpm --dir ${{ env.CONSOLE_UI }} exec playwright install chromium && break
+            echo "::warning::browser download attempt $attempt failed or timed out"
+            if [ "$attempt" = 3 ]; then
+              echo "::error::could not download the Playwright browser"
+              exit 1
+            fi
+            sleep 15
+          done
+          timeout 5m pnpm --dir ${{ env.CONSOLE_UI }} exec playwright install-deps chromium \
+            || echo "::warning::playwright install-deps failed; continuing with runner libraries"
+      - name: Run HR-07A real-server acceptance
+        run: >-
+          pnpm --dir ${{ env.CONSOLE_UI }} exec playwright test
+          e2e/issue158-admin-runtime.spec.ts
+          --project=real-server

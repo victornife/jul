@@ -79,10 +79,10 @@ counts:
   schema_paths: 356
   schema_leaves: 302
   registry_entries: 302
-  startup_consumed: 44
+  startup_consumed: 40
   by_class:
-    hot_reload: 243
-    restart_required: 44
+    hot_reload: 247
+    restart_required: 40
     new_listener_only: 8
     ignored_deprecated: 4
     validation_rejected_reserved: 3
@@ -136,10 +136,9 @@ fields:
     reason: "the admin listener and its resources are created once at startup"
     startup_consumed: true
   - path: "admin.max_event_conns"
-    class: restart_required
+    class: hot_reload
     subsystem: admin
-    reason: "the admin listener and its resources are created once at startup"
-    startup_consumed: true
+    reason: "new SSE admissions use the captured per-client connection cap while existing leases and connection counts survive policy reload"
   - path: "admin.plugin_upload_dir"
     class: hot_reload
     subsystem: admin
@@ -153,20 +152,17 @@ fields:
     subsystem: admin
     reason: "each upload captures its size limit from the immutable admin runtime snapshot before body processing"
   - path: "admin.rate_limit_apply_per_min"
-    class: restart_required
+    class: hot_reload
     subsystem: admin
-    reason: "the admin listener and its resources are created once at startup"
-    startup_consumed: true
+    reason: "new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload"
   - path: "admin.rate_limit_read_per_min"
-    class: restart_required
+    class: hot_reload
     subsystem: admin
-    reason: "the admin listener and its resources are created once at startup"
-    startup_consumed: true
+    reason: "new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload"
   - path: "admin.rate_limit_write_per_min"
-    class: restart_required
+    class: hot_reload
     subsystem: admin
-    reason: "the admin listener and its resources are created once at startup"
-    startup_consumed: true
+    reason: "new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload"
   - path: "admin.rbac.default_role"
     class: hot_reload
     subsystem: rbac

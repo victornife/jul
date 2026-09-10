@@ -394,6 +394,19 @@ export const AdminRuntimeStatusSchema = z.object({
   upload_directory_health: z.string(),
   preparation_failure: z.string().optional(),
   last_upload_rejection: z.string().optional(),
+  rate_limit_read_per_min: z.number().int(),
+  rate_limit_write_per_min: z.number().int(),
+  rate_limit_apply_per_min: z.number().int(),
+  max_event_conns: z.number().int().positive(),
+  tracked_limiter_clients: z.number().int().nonnegative(),
+  sse_active_total: z.number().int().nonnegative(),
+  sse_active_clients: z.number().int().nonnegative(),
+  sse_over_cap_clients: z.number().int().nonnegative(),
+  sse_max_per_client: z.number().int().nonnegative(),
+  rate_read_rejected: z.number().int().nonnegative(),
+  rate_write_rejected: z.number().int().nonnegative(),
+  rate_apply_rejected: z.number().int().nonnegative(),
+  sse_rejected: z.number().int().nonnegative(),
 });
 export type AdminRuntimeStatus = z.infer<typeof AdminRuntimeStatusSchema>;
 
@@ -855,6 +868,10 @@ export const AdminRuntimeSettingsProjectionSchema = z.object({
   plugin_upload_enabled: z.boolean(),
   plugin_upload_max_size_mb: z.number().int().nonnegative(),
   plugin_upload_dir: z.string(),
+  rate_limit_read_per_min: z.number().int(),
+  rate_limit_write_per_min: z.number().int(),
+  rate_limit_apply_per_min: z.number().int(),
+  max_event_conns: z.number().int().positive(),
   plugin_upload_effective: z.boolean(),
   upload_directory_health: z.string(),
   lifecycle: z.record(z.string(), LifecycleFieldProjectionSchema).default({}),
@@ -1663,6 +1680,7 @@ export type ConfigPatch =
   | { op: "upstream_remove"; upstream: string }
   | { op: "global_set"; global: GlobalPatch }
   | { op: "admin_console_set"; enabled: boolean }
+  | { op: "admin_limits_set"; admin_limits: { read_per_min?: number; write_per_min?: number; apply_per_min?: number; max_event_conns?: number } }
   | {
       op: "admin_plugin_upload_set";
       plugin_upload: { enabled?: boolean; max_size_mb?: number; directory?: string };

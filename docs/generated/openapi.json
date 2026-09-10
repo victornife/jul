@@ -5334,6 +5334,28 @@
                 "address": {
                   "type": "string"
                 },
+                "admin_limits": {
+                  "type": "object",
+                  "properties": {
+                    "apply_per_min": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "max_event_conns": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "read_per_min": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "write_per_min": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  },
+                  "additionalProperties": false
+                },
                 "auth": {
                   "type": "object",
                   "properties": {

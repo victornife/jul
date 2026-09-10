@@ -345,3 +345,18 @@ Runtime observability exposes only bounded categories and effective state. Uploa
 
 See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
 
+## Admin admission-state continuity (HR-07A)
+
+Admin request limiting is keyed by the transport peer IP from `RemoteAddr`; untrusted
+`Forwarded` and `X-Forwarded-For` values never select a bucket. The limiter manager is
+stable for the admin runtime lifetime, while the read/write/apply policy is taken from
+the same immutable admin generation captured once per request. This deliberately
+preserves accumulated abuse state across reloads: a configuration change cannot grant
+a fresh burst, reset active SSE counts, or erase another request class's history.
+
+Secure-transport approval remains ahead of admission/authentication, and rate-limit
+refusal does not inspect bearer-token contents or authorization results. External
+`/api/v1` refusals retain the closed `rate_limited` response contract, including a
+server request ID and a `Retry-After` value matching `details.retry_after_seconds`.
+Operational metrics/status use bounded classes and aggregates only; client IPs,
+principals, tokens, request IDs and policy generations are not metric labels.

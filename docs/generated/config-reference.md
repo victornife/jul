@@ -141,11 +141,10 @@ MaxEventConns bounds concurrent /api/events SSE streams per client to prevent re
 | | |
 | --- | --- |
 | Type | `integer` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `admin` |
-| Why | the admin listener and its resources are created once at startup |
+| Why | new SSE admissions use the captured per-client connection cap while existing leases and connection counts survive policy reload |
 | Default | 4 |
-| Flags | startup-consumed |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 4 |
 | Active when | always |
@@ -196,11 +195,10 @@ RateLimitApplyPerMin caps the high-impact config validate/diff/apply endpoints p
 | | |
 | --- | --- |
 | Type | `integer` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `admin` |
-| Why | the admin listener and its resources are created once at startup |
+| Why | new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload |
 | Default | 30 |
-| Flags | startup-consumed |
 | Constraint | any integer; negative disables the limiter |
 | Zero/empty semantics | omitted/zero defaults to 30 |
 | Active when | always |
@@ -212,11 +210,10 @@ RateLimitReadPerMin caps read (GET) admin/API requests per client per minute.
 | | |
 | --- | --- |
 | Type | `integer` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `admin` |
-| Why | the admin listener and its resources are created once at startup |
+| Why | new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload |
 | Default | 240 |
-| Flags | startup-consumed |
 | Constraint | any integer; negative disables the limiter |
 | Zero/empty semantics | omitted/zero defaults to 240 |
 | Active when | always |
@@ -228,11 +225,10 @@ RateLimitWritePerMin caps mutating (POST/PUT/DELETE) admin requests per client p
 | | |
 | --- | --- |
 | Type | `integer` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `admin` |
-| Why | the admin listener and its resources are created once at startup |
+| Why | new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload |
 | Default | 60 |
-| Flags | startup-consumed |
 | Constraint | any integer; negative disables the limiter |
 | Zero/empty semantics | omitted/zero defaults to 60 |
 | Active when | always |

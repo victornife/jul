@@ -1083,3 +1083,19 @@ The Runtime settings drawer submits a typed change through the normal lifecycle 
 
 See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
 
+## Admin admission controls (HR-07A)
+
+The Admin runtime settings drawer can change the live read, write and high-impact
+apply request budgets plus the per-transport-client SSE connection cap without
+restarting an existing admin listener. Request-rate values preserve the canonical
+configuration semantics: zero selects the configured default, a negative value
+disables that request class, and a positive value is an explicit requests-per-minute
+limit. For `max_event_conns`, zero selects the canonical default (4), positive values
+set the cap, and negative/unlimited values are not supported.
+
+Reload does not reset accumulated client quotas. A tighter policy governs the first
+new admission after Publish. Lowering the SSE cap never terminates an existing event
+or live-log stream; clients already at or above the new per-client cap must fall below
+it before opening another stream. Lifecycle badges and preview remain server-derived,
+and mixed changes that include `admin.enabled` or `admin.listen` remain whole-candidate
+restart/staging operations.

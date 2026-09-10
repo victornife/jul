@@ -12,59 +12,94 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"jul/internal/adminapi"
+	"jul/internal/config"
+	"jul/internal/rbac"
 )
 
-// adminLimiter enforces the Console v2 Milestone 1.6 admin-API protections:
-// per-client request rate limits (separately for reads, writes, and the
-// high-impact config apply/validate/diff endpoints) plus a concurrent-connection
-// cap on the /api/events SSE stream. Clients are keyed by transport peer IP so a
-// single shared admin token cannot be used to exhaust the limits from many
-// hosts. A nil *adminLimiter is a no-op, so the middleware degrades gracefully
-// when limits are disabled.
-type adminLimiter struct {
-	log *slog.Logger
-
+// adminLimitPolicy is immutable request-generation policy. It is always derived
+// from the AdminConfig carried by the request's captured #157 admin snapshot;
+// mutable abuse/accounting state deliberately lives in adminLimiter instead.
+type adminLimitPolicy struct {
 	readPerMin  int
 	writePerMin int
 	applyPerMin int
 	maxConns    int
+}
+
+func adminLimitPolicyFromConfig(cfg config.AdminConfig) adminLimitPolicy {
+	return adminLimitPolicy{
+		readPerMin:  cfg.RateLimitReadPerMin,
+		writePerMin: cfg.RateLimitWritePerMin,
+		applyPerMin: cfg.RateLimitApplyPerMin,
+		maxConns:    cfg.MaxEventConns,
+	}
+}
+
+func (p adminLimitPolicy) perMinute(kind limitKind) int {
+	switch kind {
+	case limitWrite:
+		return p.writePerMin
+	case limitApply:
+		return p.applyPerMin
+	default:
+		return p.readPerMin
+	}
+}
+
+// adminLimiter is the process-lifetime mutable admission-state manager. Its
+// identity does not change when admin policy reloads: per-client token history,
+// SSE leases and idle bookkeeping therefore survive a snapshot publication.
+type adminLimiter struct {
+	log *slog.Logger
+	now func() time.Time
 
 	mu       sync.Mutex
 	buckets  map[string]*adminClient
 	lastSeen map[string]time.Time
+	nextGC   time.Time
+
+	lastRejectLog [3]time.Time
+	rejections    [3]uint64
+	sseRejected   uint64
 }
 
-// adminClient holds one client's token buckets and live SSE connection count.
+// adminRateBucket keeps the limiter object even while its class is disabled.
+// That matters for finite -> disabled -> finite: reload is not quota forgiveness.
+type adminRateBucket struct {
+	limiter       *rate.Limiter
+	appliedPerMin int
+	initialized   bool
+}
+
+// adminClient holds one transport peer's independent request buckets and live
+// SSE lease count.
 type adminClient struct {
-	read  *rate.Limiter
-	write *rate.Limiter
-	apply *rate.Limiter
+	read  adminRateBucket
+	write adminRateBucket
+	apply adminRateBucket
 	conns int
 }
 
-// newAdminLimiter builds a limiter from the resolved per-minute limits and SSE
-// connection cap. It returns nil when every protection is disabled so callers
-// can skip the middleware entirely.
-func newAdminLimiter(log *slog.Logger, readPerMin, writePerMin, applyPerMin, maxConns int) *adminLimiter {
-	if readPerMin <= 0 && writePerMin <= 0 && applyPerMin <= 0 && maxConns <= 0 {
-		return nil
-	}
+// newAdminLimiter always returns one stable manager. The variadic compatibility
+// argument intentionally carries no policy authority; production policy is read
+// only from the immutable request snapshot. Keeping the shape avoids forcing
+// callers/tests compiled against the old constructor through a transition shim.
+func newAdminLimiter(log *slog.Logger, _ ...int) *adminLimiter {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &adminLimiter{
-		log:         log,
-		readPerMin:  readPerMin,
-		writePerMin: writePerMin,
-		applyPerMin: applyPerMin,
-		maxConns:    maxConns,
-		buckets:     make(map[string]*adminClient),
-		lastSeen:    make(map[string]time.Time),
+		log:      log,
+		now:      time.Now,
+		buckets:  make(map[string]*adminClient),
+		lastSeen: make(map[string]time.Time),
 	}
 }
 
-// kind classifies an admin request for limit selection.
-type limitKind int
+// limitKind is a closed, bounded request admission class.
+type limitKind uint8
 
 const (
 	limitRead limitKind = iota
@@ -72,57 +107,71 @@ const (
 	limitApply
 )
 
-// perMinute converts a requests-per-minute budget into a rate.Limiter. A
-// non-positive budget yields an Inf limiter (never limited). Burst equals the
-// per-minute budget so short bursts of legitimate polling are tolerated while
-// the sustained rate is still bounded.
-func perMinute(n int) *rate.Limiter {
-	if n <= 0 {
-		return rate.NewLimiter(rate.Inf, 0)
+func (k limitKind) String() string {
+	switch k {
+	case limitWrite:
+		return "write"
+	case limitApply:
+		return "apply"
+	default:
+		return "read"
 	}
-	return rate.NewLimiter(rate.Limit(float64(n)/60.0), n)
 }
 
-// client returns the per-IP bucket set, creating it on first use.
-func (l *adminLimiter) client(ip string) *adminClient {
+func finiteLimiter(perMinute int) *rate.Limiter {
+	return rate.NewLimiter(rate.Limit(float64(perMinute)/60.0), perMinute)
+}
+
+func (c *adminClient) bucket(kind limitKind) *adminRateBucket {
+	switch kind {
+	case limitWrite:
+		return &c.write
+	case limitApply:
+		return &c.apply
+	default:
+		return &c.read
+	}
+}
+
+func (l *adminLimiter) clientLocked(ip string, now time.Time) *adminClient {
 	c := l.buckets[ip]
 	if c == nil {
-		c = &adminClient{
-			read:  perMinute(l.readPerMin),
-			write: perMinute(l.writePerMin),
-			apply: perMinute(l.applyPerMin),
-		}
+		c = &adminClient{}
 		l.buckets[ip] = c
 	}
-	l.lastSeen[ip] = time.Now()
+	l.lastSeen[ip] = now
 	return c
 }
 
-// allow reports whether a request of the given kind from ip may proceed and,
-// when denied, the suggested Retry-After in whole seconds.
-func (l *adminLimiter) allow(ip string, kind limitKind) (bool, int) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.gcLocked()
-
-	c := l.client(ip)
-	var lim *rate.Limiter
-	switch kind {
-	case limitWrite:
-		lim = c.write
-	case limitApply:
-		lim = c.apply
-	default:
-		lim = c.read
+// reserveLocked performs policy retune and admission as one synchronized
+// transaction. x/time/rate's SetLimitAt/SetBurstAt update the bucket parameters;
+// ReserveN at the same timestamp advances using the new burst, which clamps any
+// previously accumulated excess before the first new-policy admission.
+func (b *adminRateBucket) reserveLocked(now time.Time, perMinute int) (bool, int) {
+	if perMinute <= 0 {
+		// Disabled request classes bypass admission but retain any finite limiter
+		// and its timeline for a later re-enable.
+		b.appliedPerMin = perMinute
+		return true, 0
 	}
 
-	r := lim.Reserve()
-	if !r.OK() {
+	if !b.initialized || b.limiter == nil {
+		b.limiter = finiteLimiter(perMinute)
+		b.appliedPerMin = perMinute
+		b.initialized = true
+	} else if b.appliedPerMin != perMinute {
+		b.limiter.SetLimitAt(now, rate.Limit(float64(perMinute)/60.0))
+		b.limiter.SetBurstAt(now, perMinute)
+		b.appliedPerMin = perMinute
+	}
+
+	reservation := b.limiter.ReserveN(now, 1)
+	if !reservation.OK() {
 		return false, 1
 	}
-	if d := r.Delay(); d > 0 {
-		r.Cancel()
-		secs := int((d + time.Second - 1) / time.Second)
+	if delay := reservation.DelayFrom(now); delay > 0 {
+		reservation.CancelAt(now)
+		secs := int((delay + time.Second - 1) / time.Second)
 		if secs < 1 {
 			secs = 1
 		}
@@ -131,56 +180,110 @@ func (l *adminLimiter) allow(ip string, kind limitKind) (bool, int) {
 	return true, 0
 }
 
-// acquireConn tries to register a new SSE connection for ip, returning a release
-// function when admitted. It returns ok=false once the per-client cap is hit.
-func (l *adminLimiter) acquireConn(ip string) (release func(), ok bool) {
-	if l == nil || l.maxConns <= 0 {
-		return func() {}, true
-	}
+// allow admits one request under the policy captured with that request. One
+// timestamp covers lazy retune, reservation, cancellation and Retry-After.
+func (l *adminLimiter) allow(ip string, kind limitKind, policy adminLimitPolicy) (bool, int) {
+	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.gcLocked()
+	l.gcLocked(now)
 
-	c := l.client(ip)
-	if c.conns >= l.maxConns {
+	c := l.clientLocked(ip, now)
+	ok, retryAfter := c.bucket(kind).reserveLocked(now, policy.perMinute(kind))
+	if !ok {
+		l.rejections[int(kind)]++
+	}
+	return ok, retryAfter
+}
+
+// acquireConn registers an SSE lease under the cap from the same captured admin
+// generation as the request. Lowering the cap never revokes existing leases;
+// it only blocks new admissions until the peer drops below the new cap.
+func (l *adminLimiter) acquireConn(ip string, policy adminLimitPolicy) (release func(), ok bool) {
+	now := l.now()
+	l.mu.Lock()
+	l.gcLocked(now)
+	c := l.clientLocked(ip, now)
+	if policy.maxConns > 0 && c.conns >= policy.maxConns {
+		l.sseRejected++
+		l.mu.Unlock()
 		return nil, false
 	}
 	c.conns++
-	released := false
+	l.mu.Unlock()
+
+	var once sync.Once
 	return func() {
-		l.mu.Lock()
-		defer l.mu.Unlock()
-		if released {
-			return
-		}
-		released = true
-		if cc := l.buckets[ip]; cc != nil && cc.conns > 0 {
-			cc.conns--
-		}
+		once.Do(func() {
+			now := l.now()
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			if cc := l.buckets[ip]; cc != nil {
+				if cc.conns > 0 {
+					cc.conns--
+				}
+				l.lastSeen[ip] = now
+			}
+		})
 	}, true
 }
 
-// eventConnCount returns the total number of live SSE connections across all
-// clients, for the Console health endpoint (Milestone 5.7). A nil limiter
-// reports zero.
-func (l *adminLimiter) eventConnCount() int {
-	if l == nil {
-		return 0
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	total := 0
-	for _, c := range l.buckets {
-		total += c.conns
-	}
-	return total
+type adminLimiterStats struct {
+	TrackedClients    int
+	SSEActiveTotal    int
+	SSEActiveClients  int
+	SSEOverCapClients int
+	SSEMaxPerClient   int
+	SSERejected       uint64
+	ReadRejected      uint64
+	WriteRejected     uint64
+	ApplyRejected     uint64
 }
 
-// gcLocked evicts idle client entries with no live connections so the maps stay
-// bounded under churny IP spaces. The caller must hold l.mu.
-func (l *adminLimiter) gcLocked() {
-	const idle = 15 * time.Minute
-	cutoff := time.Now().Add(-idle)
+// stats samples mutable process-lifetime accounting against one captured policy.
+// It deliberately exposes no transport peer identities.
+func (l *adminLimiter) stats(policy adminLimitPolicy) adminLimiterStats {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := adminLimiterStats{
+		TrackedClients: len(l.buckets),
+		SSERejected:    l.sseRejected,
+		ReadRejected:   l.rejections[int(limitRead)],
+		WriteRejected:  l.rejections[int(limitWrite)],
+		ApplyRejected:  l.rejections[int(limitApply)],
+	}
+	for _, c := range l.buckets {
+		if c.conns <= 0 {
+			continue
+		}
+		out.SSEActiveClients++
+		out.SSEActiveTotal += c.conns
+		if c.conns > out.SSEMaxPerClient {
+			out.SSEMaxPerClient = c.conns
+		}
+		if policy.maxConns > 0 && c.conns > policy.maxConns {
+			out.SSEOverCapClients++
+		}
+	}
+	return out
+}
+
+func (l *adminLimiter) eventConnCount() int {
+	return l.stats(adminLimitPolicy{}).SSEActiveTotal
+}
+
+// gcLocked amortizes the historical O(number of clients) scan. Active SSE
+// peers are retained regardless of request-idle age.
+func (l *adminLimiter) gcLocked(now time.Time) {
+	const (
+		idle       = 15 * time.Minute
+		gcInterval = time.Minute
+	)
+	if !l.nextGC.IsZero() && now.Before(l.nextGC) {
+		return
+	}
+	l.nextGC = now.Add(gcInterval)
+	cutoff := now.Add(-idle)
 	for ip, seen := range l.lastSeen {
 		if seen.Before(cutoff) {
 			if c := l.buckets[ip]; c == nil || c.conns == 0 {
@@ -191,46 +294,102 @@ func (l *adminLimiter) gcLocked() {
 	}
 }
 
-// classify maps an HTTP request to its limit kind. The high-impact config
-// validate/diff/apply endpoints are limited separately and more strictly than
-// ordinary writes; all other mutations are writes; everything else is a read.
-func classify(r *http.Request) limitKind {
-	switch r.Method {
+func safeMethod(method string) bool {
+	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	default:
+		return false
+	}
+}
+
+func permissionForMethod(spec RouteSpec, method string) rbac.Permission {
+	if spec.Permissions != nil {
+		return spec.Permissions[method]
+	}
+	return spec.Permission
+}
+
+func hasPermission(perms []rbac.Permission, target rbac.Permission) bool {
+	for _, p := range perms {
+		if p == target {
+			return true
+		}
+	}
+	return false
+}
+
+// limitClassForSpec derives the admission decision from the authoritative route
+// catalogue rather than a parallel path switch. Safe methods are reads. Config
+// assessment/mutation permissions use the stricter apply budget; other
+// mutations use write. Unknown methods are conservatively write.
+func limitClassForSpec(spec RouteSpec, method string) limitKind {
+	if explicit, ok := spec.LimitClasses[method]; ok {
+		return explicit
+	}
+	if safeMethod(method) {
 		return limitRead
 	}
-	switch r.URL.Path {
-	case "/api/config/apply", "/api/config/validate", "/api/config/diff":
+
+	perm := permissionForMethod(spec, method)
+	if perm == rbac.ConfigApply || perm == rbac.HistoryRollback || perm == rbac.ConfigAdopt || hasPermission(spec.AnyPermissions, rbac.ConfigApply) || hasPermission(spec.AnyPermissions, rbac.HistoryRollback) || hasPermission(spec.AnyPermissions, rbac.ConfigAdopt) {
 		return limitApply
+	}
+	if op, ok := spec.Operations[method]; ok {
+		switch op.ID {
+		case "validateConfig", "planConfig", "previewConfigPatch", "applyConfig", "applyConfigPatch", "rollbackConfig", "previewAdoptExternal", "adoptExternal", "discardPendingRestart":
+			return limitApply
+		}
 	}
 	return limitWrite
 }
 
-// rateLimit wraps next with the admin request-rate protections. A nil receiver
-// (limits disabled) returns next unchanged. SSE connection caps are enforced
-// separately by the events handler via acquireConn.
-func (l *adminLimiter) rateLimit(next http.Handler) http.Handler {
-	if l == nil {
-		return next
+func (l *adminLimiter) maybeLogRejection(kind limitKind, retryAfter int) {
+	now := l.now()
+	l.mu.Lock()
+	last := l.lastRejectLog[int(kind)]
+	if !last.IsZero() && now.Sub(last) < time.Second {
+		l.mu.Unlock()
+		return
 	}
+	l.lastRejectLog[int(kind)] = now
+	l.mu.Unlock()
+	l.log.Warn("admin rate limit exceeded", "class", kind.String(), "retry_after_s", retryAfter)
+}
+
+func writeRateLimited(w http.ResponseWriter, r *http.Request, retryAfter int) {
+	if retryAfter < 1 {
+		retryAfter = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+	if _, external := externalContract(r.Context()); external {
+		v := retryAfter
+		writeAPIError(w, r, adminapi.New(adminapi.CodeRateLimited).WithDetails(adminapi.Details{RetryAfterSeconds: &v}))
+		return
+	}
+	http.Error(w, "429 Too Many Requests", http.StatusTooManyRequests)
+}
+
+// limitRoute is installed exactly once while the stable mux is built. Policy is
+// loaded only through requestAdminSnapshot, which reuses the snapshot captured
+// at outer mux entry. It therefore cannot observe a different reload generation
+// from auth/Console/upload policy.
+func (s *Server) limitRoute(spec RouteSpec, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := adminClientIP(r)
-		kind := classify(r)
-		ok, retryAfter := l.allow(ip, kind)
+		policy := adminLimitPolicyFromConfig(s.requestAdminSnapshot(r).cfg)
+		kind := limitClassForSpec(spec, r.Method)
+		ok, retryAfter := s.limiter.allow(adminClientIP(r), kind, policy)
 		if !ok {
-			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-			l.log.Warn("admin rate limit exceeded",
-				"client", ip, "method", r.Method, "path", r.URL.Path, "retry_after_s", retryAfter)
-			http.Error(w, "429 Too Many Requests", http.StatusTooManyRequests)
+			s.limiter.maybeLogRejection(kind, retryAfter)
+			writeRateLimited(w, r, retryAfter)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
 }
 
-// adminClientIP extracts the transport peer IP from a request, falling back to
-// the raw RemoteAddr when it carries no port. Untrusted forwarding headers are
-// deliberately ignored so the limit key cannot be spoofed.
+// adminClientIP extracts the transport peer IP and deliberately ignores
+// untrusted forwarding headers so callers cannot choose their own bucket key.
 func adminClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

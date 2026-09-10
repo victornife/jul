@@ -875,3 +875,10 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 - Stream proxy, WASM plugins, WAF, HTTP/3, and Consul/Kubernetes discovery promoted from experimental to Beta.
 - TOML schema extended with upstream health checks, service discovery blocks, and plugin configurations.
 
+- **Hot-reload admin admission policy (#158):** `admin.rate_limit_read_per_min`,
+  `admin.rate_limit_write_per_min`, `admin.rate_limit_apply_per_min`, and
+  `admin.max_event_conns` now publish live on an existing admin server. Per-client
+  token buckets and shared event/log SSE leases survive reload, tighter policies apply
+  to the first new admission without a quota reset, existing SSE streams are not
+  force-closed when the cap is reduced, and versioned API 429 responses retain the
+  `rate_limited`/`Retry-After` contract.
