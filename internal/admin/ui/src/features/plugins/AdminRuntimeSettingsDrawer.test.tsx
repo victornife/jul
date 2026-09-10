@@ -83,7 +83,11 @@ function rateInput(label: string): HTMLInputElement {
 }
 
 function spinbutton(index: number): HTMLInputElement {
-  return screen.getAllByRole("spinbutton")[index];
+  const element = screen.getAllByRole("spinbutton")[index];
+  if (!(element instanceof HTMLInputElement)) {
+    throw new Error(`spinbutton ${index} is not an input`);
+  }
+  return element;
 }
 
 describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
