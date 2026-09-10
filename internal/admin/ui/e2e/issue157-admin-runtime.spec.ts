@@ -97,7 +97,7 @@ test.describe("HR-06B admin runtime", () => {
 
       await expect(page).toHaveURL(/\/config$/);
       await expect(page.getByText("atomic patch", { exact: true })).toBeVisible();
-      await expect(page.getByText("admin.console", { exact: true })).toBeVisible();
+      await expect(page.locator("code").filter({ hasText: /^admin\.console$/ })).toBeVisible();
       await expect(page.getByText("Hot apply: available", { exact: true })).toBeVisible();
 
       // First submission intentionally omits confirm_admin. The server's
