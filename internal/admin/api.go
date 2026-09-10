@@ -156,6 +156,7 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 	}
 	// Admin subsystem health is surfaced only when degraded (F-05).
 	out.AdminHealth = s.adminHealthProjection()
+	out.AdminRuntime = s.adminRuntimeStatus(r)
 	if s.deps.Authority != nil {
 		status := s.deps.Authority()
 		out.Authority = &status

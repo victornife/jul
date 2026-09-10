@@ -551,3 +551,12 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 - [docs/compatibility.md](compatibility.md) — versioning and stability policy
 - [docs/roadmap/README.md](roadmap/README.md) — what is planned, what is
   deferred, and what is demand-gated
+
+## Admin operational hot-reload boundaries
+
+HR-06B hot-reloads Console mode and plugin-upload admission/max-size/directory only when the admin server already exists. It does **not** make the management listener structural lifecycle dynamic: `admin.enabled` and `admin.listen` still require the established restart/stage-restart path, pending the separately gated #97 decision.
+
+Plugin directory changes intentionally do not migrate or clean up files. Host-filesystem semantics still apply outside the opened upload root, and a storage device can fail after a candidate was successfully prepared; such post-Publish I/O failures are reported as runtime degradation/rejection rather than pretending the committed configuration was rolled back. A lean binary cannot serve embedded Console assets even if `admin.console = true`; effective status reports that distinction explicitly.
+
+See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
+

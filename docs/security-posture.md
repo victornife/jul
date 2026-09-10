@@ -336,3 +336,12 @@ See [docs/release.md](release.md) for verification steps.
 - [docs/deployment.md](deployment.md) — systemd / Docker hardening
 - [docs/adr/0010-console-rbac.md](adr/0010-console-rbac.md) — RBAC design
 - [docs/specs/console-rbac.md](specs/console-rbac.md) — RBAC implementation spec
+
+## Admin runtime generation and upload boundary (HR-06B)
+
+Console mode and plugin-upload policy now share the same immutable per-request admin generation as authentication/RBAC. This closes a split-generation class where a request could otherwise authenticate under one policy and later consult another mutable Console/upload policy. Upload-disable rejects before body parsing; candidate directories are preflighted before Publish; final writes are root-confined, owner-only on Unix and reject unsafe destination types.
+
+Runtime observability exposes only bounded categories and effective state. Upload paths, filenames, bearer tokens, resolved secrets and raw filesystem errors are not metric labels or runtime-status fields. The configured upload directory appears only on the authenticated `config:read` settings projection where it is required for operator editing.
+
+See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
+

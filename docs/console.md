@@ -1074,3 +1074,12 @@ its `base_version` together in memory. It always stages and never offers Apply
 live. Raw candidate source requires `config:raw`; typed edits require
 `config:write`, and the final action independently requires `config:apply`.
 Candidate TOML is not serialized to `sessionStorage` or `localStorage`.
+
+## Hot Console mode (HR-06B)
+
+In Full builds, `[admin].console` is hot-reloadable on an already-running admin server. The route mux and admin listener stay in place: each request is pinned to one immutable admin generation and `/`/`/ui` dispatches either the embedded Console or the fallback admin UI from that generation. Turning the Console off therefore does **not** disable authenticated admin APIs. Lean builds report the Console as not compiled/effective and continue to use the fallback UI even when the configured flag is true.
+
+The Runtime settings drawer submits a typed change through the normal lifecycle preview/apply ledger. Disabling the web Console requires an explicit acknowledgement and shows the recovery path before apply: set `[admin] console = true` in the source configuration and reload, or use an authenticated configuration apply/patch API request. The UI waits for the correlated terminal apply result before relying on the Console remaining reachable. `admin.enabled` and `admin.listen` are intentionally not part of this capability and remain restart-required under #97.
+
+See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
+

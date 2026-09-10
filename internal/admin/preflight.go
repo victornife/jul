@@ -11,10 +11,9 @@ import (
 	"jul/internal/config"
 )
 
-// PreflightConfig validates that an AdminConfig can be applied at the next
-// process startup. For the history directory, audit-log directory, and plugin
-// upload directory it proves writability by creating and immediately removing a
-// temporary sentinel file. It does not retain any file handle.
+// PreflightConfig validates admin filesystem targets before persistence. The
+// upload directory uses #157's reversible probe so a missing candidate path is
+// not created until an upload is actually admitted under the published policy.
 func PreflightConfig(cfg config.AdminConfig) error {
 	if !cfg.Enabled {
 		return nil
@@ -30,18 +29,15 @@ func PreflightConfig(cfg config.AdminConfig) error {
 			return err
 		}
 	}
-	if cfg.PluginUploadDir != "" && cfg.PluginUploadEnabled != nil && *cfg.PluginUploadEnabled {
-		if err := probeWritable(cfg.PluginUploadDir, "[admin] plugin_upload_dir"); err != nil {
+	uploadEnabled := (cfg.PluginUploadEnabled == nil || *cfg.PluginUploadEnabled) && cfg.PluginUploadMaxSize > 0
+	if uploadEnabled {
+		if err := preflightPluginUploadDir(cfg.PluginUploadDir); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// probeWritable creates and immediately removes a temporary file inside dir to
-// verify that the directory is writable without retaining any open handle. If
-// the directory does not exist it is created first (MkdirAll), so the check
-// also validates that the path can be created under the filesystem root.
 func probeWritable(dir, label string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("%s %q: cannot create directory: %w", label, dir, err)

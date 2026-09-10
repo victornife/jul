@@ -75,12 +75,11 @@ Console toggles the web console dashboard at the admin root.
 | --- | --- |
 | Type | `bool` |
 | Optional | yes |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `admin` |
-| Why | the admin listener and its resources are created once at startup |
+| Why | the live admin server dispatches Console mode from one immutable per-request runtime snapshot published atomically |
 | Requires | `console` |
 | Default (conditional) | true (when admin.enabled) |
-| Flags | startup-consumed |
 
 ## `admin.enabled` {#admin-enabled}
 
@@ -158,10 +157,9 @@ PluginUploadDir is the directory where uploaded .wasm files are stored when oper
 | | |
 | --- | --- |
 | Type | `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `admin` |
-| Why | the admin listener and its resources are created once at startup |
-| Flags | startup-consumed |
+| Why | candidate storage is preflighted before Publish and each upload is confined to the directory captured at request start |
 
 ## `admin.plugin_upload_enabled` {#admin-plugin_upload_enabled}
 
@@ -171,11 +169,10 @@ PluginUploadEnabled controls whether the admin console allows uploading .wasm pl
 | --- | --- |
 | Type | `bool` |
 | Optional | yes |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `admin` |
-| Why | the admin listener and its resources are created once at startup |
+| Why | new upload requests read admission state from the immutable admin runtime snapshot captured at request start |
 | Default | false |
-| Flags | startup-consumed |
 
 ## `admin.plugin_upload_max_size` {#admin-plugin_upload_max_size}
 
@@ -184,11 +181,10 @@ PluginUploadMaxSize caps the size of an uploaded .wasm file in megabytes.
 | | |
 | --- | --- |
 | Type | `integer` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `admin` |
-| Why | the admin listener and its resources are created once at startup |
+| Why | each upload captures its size limit from the immutable admin runtime snapshot before body processing |
 | Default | 32 |
-| Flags | startup-consumed |
 | Constraint | positive when upload is enabled; otherwise non-negative |
 | Zero/empty semantics | omitted/zero defaults to 32 MiB when upload is enabled |
 | Active when | always |

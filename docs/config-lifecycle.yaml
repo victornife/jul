@@ -79,10 +79,10 @@ counts:
   schema_paths: 356
   schema_leaves: 302
   registry_entries: 302
-  startup_consumed: 48
+  startup_consumed: 44
   by_class:
-    hot_reload: 239
-    restart_required: 48
+    hot_reload: 243
+    restart_required: 44
     new_listener_only: 8
     ignored_deprecated: 4
     validation_rejected_reserved: 3
@@ -112,10 +112,9 @@ fields:
     reason: "the admin listener and its resources are created once at startup"
     startup_consumed: true
   - path: "admin.console"
-    class: restart_required
+    class: hot_reload
     subsystem: admin
-    reason: "the admin listener and its resources are created once at startup"
-    startup_consumed: true
+    reason: "the live admin server dispatches Console mode from one immutable per-request runtime snapshot published atomically"
   - path: "admin.enabled"
     class: restart_required
     subsystem: admin
@@ -142,20 +141,17 @@ fields:
     reason: "the admin listener and its resources are created once at startup"
     startup_consumed: true
   - path: "admin.plugin_upload_dir"
-    class: restart_required
+    class: hot_reload
     subsystem: admin
-    reason: "the admin listener and its resources are created once at startup"
-    startup_consumed: true
+    reason: "candidate storage is preflighted before Publish and each upload is confined to the directory captured at request start"
   - path: "admin.plugin_upload_enabled"
-    class: restart_required
+    class: hot_reload
     subsystem: admin
-    reason: "the admin listener and its resources are created once at startup"
-    startup_consumed: true
+    reason: "new upload requests read admission state from the immutable admin runtime snapshot captured at request start"
   - path: "admin.plugin_upload_max_size"
-    class: restart_required
+    class: hot_reload
     subsystem: admin
-    reason: "the admin listener and its resources are created once at startup"
-    startup_consumed: true
+    reason: "each upload captures its size limit from the immutable admin runtime snapshot before body processing"
   - path: "admin.rate_limit_apply_per_min"
     class: restart_required
     subsystem: admin

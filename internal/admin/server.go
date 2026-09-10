@@ -686,6 +686,9 @@ type Server struct {
 	// authGen is a monotonic generation counter stamped into each installed
 	// snapshot so transitions can be correlated in logs and tests.
 	authGen atomic.Uint64
+	// Low-cardinality #157 diagnostics only; never paths, filenames or secrets.
+	adminPrepareFailure   atomic.Pointer[string]
+	pluginUploadRejection atomic.Pointer[string]
 	// applyMu serializes config writes (raw apply, structured patch apply, and
 	// history rollback) so optimistic-concurrency checks and the write they guard
 	// are atomic, closing the read-modify-write race between concurrent edits
@@ -1307,8 +1310,12 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 // This handler now uses the same applyMu lock and optimistic-version contract as v2 apply
 // to close the read-modify-write race with concurrent writes (P2-12).
 func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		s.handleAdminRuntimeSettingsRead(w, r)
+		return
+	}
 	if r.Method != http.MethodPost && r.Method != http.MethodPut {
-		w.Header().Set("Allow", "POST, PUT")
+		w.Header().Set("Allow", "GET, POST, PUT")
 		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}

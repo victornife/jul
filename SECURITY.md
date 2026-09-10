@@ -189,3 +189,7 @@ permanent regression seed.
   via keyless Sigstore signing (GitHub OIDC, no long-lived keys). The attestations
   can be verified with `gh attestation verify <artifact> --repo <owner>/<repo>`.
 
+## Admin Console and plugin-upload hot reload
+
+HR-06B (#157) treats admin authentication/RBAC, Console dispatch and plugin-upload policy as one immutable per-request generation. Disabling uploads rejects before request-body parsing; candidate upload storage is validated before Publish with reversible probes; admitted writes are confined to an `os.Root`, use owner-only files on Unix, and reject symbolic-link/special-file final destinations. Bounded runtime diagnostics do not expose upload paths, filenames, bearer tokens or resolved secrets as metric labels/status fields. See [`docs/admin-runtime-hot-reload.md`](docs/admin-runtime-hot-reload.md) for the complete security and concurrency contract.
+

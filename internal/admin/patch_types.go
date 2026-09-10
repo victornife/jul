@@ -149,6 +149,8 @@ type patchRequest struct {
 	// tracks presence so omission preserves the current value.
 	Global *globalPatch `json:"global,omitempty"`
 
+	AdminPluginUpload *adminPluginUploadPatch `json:"plugin_upload,omitempty"`
+
 	// compression_set payload: the supported global [compression] fields. Every
 	// field tracks presence so explicit false/zero/empty values remain distinct
 	// from omission.

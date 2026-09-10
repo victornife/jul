@@ -905,3 +905,12 @@ existing listener is retained but may follow a server-authorized hot path when
 all affected listeners are new. A `global.reload_timeout` edit uses the
 currently active timeout for that transaction; the new value governs later
 transactions.
+
+## HR-06B admin operational generation
+
+`admin.console`, `admin.plugin_upload_enabled`, `admin.plugin_upload_max_size` and `admin.plugin_upload_dir` are `hot_reload` after #157. They publish together with the existing immutable admin authentication/RBAC snapshot, and the outer admin handler pins that single snapshot once per request. Authentication, Console dispatch, upload admission/limit/directory and safe projections cannot mix generations inside one request.
+
+Upload directory preparation occurs before Publish and is reversible. A preparation failure leaves the previous live generation untouched. `admin.enabled` and `admin.listen` remain structural `restart_required` fields; a mixed candidate changing either one is not partially hot-applied. The generated lifecycle registry remains authoritative.
+
+See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
+
