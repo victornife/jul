@@ -28,9 +28,51 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
-      - name: Format all HR-07A Go changes
+      - name: Apply deterministic HR-07A fixes
+        shell: python
         run: |
-          gofmt -w internal/admin/ratelimit.go internal/admin/ratelimit_test.go internal/admin/routes.go internal/admin/events.go internal/admin/logs.go internal/admin/admin_runtime_status.go internal/admin/patch_admin_runtime.go internal/admin/patch.go internal/admin/patch_types.go internal/lifecycle/admin_limits.go
+          from pathlib import Path
+
+          p = Path('internal/admin/routes.go')
+          s = p.read_text()
+          anchor = 'func (s *Server) routes() http.Handler {\n\tmux := http.NewServeMux()\n'
+          replacement = 'func (s *Server) routes() http.Handler {\n\t// Some tests and embedders construct Server directly. Establish the same\n\t// process-lifetime invariant as NewServer before building the stable mux.\n\tif s.limiter == nil {\n\t\ts.limiter = newAdminLimiter(s.log)\n\t}\n\tmux := http.NewServeMux()\n'
+          if replacement not in s:
+              if anchor not in s:
+                  raise SystemExit('routes.go initializer anchor not found')
+              s = s.replace(anchor, replacement, 1)
+          p.write_text(s)
+
+          p = Path('internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.tsx')
+          s = p.read_text()
+          s = s.replace('  const parsedRead = integerValue(readPerMin);\n  const parsedWrite = integerValue(writePerMin);\n  const parsedApply = integerValue(applyPerMin);\n  const parsedConns = integerValue(maxEventConns);\n  const limitsValid = parsedRead !== null && parsedWrite !== null && parsedApply !== null && parsedConns !== null && parsedConns > 0;\n  const loweringSSE = Boolean(data && parsedConns !== null && parsedConns > 0 && parsedConns < data.max_event_conns);', '  const parsedRead = Number(readPerMin);\n  const parsedWrite = Number(writePerMin);\n  const parsedApply = Number(applyPerMin);\n  const parsedConns = Number(maxEventConns);\n  const limitsValid = Number.isInteger(parsedRead) && Number.isInteger(parsedWrite) && Number.isInteger(parsedApply) && Number.isInteger(parsedConns) && parsedConns > 0;\n  const loweringSSE = Boolean(data && parsedConns > 0 && parsedConns < data.max_event_conns);')
+          s = s.replace('    if (!data || !maxValid || !limitsValid || parsedRead === null || parsedWrite === null || parsedApply === null || parsedConns === null) return [];', '    if (!data || !maxValid || !limitsValid) return [];')
+          s = s.replace('  }, [applyPerMin, consoleEnabled, data, directory, limitsValid, maxEventConns, maxValid, parsedApply, parsedConns, parsedMax, parsedRead, parsedWrite, readPerMin, uploadEnabled, writePerMin]);', '  }, [consoleEnabled, data, directory, limitsValid, maxValid, parsedApply, parsedConns, parsedMax, parsedRead, parsedWrite, uploadEnabled]);')
+          s = s.replace('onChange={(event) => (setter as (value: string) => void)(event.target.value)}', 'onChange={(event) => { (setter as (value: string) => void)(event.target.value); }}')
+          s = s.replace('{parsedConns !== null && parsedConns <= 0 && <p className="mt-1 text-xs text-jul-danger">', '{parsedConns <= 0 && <p className="mt-1 text-xs text-jul-danger">')
+          p.write_text(s)
+
+          p = Path('internal/lifecycle/registry.go')
+          s = p.read_text()
+          for line in [
+              '\t\t"admin.max_event_conns",\n',
+              '\t\t"admin.rate_limit_apply_per_min",\n',
+              '\t\t"admin.rate_limit_read_per_min",\n',
+              '\t\t"admin.rate_limit_write_per_min",\n',
+          ]:
+              s = s.replace(line, '', 1)
+          marker = '\t\thot("admin.plugin_upload_dir", SubAdmin, "candidate storage is preflighted before Publish and each upload is confined to the directory captured at request start"),\n'
+          additions = marker + '\t\thot("admin.rate_limit_read_per_min", SubAdmin, "new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload"),\n\t\thot("admin.rate_limit_write_per_min", SubAdmin, "new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload"),\n\t\thot("admin.rate_limit_apply_per_min", SubAdmin, "new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload"),\n\t\thot("admin.max_event_conns", SubAdmin, "new SSE admissions use the captured per-client connection cap while existing leases and connection counts survive policy reload"),\n'
+          if 'hot("admin.max_event_conns", SubAdmin' not in s:
+              if marker not in s:
+                  raise SystemExit('registry.go admin hot anchor not found')
+              s = s.replace(marker, additions, 1)
+          p.write_text(s)
+          Path('internal/lifecycle/admin_limits.go').unlink(missing_ok=True)
+
+      - name: Format and regenerate
+        run: |
+          gofmt -w internal/admin/ratelimit.go internal/admin/ratelimit_test.go internal/admin/issue158_transition_test.go internal/admin/issue158_patch_test.go internal/admin/routes.go internal/admin/events.go internal/admin/logs.go internal/admin/admin_runtime_status.go internal/admin/patch_admin_runtime.go internal/admin/patch.go internal/admin/patch_types.go internal/lifecycle/registry.go
           make lifecycle-generate
       - name: Capture targeted diagnostics
         shell: bash
@@ -56,14 +98,11 @@ jobs:
             echo "FRONTEND_LINT_RC=$lint_rc"
             if [ -f /tmp/frontend-lint.log ]; then cat /tmp/frontend-lint.log; fi
           } > .issue158-diagnostics.txt
-          exit 0
-      - name: Commit formatting, generated files and diagnostics
+      - name: Commit fixes, generated files and diagnostics
         run: |
-          if git diff --quiet && git status --porcelain | grep -qv '^?? .issue158-diagnostics.txt$'; then
-            exit 0
-          fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add internal/admin/ratelimit.go internal/admin/ratelimit_test.go internal/admin/routes.go internal/admin/events.go internal/admin/logs.go internal/admin/admin_runtime_status.go internal/admin/patch_admin_runtime.go internal/admin/patch.go internal/admin/patch_types.go internal/lifecycle/admin_limits.go docs/config-lifecycle.yaml docs/generated/config-lifecycle.json docs/generated/config-lifecycle.md .issue158-diagnostics.txt
-          git commit -m 'chore: format HR-07A and capture diagnostics'
+          git add -A internal/admin internal/lifecycle docs/config-lifecycle.yaml docs/generated/config-lifecycle.json docs/generated/config-lifecycle.md .issue158-diagnostics.txt
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'fix(admin): reconcile HR-07A CI and lifecycle authority (#158)'
           git push origin HEAD:issue-158-admin-rate-limits
