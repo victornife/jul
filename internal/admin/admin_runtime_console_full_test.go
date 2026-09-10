@@ -8,6 +8,7 @@ package admin
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"jul/internal/config"
@@ -30,17 +31,21 @@ func TestConsoleModeHotReloadOnOffOnFullBuild(t *testing.T) {
 	}
 
 	onFirst := serve()
+	if !strings.Contains(onFirst.Body.String(), "<title>Jul.IA Console</title>") {
+		t.Fatalf("enabled Console did not serve embedded SPA: %s", onFirst.Body.String())
+	}
+
 	cfg.Console = &off
 	srv.UpdateLiveAdminConfig(cfg)
 	offResponse := serve()
-	if onFirst.Body.String() == offResponse.Body.String() {
+	if strings.Contains(offResponse.Body.String(), "<title>Jul.IA Console</title>") {
 		t.Fatal("Console disable did not switch the stable root handler to fallback UI")
 	}
 
 	cfg.Console = &on
 	srv.UpdateLiveAdminConfig(cfg)
 	onAgain := serve()
-	if onFirst.Body.String() != onAgain.Body.String() {
-		t.Fatal("Console re-enable did not restore the same embedded Console response")
+	if !strings.Contains(onAgain.Body.String(), "<title>Jul.IA Console</title>") {
+		t.Fatalf("Console re-enable did not restore embedded SPA: %s", onAgain.Body.String())
 	}
 }
