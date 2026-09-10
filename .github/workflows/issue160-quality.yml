@@ -137,8 +137,11 @@ jobs:
               start = int(m.group(1)); count = int(m.group(2) or '1')
               added[current].update(range(start, start + count))
 
-          total = covered = 0
-          seen = set()
+          # `go test -coverprofile` over several test packages emits the same
+          # instrumented production block once per test binary. Aggregate those
+          # duplicate records before scoring so a zero-count copy from one binary
+          # cannot hide a later execution of the same block by another package.
+          executions = {}
           for line in Path('/tmp/hr07c.cover').read_text().splitlines()[1:]:
               span, stmts, count = line.rsplit(' ', 2)
               path, coords = span.split(':', 1)
@@ -153,13 +156,10 @@ jobs:
               if not any(lo <= n <= hi for n in added[path]):
                   continue
               key = (path, coords, int(stmts))
-              if key in seen:
-                  continue
-              seen.add(key)
-              n = int(stmts)
-              total += n
-              if int(count) > 0:
-                  covered += n
+              executions[key] = executions.get(key, 0) + int(count)
+
+          total = sum(key[2] for key in executions)
+          covered = sum(key[2] for key, count in executions.items() if count > 0)
           if total == 0:
               raise SystemExit('no added HR-07C production statements found in coverage profile')
           pct = covered * 100.0 / total
