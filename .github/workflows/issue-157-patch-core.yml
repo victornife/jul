@@ -23,6 +23,7 @@ jobs:
           gofmt -w internal/admin internal/app internal/lifecycle
           make lifecycle-generate
           make config-contract-generate
+          make api-contract-generate
           go test ./internal/admin ./internal/app ./internal/config ./internal/lifecycle ./internal/plugins
           make generated-check
       - name: commit verified changes
