@@ -62,7 +62,7 @@ func (s *Server) adminRuntimeStatus(r *http.Request) *AdminRuntimeStatus {
 		return nil
 	}
 	uploadEnabled := pluginUploadEnabled(snap.cfg) && snap.cfg.PluginUploadMaxSize > 0
-	health := snap.uploadDirHealth
+	health := inspectPluginUploadDirHealth(snap.cfg.PluginUploadDir)
 	if !uploadEnabled {
 		health = "disabled"
 	}
@@ -86,23 +86,29 @@ func (s *Server) adminRuntimeStatus(r *http.Request) *AdminRuntimeStatus {
 }
 
 func (s *Server) handleAdminRuntimeSettingsRead(w http.ResponseWriter, r *http.Request) {
-	state, err := s.currentWriteState(false)
-	if err != nil || state.Config == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "configuration unavailable"})
+	// The stable mux pins the serving generation before this handler. Use that
+	// exact immutable AdminConfig for every projected field instead of mixing it
+	// with a later persisted-config read if Publish races this request.
+	snap := s.requestAdminSnapshot(r)
+	if snap == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "admin runtime unavailable"})
 		return
 	}
-	snap := s.requestAdminSnapshot(r)
-	cfg := state.Config.Admin
-	uploadConfigured := pluginUploadEnabled(cfg) && cfg.PluginUploadMaxSize > 0
+	cfg := snap.cfg
+	uploadEffective := pluginUploadEnabled(cfg) && cfg.PluginUploadMaxSize > 0
+	health := inspectPluginUploadDirHealth(cfg.PluginUploadDir)
+	if !uploadEffective {
+		health = "disabled"
+	}
 	projection := AdminRuntimeSettingsProjection{
 		Console:               cfg.ConsoleEnabled(),
 		ConsoleCompiled:       snap.consoleCompiled,
-		ConsoleEffective:      snap.consoleCompiled && snap.cfg.ConsoleEnabled(),
+		ConsoleEffective:      snap.consoleCompiled && cfg.ConsoleEnabled(),
 		PluginUploadEnabled:   pluginUploadEnabled(cfg),
 		PluginUploadMaxSizeMB: cfg.PluginUploadMaxSize,
 		PluginUploadDir:       cfg.PluginUploadDir,
-		PluginUploadEffective: uploadConfigured,
-		UploadDirectoryHealth: snap.uploadDirHealth,
+		PluginUploadEffective: uploadEffective,
+		UploadDirectoryHealth: health,
 		Lifecycle: map[string]LifecycleFieldProjection{
 			"console":                lifecycleFieldProjection("admin.console"),
 			"plugin_upload_enabled":  lifecycleFieldProjection("admin.plugin_upload_enabled"),
