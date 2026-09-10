@@ -10,30 +10,29 @@ import (
 
 // AdminHealthStatus reports the health of the admin subsystem so that runtime
 // overview and readiness probes can surface admin failures as top-level
-// degraded state (F-05). It carries the audit-sink status plus any additional
-// composition-root-level degradation reported through Deps.AdminHealth.
+// degraded state (F-05). Machine-facing reasons are deliberately bounded; raw
+// filesystem errors remain in operator logs only.
 type AdminHealthStatus struct {
-	// Healthy is true when no admin subsystem failure is active.
 	Healthy bool `json:"healthy"`
 	// Reason is a short machine-readable classification: "audit_sink",
 	// "admin_reload", or "admin_health".
 	Reason string `json:"reason,omitempty"`
-	// Detail is a human-readable explanation of the degradation.
+	// Detail is suitable for authenticated runtime diagnostics, but public
+	// readiness deliberately omits it.
 	Detail string `json:"detail,omitempty"`
 }
 
-// AdminHealthStatus returns the current admin subsystem health. It checks the
-// durable audit sink and any composition-root health hook. A non-nil error is
-// returned when the subsystem is degraded; the error can be cast to an
-// AdminHealthStatus via AsAdminHealthStatus when a structured reason is needed.
+// AdminHealthStatus returns the current admin subsystem health. A configured
+// audit sink that cannot persist remains readiness-gating, while candidate
+// preparation failures never overwrite the live sink's health.
 func (s *Server) AdminHealthStatus() error {
 	if s.audit != nil {
 		if st := s.audit.statusReport(); st != nil && !st.Healthy {
-			return &AdminHealthStatus{
-				Healthy: false,
-				Reason:  "audit_sink",
-				Detail:  "durable audit sink is degraded: " + st.Error,
+			detail := "durable audit sink is degraded"
+			if st.LastFailureCategory != "" {
+				detail += " (" + st.LastFailureCategory + ")"
 			}
+			return &AdminHealthStatus{Healthy: false, Reason: "audit_sink", Detail: detail}
 		}
 	}
 	if s.deps.AdminHealth != nil {
@@ -41,18 +40,12 @@ func (s *Server) AdminHealthStatus() error {
 			if status := AsAdminHealthStatus(err); status != nil {
 				return err
 			}
-			return &AdminHealthStatus{
-				Healthy: false,
-				Reason:  "admin_health",
-				Detail:  err.Error(),
-			}
+			return &AdminHealthStatus{Healthy: false, Reason: "admin_health", Detail: err.Error()}
 		}
 	}
 	return nil
 }
 
-// AsAdminHealthStatus extracts an AdminHealthStatus from an error. It returns
-// nil if the error is not an *AdminHealthStatus.
 func AsAdminHealthStatus(err error) *AdminHealthStatus {
 	var status *AdminHealthStatus
 	if errors.As(err, &status) {
@@ -61,8 +54,6 @@ func AsAdminHealthStatus(err error) *AdminHealthStatus {
 	return nil
 }
 
-// Error implements the error interface so AdminHealthStatus can be returned
-// from Deps.AdminHealth and from Server.AdminHealthStatus.
 func (a *AdminHealthStatus) Error() string {
 	if a.Detail != "" {
 		return a.Detail
@@ -73,9 +64,6 @@ func (a *AdminHealthStatus) Error() string {
 	return "admin subsystem degraded"
 }
 
-// adminHealthProjection returns a value suitable for JSON serialization in the
-// runtime overview. It returns nil when healthy so the field is omitted from
-// the overview when there is no degradation.
 func (s *Server) adminHealthProjection() *AdminHealthStatus {
 	err := s.AdminHealthStatus()
 	if err == nil {
@@ -84,14 +72,12 @@ func (s *Server) adminHealthProjection() *AdminHealthStatus {
 	if status := AsAdminHealthStatus(err); status != nil {
 		return status
 	}
-	return &AdminHealthStatus{
-		Healthy: false,
-		Reason:  "admin_health",
-		Detail:  err.Error(),
-	}
+	return &AdminHealthStatus{Healthy: false, Reason: "admin_health", Detail: "admin subsystem degraded"}
 }
 
-// handleReadyz reports readiness to serve traffic.
+// handleReadyz is intentionally a bounded public surface. It reports a closed
+// reason token for admin degradation and never emits raw OS errors, paths,
+// certificate material or authenticated diagnostic detail.
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	ready := true
 	if s.deps.Ready != nil {
@@ -101,24 +87,17 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not ready"})
 		return
 	}
-	// Readiness gate: admin subsystem failures degrade readiness (F-05).
 	if err := s.AdminHealthStatus(); err != nil {
-		code := http.StatusServiceUnavailable
-		if health := AsAdminHealthStatus(err); health != nil {
-			writeJSON(w, code, map[string]any{
-				"status": "not ready",
-				"reason": health.Reason,
-				"detail": health.Detail,
-			})
-			return
+		reason := "admin_health"
+		if health := AsAdminHealthStatus(err); health != nil && health.Reason != "" {
+			reason = health.Reason
 		}
-		writeJSON(w, code, map[string]string{
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"status": "not ready",
-			"reason": err.Error(),
+			"reason": reason,
 		})
 		return
 	}
-	// Readiness gate: any expired certificate prevents traffic serving.
 	if s.deps.LoadConfig != nil && s.deps.Certs != nil {
 		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
 			certs := projectTLS(cfg, s.deps.Certs())
@@ -126,7 +105,7 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 				if c.DaysLeft < 0 {
 					writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 						"status": "not ready",
-						"reason": "certificate expired for " + c.ServerNames[0],
+						"reason": "certificate_expired",
 					})
 					return
 				}
