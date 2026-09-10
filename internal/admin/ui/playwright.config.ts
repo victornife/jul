@@ -65,6 +65,7 @@ export default defineConfig({
         "e2e/issue158-admin-runtime.spec.ts",
         "e2e/issue160-audit-sink.spec.ts",
         "e2e/issue160-transition-event.spec.ts",
+        "e2e/issue160-mixed-resources.spec.ts",
       ],
       use: {
         baseURL: realServerURL,
