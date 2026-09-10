@@ -69,6 +69,12 @@ replacement = '''func limitClassForSpec(spec RouteSpec, method string) limitKind
 s = s[:begin] + replacement + s[end:]
 p.write_text(s)
 
+# Transition test no longer needs net/http after the catalogue assertion was
+# simplified to use each spec's declared method.
+p = Path("internal/admin/issue158_transition_test.go")
+s = p.read_text().replace('\t"net/http"\n', "")
+p.write_text(s)
+
 # Remove now-unused frontend helper after the explicit Number validation cleanup.
 p = Path("internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.tsx")
 s = p.read_text()
