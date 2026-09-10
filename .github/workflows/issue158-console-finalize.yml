@@ -1,0 +1,48 @@
+name: Issue 158 Console finalize
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [issue-158-admin-rate-limits]
+    paths:
+      - ".github/workflows/issue158-console-finalize.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild-console:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: issue-158-admin-rate-limits
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: internal/admin/ui/package.json
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+      - name: Install Console dependencies
+        run: pnpm --dir internal/admin/ui install --frozen-lockfile
+      - name: Validate and rebuild embedded Console assets
+        run: make console-build
+      - name: Commit regenerated assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add internal/admin/assets/dist
+          if git diff --cached --quiet; then
+            echo "Embedded Console assets already current."
+            exit 0
+          fi
+          git commit -m "build(console): refresh embedded HR-07A assets (#158)"
+          git push origin HEAD:issue-158-admin-rate-limits
