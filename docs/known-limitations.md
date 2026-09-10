@@ -560,3 +560,10 @@ Plugin directory changes intentionally do not migrate or clean up files. Host-fi
 
 See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
 
+## Admin admission policy (HR-07A)
+
+Admin request-rate buckets and SSE lease accounting are in-memory and process-local;
+there is no distributed/fleet-wide quota coordination. The admission identity remains
+the transport peer IP. Configuration reload preserves that in-memory state, but an
+actual process restart resets it. Reducing `admin.max_event_conns` affects only new
+SSE admissions: existing event/log streams are intentionally not forcibly drained.
