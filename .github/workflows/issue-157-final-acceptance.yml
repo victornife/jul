@@ -1,0 +1,65 @@
+name: issue-157 final acceptance
+
+on:
+  push:
+    branches:
+      - issue-157-hot-admin-runtime
+
+permissions:
+  contents: write
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          package_json_file: internal/admin/ui/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+
+      - name: focused Go and race matrix
+        run: |
+          go test ./internal/admin ./internal/app ./internal/config ./internal/lifecycle ./internal/plugins ./internal/server
+          go test -tags "console wasmplugins" ./internal/admin ./internal/app ./internal/config ./internal/lifecycle ./internal/plugins ./internal/server
+          go test -race -p 2 -tags "console wasmplugins" ./internal/admin ./internal/app ./internal/config ./internal/lifecycle ./internal/plugins ./internal/server
+
+      - name: Console build and unit gates
+        run: |
+          pnpm --dir internal/admin/ui install --frozen-lockfile
+          pnpm --dir internal/admin/ui run typecheck
+          pnpm --dir internal/admin/ui run lint
+          pnpm --dir internal/admin/ui run test:coverage
+          pnpm --dir internal/admin/ui run build
+
+      - name: install Chromium
+        run: |
+          pnpm --dir internal/admin/ui exec playwright install chromium
+          timeout 5m pnpm --dir internal/admin/ui exec playwright install-deps chromium \
+            || echo "::warning::playwright install-deps failed; continuing with runner libraries"
+
+      - name: HR-06B real-server browser acceptance
+        run: pnpm --dir internal/admin/ui exec playwright test --project=real-server e2e/issue157-admin-runtime.spec.ts
+
+      - name: generated and docs drift
+        run: |
+          make generated-check
+          python3 scripts/docs-check.py
+
+      - name: remove temporary acceptance workflow
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/issue-157-final-acceptance.yml
+          git commit -m "chore: record green #157 focused acceptance"
+          git push origin HEAD:issue-157-hot-admin-runtime
