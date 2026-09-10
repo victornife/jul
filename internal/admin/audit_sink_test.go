@@ -43,7 +43,6 @@ func TestAuditLogDurableSinkWritesJSONL(t *testing.T) {
 	if events[0].Operation != "config.apply" || events[1].Operation != "config.rollback" {
 		t.Errorf("unexpected order/content: %+v", events)
 	}
-	// IDs are assigned monotonically and persisted.
 	if events[0].ID != 1 || events[1].ID != 2 {
 		t.Errorf("ids = %d,%d, want 1,2", events[0].ID, events[1].ID)
 	}
@@ -53,8 +52,6 @@ func TestAuditLogDurableSinkPersistsRedacted(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.jsonl")
 	a := newAuditLogWithSink(8, path, 0, 0, nil)
-	// A detail carrying a credential marker must be redacted before it is both
-	// buffered and persisted.
 	a.record(AuditEvent{Operation: "auth.fail", Result: "failure", Detail: "Authorization: Bearer sekret"})
 	_ = a.Close()
 
@@ -76,13 +73,12 @@ func TestAuditLogDurableSinkPersistsRedacted(t *testing.T) {
 
 func TestAuditLogNoSinkWhenPathEmpty(t *testing.T) {
 	a := newAuditLogWithSink(8, "", 0, 0, nil)
-	if a.sink != nil {
+	if a.currentSink != nil {
 		t.Error("expected no durable sink for empty path")
 	}
 	if a.statusReport() != nil {
 		t.Error("expected nil status when no durable sink is configured")
 	}
-	// Still records in memory.
 	a.record(AuditEvent{Operation: "x", Result: "success"})
 	if got := a.snapshot("", "", 0); len(got) != 1 {
 		t.Errorf("in-memory records = %d, want 1", len(got))
@@ -92,14 +88,8 @@ func TestAuditLogNoSinkWhenPathEmpty(t *testing.T) {
 	}
 }
 
-// TestAuditLogSinkOpenFailureSurfacesDegradedStatus proves a misconfigured
-// durable path is fail-loud (P3-08): the sink degrades to memory-only AND the
-// failure is reported as a degraded status instead of being silently dropped,
-// while request handling (in-memory recording) keeps working.
 func TestAuditLogSinkOpenFailureSurfacesDegradedStatus(t *testing.T) {
 	dir := t.TempDir()
-	// Make the would-be parent directory an existing file so the sink cannot be
-	// created — a portable way to force an open failure.
 	blocker := filepath.Join(dir, "blocker")
 	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 		t.Fatalf("seed blocker: %v", err)
@@ -107,10 +97,9 @@ func TestAuditLogSinkOpenFailureSurfacesDegradedStatus(t *testing.T) {
 	path := filepath.Join(blocker, "audit.jsonl")
 
 	a := newAuditLogWithSink(8, path, 0, 0, nil)
-	if a.sink != nil {
+	if a.currentSink != nil {
 		t.Fatal("sink should be nil when the path cannot be opened")
 	}
-	// The API is never taken down: in-memory recording still works.
 	a.record(AuditEvent{Operation: "config.apply", Result: "success"})
 	if got := a.snapshot("", "", 0); len(got) != 1 {
 		t.Errorf("in-memory records = %d, want 1", len(got))
@@ -120,22 +109,14 @@ func TestAuditLogSinkOpenFailureSurfacesDegradedStatus(t *testing.T) {
 	if st == nil {
 		t.Fatal("status should be reported when a durable path is configured")
 	}
-	if !st.Configured {
-		t.Error("configured = false, want true")
+	if !st.Configured || st.Active || st.Healthy {
+		t.Fatalf("unexpected degraded status: %+v", st)
 	}
-	if st.Healthy {
-		t.Error("healthy = true, want false for an unopenable sink")
-	}
-	if st.Error == "" {
-		t.Error("error should explain why the sink is degraded")
-	}
-	if st.Path != path {
-		t.Errorf("path = %q, want %q", st.Path, path)
+	if st.LastFailureCategory == "" {
+		t.Error("bounded failure category should explain why the sink is degraded")
 	}
 }
 
-// TestAuditLogHealthyStatusWhenWritable proves a writable durable sink reports a
-// healthy status with no write failures, so the field is a true signal.
 func TestAuditLogHealthyStatusWhenWritable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	a := newAuditLogWithSink(8, path, 0, 0, nil)
@@ -146,13 +127,13 @@ func TestAuditLogHealthyStatusWhenWritable(t *testing.T) {
 	if st == nil {
 		t.Fatal("status should be reported")
 	}
-	if !st.Configured || !st.Healthy {
-		t.Errorf("status = %+v, want configured+healthy", st)
+	if !st.Configured || !st.Active || !st.Healthy {
+		t.Errorf("status = %+v, want configured+active+healthy", st)
 	}
-	if st.WriteFailures != 0 {
-		t.Errorf("write_failures = %d, want 0", st.WriteFailures)
+	if st.Generation == 0 {
+		t.Error("active generation must be non-zero")
 	}
-	if st.Error != "" {
-		t.Errorf("error = %q, want empty", st.Error)
+	if st.WriteFailures != 0 || st.LastFailureCategory != "" {
+		t.Errorf("unexpected failure state: %+v", st)
 	}
 }
