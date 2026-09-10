@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   fetchSettings: vi.fn(),
-  run: vi.fn(async () => undefined),
+  run: vi.fn(() => Promise.resolve(undefined)),
   runnerError: null as Error | null,
   runnerBusy: false,
 }));
@@ -83,7 +83,7 @@ function rateInput(label: string): HTMLInputElement {
 }
 
 function spinbutton(index: number): HTMLInputElement {
-  return screen.getAllByRole("spinbutton")[index] as HTMLInputElement;
+  return screen.getAllByRole("spinbutton")[index];
 }
 
 describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
@@ -178,7 +178,9 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
     const review = screen.getByRole("button", { name: "Review changes" });
     expect(review).toBeEnabled();
     fireEvent.click(review);
-    await waitFor(() => expect(mocks.run).toHaveBeenCalledWith([{ op: "admin_console_set", enabled: false }]));
+    await waitFor(() => {
+      expect(mocks.run).toHaveBeenCalledWith([{ op: "admin_console_set", enabled: false }]);
+    });
   });
 
   it("keeps upload edits orthogonal to the limits operation", async () => {
