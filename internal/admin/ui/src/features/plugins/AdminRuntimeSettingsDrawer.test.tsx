@@ -145,6 +145,15 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
     expect(screen.getByText(/cannot open another stream until their active count falls below/)).toBeInTheDocument();
   });
 
+  it("treats zero as canonical cap 4 when deciding whether to warn on tightening", async () => {
+    mocks.fetchSettings.mockResolvedValue({ ...baseSettings, max_event_conns: 8 });
+    renderDrawer();
+    await screen.findByText("Admin request admission");
+
+    fireEvent.change(spinbutton(3), { target: { value: "0" } });
+    expect(screen.getByText(/Existing event\/log streams remain connected/)).toBeInTheDocument();
+  });
+
   it("rejects negative/non-integer SSE caps while negative request rates remain valid", async () => {
     renderDrawer();
     await screen.findByText("Admin request admission");
@@ -157,6 +166,7 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
     expect(screen.getByRole("button", { name: "Review changes" })).toBeDisabled();
 
     fireEvent.change(spinbutton(3), { target: { value: "1.5" } });
+    expect(screen.getByText(/Use a non-negative whole number/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Review changes" })).toBeDisabled();
   });
 
