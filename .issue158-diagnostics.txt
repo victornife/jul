@@ -1,0 +1,73 @@
+GO_TEST_RC=1
+go: downloading google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688
+go: downloading google.golang.org/protobuf v1.36.12
+go: downloading gopkg.in/natefinch/lumberjack.v2 v2.2.1
+go: downloading github.com/golang-jwt/jwt/v5 v5.3.1
+go: downloading golang.org/x/crypto v0.56.0
+go: downloading github.com/prometheus/client_golang v1.24.1
+go: downloading github.com/prometheus/client_model v0.6.3
+go: downloading golang.org/x/net v0.58.0
+go: downloading github.com/beorn7/perks v1.0.1
+go: downloading github.com/cespare/xxhash/v2 v2.3.0
+go: downloading github.com/prometheus/common v0.70.1
+go: downloading github.com/prometheus/procfs v0.21.1
+go: downloading github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
+--- FAIL: TestListenerClientAddressWritesEverySiblingBlock (0.00s)
+panic: runtime error: invalid memory address or nil pointer dereference [recovered, repanicked]
+[signal SIGSEGV: segmentation violation code=0x1 addr=0x8 pc=0x9bdca6]
+
+goroutine 44 [running]:
+testing.tRunner.func1.2({0xc411e0, 0x13a6340})
+	/opt/hostedtoolcache/go/1.26.6/x64/src/testing/testing.go:1974 +0x232
+testing.tRunner.func1()
+	/opt/hostedtoolcache/go/1.26.6/x64/src/testing/testing.go:1977 +0x349
+panic({0xc411e0?, 0x13a6340?})
+	/opt/hostedtoolcache/go/1.26.6/x64/src/runtime/panic.go:860 +0x13a
+jul/internal/admin.(*adminLimiter).allow(0x0, {0xd2b7ba, 0x9}, 0x1, {0x2?, 0x19ac76d19680?, 0x0?, 0x0?})
+	/home/runner/work/jul/jul/internal/admin/ratelimit.go:186 +0x66
+jul/internal/admin.(*Server).routes.(*Server).limitRoute.func5({0xdb0820, 0x19ac76b07ea0}, 0x19ac76d1edc0)
+	/home/runner/work/jul/jul/internal/admin/ratelimit.go:372 +0x23b
+net/http.HandlerFunc.ServeHTTP(0x19ac76b7e0c0?, {0xdb0820?, 0x19ac76b07ea0?}, 0x19ac76b77b20?)
+	/opt/hostedtoolcache/go/1.26.6/x64/src/net/http/server.go:2284 +0x29
+net/http.(*ServeMux).ServeHTTP(0x0?, {0xdb0820, 0x19ac76b07ea0}, 0x19ac76d1edc0)
+	/opt/hostedtoolcache/go/1.26.6/x64/src/net/http/server.go:2826 +0x1c7
+jul/internal/admin.(*Server).routes.(*Server).observeConsole.func7({0xdb0790, 0x19ac76ae49c0}, 0x19ac76d1edc0)
+	/home/runner/work/jul/jul/internal/admin/operational.go:122 +0xbd
+net/http.HandlerFunc.ServeHTTP(0x19ac76b72a88?, {0xdb0790?, 0x19ac76ae49c0?}, 0x130?)
+	/opt/hostedtoolcache/go/1.26.6/x64/src/net/http/server.go:2284 +0x29
+jul/internal/admin.(*Server).routes.(*Server).requireSecureTransport.func8({0xdb0790, 0x19ac76ae49c0}, 0x19ac76d1edc0)
+	/home/runner/work/jul/jul/internal/admin/transport_gate.go:67 +0x94
+net/http.HandlerFunc.ServeHTTP(0x19ac76d1ec80?, {0xdb0790?, 0x19ac76ae49c0?}, 0x13ed960?)
+	/opt/hostedtoolcache/go/1.26.6/x64/src/net/http/server.go:2284 +0x29
+jul/internal/admin.(*Server).routes.(*Server).captureAdminRuntimeSnapshot.func9({0xdb0790, 0x19ac76ae49c0}, 0x19ac76d1ec80)
+	/home/runner/work/jul/jul/internal/admin/runtime_snapshot.go:31 +0xb5
+net/http.HandlerFunc.ServeHTTP(0x19ac76b72a88?, {0xdb0790?, 0x19ac76ae49c0?}, 0xd?)
+	/opt/hostedtoolcache/go/1.26.6/x64/src/net/http/server.go:2284 +0x29
+jul/internal/admin.patchClientAddress(0x19ac76bfe008?, 0x19ac76b72a88, {0xd492c0, 0x21}, {0xd2abdc, 0xe}, {0xd8342a, 0x6a})
+	/home/runner/work/jul/jul/internal/admin/api_client_address_test.go:64 +0x2f7
+jul/internal/admin.TestListenerClientAddressWritesEverySiblingBlock(0x19ac76bfe008)
+	/home/runner/work/jul/jul/internal/admin/api_client_address_test.go:84 +0x15a
+testing.tRunner(0x19ac76bfe008, 0xd9e8c8)
+	/opt/hostedtoolcache/go/1.26.6/x64/src/testing/testing.go:2036 +0xea
+created by testing.(*T).Run in goroutine 1
+	/opt/hostedtoolcache/go/1.26.6/x64/src/testing/testing.go:2101 +0x4c5
+FAIL	jul/internal/admin	0.062s
+FAIL
+
+PNPM_INSTALL_RC=0
+
+FRONTEND_LINT_RC=1
+$ eslint . --cache
+
+/home/runner/work/jul/jul/internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.tsx
+  101:47   error    Unnecessary conditional, the types have no overlap                                                                                                                    @typescript-eslint/no-unnecessary-condition
+  101:70   error    Unnecessary conditional, the types have no overlap                                                                                                                    @typescript-eslint/no-unnecessary-condition
+  101:94   error    Unnecessary conditional, the types have no overlap                                                                                                                    @typescript-eslint/no-unnecessary-condition
+  101:118  error    Unnecessary conditional, the types have no overlap                                                                                                                    @typescript-eslint/no-unnecessary-condition
+  122:6    warning  React Hook useMemo has unnecessary dependencies: 'applyPerMin', 'maxEventConns', 'readPerMin', and 'writePerMin'. Either exclude them or remove the dependency array  react-hooks/exhaustive-deps
+  205:42   error    Returning a void expression from an arrow function shorthand is forbidden. Please add braces to the arrow function                                                    @typescript-eslint/no-confusing-void-expression
+
+✖ 6 problems (5 errors, 1 warning)
+  1 error and 0 warnings potentially fixable with the `--fix` option.
+
+[ELIFECYCLE] Command failed with exit code 1.

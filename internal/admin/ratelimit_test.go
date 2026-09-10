@@ -17,12 +17,12 @@ import (
 
 func limitTestConfig(read, write, apply, conns int) config.AdminConfig {
 	return config.AdminConfig{
-		Enabled:                  true,
-		Listen:                   "127.0.0.1:0",
-		RateLimitReadPerMin:      read,
-		RateLimitWritePerMin:     write,
-		RateLimitApplyPerMin:     apply,
-		MaxEventConns:            conns,
+		Enabled:              true,
+		Listen:               "127.0.0.1:0",
+		RateLimitReadPerMin:  read,
+		RateLimitWritePerMin: write,
+		RateLimitApplyPerMin: apply,
+		MaxEventConns:        conns,
 	}
 }
 
@@ -137,12 +137,24 @@ func TestAdminRateLimitIndependentClasses(t *testing.T) {
 	s.limiter.now = func() time.Time { return now }
 	p := adminLimitPolicyFromConfig(cfg)
 	ip := "127.0.0.1"
-	if ok, _ := s.limiter.allow(ip, limitRead, p); !ok { t.Fatal("first read denied") }
-	if ok, _ := s.limiter.allow(ip, limitWrite, p); !ok { t.Fatal("first write denied") }
-	if ok, _ := s.limiter.allow(ip, limitApply, p); !ok { t.Fatal("first apply denied") }
-	if ok, _ := s.limiter.allow(ip, limitRead, p); ok { t.Fatal("second read should be denied") }
-	if ok, _ := s.limiter.allow(ip, limitWrite, p); ok { t.Fatal("second write should be denied") }
-	if ok, _ := s.limiter.allow(ip, limitApply, p); ok { t.Fatal("second apply should be denied") }
+	if ok, _ := s.limiter.allow(ip, limitRead, p); !ok {
+		t.Fatal("first read denied")
+	}
+	if ok, _ := s.limiter.allow(ip, limitWrite, p); !ok {
+		t.Fatal("first write denied")
+	}
+	if ok, _ := s.limiter.allow(ip, limitApply, p); !ok {
+		t.Fatal("first apply denied")
+	}
+	if ok, _ := s.limiter.allow(ip, limitRead, p); ok {
+		t.Fatal("second read should be denied")
+	}
+	if ok, _ := s.limiter.allow(ip, limitWrite, p); ok {
+		t.Fatal("second write should be denied")
+	}
+	if ok, _ := s.limiter.allow(ip, limitApply, p); ok {
+		t.Fatal("second apply should be denied")
+	}
 }
 
 func TestAdminExternalRateLimitEnvelope(t *testing.T) {
@@ -177,10 +189,10 @@ func TestAdminExternalRateLimitEnvelope(t *testing.T) {
 
 func TestLimitClassForSpec(t *testing.T) {
 	cases := []struct {
-		name string
-		spec RouteSpec
+		name   string
+		spec   RouteSpec
 		method string
-		want limitKind
+		want   limitKind
 	}{
 		{"read", RouteSpec{Methods: []string{http.MethodGet}}, http.MethodGet, limitRead},
 		{"write", RouteSpec{Methods: []string{http.MethodPost}, Permission: rbac.CachePurge}, http.MethodPost, limitWrite},
@@ -206,7 +218,9 @@ func TestAdminEventConnCapHotReloadAndExactRelease(t *testing.T) {
 	releases := make([]func(), 0, 4)
 	for i := 0; i < 4; i++ {
 		r, ok := l.acquireConn(peer, p4)
-		if !ok { t.Fatalf("connection %d denied", i+1) }
+		if !ok {
+			t.Fatalf("connection %d denied", i+1)
+		}
 		releases = append(releases, r)
 	}
 	if _, ok := l.acquireConn(peer, p2); ok {
@@ -225,7 +239,9 @@ func TestAdminEventConnCapHotReloadAndExactRelease(t *testing.T) {
 	}
 	releases[2]()
 	r, ok := l.acquireConn(peer, p2)
-	if !ok { t.Fatal("below cap, one stream should be admitted") }
+	if !ok {
+		t.Fatal("below cap, one stream should be admitted")
+	}
 	r()
 	releases[3]()
 	if got := l.stats(p2).SSEActiveTotal; got != 0 {
@@ -239,14 +255,18 @@ func TestAdminLimiterGCDoesNotEvictActiveSSEClient(t *testing.T) {
 	l.now = func() time.Time { return now }
 	peer := "203.0.113.20"
 	release, ok := l.acquireConn(peer, adminLimitPolicy{maxConns: 4})
-	if !ok { t.Fatal("initial SSE denied") }
+	if !ok {
+		t.Fatal("initial SSE denied")
+	}
 
 	now = now.Add(20 * time.Minute)
 	l.mu.Lock()
 	l.gcLocked(now)
 	_, exists := l.buckets[peer]
 	l.mu.Unlock()
-	if !exists { t.Fatal("GC evicted client with active SSE lease") }
+	if !exists {
+		t.Fatal("GC evicted client with active SSE lease")
+	}
 
 	release()
 	now = now.Add(20 * time.Minute)
@@ -255,5 +275,7 @@ func TestAdminLimiterGCDoesNotEvictActiveSSEClient(t *testing.T) {
 	l.gcLocked(now)
 	_, exists = l.buckets[peer]
 	l.mu.Unlock()
-	if exists { t.Fatal("idle client was not reclaimed after final lease release") }
+	if exists {
+		t.Fatal("idle client was not reclaimed after final lease release")
+	}
 }
