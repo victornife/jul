@@ -5,7 +5,6 @@ package admin
 
 import (
 	"context"
-	"errors"
 
 	"jul/internal/config"
 )
@@ -31,17 +30,20 @@ func (s *Server) prepareAuditRuntime(cfg config.AdminConfig, prepared *PreparedA
 }
 
 // CommitPreparedAdminRuntime is the no-fail publication step for the complete
-// prepared admin artifact. The immutable request policy and durable audit sink
-// generation become live at one publication boundary; the audit swap itself is
-// bounded in-memory work and performs no filesystem I/O.
+// prepared admin artifact. When the sink changes, the auth/config snapshot is
+// published while the audit event linearization lock is held and the sink swap
+// immediately follows before that barrier is released. Thus any request that
+// observes the new admin snapshot cannot linearize an audit event to the old
+// sink. No filesystem operation occurs in this section.
 func (s *Server) CommitPreparedAdminRuntime(prepared *PreparedAuth) {
 	if prepared == nil {
 		return
 	}
-	if prepared.audit != nil {
-		prepared.audit.commit()
+	if prepared.audit == nil {
+		s.CommitPreparedAuth(prepared)
+		return
 	}
-	s.CommitPreparedAuth(prepared)
+	prepared.audit.commitWith(func() { s.CommitPreparedAuth(prepared) })
 }
 
 // AbortPreparedAdminRuntime releases a candidate audit resource without
@@ -61,12 +63,4 @@ func (s *Server) RetirePreparedAdminRuntime(ctx context.Context, prepared *Prepa
 		return
 	}
 	prepared.audit.retire(ctx)
-}
-
-func auditPrepareFailureCategory(err error) string {
-	var pathErr *auditPathError
-	if errors.As(err, &pathErr) {
-		return string(auditFailurePath)
-	}
-	return string(auditFailureOpen)
 }
