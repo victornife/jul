@@ -72,12 +72,14 @@ const (
 )
 
 type auditSinkGeneration struct {
-	id       uint64
-	cfg      auditSinkConfig
-	owner    *auditFileOwner
-	inflight int
-	retired  bool
-	drained  chan struct{}
+	id               uint64
+	cfg              auditSinkConfig
+	owner            *auditFileOwner
+	inflight         int
+	retired          bool
+	releaseRequested bool
+	drained          chan struct{}
+	releaseOnce      sync.Once
 }
 
 type preparedAuditSink struct {
@@ -95,6 +97,36 @@ type createdAuditDir struct {
 	info fs.FileInfo
 }
 
+type auditFileHandle interface {
+	Write([]byte) (int, error)
+	Close() error
+	Stat() (fs.FileInfo, error)
+}
+
+type auditRootHandle interface {
+	Lstat(string) (fs.FileInfo, error)
+	OpenFile(string, int, fs.FileMode) (auditFileHandle, error)
+	Rename(string, string) error
+	Remove(string) error
+	ReadDir(string) ([]fs.DirEntry, error)
+	Close() error
+}
+
+type osAuditRootHandle struct{ root *os.Root }
+
+func (r *osAuditRootHandle) Lstat(name string) (fs.FileInfo, error) { return r.root.Lstat(name) }
+func (r *osAuditRootHandle) OpenFile(name string, flag int, perm fs.FileMode) (auditFileHandle, error) {
+	return r.root.OpenFile(name, flag, perm)
+}
+func (r *osAuditRootHandle) Rename(oldName, newName string) error {
+	return r.root.Rename(oldName, newName)
+}
+func (r *osAuditRootHandle) Remove(name string) error { return r.root.Remove(name) }
+func (r *osAuditRootHandle) ReadDir(name string) ([]fs.DirEntry, error) {
+	return fs.ReadDir(r.root.FS(), name)
+}
+func (r *osAuditRootHandle) Close() error { return r.root.Close() }
+
 type auditFileOwner struct {
 	// lifeMu never protects disk I/O. Publish may retain/activate a same-path
 	// owner even while a slow physical write holds mu.
@@ -109,8 +141,8 @@ type auditFileOwner struct {
 	mu   sync.Mutex
 	cond *sync.Cond
 
-	root *os.Root
-	file *os.File
+	root auditRootHandle
+	file auditFileHandle
 	base string
 	path string
 	mode fs.FileMode
@@ -257,28 +289,57 @@ func (p *preparedAuditSink) retire(ctx context.Context) {
 		return
 	}
 	p.retireOnce.Do(func() {
-		select {
-		case <-p.old.drained:
-		case <-ctx.Done():
-			p.log.noteRetirementFailure(auditFailureRetirement, ctx.Err())
-			return
+		a := p.log
+		a.mu.Lock()
+		p.old.releaseRequested = true
+		drained := p.old.inflight == 0
+		a.mu.Unlock()
+		if !drained {
+			select {
+			case <-p.old.drained:
+			case <-ctx.Done():
+				a.noteRetirementFailure(auditFailureRetirement, ctx.Err())
+				return
+			}
 		}
-		if err := p.old.owner.release(ctx, true); err != nil {
-			p.log.noteRetirementFailure(auditFailureClose, err)
+		if err := a.releaseGeneration(p.old, ctx); err != nil {
+			category := auditFailureClose
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				category = auditFailureRetirement
+			}
+			a.noteRetirementFailure(category, err)
 		}
 	})
+}
+
+func (a *auditLog) releaseGeneration(gen *auditSinkGeneration, ctx context.Context) error {
+	if gen == nil {
+		return nil
+	}
+	var releaseErr error
+	gen.releaseOnce.Do(func() {
+		releaseErr = gen.owner.release(ctx, true)
+	})
+	return releaseErr
 }
 
 func (a *auditLog) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	return a.closeWithContext(ctx)
+}
+
+func (a *auditLog) closeWithContext(ctx context.Context) error {
 	a.mu.Lock()
 	old := a.currentSink
 	a.currentSink = nil
-	if old != nil && !old.retired {
-		old.retired = true
-		if old.inflight == 0 {
-			close(old.drained)
+	if old != nil {
+		old.releaseRequested = true
+		if !old.retired {
+			old.retired = true
+			if old.inflight == 0 {
+				close(old.drained)
+			}
 		}
 	}
 	a.mu.Unlock()
@@ -290,7 +351,7 @@ func (a *auditLog) Close() error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	return old.owner.release(ctx, true)
+	return a.releaseGeneration(old, ctx)
 }
 
 func (a *auditLog) statusReport() *AuditSinkStatus {
@@ -361,11 +422,11 @@ func (a *auditLog) record(ev AuditEvent) {
 
 func (a *auditLog) completeWrite(gen *auditSinkGeneration, result auditWriteResult) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	gen.inflight--
 	if gen.retired && gen.inflight == 0 {
 		close(gen.drained)
 	}
+	shouldRelease := gen.retired && gen.releaseRequested && gen.inflight == 0
 	if result.err != nil {
 		switch result.category {
 		case auditFailureRotate:
@@ -379,12 +440,25 @@ func (a *auditLog) completeWrite(gen *auditSinkGeneration, result auditWriteResu
 			a.activeFailure = result.category
 			a.activeFailureAt = time.Now().UTC()
 		}
-		auditLogWarn(a.log, "audit sink persistence failed", gen.cfg.publicPath, result.err)
-		return
-	}
-	if a.currentSink == gen {
+	} else if a.currentSink == gen {
 		a.activeFailure = ""
 		a.activeFailureAt = time.Time{}
+	}
+	a.mu.Unlock()
+
+	if result.err != nil {
+		auditLogWarn(a.log, "audit sink persistence failed", gen.cfg.publicPath, result.err)
+	}
+	if shouldRelease {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.releaseGeneration(gen, ctx); err != nil {
+			category := auditFailureClose
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				category = auditFailureRetirement
+			}
+			a.noteRetirementFailure(category, err)
+		}
 	}
 }
 
@@ -541,7 +615,7 @@ func (o *auditFileOwner) pruneLocked(keep int) error {
 	if keep <= 0 {
 		return nil
 	}
-	entries, err := fs.ReadDir(o.root.FS(), ".")
+	entries, err := o.root.ReadDir(".")
 	if err != nil {
 		return err
 	}
@@ -563,6 +637,9 @@ func (o *auditFileOwner) pruneLocked(keep int) error {
 		}
 	}
 	sort.Slice(backups, func(i, j int) bool { return backups[i].time.After(backups[j].time) })
+	if len(backups) <= keep {
+		return nil
+	}
 	var first error
 	for _, backup := range backups[keep:] {
 		if err := o.root.Remove(backup.name); err != nil && first == nil {
@@ -589,6 +666,10 @@ func prepareAuditFileOwner(path string) (*auditFileOwner, error) {
 	if err != nil {
 		return nil, &auditPathError{err: err}
 	}
+	return prepareAuditFileOwnerAtRoot(root, base, path, createdDirs)
+}
+
+func prepareAuditFileOwnerAtRoot(root auditRootHandle, base, path string, createdDirs []createdAuditDir) (*auditFileOwner, error) {
 	cleanupRoot := true
 	defer func() {
 		if cleanupRoot {
@@ -609,6 +690,14 @@ func prepareAuditFileOwner(path string) (*auditFileOwner, error) {
 		o.file = f
 		created = true
 		info, err = f.Stat()
+		if err != nil {
+			_ = f.Close()
+			o.file = nil
+			o.cleanupCandidate()
+			return nil, fmt.Errorf("stat created audit file: %w", err)
+		}
+		o.createdFile = true
+		o.createdInfo = info
 	} else if err == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 			o.cleanupCandidate()
@@ -648,7 +737,7 @@ func prepareAuditFileOwner(path string) (*auditFileOwner, error) {
 	return o, nil
 }
 
-func prepareAuditParent(parent string) (*os.Root, []createdAuditDir, error) {
+func prepareAuditParent(parent string) (auditRootHandle, []createdAuditDir, error) {
 	parent = filepath.Clean(parent)
 	missing := []string{}
 	ancestor := parent
@@ -680,7 +769,7 @@ func prepareAuditParent(parent string) (*os.Root, []createdAuditDir, error) {
 		return nil, nil, err
 	}
 	if rel == "." {
-		return root, nil, nil
+		return &osAuditRootHandle{root: root}, nil, nil
 	}
 	if err := root.MkdirAll(rel, 0o750); err != nil {
 		_ = root.Close()
@@ -704,7 +793,7 @@ func prepareAuditParent(parent string) (*os.Root, []createdAuditDir, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return parentRoot, created, nil
+	return &osAuditRootHandle{root: parentRoot}, created, nil
 }
 
 func (o *auditFileOwner) release(ctx context.Context, committed bool) error {
@@ -720,32 +809,36 @@ func (o *auditFileOwner) release(ctx context.Context, committed bool) error {
 	shouldCleanup := !o.live && !committed
 	o.lifeMu.Unlock()
 
-	// Release is never invoked from Publish. For a committed generation all
-	// selected writes have already drained; for Abort the writer was unpublished.
+	// Release is never invoked from Publish. The cleanup operation itself may
+	// outlive a bounded retirement caller if the OS Close blocks, but it keeps
+	// ownership of the root and completes exactly once when Close returns.
 	o.mu.Lock()
 	file := o.file
 	o.file = nil
 	o.mu.Unlock()
 
-	var closeErr error
-	if file != nil {
-		done := make(chan error, 1)
-		go func() { done <- file.Close() }()
-		select {
-		case closeErr = <-done:
-		case <-ctx.Done():
-			return ctx.Err()
+	done := make(chan error, 1)
+	go func() {
+		var releaseErr error
+		if file != nil {
+			releaseErr = file.Close()
 		}
-	}
-	if shouldCleanup {
-		o.cleanupCandidate()
-	}
-	if o.root != nil {
-		if err := o.root.Close(); closeErr == nil {
-			closeErr = err
+		if shouldCleanup {
+			o.cleanupCandidate()
 		}
+		if o.root != nil {
+			if err := o.root.Close(); releaseErr == nil {
+				releaseErr = err
+			}
+		}
+		done <- releaseErr
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return closeErr
 }
 
 func (o *auditFileOwner) cleanupCandidate() {
