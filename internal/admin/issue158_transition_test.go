@@ -65,8 +65,11 @@ func TestAdminRateLimitDelayedDisableReenableIsBoundedByNewBurst(t *testing.T) {
 func TestXTimeRateTighteningCharacterization(t *testing.T) {
 	now := time.Unix(8000, 0)
 	lim := rate.NewLimiter(rate.Limit(1), 4)
-	if !lim.AllowN(now, 1) || !lim.AllowN(now, 1) {
-		t.Fatal("failed to establish partially consumed four-token bucket")
+	if !lim.AllowN(now, 1) {
+		t.Fatal("failed to establish first consumption from four-token bucket")
+	}
+	if !lim.AllowN(now, 1) {
+		t.Fatal("failed to establish second consumption from four-token bucket")
 	}
 	if got := lim.TokensAt(now); got < 1.9 {
 		t.Fatalf("unexpected pre-tighten tokens %.3f", got)
