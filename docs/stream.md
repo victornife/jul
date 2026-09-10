@@ -43,12 +43,12 @@ max_udp_sessions = 1024
 | `listen` | required | Bind address (`host:port`) |
 | `protocol` | `tcp` | `tcp` or `udp` |
 | `proxy_pass` | required | Backend: upstream name or literal `host:port` |
-| `connect_timeout` | `5s` | TCP backend dial deadline |
-| `idle_timeout` | `1h` | TCP connection idle timeout; UDP session idle reap |
+| `connect_timeout` | `10s` | TCP backend dial deadline |
+| `idle_timeout` | `5m` | TCP connection idle timeout; UDP session idle reap |
 | `proxy_protocol` | `""` | `"in"`, `"out"`, `"both"` — HAProxy PROXY protocol |
 | `trusted_proxies` | `[]` | Peers allowed to assert a client address with an inbound PROXY header. Required when `proxy_protocol` ingests one; a connection from outside the set is refused |
 | `sni_routes` | `{}` | TLS SNI → backend map (`"*"` = catch-all) |
-| `max_udp_sessions` | `1024` | Per-listener UDP session cap |
+| `max_udp_sessions` | `10000` | Per-listener UDP session cap |
 
 ### Bounding concurrency
 

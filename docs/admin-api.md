@@ -208,10 +208,7 @@ Two boundaries are worth stating:
 The `build` flags are the same ones `jul capabilities` prints, read from one
 shared source so the two cannot drift apart.
 
-**The `/api/v1` mutating surface is not published yet.** ADR 0019 §24 fixes its
-full path set; the operations land incrementally, and a path appears here only
-once it is served. Publishing a `v1` path is a one-way door under §25, so
-nothing is declared stable ahead of being implemented.
+**The `/api/v1` read and mutating surfaces are published.** The committed generated OpenAPI is the machine authority for the supported method/path set; a path is externally supported only while it appears there.
 
 ### `GET /api/v1/config`
 

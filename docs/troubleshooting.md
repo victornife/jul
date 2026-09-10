@@ -229,7 +229,7 @@ they update on the next successful poll.
 
 - `jul_upstream_backends{pool}` — current backend count discovery sees.
 - `jul_discovery_errors_total{pool}` — failed/empty resolves (last-good kept).
-- `jul_upstream_healthy{pool}` — of those, how many pass active health checks.
+- `jul_upstream_backends_healthy{pool}` — of those, how many pass active health checks.
 
 A rising `jul_discovery_errors_total` with a flat `jul_upstream_backends` is the
 signature of a provider outage masked by keep-last-good.

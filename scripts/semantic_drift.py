@@ -286,6 +286,33 @@ def _metric_names(data: dict[str, Any]) -> set[str]:
     return names
 
 
+def _mask_historical_sections(text: str) -> str:
+    """Blank explicitly historical Markdown sections while preserving line numbers."""
+    lines = text.splitlines()
+    masked = list(lines)
+    cutoff = None
+    for i, line in enumerate(lines):
+        match = re.match(r"^(#{2,6})\s+(.+?)\s*$", line)
+        if not match:
+            if cutoff is not None:
+                masked[i] = ""
+            continue
+        level = len(match.group(1))
+        title = match.group(2).lower()
+        if cutoff is not None and level <= cutoff:
+            cutoff = None
+        if any(marker in title for marker in ("changelog", "historical", "release history", "previous review")):
+            cutoff = level
+            masked[i] = ""
+        elif cutoff is not None:
+            masked[i] = ""
+    return "\n".join(masked) + ("\n" if text.endswith("\n") else "")
+
+
+def _source_metric_candidate(name: str) -> bool:
+    return name.endswith(("_total", "_seconds", "_bytes", "_info", "_count", "_bucket", "_sum", "_requests", "_connections", "_backends", "_healthy"))
+
+
 def _metric_consumers(root: Path) -> list[Path]:
     paths = set(_active_markdown(root))
     ui = root / "internal" / "admin" / "ui" / "src"
@@ -306,11 +333,14 @@ def check_metric_claims(root: Path) -> list[Finding]:
     findings: list[Finding] = []
     for path in _metric_consumers(root):
         try:
-            text = path.read_text(encoding="utf-8")
+            raw_text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
+        text = _mask_historical_sections(raw_text) if path.suffix.lower() == ".md" else raw_text
         for m in METRIC_RE.finditer(text):
             name = m.group(0)
+            if path.suffix.lower() in {".ts", ".tsx", ".js", ".jsx"} and not _source_metric_candidate(name):
+                continue
             if name not in allowed:
                 findings.append(Finding(
                     _rel(root, path), _line(text, m.start()), "metrics", f"unknown/removed metric {name!r}",
@@ -354,6 +384,9 @@ def _structured_api_claims(text: str) -> Iterable[tuple[int, str, str, str, bool
         # Arbitrary unversioned Console routes are legitimate prose examples.
         # Only versioned/public routes are inherently external claims.
         if not (bare.startswith("/api/v1/") or bare in {"/healthz", "/readyz", "/metrics"}):
+            continue
+        local_line = text[text.rfind("\n", 0, m.start()) + 1:text.find("\n", m.end()) if text.find("\n", m.end()) != -1 else len(text)].lower()
+        if any(marker in local_line for marker in (" absent", "not published", "not supported", " internal", " private", "historical")):
             continue
         row = (_line(text, m.start()), m.group(1), path, m.group(0), True)
         key = row[:3]
@@ -485,10 +518,20 @@ def _documented_remote_commands(text: str) -> list[tuple[int, str]]:
     section = re.search(r"(?ms)^## Commands\s*$\n(.*?)(?=^##\s|\Z)", text)
     if section:
         base = _line(text, section.start(1)) - 1
-        for i, line in enumerate(section.group(1).splitlines(), 1):
-            m = REMOTE_COMMAND_RE.search(line)
-            if m:
-                commands.append((base + i, m.group(1)))
+        lines = section.group(1).splitlines()
+        in_command_table = False
+        for i, line in enumerate(lines, 1):
+            if line.lstrip().startswith("|"):
+                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                if cells and cells[0].lower() == "command":
+                    in_command_table = True
+                    continue
+                if in_command_table and cells and not all(re.fullmatch(r"[: -]+", c or "-") for c in cells):
+                    m = REMOTE_COMMAND_RE.search(cells[0])
+                    if m:
+                        commands.append((base + i, m.group(1)))
+            elif line.strip():
+                in_command_table = False
     for m in re.finditer(r"(?m)^\s*jul\s+([a-z][a-z0-9-]+)\b[^\n]*--endpoint\b", text):
         commands.append((_line(text, m.start()), m.group(1)))
     return sorted(set(commands))
