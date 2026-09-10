@@ -89,7 +89,7 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
   const parsedWrite = Number(writePerMin);
   const parsedApply = Number(applyPerMin);
   const parsedConns = Number(maxEventConns);
-  const limitsValid = Number.isInteger(parsedRead) && Number.isInteger(parsedWrite) && Number.isInteger(parsedApply) && Number.isInteger(parsedConns) && parsedConns > 0;
+  const limitsValid = Number.isInteger(parsedRead) && Number.isInteger(parsedWrite) && Number.isInteger(parsedApply) && Number.isInteger(parsedConns) && parsedConns >= 0;
   const loweringSSE = Boolean(data && parsedConns > 0 && parsedConns < data.max_event_conns);
 
   const ops = useMemo<ConfigPatch[]>(() => {
@@ -212,14 +212,14 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
             <SettingLabel title="Concurrent event/log streams per client" field={data.lifecycle.max_event_conns} />
             <input
               type="number"
-              min={1}
+              min={0}
               step={1}
               value={maxEventConns}
               onChange={(event) => { setMaxEventConns(event.target.value); }}
               className="w-32 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
             />
-            {parsedConns <= 0 && <p className="mt-1 text-xs text-jul-danger">Use a positive whole number. This setting has no unlimited mode.</p>}
-            <p className="mt-2 text-xs text-jul-muted">The cap is shared by event and live-log SSE streams for each transport peer.</p>
+            {parsedConns < 0 && <p className="mt-1 text-xs text-jul-danger">Use a non-negative whole number. This setting has no unlimited mode.</p>}
+            <p className="mt-2 text-xs text-jul-muted">Zero selects the canonical default (4); positive values set the per-client cap. There is no unlimited mode. The cap is shared by event and live-log SSE streams for each transport peer.</p>
             {loweringSSE && (
               <p className="mt-3 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-2 text-xs text-jul-text">
                 Existing event/log streams remain connected. The new per-client cap applies to new connections; clients already above the cap cannot open another stream until their active count falls below the configured limit.
