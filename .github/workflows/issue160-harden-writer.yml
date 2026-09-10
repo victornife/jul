@@ -35,20 +35,6 @@ jobs:
           if old not in s:
               raise SystemExit("prune anchor missing")
           p.write_text(s.replace(old, new, 1))
-
-          p = Path("internal/admin/issue160_writer_matrix_test.go")
-          s = p.read_text().replace('\t"io"\n', '')
-          old = '''\tif got.err == nil || !errors.Is(got.err, io.ErrShortWrite) && got.category != auditFailureWrite {
-          \t\tif got.category != auditFailureWrite {
-          \t\t\tt.Fatalf("result=%+v", got)
-          \t\t}
-          \t}'''
-          new = '''\tif got.err == nil || got.category != auditFailureWrite {
-          \t\tt.Fatalf("result=%+v", got)
-          \t}'''
-          if old not in s:
-              raise SystemExit("oversized assertion anchor missing")
-          p.write_text(s.replace(old, new, 1))
           PY
           gofmt -w internal/admin/audit_sink_runtime.go internal/admin/issue160_writer_matrix_test.go
       - name: Verify focused matrix
