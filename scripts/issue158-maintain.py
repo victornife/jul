@@ -75,7 +75,8 @@ p = Path("internal/admin/issue158_transition_test.go")
 s = p.read_text().replace('\t"net/http"\n', "")
 p.write_text(s)
 
-# Remove now-unused frontend helper after the explicit Number validation cleanup.
+# Keep Console semantics identical to canonical server configuration: zero is
+# the default for max_event_conns after canonicalization, never unlimited.
 p = Path("internal/admin/ui/src/features/plugins/AdminRuntimeSettingsDrawer.tsx")
 s = p.read_text()
 helper = '''function integerValue(value: string): number | null {
@@ -85,6 +86,10 @@ helper = '''function integerValue(value: string): number | null {
 
 '''
 s = s.replace(helper, "")
+s = s.replace("Number.isInteger(parsedConns) && parsedConns > 0;", "Number.isInteger(parsedConns) && parsedConns >= 0;")
+s = s.replace('min={1}\n              step={1}', 'min={0}\n              step={1}')
+s = s.replace('{parsedConns <= 0 && <p className="mt-1 text-xs text-jul-danger">Use a positive whole number. This setting has no unlimited mode.</p>}', '{parsedConns < 0 && <p className="mt-1 text-xs text-jul-danger">Use a non-negative whole number. This setting has no unlimited mode.</p>}')
+s = s.replace('The cap is shared by event and live-log SSE streams for each transport peer.</p>', 'Zero selects the canonical default (4); positive values set the per-client cap. There is no unlimited mode. The cap is shared by event and live-log SSE streams for each transport peer.</p>')
 p.write_text(s)
 
 # Move the exact four HR-07A lifecycle decisions into the authoritative registry
