@@ -1,0 +1,38 @@
+name: HR-07C config contract regenerate once
+
+on:
+  push:
+    branches: [issue-160-hot-audit-sink]
+    paths:
+      - '.github/workflows/issue160-config-contract-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: issue-160-hot-audit-sink
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Regenerate configuration contract
+        run: |
+          make config-contract-generate
+          git diff -- docs/generated
+      - name: Commit generated mirrors
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/generated
+          if git diff --cached --quiet; then
+            echo 'No generated changes required.'
+            exit 0
+          fi
+          git commit -s -m 'docs: regenerate HR-07C configuration contract mirrors'
+          git push origin HEAD:issue-160-hot-audit-sink
