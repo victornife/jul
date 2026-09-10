@@ -381,6 +381,22 @@ export const AdminHealthStatusSchema = z.object({
 });
 export type AdminHealthStatus = z.infer<typeof AdminHealthStatusSchema>;
 
+// HR-06B bounded effective admin policy. No configured upload path, filename,
+// token, or raw preparation error is exposed here.
+export const AdminRuntimeStatusSchema = z.object({
+  generation: z.string(),
+  console_compiled: z.boolean(),
+  console_configured: z.boolean(),
+  console_effective: z.boolean(),
+  plugins_compiled: z.boolean(),
+  upload_enabled: z.boolean(),
+  upload_max_size_mb: z.number().int().nonnegative(),
+  upload_directory_health: z.string(),
+  preparation_failure: z.string().optional(),
+  last_upload_rejection: z.string().optional(),
+});
+export type AdminRuntimeStatus = z.infer<typeof AdminRuntimeStatusSchema>;
+
 // ManagedApplyOutcomeSchema mirrors admin.ManagedApplyOutcome: the terminal
 // async result of a managed configuration apply (including any restoration).
 // Exposed in RuntimeOverview as last_managed_apply so the console can surface
@@ -473,6 +489,8 @@ export const OverviewSchema = z.object({
   // when the admin subsystem is degraded (e.g. a post-Publish admin reload
   // failure). Absent when the admin subsystem is healthy.
   admin_health: AdminHealthStatusSchema.optional(),
+  // HR-06B request-generation policy and bounded health metadata.
+  admin_runtime: AdminRuntimeStatusSchema.optional(),
   // last_managed_apply is the terminal outcome of the most recent managed
   // configuration apply, including any async restoration (H-06/M-05). Absent
   // until the first managed apply completes.
@@ -827,6 +845,22 @@ export const GlobalSettingsProjectionSchema = z.object({
 });
 export type GlobalSettingsProjection = z.infer<typeof GlobalSettingsProjectionSchema>;
 
+
+// Secret-safe HR-06B settings projection. The upload directory is configuration
+// data gated by config:read; it is intentionally absent from runtime metrics/status.
+export const AdminRuntimeSettingsProjectionSchema = z.object({
+  console: z.boolean(),
+  console_compiled: z.boolean(),
+  console_effective: z.boolean(),
+  plugin_upload_enabled: z.boolean(),
+  plugin_upload_max_size_mb: z.number().int().nonnegative(),
+  plugin_upload_dir: z.string(),
+  plugin_upload_effective: z.boolean(),
+  upload_directory_health: z.string(),
+  lifecycle: z.record(z.string(), LifecycleFieldProjectionSchema).default({}),
+});
+export type AdminRuntimeSettingsProjection = z.infer<typeof AdminRuntimeSettingsProjectionSchema>;
+
 export const CompressionProjectionSchema = z.object({
   enabled: z.boolean(),
   encoders: z.array(z.string()).default([]),
@@ -1109,6 +1143,10 @@ export function fetchMe(): Promise<Identity> {
 
 export function fetchTrafficControls(): Promise<TrafficControls> {
   return api<unknown>("/traffic-controls").then((d) => TrafficControlsSchema.parse(d));
+}
+
+export function fetchAdminRuntimeSettings(): Promise<AdminRuntimeSettingsProjection> {
+  return api<unknown>("/config/settings").then((d) => AdminRuntimeSettingsProjectionSchema.parse(d));
 }
 
 export function fetchPlugins(): Promise<PluginsProjection> {
@@ -1624,6 +1662,11 @@ export type ConfigPatch =
   | { op: "upstream_add"; upstream: string; address: string; weight?: number; strategy?: string }
   | { op: "upstream_remove"; upstream: string }
   | { op: "global_set"; global: GlobalPatch }
+  | { op: "admin_console_set"; enabled: boolean }
+  | {
+      op: "admin_plugin_upload_set";
+      plugin_upload: { enabled?: boolean; max_size_mb?: number; directory?: string };
+    }
   | { op: "compression_set"; compression: CompressionPatch }
   | { op: "rate_limit_global_set"; rate_limit: GlobalRateLimitPatch }
   | ({ op: "location_toggle_require_client_cert"; enabled: boolean } & RouteTarget);

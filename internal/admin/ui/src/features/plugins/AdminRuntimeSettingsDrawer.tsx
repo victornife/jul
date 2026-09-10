@@ -7,7 +7,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchAdminRuntimeSettings,
-  type AdminRuntimeSettingsProjection,
   type ConfigPatch,
   type LifecycleFieldProjection,
 } from "@/api/client.ts";
@@ -19,7 +18,7 @@ interface Props {
   onClose: () => void;
 }
 
-function LifecycleBadge({ field }: { field?: LifecycleFieldProjection }) {
+function LifecycleBadge({ field }: { field: LifecycleFieldProjection | undefined }) {
   if (!field) return null;
   const hot = field.class === "hot_reload";
   return (
@@ -41,7 +40,7 @@ function SettingLabel({
   field,
 }: {
   title: string;
-  field?: LifecycleFieldProjection;
+  field: LifecycleFieldProjection | undefined;
 }) {
   return (
     <div className="mb-1.5 flex items-center gap-2">
@@ -162,7 +161,7 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
                   <input
                     type="checkbox"
                     checked={confirmDisable}
-                    onChange={(event) => setConfirmDisable(event.target.checked)}
+                    onChange={(event) => { setConfirmDisable(event.target.checked); }}
                   />
                   <span>I understand how to re-enable the Console.</span>
                 </label>
@@ -176,7 +175,7 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
               <input
                 type="checkbox"
                 checked={uploadEnabled}
-                onChange={(event) => setUploadEnabled(event.target.checked)}
+                onChange={(event) => { setUploadEnabled(event.target.checked); }}
               />
               Accept authenticated WASM uploads
             </label>
@@ -198,7 +197,7 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
                 min={0}
                 step={1}
                 value={maxSize}
-                onChange={(event) => setMaxSize(event.target.value)}
+                onChange={(event) => { setMaxSize(event.target.value); }}
                 className="w-32 rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 text-sm text-jul-text"
               />
               <span className="text-sm text-jul-muted">MB</span>
@@ -214,7 +213,7 @@ export function AdminRuntimeSettingsDrawer({ onClose }: Props) {
             <input
               type="text"
               value={directory}
-              onChange={(event) => setDirectory(event.target.value)}
+              onChange={(event) => { setDirectory(event.target.value); }}
               className="w-full rounded-md border border-jul-border bg-jul-bg px-2 py-1.5 font-mono text-sm text-jul-text"
             />
             {directoryChanging && (
