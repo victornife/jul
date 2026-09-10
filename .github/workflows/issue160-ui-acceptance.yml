@@ -27,7 +27,7 @@ jobs:
           python3 scripts/issue160_ui_lint_fix.py
           python3 scripts/issue160_ui_acceptance.py
           pnpm --dir internal/admin/ui install --frozen-lockfile
-          pnpm --dir internal/admin/ui exec prettier --write src/features/plugins/AdminRuntimeSettingsDrawer.tsx src/features/plugins/AdminRuntimeSettingsDrawer.test.tsx e2e/issue160-audit-sink.spec.ts
+          pnpm --dir internal/admin/ui exec prettier --write src/features/plugins/AdminRuntimeSettingsDrawer.tsx src/features/plugins/AdminRuntimeSettingsDrawer.test.tsx e2e/issue160-audit-sink.spec.ts playwright.config.ts
           pnpm --dir internal/admin/ui run typecheck
           pnpm --dir internal/admin/ui run lint
           pnpm --dir internal/admin/ui exec vitest run src/features/plugins/AdminRuntimeSettingsDrawer.test.tsx --coverage.enabled --coverage.include=src/features/plugins/AdminRuntimeSettingsDrawer.tsx --coverage.reporter=json-summary --coverage.reportsDirectory=/tmp/hr07c-ui-cov
@@ -48,7 +48,8 @@ jobs:
           PY
       - name: Build real Jul and run HR-07C Playwright
         run: |
-          pnpm --dir internal/admin/ui exec playwright test e2e/issue160-audit-sink.spec.ts
+          pnpm --dir internal/admin/ui exec playwright install --with-deps chromium
+          pnpm --dir internal/admin/ui exec playwright test --project=real-server issue160-audit-sink.spec.ts
       - name: Commit materialized acceptance
         run: |
           rm scripts/issue160_ui_lint_fix.py scripts/issue160_ui_acceptance.py .github/workflows/issue160-ui-acceptance.yml
