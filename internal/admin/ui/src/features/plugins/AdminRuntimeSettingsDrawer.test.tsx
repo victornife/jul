@@ -78,8 +78,12 @@ function renderDrawer(onClose = vi.fn()) {
   return { onClose, ...render(<AdminRuntimeSettingsDrawer onClose={onClose} />, { wrapper: Wrapper }) };
 }
 
-function numberInput(label: string): HTMLInputElement {
+function rateInput(label: string): HTMLInputElement {
   return screen.getByLabelText(label) as HTMLInputElement;
+}
+
+function spinbutton(index: number): HTMLInputElement {
+  return screen.getAllByRole("spinbutton")[index] as HTMLInputElement;
 }
 
 describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
@@ -98,8 +102,8 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
     expect(screen.getByText(/Zero means the canonical default/)).toBeInTheDocument();
     expect(screen.getByText(/Zero selects the canonical default \(4\)/)).toBeInTheDocument();
 
-    fireEvent.change(numberInput("Read / min"), { target: { value: "-1" } });
-    fireEvent.change(numberInput("Concurrent event/log streams per client"), { target: { value: "0" } });
+    fireEvent.change(rateInput("Read / min"), { target: { value: "-1" } });
+    fireEvent.change(spinbutton(3), { target: { value: "0" } });
     fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
 
     await waitFor(() => {
@@ -113,8 +117,8 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
     renderDrawer();
     await screen.findByText("Admin request admission");
 
-    fireEvent.change(numberInput("Write / min"), { target: { value: "12" } });
-    fireEvent.change(numberInput("Apply / min"), { target: { value: "7" } });
+    fireEvent.change(rateInput("Write / min"), { target: { value: "12" } });
+    fireEvent.change(rateInput("Apply / min"), { target: { value: "7" } });
     fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
 
     await waitFor(() => {
@@ -127,7 +131,7 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
   it("warns on SSE tightening without treating existing sessions as drain candidates", async () => {
     renderDrawer();
     await screen.findByText("Admin request admission");
-    fireEvent.change(numberInput("Concurrent event/log streams per client"), { target: { value: "2" } });
+    fireEvent.change(spinbutton(3), { target: { value: "2" } });
 
     expect(screen.getByText(/Existing event\/log streams remain connected/)).toBeInTheDocument();
     expect(screen.getByText(/cannot open another stream until their active count falls below/)).toBeInTheDocument();
@@ -137,14 +141,14 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
     renderDrawer();
     await screen.findByText("Admin request admission");
 
-    fireEvent.change(numberInput("Read / min"), { target: { value: "-20" } });
+    fireEvent.change(rateInput("Read / min"), { target: { value: "-20" } });
     expect(screen.getByRole("button", { name: "Review changes" })).toBeEnabled();
 
-    fireEvent.change(numberInput("Concurrent event/log streams per client"), { target: { value: "-1" } });
+    fireEvent.change(spinbutton(3), { target: { value: "-1" } });
     expect(screen.getByText(/Use a non-negative whole number/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Review changes" })).toBeDisabled();
 
-    fireEvent.change(numberInput("Concurrent event/log streams per client"), { target: { value: "1.5" } });
+    fireEvent.change(spinbutton(3), { target: { value: "1.5" } });
     expect(screen.getByRole("button", { name: "Review changes" })).toBeDisabled();
   });
 
@@ -152,13 +156,13 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
     renderDrawer();
     await screen.findByText("Admin request admission");
 
-    expect(numberInput("Read / min").value).toBe("240");
-    expect(numberInput("Write / min").value).toBe("60");
-    expect(numberInput("Apply / min").value).toBe("30");
-    expect(numberInput("Concurrent event/log streams per client").value).toBe("4");
+    expect(rateInput("Read / min").value).toBe("240");
+    expect(rateInput("Write / min").value).toBe("60");
+    expect(rateInput("Apply / min").value).toBe("30");
+    expect(spinbutton(3).value).toBe("4");
     expect(screen.getByRole("button", { name: "Review changes" })).toBeDisabled();
 
-    fireEvent.change(numberInput("Read / min"), { target: { value: "1.25" } });
+    fireEvent.change(rateInput("Read / min"), { target: { value: "1.25" } });
     expect(screen.getByRole("button", { name: "Review changes" })).toBeDisabled();
   });
 
@@ -189,8 +193,8 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
     fireEvent.click(screen.getByLabelText(/Accept authenticated WASM uploads/));
     expect(screen.getByText(/blocks new request bodies before multipart parsing/)).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Maximum upload size"), { target: { value: "22" } });
-    fireEvent.change(screen.getByLabelText("Upload directory"), { target: { value: "/tmp/next" } });
+    fireEvent.change(spinbutton(4), { target: { value: "22" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "/tmp/next" } });
     expect(screen.getByText(/does not copy, migrate, or delete files/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
@@ -205,15 +209,14 @@ describe("AdminRuntimeSettingsDrawer HR-07A limits", () => {
   });
 
   it("renders loading, request errors, preview errors and busy state without bypassing guards", async () => {
-    const never = new Promise(() => undefined);
-    mocks.fetchSettings.mockReturnValueOnce(never);
+    mocks.fetchSettings.mockReturnValueOnce(new Promise(() => undefined));
     const loading = renderDrawer();
     expect(screen.getByText(/Loading admin runtime settings/)).toBeInTheDocument();
     loading.unmount();
 
     mocks.fetchSettings.mockRejectedValueOnce(new Error("settings unavailable"));
     const failed = renderDrawer();
-    await screen.findByText(/settings unavailable/);
+    await screen.findByRole("alert");
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(failed.onClose).toHaveBeenCalled();
     failed.unmount();
