@@ -58,6 +58,15 @@ HTTP/3 Alt-Svc advertisement (mode and max-age) hot-applies per listener
 without rebinding the QUIC socket (#161) — `http3.enabled` itself still
 requires a restart, since it changes whether a UDP listener exists at all.
 
+Two current restart boundaries are now **selected for removal**, but remain
+limitations until their implementation PRs merge: #99 is reduced to
+`observability.tracing.sample_ratio` only (**S/M, 4–7 focused engineer-days**),
+and #94 selects generation-correct `egress.enabled`/`egress.allow` (**L, 15–25
+focused engineer-days / ~3–5 focused weeks**). All other tracing fields stay
+restart-bound in this tranche, and egress is not promoted until every auxiliary
+outbound consumer and old connection pool obeys the candidate generation. See
+[hot-reload strategy](hot-reload-strategy.md).
+
 - **A same-path access-log rotation-setting change has a narrow, bounded
   overlap risk.** Changing `rotate_max_mb`/`rotate_keep` while `file` stays the
   same builds a new, independent file writer for the new generation rather
@@ -181,7 +190,7 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 ## Configuration reload ([reload-semantics.md](reload-semantics.md))
 
 - **Some fields cannot be hot-reloaded.** The authoritative classification is
-  [`internal/lifecycle/lifecycle.go`](../internal/lifecycle/lifecycle.go) and
+  [`internal/lifecycle/registry.go`](../internal/lifecycle/registry.go) and
   the machine-readable copy in [config-lifecycle.yaml](config-lifecycle.yaml).
   Restart-required fields are rejected by the admin apply path and by
   SIGHUP/file-watch reloads; the new value is saved but takes effect only after

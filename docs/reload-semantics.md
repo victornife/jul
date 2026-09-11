@@ -22,6 +22,11 @@
 >
 > Mixed candidates remain whole-candidate operations: Jul.IA does not silently
 > publish a hot subset while another field is staged or restart-bound.
+>
+> Why a field is promoted to `hot_reload` or deliberately left behind a restart
+> boundary is documented in [hot-reload strategy and selection
+> criteria](hot-reload-strategy.md). Selection never changes this document's
+> descriptive runtime truth ahead of implementation.
 
 Jul.IA reloads configuration **without dropping connections**. A reload can be
 triggered three ways:
@@ -435,8 +440,9 @@ are:
    handler generation after it drains, and retire the `PreparedRuntime`
    asynchronously (bounded by `[global] shutdown_timeout`, like handler
    generation retirement) so Publish never waits on it.
-9. **PostCommit** — apply dynamic side effects: log level, GOMAXPROCS, and
-    stream-proxy reload.
+9. **PostCommit** — apply committed dynamic side effects that do not need a
+   prepared resource: log level/format, metrics host-label mode, cache scalar
+   policy/capacity, GOMAXPROCS, and stream-proxy reload.
 
 On any failure before Publish, `Abort()` releases all candidate resources
 without touching live state. On any failure after Publish, the reload is
@@ -537,7 +543,7 @@ from the same inputs.
 These subsystems are classified per exact leaf rather than as one group, so a
 restart reason names the field that actually changed:
 
-- `servers.*.tls.enabled`, `.min_version`, `.cert`, `.key`;
+- `servers.*.tls.enabled`, `.min_version`;
 - `servers.*.tls.client_auth.mode`, `.ca_file`, `.verify_san`, `.crl_file` —
   the **mtls** bundle installed in the listener's `tls.Config` at bind time;
 - `servers.*.tls.acme.enabled`, `.email`, `.ca`, `.domains`, `.challenge`,
@@ -546,8 +552,11 @@ restart reason names the field that actually changed:
   UDP socket exists at all is a bind-time decision;
 - `servers.*.h2c`.
 
-All of them are compared per listen address, so adding or removing an unrelated
-listener never produces a restart-required verdict for an address nobody edited.
+All restart-bound listener fields above are compared per listen address, so
+adding or removing an unrelated listener never produces a restart-required
+verdict for an address nobody edited. Static `servers.*.tls.cert` and `.key`
+are intentionally absent: #100 prepares and atomically publishes a candidate
+certificate provider on the retained listener, so both are `hot_reload`.
 
 `servers.*.http3.alt_svc_max_age` is the one HTTP/3 leaf that is **not** in
 this restart-required list: the Alt-Svc advertisement is a per-listener atomic
@@ -573,27 +582,6 @@ candidate fingerprint for each kept listener. This detects:
 - HTTP/3 or h2c toggles on an already-bound address.
 
 These changes are reported as `restart_required` and rejected before Publish.
-
-## Lifecycle classification: single source of truth
-
-The authoritative classification is in
-[`internal/lifecycle/lifecycle.go`](../internal/lifecycle/lifecycle.go) and is
-mirrored in [`docs/config-lifecycle.yaml`](config-lifecycle.yaml). The three
-classes are:
-
-- **hot_reload** — takes effect on the next successful reload.
-- **restart_required** — takes effect only after a process restart. The admin
-  apply path returns HTTP 409 with `restart_required: true`; SIGHUP/file-watch
-  set `LastReload.OK=false`.
-- **new_listener_only** — honored for a brand-new listen address on reload;
-  changing the property on an already-bound listener is restart-required.
-
-Lifecycle checks compare **effective values** (secret references resolved,
-file-backed secrets digested, `worker_threads` auto resolved to the effective
-GOMAXPROCS cap). This prevents a saved secret-reference change from hiding a
-real structural change and detects file-content rotation. Hot-reloadable
-fields such as `worker_threads` are diffed against the live effective value so
-that a change is applied on the next successful reload.
 
 ### Pending-restart indicator
 
@@ -813,12 +801,16 @@ now format is too.
   the socket is bound once and reused. Changing read/read-header/write/idle
   timeouts, max header bytes, h2c, HTTP/3, or the global connection cap cannot
   rebind the listener live.
-- **TLS handshake parameters on an existing listener** — minimum TLS version,
-  certificates, and the **mtls** client-authentication bundle (mode, CA bundle,
-  SAN allow-list, CRL) are baked into the listener's TLS config. **http3**
-  `enabled` and `h2c` are likewise decided when the address binds; `http3`
-  `alt_svc_max_age` is the one exception — see below.
-- **Tracing** — the OpenTelemetry pipeline is wired once at startup.
+- **TLS handshake parameters on an existing listener** — minimum TLS version
+  and the **mtls** client-authentication bundle (mode, CA bundle, SAN allow-list,
+  CRL) are baked into the listener's TLS config. Static certificate/key content
+  is the deliberate exception: #100 hot-reloads it through a prepared dynamic
+  certificate provider. **http3** `enabled` and `h2c` are likewise decided when
+  the address binds; `http3.alt_svc_max_age` is hot — see below.
+- **Tracing** — the provider/exporter pipeline is wired once at startup, so all
+  tracing fields are currently restart-bound. #99 is selected with reduced
+  scope to make only `observability.tracing.sample_ratio` hot; the other tracing
+  fields remain deliberately restart-required.
 - **Response cache** — the cache backend (LRU/disk tiers and counters) is
   built once at startup and remains process-scoped across ordinary handler
   reloads. Its five scalar policy/capacity fields (`default_ttl`,
@@ -844,14 +836,27 @@ now format is too.
   prior process generation advertised. See
   [known-limitations.md](known-limitations.md) for the client-caching and
   max-age transition-boundary caveats.
-- **Egress allow-list** — the outbound dial policy is built once at startup.
-- **Admin server** — listener, rate limits, history, plugin-upload, and
-  audit-log settings are baked in at startup. `admin.token` and the RBAC policy
-  (including its `admin.rbac.enabled` toggle) are the exception: both hot-reload
-  via the same prepared atomic authentication snapshot, so a rotated token or
-  policy is live for the very next request after a successful reload and the
-  prior token is rejected immediately — no restart, no overlap window (#95;
-  see [config-lifecycle.yaml](config-lifecycle.yaml)).
+- **Egress allow-list** — the outbound dial policy is currently built once at
+  startup. #94 is selected to make `egress.enabled` and `egress.allow` dynamic,
+  but they remain `restart_required` until every auth/discovery/plugin/PKI
+  consumer and reusable transport is generation-correct.
+- **Admin structural resources** — `admin.enabled`, `admin.listen`, history
+  directory/retention, TLS protocol mode/minimum version and admin mTLS handshake
+  policy remain startup-owned. In contrast, Console/plugin-upload policy, admin
+  request/SSE limits, durable audit sink path/rotation, `admin.token`, RBAC and
+  admin static certificate/key are all hot-reloadable; see the generated
+  lifecycle reference for the exact leaves.
+
+### Selected runtime gaps (not current behavior)
+
+Two remaining restart-bound gaps are selected for implementation after the
+post-#160 value/peer audit: #99 will hot-reload only
+`observability.tracing.sample_ratio` without replacing the tracing pipeline, and
+#94 will make `[egress]` generation-correct across every auxiliary outbound
+consumer and reusable connection pool. Their present registry classification is
+unchanged until those implementations land. See
+[hot-reload strategy](hot-reload-strategy.md) for the decision rubric, target
+contracts and effort.
 
 Adding a brand-new `listen` address is *not* restart-required: the reload binds
 it fresh. Only changes to an address the server is already serving are gated.

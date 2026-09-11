@@ -109,9 +109,15 @@ overhead; these numbers represent the in-process span construction cost.
 
 ## Known limitations
 
-1. **Tracing settings require a restart.** Changing `[observability.tracing]`
-   after startup emits a warning and keeps the running tracer; a restart is
-   needed to pick up new endpoint, sample ratio, or exporter type.
+1. **Tracing settings currently require a restart.** Changing
+   `[observability.tracing]` after startup keeps the running tracer. #99 is now
+   **selected with reduced scope** to make only `sample_ratio` hot-reloadable:
+   new root spans after Publish will use the new ratio while parent sampling
+   decisions remain authoritative, without rebuilding the provider/exporter.
+   Until that implementation lands, `sample_ratio` remains `restart_required`.
+   `enabled`, `endpoint`, `exporter`, `service_name`, and `insecure` remain
+   deliberately restart-bound in this tranche. See
+   [hot-reload strategy](hot-reload-strategy.md).
 
 2. **No tail-based sampling.** Only head-based ratio sampling is supported
    (`sample_ratio`). Adaptive or error-biased sampling must be done in the
