@@ -194,7 +194,7 @@ parameter that controls how a valid candidate is applied:
 | Mode | Description |
 | ---- | ----------- |
 | `hot` (default) | Validates, persists, and immediately triggers a live reload. Restart-required changes are rejected with `restart_required: true` and `can_stage: true`; nothing is written. |
-| `stage_restart` | Validates and persists the candidate without triggering a live reload. The running process continues serving the previous configuration. The candidate takes effect on the next process restart. Use this mode for changes to startup-bound settings (cache, egress, admin, tracing, ACME, log format, listener settings). |
+| `stage_restart` | Validates and persists the candidate without triggering a live reload. The running process continues serving the previous configuration. The candidate takes effect on the next process restart. Use this mode whenever preview reports `restart_required` — for example `global.config_authority`, cache backend identity (`cache.enabled` / `cache.disk_path`), the currently restart-bound egress and tracing leaves, ACME identity/policy, admin structural resources, or retained-listener bind-time settings. Do not infer lifecycle from the subsystem name; the generated lifecycle registry is field-specific. |
 
 When a candidate is staged:
 
