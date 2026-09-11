@@ -18,7 +18,7 @@ Adopt a single **`ReloadPlan`** value that owns every piece of candidate state f
 
 ### 1. ReloadPlan transaction
 
-`internal/server/server.go` defines `ReloadPlan` with the phases:
+`internal/server/reload_plan.go` defines `ReloadPlan` with the phases:
 
 1. **Resolve** — expand secrets once and build the immutable `config.Candidate` (raw config, effective config, redaction state, secret digests, candidate fingerprint).
 2. **Validate** — run structural/runtime validation on `Candidate.Effective`.
@@ -27,9 +27,10 @@ Adopt a single **`ReloadPlan`** value that owns every piece of candidate state f
 5. **StageListeners** — bind new TCP listeners and HTTP/3 resources without serving.
 6. **Publish** — atomically install redaction state, swap configs, publish handler generation, and commit pool/generation resources.
 7. **Activate** — start serving on staged listeners.
-8. **Retire** — stop listeners no longer in the config and retire the old handler generation.
-9. **Refresh** — reload TLS certificates.
-10. **PostCommit** — apply dynamic side effects (`log_level`, `GOMAXPROCS`, stream reload).
+8. **Retire** — stop listeners no longer in the config, retire the old handler generation, and retire committed `PreparedRuntime` resources within their bounded lifetime.
+9. **PostCommit** — apply committed dynamic side effects that do not need a prepared resource (currently log level/format, metrics host-label mode, cache scalar policy/capacity, `GOMAXPROCS`, and stream reload).
+
+Static certificate rotation is no longer a separate `Refresh` phase: since #100, candidate certificate providers are built during **Prepare** and published through `PreparedRuntime` before the new handler generation becomes reachable.
 
 On any failure before Publish, `Abort` releases all candidate resources without touching live state.
 
@@ -108,9 +109,13 @@ startup value. This amendment closes that gap.
    `lifecycle.DiffEntry` carries no before/after values.
 
 7. **Classification records proven behavior.** Splitting a coarse entry never
-   promotes a field to `hot_reload` in anticipation of unlanded work: cache,
-   static certificate material, access-log sinks and tracing stay restart-bound
-   until #92/#93, #100 and #98 land. `stream.*.protocol` was reclassified to
+   promotes a field to `hot_reload` in anticipation of unlanded work. At the
+   time of the closed-world amendment, cache policy, static certificate material,
+   access-log sinks and tracing were deliberately restart-bound pending their
+   focused implementation issues. Later work promoted only the leaves whose
+   runtime semantics were actually proved (#92 cache scalars, #100 static
+   certificate/key rotation, #98 access-log sinks); tracing remains restart-bound
+   at this baseline. `stream.*.protocol` was likewise reclassified to
    `hot_reload` only after a real-socket characterization matrix proved the
    listener transaction binds the candidate protocol before retiring the previous
    one.
@@ -168,7 +173,7 @@ The handler factory receives an immutable `upstream.SnapshotMap` at commit time.
 - `internal/config/candidate.go` — immutable candidate
 - `internal/config/secrets.go` — secret expansion
 - `internal/redact/state.go` — redaction state
-- `internal/lifecycle/lifecycle.go` — lifecycle registry
+- `internal/lifecycle/registry.go` — lifecycle registry
 - `docs/config-lifecycle.yaml` — field lifecycle manifest
 - `docs/reload-semantics.md` — operator-facing reload semantics
 - `docs/specs/reload-plan.md` — detailed implementation design

@@ -42,6 +42,9 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 - **[Reload, staging, authority and rollback](reload-semantics.md)** —
   transactional reload, planned restart, managed/file-owned authority and
   generation lifetimes.
+- **[Hot-reload strategy and selection criteria](hot-reload-strategy.md)** —
+  rationale for future live-transition investment; it never overrides the
+  generated field-level lifecycle truth of the current binary.
 - **[Generated lifecycle reference](generated/config-lifecycle.md)** and
   **[machine lifecycle metadata](generated/config-lifecycle.json)** — exhaustive
   field-level lifecycle truth from the Go registry.

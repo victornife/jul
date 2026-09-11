@@ -163,10 +163,9 @@ Supporting helpers in `internal/app/`:
 | `factory.go` | `HandlerFactory` — per-reload HTTP handler tree construction | Yes (`*_test.go`) |
 | `wiring.go` | Scope keys, upstream indexing, reload channel fan-in, `ValidateRuntimeConfig`, managed-mode drift-only watcher/SIGHUP consumers | Yes (`*_test.go`) |
 | `admin_deps.go` | Build `admin.Deps` from initialised subsystems (`BuildAdminDeps`, adapters) | Yes (`*_test.go`) |
-| `preflight.go` | Admin write preflight gates (`Preflight.Apply` with `StreamPreflighter` iface) | Yes (`*_test.go`) |
+| `preflight.go` | Admin write preflight gates (`Preflight.Apply` with `StreamPreflighter` iface), including side-effect-free startup-resource validation for restart-bound candidates | Yes (`*_test.go`) |
 | `runtime.go` | Process-lifetime subsystems behind their build-tag gates (`RuntimeBuilder`/`Runtime`: tracing, ACME, HTTP/3, stream server) | Yes (`*_test.go`) |
 | `generation.go` | Generational handler teardown (`GenerationResources`: live closers + `poolReg` Begin/Commit/Abort staging) | Yes (`*_test.go`) |
-| `startup_restart.go` | Startup-bound subsystem restart checks (cache, egress, admin, metrics) | Yes (`*_test.go`) |
 | `authority.go` | `ConfigAuthority`/`ConfigState`/`DegradedKind` types and the fixed-default resolution rule (ADR 0019 §9.1) | Yes (`*_test.go`) |
 | `managed_baseline.go` | `ManagedBaselineStore`: the persisted managed-baseline marker+snapshot, T-write/T-mark, drift assessment, recovery, epoch close (ADR 0019 §11.2) | Yes (`managed_baseline_test.go`) |
 | `adopt.go` | `AdoptExternal`/`AssessAdoptExternal`: the adopt-external workflow and its dedicated coordinator entry (ADR 0019 §14) | Yes (`adopt_test.go`) |

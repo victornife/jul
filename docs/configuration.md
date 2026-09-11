@@ -194,7 +194,7 @@ parameter that controls how a valid candidate is applied:
 | Mode | Description |
 | ---- | ----------- |
 | `hot` (default) | Validates, persists, and immediately triggers a live reload. Restart-required changes are rejected with `restart_required: true` and `can_stage: true`; nothing is written. |
-| `stage_restart` | Validates and persists the candidate without triggering a live reload. The running process continues serving the previous configuration. The candidate takes effect on the next process restart. Use this mode for changes to startup-bound settings (cache, egress, admin, tracing, ACME, log format, listener settings). |
+| `stage_restart` | Validates and persists the candidate without triggering a live reload. The running process continues serving the previous configuration. The candidate takes effect on the next process restart. Use this mode whenever preview reports `restart_required` — for example `global.config_authority`, cache backend identity (`cache.enabled` / `cache.disk_path`), the currently restart-bound egress and tracing leaves, ACME identity/policy, admin structural resources, or retained-listener bind-time settings. Do not infer lifecycle from the subsystem name; the generated lifecycle registry is field-specific. |
 
 When a candidate is staged:
 
@@ -1444,9 +1444,13 @@ making it easy to diagnose latency across proxy hops, cache hits, and upstream
 calls. Tracing is disabled by default and requires a binary built with the
 `otel` build tag.
 
-Tracing configuration is read once at boot; a reload keeps the running tracer
-(the server logs a warning if the block changed) — restart to apply tracing
-changes.
+Tracing configuration is currently read once at boot; a reload keeps the
+running tracer and a restart applies tracing changes. #99 is selected with
+reduced scope to make only `observability.tracing.sample_ratio` hot-reloadable
+without replacing the provider/exporter; until that implementation lands, the
+machine lifecycle still reports it as `restart_required`. The other tracing
+fields remain restart-bound in this tranche. See
+[hot-reload strategy](hot-reload-strategy.md).
 
 ```toml
 [observability.tracing]

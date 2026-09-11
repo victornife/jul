@@ -112,9 +112,19 @@ constrained.
 ## Reload behaviour
 
 The policy is built once from the **startup** configuration; changing `[egress]`
-takes effect after a **restart** (like listener bind-time settings). This keeps
-the guard consistent for the process lifetime, including the discovery refreshers
-that run for the whole run.
+currently takes effect after a **restart**. The machine-authoritative lifecycle
+registry therefore still classifies `egress.enabled` and `egress.allow` as
+`restart_required`.
+
+**Selected evolution (#94).** Dynamic egress policy is now selected for the final
+runtime-dynamics tranche. Selection does not change current behavior. The field
+will be promoted only when auth, discovery, WASM fetch, ACME/OCSP and their
+reusable HTTP transports all become generation-correct: work admitted after
+Publish must use the candidate policy and must not reuse a connection pool
+created under an older policy. A pointer-only policy swap is explicitly
+insufficient because it could make the configuration say a destination is
+blocked while a new operation still reaches it through an old keep-alive/H2
+connection. See [hot-reload strategy](hot-reload-strategy.md) and #94.
 
 ## Errors
 
@@ -201,7 +211,9 @@ to this page. No destination history is retained.
   the server exists to carry, and it is governed by routing/upstream config, not
   the egress allow-list.
 - Port is not part of a host rule: a name-allowed host is reachable on any port.
-- Applied at startup; changes need a restart.
+- **Current binary:** egress policy is applied at startup and changes require a
+  restart. #94 is selected to remove this boundary once its full
+  generation-correct consumer/transport contract is implemented.
 
 ## Build tags
 

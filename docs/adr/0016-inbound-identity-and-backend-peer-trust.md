@@ -427,8 +427,7 @@ thing for this field, where they were deliberately separated while the consumers
 malformed policy still fails during candidate preparation, so the reload aborts before anything is
 published.
 
-(`reloadCertificates` remains a no-op. That concerns **inbound** listener certificates, which are
-restart-only under R7-07, and was cited here as a `backend_tls` blocker in error.)
+(**Historical baseline note.** At the time this ADR was accepted, `reloadCertificates` was a no-op and inbound static listener certificates were restart-only under R7-07; that fact was cited here as a `backend_tls` blocker in error. #100 subsequently introduced the prepared `dynamicCertProvider`, so inbound static certificate/key content now hot-reloads on retained listeners. The architectural point of this paragraph is unchanged: inbound certificate rotation is not a Boundary-E/backend-peer-trust dependency.)
 
 ### 11. A′ — TLS termination and the two client credentials
 

@@ -97,7 +97,7 @@ Cell key: ✅ met · ☐ open · n/a not applicable (no custom parser).
 > a single `ReloadPlan` value (ADR 0011): validation, listener staging, handler
 > publication, activation, and retirement are sequenced so no client request is
 > served by a listener before its handler generation is live. The authoritative
-> lifecycle classification is in [`internal/lifecycle/lifecycle.go`](../internal/lifecycle/lifecycle.go)
+> lifecycle classification is in [`internal/lifecycle/registry.go`](../internal/lifecycle/registry.go)
 > and [`docs/config-lifecycle.yaml`](config-lifecycle.yaml). See the dedicated
 > row in the GA table below and [reload-semantics.md](reload-semantics.md) for
 > the full contract.
