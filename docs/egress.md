@@ -211,7 +211,9 @@ to this page. No destination history is retained.
   the server exists to carry, and it is governed by routing/upstream config, not
   the egress allow-list.
 - Port is not part of a host rule: a name-allowed host is reachable on any port.
-- Applied at startup; changes need a restart.
+- **Current binary:** egress policy is applied at startup and changes require a
+  restart. #94 is selected to remove this boundary once its full
+  generation-correct consumer/transport contract is implemented.
 
 ## Build tags
 
