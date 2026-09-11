@@ -137,6 +137,14 @@ jobs:
               start = int(m.group(1)); count = int(m.group(2) or '1')
               added[current].update(range(start, start + count))
 
+          # This workflow also runs for docs-only changes so it can enforce the
+          # HR-07C documentation/lifecycle contract. Incremental Go coverage is
+          # not applicable when the PR adds no production Go lines in the
+          # HR-07C implementation packages.
+          if not any(added.values()):
+              print('HR-07C added Go production coverage: not applicable (no added relevant production Go lines)')
+              raise SystemExit(0)
+
           # `go test -coverprofile` over several test packages emits the same
           # instrumented production block once per test binary. Aggregate those
           # duplicate records before scoring so a zero-count copy from one binary
@@ -161,7 +169,7 @@ jobs:
           total = sum(key[2] for key in executions)
           covered = sum(key[2] for key, count in executions.items() if count > 0)
           if total == 0:
-              raise SystemExit('no added HR-07C production statements found in coverage profile')
+              raise SystemExit('added relevant production Go lines found but no statements were found in coverage profile')
           pct = covered * 100.0 / total
           print(f'HR-07C added Go production statements: {covered}/{total} = {pct:.4f}%')
           if pct < 90.0:
