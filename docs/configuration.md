@@ -1444,9 +1444,13 @@ making it easy to diagnose latency across proxy hops, cache hits, and upstream
 calls. Tracing is disabled by default and requires a binary built with the
 `otel` build tag.
 
-Tracing configuration is read once at boot; a reload keeps the running tracer
-(the server logs a warning if the block changed) — restart to apply tracing
-changes.
+Tracing configuration is currently read once at boot; a reload keeps the
+running tracer and a restart applies tracing changes. #99 is selected with
+reduced scope to make only `observability.tracing.sample_ratio` hot-reloadable
+without replacing the provider/exporter; until that implementation lands, the
+machine lifecycle still reports it as `restart_required`. The other tracing
+fields remain restart-bound in this tranche. See
+[hot-reload strategy](hot-reload-strategy.md).
 
 ```toml
 [observability.tracing]
