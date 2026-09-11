@@ -12,8 +12,8 @@ def replace_once(path: str, old: str, new: str) -> None:
 
 replace_once(
     "docs/status.md",
-    "lifecycle classification is in [`internal/lifecycle/lifecycle.go`](../internal/lifecycle/lifecycle.go)\nand [`docs/config-lifecycle.yaml`](config-lifecycle.yaml).",
-    "lifecycle classification is in [`internal/lifecycle/registry.go`](../internal/lifecycle/registry.go)\nand [`docs/config-lifecycle.yaml`](config-lifecycle.yaml).",
+    "[`internal/lifecycle/lifecycle.go`](../internal/lifecycle/lifecycle.go)",
+    "[`internal/lifecycle/registry.go`](../internal/lifecycle/registry.go)",
 )
 
 replace_once(
