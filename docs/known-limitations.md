@@ -579,3 +579,18 @@ there is no distributed/fleet-wide quota coordination. The admission identity re
 the transport peer IP. Configuration reload preserves that in-memory state, but an
 actual process restart resets it. Reducing `admin.max_event_conns` affects only new
 SSE admissions: existing event/log streams are intentionally not forcibly drained.
+
+
+## Intentional runtime-dynamics boundaries after #106
+
+The hot-reload programme deliberately stops short of universal dynamic
+configuration. The following are intentional boundaries, not accidentally
+unimplemented live swaps: cache backend identity/path (#93 deferred), admin
+listener identity (#97 retained), TLS minimum-version and mTLS policy tightening
+(#101 deferred pending connection/session epochs), HTTP/3 listener existence
+(#102 retained; Alt-Svc max-age is already hot), broader ACME manager policy
+(#103 deferred), ACME account/issuer/cache identity (#104 retained),
+TLS/plaintext+h2c socket interpretation (#105 retained), and history directory
+relocation (#159 retained). `admin.history_keep` is hot; `admin.history_dir` is
+not. See [hot-reload-strategy.md](hot-reload-strategy.md) for objective revisit
+triggers.

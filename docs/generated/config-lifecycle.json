@@ -1444,7 +1444,7 @@
       "path": "rate_limit.max_conns",
       "class": "hot_reload",
       "subsystem": "rate_limit",
-      "reason": "the rate-limiter store accepts a new policy on each successful reload",
+      "reason": "the stable listener-owned connection admission limiter publishes the effective cap at reload Publish; admitted connections are never terminated (#106)",
       "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,

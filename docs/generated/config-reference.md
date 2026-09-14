@@ -1237,7 +1237,7 @@ MaxConns caps concurrent connections per listener (0 = unlimited).
 | Type | `integer` |
 | Lifecycle | `hot_reload` |
 | Subsystem | `rate_limit` |
-| Why | the rate-limiter store accepts a new policy on each successful reload |
+| Why | the stable listener-owned connection admission limiter publishes the effective cap at reload Publish; admitted connections are never terminated (#106) |
 | Constraint | non-negative |
 | Zero/empty semantics | 0 means unlimited |
 | Active when | global rate limit enabled |

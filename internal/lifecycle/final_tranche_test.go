@@ -3,7 +3,11 @@
 
 package lifecycle
 
-import "testing"
+import (
+	"testing"
+
+	"jul/internal/config"
+)
 
 func TestFinalTrancheLifecycleDecisions(t *testing.T) {
 	for _, path := range []string{
@@ -32,5 +36,20 @@ func TestFinalTrancheLifecycleDecisions(t *testing.T) {
 		if e.Class != RestartRequiredClass {
 			t.Fatalf("%s = %s, want restart_required", path, e.Class)
 		}
+	}
+}
+
+func TestHistoryRetentionMixedWithDirectoryRemainsWholeCandidateRestart(t *testing.T) {
+	before := &config.Config{Admin: config.AdminConfig{HistoryDir: "/history/a", HistoryKeep: 50}}
+	after := &config.Config{Admin: config.AdminConfig{HistoryDir: "/history/b", HistoryKeep: 10}}
+	res, err := Classify(before, after, Live{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.CanApplyHot || !res.CanStageRestart {
+		t.Fatalf("mixed history candidate must stage as a whole: %+v", res)
+	}
+	if !contains(res.RestartRequired, "admin.history_dir") {
+		t.Fatalf("unexpected mixed history classification: restart=%v", res.RestartRequired)
 	}
 }

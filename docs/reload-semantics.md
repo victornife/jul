@@ -926,3 +926,52 @@ Upload directory preparation occurs before Publish and is reversible. A preparat
 
 See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
 
+
+
+## Final bounded runtime-policy transitions (#106)
+
+The final runtime-dynamics tranche adds three policy-only live transitions while
+preserving the same whole-candidate transaction boundary.
+
+### `rate_limit.max_conns`
+
+- **Prepare:** canonical validation only; no live cap mutation.
+- **Publish:** update each retained listener's stable Jul-owned admission limiter
+  before the candidate configuration/runtime snapshot is published. Newly staged
+  listeners were already built with the candidate effective cap.
+- **Abort:** no cap mutation.
+- **Retire/PostCommit:** none.
+
+The cap governs **new admission**. Lowering it never closes admitted TCP/TLS/HTTP
+connections; if active connections exceed the new finite cap, no new connection
+is admitted until active drops below it. `0` is unlimited. The effective cap
+continues to honor the existing `[rate_limit].enabled` master switch live.
+
+### `admin.history_keep`
+
+- **Prepare:** stage only the scalar retention value; no filesystem deletion or
+  backend migration.
+- **Publish:** atomically install retention on the existing history object before
+  the candidate admin snapshot advertises it.
+- **Abort:** live retention and files remain unchanged.
+- **Retire/PostCommit:** a tightening runs a serialized prune. Failure is bounded
+  advisory health (`prune_failed`) and never converts an applied config into a
+  failed one.
+
+Managed-apply history finalization happens after terminal commit, so the rollback
+snapshot created by the same successful apply observes the **published candidate
+retention**. A candidate that also changes `admin.history_dir` remains a complete
+staged-restart candidate; Jul never partially applies only `history_keep`.
+
+### `servers.*.tls.acme.ocsp_stapling`
+
+- **Prepare:** validation only; ACME manager/account/cache/provider identity is
+  unchanged.
+- **Publish:** atomically toggle the stable OCSP provider wrapper before the new
+  config snapshot is visible.
+- **Abort/Retire/PostCommit:** no manager or listener resource work.
+
+Disabling prevents new lookups from initiating a refresh through the stapler;
+already-started refresh work may finish. Cached staple state remains owned by the
+stable wrapper and may be reused when re-enabled. Broader ACME domain, challenge,
+account, issuer and cache transitions remain outside this seam.

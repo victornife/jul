@@ -691,8 +691,9 @@ func (s *Server) bindFrom(addr string, cfg *config.Config) error {
 }
 
 // buildListenerEntry creates a listenerEntry for addr using cfg for all
-// bind-time settings: TLS, mTLS, h2c, HTTP/3, timeouts, header limits, and
-// connection cap. The entry is NOT yet registered in s.listeners and httpd.Serve
+// bind-time settings: TLS, mTLS, h2c, HTTP/3, timeouts and header limits.
+// The connection cap is listener-owned but live policy, initialized from cfg and
+// updated in place at Publish. The entry is NOT yet registered in s.listeners and httpd.Serve
 // is NOT yet started — connections queue in the kernel backlog until startServing
 // is called. This separation lets doReload stage binds before committing the
 // generation, so no 503 responses are served on a new address during an abort.

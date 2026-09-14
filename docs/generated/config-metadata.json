@@ -1453,7 +1453,7 @@
       "dynamic": false,
       "subsystem": "rate_limit",
       "lifecycle_class": "hot_reload",
-      "lifecycle_reason": "the rate-limiter store accepts a new policy on each successful reload",
+      "lifecycle_reason": "the stable listener-owned connection admission limiter publishes the effective cap at reload Publish; admitted connections are never terminated (#106)",
       "value_kind": "integer",
       "constraint": "non-negative",
       "zero_semantics": "0 means unlimited",

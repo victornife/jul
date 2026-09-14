@@ -207,7 +207,7 @@ value is compared as a digest so no secret material leaves the process.
 | `rate_limit.burst` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
 | `rate_limit.enabled` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
 | `rate_limit.key` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
-| `rate_limit.max_conns` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
+| `rate_limit.max_conns` | `hot_reload` | `rate_limit` | — | the stable listener-owned connection admission limiter publishes the effective cap at reload Publish; admitted connections are never terminated (#106) |
 | `rate_limit.rate` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
 | `servers.*.access_log` | `ignored_deprecated` | `access_log` | deprecated, ignored | superseded by observability.access_log; no runtime consumer reads it |
 | `servers.*.client_address.forwarded_headers` | `hot_reload` | `client_address` | — | the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish |

@@ -350,6 +350,7 @@ func (h *history) pruneCurrent() error {
 		id := strings.TrimSuffix(name, historyExt)
 		if err := h.removeFile(filepath.Join(h.dir, id+historyMetaExt)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("remove history metadata: %w", err))
+			continue // preserve the raw+sidecar pair on metadata deletion failure
 		}
 		if err := h.removeFile(filepath.Join(h.dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("remove history snapshot: %w", err))

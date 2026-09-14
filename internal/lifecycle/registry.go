@@ -433,13 +433,15 @@ func pluginEntries() []Entry {
 }
 
 func rateLimitEntries() []Entry {
-	return hotGroup(SubRateLimit, reasonRateLimitPolicy,
+	out := hotGroup(SubRateLimit, reasonRateLimitPolicy,
 		"rate_limit.burst",
 		"rate_limit.enabled",
 		"rate_limit.key",
 		"rate_limit.rate",
-		"rate_limit.max_conns",
 	)
+	out = append(out, hot("rate_limit.max_conns", SubRateLimit,
+		"the stable listener-owned connection admission limiter publishes the effective cap at reload Publish; admitted connections are never terminated (#106)"))
+	return out
 }
 
 func serverEntries() []Entry {
