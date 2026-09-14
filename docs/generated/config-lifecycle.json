@@ -259,12 +259,12 @@
     "schema_paths": 356,
     "schema_leaves": 302,
     "registry_entries": 302,
-    "startup_consumed": 37,
+    "startup_consumed": 36,
     "by_class": {
-      "hot_reload": 250,
+      "hot_reload": 251,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
-      "restart_required": 37,
+      "restart_required": 36,
       "validation_rejected_reserved": 3
     }
   },
@@ -1182,10 +1182,10 @@
     },
     {
       "path": "observability.tracing.sample_ratio",
-      "class": "restart_required",
+      "class": "hot_reload",
       "subsystem": "tracing",
-      "reason": "the tracer provider and exporter are created once at startup",
-      "startup_consumed": true,
+      "reason": "the stable ParentBased sampler delegates root decisions to an atomic ratio sampler updated at successful Publish; existing traces and parent decisions remain unchanged (#99)",
+      "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,
       "deprecated": false,

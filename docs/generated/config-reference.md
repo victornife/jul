@@ -951,12 +951,11 @@ SampleRatio is the head-based sampling probability for root spans, in the range 
 | | |
 | --- | --- |
 | Type | `float` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `tracing` |
-| Why | the tracer provider and exporter are created once at startup |
+| Why | the stable ParentBased sampler delegates root decisions to an atomic ratio sampler updated at successful Publish; existing traces and parent decisions remain unchanged (#99) |
 | Requires | `otel` |
 | Default | 1 |
-| Flags | startup-consumed |
 | Constraint | 0..1 |
 | Zero/empty semantics | omitted/zero defaults to 1.0 when tracing is enabled |
 | Active when | tracing enabled |

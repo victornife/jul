@@ -79,10 +79,10 @@ counts:
   schema_paths: 356
   schema_leaves: 302
   registry_entries: 302
-  startup_consumed: 37
+  startup_consumed: 36
   by_class:
-    hot_reload: 250
-    restart_required: 37
+    hot_reload: 251
+    restart_required: 36
     new_listener_only: 8
     ignored_deprecated: 4
     validation_rejected_reserved: 3
@@ -403,10 +403,9 @@ fields:
     reason: "the tracer provider and exporter are created once at startup"
     startup_consumed: true
   - path: "observability.tracing.sample_ratio"
-    class: restart_required
+    class: hot_reload
     subsystem: tracing
-    reason: "the tracer provider and exporter are created once at startup"
-    startup_consumed: true
+    reason: "the stable ParentBased sampler delegates root decisions to an atomic ratio sampler updated at successful Publish; existing traces and parent decisions remain unchanged (#99)"
   - path: "observability.tracing.service_name"
     class: restart_required
     subsystem: tracing

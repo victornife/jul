@@ -1099,9 +1099,8 @@
       "optional": false,
       "dynamic": false,
       "subsystem": "tracing",
-      "lifecycle_class": "restart_required",
-      "lifecycle_reason": "the tracer provider and exporter are created once at startup",
-      "startup_consumed": true,
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the stable ParentBased sampler delegates root decisions to an atomic ratio sampler updated at successful Publish; existing traces and parent decisions remain unchanged (#99)",
       "capabilities": [
         "otel"
       ],
