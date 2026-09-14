@@ -7,10 +7,11 @@
 //
 // This file is compiled only with the `otel` build tag. It provides a server
 // span around every request, W3C tracecontext propagation, and an OTLP
-// exporter (gRPC or HTTP). It is the spike seam for full distributed tracing:
-// later releases add child spans in the proxy, cache, and upstream layers and
-// honor reloads. The global TracerProvider/propagator are set here so those
-// child spans join the same trace.
+// exporter (gRPC or HTTP). The provider/exporter/resource/propagator pipeline
+// is process-lifetime. Only the root sampling ratio is runtime-tunable: a
+// stable ParentBased sampler delegates root decisions to an atomically swapped
+// SDK TraceIDRatioBased sampler, so parent decisions and in-flight traces never
+// change when the ratio is reloaded.
 package observability
 
 import (
@@ -18,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -39,13 +41,65 @@ import (
 // binary. It is true only under the `otel` build tag.
 const TracingCompiled = true
 
+// samplerState is immutable after publication. Keeping the ratio beside the
+// SDK sampler makes every atomic load a coherent snapshot and keeps Jul out of
+// OpenTelemetry's TraceID sampling math.
+type samplerState struct {
+	ratio   float64
+	sampler sdktrace.Sampler
+}
+
+// dynamicRootSampler is the process-lifetime root delegate installed beneath
+// sdktrace.ParentBased. Update replaces one immutable state with another; a
+// concurrent ShouldSample therefore observes either the complete old sampler
+// or the complete new sampler, never a partially updated floating-point value.
+type dynamicRootSampler struct {
+	current atomic.Pointer[samplerState]
+}
+
+func newDynamicRootSampler(ratio float64) *dynamicRootSampler {
+	s := &dynamicRootSampler{}
+	s.Update(ratio)
+	return s
+}
+
+// Update publishes a new root ratio. Configuration validation owns range and
+// finiteness checks before Publish, so this method is deliberately no-fail.
+func (s *dynamicRootSampler) Update(ratio float64) {
+	if s == nil {
+		return
+	}
+	s.current.Store(&samplerState{
+		ratio:   ratio,
+		sampler: sdktrace.TraceIDRatioBased(ratio),
+	})
+}
+
+func (s *dynamicRootSampler) ShouldSample(p sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	if s == nil {
+		return sdktrace.NeverSample().ShouldSample(p)
+	}
+	state := s.current.Load()
+	if state == nil || state.sampler == nil {
+		return sdktrace.NeverSample().ShouldSample(p)
+	}
+	return state.sampler.ShouldSample(p)
+}
+
+// Description is intentionally stable. The current ratio belongs to runtime
+// configuration/status rather than a mutable sampler description string.
+func (s *dynamicRootSampler) Description() string { return "JulDynamicRootSampler" }
+
 // Tracer owns the OpenTelemetry pipeline for the process. It is constructed
-// once at startup and shut down on graceful exit to flush pending spans.
+// once at startup and shut down on graceful exit to flush pending spans. A
+// ratio-only reload updates rootSampler in place and never replaces provider,
+// exporter, resource, propagator, tracer, or global OpenTelemetry state.
 type Tracer struct {
-	provider   *sdktrace.TracerProvider
-	tracer     trace.Tracer
-	propagator propagation.TextMapPropagator
-	enabled    bool
+	provider    *sdktrace.TracerProvider
+	tracer      trace.Tracer
+	propagator  propagation.TextMapPropagator
+	rootSampler *dynamicRootSampler
+	enabled     bool
 }
 
 // NewTracer builds the tracing pipeline from cfg. When tracing is disabled it
@@ -72,27 +126,41 @@ func NewTracer(cfg config.TracingConfig) (*Tracer, error) {
 		return nil, fmt.Errorf("[observability.tracing] build resource: %w", err)
 	}
 
+	rootSampler := newDynamicRootSampler(cfg.SampleRatio)
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exp),
 		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SampleRatio))),
+		sdktrace.WithSampler(sdktrace.ParentBased(rootSampler)),
 	)
 	prop := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
 
-	// Publish globally so child spans created elsewhere (proxy, cache, upstream)
-	// join the same trace, and wire the dependency-free tracing seam so those
-	// layers emit spans without importing OpenTelemetry.
+	// Publish globally once at process startup so child spans created elsewhere
+	// (proxy, cache, upstream) join the same trace, and wire the dependency-free
+	// tracing seam. A ratio-only reload never mutates this global state.
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(prop)
 	tr := tp.Tracer("jul/internal/observability")
 	tracing.Set(otelTracer{tracer: tr, propagator: prop})
 
 	return &Tracer{
-		provider:   tp,
-		tracer:     tr,
-		propagator: prop,
-		enabled:    true,
+		provider:    tp,
+		tracer:      tr,
+		propagator:  prop,
+		rootSampler: rootSampler,
+		enabled:     true,
 	}, nil
+}
+
+// UpdateSampleRatio atomically changes only the root sampling ratio for spans
+// whose sampling decision is made after this call. ParentBased remains the
+// stable outer sampler, so local/remote parent decisions stay authoritative and
+// already-started traces cannot change sampling state. Disabled tracing has no
+// runtime sampler, making a ratio-only reload an intentional no-op there.
+func (t *Tracer) UpdateSampleRatio(ratio float64) {
+	if t == nil || t.rootSampler == nil {
+		return
+	}
+	t.rootSampler.Update(ratio)
 }
 
 // newExporter builds the OTLP span exporter for the configured transport. The
