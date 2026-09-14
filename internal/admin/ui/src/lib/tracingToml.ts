@@ -39,9 +39,9 @@ function tomlString(s: string): string {
   return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-// formatRatio renders a sampling probability as a valid TOML float. Values are
-// only emitted in [0,1); the parser treats a zero as "unset" and defaults to
-// full sampling, so a fraction such as 0.1 is the meaningful case.
+// formatRatio renders a sampling probability as a valid TOML float. Values in
+// [0,1) are emitted explicitly; 0 disables sampling of new root traces, while
+// 1 may be omitted because it is the server default.
 function formatRatio(n: number): string {
   const clamped = Math.min(1, Math.max(0, n));
   return Number.isInteger(clamped) ? `${String(clamped)}.0` : String(clamped);
@@ -62,11 +62,6 @@ export function tracingWarnings(d: TracingDraft): string[] {
       "Insecure mode sends spans over plaintext instead of TLS; only use it for a local collector on a trusted network.",
     );
   }
-  if (d.sampleRatio <= 0) {
-    w.push(
-      "A sample ratio of 0 is treated as unset and falls back to full sampling; set a fraction such as 0.1 to sample less.",
-    );
-  }
   w.push("Tracing is only active in binaries built with the `otel` build tag.");
   return w;
 }
@@ -82,9 +77,9 @@ export function generateTracingToml(d: TracingDraft): string {
   if (d.endpoint.trim()) {
     lines.push(`endpoint = ${tomlString(d.endpoint.trim())}`);
   }
-  // Only emit a fraction; full sampling (1.0) is the server default, so omit it
-  // to keep the config minimal and round-trip a default-sampled block.
-  if (d.sampleRatio > 0 && d.sampleRatio < 1) {
+  // Emit zero and fractions explicitly. Full sampling (1.0) is the server
+  // default, so omit only that value to keep the config minimal.
+  if (Number.isFinite(d.sampleRatio) && d.sampleRatio >= 0 && d.sampleRatio < 1) {
     lines.push(`sample_ratio = ${formatRatio(d.sampleRatio)}`);
   }
   if (d.serviceName.trim()) {

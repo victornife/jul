@@ -957,7 +957,7 @@ SampleRatio is the head-based sampling probability for root spans, in the range 
 | Requires | `otel` |
 | Default | 1 |
 | Constraint | 0..1 |
-| Zero/empty semantics | omitted/zero defaults to 1.0 when tracing is enabled |
+| Zero/empty semantics | omitted defaults to 1.0; explicit zero disables sampling of new root traces |
 | Active when | tracing enabled |
 
 ## `observability.tracing.service_name` {#observability-tracing-service_name}

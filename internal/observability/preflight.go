@@ -39,6 +39,9 @@ func PreflightAccessSinks(cfg config.AccessLogConfig) error {
 // (whether the otel tag is compiled in) happens in NewTracer; this function
 // only validates that required fields are populated when tracing is enabled.
 func ValidateTracerConfig(cfg config.TracingConfig) error {
+	if err := config.ValidateTracingSampleRatio(cfg.SampleRatio); err != nil {
+		return err
+	}
 	if !cfg.Enabled {
 		return nil
 	}
@@ -50,9 +53,6 @@ func ValidateTracerConfig(cfg config.TracingConfig) error {
 		// valid
 	default:
 		return fmt.Errorf("[observability.tracing] unknown exporter %q; valid values: otlp-grpc, otlp-http", cfg.Exporter)
-	}
-	if cfg.SampleRatio < 0 || cfg.SampleRatio > 1 {
-		return fmt.Errorf("[observability.tracing] sample_ratio must be in [0, 1], got %g", cfg.SampleRatio)
 	}
 	return nil
 }

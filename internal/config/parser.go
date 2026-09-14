@@ -79,8 +79,30 @@ func Parse(data []byte) (*Config, error) {
 		}
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	cfg.applyDefaults()
+	sampleRatioPresent, err := tracingSampleRatioPresent(normalized)
+	if err != nil {
+		return nil, err
+	}
+	cfg.applyDefaultsWithPresence(sampleRatioPresent)
 	return &cfg, nil
+}
+
+// tracingSampleRatioPresent records syntax presence without changing the public
+// Config shape. This is the one place where omission must be distinguished from
+// an explicit numeric zero: omitted+enabled defaults to 1.0, while explicit
+// zero is a real request to stop sampling new root traces.
+func tracingSampleRatioPresent(data []byte) (bool, error) {
+	var presence struct {
+		Observability struct {
+			Tracing struct {
+				SampleRatio *float64 `toml:"sample_ratio"`
+			} `toml:"tracing"`
+		} `toml:"observability"`
+	}
+	if err := toml.Unmarshal(data, &presence); err != nil {
+		return false, fmt.Errorf("decode tracing field presence: %w", err)
+	}
+	return presence.Observability.Tracing.SampleRatio != nil, nil
 }
 
 // normalizeDeprecatedTOML preserves only explicitly supported compatibility
@@ -174,8 +196,15 @@ func Marshal(c *Config) ([]byte, error) {
 	return data, nil
 }
 
-// applyDefaults fills in conservative defaults for unset fields.
+// applyDefaults fills in conservative defaults for programmatically-built
+// configs where TOML field presence is unavailable.
 func (c *Config) applyDefaults() {
+	c.applyDefaultsWithPresence(false)
+}
+
+// applyDefaultsWithPresence applies defaults while preserving the one numeric
+// field where explicit zero is semantically distinct from omission.
+func (c *Config) applyDefaultsWithPresence(tracingSampleRatioPresent bool) {
 	if c.Global.LogLevel == "" {
 		c.Global.LogLevel = "info"
 	}
@@ -353,9 +382,7 @@ func (c *Config) applyDefaults() {
 		if t.ServiceName == "" {
 			t.ServiceName = "jul"
 		}
-		// A zero ratio means "unset" here and defaults to full sampling; users
-		// who want less set an explicit fraction in (0,1].
-		if t.SampleRatio == 0 {
+		if t.SampleRatio == 0 && !tracingSampleRatioPresent {
 			t.SampleRatio = 1.0
 		}
 	}
