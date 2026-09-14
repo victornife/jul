@@ -74,7 +74,8 @@ jobs:
               'admin.audit_log_rotate_max_mb': 'hot_reload',
               'admin.audit_log_rotate_keep': 'hot_reload',
               'admin.history_dir': 'restart_required',
-              'admin.history_keep': 'restart_required',
+              # #106 intentionally promoted retention only; directory ownership remains structural.
+              'admin.history_keep': 'hot_reload',
               'admin.enabled': 'restart_required',
               'admin.listen': 'restart_required',
           }
