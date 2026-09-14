@@ -110,6 +110,15 @@ func (m *Manager) Close() error {
 // the error returned, so a rejected reload leaks no runtimes. ctx bounds the
 // build and is checked between plugins so a cancelled reload stops promptly.
 func (m *Manager) Build(ctx context.Context, cfg map[string]config.PluginConfig) (*Set, error) {
+	return m.BuildWithEgress(ctx, cfg, m.egressWrap)
+}
+
+// BuildWithEgress is Build with an explicit generation-scoped global egress
+// wrapper. HandlerFactory uses it so every newly published plugin Set captures
+// the candidate egress generation while the process-lifetime Manager keeps its
+// compilation cache and KV store. A nil wrapper preserves plugin-local SSRF and
+// allowed_hosts enforcement without a global egress policy.
+func (m *Manager) BuildWithEgress(ctx context.Context, cfg map[string]config.PluginConfig, egressWrap func(base DialFunc) DialFunc) (*Set, error) {
 	s := &Set{plugins: make(map[string]*plugin, len(cfg))}
 	ok := false
 	defer func() {
@@ -121,7 +130,7 @@ func (m *Manager) Build(ctx context.Context, cfg map[string]config.PluginConfig)
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("plugin %q: %w", name, err)
 		}
-		p, err := m.compilePlugin(ctx, name, pc)
+		p, err := m.compilePlugin(ctx, name, pc, egressWrap)
 		if err != nil {
 			return nil, fmt.Errorf("plugin %q: %w", name, err)
 		}
@@ -179,7 +188,7 @@ type plugin struct {
 	onPanic  func(string)
 }
 
-func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.PluginConfig) (*plugin, error) {
+func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.PluginConfig, egressWrap func(base DialFunc) DialFunc) (*plugin, error) {
 	wasm, err := loadModule(pc)
 	if err != nil {
 		return nil, err
@@ -216,7 +225,7 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		log:          m.log,
 		onInvoke:     m.onInvoke,
 		onPanic:      m.onPanic,
-		egressWrap:   m.egressWrap,
+		egressWrap:   egressWrap,
 	}
 	if p.fetchTimeout <= 0 {
 		p.fetchTimeout = 5 * time.Second

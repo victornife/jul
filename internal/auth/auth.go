@@ -56,6 +56,12 @@ type Authenticator struct {
 
 	logger     *slog.Logger
 	onDecision func(method, result string)
+
+	// ownedClient is non-nil only for the default JWT/forward-auth client this
+	// Authenticator created. It is generation-owned and its idle H1/H2 pools are
+	// retired when the handler generation drains (#94). A caller-supplied client
+	// remains caller-owned and is never closed here.
+	ownedClient *http.Client
 }
 
 // New builds an Authenticator from a validated AuthConfig. It returns an error
@@ -82,16 +88,29 @@ func New(ctx context.Context, cfg config.AuthConfig, opts Options) (*Authenticat
 		client := opts.HTTPClient
 		if client == nil {
 			client = jwksHTTPClient(opts.DialContext, cfg.JWT.Timeout.Std())
+			a.ownedClient = client
 		}
 		a.jwt = newJWTAuth(cfg.JWT.JWKSURL, cfg.JWT.Issuer, cfg.JWT.Audience, cfg.JWT.Algorithms, client, opts.JWKSPool)
 	case cfg.ForwardAuth != nil:
 		client := opts.HTTPClient
 		if client == nil {
 			client = forwardHTTPClient(opts.DialContext, cfg.ForwardAuth.Timeout.Std())
+			a.ownedClient = client
 		}
 		a.forward = newForwardAuth(cfg.ForwardAuth.URL, cfg.ForwardAuth.AuthResponseHeaders, client, opts.ForwardPool)
 	}
 	return a, nil
+}
+
+// Close retires idle connections owned by this authenticator's generation.
+// Active exchanges are not cancelled: GenerationResources calls Close only
+// after the old handler generation has drained. Caller-supplied HTTP clients
+// remain caller-owned and are deliberately untouched.
+func (a *Authenticator) Close() error {
+	if a != nil && a.ownedClient != nil {
+		a.ownedClient.CloseIdleConnections()
+	}
+	return nil
 }
 
 // Wrap returns middleware that enforces the policy ahead of next. The CIDR gate

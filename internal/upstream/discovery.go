@@ -6,6 +6,7 @@ package upstream
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"strings"
@@ -116,6 +117,7 @@ func (p *Pool) StartDiscovery(d Discoverer, refresh time.Duration, hooks Discove
 		ld.SetLogger(log)
 	}
 	go func() {
+		defer closeDiscoverer(d)
 		p.refreshOnce(d, hooks, log)
 		timer := time.NewTimer(jitter(refresh))
 		defer timer.Stop()
@@ -178,6 +180,12 @@ func (p *Pool) refreshOnce(d Discoverer, hooks DiscoveryHooks, log *slog.Logger)
 
 // targetsToServers converts discovered targets to upstream server configs,
 // normalizing weights to at least 1.
+func closeDiscoverer(d Discoverer) {
+	if closer, ok := d.(io.Closer); ok {
+		_ = closer.Close()
+	}
+}
+
 func targetsToServers(targets []Target) []config.UpstreamServer {
 	out := make([]config.UpstreamServer, 0, len(targets))
 	for _, t := range targets {

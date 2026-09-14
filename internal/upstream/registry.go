@@ -48,6 +48,14 @@ type Registry struct {
 	mu     sync.Mutex
 	live   map[poolKey]*poolEntry // committed pools currently serving, keyed by (name, scheme)
 	staged map[poolKey]*poolEntry // pools assembled by the in-progress build
+
+	// stagedDial/stagedEgressID belong to the in-progress handler generation.
+	// HandlerFactory sets them immediately after Begin. A discovery pool can be
+	// reused only when this ID matches the generation that created its worker;
+	// otherwise Consul/Kubernetes gets a fresh client/transport and worker so a
+	// tightened egress policy cannot inherit an old H1/H2 pool (#94).
+	stagedDial     DialFunc
+	stagedEgressID uint64
 }
 
 // RegistryOptions configures a Registry. All fields are optional.
@@ -120,6 +128,7 @@ type poolEntry struct {
 	healthTLS  *backendtls.Policy
 	discoverer Discoverer
 	discoCfg   config.DiscoveryConfig
+	egressGen  uint64
 }
 
 // upstreamMeta captures the fields that determine a pool's identity. When any of
@@ -198,6 +207,19 @@ func (r *Registry) Begin() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.staged = make(map[poolKey]*poolEntry)
+	r.stagedDial = r.opts.DialContext
+	r.stagedEgressID = 0
+}
+
+// SetEgressGeneration binds the current staged build to one immutable egress
+// generation. It must be called after Begin and before For. ID 0 preserves the
+// legacy RegistryOptions.DialContext behavior for callers that do not use the
+// process-level egress generation manager.
+func (r *Registry) SetEgressGeneration(id uint64, dial DialFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stagedEgressID = id
+	r.stagedDial = dial
 }
 
 // For returns the pool for a named upstream within the current build, creating
@@ -218,6 +240,7 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 	}
 
 	meta := metaOf(up, scheme)
+	disco := discoveryEnabled(up.Discovery)
 	// Resolved before the reuse check so a malformed policy fails the staged
 	// build — and with it the reload — whether or not the pool is being reused.
 	// It is deliberately not part of upstreamMeta: a policy change swaps a
@@ -228,7 +251,7 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 		return nil, fmt.Errorf("upstream %q: %w", up.Name, perr)
 	}
 	pending := up.Servers
-	if e, ok := r.live[key]; ok && e.meta.equal(meta) {
+	if e, ok := r.live[key]; ok && e.meta.equal(meta) && (!disco || e.egressGen == r.stagedEgressID) {
 		// Same shape: keep the running pool (and its checker/refresher). The backend
 		// set is refreshed at Commit (not here) so an aborted build leaves the live
 		// pool untouched, preserving an atomic reload. A discovery pool's backends
@@ -236,11 +259,10 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 		//
 		// For discovery-only upstreams the static seed is empty, so CandidateSnapshot
 		// must build from the currently discovered backend set instead (R12-01).
-		disco := discoveryEnabled(up.Discovery)
 		if disco {
 			pending = backendsToServers(e.pool.Backends())
 		}
-		r.staged[key] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: pending, discovery: disco, policy: resPolicy, circuit: circuitParamsOf(up)}
+		r.staged[key] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: pending, discovery: disco, policy: resPolicy, circuit: circuitParamsOf(up), egressGen: e.egressGen}
 		return e.pool, nil
 	}
 
@@ -264,14 +286,13 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 	// active-checker one even on a pool with no active checks configured.
 	pool.SetHealthHook(r.healthHookFor(up.Name, pool))
 	pool.SetCircuitHook(r.opts.OnCircuitTransition)
-	disco := discoveryEnabled(up.Discovery)
 	var d Discoverer
 	if disco {
 		newDisco := r.opts.NewDiscoverer
 		if newDisco == nil {
 			newDisco = newDiscoverer
 		}
-		d, err = newDisco(*up.Discovery, r.opts.DialContext)
+		d, err = newDisco(*up.Discovery, r.stagedDial)
 		if err != nil {
 			pool.Close()
 			return nil, err
@@ -314,6 +335,7 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 		healthTLS:   policy,
 		discoverer:  d,
 		discoCfg:    discoveryCfgOrZero(up.Discovery),
+		egressGen:   r.stagedEgressID,
 	}
 	r.staged[key] = entry
 	return pool, nil
@@ -525,6 +547,10 @@ func (r *Registry) Abort() {
 	defer r.mu.Unlock()
 	for _, e := range r.staged {
 		if !e.reused {
+			// Activate has not run on an aborted generation, so ownership of the
+			// candidate discoverer's HTTP transport is still here rather than in
+			// the refresher goroutine.
+			closeDiscoverer(e.discoverer)
 			e.pool.Close()
 		}
 	}

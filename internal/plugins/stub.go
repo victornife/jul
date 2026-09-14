@@ -59,7 +59,13 @@ func (*Manager) Close() error { return nil }
 
 // Build returns an empty Set when no plugins are configured, and an error when
 // any are, since this build cannot run them.
-func (*Manager) Build(ctx context.Context, cfg map[string]config.PluginConfig) (*Set, error) {
+func (m *Manager) Build(ctx context.Context, cfg map[string]config.PluginConfig) (*Set, error) {
+	return m.BuildWithEgress(ctx, cfg, nil)
+}
+
+// BuildWithEgress mirrors the compiled build. The wrapper is intentionally
+// ignored because this build cannot instantiate plugins.
+func (*Manager) BuildWithEgress(ctx context.Context, cfg map[string]config.PluginConfig, _ func(base DialFunc) DialFunc) (*Set, error) {
 	if len(cfg) > 0 {
 		return nil, errors.New("plugins are configured but this build was compiled without the \"wasmplugins\" tag")
 	}
