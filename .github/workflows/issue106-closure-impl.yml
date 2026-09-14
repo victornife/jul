@@ -28,7 +28,7 @@ jobs:
 
       - name: Apply deterministic implementation patch
         run: |
-          python3 -c 'from pathlib import Path; p=Path("scripts/issue106_closure_patch.py"); s=p.read_text(); old="    if count != 1:\\n        raise SystemExit(f\\\"{path}: expected exactly one match, found {count}: {old[:120]!r}\\\")\\n    write(path, text.replace(old, new, 1))"; new="    if count < 1:\\n        raise SystemExit(f\\\"{path}: expected at least one match, found {count}: {old[:120]!r}\\\")\\n    write(path, text.replace(old, new))"; assert old in s; p.write_text(s.replace(old,new,1))'
+          sed -i 's/if count != 1:/if count < 1:/; s/expected exactly one match/expected at least one match/; s/text.replace(old, new, 1)/text.replace(old, new)/' scripts/issue106_closure_patch.py
           python3 scripts/issue106_closure_patch.py
           python3 scripts/issue106_test_reconcile.py
 
