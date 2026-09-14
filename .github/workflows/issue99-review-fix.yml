@@ -1,3 +1,4 @@
+# Temporary #403 remediation workflow; removes itself after a successful run.
 name: issue99 review fix
 
 on:
