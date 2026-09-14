@@ -385,7 +385,7 @@ func compressionEntries() []Entry {
 }
 
 func egressEntries() []Entry {
-	return restartGroup(SubEgress, "the outbound dial policy is built once at startup and captured as an immutable set",
+	return hotGroup(SubEgress, "the candidate egress policy is compiled during Prepare and published as an immutable generation; auth, plugin, Consul/Kubernetes discovery and process-lifetime PKI clients select that generation without reusing earlier H1/H2 pools, while retired transports/workers drain with their bounded owner generation (#94)",
 		"egress.allow",
 		"egress.enabled",
 	)

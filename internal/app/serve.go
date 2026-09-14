@@ -132,9 +132,11 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 	// The optional egress allow-list guards the server's config-driven auxiliary
 	// fetches (JWKS, forward-auth, Consul/Kubernetes discovery, ACME/OCSP PKI
-	// calls, and WASM plugin fetches). It is built before the process-lifetime
-	// runtime so the ACME/OCSP clients can be guarded. Changing [egress] takes
-	// effect after a restart.
+	// calls, and WASM plugin fetches). The process-lifetime manager is built
+	// before ACME/OCSP so their stable clients can select the current immutable
+	// egress generation on every HTTP exchange. Reload candidates compile a new
+	// generation during Prepare and publish it atomically with the handler/pool
+	// generation (#94).
 	// A rate-limited, secret-free block logger complements the bounded metrics:
 	// it names the subsystem, normalized host, optional resolved IP, and reason
 	// so an operator can act on a refusal, and rate-limits identical events so a

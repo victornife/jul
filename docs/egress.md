@@ -111,20 +111,49 @@ constrained.
 
 ## Reload behaviour
 
-The policy is built once from the **startup** configuration; changing `[egress]`
-currently takes effect after a **restart**. The machine-authoritative lifecycle
-registry therefore still classifies `egress.enabled` and `egress.allow` as
-`restart_required`.
+`egress.enabled` and `egress.allow` are **hot-reloadable** (#94). A candidate
+policy is compiled during Prepare and remains unreachable from live traffic until
+the reload Publish boundary. Publish then selects one immutable egress generation
+for newly admitted auxiliary work; a malformed candidate aborts before Publish and
+leaves the live generation untouched.
 
-**Selected evolution (#94).** Dynamic egress policy is now selected for the final
-runtime-dynamics tranche. Selection does not change current behavior. The field
-will be promoted only when auth, discovery, WASM fetch, ACME/OCSP and their
-reusable HTTP transports all become generation-correct: work admitted after
-Publish must use the candidate policy and must not reuse a connection pool
-created under an older policy. A pointer-only policy swap is explicitly
-insufficient because it could make the configuration say a destination is
-blocked while a new operation still reaches it through an old keep-alive/H2
-connection. See [hot-reload strategy](hot-reload-strategy.md) and #94.
+The generation boundary is deliberately stronger than a pointer-only policy swap:
+
+- **JWT/forward-auth** clients belong to the candidate handler generation and their
+  idle H1/H2 pools retire only after that handler generation drains.
+- **WASM fetch** captures the candidate generation's global wrapper in the new
+  plugin Set; the Set closes its fetch pools when that generation retires.
+- **Consul/Kubernetes discovery** keeps the backend pool/admission/circuit state,
+  but Publish cancels and fences the old discovery worker/client generation before
+  starting the new one. A late result from the retired worker cannot overwrite the
+  new generation's backend view. DNS and DNS-SRV do not use Boundary C and do not
+  churn on an egress-only reload.
+- **ACME/OCSP** keep their process-lifetime owners, but their stable HTTP clients
+  select the current egress generation on every exchange; each generation owns a
+  distinct transport pool, so a post-Publish operation cannot reuse a keep-alive
+  or HTTP/2 connection created under the previous policy. Redirect hops re-read
+  the current generation and may therefore become stricter after Publish.
+
+Work already admitted under the previous generation may finish under the resources
+it captured. Retiring a generation closes idle transports/workers exactly once;
+active exchanges are not destructively cancelled merely to apply a policy change.
+
+### Disabled-mode compatibility
+
+Disabling `[egress]` preserves the pre-hardening behavior instead of installing a
+hidden deny or proxy change:
+
+| Consumer | `egress.enabled = false` | `egress.enabled = true` |
+| --- | --- | --- |
+| JWT / forward-auth | normal default HTTP transport/client behavior | generation-scoped guarded dial; blocked destinations fail closed |
+| Consul / Kubernetes | normal provider HTTP client behavior | generation-scoped guarded worker/client; old worker fenced at Publish |
+| DNS / DNS-SRV discovery | system resolver; unaffected | system resolver; unaffected |
+| WASM `fetch` | plugin-local `allowed_hosts` + SSRF guard only | plugin-local rules **and** global egress guard |
+| ACME / OCSP | disabled generation clones the default transport, including `HTTP(S)_PROXY` behavior | guarded generation pins `Proxy = nil` |
+
+This compatibility rule also applies across a live enabled↔disabled transition:
+newly admitted work observes the newly published mode without inheriting an older
+generation's connection pool.
 
 ## Errors
 
@@ -211,9 +240,9 @@ to this page. No destination history is retained.
   the server exists to carry, and it is governed by routing/upstream config, not
   the egress allow-list.
 - Port is not part of a host rule: a name-allowed host is reachable on any port.
-- **Current binary:** egress policy is applied at startup and changes require a
-  restart. #94 is selected to remove this boundary once its full
-  generation-correct consumer/transport contract is implemented.
+- Egress policy changes are hot-reloadable. The Publish boundary is
+  generation-correct for every configured auxiliary consumer; old H1/H2 pools and
+  discovery workers cannot be reused by newly admitted work.
 
 ## Build tags
 

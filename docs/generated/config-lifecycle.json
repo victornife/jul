@@ -259,12 +259,12 @@
     "schema_paths": 356,
     "schema_leaves": 302,
     "registry_entries": 302,
-    "startup_consumed": 36,
+    "startup_consumed": 34,
     "by_class": {
-      "hot_reload": 251,
+      "hot_reload": 253,
       "ignored_deprecated": 4,
       "new_listener_only": 8,
-      "restart_required": 36,
+      "restart_required": 34,
       "validation_rejected_reserved": 3
     }
   },
@@ -896,10 +896,10 @@
     },
     {
       "path": "egress.allow",
-      "class": "restart_required",
+      "class": "hot_reload",
       "subsystem": "egress",
-      "reason": "the outbound dial policy is built once at startup and captured as an immutable set",
-      "startup_consumed": true,
+      "reason": "the candidate egress policy is compiled during Prepare and published as an immutable generation; auth, plugin, Consul/Kubernetes discovery and process-lifetime PKI clients select that generation without reusing earlier H1/H2 pools, while retired transports/workers drain with their bounded owner generation (#94)",
+      "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,
       "deprecated": false,
@@ -909,10 +909,10 @@
     },
     {
       "path": "egress.enabled",
-      "class": "restart_required",
+      "class": "hot_reload",
       "subsystem": "egress",
-      "reason": "the outbound dial policy is built once at startup and captured as an immutable set",
-      "startup_consumed": true,
+      "reason": "the candidate egress policy is compiled during Prepare and published as an immutable generation; auth, plugin, Consul/Kubernetes discovery and process-lifetime PKI clients select that generation without reusing earlier H1/H2 pools, while retired transports/workers drain with their bounded owner generation (#94)",
+      "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,
       "deprecated": false,

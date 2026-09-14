@@ -68,16 +68,16 @@ runtime untouched, and Retire is bounded and cannot turn an applied change into
 
 ## Selected final gaps — 2026-09-11
 
-A post-#160 source audit and peer review selected two additional investments.
-#99 is implemented: `observability.tracing.sample_ratio` is hot while the tracing
-pipeline identity remains startup-bound. #94 remains the next selected implementation
-and its egress fields stay restart-required until its complete consumer/pool security
-matrix passes.
+A post-#160 source audit and peer review selected two final runtime-dynamics
+investments. Both are now implemented: #99 makes
+`observability.tracing.sample_ratio` hot while the tracing pipeline identity remains
+startup-bound, and #94 makes `egress.enabled`/`egress.allow` hot only after proving
+generation correctness across every auxiliary consumer and reusable pool.
 
-| Gap | Current lifecycle | Target | Why selected | Estimated effort | Risk |
-| --- | --- | --- | --- | --- | --- |
-| `observability.tracing.sample_ratio` (#99) | `hot_reload` | Atomic root-ratio update inside one stable provider/exporter pipeline | High incident/cost-control value with a very small permanent runtime surface | **S/M: 4–7 focused engineer-days** | Low–medium |
-| `egress.enabled`, `egress.allow` (#94) | `restart_required` | Generation-correct policy for every auxiliary outbound consumer and its pools | Security containment and truthful policy enforcement without restarting healthy traffic | **L: 15–25 focused engineer-days / ~3–5 focused weeks** | High correctness/security |
+| Gap | Current lifecycle | Implemented contract | Evidence | Residual risk |
+| --- | --- | --- | --- | --- |
+| `observability.tracing.sample_ratio` (#99) | `hot_reload` | Atomic root-ratio update inside one stable provider/exporter pipeline | deterministic sampler/concurrency/local-OTLP gates | Low–medium |
+| `egress.enabled`, `egress.allow` (#94) | `hot_reload` | Immutable Prepare→Publish egress generations across auth, Consul/K8s, WASM and ACME/OCSP; old H1/H2 pools/workers cannot serve newly admitted work | H1 + real H2 isolation, redirects, worker fencing, race/leak/security matrices and ≥90% added-statement gate | bounded old-generation drain only |
 
 ### `tracing.sample_ratio`: selected reduced scope
 
@@ -107,34 +107,28 @@ runtime random sampling, and HAProxy 3.4+ exposes OpenTelemetry rate adjustment
 through its Runtime API. Those products do not define Jul's implementation;
 they validate the operational use case.
 
-### Dynamic egress policy: selected full security contract
+### Dynamic egress policy: implemented full security contract
 
-The current `[egress]` policy is constructed once at startup and captured by
-multiple lifetimes: JWT/forward-auth clients, service-discovery workers, WASM
-fetch clients, ACME/OCSP clients and their reusable HTTP transports.
+#94 implements the stronger generation model selected above rather than a pointer
+swap. The process owns one egress `Manager`; Prepare compiles an immutable candidate
+and Publish performs the single authoritative generation change. Each consumer
+either belongs to that generation (auth and WASM), owns a replaceable worker/client
+generation while preserving unrelated backend state (Consul/Kubernetes), or uses a
+stable process-lifetime client that dispatches each exchange through the current
+generation (ACME/OCSP).
 
-A pointer-only policy swap is **not acceptable**. If policy B removes a
-destination but a new operation can reuse an HTTP/1.1 keep-alive or HTTP/2
-connection created under policy A, the configuration would claim a security
-boundary that the runtime does not enforce.
+The completion evidence covers the one-way security doors explicitly: real H1 and
+H2 reuse attempts after tightening, redirect hops across Publish, concurrent policy
+churn under `-race`, discovery cancellation plus epoch-fenced late results, repeated
+worker retirement under `goleak`, plugin-local/global SSRF intersection, abort/no-
+publish behavior, disabled-mode proxy compatibility, and an enforced ≥90% statement
+coverage floor over production code added by the tranche.
 
-Target contract:
-
-- an auth/discovery/plugin/PKI operation admitted after Publish uses the
-  candidate policy;
-- it cannot reuse a transport/connection pool created under an older policy;
-- work already admitted under the old generation may finish under the policy it
-  captured;
-- old workers/transports retire exactly once and within a bounded lifetime;
-- disabled-mode proxy compatibility, DNS-rebinding defenses, redirect checks,
-  plugin-local SSRF intersection and bounded telemetry remain intact;
-- lifecycle promotion occurs only when **every configured consumer class** has
-  generation-correct evidence.
-
-HAProxy's runtime ACL transactions are useful evidence that live policy changes
-are an established operator workflow. Jul's egress boundary is broader than one
-request ACL, so its completion bar remains the full consumer/transport matrix in
-#94.
+The remaining cross-generation behavior is intentional and bounded: work already
+admitted by generation A may drain on A's resources, while work admitted after B's
+Publish cannot acquire or reuse an A transport/worker. No configuration projection
+can therefore claim a destination is blocked while newly admitted work silently
+reaches it through a superseded keep-alive/H2 pool.
 
 ## Why the remaining structural gaps are different
 
@@ -155,7 +149,7 @@ The final selected runtime-dynamics edge is:
 ```text
 #99 — sample_ratio-only hot reload COMPLETE
   ↓
-#94 — generation-correct egress hot reload NEXT
+#94 — generation-correct egress hot reload COMPLETE
   ↓
 explicit retain/defer decisions for remaining gated fields
   ↓
