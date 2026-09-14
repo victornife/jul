@@ -49,9 +49,12 @@ replace(
     '''cache backend identity (`cache.enabled` / `cache.disk_path`), the currently restart-bound egress fields and tracing pipeline identity leaves (not hot `sample_ratio`), ACME identity/policy,'''
 )
 
-regex_replace(
+replace(
     "docs/reload-semantics.md",
-    r'''- \*\*Tracing\*\* — the provider/exporter pipeline is wired once at startup, so all\n  tracing fields are currently restart-bound\..*?the remaining tracing fields stay\n  restart-bound\.''',
+    '''- **Tracing** — the provider/exporter pipeline is wired once at startup, so all
+  tracing fields are currently restart-bound. #99 is selected with reduced
+  scope to make only `observability.tracing.sample_ratio` hot; the other tracing
+  fields remain deliberately restart-required.''',
     '''- **Tracing** — the provider/exporter/resource/propagator/tracer pipeline is
   wired once at startup. `observability.tracing.sample_ratio` is hot (#99):
   successful Publish atomically swaps only the stable ParentBased sampler's root
@@ -66,6 +69,24 @@ replace(
   tracing, ACME, and retained-listener bind settings) are **rejected at swap time**''',
     '''  lifecycle, `admin.enabled`, `admin.listen`, admin history resources,
   tracing pipeline identity fields other than `sample_ratio`, ACME, and retained-listener bind settings) are **rejected at swap time**'''
+)
+replace(
+    "docs/reload-semantics.md",
+    '''### Selected runtime gaps (not current behavior)
+
+Two remaining restart-bound gaps are selected for implementation after the
+post-#160 value/peer audit: #99 will hot-reload only
+`observability.tracing.sample_ratio` without replacing the tracing pipeline, and
+#94 will make `[egress]` generation-correct across every auxiliary outbound
+consumer and reusable connection pool. Their present registry classification is
+unchanged until those implementations land.''',
+    '''### Selected runtime gaps
+
+The first selected gap is now implemented: #99 hot-reloads only
+`observability.tracing.sample_ratio` without replacing the tracing pipeline. #94
+remains the next selected gap and will make `[egress]` generation-correct across
+every auxiliary outbound consumer and reusable connection pool; the egress
+registry classification remains restart-required until that implementation lands.'''
 )
 
 replace(
