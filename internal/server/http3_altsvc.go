@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 
 	"jul/internal/config"
-	"jul/internal/observability"
 )
 
 // AltSvcMode is the closed set of Alt-Svc advertisement states for one TCP/TLS
@@ -127,28 +126,20 @@ func altSvcModeString(mode AltSvcMode) string {
 	}
 }
 
-// updateAltSvcState is the existing no-fail scalar Publish seam. #99 also uses
-// it to publish the process-lifetime tracing root sample ratio before the new
-// handler/config snapshot becomes reachable. Both operations are bounded,
-// allocation-only/atomic state changes after all fallible reload preparation
-// has completed; neither performs validation, filesystem/network discovery or
-// teardown. This keeps the sample-ratio cutover inside ReloadPlan.Publish
-// rather than the later degradable PostCommit phase.
+// updateAltSvcState refreshes every retained listener's Alt-Svc advertisement
+// to match next's alt_svc_max_age, without touching the TCP or UDP listener
+// (#161). Unlike certificate rotation, building an Alt-Svc header cannot
+// fail, so there is no Prepare/Abort phase: this runs directly at Publish,
+// exactly like the admin auth snapshot and cache policy updates do.
 //
-// For Alt-Svc specifically, it refreshes every retained listener's
-// advertisement to match next's alt_svc_max_age, without touching the TCP or
-// UDP listener (#161). A newly added address is out of scope:
-// buildListenerEntry computes its initial state (still AltSvcNone until
-// Activate succeeds). A degraded listener (h3Degraded) is left cleared
-// regardless of the candidate max-age. servers.*.http3.enabled stays
-// restart-required (#102), so a retained address here never actually
-// transitions HTTP/3 on/off; only its max-age can change.
+// A newly added address is out of scope: buildListenerEntry computes its
+// initial state (still AltSvcNone until Activate succeeds). A degraded
+// listener (h3Degraded) is left cleared regardless of the candidate max-age —
+// this issue does not attempt automatic recovery of a failed HTTP/3 listener.
+// servers.*.http3.enabled stays restart-required (#102), so a retained
+// address here never actually transitions HTTP/3 on/off; only its max-age can
+// change.
 func (s *Server) updateAltSvcState(next *config.Config) {
-	// #99: this is deliberately before handler/config publication. A
-	// ratio-only candidate that fails any earlier phase never reaches this call;
-	// once reached, the atomic sampler swap cannot fail.
-	observability.UpdateTracingSampleRatio(next.Observability.Tracing.SampleRatio)
-
 	cv := &Server{cfg: next}
 	for _, addr := range uniqueListenAddrs(next.Servers) {
 		s.mu.Lock()
