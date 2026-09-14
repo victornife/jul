@@ -52,7 +52,7 @@ replace(
     // read_timeout remains new_listener_only, so changing it on an already-bound
     // listener stages the whole candidate for restart.
     const limitsForStage = await openTrafficEditor("Limits & Timeouts", "Edit limits & timeouts");
-    const readTimeout = limitsForStage.getByLabel("Read timeout");
+    const readTimeout = limitsForStage.getByRole("textbox", { name: "Read timeout", exact: true });
     const currentReadTimeout = await readTimeout.inputValue();
     await readTimeout.fill(currentReadTimeout === "31s" ? "32s" : "31s");
     await waitForConfigQuiescence();
@@ -63,7 +63,7 @@ replace(
     await expectStaticOK(request, "Jul static OK");
 
     const stagedLimits = await openTrafficEditor("Limits & Timeouts", "Edit limits & timeouts");
-    const readTimeout2 = stagedLimits.getByLabel("Read timeout");
+    const readTimeout2 = stagedLimits.getByRole("textbox", { name: "Read timeout", exact: true });
     const stagedReadTimeout = await readTimeout2.inputValue();
     await readTimeout2.fill(stagedReadTimeout === "33s" ? "34s" : "33s");
     await waitForConfigQuiescence();
