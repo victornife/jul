@@ -1,6 +1,7 @@
 name: HR-05 egress generation quality
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - 'internal/egress/**'
@@ -66,7 +67,7 @@ jobs:
         run: |
           go test -count=1 ./internal/egress -run 'TestDynamicClientTighteningCannotReuseOldKeepAlive|TestDynamicClientRedirectHopUsesPublishedGeneration|TestManagerConcurrentReadsAndPolicyChurnRaceClean'
           go test -count=1 ./internal/egress -run 'TestDynamicClientTighteningCannotReuseOldHTTP2Connection'
-          go test -count=1 ./internal/upstream -run 'TestRegistryDiscoveryPoolIdentityIncludesEgressGeneration|TestRegistryEgressCandidateAbortClosesFreshDiscovererOnly'
+          go test -count=1 ./internal/upstream -run 'TestRegistryDiscoveryPoolIdentityIncludesEgressGeneration|TestRegistryEgressCandidateAbortClosesFreshDiscovererOnly|TestDiscoveryResultFromRetiredEgressGenerationCannotOverwriteNewGeneration'
           go test -count=1 ./internal/app -run 'TestHandlerFactoryEgress'
           go test -count=1 -tags wasmplugins ./internal/plugins -run 'TestBuildWithEgressCapturesGenerationScopedWrapper|TestFetchDialIntersection'
           go test -count=1 ./internal/auth -run 'TestEgressDialContextGuardsJWKS|TestEgressDialContextGuardsForward'
