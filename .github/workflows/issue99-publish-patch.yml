@@ -1,0 +1,39 @@
+name: issue99 publish patch
+
+on:
+  push:
+    branches:
+      - issue-99-dynamic-sample-ratio
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Apply explicit Publish seam
+        run: |
+          python3 scripts/issue99_publish_patch.py
+          gofmt -w internal/server/reload_plan.go
+      - name: Compile targeted packages
+        run: go test -run '^$' -tags otel ./internal/observability ./internal/server
+      - name: Remove temporary patch helpers
+        run: |
+          rm scripts/issue99_publish_patch.py
+          rm .github/workflows/issue99-publish-patch.yml
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(reload): publish tracing sample ratio atomically'
+          git push origin HEAD:issue-99-dynamic-sample-ratio
