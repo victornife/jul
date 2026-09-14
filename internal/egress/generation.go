@@ -4,7 +4,6 @@
 package egress
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"sort"
@@ -80,15 +79,16 @@ func (m *Manager) Publish(generation *Generation) *Generation {
 	return m.current.Swap(generation)
 }
 
-// Client returns a stable process-lifetime HTTP client that dispatches each new
-// request through the egress generation current when that request is admitted.
-// It is used for long-lived PKI owners whose identity is intentionally
+// Client returns a stable process-lifetime HTTP client that dispatches each
+// RoundTrip through the egress generation current when that HTTP exchange is
+// admitted. It is used for long-lived PKI owners whose identity is intentionally
 // process-lifetime even while their outbound policy changes.
 //
-// The transport pins the selected generation into the request context. Go's
-// redirect machinery carries that context into redirect requests, so one
-// logical request cannot jump from policy A to policy B half-way through its
-// redirect chain. A request admitted after Publish always selects B.
+// Redirects are intentionally re-evaluated against the then-current generation.
+// If Publish lands between redirect hops, the later hop can become stricter; it
+// can never keep using an old-policy pool. This is conservative for an operation
+// that began before Publish and preserves the RoundTripper contract by never
+// mutating the caller's *http.Request.
 func (m *Manager) Client(subsystem string, timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout:   timeout,
@@ -190,8 +190,6 @@ func (g *Generation) roundTripper(subsystem string) http.RoundTripper {
 	return rt
 }
 
-type generationContextKey struct{}
-
 type dynamicRoundTripper struct {
 	manager   *Manager
 	subsystem string
@@ -201,17 +199,9 @@ func (rt *dynamicRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 	if req == nil {
 		return nil, errors.New("egress: nil HTTP request")
 	}
-	generation, _ := req.Context().Value(generationContextKey{}).(*Generation)
+	generation := rt.manager.Current()
 	if generation == nil {
-		generation = rt.manager.Current()
-		if generation == nil {
-			return nil, errors.New("egress: no published generation")
-		}
-		// net/http retains the original *Request while following redirects. Pinning
-		// the immutable generation on that request makes the whole redirect chain
-		// one admitted operation instead of re-reading Manager.Current at each hop.
-		pinned := req.WithContext(context.WithValue(req.Context(), generationContextKey{}, generation))
-		*req = *pinned
+		return nil, errors.New("egress: no published generation")
 	}
 	return generation.roundTripper(rt.subsystem).RoundTrip(req)
 }
