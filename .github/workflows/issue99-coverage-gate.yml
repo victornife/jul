@@ -1,0 +1,97 @@
+name: issue99 coverage gate
+
+on:
+  push:
+    branches:
+      - issue-99-dynamic-sample-ratio
+
+permissions:
+  contents: write
+
+jobs:
+  coverage:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Generate default and OTel coverage
+        run: |
+          go test -coverpkg=./internal/observability,./internal/server,./internal/lifecycle -coverprofile=/tmp/default.cover ./internal/observability ./internal/server ./internal/lifecycle
+          go test -tags otel -coverpkg=./internal/observability,./internal/server,./internal/lifecycle -coverprofile=/tmp/otel.cover ./internal/observability ./internal/server ./internal/lifecycle
+      - name: Enforce #99-owned production statement coverage
+        run: |
+          python3 - <<'PY'
+          import re, subprocess
+          from pathlib import Path
+
+          base = 'origin/main'
+          diff = subprocess.check_output(['git','diff','--unified=0',f'{base}...HEAD','--','*.go'], text=True)
+          changed = {}
+          current = None
+          new_line = None
+          for line in diff.splitlines():
+              if line.startswith('+++ b/'):
+                  current = line[6:]
+                  if current.endswith('_test.go'):
+                      current = None
+              elif line.startswith('@@'):
+                  m = re.search(r'\+(\d+)(?:,(\d+))?', line)
+                  new_line = int(m.group(1)) if m else None
+              elif current is not None and new_line is not None:
+                  if line.startswith('+') and not line.startswith('+++'):
+                      changed.setdefault(current, set()).add(new_line)
+                      new_line += 1
+                  elif line.startswith('-') and not line.startswith('---'):
+                      pass
+                  else:
+                      new_line += 1
+
+          records = {}
+          pat = re.compile(r'^(.*):(\d+)\.\d+,(\d+)\.\d+\s+(\d+)\s+(\d+)$')
+          for cover in ['/tmp/default.cover','/tmp/otel.cover']:
+              for line in Path(cover).read_text().splitlines()[1:]:
+                  m = pat.match(line)
+                  if not m:
+                      continue
+                  path, start, end, stmts, count = m.groups()
+                  path = path.removeprefix('jul/')
+                  key = (path, int(start), int(end), int(stmts))
+                  records[key] = max(records.get(key, 0), int(count))
+
+          total = covered = 0
+          selected = []
+          for (path, start, end, stmts), count in records.items():
+              lines = changed.get(path)
+              if not lines or not any(start <= n <= end for n in lines):
+                  continue
+              total += stmts
+              if count > 0:
+                  covered += stmts
+              selected.append((path,start,end,stmts,count))
+
+          if total == 0:
+              raise SystemExit('no #99-owned production statements matched coverage profiles')
+          pct = covered * 100.0 / total
+          print(f'#99-owned production statement coverage: {covered}/{total} = {pct:.1f}%')
+          for row in sorted(selected):
+              print(row)
+          if pct < 90.0:
+              raise SystemExit(f'#99-owned coverage {pct:.1f}% < 90.0%')
+          PY
+      - name: Re-run dynamic sampler race test
+        run: go test -race -tags otel ./internal/observability -run 'DynamicRootSampler|ProcessSampleRatio|TracerRatioUpdate|LocalOTLP'
+      - name: Remove temporary workflow
+        run: rm .github/workflows/issue99-coverage-gate.yml
+      - name: Commit cleanup
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'chore: remove temporary #99 coverage gate'
+          git push origin HEAD:issue-99-dynamic-sample-ratio
