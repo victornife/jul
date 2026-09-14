@@ -1,6 +1,7 @@
 name: issue94 security matrix
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - issue-94-egress-generations
