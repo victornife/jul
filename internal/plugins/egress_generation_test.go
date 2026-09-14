@@ -43,17 +43,17 @@ func TestBuildWithEgressCapturesGenerationScopedWrapper(t *testing.T) {
 	}
 	defer setB.Close()
 
-	base := func(context.Context, string, string) (net.Conn, error) {
+	base := dialerFunc(func(context.Context, string, string) (net.Conn, error) {
 		left, right := net.Pipe()
 		_ = right.Close()
 		return left, nil
-	}
+	})
 	resolver := rebindResolver{ip: "8.8.8.8"}
 
 	for name, tc := range map[string]struct {
-		set     *Set
-		wantA   int64
-		wantB   int64
+		set   *Set
+		wantA int64
+		wantB int64
 	}{
 		"old set keeps A": {set: setA, wantA: 1, wantB: 0},
 		"new set uses B":  {set: setB, wantA: 1, wantB: 1},
@@ -63,7 +63,7 @@ func TestBuildWithEgressCapturesGenerationScopedWrapper(t *testing.T) {
 			if p == nil {
 				t.Fatal("compiled plugin missing")
 			}
-			conn, err := p.fetchDial(dialerFunc(base), resolver).DialContext(context.Background(), "tcp", "api.example.com:443")
+			conn, err := p.fetchDial(base, resolver)(context.Background(), "tcp", "api.example.com:443")
 			if err != nil {
 				t.Fatalf("fetchDial: %v", err)
 			}
