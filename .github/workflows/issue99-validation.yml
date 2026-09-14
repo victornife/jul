@@ -1,0 +1,53 @@
+name: issue99 validation
+
+on:
+  push:
+    branches:
+      - issue-99-dynamic-sample-ratio
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Targeted default tests
+        run: go test ./internal/observability ./internal/tracing ./internal/app ./internal/config ./internal/lifecycle
+      - name: Targeted OTel tests
+        run: go test -tags otel ./internal/observability ./internal/tracing ./internal/server ./internal/app ./internal/config ./internal/lifecycle
+      - name: Targeted race tests
+        run: go test -race -p 2 -tags "otel console" ./internal/observability ./internal/tracing ./internal/server ./internal/app ./internal/config ./internal/lifecycle
+      - name: Observability coverage
+        run: |
+          go test -tags otel -coverprofile=/tmp/observability.cover ./internal/observability
+          go tool cover -func=/tmp/observability.cover | tee /tmp/observability-coverage.txt
+      - name: Lifecycle tests
+        run: go test ./internal/lifecycle
+      - name: Generated and docs checks
+        run: |
+          make generated-check
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+          python3 scripts/test_semantic_drift.py
+      - name: Repository tests
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Remove temporary workflow
+        run: rm .github/workflows/issue99-validation.yml
+      - name: Commit cleanup
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'chore: remove temporary #99 validation workflow'
+          git push origin HEAD:issue-99-dynamic-sample-ratio
