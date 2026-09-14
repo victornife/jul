@@ -32,6 +32,7 @@ jobs:
       - name: Apply review fixes
         run: |
           python3 scripts/issue99-review-fix.py
+          python3 scripts/issue99-review-fix-v2.py
           gofmt -w \
             internal/config/parser.go \
             internal/config/schema.go \
@@ -72,6 +73,7 @@ jobs:
       - name: Remove temporary remediation helpers
         run: |
           rm scripts/issue99-review-fix.py
+          rm scripts/issue99-review-fix-v2.py
           rm .github/workflows/issue99-review-fix.yml
 
       - name: Commit remediation
