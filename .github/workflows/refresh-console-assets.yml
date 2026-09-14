@@ -1,0 +1,46 @@
+name: refresh console assets
+
+on:
+  push:
+    branches:
+      - issue-99-dynamic-sample-ratio
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.8.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: internal/admin/ui/package.json
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+      - name: Rebuild embedded Console assets
+        run: |
+          pnpm --dir internal/admin/ui install --frozen-lockfile
+          pnpm --dir internal/admin/ui run build
+      - name: Verify expected stale hashes were replaced
+        run: |
+          test -f internal/admin/assets/dist/assets/CodeEditor-atzpSsRC.js
+          test -f internal/admin/assets/dist/assets/index-5f4bbnHo.js
+          test ! -f internal/admin/assets/dist/assets/CodeEditor-CPZSH35D.js
+          test ! -f internal/admin/assets/dist/assets/index-D2bVu4Y1.js
+      - name: Remove temporary workflow and commit only asset refresh
+        run: |
+          rm .github/workflows/refresh-console-assets.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A internal/admin/assets/dist .github/workflows/refresh-console-assets.yml
+          git diff --cached --check
+          git diff --cached --quiet && exit 0
+          git commit -m 'chore: refresh embedded console assets'
+          git push origin HEAD:issue-99-dynamic-sample-ratio
