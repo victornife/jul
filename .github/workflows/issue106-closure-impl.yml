@@ -58,7 +58,7 @@ jobs:
 
       - name: Commit permanent implementation only
         run: |
-          git rm .github/workflows/issue106-closure-impl.yml scripts/issue106_closure_patch.py scripts/issue106_test_reconcile.py
+          git rm -f .github/workflows/issue106-closure-impl.yml scripts/issue106_closure_patch.py scripts/issue106_test_reconcile.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
