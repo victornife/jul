@@ -27,12 +27,13 @@ func (d *blockingDiscoverer) Resolve(context.Context) ([]Target, error) {
 func (*blockingDiscoverer) Describe() string { return "blocking" }
 
 type immediateDiscoverer struct{ targets []Target }
+
 func (d immediateDiscoverer) Resolve(context.Context) ([]Target, error) { return d.targets, nil }
-func (immediateDiscoverer) Describe() string { return "immediate" }
+func (immediateDiscoverer) Describe() string                            { return "immediate" }
 
 func TestDiscoveryResultFromRetiredEgressGenerationCannotOverwriteNewGeneration(t *testing.T) {
 	p, err := NewPool(config.UpstreamConfig{
-		Name: "svc",
+		Name:    "svc",
 		Servers: []config.UpstreamServer{{Address: "127.0.0.1:8000", Weight: 1}},
 	}, "http")
 	if err != nil {

@@ -21,7 +21,7 @@ func (t *closeTrackingTransport) CloseIdleConnections() { t.calls.Add(1) }
 
 func TestHTTPDiscovererCloseRetiresOwnedPools(t *testing.T) {
 	for name, closeFn := range map[string]func(*http.Client) error{
-		"consul": func(c *http.Client) error { return (&consulDiscoverer{client: c}).Close() },
+		"consul":     func(c *http.Client) error { return (&consulDiscoverer{client: c}).Close() },
 		"kubernetes": func(c *http.Client) error { return (&k8sDiscoverer{client: c}).Close() },
 	} {
 		t.Run(name+" nil", func(t *testing.T) {
