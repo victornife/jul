@@ -50,15 +50,17 @@ func TestBuildWithEgressCapturesGenerationScopedWrapper(t *testing.T) {
 	})
 	resolver := rebindResolver{ip: "8.8.8.8"}
 
-	for name, tc := range map[string]struct {
+	cases := []struct {
+		name  string
 		set   *Set
 		wantA int64
 		wantB int64
 	}{
-		"old set keeps A": {set: setA, wantA: 1, wantB: 0},
-		"new set uses B":  {set: setB, wantA: 1, wantB: 1},
-	} {
-		t.Run(name, func(t *testing.T) {
+		{name: "old set keeps A", set: setA, wantA: 1, wantB: 0},
+		{name: "new set uses B", set: setB, wantA: 1, wantB: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			p := tc.set.plugins["p"]
 			if p == nil {
 				t.Fatal("compiled plugin missing")
