@@ -720,11 +720,11 @@ race is rejected visibly. The server still enforces missing-target, final-server
 and referenced-upstream protections. The backend/API also accepts sparse
 `global_set`, `compression_set`, and `rate_limit_global_set` operations. Omitted
 fields are preserved; explicit false, zero, empty string, and empty-list values
-retain their documented parser semantics; summaries list field names only. A
-candidate containing a retained-listener `max_conns` change is staged as one
-complete candidate; every other `global_set` field (`log_level`, `log_format`,
+retain their documented parser semantics; summaries list field names only. `rate_limit.max_conns` is hot (#106) through the stable listener admission
+limiter; lowering the cap affects new admissions without terminating existing
+connections. Every `global_set` field (`log_level`, `log_format`,
 `worker_threads`, `shutdown_timeout`, `reload_timeout`,
-`redact_min_secret_length`) is hot. The current Global and Traffic
+`redact_min_secret_length`) is also hot. The current Global and Traffic
 Controls forms keep their guided validated-TOML-upsert path until #81; `[cache]`
 remains truthful stage-only and the raw editor remains available.
 
@@ -1067,9 +1067,10 @@ sparse typed operations. Omitted properties preserve the persisted/staged
 value; explicit false, zero, empty strings where valid, and empty arrays remain
 present. A no-op cannot be reviewed. Final action selection stays
 server-authoritative: **Apply live**, **Save for next restart**, or **Update
-staged configuration**. `log_format` is hot-reloadable (#91). `max_conns` is bound to
-listeners: a retained listener stages, while an all-new listener transition may
-be hot if the backend preview says so. Mixed candidates stage whole.
+staged configuration**. `log_format` is hot-reloadable (#91). `max_conns` is hot-reloadable (#106):
+new admissions observe the published listener cap while admitted connections
+continue undisturbed. Mixed candidates still stage whole when another changed
+field is restart-bound.
 
 Cache intentionally has no `cache_set`. The editor regenerates the complete
 seven-field `[cache]` table from the exact raw fetch and keeps the candidate and

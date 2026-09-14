@@ -177,10 +177,9 @@ patches retain their established complete-replacement behavior and reject
 Operation summaries are deterministic field-name lists and never contain
 configured values. `global.log_format` is hot-reloadable (#91): the slog handler
 encoding swaps atomically on the next successful reload without rebuilding the
-logger. A changed
-`max_conns` requires staging whenever any currently bound desired address is
-retained; it can apply live only when all affected desired listeners are new in
-the same complete candidate. Mixed hot/restart batches stage the whole
+logger. `max_conns` is hot (#106): the stable listener admission limiter publishes
+the candidate cap in place for retained listeners, newly staged listeners start
+with that cap, and existing admitted connections are never terminated. Mixed hot/restart batches stage the whole
 candidate. A `reload_timeout` change uses the currently serving timeout for that
 transaction and governs later transactions only.
 
@@ -194,7 +193,7 @@ parameter that controls how a valid candidate is applied:
 | Mode | Description |
 | ---- | ----------- |
 | `hot` (default) | Validates, persists, and immediately triggers a live reload. Restart-required changes are rejected with `restart_required: true` and `can_stage: true`; nothing is written. |
-| `stage_restart` | Validates and persists the candidate without triggering a live reload. The running process continues serving the previous configuration. The candidate takes effect on the next process restart. Use this mode whenever preview reports `restart_required` — for example `global.config_authority`, cache backend identity (`cache.enabled` / `cache.disk_path`), the currently restart-bound egress fields and tracing pipeline identity leaves (not hot `sample_ratio`), ACME identity/policy, admin structural resources, or retained-listener bind-time settings. Do not infer lifecycle from the subsystem name; the generated lifecycle registry is field-specific. |
+| `stage_restart` | Validates and persists the candidate without triggering a live reload. The running process continues serving the previous configuration. The candidate takes effect on the next process restart. Use this mode whenever preview reports `restart_required` — for example `global.config_authority`, cache backend identity (`cache.enabled` / `cache.disk_path`), tracing pipeline identity leaves (not hot `sample_ratio`), ACME manager/account/challenge identity policy (not hot `ocsp_stapling`), admin structural resources such as `history_dir`, or retained-listener bind-time settings. Do not infer lifecycle from the subsystem name; the generated lifecycle registry is field-specific. |
 
 When a candidate is staged:
 

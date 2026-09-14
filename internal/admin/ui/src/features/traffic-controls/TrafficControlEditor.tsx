@@ -69,7 +69,7 @@ const TITLES: Record<TrafficEditorKind, { title: string; subtitle: string }> = {
   rate_limit: {
     title: "Rate limiting",
     subtitle:
-      "The global request policy uses rate_limit_global_set. max_conns is a listener-level concurrent-connection cap whose final lifecycle is decided by the server.",
+      "The global request policy uses rate_limit_global_set. max_conns hot-applies to the stable listener admission limiter; lowering the cap never terminates connections already admitted.",
   },
   limits: {
     title: "Limits & timeouts",
@@ -443,7 +443,7 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
               }}
             />
             <p className="text-xs text-jul-muted">
-              max_conns is listener-level. The authoritative preview may permit it for listeners that are all new; retained listeners are saved for the next restart.
+              max_conns hot-applies to the stable listener admission limiter. New admissions observe the published cap; connections already admitted are never terminated.
             </p>
             <AffectedRoutes title="Routes with rate limiting" paths={affected} emptyHint="No locations currently opt into rate limiting." />
             {stats.data?.rateLimited && (
