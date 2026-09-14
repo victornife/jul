@@ -1,0 +1,41 @@
+name: issue94 tighten apply
+
+on:
+  push:
+    branches:
+      - issue-94-egress-generations
+    paths:
+      - scripts/issue94_tighten.py
+      - .github/workflows/issue94-tighten-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: issue-94-egress-generations
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: apply patch
+        run: python3 scripts/issue94_tighten.py
+      - name: format
+        run: gofmt -w internal/upstream/discovery.go internal/upstream/registry.go internal/upstream/egress_generation_test.go internal/plugins/egress_generation_test.go
+      - name: verify targeted
+        run: |
+          go test ./internal/upstream ./internal/app ./internal/egress
+          go test -tags 'wasmplugins consul kubernetes acme' ./internal/plugins ./internal/upstream ./internal/app ./internal/egress
+      - name: remove temporary files
+        run: git rm scripts/issue94_tighten.py .github/workflows/issue94-tighten-apply.yml
+      - name: commit
+        run: |
+          git config user.name 'Marmitakus'
+          git config user.email '72155289+victornife@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor: scope egress generations to HTTP discovery (#94)'
+          git push origin HEAD:issue-94-egress-generations
