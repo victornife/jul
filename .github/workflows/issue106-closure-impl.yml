@@ -28,10 +28,6 @@ jobs:
 
       - name: Apply deterministic implementation patch
         run: |
-          # The listener rebind diagnostic intentionally appears twice in
-          # server.go (live + preflight path); both carry the same stale
-          # connection-cap wording. Allow deterministic all-match replacement
-          # while still failing on a missing anchor.
           python3 - <<'PY'
           from pathlib import Path
           p = Path('scripts/issue106_closure_patch.py')
@@ -43,6 +39,33 @@ jobs:
           p.write_text(s.replace(old, new, 1))
           PY
           python3 scripts/issue106_closure_patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('internal/server/dynamic_conn_limit_test.go')
+          s = p.read_text()
+          old = '''\tclient3 := dialTCP(t, raw.Addr().String())\n\tblocked := acceptAsync(l)'''
+          new = '''\tclient3 := dialTCP(t, raw.Addr().String())\n\tdefer client3.Close()\n\tblocked := acceptAsync(l)'''
+          if old not in s:
+              raise SystemExit('dynamic limiter client3 anchor missing')
+          p.write_text(s.replace(old, new, 1))
+
+          p = Path('internal/admin/history_retention_hot_test.go')
+          s = p.read_text()
+          old = '''\tstatus := s.adminRuntimeStatus(nil)\n\tif status.HistoryRetentionHealth != "prune_failed" {\n\t\tt.Fatalf("history health=%q want prune_failed", status.HistoryRetentionHealth)\n\t}'''
+          new = '''\tstatus := s.historyRetentionStatus.Load()\n\tif status == nil || *status != "prune_failed" {\n\t\tt.Fatalf("history health=%v want prune_failed", status)\n\t}'''
+          if old not in s:
+              raise SystemExit('history advisory test anchor missing')
+          p.write_text(s.replace(old, new, 1))
+
+          p = Path('internal/lifecycle/classify_test.go')
+          s = p.read_text()
+          old = '''// TestClassifyConnectionCapIsListenerGlobal proves the global cap strands every\n// kept listener.\nfunc TestClassifyConnectionCapIsListenerGlobal(t *testing.T) {\n\tbefore := fullConfig()\n\tafter := fullConfig()\n\tafter.RateLimit.MaxConns = 5\n\n\tres, err := Classify(before, after, Live{BoundHTTPAddrs: []string{":8443"}})\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif !contains(res.RestartRequired, "rate_limit.max_conns") {\n\t\tt.Fatalf("restart-required = %v", res.RestartRequired)\n\t}\n\n\t// With no live listener there is nothing to strand.\n\tres, err = Classify(&config.Config{}, &config.Config{RateLimit: config.RateLimitConfig{MaxConns: 5}}, Live{})\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif !res.CanApplyHot {\n\t\tt.Fatalf("without a bound listener the cap applies on the next bind: %+v", res)\n\t}\n}\n'''
+          new = '''// TestClassifyConnectionCapIsHot proves #106 removed max_conns from the\n// bind-time lifecycle: retained and newly bound listeners use the same live\n// admission policy.\nfunc TestClassifyConnectionCapIsHot(t *testing.T) {\n\tbefore := fullConfig()\n\tafter := fullConfig()\n\tafter.RateLimit.MaxConns = 5\n\n\tres, err := Classify(before, after, Live{BoundHTTPAddrs: []string{":8443"}})\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif !res.CanApplyHot || !contains(res.HotReload, "rate_limit.max_conns") {\n\t\tt.Fatalf("max_conns should hot-apply on a retained listener: %+v", res)\n\t}\n\tif contains(res.RestartRequired, "rate_limit.max_conns") {\n\t\tt.Fatalf("max_conns unexpectedly restart-required: %+v", res)\n\t}\n}\n'''
+          if old not in s:
+              raise SystemExit('stale max_conns classify test anchor missing')
+          p.write_text(s.replace(old, new, 1))
+          PY
 
       - name: Format Go sources
         run: gofmt -w internal/server internal/admin internal/lifecycle
