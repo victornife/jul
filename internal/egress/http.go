@@ -96,3 +96,16 @@ func (rt *guardedRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 	}
 	return rt.next.RoundTrip(req)
 }
+
+// CloseIdleConnections forwards retirement through the policy wrapper. Without
+// this method http.Client.CloseIdleConnections cannot reach the underlying
+// *http.Transport, which would leave HTTP/1.1 keep-alives and HTTP/2 pools from
+// a retired egress generation reusable until their ordinary idle timeout.
+func (rt *guardedRoundTripper) CloseIdleConnections() {
+	if rt == nil || rt.next == nil {
+		return
+	}
+	if closer, ok := rt.next.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
