@@ -197,7 +197,9 @@ func (p *Pool) refreshOnce(workerCtx context.Context, epoch uint64, d Discoverer
 		return
 	}
 
-	p.UpdateTargets(targets)
+	if !p.applyDiscoveryTargets(epoch, targets) {
+		return
+	}
 	if hooks.OnBackends != nil {
 		hooks.OnBackends(p.name, len(targets))
 	}

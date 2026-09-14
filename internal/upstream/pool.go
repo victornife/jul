@@ -459,6 +459,25 @@ func (p *Pool) discoveryGenerationCurrent(epoch uint64) bool {
 	return p != nil && p.discoveryEpoch.Load() == epoch
 }
 
+// applyDiscoveryTargets linearizes a successful discovery result against a
+// policy-generation Publish. Holding discoveryMu across the epoch check and
+// UpdateTargets removes the check/update race: either the A result commits
+// before StopDiscovery acquires the lock, or StopDiscovery advances the epoch
+// first and A is discarded. It can never pass the check under A and write after
+// B has fenced the worker.
+func (p *Pool) applyDiscoveryTargets(epoch uint64, targets []Target) bool {
+	if p == nil {
+		return false
+	}
+	p.discoveryMu.Lock()
+	defer p.discoveryMu.Unlock()
+	if p.discoveryEpoch.Load() != epoch {
+		return false
+	}
+	p.UpdateTargets(targets)
+	return true
+}
+
 // Done returns a channel closed when the pool is closed. Pool-owned goroutines
 // (active health checks, discovery refreshers) select on it to exit.
 func (p *Pool) Done() <-chan struct{} { return p.done }
