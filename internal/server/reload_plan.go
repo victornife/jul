@@ -12,6 +12,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/lifecycle"
+	"jul/internal/observability"
 	"jul/internal/upstream"
 )
 
@@ -275,6 +276,14 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// commit before the new handler generation becomes reachable, so a new
 	// vhost route can never be selected against a stale candidate mapping.
 	p.Runtime.Commit()
+
+	// #99: publish the candidate root sampling ratio inside the same no-fail
+	// Publish transaction, before candidate handlers/config become reachable.
+	// Canonical config validation has already accepted the ratio, and the
+	// observability seam performs one atomic immutable-state swap only: no OTel
+	// provider/exporter/global-state rebuild, network I/O, teardown or failure.
+	observability.UpdateTracingSampleRatio(p.Candidate.Effective.Observability.Tracing.SampleRatio)
+
 	// Alt-Svc max-age hot reload (#161): unlike certificate rotation, building
 	// a header value cannot fail, so this has no Prepare/Abort phase and runs
 	// directly here, updating every retained HTTP/3 listener's advertised

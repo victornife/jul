@@ -166,6 +166,7 @@ const (
 	reasonCacheScalarPolicyHot  = "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)"
 	reasonAccessLogHot          = "a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98)"
 	reasonTracingStartup        = "the tracer provider and exporter are created once at startup"
+	reasonTracingSampleRatioHot = "the stable ParentBased sampler delegates root decisions to an atomic ratio sampler updated at successful Publish; existing traces and parent decisions remain unchanged (#99)"
 	reasonBindFrozen            = "the value is read once when the socket binds; an address kept across the reload keeps the value it bound with"
 	reasonClientAddressRebuild  = "the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish"
 	reasonBackendTLSPool        = "the resolved policy is part of the pool's identity, so a changed policy — including a certificate rotated in place — rebuilds the pool and its probe client on the next successful reload"
@@ -405,9 +406,9 @@ func observabilityEntries() []Entry {
 		"observability.tracing.endpoint",
 		"observability.tracing.exporter",
 		"observability.tracing.insecure",
-		"observability.tracing.sample_ratio",
 		"observability.tracing.service_name",
 	)...)
+	out = append(out, hot("observability.tracing.sample_ratio", SubTracing, reasonTracingSampleRatioHot))
 	return out
 }
 

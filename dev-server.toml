@@ -204,8 +204,8 @@ listen = "127.0.0.1:10199"
 # OTLP to a collector (Grafana Tempo, Jaeger, the OpenTelemetry Collector, ...).
 # Each request emits a server span with proxy.roundtrip / upstream.request /
 # cache.lookup child spans, and W3C tracecontext is propagated to upstreams.
-# Tracing settings are fixed at startup: changing this block needs a restart
-# (a config reload keeps the running tracer).
+# Tracing pipeline identity settings are fixed at startup, but sample_ratio
+# hot-reloads atomically for new root spans (#99); parent/in-flight decisions stay stable.
 # enabled = true
 # exporter = "otlp-grpc"           # "otlp-grpc" (default) or "otlp-http"
 # endpoint = "localhost:4317"      # collector address: host:port (gRPC) / URL (HTTP)

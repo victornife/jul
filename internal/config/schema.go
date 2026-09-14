@@ -1472,8 +1472,8 @@ type TracingConfig struct {
 	// HTTP. Required when tracing is enabled.
 	Endpoint string `toml:"endpoint"`
 	// SampleRatio is the head-based sampling probability for root spans, in the
-	// range [0,1]. It defaults to 1.0 (sample everything) when enabled; set a
-	// fraction such as 0.1 to sample less.
+	// range [0,1]. An omitted TOML value defaults to 1.0 (sample everything); an
+	// explicit 0 disables sampling of new root traces.
 	SampleRatio float64 `toml:"sample_ratio"`
 	// ServiceName sets the OpenTelemetry resource service.name. Defaults to
 	// "jul" when unset.

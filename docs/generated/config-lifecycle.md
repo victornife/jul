@@ -20,9 +20,9 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 | Schema paths (containers included) | 356 |
 | Schema leaves (configurable values) | 302 |
 | Registry entries | 302 |
-| Startup-consumed entries | 37 |
-| Class `hot_reload` | 250 |
-| Class `restart_required` | 37 |
+| Startup-consumed entries | 36 |
+| Class `hot_reload` | 251 |
+| Class `restart_required` | 36 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 3 |
@@ -187,7 +187,7 @@ value is compared as a digest so no secret material leaves the process.
 | `observability.tracing.endpoint` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |
 | `observability.tracing.exporter` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |
 | `observability.tracing.insecure` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |
-| `observability.tracing.sample_ratio` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |
+| `observability.tracing.sample_ratio` | `hot_reload` | `tracing` | — | the stable ParentBased sampler delegates root decisions to an atomic ratio sampler updated at successful Publish; existing traces and parent decisions remain unchanged (#99) |
 | `observability.tracing.service_name` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |
 | `plugins.*.allowed_hosts` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.config.*` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |

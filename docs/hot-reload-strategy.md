@@ -69,11 +69,14 @@ runtime untouched, and Retire is bounded and cannot turn an applied change into
 ## Selected final gaps — 2026-09-11
 
 A post-#160 source audit and peer review selected two additional investments.
-Neither is hot in the current binary yet.
+#99 is implemented: `observability.tracing.sample_ratio` is hot while the tracing
+pipeline identity remains startup-bound. #94 remains the next selected implementation
+and its egress fields stay restart-required until its complete consumer/pool security
+matrix passes.
 
 | Gap | Current lifecycle | Target | Why selected | Estimated effort | Risk |
 | --- | --- | --- | --- | --- | --- |
-| `observability.tracing.sample_ratio` (#99) | `restart_required` | Hot-update the root sampling ratio without rebuilding the provider/exporter | High incident/cost-control value with a very small permanent runtime surface | **S/M: 4–7 focused engineer-days** | Low–medium |
+| `observability.tracing.sample_ratio` (#99) | `hot_reload` | Atomic root-ratio update inside one stable provider/exporter pipeline | High incident/cost-control value with a very small permanent runtime surface | **S/M: 4–7 focused engineer-days** | Low–medium |
 | `egress.enabled`, `egress.allow` (#94) | `restart_required` | Generation-correct policy for every auxiliary outbound consumer and its pools | Security containment and truthful policy enforcement without restarting healthy traffic | **L: 15–25 focused engineer-days / ~3–5 focused weeks** | High correctness/security |
 
 ### `tracing.sample_ratio`: selected reduced scope
@@ -150,9 +153,9 @@ meets the product's operational contract.
 The final selected runtime-dynamics edge is:
 
 ```text
-#99 — sample_ratio-only hot reload
+#99 — sample_ratio-only hot reload COMPLETE
   ↓
-#94 — generation-correct egress hot reload
+#94 — generation-correct egress hot reload NEXT
   ↓
 explicit retain/defer decisions for remaining gated fields
   ↓

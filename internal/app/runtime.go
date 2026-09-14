@@ -78,9 +78,10 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 	rt := &Runtime{log: b.Logger}
 
 	// Tracing is initialised once at startup (like ACME): the OTLP pipeline and
-	// global TracerProvider are fixed for the process, so changing
-	// [observability.tracing] takes effect only after a restart. It is a no-op
-	// unless enabled and built with the "otel" tag; an enabled block in a binary
+	// global TracerProvider identity are fixed for the process. The pipeline
+	// identity fields remain restart-bound; sample_ratio is the sole runtime-
+	// tunable tracing field. It is a no-op unless enabled and built with the
+	// "otel" tag; an enabled block in a binary
 	// without that tag is a startup error.
 	tracer, err := observability.NewTracer(cfg.Observability.Tracing)
 	if err != nil {

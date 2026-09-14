@@ -33,15 +33,15 @@ describe("generateTracingToml", () => {
     );
   });
 
-  it("emits a fractional sample ratio but omits 0 and 1", () => {
+  it("emits zero and fractional sample ratios but omits default 1", () => {
     expect(generateTracingToml(draft({ enabled: true, endpoint: "h:1", sampleRatio: 0.1 }))).toContain(
       "sample_ratio = 0.1",
     );
     expect(generateTracingToml(draft({ enabled: true, endpoint: "h:1", sampleRatio: 1 }))).not.toContain(
       "sample_ratio",
     );
-    expect(generateTracingToml(draft({ enabled: true, endpoint: "h:1", sampleRatio: 0 }))).not.toContain(
-      "sample_ratio",
+    expect(generateTracingToml(draft({ enabled: true, endpoint: "h:1", sampleRatio: 0 }))).toContain(
+      "sample_ratio = 0.0",
     );
   });
 

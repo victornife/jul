@@ -881,7 +881,7 @@
       "go_field": "ResponseHeaderOp.Name",
       "path": "servers[].locations[].response_headers[].name",
       "kind": "grammar",
-      "constraint": "RFC 9110 field-name token; hop-by-hop/framing names, Content-Encoding, and Vary/Access-Control-* under their §8a/§8b conditions are rejected",
+      "constraint": "RFC 9110 field-name token; hop-by-hop/framing names, Content-Encoding, and Vary/Access-Control-* under their \u00a78a/\u00a78b conditions are rejected",
       "zero_semantics": "required; there is no default",
       "active_when": "a response_headers entry is present"
     },
@@ -1059,7 +1059,7 @@
       "path": "observability.tracing.sample_ratio",
       "kind": "ratio",
       "constraint": "0..1",
-      "zero_semantics": "omitted/zero defaults to 1.0 when tracing is enabled",
+      "zero_semantics": "omitted defaults to 1.0; explicit zero disables sampling of new root traces",
       "active_when": "tracing enabled"
     },
     {

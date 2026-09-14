@@ -66,7 +66,7 @@ than before the external owner wrote the file. This means:
   so reload neither resets abuse state nor disconnects existing streams.
 - Changes to **restart-required** fields (cache/egress fields that retain that
   lifecycle, `admin.enabled`, `admin.listen`, admin history resources,
-  tracing, ACME, and retained-listener bind settings) are **rejected at swap time** — the swap is
+  tracing pipeline identity fields other than `sample_ratio`, ACME, and retained-listener bind settings) are **rejected at swap time** — the swap is
   aborted, `LastReload.Outcome=not_applied` is recorded
   with the reason, and the old config remains authoritative. The file on disk
   may contain the new value, but the running process ignores it until a
@@ -806,10 +806,13 @@ now format is too.
   is the deliberate exception: #100 hot-reloads it through a prepared dynamic
   certificate provider. **http3** `enabled` and `h2c` are likewise decided when
   the address binds; `http3.alt_svc_max_age` is hot — see below.
-- **Tracing** — the provider/exporter pipeline is wired once at startup, so all
-  tracing fields are currently restart-bound. #99 is selected with reduced
-  scope to make only `observability.tracing.sample_ratio` hot; the other tracing
-  fields remain deliberately restart-required.
+- **Tracing** — the provider/exporter/resource/propagator/tracer pipeline is
+  wired once at startup. `observability.tracing.sample_ratio` is hot (#99):
+  successful Publish atomically swaps only the stable ParentBased sampler's root
+  delegate before the candidate handler/config becomes reachable. New root spans
+  use the new ratio; parent decisions and already-started traces do not change.
+  `enabled`, `endpoint`, `exporter`, `service_name`, and `insecure` remain
+  restart-bound.
 - **Response cache** — the cache backend (LRU/disk tiers and counters) is
   built once at startup and remains process-scoped across ordinary handler
   reloads. Its five scalar policy/capacity fields (`default_ttl`,
@@ -846,14 +849,13 @@ now format is too.
   admin static certificate/key are all hot-reloadable; see the generated
   lifecycle reference for the exact leaves.
 
-### Selected runtime gaps (not current behavior)
+### Selected runtime gaps
 
-Two remaining restart-bound gaps are selected for implementation after the
-post-#160 value/peer audit: #99 will hot-reload only
-`observability.tracing.sample_ratio` without replacing the tracing pipeline, and
-#94 will make `[egress]` generation-correct across every auxiliary outbound
-consumer and reusable connection pool. Their present registry classification is
-unchanged until those implementations land. See
+The first selected gap is now implemented: #99 hot-reloads only
+`observability.tracing.sample_ratio` without replacing the tracing pipeline. #94
+remains the next selected gap and will make `[egress]` generation-correct across
+every auxiliary outbound consumer and reusable connection pool; the egress
+registry classification remains restart-required until that implementation lands. See
 [hot-reload strategy](hot-reload-strategy.md) for the decision rubric, target
 contracts and effort.
 

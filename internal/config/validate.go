@@ -6,6 +6,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/netip"
 	"net/url"
@@ -249,14 +250,27 @@ func validateCompression(c CompressionConfig) []error {
 	return errs
 }
 
+// ValidateTracingSampleRatio validates the numeric invariant required by the
+// no-fail tracing Publish seam. TOML accepts NaN and infinities, so ordinary
+// range comparisons alone are insufficient.
+func ValidateTracingSampleRatio(ratio float64) error {
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 0 || ratio > 1 {
+		return fmt.Errorf("[observability.tracing] sample_ratio must be finite and in [0, 1], got %g", ratio)
+	}
+	return nil
+}
+
 // validateTracing checks the [observability.tracing] block. It validates the
 // configuration only; whether the `otel` build tag is compiled in is reported
 // when the tracer is constructed at startup, since that depends on build tags.
 func validateTracing(c TracingConfig) []error {
-	if !c.Enabled {
-		return nil
-	}
 	var errs []error
+	if err := ValidateTracingSampleRatio(c.SampleRatio); err != nil {
+		errs = append(errs, err)
+	}
+	if !c.Enabled {
+		return errs
+	}
 	switch c.Exporter {
 	case "", "otlp-grpc", "otlp-http":
 	default:
@@ -264,9 +278,6 @@ func validateTracing(c TracingConfig) []error {
 	}
 	if strings.TrimSpace(c.Endpoint) == "" {
 		errs = append(errs, errors.New("[observability.tracing] enabled but 'endpoint' is empty"))
-	}
-	if c.SampleRatio < 0 || c.SampleRatio > 1 {
-		errs = append(errs, fmt.Errorf("[observability.tracing] sample_ratio %g out of range (want 0..1)", c.SampleRatio))
 	}
 	return errs
 }

@@ -32,6 +32,16 @@ func NewTracer(cfg config.TracingConfig) (*Tracer, error) {
 	return &Tracer{}, nil
 }
 
+// UpdateSampleRatio is intentionally inert in a lean build. A ratio-only
+// configuration change remains valid while tracing is disabled, but it must not
+// create a provider, exporter or background worker. Enabling tracing is still
+// rejected by NewTracer/build-capability validation.
+func (t *Tracer) UpdateSampleRatio(float64) {}
+
+// UpdateTracingSampleRatio is the process-level equivalent used by the reload
+// Publish seam. Without the otel build tag there is no sampler to update.
+func UpdateTracingSampleRatio(float64) {}
+
 // Middleware is a pass-through in builds without tracing.
 func (t *Tracer) Middleware(next http.Handler) http.Handler { return next }
 

@@ -1099,15 +1099,14 @@
       "optional": false,
       "dynamic": false,
       "subsystem": "tracing",
-      "lifecycle_class": "restart_required",
-      "lifecycle_reason": "the tracer provider and exporter are created once at startup",
-      "startup_consumed": true,
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the stable ParentBased sampler delegates root decisions to an atomic ratio sampler updated at successful Publish; existing traces and parent decisions remain unchanged (#99)",
       "capabilities": [
         "otel"
       ],
       "value_kind": "ratio",
       "constraint": "0..1",
-      "zero_semantics": "omitted/zero defaults to 1.0 when tracing is enabled",
+      "zero_semantics": "omitted defaults to 1.0; explicit zero disables sampling of new root traces",
       "active_when": "tracing enabled",
       "default": 1,
       "description": "SampleRatio is the head-based sampling probability for root spans, in the range [0,1]",

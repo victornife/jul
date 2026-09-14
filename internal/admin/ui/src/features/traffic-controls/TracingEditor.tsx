@@ -199,7 +199,7 @@ export function TracingEditor({ current, onClose }: TracingEditorProps) {
 
             <TextField
               label="Sample ratio (optional)"
-              hint="Head-based sampling probability 0–1. Blank or 1 samples everything; 0.1 samples 10%."
+              hint="Head-based sampling probability 0–1. Blank or 1 samples everything; 0 samples no new root traces."
               value={draft.sampleRatio === 1 ? "" : String(draft.sampleRatio)}
               placeholder="1.0"
               onChange={(v) => {
