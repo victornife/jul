@@ -49,11 +49,24 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Fetch comparison base
-        run: git fetch --no-tags origin main:refs/remotes/origin/main
+      - name: Resolve comparison base
+        shell: bash
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            base="${{ github.event.before }}"
+            if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+              base="$(git rev-parse HEAD^)"
+            fi
+          else
+            base="origin/main"
+          fi
+          git cat-file -e "${base}^{commit}"
+          echo "BASE_SHA=$base" >> "$GITHUB_ENV"
+          echo "HR-05 comparison base: $base"
       - name: Formatting
         run: |
-          changed="$(git diff --name-only origin/main...HEAD -- '*.go')"
+          changed="$(git diff --name-only "$BASE_SHA"...HEAD -- '*.go')"
           if [ -n "$changed" ]; then
             test -z "$(gofmt -d $changed)"
           fi
@@ -67,7 +80,7 @@ jobs:
         run: |
           go test -count=1 ./internal/egress -run 'TestDynamicClientTighteningCannotReuseOldKeepAlive|TestDynamicClientRedirectHopUsesPublishedGeneration|TestManagerConcurrentReadsAndPolicyChurnRaceClean'
           go test -count=1 ./internal/egress -run 'TestDynamicClientTighteningCannotReuseOldHTTP2Connection'
-          go test -count=1 ./internal/upstream -run 'TestRegistryDiscoveryPoolIdentityIncludesEgressGeneration|TestRegistryEgressCandidateAbortClosesFreshDiscovererOnly|TestDiscoveryResultFromRetiredEgressGenerationCannotOverwriteNewGeneration'
+          go test -count=1 ./internal/upstream -run 'TestRegistryDiscoveryPoolIdentityIncludesEgressGeneration|TestRegistryEgressCandidateAbortClosesFreshDiscovererOnly|TestDiscoveryResultFromRetiredEgressGenerationCannotOverwriteNewGeneration|TestDiscoveryWorkerGenerationChurnNoLeak'
           go test -count=1 ./internal/app -run 'TestHandlerFactoryEgress'
           go test -count=1 -tags wasmplugins ./internal/plugins -run 'TestBuildWithEgressCapturesGenerationScopedWrapper|TestFetchDialIntersection'
           go test -count=1 ./internal/auth -run 'TestEgressDialContextGuardsJWKS|TestEgressDialContextGuardsForward'
@@ -75,7 +88,7 @@ jobs:
         run: |
           go test -count=1 -covermode=atomic -coverpkg="${COVERPKG}" -coverprofile=/tmp/hr05-lean.cover ./internal/egress ./internal/auth ./internal/upstream ./internal/app ./internal/server ./internal/lifecycle
           go test -count=1 -tags "${FULL_TAGS}" -covermode=atomic -coverpkg="${COVERPKG}" -coverprofile=/tmp/hr05-full.cover ./internal/egress ./internal/auth ./internal/upstream ./internal/plugins ./internal/app ./internal/server ./internal/lifecycle
-          git diff --unified=0 origin/main...HEAD -- '*.go' > /tmp/hr05.diff
+          git diff --unified=0 "$BASE_SHA"...HEAD -- '*.go' > /tmp/hr05.diff
           python3 - <<'PY'
           from pathlib import Path
           import re
