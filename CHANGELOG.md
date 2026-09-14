@@ -9,6 +9,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+- **HR-10 / #99 — OpenTelemetry root sample ratio hot-reloads without rebuilding tracing.** `observability.tracing.sample_ratio` now publishes as one atomic immutable root-sampler swap inside `ReloadPlan.Publish`; the stable `ParentBased` sampler preserves local/remote parent decisions and already-started traces while new roots use the new ratio. Provider, exporter, resource, propagator, tracer and global OTel registration remain process-lifetime, so a ratio-only change causes no exporter shutdown/flush/reconnect or provider churn. Disabled and lean builds remain inert, mixed candidates with the five tracing pipeline identity fields remain whole-candidate restart operations, lifecycle/config artifacts are generated from the authoritative registry, and deterministic SDK-delegation, concurrency and local OTLP tests cover the transition. The five pipeline identity fields remain `restart_required`.
 - **HR-07C / #160 — hot-reloadable durable audit sink.** The audit ring and global event IDs are process-stable while path/rotation changes publish a prepared durable sink generation, with same-path single-owner rotation, bounded post-Publish retirement, secret-safe health, typed Console editing, and deterministic failure/concurrency coverage.
 
 > **Release state:** the selected correction tranche through
