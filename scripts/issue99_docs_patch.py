@@ -114,12 +114,20 @@ replace(
 #94 — generation-correct egress hot reload NEXT'''
 )
 
-regex_replace(
+replace(
     "docs/known-limitations.md",
-    r'''Two current restart boundaries are now \*\*selected for removal\*\*, but remain\nlimitations until their implementation PRs merge: #99.*?#94 selects generation-correct `egress\.enabled` / `egress\.allow`''',
+    '''Two current restart boundaries are now **selected for removal**, but remain
+limitations until their implementation PRs merge: #99 is reduced to
+`observability.tracing.sample_ratio` only (**S/M, 4–7 focused engineer-days**),
+and #94 selects generation-correct `egress.enabled`/`egress.allow` (**L, 15–25
+focused engineer-days / ~3–5 focused weeks**). All other tracing fields stay
+restart-bound in this tranche, and egress is not promoted until every auxiliary
+outbound consumer and old connection pool obeys the candidate generation.''',
     '''One selected restart boundary is now removed and one remains: #99 makes
-`observability.tracing.sample_ratio` hot while leaving tracing pipeline identity
-fields restart-bound. #94 remains selected for generation-correct `egress.enabled` / `egress.allow`'''
+`observability.tracing.sample_ratio` hot while the provider/exporter pipeline identity
+fields remain restart-bound. #94 remains selected for generation-correct
+`egress.enabled`/`egress.allow` and egress is not promoted until every auxiliary
+outbound consumer and old connection pool obeys the candidate generation.'''
 )
 
 for cfg in ("server.toml", "dev-server.toml"):
