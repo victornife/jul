@@ -234,3 +234,15 @@ the [soak evidence log](soak-evidence.md).
 | 2026-07-11 | 1.32 | **L4 stream proxy soak completed + promotion to GA.** Isolated 8h Linux soak (`TestSoakUDPChurn`) completed with 54,892,354 sends and 0 errors; goroutine/heap growth stayed bounded. Evidence logged in the soak log and status table. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [stream.md](stream.md) |
 | 2026-07-12 | 1.32 | **WASM plugin soak completed + promotion to GA.** Isolated Linux smoke and 8h soak completed with 286/33,428 successful requests and 0 errors; plugin execution remained healthy throughout. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [plugins.md](plugins.md) |
 | 2026-07-13 | 1.32 | **HTTP/3 soak completed + promotion to GA.** Isolated 8h Linux soak completed with 55,302,486 successful requests and 0 failures over QUIC/TLS on `:8443`. | [soak-evidence.md](soak-evidence.md), [status.md](status.md), [http3.md](http3.md), [ga-push.md](ga-push.md) |
+
+
+## Runtime-dynamics programme closure (2026-09-14)
+
+The bounded hot-reload programme is complete at the lifecycle-design level. The
+final generated inventory is 302 leaves: **256 hot reload, 32 restart required,
+7 new-listener-only, 4 ignored/deprecated, 3 validation-rejected/reserved**.
+This is an intentional architecture inventory, not a score: structural listener,
+resource-identity and security-tightening changes retain explicit restart/defer
+boundaries. Future hot-reload work requires a new operational value signal or
+reusable architectural leverage; it is not an automatic continuation toward
+100%.

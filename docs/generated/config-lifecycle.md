@@ -20,10 +20,10 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 | Schema paths (containers included) | 356 |
 | Schema leaves (configurable values) | 302 |
 | Registry entries | 302 |
-| Startup-consumed entries | 34 |
-| Class `hot_reload` | 253 |
-| Class `restart_required` | 34 |
-| Class `new_listener_only` | 8 |
+| Startup-consumed entries | 32 |
+| Class `hot_reload` | 256 |
+| Class `restart_required` | 32 |
+| Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 3 |
 
@@ -124,7 +124,7 @@ value is compared as a digest so no secret material leaves the process.
 | `admin.console` | `hot_reload` | `admin` | — | the live admin server dispatches Console mode from one immutable per-request runtime snapshot published atomically |
 | `admin.enabled` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.history_dir` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
-| `admin.history_keep` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
+| `admin.history_keep` | `hot_reload` | `admin` | — | the existing history backend keeps an atomic retention policy published with the admin runtime; tightening prunes only after Publish and prune failure is advisory (#106/#159) |
 | `admin.listen` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.max_event_conns` | `hot_reload` | `admin` | — | new SSE admissions use the captured per-client connection cap while existing leases and connection counts survive policy reload |
 | `admin.plugin_upload_dir` | `hot_reload` | `admin` | — | candidate storage is preflighted before Publish and each upload is confined to the directory captured at request start |
@@ -207,7 +207,7 @@ value is compared as a digest so no secret material leaves the process.
 | `rate_limit.burst` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
 | `rate_limit.enabled` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
 | `rate_limit.key` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
-| `rate_limit.max_conns` | `new_listener_only` | `rate_limit` | cond. | the concurrent-connection cap is installed on each listener when it binds, so a kept address keeps the cap it bound with |
+| `rate_limit.max_conns` | `hot_reload` | `rate_limit` | — | the stable listener-owned connection admission limiter publishes the effective cap at reload Publish; admitted connections are never terminated (#106) |
 | `rate_limit.rate` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
 | `servers.*.access_log` | `ignored_deprecated` | `access_log` | deprecated, ignored | superseded by observability.access_log; no runtime consumer reads it |
 | `servers.*.client_address.forwarded_headers` | `hot_reload` | `client_address` | — | the trusted-proxy policy is recompiled per listen address while the handler tree is prepared, so a malformed prefix aborts the reload before publish |
@@ -330,7 +330,7 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.tls.acme.domains` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | `servers.*.tls.acme.email` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | `servers.*.tls.acme.enabled` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
-| `servers.*.tls.acme.ocsp_stapling` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
+| `servers.*.tls.acme.ocsp_stapling` | `hot_reload` | `acme` | — | the process-lifetime ACME manager keeps a stable stapling wrapper whose atomic policy changes at Publish; no manager, account, cache, HostPolicy or listener is replaced (#106) |
 | `servers.*.tls.cert` | `hot_reload` | `tls` | digest | a candidate certificate provider is built and validated during Prepare and swapped atomically into the listener's existing dynamic provider at Publish, without rebinding (#100) |
 | `servers.*.tls.client_auth.ca_file` | `restart_required` | `mtls` | startup, per-address, cond., digest | the client CA pool is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected |
 | `servers.*.tls.client_auth.crl_file` | `restart_required` | `mtls` | startup, per-address, cond., digest | the revocation list is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected |

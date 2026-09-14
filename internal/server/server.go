@@ -18,8 +18,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/net/netutil"
-
 	"jul/internal/background"
 	"jul/internal/config"
 	"jul/internal/lifecycle"
@@ -459,6 +457,7 @@ type listenerEntry struct {
 	addr             string
 	httpd            *http.Server
 	ln               net.Listener
+	connLimiter      *dynamicConnLimiter  // stable listener-lifetime admission cap
 	provider         *DynamicCertProvider // nil for plain HTTP
 	h3               h3Listener           // nil unless HTTP/3 is enabled and compiled in
 	boundFingerprint string               // listenerBindFingerprint at bind time, for rotation detection
@@ -692,8 +691,9 @@ func (s *Server) bindFrom(addr string, cfg *config.Config) error {
 }
 
 // buildListenerEntry creates a listenerEntry for addr using cfg for all
-// bind-time settings: TLS, mTLS, h2c, HTTP/3, timeouts, header limits, and
-// connection cap. The entry is NOT yet registered in s.listeners and httpd.Serve
+// bind-time settings: TLS, mTLS, h2c, HTTP/3, timeouts and header limits.
+// The connection cap is listener-owned but live policy, initialized from cfg and
+// updated in place at Publish. The entry is NOT yet registered in s.listeners and httpd.Serve
 // is NOT yet started — connections queue in the kernel backlog until startServing
 // is called. This separation lets doReload stage binds before committing the
 // generation, so no 503 responses are served on a new address during an abort.
@@ -709,13 +709,11 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		return nil, fmt.Errorf("listen %s: %w", addr, err)
 	}
 
-	// Cap concurrent connections per listener before the optional TLS wrap so
-	// the limit counts raw accepts and TLS handshakes happen only for admitted
-	// connections. Gated by the [rate_limit] master switch; the cap is fixed at
-	// bind time, so changing max_conns applies to newly bound listeners.
-	if rl := cfg.RateLimit; rl.Enabled && rl.MaxConns > 0 {
-		ln = netutil.LimitListener(ln, rl.MaxConns)
-	}
+	// Keep one Jul-owned admission wrapper for the listener lifetime. The
+	// effective cap is published in place on reload, before TLS, so TLS/HTTP work
+	// begins only after admission and no socket rebind is required (#106).
+	connLimiter := newDynamicConnLimiter(ln, effectiveConnectionCap(cfg))
+	ln = connLimiter
 
 	// The PROXY header is plaintext framing ahead of the ClientHello, so it is
 	// stripped before the TLS wrap. The advertised address becomes this
@@ -727,7 +725,7 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		ln = &proxyProtoListener{Listener: ln, trusted: policy, log: s.log}
 	}
 
-	entry := &listenerEntry{addr: addr}
+	entry := &listenerEntry{addr: addr, connLimiter: connLimiter}
 
 	bindings, minVer, tlsOK := tlsBindingsForAddr(cfg.Servers, addr)
 	if tlsOK {
@@ -887,7 +885,7 @@ func (s *Server) listenerBoundRebindRequired(next *config.Config) (string, bool)
 		}
 		if entry.boundFingerprint != listenerBindFingerprint(next, addr) {
 			return fmt.Sprintf(
-				"listener %s has bind-time settings (timeouts, header limits, h2c, HTTP/3, TLS, mutual TLS, or connection cap) that changed; these are fixed when the listener binds and take effect on restart",
+				"listener %s has bind-time settings (timeouts, header limits, h2c, HTTP/3, TLS, or mutual TLS) that changed; these are fixed when the listener binds and take effect on restart",
 				addr,
 			), true
 		}
@@ -1584,7 +1582,7 @@ func PreflightRebindRequired(live LiveSnapshot, next *config.Config) (string, bo
 		}
 		if info.Fingerprint != listenerBindFingerprint(next, addr) {
 			return fmt.Sprintf(
-				"listener %s has bind-time settings (timeouts, header limits, h2c, HTTP/3, TLS, mutual TLS, or connection cap) that changed; these are fixed when the listener binds and take effect on restart",
+				"listener %s has bind-time settings (timeouts, header limits, h2c, HTTP/3, TLS, or mutual TLS) that changed; these are fixed when the listener binds and take effect on restart",
 				addr,
 			), true
 		}

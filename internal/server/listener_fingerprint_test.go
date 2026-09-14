@@ -144,13 +144,11 @@ func TestListenerRebindRequired(t *testing.T) {
 			s.TLS.ClientAuth.CRLFile = "revoked.crl"
 		})
 	})
-	t.Run("connection cap (global max_conns) with a kept listener", func(t *testing.T) {
+	t.Run("connection cap (global max_conns) hot-applies on a kept listener", func(t *testing.T) {
 		old := cfg(plain())
 		next := cfg(plain())
 		next.RateLimit = config.RateLimitConfig{Enabled: true, MaxConns: 100}
-		if _, need := ListenerRebindRequired(old, next); !need {
-			t.Fatal("changing the connection cap must require a restart for kept listeners")
-		}
+		hotApplies(t, old, next)
 	})
 
 	// --- false-positive guards: nothing the bound listener depends on changed ---

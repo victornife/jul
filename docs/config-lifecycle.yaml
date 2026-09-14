@@ -79,11 +79,11 @@ counts:
   schema_paths: 356
   schema_leaves: 302
   registry_entries: 302
-  startup_consumed: 34
+  startup_consumed: 32
   by_class:
-    hot_reload: 253
-    restart_required: 34
-    new_listener_only: 8
+    hot_reload: 256
+    restart_required: 32
+    new_listener_only: 7
     ignored_deprecated: 4
     validation_rejected_reserved: 3
 
@@ -123,10 +123,9 @@ fields:
     reason: "the admin listener and its resources are created once at startup"
     startup_consumed: true
   - path: "admin.history_keep"
-    class: restart_required
+    class: hot_reload
     subsystem: admin
-    reason: "the admin listener and its resources are created once at startup"
-    startup_consumed: true
+    reason: "the existing history backend keeps an atomic retention policy published with the admin runtime; tightening prunes only after Publish and prune failure is advisory (#106/#159)"
   - path: "admin.listen"
     class: restart_required
     subsystem: admin
@@ -482,10 +481,9 @@ fields:
     subsystem: rate_limit
     reason: "the rate-limiter store accepts a new policy on each successful reload"
   - path: "rate_limit.max_conns"
-    class: new_listener_only
+    class: hot_reload
     subsystem: rate_limit
-    reason: "the concurrent-connection cap is installed on each listener when it binds, so a kept address keeps the cap it bound with"
-    conditional: true
+    reason: "the stable listener-owned connection admission limiter publishes the effective cap at reload Publish; admitted connections are never terminated (#106)"
   - path: "rate_limit.rate"
     class: hot_reload
     subsystem: rate_limit
@@ -1016,12 +1014,9 @@ fields:
     address_keyed: true
     conditional: true
   - path: "servers.*.tls.acme.ocsp_stapling"
-    class: restart_required
+    class: hot_reload
     subsystem: acme
-    reason: "the ACME manager, its account and its certificate cache are created for the listener at bind time"
-    startup_consumed: true
-    address_keyed: true
-    conditional: true
+    reason: "the process-lifetime ACME manager keeps a stable stapling wrapper whose atomic policy changes at Publish; no manager, account, cache, HostPolicy or listener is replaced (#106)"
   - path: "servers.*.tls.cert"
     class: hot_reload
     subsystem: tls

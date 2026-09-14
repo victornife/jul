@@ -39,11 +39,19 @@ func (s *Server) CommitPreparedAdminRuntime(prepared *PreparedAuth) {
 	if prepared == nil {
 		return
 	}
-	if prepared.audit == nil {
+	commitRuntime := func() {
+		// Publish history retention before the immutable admin snapshot that
+		// advertises it. This operation cannot fail and performs no deletion.
+		if prepared.historyKeepSet && s.hist != nil {
+			prepared.historyNeedsPrune = s.hist.setRetention(prepared.historyKeep)
+		}
 		s.CommitPreparedAuth(prepared)
+	}
+	if prepared.audit == nil {
+		commitRuntime()
 		return
 	}
-	prepared.audit.commitWith(func() { s.CommitPreparedAuth(prepared) })
+	prepared.audit.commitWith(commitRuntime)
 }
 
 // AbortPreparedAdminRuntime releases a candidate audit resource without
@@ -59,8 +67,20 @@ func (s *Server) AbortPreparedAdminRuntime(prepared *PreparedAuth) {
 // before Publish, then releases its physical writer. Failure is advisory: the
 // candidate is already committed and is never rolled back here.
 func (s *Server) RetirePreparedAdminRuntime(ctx context.Context, prepared *PreparedAuth) {
-	if prepared == nil || prepared.audit == nil {
+	if prepared == nil {
 		return
 	}
-	prepared.audit.retire(ctx)
+	if prepared.historyNeedsPrune && s.hist != nil {
+		if err := s.hist.pruneCurrent(); err != nil {
+			s.recordHistoryRetentionFailure()
+			if s.log != nil {
+				s.log.Warn("configuration history retention prune degraded after publish", "error", err)
+			}
+		} else {
+			s.clearHistoryRetentionFailure()
+		}
+	}
+	if prepared.audit != nil {
+		prepared.audit.retire(ctx)
+	}
 }

@@ -110,11 +110,10 @@ HistoryKeep bounds how many configuration snapshots are retained; older snapshot
 | | |
 | --- | --- |
 | Type | `integer` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `admin` |
-| Why | the admin listener and its resources are created once at startup |
+| Why | the existing history backend keeps an atomic retention policy published with the admin runtime; tightening prunes only after Publish and prune failure is advisory (#106/#159) |
 | Default | 50 |
-| Flags | startup-consumed |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 50 when admin is enabled |
 | Active when | always |
@@ -1236,10 +1235,9 @@ MaxConns caps concurrent connections per listener (0 = unlimited).
 | | |
 | --- | --- |
 | Type | `integer` |
-| Lifecycle | `new_listener_only` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `rate_limit` |
-| Why | the concurrent-connection cap is installed on each listener when it binds, so a kept address keeps the cap it bound with |
-| Flags | conditional |
+| Why | the stable listener-owned connection admission limiter publishes the effective cap at reload Publish; admitted connections are never terminated (#106) |
 | Constraint | non-negative |
 | Zero/empty semantics | 0 means unlimited |
 | Active when | global rate limit enabled |
@@ -2844,12 +2842,11 @@ OCSPStapling enables OCSP stapling for ACME-issued certificates so clients can v
 | --- | --- |
 | Type | `bool` |
 | Optional | yes |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `acme` |
-| Why | the ACME manager, its account and its certificate cache are created for the listener at bind time |
+| Why | the process-lifetime ACME manager keeps a stable stapling wrapper whose atomic policy changes at Publish; no manager, account, cache, HostPolicy or listener is replaced (#106) |
 | Requires | `acme` |
 | Default | true |
-| Flags | startup-consumed, per-address, conditional |
 
 ## `servers.*.tls.cert` {#servers-x-tls-cert}
 

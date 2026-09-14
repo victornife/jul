@@ -27,16 +27,18 @@ const (
 // generation pinned to a request. Mutable limiter counters are sampled against
 // that same captured policy, never against a later global config load.
 type AdminRuntimeStatus struct {
-	Generation            string `json:"generation"`
-	ConsoleCompiled       bool   `json:"console_compiled"`
-	ConsoleConfigured     bool   `json:"console_configured"`
-	ConsoleEffective      bool   `json:"console_effective"`
-	PluginsCompiled       bool   `json:"plugins_compiled"`
-	UploadEnabled         bool   `json:"upload_enabled"`
-	UploadMaxSizeMB       int    `json:"upload_max_size_mb"`
-	UploadDirectoryHealth string `json:"upload_directory_health"`
-	PreparationFailure    string `json:"preparation_failure,omitempty"`
-	LastUploadRejection   string `json:"last_upload_rejection,omitempty"`
+	Generation             string `json:"generation"`
+	ConsoleCompiled        bool   `json:"console_compiled"`
+	ConsoleConfigured      bool   `json:"console_configured"`
+	ConsoleEffective       bool   `json:"console_effective"`
+	PluginsCompiled        bool   `json:"plugins_compiled"`
+	UploadEnabled          bool   `json:"upload_enabled"`
+	UploadMaxSizeMB        int    `json:"upload_max_size_mb"`
+	UploadDirectoryHealth  string `json:"upload_directory_health"`
+	PreparationFailure     string `json:"preparation_failure,omitempty"`
+	LastUploadRejection    string `json:"last_upload_rejection,omitempty"`
+	HistoryKeep            int    `json:"history_keep"`
+	HistoryRetentionHealth string `json:"history_retention_health"`
 
 	RateLimitReadPerMin   int    `json:"rate_limit_read_per_min"`
 	RateLimitWritePerMin  int    `json:"rate_limit_write_per_min"`
@@ -73,6 +75,7 @@ type AdminRuntimeSettingsProjection struct {
 	AuditLogFile          string                              `json:"audit_log_file"`
 	AuditLogRotateMaxMB   int                                 `json:"audit_log_rotate_max_mb"`
 	AuditLogRotateKeep    int                                 `json:"audit_log_rotate_keep"`
+	HistoryKeep           int                                 `json:"history_keep"`
 	AuditSink             *AuditSinkStatus                    `json:"audit_sink,omitempty"`
 	Lifecycle             map[string]LifecycleFieldProjection `json:"lifecycle"`
 }
@@ -89,28 +92,36 @@ func (s *Server) adminRuntimeStatus(r *http.Request) *AdminRuntimeStatus {
 	}
 	policy := adminLimitPolicyFromConfig(snap.cfg)
 	stats := s.limiter.stats(policy)
+	historyHealth := "ok"
+	if s.hist == nil || !s.hist.enabled() {
+		historyHealth = "disabled"
+	} else if p := s.historyRetentionStatus.Load(); p != nil {
+		historyHealth = *p
+	}
 	out := &AdminRuntimeStatus{
-		Generation:            snap.gen,
-		ConsoleCompiled:       snap.consoleCompiled,
-		ConsoleConfigured:     snap.cfg.ConsoleEnabled(),
-		ConsoleEffective:      snap.consoleCompiled && snap.cfg.ConsoleEnabled(),
-		PluginsCompiled:       snap.pluginsCompiled,
-		UploadEnabled:         uploadEnabled,
-		UploadMaxSizeMB:       snap.cfg.PluginUploadMaxSize,
-		UploadDirectoryHealth: health,
-		RateLimitReadPerMin:   policy.readPerMin,
-		RateLimitWritePerMin:  policy.writePerMin,
-		RateLimitApplyPerMin:  policy.applyPerMin,
-		MaxEventConns:         policy.maxConns,
-		TrackedLimiterClients: stats.TrackedClients,
-		SSEActiveTotal:        stats.SSEActiveTotal,
-		SSEActiveClients:      stats.SSEActiveClients,
-		SSEOverCapClients:     stats.SSEOverCapClients,
-		SSEMaxPerClient:       stats.SSEMaxPerClient,
-		RateReadRejected:      stats.ReadRejected,
-		RateWriteRejected:     stats.WriteRejected,
-		RateApplyRejected:     stats.ApplyRejected,
-		SSERejected:           stats.SSERejected,
+		Generation:             snap.gen,
+		ConsoleCompiled:        snap.consoleCompiled,
+		ConsoleConfigured:      snap.cfg.ConsoleEnabled(),
+		ConsoleEffective:       snap.consoleCompiled && snap.cfg.ConsoleEnabled(),
+		PluginsCompiled:        snap.pluginsCompiled,
+		UploadEnabled:          uploadEnabled,
+		UploadMaxSizeMB:        snap.cfg.PluginUploadMaxSize,
+		UploadDirectoryHealth:  health,
+		HistoryKeep:            snap.cfg.HistoryKeep,
+		HistoryRetentionHealth: historyHealth,
+		RateLimitReadPerMin:    policy.readPerMin,
+		RateLimitWritePerMin:   policy.writePerMin,
+		RateLimitApplyPerMin:   policy.applyPerMin,
+		MaxEventConns:          policy.maxConns,
+		TrackedLimiterClients:  stats.TrackedClients,
+		SSEActiveTotal:         stats.SSEActiveTotal,
+		SSEActiveClients:       stats.SSEActiveClients,
+		SSEOverCapClients:      stats.SSEOverCapClients,
+		SSEMaxPerClient:        stats.SSEMaxPerClient,
+		RateReadRejected:       stats.ReadRejected,
+		RateWriteRejected:      stats.WriteRejected,
+		RateApplyRejected:      stats.ApplyRejected,
+		SSERejected:            stats.SSERejected,
 	}
 	if p := s.adminPrepareFailure.Load(); p != nil {
 		out.PreparationFailure = *p
@@ -152,6 +163,7 @@ func (s *Server) handleAdminRuntimeSettingsRead(w http.ResponseWriter, r *http.R
 		AuditLogFile:          cfg.AuditLogFile,
 		AuditLogRotateMaxMB:   cfg.AuditLogRotateMaxMB,
 		AuditLogRotateKeep:    cfg.AuditLogRotateKeep,
+		HistoryKeep:           cfg.HistoryKeep,
 		AuditSink:             s.audit.statusReport(),
 		Lifecycle: map[string]LifecycleFieldProjection{
 			"console":                  lifecycleFieldProjection("admin.console"),
@@ -165,6 +177,7 @@ func (s *Server) handleAdminRuntimeSettingsRead(w http.ResponseWriter, r *http.R
 			"audit_log_file":           lifecycleFieldProjection("admin.audit_log_file"),
 			"audit_log_rotate_max_mb":  lifecycleFieldProjection("admin.audit_log_rotate_max_mb"),
 			"audit_log_rotate_keep":    lifecycleFieldProjection("admin.audit_log_rotate_keep"),
+			"history_keep":             lifecycleFieldProjection("admin.history_keep"),
 		},
 	}
 	writeJSON(w, http.StatusOK, projection)
@@ -181,6 +194,13 @@ func (s *Server) recordPluginUploadRejection(reason string) {
 	v := reason
 	s.pluginUploadRejection.Store(&v)
 }
+
+func (s *Server) recordHistoryRetentionFailure() {
+	v := "prune_failed"
+	s.historyRetentionStatus.Store(&v)
+}
+
+func (s *Server) clearHistoryRetentionFailure() { s.historyRetentionStatus.Store(nil) }
 
 // inspectPluginUploadDirHealth is read-only and returns a bounded category. It
 // never creates the directory or a probe file; actual candidate writability is

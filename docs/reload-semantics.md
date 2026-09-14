@@ -60,13 +60,13 @@ than before the external owner wrote the file. This means:
 
 - Changes to **hot-reloadable** fields (routes, handlers, upstreams,
   compression, global rate limiting, admin Console/plugin-upload policy, and
-  admin read/write/apply limits plus the shared SSE cap, and the durable audit
-  sink path/rotation policy) apply through the same transaction. Admin admission policy is carried by the immutable request
+  admin read/write/apply limits plus the shared SSE cap, history retention, the durable audit
+  sink path/rotation policy, and the listener connection cap) apply through the same transaction. Admin admission policy is carried by the immutable request
   generation while token buckets and active SSE leases remain process-stable,
   so reload neither resets abuse state nor disconnects existing streams.
 - Changes to **restart-required** fields (cache fields that retain that
-  lifecycle, `admin.enabled`, `admin.listen`, admin history resources,
-  tracing pipeline identity fields other than `sample_ratio`, ACME, and retained-listener bind settings) are **rejected at swap time** — the swap is
+  lifecycle, `admin.enabled`, `admin.listen`, `admin.history_dir`,
+  tracing pipeline identity fields other than `sample_ratio`, ACME manager/account/challenge identity fields other than hot `ocsp_stapling`, and retained-listener bind settings) are **rejected at swap time** — the swap is
   aborted, `LastReload.Outcome=not_applied` is recorded
   with the reason, and the old config remains authoritative. The file on disk
   may contain the new value, but the running process ignores it until a
@@ -98,11 +98,11 @@ listener and refuses same-address sibling risk before preview.
 
 The sparse global operations use the same path. `global_set`,
 `compression_set`, and `rate_limit_global_set` first produce one canonical
-complete candidate, then the registry classifies it. A changed global
-`max_conns` stages whenever any desired address is already bound; only an
-all-new affected listener set can adopt it during live bind. `global.log_format`,
+complete candidate, then the registry classifies it. `rate_limit.max_conns` is hot (#106): retained listeners publish a new
+admission cap in place, new listeners start with the candidate cap, and already
+admitted connections are never terminated. `global.log_format`,
 `observability.metrics.host_label`, and compression/global rate/key/burst
-changes are all hot (#91). Operation summaries contain field
+changes are also hot (#91). Operation summaries contain field
 names only, and a stage update preserves the original pre-stage rollback base.
 
 For the strongest guarantees, use the Console or admin API for configuration
@@ -912,9 +912,9 @@ base blocks instead of substituting a newer token.
 
 The three primary labels are **Apply live**, **Save for next restart**, and
 **Update staged configuration**. Restart-required and mixed candidates stage the
-complete candidate. Listener-bound `rate_limit.max_conns` stages when an
-existing listener is retained but may follow a server-authorized hot path when
-all affected listeners are new. A `global.reload_timeout` edit uses the
+complete candidate. `rate_limit.max_conns` is hot on retained and new listeners;
+listener-owned timeout/header/protocol settings keep their authoritative
+`new_listener_only` or restart-required behavior. A `global.reload_timeout` edit uses the
 currently active timeout for that transaction; the new value governs later
 transactions.
 
@@ -926,3 +926,52 @@ Upload directory preparation occurs before Publish and is reversible. A preparat
 
 See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
 
+
+
+## Final bounded runtime-policy transitions (#106)
+
+The final runtime-dynamics tranche adds three policy-only live transitions while
+preserving the same whole-candidate transaction boundary.
+
+### `rate_limit.max_conns`
+
+- **Prepare:** canonical validation only; no live cap mutation.
+- **Publish:** update each retained listener's stable Jul-owned admission limiter
+  before the candidate configuration/runtime snapshot is published. Newly staged
+  listeners were already built with the candidate effective cap.
+- **Abort:** no cap mutation.
+- **Retire/PostCommit:** none.
+
+The cap governs **new admission**. Lowering it never closes admitted TCP/TLS/HTTP
+connections; if active connections exceed the new finite cap, no new connection
+is admitted until active drops below it. `0` is unlimited. The effective cap
+continues to honor the existing `[rate_limit].enabled` master switch live.
+
+### `admin.history_keep`
+
+- **Prepare:** stage only the scalar retention value; no filesystem deletion or
+  backend migration.
+- **Publish:** atomically install retention on the existing history object before
+  the candidate admin snapshot advertises it.
+- **Abort:** live retention and files remain unchanged.
+- **Retire/PostCommit:** a tightening runs a serialized prune. Failure is bounded
+  advisory health (`prune_failed`) and never converts an applied config into a
+  failed one.
+
+Managed-apply history finalization happens after terminal commit, so the rollback
+snapshot created by the same successful apply observes the **published candidate
+retention**. A candidate that also changes `admin.history_dir` remains a complete
+staged-restart candidate; Jul never partially applies only `history_keep`.
+
+### `servers.*.tls.acme.ocsp_stapling`
+
+- **Prepare:** validation only; ACME manager/account/cache/provider identity is
+  unchanged.
+- **Publish:** atomically toggle the stable OCSP provider wrapper before the new
+  config snapshot is visible.
+- **Abort/Retire/PostCommit:** no manager or listener resource work.
+
+Disabling prevents new lookups from initiating a refresh through the stapler;
+already-started refresh work may finish. Cached staple state remains owned by the
+stable wrapper and may be reused when re-enabled. Broader ACME domain, challenge,
+account, issuer and cache transitions remain outside this seam.

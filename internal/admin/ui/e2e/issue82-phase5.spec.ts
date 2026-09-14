@@ -189,26 +189,27 @@ test(
     const preStage = RawConfigSchema.parse(await preStageResp.json());
     const preStageRaw = preStage.raw ?? "";
 
-    // max_conns is listener-level and restart-required for a retained listener
-    // (unlike the global rate itself), so it is what still exercises the
-    // stage/update-staged flow below.
-    const limiterForStage = await openTrafficEditor("Rate limiting", "Edit rate limiting");
-    const maxConns = limiterForStage.getByLabel("Maximum concurrent connections");
-    const currentMax = Number(await maxConns.inputValue()) || 0;
-    await maxConns.fill(String(currentMax + 17));
+    // #106 made max_conns genuinely hot on retained listeners. Keep this Phase 5
+    // planned-restart exercise truthful by changing a socket-owned timeout instead:
+    // read_timeout remains new_listener_only, so changing it on an already-bound
+    // listener stages the whole candidate for restart.
+    const limitsForStage = await openTrafficEditor("Limits & Timeouts", "Edit limits & timeouts");
+    const readTimeout = limitsForStage.getByRole("textbox", { name: "Read timeout", exact: true });
+    const currentReadTimeout = await readTimeout.inputValue();
+    await readTimeout.fill(currentReadTimeout === "31s" ? "32s" : "31s");
     await waitForConfigQuiescence();
-    await limiterForStage.getByRole("button", { name: "Review changes" }).click();
+    await limitsForStage.getByRole("button", { name: "Review changes" }).click();
     await expect(page).toHaveURL(/\/config$/);
     await applyConfigAction("Save for next restart");
     await expect(page.getByText("Restart required — configuration staged")).toBeVisible();
     await expectStaticOK(request, "Jul static OK");
 
-    const stagedLimiter = await openTrafficEditor("Rate limiting", "Edit rate limiting");
-    const maxConns2 = stagedLimiter.getByLabel("Maximum concurrent connections");
-    const currentMax2 = Number(await maxConns2.inputValue()) || 0;
-    await maxConns2.fill(String(currentMax2 + 17));
+    const stagedLimits = await openTrafficEditor("Limits & Timeouts", "Edit limits & timeouts");
+    const readTimeout2 = stagedLimits.getByRole("textbox", { name: "Read timeout", exact: true });
+    const stagedReadTimeout = await readTimeout2.inputValue();
+    await readTimeout2.fill(stagedReadTimeout === "33s" ? "34s" : "33s");
     await waitForConfigQuiescence();
-    await stagedLimiter.getByRole("button", { name: "Review changes" }).click();
+    await stagedLimits.getByRole("button", { name: "Review changes" }).click();
     await expect(page).toHaveURL(/\/config$/);
     await applyConfigAction("Update staged configuration");
     await expect(page.getByText("Restart required — configuration staged")).toBeVisible();

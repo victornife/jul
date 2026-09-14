@@ -25,14 +25,21 @@ changes.
 
 ## Current lifecycle baseline
 
-At `main@5b00a26db7450000abf462b079c87c89201723d1`, the generated lifecycle
-inventory contains 302 configurable leaves: 250 `hot_reload`, 37
-`restart_required`, 8 `new_listener_only`, 4 `ignored_deprecated`, and 3
+The final bounded tranche was audited from
+`main@bb95de16119102c8fd23e11c908f131d2323a6ab`, whose generated inventory was
+302 configurable leaves: 253 `hot_reload`, 34 `restart_required`, 8
+`new_listener_only`, 4 `ignored_deprecated`, and 3
 `validation_rejected_reserved`.
 
-These numbers are descriptive, not a target score. The current counts are always
-available from [the generated lifecycle reference](generated/config-lifecycle.md)
-and may change as selected work lands.
+After the bounded #106 implementation, the same 302 leaves are intentionally
+classified as **256 `hot_reload`, 32 `restart_required`, 7 `new_listener_only`,
+4 `ignored_deprecated`, and 3 `validation_rejected_reserved`**. The three live
+promotions are `rate_limit.max_conns`, `admin.history_keep`, and
+`servers.*.tls.acme.ocsp_stapling`; no structural/security-heavy field was
+promoted merely to improve a percentage.
+
+These numbers are descriptive, not a target score. The authoritative current
+counts remain the generated lifecycle reference and machine registry.
 
 ## Selection rubric
 
@@ -66,18 +73,19 @@ Publish, Publish is bounded/no-fail by construction, Abort leaves the live
 runtime untouched, and Retire is bounded and cannot turn an applied change into
 `not_applied`.
 
-## Selected final gaps — 2026-09-11
+## Delivered final bounded tranche — 2026-09-14
 
-A post-#160 source audit and peer review selected two final runtime-dynamics
-investments. Both are now implemented: #99 makes
-`observability.tracing.sample_ratio` hot while the tracing pipeline identity remains
-startup-bound, and #94 makes `egress.enabled`/`egress.allow` hot only after proving
-generation correctness across every auxiliary consumer and reusable pool.
+The source audit selected only transitions with a clean ownership seam. #99 and
+#94 landed first; #106 then closes the programme with three deliberately small
+live policies and no listener/provider-generation expansion.
 
-| Gap | Current lifecycle | Implemented contract | Evidence | Residual risk |
-| --- | --- | --- | --- | --- |
-| `observability.tracing.sample_ratio` (#99) | `hot_reload` | Atomic root-ratio update inside one stable provider/exporter pipeline | deterministic sampler/concurrency/local-OTLP gates | Low–medium |
-| `egress.enabled`, `egress.allow` (#94) | `hot_reload` | Immutable Prepare→Publish egress generations across auth, Consul/K8s, WASM and ACME/OCSP; old H1/H2 pools/workers cannot serve newly admitted work | H1 + real H2 isolation, redirects, worker fencing, race/leak/security matrices and ≥90% added-statement gate | bounded old-generation drain only |
+| Gap | Final lifecycle | Implemented contract | Architectural cost |
+| --- | --- | --- | --- |
+| `observability.tracing.sample_ratio` (#99) | `hot_reload` | Atomic root-ratio update inside one stable provider/exporter pipeline | small/two-way |
+| `egress.enabled`, `egress.allow` (#94) | `hot_reload` | Immutable Prepare→Publish egress generations across all Boundary-C consumers | justified high-cost security tranche |
+| `rate_limit.max_conns` (#106) | `hot_reload` | Stable listener-owned admission limiter; cap changes affect new admissions only and never terminate admitted connections | small/two-way implementation; admission semantics are a higher-cost compatibility contract |
+| `admin.history_keep` (#106/#159) | `hot_reload` | Atomic scalar retention on the existing history backend; tightening prunes only after Publish and failure is advisory | small/two-way; directory identity remains restart-bound |
+| `tls.acme.ocsp_stapling` (#106) | `hot_reload` | Stable OCSP wrapper + atomic enable policy around the existing ACME provider/cache | small/two-way; no ACME manager replacement |
 
 ### `tracing.sample_ratio`: selected reduced scope
 
@@ -130,17 +138,49 @@ Publish cannot acquire or reuse an A transport/worker. No configuration projecti
 can therefore claim a destination is blocked while newly admitted work silently
 reaches it through a superseded keep-alive/H2 pool.
 
-## Why the remaining structural gaps are different
+## Final disposition of the remaining structural gaps
 
-This selection does not authorize universal hot reload. Listener protocol mode,
-admin-listener relocation, cache backend identity, ACME account/cache identity,
-history backend replacement and similar structural transitions may remain
-restart-bound when their operating frequency is low and a correct live handover
-would add disproportionate permanent complexity.
+The runtime-dynamics programme is **finished, not paused**. The final source
+audit makes an explicit distinction between a potentially useful feature that
+loses today's value/complexity contest and a restart boundary that is itself the
+preferred architecture.
 
-A red `restart_required` row is therefore not automatically technical debt. It
-is debt only when the value/risk analysis says the restart boundary no longer
-meets the product's operational contract.
+**Deferred for the current programme:**
+
+- **#93 cache backend identity (`cache.enabled`, `cache.disk_path`)** — route-level
+  enablement and scalar cache policy are already hot; backend/filesystem
+  generations are not justified now. Revisit if operators repeatedly require
+  backend/path changes without restart or reusable state-backend generation
+  infrastructure emerges.
+- **#101 TLS minimum-version / mTLS policy dynamics** — current TCP and HTTP/3
+  already share complete mTLS policy; the stale parity concern is resolved.
+  Revisit only if live security-policy tightening becomes a product requirement
+  and Jul gains reusable H1/H2/H3 connection-epoch plus session invalidation.
+- **#103 broader ACME runtime policy** — HTTP-01 and TLS-ALPN-01 are already
+  exclusive/correct, #94 solved ACME/OCSP egress generations, and #106 makes
+  OCSP stapling itself hot. Revisit if domain/challenge/provider changes become
+  operationally frequent or reusable ACME-manager generation infrastructure is
+  justified elsewhere.
+
+**Retained as intentional restart boundaries:**
+
+- **#97 `admin.enabled` / `admin.listen`** — management-plane listener identity,
+  self-lockout and dual-endpoint handover are structural and rare.
+- **#102 `http3.enabled`** — only UDP/QUIC listener existence remains; Alt-Svc
+  max-age is already hot via `DynamicAltSvc`.
+- **#104 ACME account/issuer/email/cache identity** — restart provides a useful
+  ownership boundary for private account state, issuer/rate-limit domain and
+  certificate-cache ownership.
+- **#105 TLS/plaintext + h2c transitions** — changing how an already-bound socket
+  interprets bytes would require a permanent raw-listener supervisor.
+- **#159 `admin.history_dir`** — retention-only is complete; storage relocation
+  stays restart-bound. Revisit only if operators need live storage relocation
+  and safe filesystem-generation infrastructure exists for another reason.
+
+A `restart_required` row is therefore not automatically technical debt. The
+programme intentionally avoids connection epochs, listener supervisors, ACME
+manager generations and filesystem generations unless future operational demand
+pays for their permanent complexity.
 
 ## Sequence
 
@@ -151,17 +191,14 @@ The final selected runtime-dynamics edge is:
   ↓
 #94 — generation-correct egress hot reload COMPLETE
   ↓
-explicit retain/defer decisions for remaining gated fields
+#106 — max_conns + history retention + OCSP policy; final dispositions
   ↓
-#106 — integrated runtime-dynamics closure
-  ↓
-#88 — portfolio closure
+#88 — portfolio closure; runtime-dynamics programme COMPLETE
 ```
 
-The small tracing change goes first because it can close independently without
-introducing tracing-provider generations. Egress follows as the final large
-security-sensitive runtime transition so #106 can certify the complete selected
-tranche once, rather than repeatedly reopening integrated evidence.
+The final boundary is intentional: future hot-reload work requires a new
+operational value signal or architectural leverage. Jul does not continue toward
+100% lifecycle coverage for its own sake.
 
 ## External reference points
 

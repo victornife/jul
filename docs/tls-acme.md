@@ -90,7 +90,7 @@ a configuration whose blocks disagree.
 | Wildcard SNI (`*.example.com`) | ✅ | single label; exact match wins over wildcard |
 | SNI fallback | ✅ | first-loaded certificate when no name matches |
 | Static PEM certificates | ✅ | `cert` / `key` |
-| Static cert **hot reload** | ❌ | current static file changes remain restart-bound; see #100 |
+| Static cert **hot reload** | ✅ | `cert`/`key` path or file-content changes are preflighted and atomically swap the retained listener provider (#100) |
 | ACME HTTP-01 | ✅ (`acme`) | exclusive mode; needs a plain HTTP listener |
 | ACME TLS-ALPN-01 | ✅ (`acme`) | exclusive mode; advertises `acme-tls/1` on the TLS listener |
 | ACME DNS-01 | ❌ | not implemented; reserved for a future release and rejected in validation |
@@ -127,9 +127,10 @@ configuration-validation time with a clear error.
 
 | Source or policy | On configuration reload |
 | --- | --- |
-| Static `cert`/`key` | **Not reloaded** — restart to pick up a new path or changed file contents until #100 lands. |
+| Static `cert`/`key` | **Hot reload** — candidate material is parsed during Prepare and the retained listener provider swaps atomically at Publish (#100). |
 | ACME renewal under the running manager | **Automatic** — renewal continues without configuration reload. |
-| ACME enablement, domains, challenge, account, issuer, cache, or OCSP policy | **Not reloaded** — process-owned manager state requires planned restart. |
+| ACME enablement, domains, challenge, account, issuer, or cache | **Not reloaded** — process-owned manager identity/policy remains restart-bound or deferred. |
+| ACME `ocsp_stapling` | **Hot reload** — an atomic policy on the stable provider wrapper changes new certificate lookups without replacing the ACME manager or listener (#106). |
 | `client_auth` (mTLS) | **Not reloaded** — bound at listener start; see [mtls.md](mtls.md). |
 
 When configuration is applied through a validated write path, every referenced
@@ -140,10 +141,13 @@ handshake time.
 
 #### Restart-required ACME changes
 
-The autocert manager's domain allow-list, account, issuer, challenge, cache, and
-OCSP policy are process-lifetime state. A candidate changing one of these values
-must be reported as restart-required and must not partially publish only its hot
-routing subset while claiming the complete candidate live.
+The autocert manager's domain allow-list, account, issuer, challenge and cache
+remain process-lifetime state. A candidate changing one of those values must be
+reported as restart-required and must not partially publish only its hot subset.
+`ocsp_stapling` is deliberately different: the manager/provider identity stays
+stable while an atomic wrapper policy decides whether a new certificate lookup
+uses the existing stapler/cache. Disabling starts no new OCSP refresh; in-flight
+work may finish, and re-enabling may reuse still-valid cached state.
 
 Removing ACME entirely currently follows the existing validated static-provider
 transition contract: static `cert`/`key` material must be configured and pass
@@ -241,7 +245,8 @@ bounded egress-denial reason as authoritative. See
   disabling TLS itself, and TLS minimum version / mutual-TLS policy changes,
   remain restart-bound (`HR-16`, `HR-12`).
 - **ACME manager transitions are restart-bound.** Domain, account, issuer,
-  challenge, cache, and OCSP policy changes require planned restart.
+  challenge, and cache changes require planned restart/deferred manager work.
+  `ocsp_stapling` itself is hot and does not replace manager identity (#106).
 - **OCSP stapling is ACME-only.** Static certificates are served without a
   stapled OCSP response.
 - **No cipher-suite, session-ticket, or server 0-RTT configuration.** Jul.IA uses

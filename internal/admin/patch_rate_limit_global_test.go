@@ -179,7 +179,7 @@ func TestGlobalRateLimitLifecycleHotAndRetainedListenerStage(t *testing.T) {
 		}
 	}
 
-	stage, err := executePatchBatch(context.Background(), patchBatchBaseline{
+	live, err := executePatchBatch(context.Background(), patchBatchBaseline{
 		Config: issue80BaseConfig(),
 		Live:   lifecycle.Live{BoundHTTPAddrs: []string{":8080"}},
 	}, "", []patchRequest{{
@@ -193,20 +193,17 @@ func TestGlobalRateLimitLifecycleHotAndRetainedListenerStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute retained-listener max_conns: %v", err)
 	}
-	if stage.Lifecycle.CanApplyHot || !stage.Lifecycle.CanStageRestart {
-		t.Fatalf("retained-listener lifecycle = %+v, want staged complete candidate", stage.Lifecycle)
+	if !live.Valid || !live.Lifecycle.CanApplyHot || hasPath(live.Lifecycle.RestartRequired, "rate_limit.max_conns") || hasPath(live.Lifecycle.NewListenerOnly, "rate_limit.max_conns") {
+		t.Fatalf("retained-listener lifecycle = %+v, want fully hot", live.Lifecycle)
 	}
-	if !hasPath(stage.Lifecycle.RestartRequired, "rate_limit.max_conns") {
-		t.Fatalf("restart paths = %v, want rate_limit.max_conns", stage.Lifecycle.RestartRequired)
-	}
-	if stage.CandidateConfig.RateLimit.Rate != 120 || stage.CandidateConfig.RateLimit.MaxConns != 20 {
-		t.Fatalf("mixed candidate was partially built: %+v", stage.CandidateConfig.RateLimit)
+	if live.CandidateConfig.RateLimit.Rate != 120 || live.CandidateConfig.RateLimit.MaxConns != 20 {
+		t.Fatalf("candidate was partially built: %+v", live.CandidateConfig.RateLimit)
 	}
 }
 
 func TestGlobalRateLimitMaxConnsListenerAwareLifecycle(t *testing.T) {
-	// Adding a new address while retaining an existing address still strands the
-	// old listener with its previous cap.
+	// max_conns is independent of listener identity: a retained address and a
+	// newly added address both use the candidate live admission policy.
 	retained, err := executePatchBatch(context.Background(), patchBatchBaseline{
 		Config: issue80BaseConfig(),
 		Live:   lifecycle.Live{BoundHTTPAddrs: []string{":8080"}},
@@ -217,28 +214,8 @@ func TestGlobalRateLimitMaxConnsListenerAwareLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute retained plus new listener: %v", err)
 	}
-	if retained.Lifecycle.CanApplyHot || !hasPath(retained.Lifecycle.RestartRequired, "rate_limit.max_conns") {
-		t.Fatalf("retained plus new lifecycle = %+v, want restart", retained.Lifecycle)
-	}
-
-	// When every previously bound address is removed and every desired listener
-	// is newly bound in the same candidate, the candidate cap is installed live.
-	allNew, err := executePatchBatch(context.Background(), patchBatchBaseline{
-		Config: issue80BaseConfig(),
-		Live:   lifecycle.Live{BoundHTTPAddrs: []string{":8080"}},
-	}, "", []patchRequest{
-		{Op: "server_add", Listen: ":9090"},
-		{Op: "server_remove", Listen: ":8080"},
-		{Op: "rate_limit_global_set", RateLimit: &rateLimitPatch{MaxConns: ptr(20)}},
-	})
-	if err != nil {
-		t.Fatalf("execute all-new listeners: %v", err)
-	}
-	if !allNew.Valid || !allNew.Lifecycle.CanApplyHot {
-		t.Fatalf("all-new lifecycle = %+v valid=%v errors=%+v", allNew.Lifecycle, allNew.Valid, allNew.ValidationErrors)
-	}
-	if !hasPath(allNew.Lifecycle.NewListenerOnly, "rate_limit.max_conns") {
-		t.Fatalf("new-listener paths = %v, want rate_limit.max_conns", allNew.Lifecycle.NewListenerOnly)
+	if !retained.Valid || !retained.Lifecycle.CanApplyHot || hasPath(retained.Lifecycle.RestartRequired, "rate_limit.max_conns") || hasPath(retained.Lifecycle.NewListenerOnly, "rate_limit.max_conns") {
+		t.Fatalf("retained plus new lifecycle = %+v, want max_conns hot", retained.Lifecycle)
 	}
 
 	unchanged, err := executePatchBatch(context.Background(), patchBatchBaseline{
