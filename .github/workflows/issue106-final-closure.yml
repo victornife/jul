@@ -38,7 +38,9 @@ jobs:
           cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
 
       - name: Apply final audited refinements
-        run: python3 scripts/issue106_finalize_patch.py
+        run: |
+          python3 scripts/issue106_fix_mixed_test.py
+          python3 scripts/issue106_finalize_patch.py
 
       - name: Format and regenerate contracts
         run: |
@@ -82,7 +84,7 @@ jobs:
 
       - name: Commit final permanent closure changes
         run: |
-          git rm -f .github/workflows/issue106-final-closure.yml scripts/issue106_finalize_patch.py
+          git rm -f .github/workflows/issue106-final-closure.yml scripts/issue106_finalize_patch.py scripts/issue106_fix_mixed_test.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
