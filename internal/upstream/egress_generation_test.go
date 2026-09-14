@@ -75,8 +75,8 @@ func TestRegistryDiscoveryPoolIdentityIncludesEgressGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("For B: %v", err)
 	}
-	if poolB == poolA {
-		t.Fatal("changed egress generation reused old discovery pool")
+	if poolB != poolA {
+		t.Fatal("egress generation change must preserve the backend pool and replace only its discovery worker")
 	}
 	if created.Load() != 2 {
 		t.Fatalf("discoverers after generation change = %d, want 2", created.Load())
@@ -124,8 +124,8 @@ func TestRegistryEgressCandidateAbortClosesFreshDiscovererOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("For candidate: %v", err)
 	}
-	if candidate == live {
-		t.Fatal("candidate generation unexpectedly reused live discovery pool")
+	if candidate != live {
+		t.Fatal("candidate egress generation should reuse the live backend pool until Publish")
 	}
 	registry.Abort()
 
