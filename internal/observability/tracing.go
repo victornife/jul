@@ -57,6 +57,13 @@ type dynamicRootSampler struct {
 	current atomic.Pointer[samplerState]
 }
 
+// activeRootSampler points at the one process-lifetime root sampler published
+// by NewTracer. This mirrors Jul's existing process-global OpenTelemetry
+// provider/propagator/tracing seam: it is installed once at startup and is not
+// replaced by reloads. The reload path mutates only the sampler's immutable
+// atomic state through UpdateTracingSampleRatio.
+var activeRootSampler atomic.Pointer[dynamicRootSampler]
+
 func newDynamicRootSampler(ratio float64) *dynamicRootSampler {
 	s := &dynamicRootSampler{}
 	s.Update(ratio)
@@ -141,6 +148,7 @@ func NewTracer(cfg config.TracingConfig) (*Tracer, error) {
 	otel.SetTextMapPropagator(prop)
 	tr := tp.Tracer("jul/internal/observability")
 	tracing.Set(otelTracer{tracer: tr, propagator: prop})
+	activeRootSampler.Store(rootSampler)
 
 	return &Tracer{
 		provider:    tp,
@@ -151,16 +159,27 @@ func NewTracer(cfg config.TracingConfig) (*Tracer, error) {
 	}, nil
 }
 
-// UpdateSampleRatio atomically changes only the root sampling ratio for spans
-// whose sampling decision is made after this call. ParentBased remains the
-// stable outer sampler, so local/remote parent decisions stay authoritative and
-// already-started traces cannot change sampling state. Disabled tracing has no
-// runtime sampler, making a ratio-only reload an intentional no-op there.
+// UpdateSampleRatio atomically changes only this Tracer's root sampling ratio
+// for spans whose sampling decision is made after the call. ParentBased remains
+// the stable outer sampler, so local/remote parent decisions stay authoritative
+// and already-started traces cannot change sampling state. Disabled tracing has
+// no runtime sampler, making a ratio-only reload an intentional no-op there.
 func (t *Tracer) UpdateSampleRatio(ratio float64) {
 	if t == nil || t.rootSampler == nil {
 		return
 	}
 	t.rootSampler.Update(ratio)
+}
+
+// UpdateTracingSampleRatio is the typed process-lifetime Publish seam used by
+// the reload transaction. NewTracer installs activeRootSampler once alongside
+// the global OTel provider; successful reloads update only its immutable root
+// sampling state. In a process where tracing started disabled there is no
+// active sampler, so the operation is a no-op and cannot enable tracing.
+func UpdateTracingSampleRatio(ratio float64) {
+	if s := activeRootSampler.Load(); s != nil {
+		s.Update(ratio)
+	}
 }
 
 // newExporter builds the OTLP span exporter for the configured transport. The
