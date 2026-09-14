@@ -1,0 +1,54 @@
+name: issue94 consumer integration
+
+on:
+  push:
+    branches:
+      - issue-94-egress-generations
+    paths:
+      - scripts/issue94_apply.py
+      - .github/workflows/issue94-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: issue-94-egress-generations
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: apply deterministic patch
+        run: python3 scripts/issue94_apply.py
+      - name: format changed Go files
+        run: |
+          gofmt -w \
+            internal/auth/auth.go \
+            internal/plugins/runtime.go \
+            internal/plugins/stub.go \
+            internal/upstream/discovery.go \
+            internal/upstream/disco_consul.go \
+            internal/upstream/disco_k8s.go \
+            internal/upstream/registry.go \
+            internal/app/factory.go \
+            internal/app/serve.go \
+            internal/egress/generation.go \
+            internal/egress/generation_test.go \
+            internal/egress/http.go
+      - name: compile and targeted tests lean
+        run: go test ./internal/egress ./internal/auth ./internal/upstream ./internal/app
+      - name: compile and targeted tests full consumers
+        run: go test -tags 'wasmplugins consul kubernetes acme' ./internal/egress ./internal/auth ./internal/upstream ./internal/plugins ./internal/server ./internal/app
+      - name: remove temporary patch machinery
+        run: git rm scripts/issue94_apply.py .github/workflows/issue94-apply.yml
+      - name: commit integration
+        run: |
+          git config user.name 'Marmitakus'
+          git config user.email '72155289+victornife@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: make egress consumers generation-correct (#94)'
+          git push origin HEAD:issue-94-egress-generations
