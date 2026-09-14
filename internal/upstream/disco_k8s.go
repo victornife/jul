@@ -226,3 +226,11 @@ func (d *k8sDiscoverer) selectPort(ports []k8sPort) int {
 }
 
 func (d *k8sDiscoverer) Describe() string { return d.describe }
+
+// Close retires the discoverer's idle HTTP/1.1 and HTTP/2 connections.
+func (d *k8sDiscoverer) Close() error {
+	if d != nil && d.client != nil {
+		d.client.CloseIdleConnections()
+	}
+	return nil
+}

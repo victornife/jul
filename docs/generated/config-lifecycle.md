@@ -20,9 +20,9 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 | Schema paths (containers included) | 356 |
 | Schema leaves (configurable values) | 302 |
 | Registry entries | 302 |
-| Startup-consumed entries | 36 |
-| Class `hot_reload` | 251 |
-| Class `restart_required` | 36 |
+| Startup-consumed entries | 34 |
+| Class `hot_reload` | 253 |
+| Class `restart_required` | 34 |
 | Class `new_listener_only` | 8 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 3 |
@@ -165,8 +165,8 @@ value is compared as a digest so no secret material leaves the process.
 | `compression.min_size` | `hot_reload` | `compression` | — | the compression middleware is rebuilt with the handler tree on each successful reload |
 | `compression.precompressed` | `hot_reload` | `compression` | — | the compression middleware is rebuilt with the handler tree on each successful reload |
 | `compression.types` | `hot_reload` | `compression` | — | the compression middleware is rebuilt with the handler tree on each successful reload |
-| `egress.allow` | `restart_required` | `egress` | startup | the outbound dial policy is built once at startup and captured as an immutable set |
-| `egress.enabled` | `restart_required` | `egress` | startup | the outbound dial policy is built once at startup and captured as an immutable set |
+| `egress.allow` | `hot_reload` | `egress` | — | the candidate egress policy is compiled during Prepare and published as an immutable generation; auth, plugin, Consul/Kubernetes discovery and process-lifetime PKI clients select that generation without reusing earlier H1/H2 pools, while retired transports/workers drain with their bounded owner generation (#94) |
+| `egress.enabled` | `hot_reload` | `egress` | — | the candidate egress policy is compiled during Prepare and published as an immutable generation; auth, plugin, Consul/Kubernetes discovery and process-lifetime PKI clients select that generation without reusing earlier H1/H2 pools, while retired transports/workers drain with their bounded owner generation (#94) |
 | `global.access_log` | `ignored_deprecated` | `access_log` | deprecated, ignored | superseded by observability.access_log; no runtime consumer reads it |
 | `global.config_authority` | `restart_required` | `config_authority` | startup | authority is resolved once at startup and wires the file watcher, SIGHUP, and the managed baseline before any writer exists; changing it moves ownership of the configuration file and cannot be hot-applied (ADR 0019 §9.2) |
 | `global.error_log` | `ignored_deprecated` | `error_log` | deprecated, ignored | structured process logs are written to stderr; no runtime consumer reads it |

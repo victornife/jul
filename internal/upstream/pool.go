@@ -4,6 +4,7 @@
 package upstream
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -84,6 +85,15 @@ type Pool struct {
 	// checks in Y1-05, discovery refreshers in Y2-05).
 	done      chan struct{}
 	closeOnce sync.Once
+
+	// Discovery is an auxiliary Boundary-C worker whose policy generation can
+	// change while this backend pool stays alive for already-admitted requests.
+	// Keep its cancellation/fencing separate from Close: a policy Publish must
+	// stop generation A from starting another refresh immediately, without
+	// retiring the pool admission/circuit state still referenced by old handlers.
+	discoveryMu     sync.Mutex
+	discoveryEpoch  atomic.Uint64
+	discoveryCancel context.CancelFunc
 
 	// admission bounds the pool's in-flight logical work and owns the resolved
 	// resilience policy. It is created with the pool and never replaced, which is
@@ -409,9 +419,63 @@ func (p *Pool) replaceBackends(next []*Backend) {
 // has a health checker or a discovery refresher behind it.
 func (p *Pool) Close() {
 	p.closeOnce.Do(func() {
+		p.StopDiscovery()
 		close(p.done)
 		p.admission.Retire()
 	})
+}
+
+// StopDiscovery fences and cancels only the current discovery worker. It does
+// not retire the pool or its admission state. This is the #94 Publish seam: a
+// Consul/Kubernetes worker built under policy A cannot begin another refresh
+// after policy B is committed, while old handler-generation requests can keep
+// using this pool until their normal generation retirement.
+func (p *Pool) StopDiscovery() {
+	if p == nil {
+		return
+	}
+	p.discoveryMu.Lock()
+	p.discoveryEpoch.Add(1) // fence any result already in flight
+	if p.discoveryCancel != nil {
+		p.discoveryCancel()
+		p.discoveryCancel = nil
+	}
+	p.discoveryMu.Unlock()
+}
+
+func (p *Pool) beginDiscoveryGeneration() (context.Context, uint64) {
+	p.discoveryMu.Lock()
+	defer p.discoveryMu.Unlock()
+	if p.discoveryCancel != nil {
+		p.discoveryCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	p.discoveryCancel = cancel
+	epoch := p.discoveryEpoch.Add(1)
+	return ctx, epoch
+}
+
+func (p *Pool) discoveryGenerationCurrent(epoch uint64) bool {
+	return p != nil && p.discoveryEpoch.Load() == epoch
+}
+
+// applyDiscoveryTargets linearizes a successful discovery result against a
+// policy-generation Publish. Holding discoveryMu across the epoch check and
+// UpdateTargets removes the check/update race: either the A result commits
+// before StopDiscovery acquires the lock, or StopDiscovery advances the epoch
+// first and A is discarded. It can never pass the check under A and write after
+// B has fenced the worker.
+func (p *Pool) applyDiscoveryTargets(epoch uint64, targets []Target) bool {
+	if p == nil {
+		return false
+	}
+	p.discoveryMu.Lock()
+	defer p.discoveryMu.Unlock()
+	if p.discoveryEpoch.Load() != epoch {
+		return false
+	}
+	p.UpdateTargets(targets)
+	return true
 }
 
 // Done returns a channel closed when the pool is closed. Pool-owned goroutines

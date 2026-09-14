@@ -64,7 +64,7 @@ than before the external owner wrote the file. This means:
   sink path/rotation policy) apply through the same transaction. Admin admission policy is carried by the immutable request
   generation while token buckets and active SSE leases remain process-stable,
   so reload neither resets abuse state nor disconnects existing streams.
-- Changes to **restart-required** fields (cache/egress fields that retain that
+- Changes to **restart-required** fields (cache fields that retain that
   lifecycle, `admin.enabled`, `admin.listen`, admin history resources,
   tracing pipeline identity fields other than `sample_ratio`, ACME, and retained-listener bind settings) are **rejected at swap time** — the swap is
   aborted, `LastReload.Outcome=not_applied` is recorded
@@ -838,10 +838,13 @@ now format is too.
   prior process generation advertised. See
   [known-limitations.md](known-limitations.md) for the client-caching and
   max-age transition-boundary caveats.
-- **Egress allow-list** — the outbound dial policy is currently built once at
-  startup. #94 is selected to make `egress.enabled` and `egress.allow` dynamic,
-  but they remain `restart_required` until every auth/discovery/plugin/PKI
-  consumer and reusable transport is generation-correct.
+- **Egress allow-list** — `egress.enabled` and `egress.allow` are
+  `hot_reload` (#94). Prepare compiles an immutable candidate generation; Publish
+  makes it authoritative for newly admitted auth/plugin/discovery/PKI work. New
+  operations cannot reuse H1/H2 pools created under an older policy; Consul/K8s
+  worker generations are cancelled/fenced at Publish while their backend-pool
+  runtime state survives; process-lifetime ACME/OCSP clients select the current
+  generation per exchange. A failed candidate leaves the live policy untouched.
 - **Admin structural resources** — `admin.enabled`, `admin.listen`, history
   directory/retention, TLS protocol mode/minimum version and admin mTLS handshake
   policy remain startup-owned. In contrast, Console/plugin-upload policy, admin

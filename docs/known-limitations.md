@@ -58,11 +58,13 @@ HTTP/3 Alt-Svc advertisement (mode and max-age) hot-applies per listener
 without rebinding the QUIC socket (#161) — `http3.enabled` itself still
 requires a restart, since it changes whether a UDP listener exists at all.
 
-One selected restart boundary is now removed and one remains: #99 makes
+The two selected final runtime-dynamics gaps are now removed: #99 makes
 `observability.tracing.sample_ratio` hot while the provider/exporter pipeline identity
-fields remain restart-bound. #94 remains selected for generation-correct
-`egress.enabled`/`egress.allow` and egress is not promoted until every auxiliary
-outbound consumer and old connection pool obeys the candidate generation. See
+fields remain restart-bound, and #94 makes `egress.enabled`/`egress.allow` hot through
+generation-correct auth, Consul/Kubernetes, WASM and ACME/OCSP ownership. Old
+handler work may drain on its captured generation, but newly admitted work cannot
+reuse an older egress transport or discovery worker. The remaining restart-required
+rows are deliberate structural/startup boundaries, not unfinished #94 work. See
 [hot-reload strategy](hot-reload-strategy.md).
 
 - **A same-path access-log rotation-setting change has a narrow, bounded

@@ -14,11 +14,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"jul/internal/auth"
 	"jul/internal/cache"
 	"jul/internal/clientaddr"
 	"jul/internal/config"
+	"jul/internal/egress"
 	"jul/internal/handler"
 	"jul/internal/middleware"
 	"jul/internal/observability"
@@ -41,11 +43,15 @@ type HandlerFactory struct {
 	Cache         *cache.Cache // nil when caching is disabled
 	AccessLogTail *observability.LogTail
 	RLStore       *middleware.RateLimiterStore
-	EgressDial    func(context.Context, string, string) (net.Conn, error)
-	PoolReg       *upstream.Registry
-	PluginMgr     *plugins.Manager
-	GenRes        *GenerationResources
-	RT            *Runtime // Tracer.Middleware, ACME
+	Egress        *egress.Manager
+	// EgressDial is the legacy injection seam used by focused factory tests.
+	// Production sets Egress and never reads this field; when Egress is nil the
+	// factory preserves the old caller-supplied dial behavior.
+	EgressDial func(context.Context, string, string) (net.Conn, error)
+	PoolReg    *upstream.Registry
+	PluginMgr  *plugins.Manager
+	GenRes     *GenerationResources
+	RT         *Runtime // Tracer.Middleware, ACME
 
 	mu sync.Mutex // serialises every build (startup, reload, preflight)
 
@@ -68,17 +74,34 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 	defer f.mu.Unlock()
 
 	upstreams := IndexUpstreams(c.Upstreams)
+	candidateEgress, egressChanged, err := f.prepareEgress(c)
+	if err != nil {
+		return nil, nil, err
+	}
 	gen := f.GenRes.Begin()
-	defer gen.Abort()
+	f.stageEgress(candidateEgress)
+	committed := false
+	defer func() {
+		gen.Abort()
+		if !committed && egressChanged && candidateEgress != nil {
+			candidateEgress.CloseIdleConnections()
+		}
+	}()
 
-	handlers, err := f.buildHandlers(ctx, c, gen, upstreams)
+	handlers, err := f.buildHandlers(ctx, c, gen, upstreams, candidateEgress)
 	if err != nil {
 		return nil, nil, err
 	}
 	var retirePrev func()
 	if commit {
-		retirePrev = gen.Commit()
+		retireHandlers := gen.Commit()
+		var retiredEgress *egress.Generation
+		if egressChanged && f.Egress != nil {
+			retiredEgress = f.Egress.Publish(candidateEgress)
+		}
 		f.PoolReg.Activate()
+		committed = true
+		retirePrev = combineRetirement(retireHandlers, retiredEgress)
 	}
 	return handlers, retirePrev, nil
 }
@@ -100,11 +123,20 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 	// Mutex is NOT deferred here: it is released by commitFn or abortFn.
 
 	upstreams := IndexUpstreams(c.Upstreams)
+	candidateEgress, egressChanged, prepErr := f.prepareEgress(c)
+	if prepErr != nil {
+		f.mu.Unlock()
+		return nil, 0, nil, nil, prepErr
+	}
 	gen := f.GenRes.Begin()
+	f.stageEgress(candidateEgress)
 
-	handlers, err = f.buildHandlers(ctx, c, gen, upstreams)
+	handlers, err = f.buildHandlers(ctx, c, gen, upstreams, candidateEgress)
 	if err != nil {
 		gen.Abort()
+		if egressChanged && candidateEgress != nil {
+			candidateEgress.CloseIdleConnections()
+		}
 		f.mu.Unlock()
 		return nil, 0, nil, nil, err
 	}
@@ -118,7 +150,11 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 			return nil, func() {}
 		}
 		committed = true
-		ret := gen.Commit()
+		retireHandlers := gen.Commit()
+		var retiredEgress *egress.Generation
+		if egressChanged && f.Egress != nil {
+			retiredEgress = f.Egress.Publish(candidateEgress)
+		}
 		// Snapshots must be captured AFTER pools commit so the generation
 		// carries the backend view of the configuration it represents (R8-01).
 		snapshots := f.PoolReg.SnapshotPools(usedUpstreamKeys)
@@ -127,7 +163,7 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		// never goes live (R9-07).
 		f.PoolReg.Activate()
 		f.mu.Unlock()
-		return snapshots, ret
+		return snapshots, combineRetirement(retireHandlers, retiredEgress)
 	}
 	abortFn = func() {
 		if committed {
@@ -135,16 +171,60 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		}
 		committed = true
 		gen.Abort()
+		if egressChanged && candidateEgress != nil {
+			candidateEgress.CloseIdleConnections()
+		}
 		f.mu.Unlock()
 	}
 	return handlers, genID, commitFn, abortFn, nil
+}
+
+func (f *HandlerFactory) prepareEgress(c *config.Config) (*egress.Generation, bool, error) {
+	if f.Egress == nil {
+		return nil, false, nil
+	}
+	generation, changed, err := f.Egress.Prepare(c.Egress)
+	if err != nil {
+		return nil, false, fmt.Errorf("egress: %w", err)
+	}
+	return generation, changed, nil
+}
+
+func (f *HandlerFactory) stageEgress(generation *egress.Generation) {
+	if f.PoolReg == nil {
+		return
+	}
+	if generation == nil {
+		f.PoolReg.SetEgressGeneration(0, nil)
+		return
+	}
+	var dial upstream.DialFunc
+	if generation.Enabled() {
+		base := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+		dial = generation.For(egress.SubsystemDiscovery).DialContext(base)
+	}
+	f.PoolReg.SetEgressGeneration(generation.ID(), dial)
+}
+
+func combineRetirement(retireHandlers func(), retiredEgress *egress.Generation) func() {
+	if retireHandlers == nil && retiredEgress == nil {
+		return nil
+	}
+	return func() {
+		if retireHandlers != nil {
+			retireHandlers()
+		}
+		if retiredEgress != nil {
+			retiredEgress.CloseIdleConnections()
+		}
+	}
 }
 
 // buildHandlers constructs the per-listen-address handler tree from c, staging
 // all closeable resources (plugin runtimes, static-file roots, gRPC connections)
 // into gen. It neither commits nor aborts gen; resource lifecycle is the
 // caller's responsibility. upstreams must be IndexUpstreams(c.Upstreams).
-func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, gen *Generation, upstreams map[string]config.UpstreamConfig) (map[string]http.Handler, error) {
+func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, gen *Generation, upstreams map[string]config.UpstreamConfig, egressGeneration *egress.Generation) (map[string]http.Handler, error) {
 
 	// Check context before starting a potentially slow plugin compilation.
 	if err := ctx.Err(); err != nil {
@@ -173,7 +253,11 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// module) fails here, rejecting the reload. The set owns per-plugin wazero
 	// runtimes; register it for generational teardown so the previous set is
 	// closed only after the new handlers are live.
-	pluginSet, err := f.PluginMgr.Build(ctx, c.Plugins)
+	var pluginEgressWrap func(plugins.DialFunc) plugins.DialFunc
+	if egressGeneration != nil && egressGeneration.Enabled() {
+		pluginEgressWrap = egressGeneration.For(egress.SubsystemPlugin).DialContextWith
+	}
+	pluginSet, err := f.PluginMgr.BuildWithEgress(ctx, c.Plugins, pluginEgressWrap)
 	if err != nil {
 		return nil, fmt.Errorf("plugins: %w", err)
 	}
@@ -303,6 +387,15 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		})
 	}
 
+	var authDial auth.DialFunc
+	if f.Egress == nil {
+		authDial = f.EgressDial
+	}
+	if egressGeneration != nil && egressGeneration.Enabled() {
+		base := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+		authDial = egressGeneration.For(egress.SubsystemAuth).DialContext(base)
+	}
+
 	// Authenticators are built once per reload, keyed by a stable location
 	// scope, so a misconfiguration (for example, an unreadable htpasswd file)
 	// fails the reload with a clear error instead of surfacing per request.
@@ -332,13 +425,14 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			a, err := auth.New(ctx, *loc.Auth, auth.Options{
 				Logger:      f.Log,
 				OnDecision:  f.Metrics.ObserveAuthDecision,
-				DialContext: f.EgressDial,
+				DialContext: authDial,
 				ForwardPool: forwardPool,
 				JWKSPool:    jwksPool,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("location %s: %w", key, err)
 			}
+			gen.Stage(a)
 			authByScope[key] = a
 		}
 	}

@@ -723,9 +723,8 @@
       "optional": false,
       "dynamic": false,
       "subsystem": "egress",
-      "lifecycle_class": "restart_required",
-      "lifecycle_reason": "the outbound dial policy is built once at startup and captured as an immutable set",
-      "startup_consumed": true,
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the candidate egress policy is compiled during Prepare and published as an immutable generation; auth, plugin, Consul/Kubernetes discovery and process-lifetime PKI clients select that generation without reusing earlier H1/H2 pools, while retired transports/workers drain with their bounded owner generation (#94)",
       "description": "Allow lists the permitted destinations",
       "anchor": "egress-allow"
     },
@@ -736,9 +735,8 @@
       "optional": false,
       "dynamic": false,
       "subsystem": "egress",
-      "lifecycle_class": "restart_required",
-      "lifecycle_reason": "the outbound dial policy is built once at startup and captured as an immutable set",
-      "startup_consumed": true,
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the candidate egress policy is compiled during Prepare and published as an immutable generation; auth, plugin, Consul/Kubernetes discovery and process-lifetime PKI clients select that generation without reusing earlier H1/H2 pools, while retired transports/workers drain with their bounded owner generation (#94)",
       "description": "Enabled turns the allow-list on",
       "anchor": "egress-enabled"
     },

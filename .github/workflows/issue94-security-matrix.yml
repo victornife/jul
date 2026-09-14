@@ -1,0 +1,45 @@
+name: issue94 security matrix
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - issue-94-egress-generations
+    paths:
+      - internal/egress/**
+      - internal/auth/**
+      - internal/upstream/**
+      - internal/plugins/**
+      - internal/server/**
+      - internal/app/**
+      - .github/workflows/issue94-security-matrix.yml
+
+permissions:
+  contents: read
+
+jobs:
+  lean-race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l internal/egress internal/auth internal/upstream internal/app)"
+      - name: targeted tests
+        run: go test ./internal/egress ./internal/auth ./internal/upstream ./internal/app
+      - name: race matrix
+        run: go test -race -p 2 ./internal/egress ./internal/auth ./internal/upstream ./internal/app
+
+  full-consumers-race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: full consumer tests
+        run: go test -tags 'wasmplugins consul kubernetes acme' ./internal/egress ./internal/auth ./internal/upstream ./internal/plugins ./internal/server ./internal/app
+      - name: full consumer race
+        run: go test -race -p 2 -tags 'wasmplugins consul kubernetes acme' ./internal/egress ./internal/auth ./internal/upstream ./internal/plugins ./internal/server ./internal/app

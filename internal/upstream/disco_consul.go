@@ -142,3 +142,11 @@ func (d *consulDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
 }
 
 func (d *consulDiscoverer) Describe() string { return d.describe }
+
+// Close retires the discoverer's idle HTTP/1.1 and HTTP/2 connections.
+func (d *consulDiscoverer) Close() error {
+	if d != nil && d.client != nil {
+		d.client.CloseIdleConnections()
+	}
+	return nil
+}

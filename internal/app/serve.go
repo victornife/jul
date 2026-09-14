@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"runtime"
@@ -133,15 +132,17 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 	// The optional egress allow-list guards the server's config-driven auxiliary
 	// fetches (JWKS, forward-auth, Consul/Kubernetes discovery, ACME/OCSP PKI
-	// calls, and WASM plugin fetches). It is built before the process-lifetime
-	// runtime so the ACME/OCSP clients can be guarded. Changing [egress] takes
-	// effect after a restart.
+	// calls, and WASM plugin fetches). The process-lifetime manager is built
+	// before ACME/OCSP so their stable clients can select the current immutable
+	// egress generation on every HTTP exchange. Reload candidates compile a new
+	// generation during Prepare and publish it atomically with the handler/pool
+	// generation (#94).
 	// A rate-limited, secret-free block logger complements the bounded metrics:
 	// it names the subsystem, normalized host, optional resolved IP, and reason
 	// so an operator can act on a refusal, and rate-limits identical events so a
 	// retry loop cannot flood the log.
 	egressBlockLog := egress.NewBlockLogObserver(log)
-	egressPolicy, err := egress.New(cfg.Egress, egress.WithObserver(func(d egress.Decision) {
+	egressManager, err := egress.NewManager(cfg.Egress, egress.WithObserver(func(d egress.Decision) {
 		metrics.ObserveEgressDecision(d.Subsystem, string(d.Result), string(d.Reason), d.DNSAnswers)
 		egressBlockLog(d)
 	}))
@@ -149,20 +150,13 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		log.Error("failed to build egress allow-list", "error", err)
 		return 1
 	}
-	// Subsystem-scoped guards attribute blocks and metrics without call sites
-	// importing the egress enforcement internals. All guards share one base
-	// dialer (safe for concurrent use).
-	egressBase := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
-	discoveryDial := egressPolicy.For(egress.SubsystemDiscovery).DialContext(egressBase)
-	authDial := egressPolicy.For(egress.SubsystemAuth).DialContext(egressBase)
-	// PKI clients are guarded only when egress is enabled; when disabled they are
-	// nil so ACME/OCSP keep their default clients (including HTTP(S)_PROXY
-	// support), preserving backward-compatible behavior.
-	var acmeClient, ocspClient *http.Client
-	if egressPolicy.Enabled() {
-		acmeClient = egressPolicy.For(egress.SubsystemACME).Client(0)
-		ocspClient = egressPolicy.For(egress.SubsystemOCSP).Client(0)
-	}
+	// ACME and OCSP owners are intentionally process-lifetime. Their stable
+	// clients select the current immutable egress generation for every HTTP
+	// exchange, so egress policy can hot-reload without rebuilding ACME state.
+	// A disabled generation clones the default transport and therefore preserves
+	// HTTP(S)_PROXY behavior; an enabled generation pins Proxy=nil.
+	acmeClient := egressManager.Client(egress.SubsystemACME, 0)
+	ocspClient := egressManager.Client(egress.SubsystemOCSP, 0)
 
 	// The process-lifetime runtime subsystems (tracing, ACME, stream server,
 	// build-tag feature gates) are built once at startup and outlive every
@@ -203,7 +197,6 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		OnCircuitTransition: func(pool string, to upstream.BackendState) { metrics.ObserveCircuitTransition(pool, string(to)) },
 		OnPoolRetired:       metrics.RetirePool,
 		OnDiscoveryError:    metrics.ObserveDiscoveryError,
-		DialContext:         discoveryDial,
 	})
 	defer poolReg.CloseAll()
 	// The live gauges are read at scrape time rather than pushed from the
@@ -213,18 +206,12 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	})
 
 	// The WASM plugin manager persists across reloads so the compilation
-	// cache and KV store survive config edits. Plugin fetches are guarded by
-	// both their local allowed_hosts/SSRF rules and, when egress is enabled, the
-	// server-wide allow-list via EgressWrap.
-	var pluginEgressWrap func(plugins.DialFunc) plugins.DialFunc
-	if egressPolicy.Enabled() {
-		pluginEgressWrap = egressPolicy.For(egress.SubsystemPlugin).DialContextWith
-	}
+	// cache and KV store survive config edits. The handler factory supplies the
+	// candidate generation's egress wrapper to each plugin Set it builds.
 	pluginMgr, err := plugins.NewManager(plugins.Options{
 		Logger:       log,
 		OnInvocation: metrics.ObservePluginInvocation,
 		OnPanic:      metrics.ObservePluginPanic,
-		EgressWrap:   pluginEgressWrap,
 	})
 	if err != nil {
 		log.Error("failed to initialize plugin manager", "error", err)
@@ -253,7 +240,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		Cache:         responseCache,
 		AccessLogTail: logTail,
 		RLStore:       rlStore,
-		EgressDial:    authDial,
+		Egress:        egressManager,
 		PoolReg:       poolReg,
 		PluginMgr:     pluginMgr,
 		GenRes:        genRes,

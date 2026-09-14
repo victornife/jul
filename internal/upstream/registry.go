@@ -48,6 +48,14 @@ type Registry struct {
 	mu     sync.Mutex
 	live   map[poolKey]*poolEntry // committed pools currently serving, keyed by (name, scheme)
 	staged map[poolKey]*poolEntry // pools assembled by the in-progress build
+
+	// stagedDial/stagedEgressID belong to the in-progress handler generation.
+	// HandlerFactory sets them immediately after Begin. A discovery pool can be
+	// reused only when this ID matches the generation that created its worker;
+	// otherwise Consul/Kubernetes gets a fresh client/transport and worker so a
+	// tightened egress policy cannot inherit an old H1/H2 pool (#94).
+	stagedDial     DialFunc
+	stagedEgressID uint64
 }
 
 // RegistryOptions configures a Registry. All fields are optional.
@@ -117,9 +125,12 @@ type poolEntry struct {
 	// healthTLS is the pool's resolved backend trust policy, applied to the
 	// probe client so a backend is never called healthy under weaker
 	// verification than live traffic uses.
-	healthTLS  *backendtls.Policy
-	discoverer Discoverer
-	discoCfg   config.DiscoveryConfig
+	healthTLS        *backendtls.Policy
+	discoverer       Discoverer
+	discoCfg         config.DiscoveryConfig
+	egressGen        uint64
+	replaceDiscovery bool
+	pendingTargets   []Target
 }
 
 // upstreamMeta captures the fields that determine a pool's identity. When any of
@@ -198,6 +209,19 @@ func (r *Registry) Begin() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.staged = make(map[poolKey]*poolEntry)
+	r.stagedDial = r.opts.DialContext
+	r.stagedEgressID = 0
+}
+
+// SetEgressGeneration binds the current staged build to one immutable egress
+// generation. It must be called after Begin and before For. ID 0 preserves the
+// legacy RegistryOptions.DialContext behavior for callers that do not use the
+// process-level egress generation manager.
+func (r *Registry) SetEgressGeneration(id uint64, dial DialFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stagedEgressID = id
+	r.stagedDial = dial
 }
 
 // For returns the pool for a named upstream within the current build, creating
@@ -218,6 +242,8 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 	}
 
 	meta := metaOf(up, scheme)
+	disco := discoveryEnabled(up.Discovery)
+	egressSensitiveDiscovery := discoveryUsesEgress(up.Discovery)
 	// Resolved before the reuse check so a malformed policy fails the staged
 	// build — and with it the reload — whether or not the pool is being reused.
 	// It is deliberately not part of upstreamMeta: a policy change swaps a
@@ -229,18 +255,40 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 	}
 	pending := up.Servers
 	if e, ok := r.live[key]; ok && e.meta.equal(meta) {
-		// Same shape: keep the running pool (and its checker/refresher). The backend
-		// set is refreshed at Commit (not here) so an aborted build leaves the live
-		// pool untouched, preserving an atomic reload. A discovery pool's backends
-		// are owned by its refresher, so its static seed is not re-applied.
-		//
-		// For discovery-only upstreams the static seed is empty, so CandidateSnapshot
-		// must build from the currently discovered backend set instead (R12-01).
-		disco := discoveryEnabled(up.Discovery)
+		// Same pool shape: preserve admission/circuit/in-flight state. An egress
+		// generation change replaces only the Consul/Kubernetes discovery worker
+		// and its HTTP transport; rebuilding the pool would reject old-generation
+		// waiters before their handler generation drained (#94).
 		if disco {
 			pending = backendsToServers(e.pool.Backends())
 		}
-		r.staged[key] = &poolEntry{pool: e.pool, meta: meta, reused: true, pending: pending, discovery: disco, policy: resPolicy, circuit: circuitParamsOf(up)}
+		entry := &poolEntry{pool: e.pool, meta: meta, reused: true, pending: pending, discovery: disco, policy: resPolicy, circuit: circuitParamsOf(up), egressGen: e.egressGen}
+		if egressSensitiveDiscovery && e.egressGen != r.stagedEgressID {
+			newDisco := r.opts.NewDiscoverer
+			if newDisco == nil {
+				newDisco = newDiscoverer
+			}
+			d, derr := newDisco(*up.Discovery, r.stagedDial)
+			if derr != nil {
+				return nil, derr
+			}
+			entry.discoverer = d
+			entry.discoCfg = *up.Discovery
+			entry.egressGen = r.stagedEgressID
+			entry.replaceDiscovery = true
+
+			resolveCtx, cancel := context.WithTimeout(ctx, discoveryTimeout)
+			targets, resolveErr := d.Resolve(resolveCtx)
+			cancel()
+			if resolveErr == nil && len(targets) > 0 {
+				entry.pendingTargets = targets
+				entry.pending = targetsToServers(targets)
+			} else if r.opts.Logger != nil {
+				r.opts.Logger.Warn("candidate discovery generation initial resolve failed; keeping last-good backends",
+					"upstream", up.Name, "discoverer", d.Describe(), "error", resolveErr)
+			}
+		}
+		r.staged[key] = entry
 		return e.pool, nil
 	}
 
@@ -264,14 +312,13 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 	// active-checker one even on a pool with no active checks configured.
 	pool.SetHealthHook(r.healthHookFor(up.Name, pool))
 	pool.SetCircuitHook(r.opts.OnCircuitTransition)
-	disco := discoveryEnabled(up.Discovery)
 	var d Discoverer
 	if disco {
 		newDisco := r.opts.NewDiscoverer
 		if newDisco == nil {
 			newDisco = newDiscoverer
 		}
-		d, err = newDisco(*up.Discovery, r.opts.DialContext)
+		d, err = newDisco(*up.Discovery, r.stagedDial)
 		if err != nil {
 			pool.Close()
 			return nil, err
@@ -314,6 +361,12 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 		healthTLS:   policy,
 		discoverer:  d,
 		discoCfg:    discoveryCfgOrZero(up.Discovery),
+		egressGen: func() uint64 {
+			if egressSensitiveDiscovery {
+				return r.stagedEgressID
+			}
+			return 0
+		}(),
 	}
 	r.staged[key] = entry
 	return pool, nil
@@ -349,9 +402,16 @@ func (r *Registry) Commit() {
 		if e.reused {
 			e.pool.setCircuitLimits(e.circuit)
 		}
-		// A discovery pool's backends are owned by its refresher; do not overwrite
-		// them with the (possibly empty) static seed on reuse.
-		if e.reused && !e.discovery {
+		// A discovery pool's backends are normally owned by its refresher. When
+		// replacing only the Consul/Kubernetes egress generation, fence/cancel A
+		// here and atomically seed the pool with B's preflight result if one was
+		// available. The pool itself stays live for old handler-generation work.
+		if e.reused && e.replaceDiscovery {
+			e.pool.StopDiscovery()
+			if len(e.pendingTargets) > 0 {
+				e.pool.UpdateTargets(e.pendingTargets)
+			}
+		} else if e.reused && !e.discovery {
 			e.pool.UpdateBackends(e.pending)
 		}
 		// A freshly built pool already resolved its policy in NewPool. A reused one
@@ -492,10 +552,10 @@ func (r *Registry) Activate() {
 		startHealthChecksTLS = (*Pool).StartHealthChecksWithTLS
 	}
 	for key, e := range r.live {
-		if e.reused {
+		if e.reused && !e.replaceDiscovery {
 			continue
 		}
-		if e.needsHealth {
+		if !e.reused && e.needsHealth {
 			if r.startHealthChecks != nil {
 				// A test replaced the plain seam; keep observing it.
 				startHealthChecks(e.pool, e.healthCfg, r.healthHookFor(key.name, e.pool), r.probeHook())
@@ -503,7 +563,7 @@ func (r *Registry) Activate() {
 				startHealthChecksTLS(e.pool, e.healthCfg, e.healthTLS, r.healthHookFor(key.name, e.pool), r.probeHook())
 			}
 		}
-		if e.discovery {
+		if e.discovery && e.discoverer != nil {
 			e.pool.StartDiscovery(e.discoverer, e.discoCfg.Refresh.Std(), DiscoveryHooks{
 				OnBackends: r.opts.OnBackends,
 				OnError:    r.opts.OnDiscoveryError,
@@ -513,6 +573,8 @@ func (r *Registry) Activate() {
 		e.needsHealth = false
 		e.healthTLS = nil
 		e.discoverer = nil
+		e.replaceDiscovery = false
+		e.pendingTargets = nil
 	}
 }
 
@@ -524,7 +586,17 @@ func (r *Registry) Abort() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, e := range r.staged {
+		if e.replaceDiscovery {
+			// The candidate worker never became live; close its candidate HTTP
+			// transport without touching the live pool/worker generation.
+			closeDiscoverer(e.discoverer)
+			continue
+		}
 		if !e.reused {
+			// Activate has not run on an aborted generation, so ownership of the
+			// candidate discoverer's HTTP transport is still here rather than in
+			// the refresher goroutine.
+			closeDiscoverer(e.discoverer)
 			e.pool.Close()
 		}
 	}

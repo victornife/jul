@@ -640,10 +640,9 @@ Allow lists the permitted destinations.
 | | |
 | --- | --- |
 | Type | list of `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `egress` |
-| Why | the outbound dial policy is built once at startup and captured as an immutable set |
-| Flags | startup-consumed |
+| Why | the candidate egress policy is compiled during Prepare and published as an immutable generation; auth, plugin, Consul/Kubernetes discovery and process-lifetime PKI clients select that generation without reusing earlier H1/H2 pools, while retired transports/workers drain with their bounded owner generation (#94) |
 
 ## `egress.enabled` {#egress-enabled}
 
@@ -652,10 +651,9 @@ Enabled turns the allow-list on.
 | | |
 | --- | --- |
 | Type | `bool` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `egress` |
-| Why | the outbound dial policy is built once at startup and captured as an immutable set |
-| Flags | startup-consumed |
+| Why | the candidate egress policy is compiled during Prepare and published as an immutable generation; auth, plugin, Consul/Kubernetes discovery and process-lifetime PKI clients select that generation without reusing earlier H1/H2 pools, while retired transports/workers drain with their bounded owner generation (#94) |
 
 ## `global.access_log` {#global-access_log}
 
