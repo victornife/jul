@@ -102,3 +102,13 @@ linters:
         text: "identitySet is unused"
         linters:
           - unused
+      # golang.org/x/net/http2's Transport (and its AllowHTTP/DialTLSContext
+      # fields and RoundTrip/CloseIdleConnections methods) is deprecated in
+      # favor of net/http.Transport's now-native HTTP/2 support, but the gRPC
+      # passthrough proxy still needs an h2c client and a custom per-backend
+      # TLS dialer that the stdlib transport does not yet expose the same way.
+      # Migrating is a separate change; suppress the warnings here meanwhile.
+      - path: internal/handler/(grpcproxy|grpc_backendtls)(_test)?\.go
+        text: "SA1019"
+        linters:
+          - staticcheck
