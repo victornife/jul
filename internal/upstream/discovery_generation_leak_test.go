@@ -37,6 +37,8 @@ func (d *churnDiscoverer) Close() error {
 	return nil
 }
 
+// Regression gate for #94: repeated Publish-equivalent worker retirement must
+// remain bounded, idempotent, and free of goroutine/discoverer leaks.
 func TestDiscoveryWorkerGenerationChurnNoLeak(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
