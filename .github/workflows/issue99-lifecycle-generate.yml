@@ -22,12 +22,14 @@ jobs:
           cache: true
       - name: Apply lifecycle authority change
         run: python3 scripts/issue99_lifecycle_generate.py
-      - name: Regenerate lifecycle artifacts
-        run: make lifecycle-generate
-      - name: Format and verify generated artifacts
+      - name: Format lifecycle authority
+        run: gofmt -w internal/lifecycle/registry.go
+      - name: Regenerate lifecycle and configuration artifacts
         run: |
-          gofmt -w internal/lifecycle/registry.go
-          make generated-check
+          make lifecycle-generate
+          make config-contract-generate
+      - name: Verify generated artifacts
+        run: make generated-check
       - name: Remove temporary generation helpers
         run: |
           rm scripts/issue99_lifecycle_generate.py
