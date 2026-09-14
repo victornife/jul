@@ -38,6 +38,10 @@ func NewTracer(cfg config.TracingConfig) (*Tracer, error) {
 // rejected by NewTracer/build-capability validation.
 func (t *Tracer) UpdateSampleRatio(float64) {}
 
+// UpdateTracingSampleRatio is the process-level equivalent used by the reload
+// Publish seam. Without the otel build tag there is no sampler to update.
+func UpdateTracingSampleRatio(float64) {}
+
 // Middleware is a pass-through in builds without tracing.
 func (t *Tracer) Middleware(next http.Handler) http.Handler { return next }
 
