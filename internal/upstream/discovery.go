@@ -81,6 +81,21 @@ func discoveryEnabled(d *config.DiscoveryConfig) bool {
 	}
 }
 
+// discoveryUsesEgress reports whether the provider owns an HTTP client guarded
+// by Boundary C. DNS and DNS-SRV use the system resolver and must not churn
+// merely because the auxiliary HTTP egress policy changed.
+func discoveryUsesEgress(d *config.DiscoveryConfig) bool {
+	if d == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(d.Type)) {
+	case "consul", "kubernetes":
+		return true
+	default:
+		return false
+	}
+}
+
 // newDiscoverer builds the Discoverer for a discovery config. The "consul" and
 // "kubernetes" providers are compiled only into builds with the matching build
 // tag; other builds return a clear error here, failing the startup or reload

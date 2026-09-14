@@ -241,6 +241,7 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 
 	meta := metaOf(up, scheme)
 	disco := discoveryEnabled(up.Discovery)
+	egressSensitiveDiscovery := discoveryUsesEgress(up.Discovery)
 	// Resolved before the reuse check so a malformed policy fails the staged
 	// build — and with it the reload — whether or not the pool is being reused.
 	// It is deliberately not part of upstreamMeta: a policy change swaps a
@@ -251,7 +252,7 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 		return nil, fmt.Errorf("upstream %q: %w", up.Name, perr)
 	}
 	pending := up.Servers
-	if e, ok := r.live[key]; ok && e.meta.equal(meta) && (!disco || e.egressGen == r.stagedEgressID) {
+	if e, ok := r.live[key]; ok && e.meta.equal(meta) && (!egressSensitiveDiscovery || e.egressGen == r.stagedEgressID) {
 		// Same shape: keep the running pool (and its checker/refresher). The backend
 		// set is refreshed at Commit (not here) so an aborted build leaves the live
 		// pool untouched, preserving an atomic reload. A discovery pool's backends
@@ -335,7 +336,12 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 		healthTLS:   policy,
 		discoverer:  d,
 		discoCfg:    discoveryCfgOrZero(up.Discovery),
-		egressGen:   r.stagedEgressID,
+		egressGen: func() uint64 {
+			if egressSensitiveDiscovery {
+				return r.stagedEgressID
+			}
+			return 0
+		}(),
 	}
 	r.staged[key] = entry
 	return pool, nil
