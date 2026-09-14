@@ -59,6 +59,12 @@ func (s *Server) PrepareAdminRuntime(cfg config.AdminConfig, prepared *PreparedA
 	out := *prepared.snapshot
 	out.cfg = cfg
 	result := &PreparedAuth{snapshot: s.completeAdminRuntimeSnapshot(&out)}
+	if s.hist != nil {
+		// Stage only the scalar policy. No prune, directory creation or other
+		// history side effect is permitted before Publish (#106/#159).
+		result.historyKeep = cfg.HistoryKeep
+		result.historyKeepSet = true
+	}
 	if err := s.prepareAuditRuntime(cfg, result); err != nil {
 		return nil, err
 	}

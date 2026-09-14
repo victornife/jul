@@ -281,6 +281,34 @@ type ACMEManager interface {
 	ChallengeHandler(next http.Handler) http.Handler
 }
 
+type acmeOCSPPolicy interface {
+	SetOCSPStapling(bool)
+}
+
+func acmeOCSPStaplingForServers(servers []config.ServerConfig) (bool, bool) {
+	for i := range servers {
+		srv := &servers[i]
+		if srv.TLS != nil && srv.TLS.Enabled && srv.TLS.ACME != nil && srv.TLS.ACME.Enabled {
+			return srv.TLS.ACME.OCSPStaplingEnabled(), true
+		}
+	}
+	return false, false
+}
+
+// updateACMEOCSPPolicy changes only the stable manager's stapling policy. Lean
+// builds and alternate ACMEManager implementations simply do not expose this
+// optional seam.
+func (s *Server) updateACMEOCSPPolicy(servers []config.ServerConfig) {
+	policy, ok := s.ACME.(acmeOCSPPolicy)
+	if !ok {
+		return
+	}
+	enabled, configured := acmeOCSPStaplingForServers(servers)
+	if configured {
+		policy.SetOCSPStapling(enabled)
+	}
+}
+
 // certProviderFor selects the certificate provider for a TLS listen address.
 // This is the single seam where the certificate source is chosen: ACME when a
 // server block on the address enables it, static files otherwise. New sources

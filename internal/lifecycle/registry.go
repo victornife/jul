@@ -298,7 +298,6 @@ func adminEntries() []Entry {
 	adminPaths := []string{
 		"admin.enabled",
 		"admin.history_dir",
-		"admin.history_keep",
 		"admin.listen",
 	}
 	out := restartGroup(SubAdmin, reasonAdminStartup, adminPaths...)
@@ -314,6 +313,7 @@ func adminEntries() []Entry {
 		hot("admin.rate_limit_write_per_min", SubAdmin, "new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload"),
 		hot("admin.rate_limit_apply_per_min", SubAdmin, "new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload"),
 		hot("admin.max_event_conns", SubAdmin, "new SSE admissions use the captured per-client connection cap while existing leases and connection counts survive policy reload"),
+		hot("admin.history_keep", SubAdmin, "the existing history backend keeps an atomic retention policy published with the admin runtime; tightening prunes only after Publish and prune failure is advisory (#106/#159)"),
 	)
 	out = append(out,
 		// admin.token feeds the same immutable authSnapshot the RBAC fields
@@ -433,15 +433,13 @@ func pluginEntries() []Entry {
 }
 
 func rateLimitEntries() []Entry {
-	out := hotGroup(SubRateLimit, reasonRateLimitPolicy,
+	return hotGroup(SubRateLimit, reasonRateLimitPolicy,
 		"rate_limit.burst",
 		"rate_limit.enabled",
 		"rate_limit.key",
 		"rate_limit.rate",
+		"rate_limit.max_conns",
 	)
-	out = append(out, newListener("rate_limit.max_conns", SubRateLimit,
-		"the concurrent-connection cap is installed on each listener when it binds, so a kept address keeps the cap it bound with"))
-	return out
 }
 
 func serverEntries() []Entry {
@@ -499,8 +497,9 @@ func tlsEntries() []Entry {
 		"servers.*.tls.acme.challenge",
 		"servers.*.tls.acme.domains",
 		"servers.*.tls.acme.email",
-		"servers.*.tls.acme.enabled",
-		"servers.*.tls.acme.ocsp_stapling")...)
+		"servers.*.tls.acme.enabled")...)
+	out = append(out, hot("servers.*.tls.acme.ocsp_stapling", SubACME,
+		"the process-lifetime ACME manager keeps a stable stapling wrapper whose atomic policy changes at Publish; no manager, account, cache, HostPolicy or listener is replaced (#106)"))
 	out = append(out, reserved("servers.*.tls.acme.dns_provider", SubACME,
 		"DNS-01 is not implemented; Validate rejects a non-empty dns_provider, so no running process can have consumed it"))
 	return out

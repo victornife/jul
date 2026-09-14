@@ -18,6 +18,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -245,24 +246,83 @@ func TestOCSPStaplerServesUnstapledOnRevoked(t *testing.T) {
 func TestProviderOCSPWrapping(t *testing.T) {
 	on, off := true, false
 
-	cfgOn := acmeServerCfg()
-	cfgOn.Servers[0].TLS.ACME.OCSPStapling = &on
-	mOn, err := NewACMEManager(cfgOn.Servers, nil, nil, nil)
+	cfg := acmeServerCfg()
+	cfg.Servers[0].TLS.ACME.OCSPStapling = &on
+	manager, err := NewACMEManager(cfg.Servers, nil, nil, nil)
 	if err != nil {
-		t.Fatalf("NewACMEManager (ocsp on): %v", err)
+		t.Fatalf("NewACMEManager: %v", err)
 	}
-	if _, ok := mOn.Provider(nil).(*ocspStapler); !ok {
-		t.Errorf("expected *ocspStapler when ocsp stapling is enabled, got %T", mOn.Provider(nil))
+	provider := manager.Provider(nil)
+	if _, ok := provider.(*dynamicOCSPProvider); !ok {
+		t.Fatalf("expected stable *dynamicOCSPProvider, got %T", provider)
+	}
+	concrete := manager.(*acmeManager)
+	if !concrete.ocsp.Load() {
+		t.Fatal("initial OCSP policy should be enabled")
+	}
+	concrete.SetOCSPStapling(false)
+	if concrete.ocsp.Load() {
+		t.Fatal("OCSP policy did not disable in place")
+	}
+	concrete.SetOCSPStapling(true)
+	if !concrete.ocsp.Load() {
+		t.Fatal("OCSP policy did not re-enable in place")
 	}
 
 	cfgOff := acmeServerCfg()
 	cfgOff.Servers[0].TLS.ACME.OCSPStapling = &off
-	mOff, err := NewACMEManager(cfgOff.Servers, nil, nil, nil)
+	managerOff, err := NewACMEManager(cfgOff.Servers, nil, nil, nil)
 	if err != nil {
-		t.Fatalf("NewACMEManager (ocsp off): %v", err)
+		t.Fatalf("NewACMEManager (off): %v", err)
 	}
-	if _, ok := mOff.Provider(nil).(*acmeProvider); !ok {
-		t.Errorf("expected *acmeProvider when ocsp stapling is disabled, got %T", mOff.Provider(nil))
+	if managerOff.(*acmeManager).ocsp.Load() {
+		t.Fatal("initial OCSP policy should be disabled")
+	}
+}
+
+func TestDynamicOCSPProviderStopsNewRefreshesWhenDisabled(t *testing.T) {
+	ca := newOCSPTestCA(t)
+	cert := ca.leaf(t, true)
+	base := certProviderFunc(func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return cert, nil })
+	fetched := make(chan struct{}, 2)
+	st := newTestStapler(cert, func(context.Context, []byte, string) ([]byte, error) {
+		fetched <- struct{}{}
+		return nil, errors.New("test fetch")
+	})
+	var enabled atomic.Bool
+	p := &dynamicOCSPProvider{enabled: &enabled, base: base, stapler: st}
+
+	if _, err := p.GetCertificate(&tls.ClientHelloInfo{ServerName: "example.test"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-fetched:
+		t.Fatal("disabled policy initiated an OCSP fetch")
+	case <-time.After(75 * time.Millisecond):
+	}
+
+	enabled.Store(true)
+	if _, err := p.GetCertificate(&tls.ClientHelloInfo{ServerName: "example.test"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-fetched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("enabled policy did not initiate OCSP refresh")
+	}
+
+	// Let the failed refresh clear its refreshing flag, then prove a disabled
+	// lookup does not start another one. Work already started before disable is
+	// allowed to finish.
+	time.Sleep(25 * time.Millisecond)
+	enabled.Store(false)
+	if _, err := p.GetCertificate(&tls.ClientHelloInfo{ServerName: "example.test"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-fetched:
+		t.Fatal("disabled policy initiated a new OCSP refresh")
+	case <-time.After(75 * time.Millisecond):
 	}
 }
 

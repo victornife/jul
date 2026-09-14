@@ -26,9 +26,6 @@ var bindFingerprintPaths = []struct {
 	path   string
 	mutate func(*config.Config)
 }{
-	{"rate_limit.max_conns", func(c *config.Config) {
-		c.RateLimit = config.RateLimitConfig{Enabled: true, Key: "ip", Rate: 1, Burst: 1, MaxConns: 7}
-	}},
 	{"servers.*.read_header_timeout", func(c *config.Config) {
 		c.Servers[0].ReadHeaderTimeout = config.Duration(3 * time.Second)
 	}},
@@ -171,8 +168,14 @@ func TestACMELeavesAreGatedByACMERestartRequired(t *testing.T) {
 		if e.Class == lifecycle.ValidationRejectedReservedClass {
 			continue
 		}
+		if e.Path == "servers.*.tls.acme.ocsp_stapling" {
+			if e.Class != lifecycle.HotReloadClass || e.StartupConsumed {
+				t.Errorf("%s must be hot and not startup-consumed after #106: class=%s startup=%t", e.Path, e.Class, e.StartupConsumed)
+			}
+			continue
+		}
 		if !e.StartupConsumed {
-			t.Errorf("%s must be startup-consumed so the fingerprint compares it", e.Path)
+			t.Errorf("%s must be startup-consumed so the ACME restart gate compares it", e.Path)
 		}
 	}
 }

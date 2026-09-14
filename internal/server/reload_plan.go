@@ -284,6 +284,16 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// provider/exporter/global-state rebuild, network I/O, teardown or failure.
 	observability.UpdateTracingSampleRatio(p.Candidate.Effective.Observability.Tracing.SampleRatio)
 
+	// #106: publish the effective concurrent-connection admission cap in
+	// place on every retained listener. This is no-fail and happens before the
+	// candidate config/runtime snapshot becomes visible; staged listeners were
+	// already built with the candidate cap.
+	p.s.updateConnectionLimits(p.Candidate.Effective)
+
+	// Optional final-tranche ACME policy: the process-lifetime ACME manager owns
+	// a stable OCSP wrapper whose atomic policy is safe to switch at Publish.
+	p.s.updateACMEOCSPPolicy(p.Candidate.Effective.Servers)
+
 	// Alt-Svc max-age hot reload (#161): unlike certificate rotation, building
 	// a header value cannot fail, so this has no Prepare/Abort phase and runs
 	// directly here, updating every retained HTTP/3 listener's advertised

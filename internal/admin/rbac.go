@@ -44,6 +44,13 @@ type authSnapshot struct {
 type PreparedAuth struct {
 	snapshot *authSnapshot
 	audit    *preparedAuditSink
+
+	// history_keep is staged without touching the live backend. Commit swaps
+	// the scalar policy before publishing snapshot; Retire performs any
+	// tightening prune after Publish and reports failures as advisory only.
+	historyKeep       int
+	historyKeepSet    bool
+	historyNeedsPrune bool
 }
 
 func PrepareAuth(cfg config.AdminConfig, p *rbac.Policy) *PreparedAuth {

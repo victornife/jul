@@ -5,11 +5,14 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"jul/internal/atomicfile"
@@ -69,15 +72,44 @@ const (
 // the admin server's single-flight request handling; filesystem operations are
 // idempotent and tolerate races by ignoring already-removed files.
 type history struct {
-	dir  string
-	keep int
+	dir string
+
+	// keep is policy, not backend identity. It changes atomically at Publish
+	// while dir remains immutable for the process lifetime (#106/#159).
+	keep atomic.Int64
+
+	// pruneMu serializes destructive retention passes. Listing/reading remain
+	// concurrent and tolerate a snapshot disappearing between directory read
+	// and stat, as before.
+	pruneMu sync.Mutex
+	remove  func(string) error // test seam; nil means os.Remove
 }
 
 // newHistory builds a history rooted at dir, retaining at most keep snapshots.
 // A blank dir disables snapshotting (all methods become no-ops returning empty
 // results), which keeps callers branch-free.
 func newHistory(dir string, keep int) *history {
-	return &history{dir: strings.TrimSpace(dir), keep: keep}
+	h := &history{dir: strings.TrimSpace(dir)}
+	h.keep.Store(int64(keep))
+	return h
+}
+
+func (h *history) retention() int {
+	if h == nil {
+		return 0
+	}
+	return int(h.keep.Load())
+}
+
+// setRetention publishes keep and reports whether the new value requires a
+// post-Publish prune. Moving from unlimited (<=0) to a finite bound is a
+// tightening; raising a finite bound or moving to unlimited deletes nothing.
+func (h *history) setRetention(keep int) (needsPrune bool) {
+	if h == nil {
+		return false
+	}
+	old := int(h.keep.Swap(int64(keep)))
+	return keep > 0 && (old <= 0 || keep < old)
 }
 
 // enabled reports whether snapshotting is active.
@@ -289,23 +321,48 @@ func (h *history) snapshotFiles() ([]string, error) {
 	return names, nil
 }
 
-// prune deletes the oldest snapshots beyond the retention bound. A keep of zero
-// or less is treated as "no pruning" so an unbounded history is still possible.
-func (h *history) prune() {
-	if h.keep <= 0 {
-		return
+// prune deletes the oldest snapshots beyond the current retention bound.
+// Snapshot writes retain the historical best-effort behavior; explicit
+// post-Publish retention tightening uses pruneCurrent so failures can be
+// surfaced as advisory/degraded state without rolling back the applied config.
+func (h *history) prune() { _ = h.pruneCurrent() }
+
+func (h *history) pruneCurrent() error {
+	if h == nil {
+		return nil
 	}
+	keep := h.retention()
+	if keep <= 0 {
+		return nil
+	}
+	h.pruneMu.Lock()
+	defer h.pruneMu.Unlock()
+
 	names, err := h.snapshotFiles()
 	if err != nil {
-		return
+		return err
 	}
-	for _, name := range names[min(len(names), h.keep):] {
-		_ = os.Remove(filepath.Join(h.dir, name))
-		// AC-05: remove the metadata sidecar alongside the raw snapshot so the
-		// two never drift. Absent sidecars (older snapshots) are ignored.
+	var errs []error
+	for _, name := range names[min(len(names), keep):] {
+		// AC-05: remove the metadata sidecar alongside the raw snapshot. Remove
+		// the sidecar first so a partial failure can at worst leave a raw-only
+		// snapshot, which is an explicitly supported backward-compatible form.
 		id := strings.TrimSuffix(name, historyExt)
-		_ = os.Remove(filepath.Join(h.dir, id+historyMetaExt))
+		if err := h.removeFile(filepath.Join(h.dir, id+historyMetaExt)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, fmt.Errorf("remove history metadata: %w", err))
+		}
+		if err := h.removeFile(filepath.Join(h.dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, fmt.Errorf("remove history snapshot: %w", err))
+		}
 	}
+	return errors.Join(errs...)
+}
+
+func (h *history) removeFile(path string) error {
+	if h.remove != nil {
+		return h.remove(path)
+	}
+	return os.Remove(path)
 }
 
 // validHistoryID reports whether id is a safe snapshot identifier: a non-empty

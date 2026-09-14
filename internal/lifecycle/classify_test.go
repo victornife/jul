@@ -147,9 +147,10 @@ func TestClassifyListenerTimeoutOnRetainedAddress(t *testing.T) {
 	}
 }
 
-// TestClassifyConnectionCapIsListenerGlobal proves the global cap strands every
-// kept listener.
-func TestClassifyConnectionCapIsListenerGlobal(t *testing.T) {
+// TestClassifyConnectionCapIsHot proves #106 removed max_conns from the
+// bind-time lifecycle: retained and newly bound listeners use the same live
+// admission policy.
+func TestClassifyConnectionCapIsHot(t *testing.T) {
 	before := fullConfig()
 	after := fullConfig()
 	after.RateLimit.MaxConns = 5
@@ -158,17 +159,11 @@ func TestClassifyConnectionCapIsListenerGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(res.RestartRequired, "rate_limit.max_conns") {
-		t.Fatalf("restart-required = %v", res.RestartRequired)
-	}
-
-	// With no live listener there is nothing to strand.
-	res, err = Classify(&config.Config{}, &config.Config{RateLimit: config.RateLimitConfig{MaxConns: 5}}, Live{})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if !res.CanApplyHot {
-		t.Fatalf("without a bound listener the cap applies on the next bind: %+v", res)
+		t.Fatalf("max_conns should hot-apply on a retained listener: %+v", res)
+	}
+	if contains(res.RestartRequired, "rate_limit.max_conns") || contains(res.NewListenerOnly, "rate_limit.max_conns") {
+		t.Fatalf("max_conns still classified listener-bound: %+v", res)
 	}
 }
 

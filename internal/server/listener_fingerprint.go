@@ -27,7 +27,8 @@ import (
 // Frozen settings covered: read/write/idle/header timeouts, max header bytes,
 // h2c, whether HTTP/3 is enabled at all, whether the listener is TLS at all,
 // the TLS minimum version, the mutual-TLS bundle (mode, CA file, SAN allow-list,
-// CRL file), and the per-listener connection cap (rate_limit.max_conns). Only
+// CRL file). The connection cap is deliberately excluded: #106 owns it in a
+// stable dynamic admission wrapper. Only
 // addresses present in BOTH old and next are compared: a newly added address is
 // bound fresh (picking up its settings) and a removed address is drained, both
 // of which doReload's listener diff already handles.
@@ -43,7 +44,7 @@ func ListenerRebindRequired(old, next *config.Config) (string, bool) {
 		}
 		if listenerBindFingerprint(old, addr) != listenerBindFingerprint(next, addr) {
 			return fmt.Sprintf(
-				"listener %s has bind-time settings (timeouts, header limits, h2c, HTTP/3, TLS, mutual TLS, or connection cap) that changed; these are fixed when the listener binds and take effect on restart",
+				"listener %s has bind-time settings (timeouts, header limits, h2c, HTTP/3, TLS, or mutual TLS) that changed; these are fixed when the listener binds and take effect on restart",
 				addr,
 			), true
 		}
@@ -62,13 +63,8 @@ func listenerBindFingerprint(cfg *config.Config, addr string) string {
 
 	var b strings.Builder
 
-	// The connection cap is global (rate_limit.max_conns) yet applied to every
-	// listener at bind time, so a change forces a rebind of each kept listener.
-	maxConns := 0
-	if rl := cfg.RateLimit; rl.Enabled && rl.MaxConns > 0 {
-		maxConns = rl.MaxConns
-	}
-	fmt.Fprintf(&b, "maxconns=%d;", maxConns)
+	// rate_limit.max_conns is intentionally absent: a stable admission
+	// wrapper applies the current cap to retained listeners at Publish (#106).
 
 	// Listener-level timeouts and the header-byte cap resolve from the first
 	// server block on addr, exactly as the http.Server fields are set in bind().

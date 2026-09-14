@@ -8,6 +8,7 @@ package server
 import (
 	"crypto/tls"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/acme"
@@ -39,7 +40,7 @@ type acmeManager struct {
 	mgr        *autocert.Manager
 	challenge  string
 	onIssue    func(domain string, notAfter time.Time)
-	ocsp       bool         // staple OCSP responses onto issued certificates
+	ocsp       atomic.Bool  // live policy; providers keep one stable wrapper
 	ocspClient *http.Client // guarded OCSP responder client; nil = default
 }
 
@@ -105,13 +106,14 @@ func NewACMEManager(servers []config.ServerConfig, onIssue func(domain string, n
 		Email:      email,
 		Client:     client,
 	}
-	return &acmeManager{
+	manager := &acmeManager{
 		mgr:        m,
 		challenge:  challenge,
 		onIssue:    onIssue,
-		ocsp:       ocsp,
 		ocspClient: ocspClient,
-	}, nil
+	}
+	manager.ocsp.Store(ocsp)
+	return manager, nil
 }
 
 // directoryURL maps a configured CA name to its ACME directory URL. The empty
@@ -136,10 +138,33 @@ func directoryURL(ca string) string {
 // certificate carries a stapled OCSP response.
 func (a *acmeManager) Provider(domains []string) CertProvider {
 	base := &acmeProvider{mgr: a.mgr, onIssue: a.onIssue}
-	if !a.ocsp {
-		return base
+	return &dynamicOCSPProvider{
+		enabled: &a.ocsp,
+		base:    base,
+		stapler: newOCSPStapler(base, a.ocspClient),
 	}
-	return newOCSPStapler(base, a.ocspClient)
+}
+
+// SetOCSPStapling is a no-fail policy-only update used at reload Publish. It
+// does not replace the autocert manager, account/cache identity, HostPolicy,
+// challenge mode, certificate provider, or listener TLS configuration.
+func (a *acmeManager) SetOCSPStapling(enabled bool) { a.ocsp.Store(enabled) }
+
+// dynamicOCSPProvider keeps one stapler/cache for the provider lifetime while
+// selecting it only when the current policy enables stapling. Disabling stops
+// new refresh initiation immediately; work already started by the stapler may
+// finish. Re-enabling can reuse a still-valid cached response.
+type dynamicOCSPProvider struct {
+	enabled *atomic.Bool
+	base    CertProvider
+	stapler *ocspStapler
+}
+
+func (p *dynamicOCSPProvider) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	if p.enabled == nil || !p.enabled.Load() {
+		return p.base.GetCertificate(hello)
+	}
+	return p.stapler.GetCertificate(hello)
 }
 
 // ChallengeHandler installs autocert's HTTP-01 handler only when HTTP-01 is the
