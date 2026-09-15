@@ -26,10 +26,13 @@ import (
 
 func startUnixHTTPBackend(t *testing.T, h http.Handler) string {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("AF_UNIX runtime fixture is not portable on Windows CI")
+	base := os.TempDir()
+	if runtime.GOOS == "darwin" {
+		// Darwin's AF_UNIX sockaddr path is short enough that the hosted runner's
+		// deeply nested os.TempDir() can exceed it; /tmp keeps the fixture portable.
+		base = "/tmp"
 	}
-	dir, err := os.MkdirTemp("/tmp", "jul407-")
+	dir, err := os.MkdirTemp(base, "jul407-")
 	if err != nil {
 		t.Fatalf("create short Unix fixture dir: %v", err)
 	}
