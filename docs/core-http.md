@@ -658,3 +658,14 @@ documented separately and gated behind their own tags.
 - [mtls.md](mtls.md) — mutual TLS / client-certificate authentication
 - [compatibility.md](compatibility.md) — config/API stability policy
 - [ga-push.md](ga-push.md) — GA hardening tracking log
+
+## Unix-socket HTTP upstreams (#407)
+
+A normal HTTP `proxy_pass = "http://<named-upstream>"` may select static
+`unix:/path.sock` members. Unix HTTP uses the same request-body, streaming/SSE,
+101 upgrade/WebSocket, timeout, retry, admission and circuit machinery as TCP.
+The socket path is dial identity only: HTTP Host follows the Unix contract in
+[upstreams.md](upstreams.md#http-over-unix-domain-sockets-407), and connection
+reuse is isolated with an internal per-backend opaque key. The first tranche is
+HTTP/1.1 over plaintext Unix sockets; it does not claim h2c, HTTP/2-over-Unix or
+TLS-over-Unix support.

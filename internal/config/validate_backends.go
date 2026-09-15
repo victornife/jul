@@ -313,12 +313,19 @@ func locationUsesTLSBackend(loc LocationConfig) bool {
 // http health check over a unix-socket backend could never run. Accepting it
 // would leave the operator with a pool whose probes silently never succeed.
 func validateUnixBackends(up UpstreamConfig, where string) []error {
-	if up.HealthCheck == nil || !up.HealthCheck.Enabled || up.HealthCheck.Type != "http" {
-		return nil
-	}
 	var errs []error
 	for i, s := range up.Servers {
-		if strings.HasPrefix(s.Address, "unix:") {
+		if !strings.HasPrefix(s.Address, "unix:") {
+			continue
+		}
+		path := strings.TrimPrefix(s.Address, "unix:")
+		if strings.TrimSpace(path) == "" {
+			errs = append(errs, fmt.Errorf("%s.servers[%d]: unix socket path is empty (want unix:/path/to/socket.sock)", where, i))
+		}
+		if up.BackendTLS != nil {
+			errs = append(errs, fmt.Errorf("%s.backend_tls: cannot be used with unix socket backend %q; HTTP over unix sockets is plaintext only", where, s.Address))
+		}
+		if up.HealthCheck != nil && up.HealthCheck.Enabled && up.HealthCheck.Type == "http" {
 			errs = append(errs, fmt.Errorf("%s.servers[%d]: health_check.type = \"http\" cannot probe the unix socket %q; use type = \"tcp\"", where, i, s.Address))
 		}
 	}

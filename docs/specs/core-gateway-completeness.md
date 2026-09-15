@@ -600,3 +600,11 @@ acceptable final outcome.
 
 See [operating-model.md](../operating-model.md), the
 [combined audit](../audit/combined-audit-2026-08-03.md) and #62.
+
+## Unix HTTP completeness follow-up (#407)
+
+The residual HTTP/Unix backend-network gap is closed by #407: a normal named HTTP
+upstream can select `unix:/path.sock` members without a second proxy or resilience
+stack. HTTP authority and Unix dial identity are separate, connection pools are
+isolated per backend, and unsupported TLS/HTTP-health/direct-target combinations
+fail during configuration/import rather than at live request time.

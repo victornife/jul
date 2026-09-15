@@ -216,6 +216,7 @@ type K8sDiscoveryView struct {
 // Omitting the field for false would conflate "unhealthy" with "unknown".
 type BackendProjection struct {
 	Address string `json:"address"`
+	Network string `json:"network,omitempty"`
 	Weight  int    `json:"weight"`
 	// State is the bounded backend state, empty when the backend is configured
 	// but not live, so the Console can say "unknown" rather than guess. It

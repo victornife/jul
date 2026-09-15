@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -179,6 +180,8 @@ func runRealJulCorpusScenarios(t *testing.T, manifest corpus.Manifest, cfg *conf
 	}
 	address := reserveLoopbackAddress(t)
 	cfg.Servers[0].Listen = address
+	stopUnixBackends := startCorpusUnixHTTPBackends(t, cfg)
+	defer stopUnixBackends()
 	if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
 		t.Fatalf("runtime preflight: %v", err)
 	}
@@ -241,7 +244,68 @@ func runRealJulCorpusScenarios(t *testing.T, manifest corpus.Manifest, cfg *conf
 			}
 		})
 	}
+}
 
+// startCorpusUnixHTTPBackends gives repository-authored Unix migration fixtures
+// a real local HTTP peer. The fixture address remains static config; no request
+// data influences the socket path. Windows AF_UNIX is certified separately in
+// the handler platform matrix because the NGINX reference fixture intentionally
+// uses a POSIX path shared with a Linux container.
+func startCorpusUnixHTTPBackends(t *testing.T, cfg *config.Config) func() {
+	t.Helper()
+	paths := map[string]struct{}{}
+	for _, up := range cfg.Upstreams {
+		for _, server := range up.Servers {
+			if strings.HasPrefix(server.Address, "unix:") {
+				paths[strings.TrimPrefix(server.Address, "unix:")] = struct{}{}
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return func() {}
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-path NGINX Unix corpus runtime is Linux-only; Windows AF_UNIX is covered by the #407 handler platform gate")
+	}
+
+	type ownedServer struct {
+		path string
+		ln   net.Listener
+		srv  *http.Server
+		done chan struct{}
+	}
+	owned := make([]ownedServer, 0, len(paths))
+	for path := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create Unix corpus backend directory: %v", err)
+		}
+		_ = os.Remove(path)
+		ln, err := net.Listen("unix", path)
+		if err != nil {
+			t.Fatalf("listen Unix corpus backend %q: %v", path, err)
+		}
+		if err := os.Chmod(path, 0o777); err != nil {
+			_ = ln.Close()
+			t.Fatalf("chmod Unix corpus backend %q: %v", path, err)
+		}
+		srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, "unix-backend-ok")
+		})}
+		done := make(chan struct{})
+		go func() {
+			_ = srv.Serve(ln)
+			close(done)
+		}()
+		owned = append(owned, ownedServer{path: path, ln: ln, srv: srv, done: done})
+	}
+	return func() {
+		for _, item := range owned {
+			_ = item.srv.Close()
+			_ = item.ln.Close()
+			<-item.done
+			_ = os.Remove(item.path)
+		}
+	}
 }
 
 func reserveLoopbackAddress(t *testing.T) string {

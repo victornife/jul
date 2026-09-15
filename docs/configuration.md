@@ -1870,3 +1870,11 @@ On a running admin server, `admin.console`, `admin.plugin_upload_enabled`, `admi
 
 See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
 
+## HTTP proxying to Unix sockets (#407)
+
+Use a named upstream for HTTP over a Unix-domain socket:
+`servers = ["unix:/run/app.sock"]` plus `proxy_pass = "http://<name>"`.
+Direct Unix syntax in `proxy_pass` is deliberately not part of the Jul grammar.
+Unix HTTP is plaintext-only, cannot use `backend_tls`, and cannot use an HTTP
+active-health probe; `health_check.type = "tcp"` provides connect/liveness
+probing over the backend's configured Unix network. See [upstreams.md](upstreams.md#http-over-unix-domain-sockets-407).

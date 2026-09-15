@@ -202,6 +202,23 @@ func locationWarnings(c *config.Config, srv *config.ServerConfig, loc *config.Lo
 	return w
 }
 
+func backendProjectionKey(network, address string) string {
+	// Network was added as a bounded projection field by #407. Tests and any
+	// in-process callers built against the previous shape may still construct a
+	// status with an empty network; the historical backend kind was TCP.
+	if network == "" {
+		network = "tcp"
+	}
+	return network + "\x00" + address
+}
+
+func configuredBackendIdentity(raw string) (network, address string) {
+	if strings.HasPrefix(raw, "unix:") {
+		return "unix", strings.TrimPrefix(raw, "unix:")
+	}
+	return "tcp", raw
+}
+
 func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjection {
 	routesByUpstream := routesUsingUpstreams(c)
 	out := make([]AppProjection, 0, len(c.Upstreams))
@@ -269,13 +286,15 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 		livePool := live[up.Name]
 		liveMap := make(map[string]BackendStatus, len(livePool.Backends))
 		for _, b := range livePool.Backends {
-			liveMap[b.Address] = b
+			liveMap[backendProjectionKey(b.Network, b.Address)] = b
 		}
 		seen := make(map[string]bool, len(up.Servers))
 		for _, b := range up.Servers {
-			seen[b.Address] = true
-			bp := BackendProjection{Address: b.Address, Weight: b.Weight}
-			if lb, ok := liveMap[b.Address]; ok {
+			network, address := configuredBackendIdentity(b.Address)
+			key := backendProjectionKey(network, address)
+			seen[key] = true
+			bp := BackendProjection{Address: b.Address, Network: network, Weight: b.Weight}
+			if lb, ok := liveMap[key]; ok {
 				bp.State = lb.State
 				bp.Inflight = lb.Inflight
 			}
@@ -285,10 +304,14 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 		// discovered from Consul, Kubernetes, DNS, etc. so the console reflects
 		// the actual pool contents.
 		for _, b := range livePool.Backends {
-			if seen[b.Address] {
+			if seen[backendProjectionKey(b.Network, b.Address)] {
 				continue
 			}
-			bp := BackendProjection{Address: b.Address, Weight: b.Weight}
+			network := b.Network
+			if network == "" {
+				network = "tcp"
+			}
+			bp := BackendProjection{Address: b.Address, Network: network, Weight: b.Weight}
 			bp.State = b.State
 			bp.Inflight = b.Inflight
 			ap.Backends = append(ap.Backends, bp)

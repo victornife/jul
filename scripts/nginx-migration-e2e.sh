@@ -10,6 +10,7 @@ readonly REQUIRED="${REQUIRE_NGINX_E2E:-0}"
 readonly -a FIXTURE_SPECS=(
 	"core-multifile-return:18080"
 	"routing-cors-policy:18084"
+	"unix-http-upstream:18086"
 )
 
 mkdir -p "${ARTIFACT_DIR}"
@@ -55,6 +56,9 @@ run_fixture() (
 	container_started=0
 	network_created=0
 	proxy_pid=0
+	backend_pid=0
+	socket_root=""
+	declare -a extra_docker_args=()
 
 	cleanup() {
 		status=$?
@@ -63,7 +67,14 @@ run_fixture() (
 			kill "${proxy_pid}" >/dev/null 2>&1 || true
 			wait "${proxy_pid}" >/dev/null 2>&1 || true
 		fi
+		if [[ "${backend_pid}" != "0" ]]; then
+			kill "${backend_pid}" >/dev/null 2>&1 || true
+			wait "${backend_pid}" >/dev/null 2>&1 || true
+		fi
 		rm -f "${proxy_port_file}"
+		if [[ -n "${socket_root}" ]]; then
+			rm -rf "${socket_root}"
+		fi
 		if [[ "${container_started}" == "1" ]]; then
 			docker logs "${container_name}" >"${fixture_artifact_dir}/nginx.log" 2>&1 || true
 			docker inspect "${container_name}" >"${fixture_artifact_dir}/container-inspect.json" 2>/dev/null || true
@@ -82,6 +93,64 @@ run_fixture() (
 	docker network create --internal "${network_name}" >/dev/null
 	network_created=1
 
+	if [[ "${fixture_id}" == "unix-http-upstream" ]]; then
+		socket_root="/tmp/jul407"
+		rm -rf "${socket_root}"
+		mkdir -p "${socket_root}"
+		chmod 0777 "${socket_root}"
+		python3 - "${socket_root}/backend.sock" <<'PYUNIX' &
+import os
+import socket
+import sys
+
+path = sys.argv[1]
+try:
+    os.unlink(path)
+except FileNotFoundError:
+    pass
+listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+listener.bind(path)
+os.chmod(path, 0o777)
+listener.listen(32)
+body = b"unix-backend-ok"
+response = (
+    b"HTTP/1.1 200 OK\r\n"
+    + b"Content-Type: text/plain\r\n"
+    + b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+    + b"Connection: close\r\n\r\n"
+    + body
+)
+while True:
+    conn, _ = listener.accept()
+    try:
+        data = b""
+        while b"\r\n\r\n" not in data and len(data) < 65536:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        conn.sendall(response)
+    finally:
+        conn.close()
+PYUNIX
+		backend_pid=$!
+		for _ in $(seq 1 100); do
+			if [[ -S "${socket_root}/backend.sock" ]]; then
+				break
+			fi
+			if ! kill -0 "${backend_pid}" >/dev/null 2>&1; then
+				echo "Unix HTTP fixture backend exited before publishing its socket" >&2
+				exit 1
+			fi
+			sleep 0.05
+		done
+		if [[ ! -S "${socket_root}/backend.sock" ]]; then
+			echo "Unix HTTP fixture backend did not publish its socket" >&2
+			exit 1
+		fi
+		extra_docker_args+=(--volume "${socket_root}:${socket_root}")
+	fi
+
 	docker run --detach \
 		--name "${container_name}" \
 		--network "${network_name}" \
@@ -95,6 +164,7 @@ run_fixture() (
 		--tmpfs /var/cache/nginx:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0700 \
 		--tmpfs /var/run:rw,noexec,nosuid,size=1m,uid=101,gid=101,mode=0700 \
 		--tmpfs /tmp:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0700 \
+		"${extra_docker_args[@]}" \
 		--volume "${fixture_dir}/nginx:/etc/nginx:ro" \
 		--entrypoint /usr/sbin/nginx \
 		"${NGINX_IMAGE}" \
@@ -189,6 +259,7 @@ done
 cat >"${ARTIFACT_DIR}/result.txt" <<'EOF_RESULT'
 reference_passed: core-multifile-return
 reference_passed: routing-cors-policy
+reference_passed: unix-http-upstream
 expected_difference: core-multifile-return/relative-redirect NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT
 expected_difference: routing-cors-policy/limit-except-post NGX_LOCATION_LIMIT_EXCEPT
 EOF_RESULT

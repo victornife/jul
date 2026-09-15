@@ -176,12 +176,13 @@ func (s *Server) v1Upstreams(c *config.Config) []adminapi.Upstream {
 		}
 		byAddress := map[string]BackendStatus{}
 		for _, b := range live[up.Name].Backends {
-			byAddress[b.Address] = b
+			byAddress[backendProjectionKey(b.Network, b.Address)] = b
 		}
 		for j := range up.Servers {
 			srv := &up.Servers[j]
-			b := adminapi.UpstreamBackend{Address: srv.Address, Weight: srv.Weight}
-			if l, ok := byAddress[srv.Address]; ok {
+			network, address := configuredBackendIdentity(srv.Address)
+			b := adminapi.UpstreamBackend{Address: srv.Address, Network: network, Weight: srv.Weight}
+			if l, ok := byAddress[backendProjectionKey(network, address)]; ok {
 				b.State = l.State
 				b.InFlight = l.Inflight
 				if l.Weight != 0 {

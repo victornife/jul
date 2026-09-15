@@ -230,6 +230,22 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 	root := serverRoot
 	index := serverIndex
 
+	// Jul exposes HTTP-over-Unix through a named upstream only. NGINX also
+	// accepts direct Unix proxy_pass spellings; translating one verbatim would
+	// produce a Jul configuration that looks valid to the importer but is
+	// intentionally unsupported by the runtime. Fail this location closed and
+	// leave an actionable, source-located finding instead.
+	for _, c := range children(d) {
+		if c.GetName() != "proxy_pass" {
+			continue
+		}
+		cp := paramValues(c)
+		if len(cp) > 0 && isDirectUnixProxyPass(cp[0]) {
+			t.report.skip(c, "direct Unix proxy_pass is not representable; create a named [[upstreams]] entry with servers = [\"unix:/path/to/socket.sock\"] and proxy_pass = \"http://<upstream-name>\"")
+			return config.LocationConfig{}, false
+		}
+	}
+
 	for _, c := range children(d) {
 		cp := paramValues(c)
 		switch c.GetName() {
@@ -561,6 +577,11 @@ func matchConfig(mod, path string, rep *Report, line int) (config.MatchConfig, b
 // translateProxyPass normalizes an nginx proxy_pass value into a Jul.IA
 // proxy_pass URL. A bare host gets an http:// scheme; an upstream name is kept
 // verbatim so it resolves to the imported [[upstreams]] pool.
+func isDirectUnixProxyPass(v string) bool {
+	v = strings.ToLower(strings.TrimSpace(v))
+	return strings.HasPrefix(v, "http://unix:") || strings.HasPrefix(v, "https://unix:")
+}
+
 func translateProxyPass(v string, rep *Report, line int) string {
 	v = strings.TrimSpace(v)
 	if v == "" {

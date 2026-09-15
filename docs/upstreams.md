@@ -612,3 +612,35 @@ verification.
 policy at all, because such a pool is verified against the platform store alone.
 
 See [health.md](health.md).
+
+## HTTP over Unix-domain sockets (#407)
+
+HTTP reverse proxying may use Unix-domain-socket backends through a **named**
+upstream. The socket spelling is the same canonical backend grammar used by the
+rest of the upstream layer:
+
+```toml
+[[upstreams]]
+name = "local-app"
+servers = ["unix:/run/local-app.sock"]
+
+[[servers.locations]]
+match = { type = "prefix", path = "/" }
+proxy_pass = "http://local-app"
+```
+
+The route stays on the normal HTTP proxy, balancing, admission, retry, circuit,
+connection-accounting and generation-retirement path. A selected Unix backend
+uses `network=unix` only for dialing; the filesystem path is never the HTTP
+Host or a metric label. Each Unix backend has a distinct opaque connection-pool
+identity, so keep-alive and `max_connections_per_backend` cannot cross sockets.
+Plain HTTP pools may mix TCP and Unix members and retries may cross between them.
+
+For Unix HTTP, the incoming Host is preserved unless `[headers].Host` explicitly
+overrides it. Direct Jul spellings such as `proxy_pass = "http://unix:/run/app.sock"`
+are rejected: put the socket in `[[upstreams]].servers` and reference the pool.
+TLS-over-Unix is not part of this contract, so an HTTPS route or `backend_tls`
+policy with a Unix member is rejected before traffic. Active `health_check.type =
+"http"` is also rejected for Unix; use the existing `"tcp"` health type, which
+means a connect/liveness probe and dials the backend's configured `unix` network.
+Socket existence is not checked at configuration-load time.

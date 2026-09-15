@@ -672,6 +672,7 @@ export type BackendState = z.infer<typeof BackendStateSchema>;
 
 export const BackendProjectionSchema = z.object({
   address: z.string(),
+  network: z.enum(["tcp", "unix"]).optional(),
   weight: z.number(),
   // Absent for a backend that is configured but not live, which the Console
   // shows as unknown rather than guessing.

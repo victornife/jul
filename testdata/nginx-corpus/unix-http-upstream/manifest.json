@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "id": "unix-http-upstream",
+  "tier": "core",
+  "description": "Named NGINX upstream backed by a Unix-domain socket and proxied through ordinary HTTP, proving importer and real-runtime migration fidelity for #407.",
+  "origin": {
+    "kind": "repository_authored",
+    "license": "AGPL-3.0-only",
+    "source": "victornife/jul#407"
+  },
+  "categories": [
+    "core-http",
+    "resiliency",
+    "upstreams"
+  ],
+  "build_tags": [
+    "importer"
+  ],
+  "root": "nginx/nginx.conf",
+  "follow_includes": false,
+  "expected_assessment": {
+    "status": "ready_for_review",
+    "ready": true,
+    "complete": true,
+    "files_read": 1,
+    "sources": [
+      "nginx.conf"
+    ],
+    "results": [
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_EVENTS",
+        "class": "informational",
+        "risk": "operational",
+        "context": "main",
+        "directive": "events"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_HTTP",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "http"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_UPSTREAM",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "upstream"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_UPSTREAM_SERVER",
+        "class": "supported",
+        "risk": "availability",
+        "context": "upstream",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "server",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_NAME",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "server_name"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LOCATION",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "location"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_PROXY_PASS",
+        "class": "supported",
+        "risk": "routing",
+        "context": "location",
+        "directive": "proxy_pass"
+      }
+    ]
+  },
+  "expected_candidate": {
+    "required": true,
+    "contains": [
+      "listen = ':18086'",
+      "name = 'local_app'",
+      "proxy_pass = 'http://local_app'",
+      "server_names = ['unix-http.test']",
+      "servers = ['unix:/tmp/jul407/backend.sock']"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "unix-http-get",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/hello?x=1",
+        "host": "unix-http.test"
+      },
+      "assert": [
+        "status",
+        "body"
+      ],
+      "ignore_headers": [
+        "date",
+        "server",
+        "x-request-id"
+      ],
+      "reference": {
+        "status": 200,
+        "body": "unix-backend-ok"
+      },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    }
+  ]
+}
