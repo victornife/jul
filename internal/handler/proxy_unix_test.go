@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -28,7 +29,12 @@ func startUnixHTTPBackend(t *testing.T, h http.Handler) string {
 	if runtime.GOOS == "windows" {
 		t.Skip("AF_UNIX runtime fixture is not portable on Windows CI")
 	}
-	path := filepath.Join(t.TempDir(), "backend.sock")
+	dir, err := os.MkdirTemp("/tmp", "jul407-")
+	if err != nil {
+		t.Fatalf("create short Unix fixture dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	path := filepath.Join(dir, "backend.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatalf("listen unix: %v", err)
