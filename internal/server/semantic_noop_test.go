@@ -111,8 +111,6 @@ func TestSemanticNoopPreservesGenerationAndResources(t *testing.T) {
 			t.Errorf("Run returned error: %v", err)
 		}
 	})
-	waitForServe(t, "http://"+addr+"/", "return-200")
-
 	initialSnapshot := waitForInitialGeneration(t, srv)
 	initialHandler := srv.handlers.Load()
 	srv.redactMu.Lock()
@@ -331,8 +329,6 @@ match = { path = "/", type = "prefix" }
 			t.Errorf("Run returned error: %v", err)
 		}
 	})
-	waitForServe(t, "http://"+addr+"/", "")
-
 	initial := waitForInitialGeneration(t, srv)
 	initialHandler := srv.handlers.Load()
 	for _, source := range []ReloadSource{ReloadSourceFileWatch, ReloadSourceSIGHUP} {
@@ -382,7 +378,6 @@ func TestChangedFileSecretPublishes(t *testing.T) {
 			t.Errorf("Run returned error: %v", err)
 		}
 	})
-	waitForServe(t, "http://"+addr+"/", "")
 	initialGeneration := waitForInitialGeneration(t, srv).Generation
 
 	if err := os.WriteFile(secretPath, []byte("second-header-secret\n"), 0o600); err != nil {
@@ -430,7 +425,6 @@ func TestManagedNoopRunsFinalCASAndAbortsPreparedAdmin(t *testing.T) {
 			t.Errorf("Run returned error: %v", err)
 		}
 	})
-	waitForServe(t, "http://"+addr+"/", "")
 	waitForInitialGeneration(t, srv)
 
 	prepared := NewPreparedCommit(nil, func() { preparedAborts.Add(1) })
@@ -613,7 +607,6 @@ func startNoopFenceServer(t *testing.T, initial *config.Candidate, src config.So
 			t.Errorf("Run returned error: %v", err)
 		}
 	})
-	waitForServe(t, "http://"+addr+"/", "")
 	waitForInitialGeneration(t, srv)
 	return srv, reload
 }
