@@ -259,6 +259,7 @@ func startCorpusUnixHTTPBackends(t *testing.T, cfg *config.Config) func() {
 			if strings.HasPrefix(server.Address, "unix:") {
 				paths[strings.TrimPrefix(server.Address, "unix:")] = struct{}{}
 			}
+		}
 	}
 	if len(paths) == 0 {
 		return func() {}

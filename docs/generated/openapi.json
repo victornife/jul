@@ -6946,6 +6946,9 @@
             "type": "integer",
             "format": "int64"
           },
+          "network": {
+            "type": "string"
+          },
           "state": {
             "type": "string"
           },
@@ -6957,6 +6960,7 @@
         "required": [
           "address",
           "in_flight",
+          "network",
           "weight"
         ],
         "additionalProperties": false

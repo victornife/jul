@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "fixture_schema_version": 1,
-  "fixture_count": 11,
-  "core_fixtures": 9,
+  "fixture_count": 12,
+  "core_fixtures": 10,
   "full_fixtures": 2,
   "categories": [
     {
@@ -15,7 +15,7 @@
     },
     {
       "name": "core-http",
-      "count": 4
+      "count": 5
     },
     {
       "name": "fastcgi",
@@ -43,7 +43,7 @@
     },
     {
       "name": "resiliency",
-      "count": 1
+      "count": 2
     },
     {
       "name": "response-headers",
@@ -67,7 +67,7 @@
     },
     {
       "name": "upstreams",
-      "count": 1
+      "count": 2
     },
     {
       "name": "variables",
@@ -89,17 +89,17 @@
     },
     {
       "name": "informational",
-      "count": 10
+      "count": 11
     },
     {
       "name": "supported",
-      "count": 85
+      "count": 93
     }
   ],
   "risks": [
     {
       "name": "availability",
-      "count": 15
+      "count": 17
     },
     {
       "name": "observability",
@@ -107,7 +107,7 @@
     },
     {
       "name": "operational",
-      "count": 21
+      "count": 23
     },
     {
       "name": "performance",
@@ -115,7 +115,7 @@
     },
     {
       "name": "routing",
-      "count": 60
+      "count": 65
     },
     {
       "name": "security",
@@ -153,11 +153,11 @@
     },
     {
       "name": "NGX_HTTP_SERVER",
-      "count": 11
+      "count": 12
     },
     {
       "name": "NGX_HTTP_UPSTREAM",
-      "count": 1
+      "count": 2
     },
     {
       "name": "NGX_INCLUDE_RESOLVED",
@@ -193,7 +193,7 @@
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS",
-      "count": 1
+      "count": 2
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS_DYNAMIC",
@@ -221,11 +221,11 @@
     },
     {
       "name": "NGX_MAIN_EVENTS",
-      "count": 9
+      "count": 10
     },
     {
       "name": "NGX_MAIN_HTTP",
-      "count": 11
+      "count": 12
     },
     {
       "name": "NGX_MAIN_MAIL",
@@ -269,15 +269,15 @@
     },
     {
       "name": "NGX_SERVER_LISTEN",
-      "count": 11
+      "count": 12
     },
     {
       "name": "NGX_SERVER_LOCATION",
-      "count": 13
+      "count": 14
     },
     {
       "name": "NGX_SERVER_NAME",
-      "count": 11
+      "count": 12
     },
     {
       "name": "NGX_SERVER_TLS_CERT",
@@ -305,7 +305,7 @@
     },
     {
       "name": "NGX_UPSTREAM_SERVER",
-      "count": 2
+      "count": 3
     },
     {
       "name": "NGX_VARIABLE_BLOCK_UNSUPPORTED",
@@ -315,7 +315,7 @@
   "verdicts": [
     {
       "name": "equivalent_for_asserted_dimensions",
-      "count": 2
+      "count": 3
     },
     {
       "name": "expected_difference",
@@ -396,13 +396,14 @@
       "status": "represented",
       "fixtures": [
         "blocking-dynamic-proxy",
+        "unix-http-upstream",
         "upstream-weighted"
       ],
       "deferred_dimensions": [
         "WebSocket/gRPC upstream runtime replay",
         "active-health migration replay",
         "backend TLS/private-CA migration replay",
-        "retry/circuit behavior pending resilience programme closure"
+        "retry/circuit migration replay beyond the dedicated product-level resilience evidence"
       ]
     }
   ]

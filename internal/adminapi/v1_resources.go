@@ -82,6 +82,7 @@ type RouteResponse struct {
 // UpstreamBackend is one backend of a pool, with its live state.
 type UpstreamBackend struct {
 	Address string `json:"address"`
+	Network string `json:"network"`
 	Weight  int    `json:"weight"`
 	// State is the runtime eligibility: available, circuit_open,
 	// circuit_half_open, health_unhealthy or at_capacity. It is empty when the

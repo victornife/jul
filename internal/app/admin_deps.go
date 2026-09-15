@@ -105,6 +105,7 @@ func AdaptUpstreams(in []upstream.PoolStatus) []admin.UpstreamStatus {
 		for _, b := range p.Backends {
 			ps.Backends = append(ps.Backends, admin.BackendStatus{
 				Address:  b.Address,
+				Network:  b.Network,
 				Weight:   b.Weight,
 				State:    string(b.State),
 				Inflight: b.Inflight,

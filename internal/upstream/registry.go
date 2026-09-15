@@ -676,6 +676,7 @@ type PoolStatus struct {
 // BackendStatus is a point-in-time view of one backend within a pool.
 type BackendStatus struct {
 	Address string
+	Network string
 	Weight  int
 	// State is why this backend can or cannot take traffic. It replaces a
 	// boolean, which could express three values at most and had to conflate an
@@ -698,6 +699,7 @@ func (r *Registry) Snapshot() []PoolStatus {
 		for _, b := range e.pool.Backends() {
 			ps.Backends = append(ps.Backends, BackendStatus{
 				Address:  b.Address,
+				Network:  b.Network,
 				Weight:   b.Weight(),
 				State:    effectiveState(b, perBackend),
 				Inflight: b.Inflight(),
