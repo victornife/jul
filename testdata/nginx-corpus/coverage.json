@@ -96,16 +96,17 @@
       "status": "represented",
       "fixtures": [
         "blocking-dynamic-proxy",
+        "unix-http-upstream",
         "upstream-weighted"
       ],
-      "rationale": "The corpus covers named weighted upstreams, least-connections translation, ignored connection-pool tuning, proxy routing, and blocking variable-derived destinations.",
+      "rationale": "The corpus covers named weighted upstreams, least-connections translation, ignored connection-pool tuning, proxy routing, blocking variable-derived destinations, and a real NGINX/Jul named HTTP upstream served over a Unix-domain socket (#407).",
       "deferred_dimensions": [
         "WebSocket/gRPC upstream runtime replay",
         "active-health migration replay",
         "backend TLS/private-CA migration replay",
-        "retry/circuit behavior pending resilience programme closure"
+        "retry/circuit migration replay beyond the dedicated product-level resilience evidence"
       ],
-      "revisit_trigger": "Expand after the relevant runtime contract is stable and a deterministic local backend can assert one migration semantic without becoming a general gateway conformance suite."
+      "revisit_trigger": "Expand after a stable runtime contract and a deterministic local backend can assert one additional migration semantic without becoming a general gateway conformance suite."
     }
   ]
 }
