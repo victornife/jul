@@ -38,7 +38,7 @@ func TestGRPCAttemptAttributionMatrix(t *testing.T) {
 		{"backend unavailable", status.Error(codes.Unavailable, "unavailable"), context.Background(), context.Background(), upstream.OriginBackendProtocol, upstream.HealthFailure},
 		{"backend deadline", status.Error(codes.DeadlineExceeded, "deadline"), context.Background(), context.Background(), upstream.OriginBackendProtocol, upstream.HealthFailure},
 		{"application not found", status.Error(codes.NotFound, "missing"), context.Background(), context.Background(), upstream.OriginBackendApplication, upstream.HealthSuccess},
-		{"backend application cancellation", status.Error(codes.Canceled, "server cancelled"), context.Background(), context.Background(), upstream.OriginBackendApplication, upstream.HealthSuccess},
+		{"ambiguous bare cancellation", status.Error(codes.Canceled, "server cancelled"), context.Background(), context.Background(), upstream.OriginJulPolicy, upstream.HealthNeutral},
 	}
 
 	for _, tt := range tests {

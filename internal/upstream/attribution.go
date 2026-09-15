@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"time"
 )
 
 // FailureOrigin is the closed set of owners for one upstream attempt result.
@@ -129,6 +130,28 @@ func ClassifyAttemptError(err error, inbound, attempt context.Context) AttemptCl
 		}
 	}
 
+	// A child transport can enforce the same deadline with its own timer and
+	// return DeadlineExceeded just before the parent context's timer goroutine
+	// publishes Err(). Deadline values are immutable, so use them to make this
+	// boundary deterministic instead of letting scheduler order blame a backend.
+	if errors.Is(err, context.DeadlineExceeded) {
+		now := time.Now()
+		if deadlineReached(inbound, now) {
+			return AttemptClassification{
+				origin: OriginClientDeadline,
+				reason: ReasonClientDeadline,
+				health: HealthNeutral,
+			}
+		}
+		if deadlineReached(attempt, now) {
+			return AttemptClassification{
+				origin: OriginJulTimeout,
+				reason: ReasonRetryDeadlineExhausted,
+				health: HealthNeutral,
+			}
+		}
+	}
+
 	if attempt != nil && attempt.Err() != nil {
 		return AttemptClassification{
 			origin: OriginJulTimeout,
@@ -163,6 +186,14 @@ func ClassifyAttemptError(err error, inbound, attempt context.Context) AttemptCl
 		reason: reason,
 		health: HealthFailure,
 	}
+}
+
+func deadlineReached(ctx context.Context, now time.Time) bool {
+	if ctx == nil {
+		return false
+	}
+	deadline, ok := ctx.Deadline()
+	return ok && !now.Before(deadline)
 }
 
 // ClassifyProtocolError applies the same ownership checks as a transport error

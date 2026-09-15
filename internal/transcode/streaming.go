@@ -44,7 +44,17 @@ func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *
 	clientStream := rt.method.IsStreamingClient()
 	serverStream := rt.method.IsStreamingServer()
 
-	ctx, cancel := context.WithCancel(outgoingContext(r))
+	base := outgoingContext(r)
+	retry := t.pool.RetryRequestFor(t.retry, false)
+	var (
+		ctx    context.Context
+		cancel context.CancelFunc
+	)
+	if retry.Deadline > 0 {
+		ctx, cancel = context.WithTimeout(base, retry.Deadline)
+	} else {
+		ctx, cancel = context.WithCancel(base)
+	}
 	defer cancel()
 
 	desc := &grpc.StreamDesc{
@@ -65,11 +75,11 @@ func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *
 	var health streamHealth
 	switch {
 	case serverStream && !clientStream:
-		health = t.serveServerStream(w, r, rt, vars, cs, method, backend)
+		health = t.serveServerStream(w, r, rt, vars, cs, ctx, method, backend)
 	case clientStream && !serverStream:
-		health = t.serveClientStream(w, r, rt, vars, cs, cancel, method, backend)
+		health = t.serveClientStream(w, r, rt, vars, cs, ctx, cancel, method, backend)
 	default:
-		health = t.serveBidiStream(w, r, rt, vars, cs, cancel, method, backend)
+		health = t.serveBidiStream(w, r, rt, vars, cs, ctx, cancel, method, backend)
 	}
 	if health == healthSuccess {
 		t.pool.RecordAttempt(backend, upstream.SuccessfulAttempt())
@@ -78,7 +88,7 @@ func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *
 
 // serveServerStream sends a single request built from the body, path variables,
 // and query, then streams each reply message to the client as a framed event.
-func (t *Transcoder) serveServerStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, method string, backend upstream.Attempt) streamHealth {
+func (t *Transcoder) serveServerStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, attempt context.Context, method string, backend upstream.Attempt) streamHealth {
 	req := dynamicpb.NewMessage(rt.method.Input())
 	if err := t.buildRequest(req, rt, vars, r); err != nil {
 		code := requestErrorStatus(err)
@@ -89,20 +99,24 @@ func (t *Transcoder) serveServerStream(w http.ResponseWriter, r *http.Request, r
 	}
 	if err := cs.SendMsg(req); err != nil {
 		t.streamSetupError(w, err, method)
-		t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), cs.Context()))
+		t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), attempt))
 		return healthRecorded
 	}
 	t.streamMsg(method, "sent")
-	_ = cs.CloseSend()
+	if err := cs.CloseSend(); err != nil {
+		t.streamSetupError(w, err, method)
+		t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), attempt))
+		return healthRecorded
+	}
 
 	resp := newStreamResponder(w, t.streamMode)
-	return t.pumpReplies(resp, cs, rt, method, backend, r.Context())
+	return t.pumpReplies(resp, cs, rt, method, backend, r.Context(), attempt)
 }
 
 // serveClientStream reads a sequence of JSON request frames (a JSON array or
 // newline/whitespace-delimited objects), forwards each as a gRPC message, then
 // returns the single reply as one JSON object.
-func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, cancel context.CancelFunc, method string, backend upstream.Attempt) streamHealth {
+func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, attempt context.Context, cancel context.CancelFunc, method string, backend upstream.Attempt) streamHealth {
 	if err := t.sendRequestFrames(r, rt, vars, cs); err != nil {
 		var de *decodeError
 		if errors.As(err, &de) {
@@ -112,17 +126,21 @@ func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, r
 			t.pool.RecordAttempt(backend, upstream.JulPolicyFailure(""))
 			return healthRecorded
 		}
-		classification := classifyGRPCAttempt(err, r.Context(), cs.Context())
+		classification := classifyGRPCAttempt(err, r.Context(), attempt)
 		cancel()
 		t.pool.RecordAttempt(backend, classification)
 		t.streamSetupError(w, err, method)
 		return healthRecorded
 	}
-	_ = cs.CloseSend()
+	if err := cs.CloseSend(); err != nil {
+		t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), attempt))
+		t.streamSetupError(w, err, method)
+		return healthRecorded
+	}
 
 	out := dynamicpb.NewMessage(rt.method.Output())
 	if err := cs.RecvMsg(out); err != nil {
-		t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), cs.Context()))
+		t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), attempt))
 		t.streamSetupError(w, err, method)
 		return healthRecorded
 	}
@@ -136,14 +154,18 @@ func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, r
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(body)
+	if n, writeErr := w.Write(body); writeErr != nil || n != len(body) {
+		t.pool.RecordAttempt(backend, upstream.ClientCancellationResult())
+		t.report(method, http.StatusOK)
+		return healthRecorded
+	}
 	t.report(method, http.StatusOK)
 	return healthSuccess
 }
 
 // serveBidiStream pumps request frames to the backend while concurrently
 // streaming reply frames back to the client over the same HTTP/2 request.
-func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, cancel context.CancelFunc, method string, backend upstream.Attempt) streamHealth {
+func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, attempt context.Context, cancel context.CancelFunc, method string, backend upstream.Attempt) streamHealth {
 	var (
 		mu                 sync.Mutex
 		sendErr            error
@@ -155,7 +177,7 @@ func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt 
 		if isDecodeError(err) {
 			sendClassification = upstream.JulPolicyFailure("")
 		} else {
-			sendClassification = classifyGRPCAttempt(err, r.Context(), cs.Context())
+			sendClassification = classifyGRPCAttempt(err, r.Context(), attempt)
 		}
 		mu.Unlock()
 		cancel()
@@ -168,7 +190,9 @@ func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt 
 			setSendErr(err)
 			return
 		}
-		_ = cs.CloseSend()
+		if err := cs.CloseSend(); err != nil {
+			setSendErr(err)
+		}
 	}()
 
 	resp := newStreamResponder(w, t.streamMode)
@@ -186,12 +210,17 @@ func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt 
 				return healthRecorded
 			}
 			if errors.Is(err, io.EOF) {
-				resp.end()
+				if err := resp.end(); err != nil {
+					t.pool.RecordAttempt(backend, upstream.ClientCancellationResult())
+					t.report(method, http.StatusOK)
+					<-done
+					return healthRecorded
+				}
 				t.report(method, http.StatusOK)
 				<-done
 				return healthSuccess
 			}
-			t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), cs.Context()))
+			t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), attempt))
 			t.finishStreamError(w, resp, err, method)
 			<-done
 			return healthRecorded
@@ -218,16 +247,20 @@ func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt 
 // pumpReplies streams every reply message from cs to the client, mapping a
 // terminal gRPC error to an HTTP error (before the first frame) or an error
 // frame (after streaming has started).
-func (t *Transcoder) pumpReplies(resp *streamResponder, cs grpc.ClientStream, rt *route, method string, backend upstream.Attempt, inbound context.Context) streamHealth {
+func (t *Transcoder) pumpReplies(resp *streamResponder, cs grpc.ClientStream, rt *route, method string, backend upstream.Attempt, inbound, attempt context.Context) streamHealth {
 	for {
 		out := dynamicpb.NewMessage(rt.method.Output())
 		if err := cs.RecvMsg(out); err != nil {
 			if errors.Is(err, io.EOF) {
-				resp.end()
+				if err := resp.end(); err != nil {
+					t.pool.RecordAttempt(backend, upstream.ClientCancellationResult())
+					t.report(method, http.StatusOK)
+					return healthRecorded
+				}
 				t.report(method, http.StatusOK)
 				return healthSuccess
 			}
-			t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, inbound, cs.Context()))
+			t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, inbound, attempt))
 			t.finishStreamError(resp.w, resp, err, method)
 			return healthRecorded
 		}
@@ -399,12 +432,15 @@ func (s *streamResponder) errorFrame(code codes.Code, msg string) {
 // end terminates a successfully completed stream. NDJSON needs no terminator;
 // SSE emits an explicit end event so clients can distinguish completion from a
 // dropped connection.
-func (s *streamResponder) end() {
+func (s *streamResponder) end() error {
 	s.ensureStarted()
 	if s.mode == "sse" {
-		_, _ = io.WriteString(s.w, "event: end\ndata: {}\n\n")
+		if _, err := io.WriteString(s.w, "event: end\ndata: {}\n\n"); err != nil {
+			return err
+		}
 		s.flush()
 	}
+	return nil
 }
 
 func (s *streamResponder) flush() {

@@ -5,17 +5,46 @@ package handler
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"jul/internal/config"
 )
+
+type cgiFaultReader struct {
+	data []byte
+	err  error
+}
+
+type cgiDiscardWriter struct{ header http.Header }
+
+func (w *cgiDiscardWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+func (*cgiDiscardWriter) WriteHeader(int)             {}
+func (*cgiDiscardWriter) Write(p []byte) (int, error) { return len(p), nil }
+
+func (r *cgiFaultReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, r.err
+}
 
 func TestParseSocketAddress(t *testing.T) {
 	cases := []struct{ in, net, addr string }{
@@ -70,6 +99,21 @@ func TestBuildCGIParams(t *testing.T) {
 }
 
 func TestWriteCGIResponse(t *testing.T) {
+	t.Run("valid header larger than reader buffer", func(t *testing.T) {
+		value := strings.Repeat("x", 8<<10)
+		raw := "X-Large: " + value + "\r\n\r\nbody"
+		rec := httptest.NewRecorder()
+		if err := writeCGIResponse(bufio.NewReader(strings.NewReader(raw)), rec); err != nil {
+			t.Fatal(err)
+		}
+		if got := rec.Header().Get("X-Large"); got != value {
+			t.Fatalf("large header length = %d, want %d", len(got), len(value))
+		}
+		if got := rec.Body.String(); got != "body" {
+			t.Fatalf("body = %q, want body", got)
+		}
+	})
+
 	t.Run("status header", func(t *testing.T) {
 		raw := "Status: 201 Created\r\nContent-Type: text/plain\r\n\r\nhi"
 		rec := httptest.NewRecorder()
@@ -116,6 +160,91 @@ func TestWriteCGIResponse(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWriteCGIResponseHeaderBounds(t *testing.T) {
+	for _, size := range []int{(4 << 10) - 1, 4 << 10, (4 << 10) + 1, 16 << 10} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			value := strings.Repeat("x", size)
+			raw := "X-Large: " + value + "\r\n\r\n"
+			rec := httptest.NewRecorder()
+			if err := writeCGIResponse(bufio.NewReader(strings.NewReader(raw)), rec); err != nil {
+				t.Fatal(err)
+			}
+			if got := len(rec.Header().Get("X-Large")); got != size {
+				t.Fatalf("header length = %d, want %d", got, size)
+			}
+		})
+	}
+
+	t.Run("multiple large headers below aggregate limit", func(t *testing.T) {
+		value := strings.Repeat("x", 12<<10)
+		raw := "X-One: " + value + "\r\nX-Two: " + value + "\r\n\r\n"
+		if err := writeCGIResponse(bufio.NewReader(strings.NewReader(raw)), httptest.NewRecorder()); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("aggregate exactly at maximum", func(t *testing.T) {
+		value := strings.Repeat("x", cgiResponseHeaderMax-len("X: ")-len("\r\n\r\n"))
+		raw := "X: " + value + "\r\n\r\n"
+		if got := len(raw); got != cgiResponseHeaderMax {
+			t.Fatalf("fixture length = %d", got)
+		}
+		if err := writeCGIResponse(bufio.NewReader(strings.NewReader(raw)), httptest.NewRecorder()); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "aggregate one byte over", raw: "X: " + strings.Repeat("x", cgiResponseHeaderMax-len("X: ")-len("\r\n\r\n")+1) + "\r\n\r\n"},
+		{name: "huge unterminated input", raw: "X: " + strings.Repeat("x", 4*cgiResponseHeaderMax)},
+		{name: "newline beyond maximum", raw: "X: " + strings.Repeat("x", 4*cgiResponseHeaderMax) + "\n\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := writeCGIResponse(bufio.NewReader(strings.NewReader(tc.raw)), httptest.NewRecorder())
+			if !errors.Is(err, errCGIResponseHeaderTooLarge) {
+				t.Fatalf("error = %v, want bounded-header error", err)
+			}
+		})
+	}
+
+	t.Run("more than 256 fields", func(t *testing.T) {
+		var raw strings.Builder
+		for i := 0; i <= cgiResponseHeaderFields; i++ {
+			fmt.Fprintf(&raw, "X-%d: value\r\n", i)
+		}
+		raw.WriteString("\r\n")
+		if err := writeCGIResponse(bufio.NewReader(strings.NewReader(raw.String())), httptest.NewRecorder()); err == nil {
+			t.Fatal("response with too many fields was accepted")
+		}
+	})
+
+	t.Run("partial data plus reader error", func(t *testing.T) {
+		want := errors.New("backend read failed")
+		reader := &cgiFaultReader{data: []byte("X-Test: partial"), err: want}
+		err := writeCGIResponse(bufio.NewReaderSize(reader, 4), httptest.NewRecorder())
+		if !errors.Is(err, want) {
+			t.Fatalf("error = %v, want %v", err, want)
+		}
+	})
+}
+
+func FuzzWriteCGIResponseHeaders(f *testing.F) {
+	for _, seed := range [][]byte{
+		[]byte("Status: 200 OK\r\nContent-Type: text/plain\r\n\r\nbody"),
+		[]byte("X-Large: " + strings.Repeat("x", 8<<10) + "\r\n\r\n"),
+		[]byte("X: " + strings.Repeat("x", cgiResponseHeaderMax+1)),
+		[]byte("broken"),
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_ = writeCGIResponse(bufio.NewReaderSize(bytes.NewReader(data), 64), &cgiDiscardWriter{})
+	})
 }
 
 // parseUWSGIVars decodes a uWSGI var block for test assertions.

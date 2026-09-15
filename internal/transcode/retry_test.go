@@ -492,7 +492,7 @@ func TestConnCacheDropsAReplacedWorkload(t *testing.T) {
 
 	// The predecessor's connection is retired rather than closed: a stream
 	// started against it may still be draining.
-	if _, ok := tr.retired.Load(key); !ok {
+	if _, ok := tr.retired.Load(connectionIdentity{dial: key, logicalID: "pod-a"}); !ok {
 		t.Fatal("the replaced connection was dropped instead of retired; an in-flight stream would have been cut")
 	}
 	if state := first.GetState(); state == connectivity.Shutdown {
@@ -513,7 +513,7 @@ func TestConnCacheEvictsAReplacedWorkloadOnReconcile(t *testing.T) {
 	if _, err := tr.connFor(key, "pod-a"); err != nil {
 		t.Fatalf("connFor: %v", err)
 	}
-	if _, ok := tr.conns.Load(key); !ok {
+	if _, ok := tr.conns.Load(connectionIdentity{dial: key, logicalID: "pod-a"}); !ok {
 		t.Fatal("precondition: the connection should be cached")
 	}
 
@@ -521,10 +521,10 @@ func TestConnCacheEvictsAReplacedWorkloadOnReconcile(t *testing.T) {
 	tr.pool.UpdateTargets([]upstream.Target{{Address: addr, ID: "pod-b"}})
 	tr.evictStaleConns()
 
-	if _, ok := tr.conns.Load(key); ok {
+	if _, ok := tr.conns.Load(connectionIdentity{dial: key, logicalID: "pod-a"}); ok {
 		t.Fatal("the reconciler kept a connection to a workload that no longer exists")
 	}
-	if _, ok := tr.retired.Load(key); !ok {
+	if _, ok := tr.retired.Load(connectionIdentity{dial: key, logicalID: "pod-a"}); !ok {
 		t.Fatal("the stale connection was not retired")
 	}
 }
@@ -543,7 +543,7 @@ func TestConnCacheKeepsAStableWorkload(t *testing.T) {
 	}
 	tr.evictStaleConns()
 
-	v, ok := tr.conns.Load(key)
+	v, ok := tr.conns.Load(connectionIdentity{dial: key, logicalID: "pod-a"})
 	if !ok {
 		t.Fatal("a reconcile pass evicted a live backend's connection")
 	}

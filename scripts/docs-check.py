@@ -952,6 +952,35 @@ def check_status_heading_uniqueness():
         ok("status.md canonical sections are complete")
 
 
+def check_documented_fuzz_commands():
+    """Every documented go-test fuzz target must exist in its named package."""
+    command_re = re.compile(
+        r"go test\b[^\n`]*?-fuzz=(?:['\"])?\^?(Fuzz[A-Za-z0-9_]+)\$?(?:['\"])?"
+        r"[^\n`]*?\s(\./[A-Za-z0-9_./-]+)"
+    )
+    found = 0
+    for path in sorted(ROOT.rglob("*.md")):
+        if any(part in {".git", "node_modules", "vendor", "reviews"} for part in path.parts):
+            continue
+        text = path.read_text(encoding="utf-8")
+        for match in command_re.finditer(text):
+            found += 1
+            target, package = match.groups()
+            line = text[:match.start()].count("\n") + 1
+            package_dir = ROOT / package.removeprefix("./")
+            if not package_dir.is_dir():
+                error(path, line, f"documented fuzz package does not exist: {package}")
+                continue
+            definition = re.compile(rf"\bfunc\s+{re.escape(target)}\s*\(")
+            if not any(definition.search(test.read_text(encoding="utf-8"))
+                       for test in package_dir.glob("*_test.go")):
+                error(path, line, f"documented fuzz target {target} does not exist in {package}")
+                continue
+            ok(f"{path}:{line} documented fuzz command resolves {target} in {package}")
+    if found == 0:
+        error(DOCS, 0, "no documented go-test fuzz commands found")
+
+
 def main():
     SKIP_DIRS = {"node_modules", "vendor", ".git", "__pycache__", "reviews"}
     md_files = [
@@ -983,6 +1012,7 @@ def main():
     check_readme_go_version()
     check_living_doc_headers()
     check_status_heading_uniqueness()
+    check_documented_fuzz_commands()
 
     print()
     print(f"Results: {OK} passed, {FAIL} failed")

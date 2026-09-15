@@ -564,6 +564,8 @@ const (
 	cgiResponseHeaderFields = 256
 )
 
+var errCGIResponseHeaderTooLarge = errors.New("CGI response header exceeds 64 KiB")
+
 // writeTrackingResponseWriter identifies a downstream write failure even when
 // the request context has not propagated its cancellation yet. CGI parsers can
 // otherwise only return one opaque copy error, which must not be blamed on the
@@ -594,10 +596,9 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 	headerBytes := 0
 	headerFields := 0
 	for {
-		line, err := br.ReadSlice('\n')
-		headerBytes += len(line)
-		if errors.Is(err, bufio.ErrBufferFull) || headerBytes > cgiResponseHeaderMax {
-			return errors.New("uwsgi response header exceeds 64 KiB")
+		line, err := readCGIHeaderLine(br, &headerBytes)
+		if errors.Is(err, errCGIResponseHeaderTooLarge) {
+			return err
 		}
 		if err != nil && !errors.Is(err, io.EOF) {
 			return err
@@ -662,4 +663,36 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 	// responsible for sanitizing any output it generates.
 	_, err := io.Copy(w, br)
 	return err
+}
+
+// readCGIHeaderLine permits a header line to span bufio's internal buffer
+// while enforcing the aggregate header limit before copying each fragment.
+// The only accumulation buffer is capped at the remaining portion of the
+// explicit 64 KiB envelope; huge unterminated input therefore fails without
+// delimiter-driven growth.
+func readCGIHeaderLine(br *bufio.Reader, total *int) ([]byte, error) {
+	lineStart := *total
+	var line []byte
+	for {
+		fragment, err := br.ReadSlice('\n')
+		remaining := cgiResponseHeaderMax - *total
+		if len(fragment) > remaining {
+			return nil, errCGIResponseHeaderTooLarge
+		}
+		*total += len(fragment)
+
+		if line != nil {
+			line = append(line, fragment...)
+		}
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			if line == nil {
+				return fragment, err
+			}
+			return line, err
+		}
+		if line == nil {
+			line = make([]byte, len(fragment), cgiResponseHeaderMax-lineStart)
+			copy(line, fragment)
+		}
+	}
 }
