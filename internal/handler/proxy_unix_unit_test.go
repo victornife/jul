@@ -77,7 +77,7 @@ func TestPrepareProxyAttemptRejectsInvalidBackendShapes(t *testing.T) {
 
 func TestPrepareProxyAttemptTCPAndTLS(t *testing.T) {
 	pool, err := upstream.NewPool(config.UpstreamConfig{
-		Name: "secure",
+		Name:    "secure",
 		Servers: []config.UpstreamServer{{Address: "127.0.0.1:8443", Weight: 1}},
 	}, "https")
 	if err != nil {
@@ -124,7 +124,7 @@ func TestValidateHTTPPoolNetworkAndDirectSyntaxBranches(t *testing.T) {
 		t.Fatalf("nil pool: %v", err)
 	}
 	pool, err := upstream.NewPool(config.UpstreamConfig{
-		Name: "local",
+		Name:    "local",
 		Servers: []config.UpstreamServer{{Address: "unix:/tmp/app.sock", Weight: 1}},
 	}, "http")
 	if err != nil {
@@ -151,7 +151,7 @@ func TestValidateHTTPPoolNetworkAndDirectSyntaxBranches(t *testing.T) {
 func unixAttempt(t *testing.T, address, scheme string) upstream.Attempt {
 	t.Helper()
 	pool, err := upstream.NewPool(config.UpstreamConfig{
-		Name: "test-unix",
+		Name:    "test-unix",
 		Servers: []config.UpstreamServer{{Address: "unix:" + address, Weight: 1}},
 	}, scheme)
 	if err != nil {
