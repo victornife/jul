@@ -38,6 +38,32 @@ func TestAppsProjectionJoinsUnixBackendByNetworkAndNormalizedAddress(t *testing.
 	}
 }
 
+func TestAppsProjectionIncludesLiveOnlyBackendAndDefaultsLegacyNetworkToTCP(t *testing.T) {
+	cfg := &config.Config{Upstreams: []config.UpstreamConfig{{
+		Name:     "api",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: "127.0.0.1:8080", Weight: 1}},
+	}}}
+	live := map[string]UpstreamStatus{
+		"api": {
+			Name: "api",
+			Backends: []BackendStatus{
+				{Address: "127.0.0.1:8080", Weight: 1, State: "available"},
+				{Address: "127.0.0.1:8081", Weight: 3, State: "unavailable", Inflight: 2},
+			},
+		},
+	}
+
+	apps := projectApps(cfg, live)
+	if len(apps) != 1 || len(apps[0].Backends) != 2 {
+		t.Fatalf("apps = %+v", apps)
+	}
+	got := apps[0].Backends[1]
+	if got.Address != "127.0.0.1:8081" || got.Network != "tcp" || got.Weight != 3 || got.State != "unavailable" || got.Inflight != 2 {
+		t.Fatalf("live-only backend projection = %+v", got)
+	}
+}
+
 func TestV1UpstreamsJoinsUnixBackendByNetworkAndNormalizedAddress(t *testing.T) {
 	cfg := &config.Config{Upstreams: []config.UpstreamConfig{{
 		Name:     "local-app",
