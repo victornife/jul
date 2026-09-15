@@ -1,4 +1,5 @@
 name: issue407 refresh generated evidence
+# Temporary implementation helper; removed before merge.
 
 on:
   push:
