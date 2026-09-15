@@ -1,0 +1,48 @@
+name: issue407 refresh generated evidence
+
+on:
+  push:
+    branches: [issue-407-unix-http-proxy]
+    paths: ['.github/workflows/issue407-refresh.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: issue-407-unix-http-proxy
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Format and regenerate corpus inventory
+        run: |
+          gofmt -w cmd/jul/import_corpus_test.go internal/handler/proxy_unix_test.go internal/handler/proxy_unix_resilience_test.go internal/handler/proxy_unix_bench_test.go internal/migrate/nginx/unix_http_test.go
+          go run -tags importer scripts/nginx-corpus-report.go -write
+      - name: Verify focused implementation
+        run: |
+          go test ./internal/handler -run 'TestProxyUnixHTTP|TestUnixHTTPPoolKeyIsolation'
+          go test -tags importer ./cmd/jul ./internal/migrate/nginx/...
+          go run -tags importer scripts/nginx-corpus-report.go -check
+          go mod verify
+          cp go.mod /tmp/go.mod.before
+          cp go.sum /tmp/go.sum.before
+          go mod tidy
+          cmp -s go.mod /tmp/go.mod.before
+          cmp -s go.sum /tmp/go.sum.before
+      - name: Publish generated/format corrections
+        shell: bash
+        run: |
+          git config user.name "ChatGPT Codex Connector"
+          git config user.email "noreply@openai.com"
+          git add cmd/jul/import_corpus_test.go internal/handler/proxy_unix_test.go internal/handler/proxy_unix_resilience_test.go internal/handler/proxy_unix_bench_test.go internal/migrate/nginx/unix_http_test.go testdata/nginx-corpus/inventory.json
+          if git diff --cached --quiet; then
+            echo "No generated or formatting changes needed"
+            exit 0
+          fi
+          git commit -m "test: refresh issue 407 generated evidence"
+          git push origin HEAD:issue-407-unix-http-proxy
