@@ -59,6 +59,18 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 	}
 	transport := newProxyTransport(loc, policy, maxConnsPerBackend(loc, pool), pool)
 
+	// Capturing the incoming Host requires a context value plus a request clone.
+	// Pay that cost only for handler generations that can actually select a
+	// Unix backend; pure TCP handlers keep their pre-#407 hot path allocation
+	// profile. Unix members are static configuration in this contract.
+	captureOriginalProxyHost := false
+	for _, b := range pool.Backends() {
+		if b.Network == upstream.NetworkUnix {
+			captureOriginalProxyHost = true
+			break
+		}
+	}
+
 	// The target supplies the scheme and base path for path joining; the
 	// balancing transport overrides the scheme and host per selected backend on
 	// every request. The scheme comes from proxy_pass (not a backend) because a
@@ -76,7 +88,9 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 			dialFailure:   dialFailure,
 		},
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.Out = pr.Out.WithContext(withOriginalProxyHost(pr.Out.Context(), pr.In.Host))
+			if captureOriginalProxyHost {
+				pr.Out = pr.Out.WithContext(withOriginalProxyHost(pr.Out.Context(), pr.In.Host))
+			}
 			pr.SetURL(target)
 			// Secure defaults: clears client-supplied X-Forwarded-* and sets
 			// them from Jul's own trusted view of the request.
