@@ -156,15 +156,18 @@ lookup.
 1. **No application-layer inspection.** TCP relay is byte-for-byte; Jul.IA
 cannot read HTTP headers, terminate TLS, or parse wire protocols inside the
 stream. Use the HTTP server (`[[servers]]`) for L7 routing.
-2. **SNI routing reads only the first TLS record.** A ClientHello that spans
-multiple records or omits SNI falls back to the default/catch-all route.
+2. **SNI inspection is bounded, not a TLS endpoint.** A ClientHello may span
+multiple records, but inspection stops at 16 KiB or 64 handshake records. A
+hello without SNI, above either cap or malformed falls back to the
+default/catch-all route; the original bytes remain untouched.
 3. **UDP sessions are memory-backed.** Each UDP client gets a session entry
 (keyed by source address); spoofed source addresses can fill the session table.
 `max_udp_sessions` bounds the table, but there is no application-layer
 authentication.
-4. **PROXY protocol v1 only.** Only HAProxy PROXY protocol v1 (text) is
-supported for inbound; v2 (binary) is supported for outbound. LOCAL/UNKNOWN
-inbound headers fall back to the on-the-wire address.
+4. **PROXY protocol is TCP-only.** HAProxy PROXY v1 text and v2 binary headers
+are supported inbound; outbound uses v2. LOCAL/UNKNOWN inbound headers fall
+back to the on-the-wire address. Inbound v1 is rejected unless its newline is
+present inside the protocol's 108-byte maximum.
 5. **No HTTP-specific features in stream.** Rate limiting, WAF, compression,
 auth, and caching apply only to `[[servers]]` HTTP traffic, not `[[stream]]`
 L4 traffic.
@@ -174,7 +177,7 @@ L4 traffic.
 | Threat | Vector | Mitigation | Residual risk |
 |--------|--------|------------|---------------|
 | Source-address spoofing (UDP) | Attacker sends UDP with forged src, filling session table | `max_udp_sessions` caps table; LRU reclaims idle sessions; short `idle_timeout` accelerates cleanup | Spoofed address from a live client blocks that legitimate client's session until idle timeout |
-| PROXY protocol injection | Attacker sends crafted PROXY header to recover internal addresses | `readProxyHeader` validates field counts, address format, and header length; rejects malformed input | A perfect mimic of a valid v1/v2 header from an untrusted client would be accepted (use network ACLs) |
+| PROXY protocol injection | Attacker sends crafted PROXY header to assert another client address | The listener checks the direct peer against `trusted_proxies` before parsing; the shared parser bounds v1 at 108 bytes during ingestion and validates the advertised family, addresses and ports | A compromised or over-broadly trusted proxy can still assert a false address |
 | SNI routing leak | Attacker probes SNI routes to map internal backends | SNI routes are config-only; no introspection API exposes them; backends should not be directly reachable | Insider with config read access |
 | Listener bind hijack | Attacker binds the stream listen port before Jul.IA starts | Preflight bind probe rejects in-use addresses; OS-level port binding is first-come-first-served | Race on startup between Jul.IA and a malicious process with same privileges |
 | Backend pool exhaustion | Many concurrent TCP connections exhaust backend capacity | `connect_timeout` prevents indefinite hangs; upstream `max_fails` / `fail_timeout` eject unhealthy backends; idle timeout reclaims stale TCP connections | Flash crowd larger than pool capacity |
@@ -185,7 +188,7 @@ L4 traffic.
 
 | Target | File | What it fuzzes | Oracle |
 |--------|------|----------------|--------|
-| `FuzzReadProxyHeader` | `internal/stream/fuzz_test.go` | Random PROXY protocol v1/v2 headers | No panic; well-formed local/unknown yields nil addr + nil err; malformed yields error |
+| `FuzzReadHeader` | `internal/proxyproto/proxyproto_test.go` | Random and oversized PROXY protocol v1/v2 headers | No panic; accepted addresses are validated TCP addresses; LOCAL/UNKNOWN may yield nil |
 | `FuzzPeekSNI` | `internal/stream/fuzz_test.go` | Random byte streams as TLS ClientHello | No panic; result is valid string or empty |
 
 Run: `go test -tags stream -fuzz='FuzzReadProxyHeader|FuzzPeekSNI' -fuzztime=15s ./internal/stream/`

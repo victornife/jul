@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"testing"
+	"time"
 )
 
 // TestReasonMappingIsExhaustive walks the whole enum. A Reason added without a
@@ -32,6 +33,7 @@ func TestReasonMappingIsExhaustive(t *testing.T) {
 		ReasonRetryDeadlineExhausted: {http.StatusGatewayTimeout, GRPCCodeDeadlineExceeded},
 		ReasonRequestNotReplayable:   {StatusFromLastAttempt, 0},
 		ReasonClientCancelled:        {StatusClientClosedRequest, GRPCCodeCancelled},
+		ReasonClientDeadline:         {http.StatusGatewayTimeout, GRPCCodeDeadlineExceeded},
 	}
 
 	reasons := Reasons()
@@ -112,6 +114,7 @@ func TestReasonForClassifiesSentinels(t *testing.T) {
 		{"hostname mismatch", x509.HostnameError{Host: "wrong"}, ReasonUpstreamTLSIdentity},
 		{"invalid certificate", x509.CertificateInvalidError{}, ReasonUpstreamTLSIdentity},
 		{"verification error", &tls.CertificateVerificationError{}, ReasonUpstreamTLSIdentity},
+		{"explicit peer identity mismatch", errors.New("backend_tls: peer certificate matches none of the configured identities"), ReasonUpstreamTLSIdentity},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -153,6 +156,14 @@ func TestCancellationDistinguishesTheClientFromOurOwnDeadline(t *testing.T) {
 	// not be reported as a client disconnecting.
 	if got := ReasonFor(context.Canceled, nil); got != ReasonRetryDeadlineExhausted {
 		t.Errorf("cancellation with no inbound context = %q, want %q", got, ReasonRetryDeadlineExhausted)
+	}
+}
+
+func TestInboundDeadlineIsNotAttributedToTheBackend(t *testing.T) {
+	inbound, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if got := ReasonFor(context.DeadlineExceeded, inbound); got != ReasonClientDeadline {
+		t.Fatalf("expired inbound deadline = %q, want %q", got, ReasonClientDeadline)
 	}
 }
 

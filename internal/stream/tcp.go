@@ -57,8 +57,8 @@ func (l *listener) handleTCP(client net.Conn) {
 	s.connDelta("tcp", 1)
 	defer s.connDelta("tcp", -1)
 
-	// Buffer large enough to peek a whole TLS ClientHello for SNI routing.
-	br := bufio.NewReaderSize(client, tlsRecordMax+512)
+	// Buffer large enough for the bounded multi-record ClientHello inspector.
+	br := bufio.NewReaderSize(client, tlsInspectMax)
 
 	clientAddr := client.RemoteAddr()
 	if r.proxyIn {

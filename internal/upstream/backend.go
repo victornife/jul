@@ -74,10 +74,10 @@ type Backend struct {
 	id string
 
 	// weight is atomic so a discovery weight change is applied in place. Reusing
-	// the backend across that change is the point: the reuse key is the address
-	// alone, so retuning a weight no longer resets in-flight accounting or
-	// (from #143) the breaker, which is the moment an operator is most likely to
-	// be watching them.
+	// the backend across that change is the point: the reuse key is logical ID,
+	// network and address (scheme is fixed by the owning pool), so retuning a
+	// weight no longer resets in-flight accounting or the breaker, which is the
+	// moment an operator is most likely to be watching them.
 	weight atomic.Int64
 
 	inflight atomic.Int64

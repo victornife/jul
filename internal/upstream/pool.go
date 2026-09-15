@@ -334,17 +334,17 @@ func (p *Pool) AllowDialFailureLog() bool { return p.dialLog.Allow(dialFailureLo
 
 // UpdateBackends atomically replaces the pool's backend set, preserving the
 // runtime state (in-flight count, passive-failure cooldown) of any backend
-// whose address is unchanged. New addresses get fresh backends; removed
-// addresses are dropped (in-flight requests already holding a pointer keep
-// working until they Release). This is the seam used by config reload and
+// whose network and address are unchanged. New identities get fresh backends;
+// removed backends are dropped (in-flight requests already holding a pointer
+// keep working until they Release). This is the seam used by config reload and
 // dynamic service discovery to update upstreams without a restart.
 //
-// The reuse key is the address alone. Including the weight, as it once did,
-// meant a Consul or DNS-SRV weight flap silently discarded that backend's
-// in-flight accounting and failure history — exactly when an operator is
-// watching them. A changed weight is now applied in place, which is safe
-// because Backend.weight is atomic and the only hot-path reader holds
-// weightedRR's own mutex.
+// The reuse key is logical ID, network and address; scheme is fixed by the
+// owning pool. Including weight, as an older key did, made a Consul or DNS-SRV
+// weight flap silently discard that backend's in-flight accounting and failure
+// history — exactly when an operator is watching them. A changed weight is
+// applied in place; Backend.weight is atomic and the hot-path reader holds
+// weightedRR's mutex.
 func (p *Pool) UpdateBackends(servers []config.UpstreamServer) {
 	cp := p.circuitParams()
 	next := make([]*Backend, 0, len(servers))

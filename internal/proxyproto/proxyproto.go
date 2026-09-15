@@ -52,18 +52,30 @@ func ReadHeader(br *bufio.Reader) (net.Addr, error) {
 
 // readV1 parses the text "PROXY TCP4 src dst sport dport\r\n" form.
 func readV1(br *bufio.Reader) (net.Addr, error) {
-	line, err := br.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("proxy protocol v1: read line: %w", err)
+	// ReadString/ReadBytes grow an allocation until the delimiter arrives, so a
+	// length check after either call does not enforce the protocol's memory
+	// bound. A fixed array makes the 108-byte limit an ingestion property.
+	var bounded [v1MaxLen]byte
+	n := 0
+	for ; n < len(bounded); n++ {
+		b, err := br.ReadByte()
+		if err != nil {
+			return nil, fmt.Errorf("proxy protocol v1: read line: %w", err)
+		}
+		bounded[n] = b
+		if b == '\n' {
+			n++
+			break
+		}
 	}
-	if len(line) > v1MaxLen {
+	if n == len(bounded) && bounded[n-1] != '\n' {
 		return nil, errors.New("proxy protocol v1: header too long")
 	}
-	line = line[:len(line)-1] // drop \n
-	if n := len(line); n > 0 && line[n-1] == '\r' {
-		line = line[:n-1]
+	if n < 2 || bounded[n-2] != '\r' {
+		return nil, errors.New("proxy protocol v1: header must end with CRLF")
 	}
-	fields := bytes.Fields([]byte(line))
+	line := bounded[:n-2]
+	fields := bytes.Fields(line)
 	if len(fields) < 2 || string(fields[0]) != "PROXY" {
 		return nil, errors.New("proxy protocol v1: malformed header")
 	}
@@ -74,15 +86,29 @@ func readV1(br *bufio.Reader) (net.Addr, error) {
 		if len(fields) != 6 {
 			return nil, errors.New("proxy protocol v1: wrong field count")
 		}
-		ip := net.ParseIP(string(fields[2]))
-		if ip == nil {
+		srcIP := net.ParseIP(string(fields[2]))
+		dstIP := net.ParseIP(string(fields[3]))
+		if srcIP == nil {
 			return nil, errors.New("proxy protocol v1: bad source address")
 		}
-		port, err := strconv.Atoi(string(fields[4]))
-		if err != nil || port < 0 || port > 65535 {
+		if dstIP == nil {
+			return nil, errors.New("proxy protocol v1: bad destination address")
+		}
+		if string(fields[1]) == "TCP4" && (srcIP.To4() == nil || dstIP.To4() == nil) {
+			return nil, errors.New("proxy protocol v1: TCP4 requires IPv4 addresses")
+		}
+		if string(fields[1]) == "TCP6" && (srcIP.To4() != nil || dstIP.To4() != nil) {
+			return nil, errors.New("proxy protocol v1: TCP6 requires IPv6 addresses")
+		}
+		srcPort, err := strconv.Atoi(string(fields[4]))
+		if err != nil || srcPort < 0 || srcPort > 65535 {
 			return nil, errors.New("proxy protocol v1: bad source port")
 		}
-		return &net.TCPAddr{IP: ip, Port: port}, nil
+		dstPort, err := strconv.Atoi(string(fields[5]))
+		if err != nil || dstPort < 0 || dstPort > 65535 {
+			return nil, errors.New("proxy protocol v1: bad destination port")
+		}
+		return &net.TCPAddr{IP: srcIP, Port: srcPort}, nil
 	default:
 		return nil, fmt.Errorf("proxy protocol v1: unsupported transport %q", fields[1])
 	}

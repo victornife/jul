@@ -23,14 +23,17 @@ live issue tracker.
   implemented on `main`.
 - Those post-RC capabilities keep their own maturity and delivery rows in
   [status.md](status.md); implementation does not imply stable publication or GA.
-- Generic resilience implementations are substantially merged, while #287/#144
-  retain integrated evidence/external-contract closure at the issue #353
-  baseline.
-- NGINX assessment, provenance and bounded include traversal are merged;
-  compatibility-corpus and later diagnostics work continue separately.
-- The versioned supported external Admin API and remote CLI remain #150/#151.
-- Selected runtime dynamics, support bundle, `jul doctor` and the bounded AI
-  experiment remain later portfolio decisions.
+- Generic resilience is merged; the 2026-09-15 pre-soak correction centralizes
+  cross-protocol failure attribution. Stable release and long-running soak
+  remain explicit later gates.
+- NGINX assessment, provenance, bounded include traversal and the selected
+  compatibility-corpus evidence are merged; later migration expansion is a
+  separate decision.
+- The versioned supported external Admin API and remote CLI are merged Beta
+  surfaces with separate maturity rows; internal Console routes do not inherit
+  that external contract.
+- Selected runtime dynamics, support bundles and `jul doctor` are merged. The
+  bounded AI experiment remains a later portfolio decision.
 
 Volatile issue-level sequencing is owned by
 [#62](https://github.com/victornife/jul/issues/62). Feature maturity/delivery is
@@ -102,10 +105,10 @@ workflow evidence, unavailable lanes and residual risk.
 |---|---|---|---|---|---|---|
 | R13-01 | Concurrent retired connection promotion closes the shared connection | `internal/transcode/invoke.go` | `TestTranscoderRetiredConnectionConcurrentReappearance` | Race test output | ✅ Implemented | `2bdf43e` |
 
-## Deferred work rationale
+## Historical deferral disposition
 
-- **R9-14.4 (never-draining shutdown test)** — transferred to the final lifecycle/soak closure in #106. Existing bounded-shutdown tests remain evidence; no new pre-cache blocker was inferred.
-- **R9-14.5 (hot-added TLS rotation)** — transferred to selected issue #100. HTTP/3 mTLS parity is already corrected by #121; certificate rotation remains later runtime-dynamics work and is not a prerequisite for #131.
+- **R9-14.4 (never-draining shutdown test)** — transferred to and completed by the final selected lifecycle closure in #106; it is no longer deferred work.
+- **R9-14.5 (hot-added TLS rotation)** — transferred to and completed by #100. HTTP/3 mTLS parity was separately corrected by #121; certificate rotation is no longer future runtime-dynamics work.
 
 ## Running the historical evidence tests
 

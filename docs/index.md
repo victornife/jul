@@ -43,8 +43,9 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
   transactional reload, planned restart, managed/file-owned authority and
   generation lifetimes.
 - **[Hot-reload strategy and selection criteria](hot-reload-strategy.md)** —
-  rationale for future live-transition investment; it never overrides the
-  generated field-level lifecycle truth of the current binary.
+  rationale and closure record for selected live-transition investment; it
+  never overrides the generated field-level lifecycle truth of the current
+  binary.
 - **[Generated lifecycle reference](generated/config-lifecycle.md)** and
   **[machine lifecycle metadata](generated/config-lifecycle.json)** — exhaustive
   field-level lifecycle truth from the Go registry.
@@ -97,6 +98,11 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 | Generated configuration contracts and route identity | [generated/config-reference.md](generated/config-reference.md) | `Beta` / `merged` |
 | NGINX migration assessment, provenance, and includes | [nginx-assessment.md](nginx-assessment.md) | `Beta` / `merged` |
 | Local diagnostics and support bundles | [diagnostics.md](diagnostics.md) | `Beta` / `merged` |
+| Admin listener TLS and client authentication | [deployment.md](deployment.md) | `Beta` / `merged` |
+| Versioned external admin API | [admin-api.md](admin-api.md) | `Beta` / `merged` |
+| Remote automation CLI | [remote-cli.md](remote-cli.md) | `Beta` / `merged` |
+| Selected runtime policy hot reload | [hot-reload-strategy.md](hot-reload-strategy.md) | `Beta` / `merged` |
+| HTTP proxy over Unix-domain upstreams | [unix-http-upstreams.md](unix-http-upstreams.md) | `Beta` / `merged` |
 
 Some capabilities share a canonical guide because they compose one subsystem.
 The status manifest still gives each additive capability its own maturity and

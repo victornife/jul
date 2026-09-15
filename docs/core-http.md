@@ -177,12 +177,13 @@ not calling them" call for opposite responses.
 | `proxy_overloaded` | 503 + `Retry-After` | `UNAVAILABLE` | Admission rejected the request |
 | `backend_at_capacity` | 503 | `UNAVAILABLE` | Every candidate is at `max_active_per_backend` |
 | `upstream_connect_failed` | 502 | `UNAVAILABLE` | Dial, handshake or transport failure |
-| `upstream_timeout` | 504 | `DEADLINE_EXCEEDED` | A per-attempt or overall timeout elapsed |
+| `upstream_timeout` | 504 | `DEADLINE_EXCEEDED` | A backend transport timeout elapsed |
 | `upstream_tls_identity` | 502 | `UNAVAILABLE` | The backend failed to prove its identity (deterministic, never retried) |
 | `retry_budget_exhausted` | last attempt's status | last attempt's code | Retries suppressed by the pool budget |
 | `retry_deadline_exhausted` | 504 | `DEADLINE_EXCEEDED` | The overall retry deadline was consumed |
 | `request_not_replayable` | last attempt's status | last attempt's code | Method, body or an already-started response forbade another attempt |
 | `client_cancelled` | 499 | `CANCELLED` | The inbound request context was cancelled — the client went away |
+| `client_deadline` | 504 | `DEADLINE_EXCEEDED` | The deadline supplied by the inbound caller elapsed; backend health remains neutral |
 
 Retry suppression never overwrites the status a backend actually produced:
 reporting 503 because a budget was spent would hide a 500 the client needs.

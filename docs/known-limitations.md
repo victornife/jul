@@ -10,9 +10,10 @@ closed issue must not remain phrased as future work.
 
 ## Active correctness or security defects
 
-No repository-wide P0/P1 defect is being declared by this document at the issue
-#353 baseline. Newly discovered correctness/security findings still pre-empt the
-roadmap and must be tracked in focused issues with tests and disposition.
+This page is not an audit authority and does not waive a current finding. The
+2026-09-15 pre-soak corrections are accepted only when their deterministic,
+race, fuzz, cross-platform, security and documentation gates pass; newly
+discovered correctness/security findings still pre-empt the roadmap.
 
 ## Implemented on `main`, not yet stable GA publication
 
@@ -21,14 +22,22 @@ roadmap and must be tracked in focused issues with tests and disposition.
 - **Backend TLS trust (`backend_tls`):** merged Beta across HTTP, native gRPC,
   transcoding/reflection and active health probes; stable tag/soak promotion
   remains open.
+- **Admin TLS/mTLS, external API and remote CLI:** merged Beta surfaces; none
+  inherits the older admin/Console maturity or soak record.
+- **Selected runtime-policy hot reload:** merged Beta; explicit restart
+  boundaries remain and universal hot reload is not claimed.
+- **HTTP over Unix-domain upstreams:** merged Beta for named plaintext HTTP/1.1
+  pools. TLS, HTTP/2 and direct Unix `proxy_pass` remain outside its contract.
 - **Routing and response policy:** method/header/query predicates,
   response-header operations and CORS are merged after the current RC.
 - **Generic resilience:** admission, retry and circuit implementations are
-  merged; #287/#144 retain the integrated race/fuzz/soak and complete
-  external-contract closure at this baseline.
+  merged. Cross-protocol failure attribution now keeps client/Jul-owned
+  cancellation neutral while backend transport/protocol faults still affect
+  the circuit; stable release and long-running soak remain open.
 - **Configuration authority/generated contracts:** managed/file-owned authority,
   drift/adoption, route identity, JSON Schema, metadata and generated reference
-  are merged; the supported external API and remote CLI remain #150/#151.
+  are merged. The later supported external API and remote CLI have separate
+  Beta maturity entries.
 - **NGINX assessment/provenance/includes:** schema-v2 assessment and bounded
   source traversal are merged separately from the released base importer GA row.
 - **Auxiliary egress allow-list:** present in `v1.32.1-rc.1`; the prerelease is
@@ -406,8 +415,9 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   server whose WebSocket path does not implement it. A WebSocket upgrade over HTTP/3 will be
   rejected. Browsers fall back to an HTTP/1.1 connection for the WebSocket, so nothing is
   unreachable.
-- **HTTP/3 settings require a restart.** The QUIC listener is built at bind
-  time; changes to `[servers.http3]` take effect only after a full restart.
+- **HTTP/3 enablement requires a restart.** The QUIC listener is built at bind
+  time, so `servers.*.http3.enabled` remains restart-bound. The Alt-Svc
+  advertisement max-age is hot-reloadable and does not rebind the listener.
 - **QUIC path MTU discovery.** Some networks drop oversized UDP packets; QUIC
   PMTUD mitigates this, but a few firewall configurations may block or
   rate-limit QUIC traffic, causing clients to fall back to TCP.
@@ -419,7 +429,10 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 - **Local only.** Rate-limit state is per-process. A fleet of Jul.IA nodes
   each enforce their own bucket independently — there is no distributed token
   bucket.
-- **Trusted-proxy identity is not yet first-class.** IP-keyed limiting uses the direct transport peer. Do not switch security identity to an arbitrary forwarding header; canonical trusted-proxy chain handling is tracked by #115, #135 and #136.
+- **Trusted-proxy scope is security-sensitive.** IP-keyed limiting uses the
+  canonical client address derived by `[servers.client_address]`; without that
+  policy it is the direct transport peer. An over-broad `trusted_proxies` range
+  lets every covered peer assert the rate-limit identity, so keep it narrow.
 - **In-memory only.** Rate-limit state is lost on restart; token buckets reset.
 
 ---
@@ -429,8 +442,10 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 - **No application-layer inspection.** TCP/UDP relay is byte-for-byte; Jul.IA
   cannot read HTTP headers, terminate TLS (only SNI passthrough), or parse
   wire protocols.
-- **SNI routing reads only the first TLS record.** A ClientHello that spans
-  multiple records or omits SNI falls back to the default route.
+- **SNI inspection is deliberately bounded.** Jul peeks at most a 16 KiB
+  ClientHello across at most 64 handshake records. A hello without SNI, above
+  either cap or structurally malformed falls back to the default route; the
+  original TLS bytes remain untouched for passthrough.
 - **UDP sessions are memory-backed.** Spoofed source addresses can fill the
   session table up to the configured cap; monitor `jul_stream_active_conns{proto="udp"}`.
 - **No UDP load balancing.** UDP streams have a single backend per listener;

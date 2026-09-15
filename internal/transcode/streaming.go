@@ -26,14 +26,12 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
-// streamHealth indicates whether a streaming transcoding call resulted in a
-// genuine backend success, a backend failure, or a neutral outcome (client-side
-// error or encoding failure) that should not affect the backend's health state.
+// streamHealth indicates whether a streaming call completed successfully or
+// already recorded a typed failure/neutral result at the point it occurred.
 type streamHealth int
 
 const (
-	healthNeutral streamHealth = iota
-	healthFailure
+	healthRecorded streamHealth = iota
 	healthSuccess
 )
 
@@ -60,9 +58,7 @@ func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *
 		code := httpStatusFromCode(status.Code(err))
 		t.writeError(w, code, status.Convert(err).Message())
 		t.report(method, code)
-		if isBackendFailure(status.Code(err)) {
-			t.pool.MarkFailure(backend)
-		}
+		t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), ctx))
 		return
 	}
 
@@ -76,7 +72,7 @@ func (t *Transcoder) serveStreaming(w http.ResponseWriter, r *http.Request, rt *
 		health = t.serveBidiStream(w, r, rt, vars, cs, cancel, method, backend)
 	}
 	if health == healthSuccess {
-		t.pool.MarkSuccess(backend)
+		t.pool.RecordAttempt(backend, upstream.SuccessfulAttempt())
 	}
 }
 
@@ -88,18 +84,19 @@ func (t *Transcoder) serveServerStream(w http.ResponseWriter, r *http.Request, r
 		code := requestErrorStatus(err)
 		t.writeError(w, code, err.Error())
 		t.report(method, code)
-		return healthNeutral
+		t.pool.RecordAttempt(backend, upstream.JulPolicyFailure(""))
+		return healthRecorded
 	}
 	if err := cs.SendMsg(req); err != nil {
 		t.streamSetupError(w, err, method)
-		t.pool.MarkFailure(backend)
-		return healthFailure
+		t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), cs.Context()))
+		return healthRecorded
 	}
 	t.streamMsg(method, "sent")
 	_ = cs.CloseSend()
 
 	resp := newStreamResponder(w, t.streamMode)
-	return t.pumpReplies(resp, cs, rt, method, backend)
+	return t.pumpReplies(resp, cs, rt, method, backend, r.Context())
 }
 
 // serveClientStream reads a sequence of JSON request frames (a JSON array or
@@ -107,35 +104,35 @@ func (t *Transcoder) serveServerStream(w http.ResponseWriter, r *http.Request, r
 // returns the single reply as one JSON object.
 func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, cancel context.CancelFunc, method string, backend upstream.Attempt) streamHealth {
 	if err := t.sendRequestFrames(r, rt, vars, cs); err != nil {
-		cancel()
 		var de *decodeError
 		if errors.As(err, &de) {
+			cancel()
 			t.writeError(w, http.StatusBadRequest, de.Error())
 			t.report(method, http.StatusBadRequest)
-			return healthNeutral
+			t.pool.RecordAttempt(backend, upstream.JulPolicyFailure(""))
+			return healthRecorded
 		}
-		if isBackendFailure(status.Code(err)) {
-			t.pool.MarkFailure(backend)
-		}
+		classification := classifyGRPCAttempt(err, r.Context(), cs.Context())
+		cancel()
+		t.pool.RecordAttempt(backend, classification)
 		t.streamSetupError(w, err, method)
-		return healthFailure
+		return healthRecorded
 	}
 	_ = cs.CloseSend()
 
 	out := dynamicpb.NewMessage(rt.method.Output())
 	if err := cs.RecvMsg(out); err != nil {
-		if isBackendFailure(status.Code(err)) {
-			t.pool.MarkFailure(backend)
-		}
+		t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), cs.Context()))
 		t.streamSetupError(w, err, method)
-		return healthFailure
+		return healthRecorded
 	}
 	t.streamMsg(method, "recv")
 	body, err := t.marshalReply(out)
 	if err != nil {
 		t.writeError(w, http.StatusInternalServerError, "encode response: "+err.Error())
 		t.report(method, http.StatusInternalServerError)
-		return healthNeutral
+		t.pool.RecordAttempt(backend, upstream.JulPolicyFailure(""))
+		return healthRecorded
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -148,12 +145,18 @@ func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, r
 // streaming reply frames back to the client over the same HTTP/2 request.
 func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, cancel context.CancelFunc, method string, backend upstream.Attempt) streamHealth {
 	var (
-		mu      sync.Mutex
-		sendErr error
+		mu                 sync.Mutex
+		sendErr            error
+		sendClassification upstream.AttemptClassification
 	)
 	setSendErr := func(err error) {
 		mu.Lock()
 		sendErr = err
+		if isDecodeError(err) {
+			sendClassification = upstream.JulPolicyFailure("")
+		} else {
+			sendClassification = classifyGRPCAttempt(err, r.Context(), cs.Context())
+		}
 		mu.Unlock()
 		cancel()
 	}
@@ -174,17 +177,13 @@ func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt 
 		if err := cs.RecvMsg(out); err != nil {
 			mu.Lock()
 			se := sendErr
+			sc := sendClassification
 			mu.Unlock()
 			if se != nil {
-				if !isDecodeError(se) && isBackendFailure(status.Code(se)) {
-					t.pool.MarkFailure(backend)
-					t.finishStreamError(w, resp, se, method)
-					<-done
-					return healthFailure
-				}
+				t.pool.RecordAttempt(backend, sc)
 				t.finishStreamError(w, resp, se, method)
 				<-done
-				return healthNeutral
+				return healthRecorded
 			}
 			if errors.Is(err, io.EOF) {
 				resp.end()
@@ -192,25 +191,25 @@ func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt 
 				<-done
 				return healthSuccess
 			}
-			if isBackendFailure(status.Code(err)) {
-				t.pool.MarkFailure(backend)
-			}
+			t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), cs.Context()))
 			t.finishStreamError(w, resp, err, method)
 			<-done
-			return healthFailure
+			return healthRecorded
 		}
 		body, mErr := t.marshalReply(out)
 		if mErr != nil {
 			t.finishStreamError(w, resp, mErr, method)
 			cancel()
 			<-done
-			return healthNeutral
+			t.pool.RecordAttempt(backend, upstream.JulPolicyFailure(""))
+			return healthRecorded
 		}
 		if err := resp.message(body); err != nil {
 			cancel()
 			<-done
 			t.report(method, http.StatusOK)
-			return healthNeutral
+			t.pool.RecordAttempt(backend, upstream.ClientCancellationResult())
+			return healthRecorded
 		}
 		t.streamMsg(method, "recv")
 	}
@@ -219,7 +218,7 @@ func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt 
 // pumpReplies streams every reply message from cs to the client, mapping a
 // terminal gRPC error to an HTTP error (before the first frame) or an error
 // frame (after streaming has started).
-func (t *Transcoder) pumpReplies(resp *streamResponder, cs grpc.ClientStream, rt *route, method string, backend upstream.Attempt) streamHealth {
+func (t *Transcoder) pumpReplies(resp *streamResponder, cs grpc.ClientStream, rt *route, method string, backend upstream.Attempt, inbound context.Context) streamHealth {
 	for {
 		out := dynamicpb.NewMessage(rt.method.Output())
 		if err := cs.RecvMsg(out); err != nil {
@@ -228,20 +227,20 @@ func (t *Transcoder) pumpReplies(resp *streamResponder, cs grpc.ClientStream, rt
 				t.report(method, http.StatusOK)
 				return healthSuccess
 			}
-			if isBackendFailure(status.Code(err)) {
-				t.pool.MarkFailure(backend)
-			}
+			t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, inbound, cs.Context()))
 			t.finishStreamError(resp.w, resp, err, method)
-			return healthFailure
+			return healthRecorded
 		}
 		body, mErr := t.marshalReply(out)
 		if mErr != nil {
 			t.finishStreamError(resp.w, resp, mErr, method)
-			return healthNeutral
+			t.pool.RecordAttempt(backend, upstream.JulPolicyFailure(""))
+			return healthRecorded
 		}
 		if err := resp.message(body); err != nil {
 			t.report(method, http.StatusOK)
-			return healthNeutral
+			t.pool.RecordAttempt(backend, upstream.ClientCancellationResult())
+			return healthRecorded
 		}
 		t.streamMsg(method, "recv")
 	}

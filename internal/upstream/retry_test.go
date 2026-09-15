@@ -510,16 +510,26 @@ func TestDoReleasesEveryFailedAttempt(t *testing.T) {
 func TestDoRetainsTheSuccessfulBackend(t *testing.T) {
 	p := testPool(t, "127.0.0.1:1")
 	var kept Attempt
-	reason, err := p.Do(context.Background(), RetryRequest{Replayable: true},
+	finish := context.CancelFunc(func() {})
+	var retainedContext context.Context
+	reason, err := p.Do(context.Background(), RetryRequest{Replayable: true, Deadline: time.Hour},
 		func(ctx context.Context, b Attempt, n int) AttemptResult {
 			kept = b
-			return AttemptResult{Retain: true}
+			retainedContext = ctx
+			return AttemptResult{Retain: true, RetainContext: &finish}
 		})
 	if err != nil || reason != StopSuccess {
 		t.Fatalf("Do = %q, %v; want success", reason, err)
 	}
 	if got := kept.inflight.Load(); got != 1 {
 		t.Fatalf("retained backend in-flight is %d, want the caller to still own 1", got)
+	}
+	if err := retainedContext.Err(); err != nil {
+		t.Fatalf("retained deadline context ended with Do: %v", err)
+	}
+	finish()
+	if !errors.Is(retainedContext.Err(), context.Canceled) {
+		t.Fatalf("retained deadline cleanup left context error %v, want canceled", retainedContext.Err())
 	}
 	p.Release(kept.Backend)
 	if got := kept.inflight.Load(); got != 0 {

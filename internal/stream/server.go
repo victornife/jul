@@ -479,7 +479,7 @@ func (l *listener) dialBackend(pool *upstream.Pool, network string, timeout time
 		conn, derr := net.DialTimeout(network, b.Address, timeout)
 		if derr != nil {
 			reason := upstream.ClassifyDialError(derr)
-			tripped := pool.MarkFailure(b)
+			tripped := pool.RecordAttempt(b, upstream.ClassifyAttemptError(derr, nil, nil))
 			pool.Release(b.Backend)
 			l.server.dialFailure(network, reason)
 			switch {
@@ -491,7 +491,7 @@ func (l *listener) dialBackend(pool *upstream.Pool, network string, timeout time
 			lastErr = derr
 			continue
 		}
-		if pool.MarkSuccess(b) {
+		if pool.RecordAttempt(b, upstream.SuccessfulAttempt()) {
 			l.server.log.Info("stream: backend recovered", "addr", l.addr, "proto", network, "backend", b.Address)
 		}
 		return conn, b, nil

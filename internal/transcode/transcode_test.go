@@ -135,6 +135,9 @@ func startEchoServer(t testing.TB, fd protoreflect.FileDescriptor, withReflectio
 			return nil, status.Error(codes.NotFound, "item not found")
 		case message == "unavailable":
 			return nil, status.Error(codes.Unavailable, "backend down")
+		case message == "block":
+			<-ctx.Done()
+			return nil, status.FromContextError(ctx.Err()).Err()
 		case message == "whoami":
 			if md, ok := metadata.FromIncomingContext(ctx); ok {
 				if v := md.Get("authorization"); len(v) > 0 {
@@ -303,6 +306,41 @@ func TestTranscodeGRPCErrorMapped(t *testing.T) {
 	}
 	if !strings.Contains(body, "item not found") {
 		t.Errorf("body %q missing grpc status message", body)
+	}
+}
+
+func TestTranscodedUnaryClientCancellationIsHealthNeutral(t *testing.T) {
+	tr := newEchoTranscoder(t, false)
+	backend := tr.pool.Backends()[0]
+
+	for i := 0; i < 5; i++ { // exceeds this pool's max_fails=3 threshold
+		ctx, cancel := context.WithCancel(context.Background())
+		req := httptest.NewRequest(http.MethodPost, "/v1/echo", strings.NewReader(`{"message":"block"}`)).WithContext(ctx)
+		rec := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			tr.ServeHTTP(rec, req)
+			close(done)
+		}()
+		deadline := time.Now().Add(time.Second)
+		for backend.Inflight() == 0 && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		if backend.Inflight() == 0 {
+			cancel()
+			<-done
+			t.Fatal("request was not admitted before cancellation")
+		}
+		cancel()
+		<-done
+	}
+
+	if !backend.Available() || backend.FailCount() != 0 || backend.Inflight() != 0 {
+		t.Fatalf("client cancellations changed transcoded backend health: available=%t fails=%d inflight=%d", backend.Available(), backend.FailCount(), backend.Inflight())
+	}
+	res, body := doRequest(t, tr, http.MethodPost, "/v1/echo", `{"message":"healthy"}`, nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("healthy request after cancellation = %d, body=%s", res.StatusCode, body)
 	}
 }
 

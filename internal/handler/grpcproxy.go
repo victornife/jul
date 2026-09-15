@@ -106,7 +106,7 @@ func NewGRPCProxy(ctx context.Context, _ config.ServerConfig, loc config.Locatio
 // a gateway error.
 type grpcBalancingTransport struct {
 	pool     *upstream.Pool
-	base     *http2.Transport
+	base     grpcRoundTripper
 	log      *slog.Logger
 	onStream func()
 	// tlsBackend records that the route is configured for TLS gRPC. A backend
@@ -115,12 +115,26 @@ type grpcBalancingTransport struct {
 	tlsBackend bool
 }
 
+// grpcRoundTripper keeps the production HTTP/2 transport replaceable by a
+// deterministic test transport. The interface is intentionally the single
+// method the balancer consumes; transport ownership and retirement remain on
+// the concrete *http2.Transport built by NewGRPCProxy.
+type grpcRoundTripper interface {
+	RoundTrip(*http.Request) (*http.Response, error)
+}
+
 func (t *grpcBalancingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	b, err := t.pool.PickCtx(req.Context())
 	if err != nil {
 		return nil, err
 	}
+	if b.URL == nil {
+		t.pool.RecordAttempt(b, upstream.JulPolicyFailure(""))
+		t.pool.Release(b.Backend)
+		return nil, fmt.Errorf("grpc backend network %s is not supported", b.Network)
+	}
 	if t.tlsBackend && b.URL.Scheme != "https" {
+		t.pool.RecordAttempt(b, upstream.JulPolicyFailure(upstream.ReasonUpstreamTLSIdentity))
 		t.pool.Release(b.Backend)
 		return nil, fmt.Errorf("grpc backend %s is not https but the route is: refusing to downgrade to h2c", b.URL.Host)
 	}
@@ -129,17 +143,25 @@ func (t *grpcBalancingTransport) RoundTrip(req *http.Request) (*http.Response, e
 
 	resp, err := t.base.RoundTrip(req)
 	if err != nil {
-		t.pool.MarkFailure(b)
+		classification := upstream.ClassifyAttemptError(err, req.Context(), req.Context())
+		t.pool.RecordAttempt(b, classification)
 		t.pool.Release(b.Backend)
 		return nil, err
 	}
-	t.pool.MarkSuccess(b)
 	if t.onStream != nil {
 		t.onStream()
 	}
-	// Hold the in-flight slot until the response body is closed so least-conn
-	// balancing reflects the full call (including a long-lived stream).
-	resp.Body = &releaseBody{ReadCloser: resp.Body, release: func() { t.pool.Release(b.Backend) }}
+	// Hold both the health verdict and the in-flight slot until the response
+	// body ends. A client cancellation after headers is neutral; a complete
+	// application response is success; a backend-owned body error is failure.
+	if resp.Body == nil {
+		resp.Body = http.NoBody
+	}
+	resp.Body = upstream.WrapAttemptBody(resp.Body, resp.ContentLength, req.Context(), req.Context(),
+		func(classification upstream.AttemptClassification, _ error) {
+			t.pool.RecordAttempt(b, classification)
+			t.pool.Release(b.Backend)
+		})
 	return resp, nil
 }
 

@@ -143,12 +143,14 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		client gofast.Client
 		chosen upstream.Attempt
 	)
+	finishRetryContext := context.CancelFunc(func() {})
 	_, err := h.pool.Do(r.Context(), h.pool.RetryRequestFor(h.retryOverride, replayable),
 		func(ctx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
 			req := r
 			if n > 1 && r.GetBody != nil {
 				body, berr := r.GetBody()
 				if berr != nil {
+					h.pool.RecordAttempt(b, upstream.JulPolicyFailure(upstream.ReasonRequestNotReplayable))
 					return upstream.AttemptResult{Err: berr, Terminal: true}
 				}
 				req = r.Clone(ctx)
@@ -159,27 +161,27 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return h.dialer.DialContext(ctx, b.Network, b.Address)
 			})()
 			if derr != nil {
-				h.noteFailure(b, derr, "fastcgi dial failed")
+				h.noteFailure(b, derr, r.Context(), ctx, false, "fastcgi dial failed")
 				return upstream.AttemptResult{Err: derr}
 			}
 
 			p, serr := h.session(c, gofast.NewRequest(req))
 			if serr != nil {
 				_ = c.Close()
-				h.noteFailure(b, serr, "fastcgi session failed")
+				h.noteFailure(b, serr, r.Context(), ctx, true, "fastcgi session failed")
 				return upstream.AttemptResult{Err: serr}
 			}
 
-			h.pool.MarkSuccess(b)
 			pipe, client, chosen = p, c, b
 			// The connection and the backend slot must outlive the attempt:
 			// the response has not been read yet.
-			return upstream.AttemptResult{Retain: true}
+			return upstream.AttemptResult{Retain: true, RetainContext: &finishRetryContext}
 		})
 	if err != nil {
 		h.fail(w, r, upstreamErrorStatus(err), err)
 		return
 	}
+	defer finishRetryContext()
 	defer h.pool.Release(chosen.Backend)
 	defer func() {
 		if cerr := client.Close(); cerr != nil && h.log != nil {
@@ -189,7 +191,22 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Past this point a byte may reach the client, so nothing here is retried.
 	errBuffer := new(bytes.Buffer)
-	if werr := pipe.WriteTo(w, errBuffer); werr != nil && h.log != nil {
+	downstream := &writeTrackingResponseWriter{
+		ResponseWriter: w,
+		onWriteError:   pipe.Close,
+	}
+	werr := pipe.WriteTo(downstream, errBuffer)
+	switch {
+	case r.Context().Err() != nil:
+		h.pool.RecordAttempt(chosen, upstream.ClassifyAttemptError(r.Context().Err(), r.Context(), r.Context()))
+	case downstream.writeErr != nil:
+		h.pool.RecordAttempt(chosen, upstream.ClientCancellationResult())
+	case werr != nil:
+		h.pool.RecordAttempt(chosen, upstream.ClassifyProtocolError(werr, r.Context(), r.Context()))
+	default:
+		h.pool.RecordAttempt(chosen, upstream.SuccessfulAttempt())
+	}
+	if werr != nil && h.log != nil {
 		h.log.Warn("fastcgi response write failed", "upstream", h.pool.Name(), "backend", chosen.Address, "error", werr)
 	}
 	if errBuffer.Len() > 0 && h.log != nil {
@@ -206,8 +223,15 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // noteFailure records a failed attempt against passive health and logs it on
 // the pool's shared throttle, so a backend outage cannot flood the log through
 // the CGI path any more than through the HTTP one.
-func (h *fastcgiHandler) noteFailure(b upstream.Attempt, err error, msg string) {
-	tripped := h.pool.MarkFailure(b)
+func (h *fastcgiHandler) noteFailure(b upstream.Attempt, err error, inbound, attempt context.Context, protocol bool, msg string) {
+	classification := upstream.ClassifyAttemptError(err, inbound, attempt)
+	if protocol {
+		classification = upstream.ClassifyProtocolError(err, inbound, attempt)
+	}
+	tripped := h.pool.RecordAttempt(b, classification)
+	if classification.Health() != upstream.HealthFailure {
+		return
+	}
 	if h.log == nil {
 		return
 	}
@@ -309,6 +333,7 @@ func (h *uwsgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		conn   net.Conn
 		chosen upstream.Attempt
 	)
+	finishRetryContext := context.CancelFunc(func() {})
 	_, err := h.pool.Do(r.Context(), h.pool.RetryRequestFor(h.retryOverride, replayable),
 		func(ctx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
 			body := r.Body
@@ -319,6 +344,7 @@ func (h *uwsgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if r.GetBody != nil {
 					rewound, berr := r.GetBody()
 					if berr != nil {
+						h.pool.RecordAttempt(b, upstream.JulPolicyFailure(upstream.ReasonRequestNotReplayable))
 						return upstream.AttemptResult{Err: berr, Terminal: true}
 					}
 					body = rewound
@@ -329,7 +355,7 @@ func (h *uwsgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// like every other transport, rather than a hardcoded ten seconds.
 			c, derr := h.dialer.DialContext(ctx, b.Network, b.Address)
 			if derr != nil {
-				h.noteFailure(b, derr, "uwsgi dial failed")
+				h.noteFailure(b, derr, r.Context(), ctx, false, "uwsgi dial failed")
 				return upstream.AttemptResult{Err: derr}
 			}
 			if dl, ok := ctx.Deadline(); ok {
@@ -337,30 +363,47 @@ func (h *uwsgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			if serr := h.sendRequest(c, r, body); serr != nil {
 				_ = c.Close()
-				h.noteFailure(b, serr, "uwsgi request send failed")
+				h.noteFailure(b, serr, r.Context(), ctx, true, "uwsgi request send failed")
 				return upstream.AttemptResult{Err: serr}
 			}
 
-			h.pool.MarkSuccess(b)
 			conn, chosen = c, b
 			// The connection and the backend slot must outlive the attempt: the
 			// response has not been read yet.
-			return upstream.AttemptResult{Retain: true}
+			return upstream.AttemptResult{Retain: true, RetainContext: &finishRetryContext}
 		})
 	if err != nil {
 		h.fail(w, r, upstreamErrorStatus(err), err)
 		return
 	}
+	defer finishRetryContext()
 	defer h.pool.Release(chosen.Backend)
 	defer conn.Close()
+	stopCancellation := context.AfterFunc(r.Context(), func() {
+		// A context cancellation does not interrupt an arbitrary net.Conn read.
+		// Expiring the deadline wakes writeCGIResponse so the attempt can release
+		// its in-flight/probe state and be classified as client-owned.
+		_ = conn.SetDeadline(time.Now())
+	})
+	defer stopCancellation()
 
 	// Past this point a byte may reach the client, so nothing here is retried.
-	if err := writeCGIResponse(bufio.NewReader(conn), w); err != nil && !errors.Is(err, io.EOF) {
+	downstream := &writeTrackingResponseWriter{ResponseWriter: w}
+	rerr := writeCGIResponse(bufio.NewReader(conn), downstream)
+	switch {
+	case r.Context().Err() != nil:
+		h.pool.RecordAttempt(chosen, upstream.ClassifyAttemptError(r.Context().Err(), r.Context(), r.Context()))
+	case downstream.writeErr != nil:
+		h.pool.RecordAttempt(chosen, upstream.ClientCancellationResult())
+	case rerr != nil:
+		h.pool.RecordAttempt(chosen, upstream.ClassifyProtocolError(rerr, r.Context(), r.Context()))
+	default:
+		h.pool.RecordAttempt(chosen, upstream.SuccessfulAttempt())
+	}
+	if rerr != nil && h.log != nil {
 		// Headers may already be written; just log.
-		if h.log != nil {
-			h.log.Error("uwsgi response error", "path", r.URL.Path, "error", err,
-				"request_id", middleware.RequestIDFrom(r.Context()))
-		}
+		h.log.Error("uwsgi response error", "path", r.URL.Path, "error", rerr,
+			"request_id", middleware.RequestIDFrom(r.Context()))
 	}
 }
 
@@ -398,8 +441,15 @@ func (h *uwsgiHandler) sendRequest(conn net.Conn, r *http.Request, body io.ReadC
 
 // noteFailure records a failed attempt against passive health and logs it on
 // the pool's shared throttle.
-func (h *uwsgiHandler) noteFailure(b upstream.Attempt, err error, msg string) {
-	tripped := h.pool.MarkFailure(b)
+func (h *uwsgiHandler) noteFailure(b upstream.Attempt, err error, inbound, attempt context.Context, protocol bool, msg string) {
+	classification := upstream.ClassifyAttemptError(err, inbound, attempt)
+	if protocol {
+		classification = upstream.ClassifyProtocolError(err, inbound, attempt)
+	}
+	tripped := h.pool.RecordAttempt(b, classification)
+	if classification.Health() != upstream.HealthFailure {
+		return
+	}
 	if h.log == nil {
 		return
 	}
@@ -509,47 +559,100 @@ func buildCGIParams(loc config.LocationConfig, r *http.Request) map[string]strin
 
 // writeCGIResponse parses a CGI-style response (optional HTTP status line, then
 // headers, a blank line, and the body) and writes it to w.
+const (
+	cgiResponseHeaderMax    = 64 << 10
+	cgiResponseHeaderFields = 256
+)
+
+// writeTrackingResponseWriter identifies a downstream write failure even when
+// the request context has not propagated its cancellation yet. CGI parsers can
+// otherwise only return one opaque copy error, which must not be blamed on the
+// selected backend when the failing side was the client connection.
+type writeTrackingResponseWriter struct {
+	http.ResponseWriter
+	writeErr     error
+	onWriteError func()
+}
+
+func (w *writeTrackingResponseWriter) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	if err != nil && w.writeErr == nil {
+		w.writeErr = err
+		if w.onWriteError != nil {
+			w.onWriteError()
+		}
+	}
+	return n, err
+}
+
 func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 	status := http.StatusOK
 	first := true
+	headerBytes := 0
+	headerFields := 0
 	for {
-		line, err := br.ReadString('\n')
-		trimmed := strings.TrimRight(line, "\r\n")
-		if trimmed == "" {
-			if line != "" || err == nil {
-				break // end of header block
-			}
-			// Reached only when line == "" and err != nil.
+		line, err := br.ReadSlice('\n')
+		headerBytes += len(line)
+		if errors.Is(err, bufio.ErrBufferFull) || headerBytes > cgiResponseHeaderMax {
+			return errors.New("uwsgi response header exceeds 64 KiB")
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
 			return err
+		}
+		if len(line) == 0 && errors.Is(err, io.EOF) {
+			return io.ErrUnexpectedEOF
+		}
+		if line[len(line)-1] != '\n' {
+			return io.ErrUnexpectedEOF
+		}
+		trimmed := strings.TrimRight(string(line), "\r\n")
+		if trimmed == "" {
+			break // end of header block
 		}
 
 		if first && strings.HasPrefix(trimmed, "HTTP/") {
-			if fields := strings.SplitN(trimmed, " ", 3); len(fields) >= 2 {
-				if c, e := strconv.Atoi(fields[1]); e == nil {
-					status = c
-				}
+			fields := strings.Fields(trimmed)
+			if len(fields) < 2 {
+				return errors.New("uwsgi response has malformed HTTP status line")
 			}
+			code, parseErr := strconv.Atoi(fields[1])
+			if parseErr != nil || code < 100 || code > 999 {
+				return errors.New("uwsgi response has invalid HTTP status")
+			}
+			status = code
 			first = false
-			if err != nil {
-				break
-			}
 			continue
 		}
 		first = false
 
-		if idx := strings.IndexByte(trimmed, ':'); idx >= 0 {
-			key := strings.TrimSpace(trimmed[:idx])
-			val := strings.TrimSpace(trimmed[idx+1:])
-			if strings.EqualFold(key, "Status") {
-				if c, e := strconv.Atoi(strings.Fields(val)[0]); e == nil {
-					status = c
-				}
-			} else {
-				w.Header().Add(key, val)
-			}
+		idx := strings.IndexByte(trimmed, ':')
+		if idx <= 0 {
+			return errors.New("uwsgi response has malformed header line")
 		}
-		if err != nil {
-			break
+		headerFields++
+		if headerFields > cgiResponseHeaderFields {
+			return errors.New("uwsgi response has too many header fields")
+		}
+		key := strings.TrimSpace(trimmed[:idx])
+		val := strings.TrimSpace(trimmed[idx+1:])
+		if key == "" || strings.ContainsAny(key, " \t\x00") || strings.ContainsRune(val, '\x00') {
+			return errors.New("uwsgi response has invalid header")
+		}
+		if strings.EqualFold(key, "Status") {
+			fields := strings.Fields(val)
+			if len(fields) == 0 {
+				return errors.New("uwsgi response has empty Status header")
+			}
+			code, parseErr := strconv.Atoi(fields[0])
+			if parseErr != nil || code < 100 || code > 999 {
+				return errors.New("uwsgi response has invalid Status header")
+			}
+			status = code
+		} else {
+			w.Header().Add(key, val)
 		}
 	}
 

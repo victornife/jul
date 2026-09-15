@@ -13,10 +13,10 @@
 # it its own entry or an explicit relationship. A GA row must be released and
 # soaked under ADR 0003/0005. Volatile issue sequencing belongs in #62, not here.
 #
-# Updated 2026-08-30 for issue #353.
+# Updated 2026-09-15 for the pre-soak reconciliation.
 
 version: 2
-updated: '2026-08-30'
+updated: '2026-09-15'
 features:
 - id: Y1-01
   name: TLS + automatic HTTPS (ACME)
@@ -503,8 +503,9 @@ features:
     7: true
     8: true
     9: false
-  notes: 'Admission, retry and circuit slices are merged; #287 and #144 retain the integrated race/fuzz/soak and complete
-    external-contract closure at this baseline.'
+  notes: 'Admission, retry and circuit slices are merged. The pre-soak correction centralizes cross-protocol failure attribution,
+    keeps client and Jul-owned cancellation neutral, and returns neutral half-open probes; stable release and long-running
+    soak remain open.'
 - id: AUTO-AUTH
   name: Configuration authority and managed drift
   tags:
@@ -523,8 +524,8 @@ features:
     7: true
     8: null
     9: true
-  notes: 'Managed/file-owned authority, drift and adoption are merged through #148; the stable external automation API remains
-    #150.'
+  notes: 'Managed/file-owned authority, drift and adoption are merged through #148. The later external automation surfaces
+    have separate AUTO-API and AUTO-CLI maturity entries.'
 - id: AUTO-CONTRACT
   name: Generated configuration contracts and route identity
   tags:
@@ -542,8 +543,8 @@ features:
     7: true
     8: null
     9: null
-  notes: 'JSON Schema, machine metadata, generated factual reference and durable route identity are merged through #149; external
-    OpenAPI is separate work under #150.'
+  notes: 'JSON Schema, machine metadata, generated factual reference and durable route identity are merged through #149. The
+    later generated external OpenAPI contract is tracked separately under AUTO-API.'
 - id: MIG-ASSESS
   name: NGINX migration assessment, provenance, and includes
   tags:
@@ -581,4 +582,105 @@ features:
     8: null
     9: null
   notes: 'Local `jul doctor` and operator-triggered support bundles are merged through #155/#156. They are versioned,
-    bounded, secret-safe and network-free by default. Stable remote API/CLI exposure remains separate work under #150/#151.'
+    bounded, secret-safe and network-free by default. The later reduced remote diagnostics projection does not promote this
+    local capability and is tracked with AUTO-API/AUTO-CLI.'
+- id: ADMIN-TLS
+  name: Admin listener TLS and client authentication
+  tags:
+  - core
+  maturity: Beta
+  delivery: merged
+  doc: deployment.md
+  criteria:
+    1: true
+    2: null
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: null
+    9: true
+  notes: 'Operator-supplied TLS termination, same-path certificate rotation and optional client-certificate authentication
+    are merged through #336. TLS gates the connection and composes with bearer/RBAC authorization; ACME on the admin
+    listener is not claimed. Stable release and soak remain open.'
+- id: AUTO-API
+  name: Versioned external admin API
+  tags:
+  - core
+  maturity: Beta
+  delivery: merged
+  doc: admin-api.md
+  criteria:
+    1: true
+    2: null
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: null
+    9: true
+  notes: 'The classified /api/v1 read and mutation surface, bounded error catalogue, generated OpenAPI contract, transport
+    gate, CAS and idempotency behavior are merged through #150/#393. The older internal Console API remains outside this
+    contract. Stable release and soak remain open.'
+- id: AUTO-CLI
+  name: Remote automation CLI
+  tags:
+  - core
+  maturity: Beta
+  delivery: merged
+  doc: remote-cli.md
+  criteria:
+    1: true
+    2: null
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: null
+    9: null
+  notes: 'The thin remote CLI over the supported /api/v1 contract, including credential precedence, machine output and
+    stable exit classes, is merged through #394. It never falls back to internal Console routes. Stable release and soak
+    remain open.'
+- id: HR-SELECTED
+  name: Selected runtime policy hot reload
+  tags:
+  - core
+  maturity: Beta
+  delivery: merged
+  doc: hot-reload-strategy.md
+  criteria:
+    1: true
+    2: null
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: null
+    9: true
+  notes: 'The selected value-ranked runtime-dynamics tranche is merged: certificate material, logging/cache/admin controls,
+    Alt-Svc, egress generations, tracing sample ratio, audit durability, connection caps, history retention and OCSP policy.
+    Explicit restart boundaries remain documented; this row does not claim universal hot reload or completed soak.'
+- id: HTTP-UNIX
+  name: HTTP proxy over Unix-domain upstreams
+  tags:
+  - core
+  maturity: Beta
+  delivery: merged
+  doc: unix-http-upstreams.md
+  criteria:
+    1: true
+    2: true
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: null
+    9: true
+  notes: 'Named plaintext HTTP/1.1 Unix-socket upstreams are merged through #407 with mixed TCP/Unix balancing, retry,
+    circuit, health, generation retirement, importer and API/Console projection coverage. TLS, backend_tls, HTTP/2 and
+    direct Unix proxy_pass remain explicitly outside the initial contract. Stable release and soak remain open.'
