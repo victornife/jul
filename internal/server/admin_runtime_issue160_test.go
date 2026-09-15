@@ -26,6 +26,111 @@ func issue160Factory(addr string) HandlerFactory {
 	}
 }
 
+// TestServingChangeForcesReloadWhenAdminRuntimeDegraded reproduces a
+// post-#412 pre-soak review finding: an admin runtime resource (durable
+// audit sink, plugin-upload directory) that is currently degraded must not
+// let an otherwise byte-identical reload take the no_change fast path, since
+// that path skips PrepareAdmin/PrepareAdminRuntime entirely and would leave
+// the resource disabled even after an operator repairs it externally.
+func TestServingChangeForcesReloadWhenAdminRuntimeDegraded(t *testing.T) {
+	trafficAddr := freePort(t)
+	cfg := cfgWith(trafficAddr)
+	cfg.Admin = config.AdminConfig{
+		Enabled:             true,
+		Listen:              "127.0.0.1:19092",
+		Token:               "admin-degraded-token",
+		AuditLogFile:        filepath.Join(t.TempDir(), "audit.jsonl"),
+		AuditLogRotateMaxMB: 100,
+		AuditLogRotateKeep:  14,
+	}
+	candidate := normalizedCandidate(t, cfg)
+
+	src := &stubSource{}
+	src.set(candidate.Raw, nil)
+	srv := New(candidate.Effective, candidate.Raw, lifecycle.ComputeFingerprint(candidate.Effective), quietLogger(), issue160Factory(trafficAddr), src, func(context.Context, *config.Config) error { return nil })
+	var prepared atomic.Int64
+	srv.PrepareAdmin = func(config.AdminConfig) (*PreparedCommit, error) {
+		prepared.Add(1)
+		return NewPreparedCommit(func() {}, nil), nil
+	}
+	// Simulate a degraded audit sink: the admin runtime reports itself
+	// unhealthy even though the candidate config is byte-identical to what is
+	// currently live.
+	srv.AdminRuntimeHealthy = func(config.AdminConfig) bool { return false }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reload := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	waitForServe(t, "http://"+trafficAddr+"/", "issue160")
+
+	resultCh := make(chan ReloadResult, 1)
+	reload <- ReloadRequest{ID: "degraded-admin-runtime", Source: ReloadSourceSIGHUP, Result: resultCh}
+	result := <-resultCh
+	if result.Outcome == ReloadNoChange {
+		t.Fatalf("reload = %+v, want a real reload (not no_change) while the admin runtime reports degraded", result)
+	}
+	if prepared.Load() != 1 {
+		t.Fatalf("PrepareAdmin calls = %d, want 1 (a degraded admin runtime must not let no_change skip repair)", prepared.Load())
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+// TestServingChangeStaysNoChangeWhenAdminRuntimeHealthy proves the companion
+// invariant: a healthy admin runtime with unchanged configuration still takes
+// the no_change fast path, so the fix above does not regress the #408/#412
+// optimization for the common case.
+func TestServingChangeStaysNoChangeWhenAdminRuntimeHealthy(t *testing.T) {
+	trafficAddr := freePort(t)
+	cfg := cfgWith(trafficAddr)
+	cfg.Admin = config.AdminConfig{
+		Enabled:             true,
+		Listen:              "127.0.0.1:19093",
+		Token:               "admin-healthy-token",
+		AuditLogFile:        filepath.Join(t.TempDir(), "audit.jsonl"),
+		AuditLogRotateMaxMB: 100,
+		AuditLogRotateKeep:  14,
+	}
+	candidate := normalizedCandidate(t, cfg)
+
+	src := &stubSource{}
+	src.set(candidate.Raw, nil)
+	srv := New(candidate.Effective, candidate.Raw, lifecycle.ComputeFingerprint(candidate.Effective), quietLogger(), issue160Factory(trafficAddr), src, func(context.Context, *config.Config) error { return nil })
+	var prepared atomic.Int64
+	srv.PrepareAdmin = func(config.AdminConfig) (*PreparedCommit, error) {
+		prepared.Add(1)
+		return NewPreparedCommit(func() {}, nil), nil
+	}
+	srv.AdminRuntimeHealthy = func(config.AdminConfig) bool { return true }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reload := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	waitForServe(t, "http://"+trafficAddr+"/", "issue160")
+
+	resultCh := make(chan ReloadResult, 1)
+	reload <- ReloadRequest{ID: "healthy-admin-runtime", Source: ReloadSourceSIGHUP, Result: resultCh}
+	result := <-resultCh
+	if result.Outcome != ReloadNoChange {
+		t.Fatalf("reload = %+v, want no_change when the admin runtime reports healthy and config is unchanged", result)
+	}
+	if prepared.Load() != 0 {
+		t.Fatalf("PrepareAdmin calls = %d, want 0 for a genuine no-op", prepared.Load())
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
 func TestIssue160SourceReloadPublishesAuditSink(t *testing.T) {
 	for _, source := range []ReloadSource{ReloadSourceSIGHUP, ReloadSourceFileWatch} {
 		t.Run(source.String(), func(t *testing.T) {

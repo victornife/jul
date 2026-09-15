@@ -919,6 +919,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		pf.PrepareAdmin = prepareAdmin
 		srv.PrepareAdmin = prepareAdmin
 		srv.AdminTLSInputsUnchanged = adminSrv.TLSInputsUnchanged
+		srv.AdminRuntimeHealthy = adminSrv.RuntimeHealthy
 		go func() {
 			if err := adminSrv.Run(ctx); err != nil {
 				log.Error("admin listener failed", "error", err)

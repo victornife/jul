@@ -251,6 +251,23 @@ func (a *auditLog) prepareTransition(cfg auditSinkConfig) (*preparedAuditSink, e
 	return &preparedAuditSink{log: a, candidate: candidate, cfg: cfg}, nil
 }
 
+// healthyFor reports whether the currently active sink already matches cfg
+// and is usable, without opening or resolving anything. It mirrors the exact
+// no-op condition prepareTransition uses to skip opening a candidate sink, so
+// a semantic no-op reload can reuse it to prove that a repair attempt (a real
+// prepareTransition call) is unnecessary — in particular, it is false for a
+// sink that failed to open at startup or during a previous reload, even when
+// cfg is unchanged, since that failure could have been resolved externally
+// (e.g. the configured path became writable again) without any config edit.
+func (a *auditLog) healthyFor(cfg auditSinkConfig) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !cfg.enabled() {
+		return !a.sinkConfigured
+	}
+	return a.sinkConfigured && a.sinkCfg.equal(cfg) && a.currentSink != nil
+}
+
 func (p *preparedAuditSink) commit() { p.commitWith(nil) }
 
 // commitWith is the exact audit-event publication barrier. publishAdmin is

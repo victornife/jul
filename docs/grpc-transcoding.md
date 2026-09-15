@@ -188,10 +188,6 @@ is a correctness bug; each is a bounded scope decision.
 - **Descriptors are loaded once.** The route table is built at construction (file
   read or one reflection fetch) and on config reload; it does not hot-refresh
   when a backend's reflection schema changes underneath a running config.
-- **No mTLS to the backend for transcoding.** TLS dialing verifies the server
-  against system roots; presenting a client certificate to the backend is not
-  yet configurable here (passthrough topologies can terminate/originate TLS at
-  the edge).
 - **HTTP framing only for streams.** Streamed responses are NDJSON or SSE over
   HTTP/1.1+; there is no gRPC-Web or WebSocket bridge.
 - **RPCs may be cut at the retired-connection grace boundary.**
@@ -291,8 +287,10 @@ All GA criteria are satisfied.
 
 With `tls = true` the transcoder dials the backend using the resolved
 [`backend_tls`](upstreams.md#backend-tls) policy, taken from the location's own
-block or, failing that, from the pool named by `grpc_transcode.target`. The
-gRPC **reflection** fetch uses the same policy as the transcoded calls, so
+block or, failing that, from the pool named by `grpc_transcode.target`. A
+configured `client_cert`/`client_key` presents a client certificate on that
+dial exactly as the HTTP proxy and native gRPC passthrough do (mutual TLS).
+The gRPC **reflection** fetch uses the same policy as the transcoded calls, so
 descriptor discovery cannot reach a backend that live traffic would refuse.
 
 Without a block the previous behaviour is unchanged: a TLS 1.2 floor and the
