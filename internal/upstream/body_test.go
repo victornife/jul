@@ -17,6 +17,11 @@ type closingBody struct{ closeErr error }
 func (*closingBody) Read([]byte) (int, error) { return 0, nil }
 func (b *closingBody) Close() error           { return b.closeErr }
 
+type readErrorBody struct{ err error }
+
+func (b *readErrorBody) Read([]byte) (int, error) { return 0, b.err }
+func (*readErrorBody) Close() error               { return nil }
+
 type errorReadWriteBody struct{ err error }
 
 func (*errorReadWriteBody) Read([]byte) (int, error) { return 0, nil }
@@ -112,6 +117,24 @@ func TestAttemptBodyCompleteReadIsSuccess(t *testing.T) {
 	_ = wrapped.Close()
 	if calls != 1 || got.Health() != HealthSuccess {
 		t.Fatalf("read classification health=%d calls=%d, want success once", got.Health(), calls)
+	}
+}
+
+func TestAttemptBodyReadFailureIsBackendFailure(t *testing.T) {
+	wantErr := errors.New("backend body reset")
+	var got AttemptClassification
+	wrapped := WrapAttemptBody(&readErrorBody{err: wantErr}, -1, context.Background(), context.Background(),
+		func(c AttemptClassification, err error) {
+			got = c
+			if !errors.Is(err, wantErr) {
+				t.Errorf("completion error = %v, want %v", err, wantErr)
+			}
+		})
+	if _, err := wrapped.Read(make([]byte, 1)); !errors.Is(err, wantErr) {
+		t.Fatalf("read error = %v, want %v", err, wantErr)
+	}
+	if got.Origin() != OriginBackendTransport || got.Health() != HealthFailure {
+		t.Fatalf("read classification = {%q %d}, want backend transport failure", got.Origin(), got.Health())
 	}
 }
 
