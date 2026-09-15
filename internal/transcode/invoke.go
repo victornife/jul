@@ -66,11 +66,16 @@ type Options struct {
 // http.Handler and io.Closer; closing it releases all backend connections when
 // the configuration is replaced.
 type Transcoder struct {
-	routes        []*route
-	pool          *upstream.Pool
-	useTLS        bool
-	tlsPolicy     *backendtls.Policy
-	conns         sync.Map // upstream.BackendIdentity -> *cachedConn
+	routes    []*route
+	pool      *upstream.Pool
+	useTLS    bool
+	tlsPolicy *backendtls.Policy
+	// connMu makes each active/retired lifecycle transition atomic. sync.Map
+	// still supplies safe observability to package tests, but production never
+	// composes multiple map operations without this lock.
+	connMu        sync.Mutex
+	conns         sync.Map // connectionIdentity -> *cachedConn
+	closed        bool
 	retry         upstream.RetryOverride
 	preserveNames bool
 	streaming     bool
@@ -79,6 +84,15 @@ type Transcoder struct {
 	log           *slog.Logger
 	onResult      func(method, code string)
 	onStreamMsg   func(method, direction string)
+	// dialConn is an injectable seam for deterministic cache-transition tests.
+	// Production instances leave it nil and use dial.
+	dialConn func(string, bool, *backendtls.Policy) (*grpc.ClientConn, error)
+	// now is injectable so retirement/expiry tests never synchronize with
+	// sleeps. Production instances leave it nil and use time.Now.
+	now func() time.Time
+	// closeConn observes ownership in tests. Production instances leave it nil
+	// and close grpc.ClientConn directly.
+	closeConn func(*grpc.ClientConn) error
 
 	// evictStop is closed by Close to stop the stale-connection eviction
 	// goroutine. It is nil when the pool has no dynamic backend set.
@@ -89,7 +103,36 @@ type Transcoder struct {
 	// retired holds connections whose backend has left the pool but which are
 	// kept alive for a grace period so in-flight requests and streams can
 	// finish (R11-05).
-	retired sync.Map // upstream.BackendIdentity -> retiredConn
+	retired sync.Map // connectionIdentity -> retiredConn
+}
+
+// connectionIdentity binds the transport destination to the discovered
+// workload identity. Dial identity alone is insufficient because an address
+// can be recycled while requests from an older generation are still draining.
+type connectionIdentity struct {
+	dial      upstream.BackendIdentity
+	logicalID string
+}
+
+func (t *Transcoder) dialBackend(addr string) (*grpc.ClientConn, error) {
+	if t.dialConn != nil {
+		return t.dialConn(addr, t.useTLS, t.tlsPolicy)
+	}
+	return dial(addr, t.useTLS, t.tlsPolicy)
+}
+
+func (t *Transcoder) cacheNow() time.Time {
+	if t.now != nil {
+		return t.now()
+	}
+	return time.Now()
+}
+
+func (t *Transcoder) closeBackendConn(conn *grpc.ClientConn) error {
+	if t.closeConn != nil {
+		return t.closeConn(conn)
+	}
+	return conn.Close()
 }
 
 // cachedConn is a live connection plus the logical identity of the workload it
@@ -109,6 +152,14 @@ type retiredConn struct {
 	id        string
 	retiredAt time.Time
 }
+
+const (
+	// maxRetiredConns is a hard per-transcoder ownership bound. The normal
+	// retirement contract is time based, but an attacker-controlled stream of
+	// logical identities must not turn the grace map into unbounded storage.
+	// Once the bound is reached, the oldest retired generation is closed early.
+	maxRetiredConns = 256
+)
 
 // retiredConnGrace is how long a removed backend's connection remains usable
 // before it is closed. It is a variable so tests can shorten it.
@@ -221,59 +272,129 @@ func (t *Transcoder) evictStaleConns() {
 		valid[b.Identity()] = b.LogicalID()
 	}
 
+	now := t.cacheNow()
+	var closeAfter []*grpc.ClientConn
+	t.connMu.Lock()
+	if t.closed {
+		t.connMu.Unlock()
+		return
+	}
+
 	// A backend still at the same address but with a different logical identity
-	// counts as stale: the peer was replaced, so the connection points at a
-	// process that no longer exists.
+	// counts as stale. Composite keys let multiple draining generations coexist
+	// without ever making one generation visible to another.
 	t.conns.Range(func(key, value any) bool {
-		id := key.(upstream.BackendIdentity)
+		id, keyOK := key.(connectionIdentity)
 		cc, ok := value.(*cachedConn)
-		if !ok {
-			t.conns.Delete(id)
+		if !keyOK || !ok {
+			t.conns.Delete(key)
 			return true
 		}
-		if liveID, live := valid[id]; live && liveID == cc.id {
+		if liveID, live := valid[id.dial]; live && liveID == id.logicalID && cc.id == id.logicalID {
 			return true
 		}
-		t.retireConn(id, cc)
+		closeAfter = append(closeAfter, t.retireConnLocked(id, cc, now)...)
 		return true
 	})
 
 	// Re-promote retired connections whose backend is valid again, or close
 	// those whose grace period has expired.
-	now := time.Now()
 	t.retired.Range(func(key, value any) bool {
-		id := key.(upstream.BackendIdentity)
-		rc := value.(retiredConn)
-		expired := now.Sub(rc.retiredAt) >= retiredConnGrace
-		if liveID, live := valid[id]; live && liveID == rc.id && !expired {
-			// The same workload reappeared: atomically promote. If another
-			// connection won the race, close the retired one (R13-01).
+		id, keyOK := key.(connectionIdentity)
+		rc, valueOK := value.(retiredConn)
+		if !keyOK || !valueOK {
 			t.retired.Delete(key)
-			if actual, loaded := t.conns.LoadOrStore(id, &cachedConn{conn: rc.conn, id: rc.id}); loaded {
+			return true
+		}
+		expired := now.Sub(rc.retiredAt) >= retiredConnGrace
+		if liveID, live := valid[id.dial]; live && liveID == id.logicalID && rc.id == id.logicalID && !expired {
+			// The same workload reappeared. The lock makes removal and promotion
+			// one transition, so stale retirement cannot delete the replacement.
+			t.retired.Delete(key)
+			if actual, loaded := t.conns.Load(id); loaded {
 				if actual.(*cachedConn).conn != rc.conn {
-					_ = rc.conn.Close()
+					closeAfter = append(closeAfter, rc.conn)
 				}
+			} else {
+				t.conns.Store(id, &cachedConn{conn: rc.conn, id: rc.id})
 			}
 			return true
 		}
 		if expired {
-			_ = rc.conn.Close()
 			t.retired.Delete(key)
+			closeAfter = append(closeAfter, rc.conn)
 		}
 		return true
 	})
+	t.connMu.Unlock()
+	t.closeConnections(closeAfter)
 }
 
-// retireConn moves a connection out of the active cache into the grace map. A
-// connection already retired under the same identity is from an even older
-// workload and is closed rather than leaked.
-func (t *Transcoder) retireConn(id upstream.BackendIdentity, cc *cachedConn) {
-	if prev, loaded := t.retired.Swap(id, retiredConn{conn: cc.conn, id: cc.id, retiredAt: time.Now()}); loaded {
+// retireConnLocked moves one exact logical identity out of the active cache.
+// connMu must be held. Different logical generations have different keys, so
+// all of them retain their own grace deadline until expiry or the hard cache
+// bound evicts the oldest retired generation.
+func (t *Transcoder) retireConnLocked(id connectionIdentity, cc *cachedConn, now time.Time) []*grpc.ClientConn {
+	var closeAfter []*grpc.ClientConn
+	if prev, loaded := t.retired.Load(id); loaded {
 		if rc, ok := prev.(retiredConn); ok && rc.conn != cc.conn {
-			_ = rc.conn.Close()
+			closeAfter = append(closeAfter, rc.conn)
 		}
 	}
+	t.retired.Store(id, retiredConn{conn: cc.conn, id: cc.id, retiredAt: now})
 	t.conns.Delete(id)
+	closeAfter = append(closeAfter, t.trimRetiredLocked()...)
+	return closeAfter
+}
+
+// trimRetiredLocked enforces a hard ownership ceiling independently of churn
+// rate. It deliberately sacrifices the oldest generation's remaining grace
+// under pathological identity churn rather than allowing an attacker to retain
+// an unbounded number of HTTP/2 transports. connMu must be held.
+func (t *Transcoder) trimRetiredLocked() []*grpc.ClientConn {
+	var closeAfter []*grpc.ClientConn
+	for {
+		count := 0
+		var oldestID connectionIdentity
+		var oldest retiredConn
+		haveOldest := false
+		t.retired.Range(func(key, value any) bool {
+			id, keyOK := key.(connectionIdentity)
+			rc, valueOK := value.(retiredConn)
+			if !keyOK || !valueOK {
+				t.retired.Delete(key)
+				return true
+			}
+			count++
+			if !haveOldest || rc.retiredAt.Before(oldest.retiredAt) {
+				oldestID, oldest, haveOldest = id, rc, true
+			}
+			return true
+		})
+		if count <= maxRetiredConns || !haveOldest {
+			return closeAfter
+		}
+		t.retired.Delete(oldestID)
+		closeAfter = append(closeAfter, oldest.conn)
+	}
+}
+
+// retireOtherActiveLocked keeps one active logical generation per dial
+// identity. Callers that already hold an older *grpc.ClientConn keep using it;
+// only cache visibility moves to the per-generation grace map.
+func (t *Transcoder) retireOtherActiveLocked(identity connectionIdentity, now time.Time) []*grpc.ClientConn {
+	var closeAfter []*grpc.ClientConn
+	t.conns.Range(func(otherKey, value any) bool {
+		other, ok := otherKey.(connectionIdentity)
+		if !ok || other == identity || other.dial != identity.dial {
+			return true
+		}
+		if cc, ok := value.(*cachedConn); ok {
+			closeAfter = append(closeAfter, t.retireConnLocked(other, cc, now)...)
+		}
+		return true
+	})
+	return closeAfter
 }
 
 // normalizeStreamMode lower-cases the configured stream mode and defaults a
@@ -302,18 +423,31 @@ func (t *Transcoder) Close() error {
 			close(t.evictStop)
 		}
 	})
-	t.conns.Range(func(_, v any) bool {
+	owned := make(map[*grpc.ClientConn]struct{})
+	t.connMu.Lock()
+	if t.closed {
+		t.connMu.Unlock()
+		return nil
+	}
+	t.closed = true
+	t.conns.Range(func(k, v any) bool {
 		if c, ok := v.(*cachedConn); ok {
-			_ = c.conn.Close()
+			owned[c.conn] = struct{}{}
 		}
+		t.conns.Delete(k)
 		return true
 	})
-	t.retired.Range(func(_, v any) bool {
+	t.retired.Range(func(k, v any) bool {
 		if rc, ok := v.(retiredConn); ok {
-			_ = rc.conn.Close()
+			owned[rc.conn] = struct{}{}
 		}
+		t.retired.Delete(k)
 		return true
 	})
+	t.connMu.Unlock()
+	for conn := range owned {
+		_ = t.closeBackendConn(conn)
+	}
 	return nil
 }
 
@@ -322,53 +456,84 @@ func (t *Transcoder) Close() error {
 // during the retired grace period a connection for a removed backend is
 // re-promoted so in-flight streams can continue (R11-05).
 //
-// The cache is keyed by dial identity, but an entry is reused only while the
-// workload behind that address is still the same one: a recycled pod IP gets a
-// fresh connection rather than one established to its predecessor.
+// The cache key contains both dial and logical identity. connMu serializes the
+// whole active/retired transition, while dialing remains outside the lock so an
+// unrelated slow backend cannot stop cache progress.
 func (t *Transcoder) connFor(key upstream.BackendIdentity, id string) (*grpc.ClientConn, error) {
-	if v, ok := t.conns.Load(key); ok {
-		cc := v.(*cachedConn)
-		if cc.id == id {
-			return cc.conn, nil
-		}
-		// The peer was replaced. Retire rather than close: a stream started
-		// against the previous workload may still be draining.
-		t.retireConn(key, cc)
+	identity := connectionIdentity{dial: key, logicalID: id}
+	now := t.cacheNow()
+	var closeAfter []*grpc.ClientConn
+
+	t.connMu.Lock()
+	if t.closed {
+		t.connMu.Unlock()
+		return nil, errors.New("grpc transcoder is closed")
 	}
-	if v, ok := t.retired.Load(key); ok {
+	if v, ok := t.conns.Load(identity); ok {
+		conn := v.(*cachedConn).conn
+		closeAfter = append(closeAfter, t.retireOtherActiveLocked(identity, now)...)
+		t.connMu.Unlock()
+		t.closeConnections(closeAfter)
+		return conn, nil
+	}
+	if v, ok := t.retired.Load(identity); ok {
 		rc := v.(retiredConn)
-		switch {
-		case rc.id != id:
-			// Belongs to a different workload; leave it for the grace period.
-		case time.Since(rc.retiredAt) < retiredConnGrace:
-			// Atomically promote back to active. Only close the retired
-			// connection if another goroutine stored a different one for the
-			// same backend in the meantime (R12-02, R13-01).
-			t.retired.Delete(key)
-			if actual, loaded := t.conns.LoadOrStore(key, &cachedConn{conn: rc.conn, id: rc.id}); loaded {
-				actualConn := actual.(*cachedConn).conn
-				if actualConn != rc.conn {
-					_ = rc.conn.Close()
-				}
-				return actualConn, nil
-			}
+		if now.Sub(rc.retiredAt) < retiredConnGrace {
+			t.retired.Delete(identity)
+			t.conns.Store(identity, &cachedConn{conn: rc.conn, id: id})
+			closeAfter = append(closeAfter, t.retireOtherActiveLocked(identity, now)...)
+			t.connMu.Unlock()
+			t.closeConnections(closeAfter)
 			return rc.conn, nil
-		default:
-			// Expired; close it lazily here and dial anew.
-			_ = rc.conn.Close()
-			t.retired.Delete(key)
 		}
+		t.retired.Delete(identity)
+		closeAfter = append(closeAfter, rc.conn)
 	}
-	conn, err := dial(key.Address, t.useTLS, t.tlsPolicy)
+	t.connMu.Unlock()
+	t.closeConnections(closeAfter)
+	closeAfter = nil
+
+	conn, err := t.dialBackend(key.Address)
 	if err != nil {
 		return nil, err
 	}
-	actual, loaded := t.conns.LoadOrStore(key, &cachedConn{conn: conn, id: id})
-	if loaded {
-		_ = conn.Close() // lost the race; use the winner's connection
+
+	// Revalidate after the speculative dial. A same-identity winner is reused;
+	// other identities remain isolated under their own keys.
+	t.connMu.Lock()
+	if t.closed {
+		t.connMu.Unlock()
+		_ = t.closeBackendConn(conn)
+		return nil, errors.New("grpc transcoder is closed")
+	}
+	if actual, loaded := t.conns.Load(identity); loaded {
+		t.connMu.Unlock()
+		_ = t.closeBackendConn(conn)
 		return actual.(*cachedConn).conn, nil
 	}
+	// A request for a replacement identity retires active predecessors at the
+	// same dial destination, but never deletes their composite cache entries by
+	// address alone. Their in-flight streams retain the grace contract.
+	now = t.cacheNow()
+	closeAfter = append(closeAfter, t.retireOtherActiveLocked(identity, now)...)
+	t.conns.Store(identity, &cachedConn{conn: conn, id: id})
+	t.connMu.Unlock()
+	t.closeConnections(closeAfter)
 	return conn, nil
+}
+
+func (t *Transcoder) closeConnections(conns []*grpc.ClientConn) {
+	seen := make(map[*grpc.ClientConn]struct{}, len(conns))
+	for _, conn := range conns {
+		if conn == nil {
+			continue
+		}
+		if _, ok := seen[conn]; ok {
+			continue
+		}
+		seen[conn] = struct{}{}
+		_ = t.closeBackendConn(conn)
+	}
 }
 
 // firstConn returns a connection to the first available backend. It is used by

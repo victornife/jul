@@ -8,9 +8,22 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+type blockedReadBody struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *blockedReadBody) Read([]byte) (int, error) {
+	close(b.started)
+	<-b.release
+	return 0, errors.New("backend read failed after close")
+}
+func (*blockedReadBody) Close() error { return nil }
 
 type closingBody struct{ closeErr error }
 
@@ -117,6 +130,43 @@ func TestAttemptBodyCompleteReadIsSuccess(t *testing.T) {
 	_ = wrapped.Close()
 	if calls != 1 || got.Health() != HealthSuccess {
 		t.Fatalf("read classification health=%d calls=%d, want success once", got.Health(), calls)
+	}
+}
+
+func TestAttemptBodyEmptyResponseIsSuccess(t *testing.T) {
+	var calls atomic.Int32
+	var got AttemptClassification
+	wrapped := WrapAttemptBody(io.NopCloser(strings.NewReader("")), 0,
+		context.Background(), context.Background(), func(c AttemptClassification, _ error) {
+			calls.Add(1)
+			got = c
+		})
+	if err := wrapped.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 || got.Health() != HealthSuccess {
+		t.Fatalf("empty completion = calls %d health %d; want success once", calls.Load(), got.Health())
+	}
+}
+
+func TestAttemptBodyReadCloseRaceCompletesExactlyOnce(t *testing.T) {
+	body := &blockedReadBody{started: make(chan struct{}), release: make(chan struct{})}
+	var calls atomic.Int32
+	wrapped := WrapAttemptBody(body, -1, context.Background(), context.Background(),
+		func(AttemptClassification, error) { calls.Add(1) })
+	readDone := make(chan struct{})
+	go func() {
+		_, _ = wrapped.Read(make([]byte, 1))
+		close(readDone)
+	}()
+	<-body.started
+	if err := wrapped.Close(); err != nil {
+		t.Fatal(err)
+	}
+	close(body.release)
+	<-readDone
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("Read/Close race completed attempt %d times, want exactly once", got)
 	}
 }
 

@@ -14,6 +14,13 @@ import (
 	"jul/internal/config"
 )
 
+type deadlineOnlyContext struct {
+	context.Context
+	deadline time.Time
+}
+
+func (c deadlineOnlyContext) Deadline() (time.Time, bool) { return c.deadline, true }
+
 func TestAttemptFailureAttributionMatrix(t *testing.T) {
 	clientCancelled, cancelClient := context.WithCancel(context.Background())
 	cancelClient()
@@ -49,6 +56,23 @@ func TestAttemptFailureAttributionMatrix(t *testing.T) {
 				t.Fatalf("classification = {%q %q %d}, want {%q %q %d}", got.Origin(), got.Reason(), got.Health(), tt.origin, tt.reason, tt.health)
 			}
 		})
+	}
+}
+
+func TestDeadlinePrecedenceDoesNotDependOnErrPublication(t *testing.T) {
+	past := time.Now().Add(-time.Second)
+	live := context.Background()
+
+	client := deadlineOnlyContext{Context: live, deadline: past}
+	got := ClassifyAttemptError(context.DeadlineExceeded, client, client)
+	if got.Origin() != OriginClientDeadline || got.Health() != HealthNeutral {
+		t.Fatalf("unpublished client deadline = {%q %d}, want client/neutral", got.Origin(), got.Health())
+	}
+
+	attempt := deadlineOnlyContext{Context: live, deadline: past}
+	got = ClassifyAttemptError(context.DeadlineExceeded, live, attempt)
+	if got.Origin() != OriginJulTimeout || got.Health() != HealthNeutral {
+		t.Fatalf("unpublished Jul deadline = {%q %d}, want Jul/neutral", got.Origin(), got.Health())
 	}
 }
 
