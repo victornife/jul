@@ -6,8 +6,12 @@ package handler
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"jul/internal/config"
@@ -49,12 +53,18 @@ func BenchmarkProxyUnixRoundTrip(b *testing.B) {
 
 func startUnixHTTPBackendForBenchmark(b *testing.B, h http.Handler) string {
 	b.Helper()
-	// Reuse the test fixture helper through a tiny testing.TB adapter is not
-	// possible because it needs Cleanup semantics tied to the benchmark. Keep
-	// the setup local and portable instead.
-	path := benchmarkUnixPath(b)
-	ln, err := netListenUnix(path)
+	base := os.TempDir()
+	if runtime.GOOS == "darwin" {
+		base = "/tmp"
+	}
+	dir, err := os.MkdirTemp(base, "jul407-bench-")
 	if err != nil {
+		b.Fatalf("MkdirTemp: %v", err)
+	}
+	path := filepath.Join(dir, "backend.sock")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		_ = os.RemoveAll(dir)
 		b.Fatalf("listen unix: %v", err)
 	}
 	srv := &http.Server{Handler: h}
@@ -67,6 +77,7 @@ func startUnixHTTPBackendForBenchmark(b *testing.B, h http.Handler) string {
 		_ = srv.Close()
 		_ = ln.Close()
 		<-done
+		_ = os.RemoveAll(dir)
 	})
 	return path
 }
