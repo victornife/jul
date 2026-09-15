@@ -22,28 +22,9 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Shorten Unix socket fixture paths
-        shell: bash
+        run: python3 .github/issue407_macos_fix.py
+      - name: Verify fixture patch
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('internal/handler/proxy_unix_test.go')
-          s = p.read_text()
-          s = s.replace('\t"net/http/httptest"\n\t"path/filepath"', '\t"net/http/httptest"\n\t"os"\n\t"path/filepath"', 1)
-          old = '''\tpath := filepath.Join(t.TempDir(), "backend.sock")
-\tln, err := net.Listen("unix", path)
-'''
-          new = '''\tdir, err := os.MkdirTemp("/tmp", "jul407-")
-\tif err != nil {
-\t\tt.Fatalf("create short Unix fixture dir: %v", err)
-\t}
-\tt.Cleanup(func() { _ = os.RemoveAll(dir) })
-\tpath := filepath.Join(dir, "backend.sock")
-\tln, err := net.Listen("unix", path)
-'''
-          if old not in s:
-              raise SystemExit('fixture patch target not found')
-          p.write_text(s.replace(old, new, 1))
-          PY
           gofmt -w internal/handler/proxy_unix_test.go
           go test ./internal/handler
       - name: Commit fix
@@ -51,7 +32,7 @@ jobs:
         run: |
           git config user.name "ChatGPT Codex Connector"
           git config user.email "noreply@openai.com"
-          git rm .github/workflows/issue407-macos-fix.yml
+          git rm .github/workflows/issue407-macos-fix.yml .github/issue407_macos_fix.py
           git add internal/handler/proxy_unix_test.go
           git commit -m "test: use portable Unix socket fixture paths (#407)"
           git push origin HEAD:issue-407-unix-http-proxy
