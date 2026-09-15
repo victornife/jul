@@ -822,12 +822,13 @@ imports downward and no package must import a sibling to name a failure.
 | `proxy_overloaded` | 503 + `Retry-After` | `UNAVAILABLE` | not applicable | Admission rejected: limit reached and the queue is full or timed out |
 | `backend_at_capacity` | 503 | `UNAVAILABLE` | not applicable | All candidates at `max_active_per_backend` |
 | `upstream_connect_failed` | 502 | `UNAVAILABLE` | yes | Dial, handshake or transport failure |
-| `upstream_timeout` | 504 | `DEADLINE_EXCEEDED` | yes | Per-attempt or overall timeout |
+| `upstream_timeout` | 504 | `DEADLINE_EXCEEDED` | yes | Backend transport timeout |
 | `upstream_tls_identity` | 502 | `UNAVAILABLE` | **no** | Deterministic identity failure |
 | `retry_budget_exhausted` | last attempt's status | mapped | — | Retries suppressed by the budget |
 | `retry_deadline_exhausted` | 504 | `DEADLINE_EXCEEDED` | — | Overall deadline consumed |
 | `request_not_replayable` | last attempt's status | mapped | — | Retry declined: method, body or response already started |
 | `client_cancelled` | 499 | `CANCELLED` | — | The client went away |
+| `client_deadline` | 504 | `DEADLINE_EXCEEDED` | — | The caller's inbound deadline elapsed; passive backend health stays neutral |
 
 **The client-facing status and the operator-facing reason are different resolutions of the same event.**
 `upstream_unavailable` and `circuit_open` are both 503 to a client and are never conflated for an

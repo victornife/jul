@@ -10,6 +10,9 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
+
+	"jul/internal/backendtls"
 )
 
 // Reason is the closed set of operator-facing explanations for an upstream
@@ -42,7 +45,7 @@ const (
 	ReasonBackendAtCapacity Reason = "backend_at_capacity"
 	// ReasonUpstreamConnectFailed means a dial, handshake or transport failure.
 	ReasonUpstreamConnectFailed Reason = "upstream_connect_failed"
-	// ReasonUpstreamTimeout means a per-attempt or overall timeout elapsed.
+	// ReasonUpstreamTimeout means a backend transport timeout elapsed.
 	ReasonUpstreamTimeout Reason = "upstream_timeout"
 	// ReasonUpstreamTLSIdentity means the backend failed to prove its identity.
 	// It is deterministic and therefore never retried.
@@ -58,6 +61,10 @@ const (
 	// ReasonClientCancelled means the inbound request context was cancelled: the
 	// client went away.
 	ReasonClientCancelled Reason = "client_cancelled"
+	// ReasonClientDeadline means the deadline supplied by the inbound caller
+	// expired. It is distinct from a Jul-owned retry deadline because only the
+	// latter is an edge policy decision; neither is backend-health evidence.
+	ReasonClientDeadline Reason = "client_deadline"
 )
 
 // StatusClientClosedRequest is nginx's 499. It is not an IANA status and is only
@@ -105,6 +112,7 @@ var reasonTable = []struct {
 	{ReasonRetryDeadlineExhausted, http.StatusGatewayTimeout, GRPCCodeDeadlineExceeded},
 	{ReasonRequestNotReplayable, StatusFromLastAttempt, grpcCodeFromLastAttempt},
 	{ReasonClientCancelled, StatusClientClosedRequest, GRPCCodeCancelled},
+	{ReasonClientDeadline, http.StatusGatewayTimeout, GRPCCodeDeadlineExceeded},
 }
 
 // Reasons returns every Reason, in taxonomy order. Callers that must enumerate
@@ -181,13 +189,18 @@ func ReasonFor(err error, inbound context.Context) Reason {
 	case errors.Is(err, ErrNoAvailableBackend):
 		return ReasonUpstreamUnavailable
 	}
+	if inbound != nil {
+		switch {
+		case errors.Is(inbound.Err(), context.Canceled):
+			return ReasonClientCancelled
+		case errors.Is(inbound.Err(), context.DeadlineExceeded):
+			return ReasonClientDeadline
+		}
+	}
 	if tlsIdentityFailure(err) {
 		return ReasonUpstreamTLSIdentity
 	}
 	if errors.Is(err, context.Canceled) {
-		if inbound != nil && errors.Is(inbound.Err(), context.Canceled) {
-			return ReasonClientCancelled
-		}
 		// A cancellation that the client did not cause is Jul abandoning the
 		// attempt itself, which is a deadline in every path that produces one.
 		return ReasonRetryDeadlineExhausted
@@ -239,5 +252,6 @@ func tlsIdentityFailure(err error) bool {
 	return errors.As(err, &unknownAuthority) ||
 		errors.As(err, &hostnameErr) ||
 		errors.As(err, &invalidCert) ||
-		errors.As(err, &verification)
+		errors.As(err, &verification) ||
+		strings.Contains(err.Error(), backendtls.PeerIdentityErrorFragment)
 }

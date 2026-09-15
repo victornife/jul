@@ -23,11 +23,28 @@ func FuzzPeekSNI(f *testing.F) {
 	f.Add([]byte{0x16, 0x03, 0x01, 0x00, 0x05})
 	// TLS record with garbage handshake
 	f.Add(append([]byte{0x16, 0x03, 0x01, 0x00, 0x10}, make([]byte, 16)...))
+	f.Add(fragmentClientHelloForFuzz(clientHelloBytesForFuzz(), 2))
+	f.Add([]byte{0x16, 0x03, 0x01, 0x40, 0x01})
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, data []byte) {
-		br := bufio.NewReaderSize(bytes.NewReader(data), 4096)
+		br := bufio.NewReaderSize(bytes.NewReader(data), tlsInspectMax)
 		_ = peekSNI(br)
 	})
+}
+
+func fragmentClientHelloForFuzz(record []byte, first int) []byte {
+	if len(record) < 5 || first <= 0 {
+		return record
+	}
+	recordLen := int(record[3])<<8 | int(record[4])
+	if recordLen > len(record)-5 || first >= recordLen {
+		return record
+	}
+	payload := record[5 : 5+recordLen]
+	var out []byte
+	out = appendHandshakeRecord(out, record[1:3], payload[:first])
+	out = appendHandshakeRecord(out, record[1:3], payload[first:])
+	return out
 }
 
 // clientHelloBytesForFuzz returns a deterministic TLS ClientHello with SNI.

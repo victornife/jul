@@ -60,8 +60,8 @@ proxy_pass = "https://inventory"
 > open the backend for the cooldown, after which the next request probes it and the next failure
 > re-trips it. [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) makes that model
 > explicit and decides the concurrency, pending, connection, retry-budget and half-open controls that
-> extend it. The admission controls below are implemented; the retry-budget and half-open controls
-> remain an accepted decision under implementation (#142, #143, #144).
+> extend it. Admission, retry budget and half-open controls are implemented on current `main`; their
+> generic resilience surface remains merged Beta pending the dedicated long-running soak.
 
 > **Who can use a pool.** `proxy_pass`, `grpc_transcode.target`, `fastcgi_pass` and `uwsgi_pass` all
 > accept a named upstream, so FastCGI and uWSGI routes are pool members with the same load balancing,
@@ -221,6 +221,18 @@ A literal `proxy_pass = "http://10.0.0.5:8080"` target builds an unregistered po
 rebuilt on every reload, so **its admission counters reset on reload**. Name the upstream if you need
 that state to survive.
 
+For a named upstream, reuse is deliberately exact. The registry key is
+`(upstream name, scheme)` and the compatible pool shape also includes balancer
+strategy, health-check configuration, discovery configuration and the resolved
+pool-level `backend_tls` fingerprint. A change to any of those builds a new
+pool generation. Within a compatible pool, a backend object is reused only for
+the same `(provider logical ID, network, address)`; weight and resilience-limit
+changes retune that object in place. A removed backend is not retained in a
+side map, so re-adding it later starts with fresh state. This lets old requests
+finish against their captured attempts without mutating a logically different
+replacement, while intentional compatible reloads preserve circuit and
+in-flight accounting.
+
 ### Sizing the limits
 
 Every limit is **per replica**. Ten replicas with `max_active_requests = 100` admit up to a thousand
@@ -335,11 +347,62 @@ not prove the backend did not accept the request, commit it and die before answe
 rather than dialled, and the refusal is terminal — retrying into the next plaintext backend would be
 the same downgrade one hop later.
 
+### Passive-health attribution
+
+Every pooled adapter classifies an attempt before mutating shared passive
+health. The classifier owns one bounded reason and one explicit circuit
+consequence; adapters do not infer ownership after calling `MarkFailure`.
+
+| Attempt result | Passive-health consequence |
+| --- | --- |
+| Inbound client cancellation, caller deadline or downstream stream termination | Neutral; release in-flight state and return any half-open probe allowance |
+| Jul-owned retry deadline, admission or local replay/policy failure | Neutral; never evidence against a backend |
+| Backend connect failure, reset, read/write failure or transport timeout | Failure; increment the passive circuit and open it at `max_fails` |
+| Malformed FastCGI/uWSGI or backend protocol exchange | Failure |
+| Route-level TLS chain/name/SNI/explicit-peer-identity rejection | Neutral for the shared pool, because another route may use a different trust policy; the request still fails closed |
+| HTTP response status | Success for transport health; Jul does not count every application 5xx |
+| Native gRPC application status | Success after the response stream completes; application status is not transport failure |
+| Transcoded gRPC `Unavailable`, backend `DeadlineExceeded`, `Internal`, `Unknown` or `DataLoss` | Backend protocol failure; other application statuses are successful exchanges |
+| Active pool health probe failure | Separate pool-level unhealthy verdict; route-level trust overrides do not weaken the probe's configured pool policy |
+
+The same contract is used by HTTP (including Unix sockets), native gRPC,
+transcoding, FastCGI, uWSGI, forward-auth dependencies and L4 TCP dialing.
+Neutral half-open attempts return their probe slot without closing or reopening
+the circuit; the next real result decides recovery.
+
+The cross-protocol audit below is the normative adapter matrix. **N** means
+neutral, **F** means passive-health failure, **S** means passive-health success,
+and **—** means the adapter does not interpret that event. “Jul timeout” means
+the overall retry/admission/policy lifetime, not a backend transport inactivity
+timeout.
+
+| Event | HTTP / Unix | Native gRPC | Transcoded gRPC | FastCGI / uWSGI | Auth dependency | L4 stream |
+| --- | --- | --- | --- | --- | --- | --- |
+| Client cancellation / downstream write termination | N | N | N | N | N | — (relay close is not a passive result) |
+| Client deadline | N | N | N | N | N | — |
+| Jul retry/admission/policy timeout | N | — | N | N | N | — |
+| Backend connect failure | F | F | F | F | F | F |
+| Backend transport inactivity timeout | F | F | F | F | F | F during dial |
+| Route-level TLS identity/trust failure | N | N | N | — | N | — (TLS passthrough) |
+| Backend reset/read/write failure | F | F | F | F | F | — after a successful dial |
+| Backend protocol error | F | F | F for the bounded backend-failure code set | F | F | — |
+| HTTP application status, including 5xx | S after complete body | — | — | S after complete exchange | S after complete bounded body | — |
+| gRPC application status | — | S after complete stream | S except `Unavailable`, backend `DeadlineExceeded`, `Internal`, `Unknown`, `DataLoss` | — | — | — |
+| Successful exchange | S | S | S | S | S | S on successful backend dial |
+
+Active health checks intentionally retain their separate pool-level hysteresis
+and trust policy; they do not call the passive attempt seam. Discovery updates
+membership and preserves compatible backend objects but does not manufacture
+success or failure results. Admin/control-plane code has no additional direct
+consumer of `upstream.Pool` beyond the auth dependencies listed here.
+
 ### The deadline dominates
 
 `retry_deadline` bounds the **whole sequence**, not each attempt: the effective deadline is
 `min(request deadline, start + retry_deadline)`, and every attempt and every backoff sleep runs under
-it. Three attempts against a three-second deadline take at most three seconds, not nine.
+it. A retained HTTP/FastCGI/uWSGI response keeps that context until its body or protocol exchange
+finishes; returning response headers does not silently cancel the attempt deadline. Three attempts
+against a three-second deadline take at most three seconds, not nine.
 
 Backoff doubles from `retry_backoff_initial`, clamps at `retry_backoff_max`, and applies **full
 jitter** — the delay is drawn uniformly from `[0, interval)`. Half-jitter would halve the spread for

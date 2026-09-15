@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.7 · Updated 2026-08-30
+> Version 2.8 · Updated 2026-09-15
 >
 > This roadmap owns the **durable portfolio sequence**. It deliberately does
 > not duplicate volatile READY/NEXT/blocked issue state. The current issue-level
@@ -76,12 +76,13 @@ outcome changes.
 
 - New post-RC capabilities are not promoted through older GA rows; their
   maturity and delivery remain explicit in [status.md](../status.md).
-- Resilience still requires the remaining integrated evidence/external-contract
-  closure tracked by #287/#144.
-- The supported versioned external Admin API and remote CLI remain #150/#151;
-  current Console routes are not automatically the stable external contract.
-- NGINX compatibility corpus and selected-dimension E2E continue after the
-  assessment/provenance/include foundation.
+- Resilience includes the cross-protocol pre-soak failure-attribution
+  correction; stable publication and long-running soak remain later gates.
+- The supported versioned external Admin API and remote CLI are merged Beta
+  surfaces; Console-only routes remain outside the external contract unless
+  explicitly classified and generated into OpenAPI.
+- The selected NGINX compatibility corpus and selected-dimension E2E closure
+  are recorded separately from the released importer GA row.
 
 ## Release-candidate checkpoint
 

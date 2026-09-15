@@ -315,6 +315,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 	var resp *http.Response
 	attempts := 0
+	finishRetryContext := context.CancelFunc(func() {})
 	// The driver computes the backoff; the span to annotate is this one. Recorded
 	// per attempt so a trace shows which wait preceded which try, rather than a
 	// single total that explains nothing.
@@ -331,6 +332,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 				// retrying cannot fix it, so the sequence ends here — but the
 				// error the client deserves is the upstream failure that
 				// triggered the retry, which Do already carries as lastErr.
+				t.pool.RecordAttempt(b, upstream.JulPolicyFailure(upstream.ReasonRequestNotReplayable))
 				return upstream.AttemptResult{Err: berr, Terminal: true}
 			}
 			out = req.Clone(actx)
@@ -340,6 +342,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		}
 		prepared, backendLabel, prepErr := prepareProxyAttempt(out, b, t.tlsBackend)
 		if prepErr != nil {
+			t.pool.RecordAttempt(b, upstream.JulPolicyFailure(""))
 			return upstream.AttemptResult{Err: prepErr, Terminal: true}
 		}
 		out = prepared
@@ -357,9 +360,6 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 		r, err := t.base.RoundTrip(out)
 		if err == nil {
-			if t.pool.MarkSuccess(b) && t.log != nil {
-				t.log.Info("proxy backend recovered", "upstream", t.pool.Name(), "backend", backendLabel)
-			}
 			aspan.SetStatus(r.StatusCode)
 			aspan.End()
 			span.SetStatus(r.StatusCode)
@@ -368,20 +368,37 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 			// protocol upgrade (101) the body is also writable and ReverseProxy
 			// splices it bidirectionally, so the wrapper preserves
 			// io.ReadWriteCloser (WebSocket / raw stream passthrough).
-			r.Body = wrapReleaseBody(r.Body, func() { t.pool.Release(b.Backend) })
+			if r.Body == nil {
+				r.Body = http.NoBody
+			}
+			r.Body = upstream.WrapAttemptBody(r.Body, r.ContentLength, req.Context(), actx,
+				func(classification upstream.AttemptClassification, bodyErr error) {
+					switch classification.Health() {
+					case upstream.HealthFailure:
+						t.recordFailure(b, bodyErr, classification)
+					case upstream.HealthSuccess:
+						if t.pool.RecordAttempt(b, classification) && t.log != nil {
+							t.log.Info("proxy backend recovered", "upstream", t.pool.Name(), "backend", backendLabel)
+						}
+					default:
+						t.pool.RecordAttempt(b, classification)
+					}
+					t.pool.Release(b.Backend)
+					finishRetryContext()
+				})
 			resp = r
-			return upstream.AttemptResult{Retain: true}
+			return upstream.AttemptResult{Retain: true, RetainContext: &finishRetryContext}
 		}
 		aspan.RecordError(err)
 		aspan.End()
-		t.noteFailure(b, err)
+		t.noteFailure(b, err, req.Context(), actx)
 		// A deterministic backend-identity failure is the same failure against
 		// every backend, so retrying it is amplification with no chance of a
 		// different answer.
 		return upstream.AttemptResult{Err: err, Terminal: tlsFailureCategory(err) != ""}
 	})
 	if err != nil {
-		if attempts == 0 && t.dialFailure != nil {
+		if attempts == 0 && t.dialFailure != nil && req.Context().Err() == nil {
 			// Every backend was already in cooldown before this call made any
 			// attempt of its own: count it (bounded reason "no_backend"), same as
 			// a real dial failure, so the counter is not undercounted relative to
@@ -397,14 +414,18 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 // noteFailure records a failed attempt against passive health and the bounded
 // dial-failure counter, logging a transition unconditionally and an ordinary
 // failure only on the pool's throttle.
-func (t *balancingTransport) noteFailure(b upstream.Attempt, err error) {
-	tripped := t.pool.MarkFailure(b)
-	// Client cancellation and backend-TLS-identity failures are not backend
-	// dial failures: the former is client behavior, and the latter already has
-	// its own unthrottled, categorized line via tlsFailureCategory (ADR 0016
-	// territory). MarkFailure still runs for both, unchanged from before this
-	// counter existed: this is observability only, not a circuit-breaker change.
-	if errors.Is(err, context.Canceled) || tlsFailureCategory(err) != "" {
+func (t *balancingTransport) noteFailure(b upstream.Attempt, err error, inbound, attempt context.Context) {
+	classification := upstream.ClassifyAttemptError(err, inbound, attempt)
+	t.recordFailure(b, err, classification)
+}
+
+func (t *balancingTransport) recordFailure(b upstream.Attempt, err error, classification upstream.AttemptClassification) {
+	tripped := t.pool.RecordAttempt(b, classification)
+	// Only a backend-attributable transport failure belongs in the backend-dial
+	// metric or passive circuit. Client lifecycle, Jul-owned deadlines and
+	// route-level TLS identity failures retain their own bounded reason without
+	// becoming evidence against a pool shared by other consumers.
+	if classification.Health() != upstream.HealthFailure {
 		return
 	}
 	reason := upstream.ClassifyDialError(err)
@@ -421,44 +442,6 @@ func (t *balancingTransport) noteFailure(b upstream.Attempt, err error) {
 		t.log.Warn("proxy dial failed", "upstream", t.pool.Name(), "backend", b.Address, "reason", reason, "error", err)
 	}
 }
-
-// releaseBody releases a backend's in-flight slot exactly once, when the
-// response body is closed.
-type releaseBody struct {
-	io.ReadCloser
-	once    sync.Once
-	release func()
-}
-
-func (r *releaseBody) Close() error {
-	r.once.Do(r.release)
-	return r.ReadCloser.Close()
-}
-
-// wrapReleaseBody attaches the in-flight slot release to a response body. A
-// protocol-upgrade (HTTP 101) response carries a writable body that
-// httputil.ReverseProxy type-asserts to io.ReadWriteCloser to splice the
-// upgraded connection (WebSocket, raw TCP-over-HTTP). The plain releaseBody is
-// read-only, which would break that assertion, so upgrade bodies are wrapped in
-// releaseRWBody to keep the Write method exposed.
-func wrapReleaseBody(body io.ReadCloser, release func()) io.ReadCloser {
-	rb := &releaseBody{ReadCloser: body, release: release}
-	if rw, ok := body.(io.ReadWriteCloser); ok {
-		return &releaseRWBody{releaseBody: rb, w: rw}
-	}
-	return rb
-}
-
-// releaseRWBody is wrapReleaseBody's variant for upgrade responses whose body is
-// also writable. Read and Close are promoted from the embedded releaseBody (so
-// the slot is still released exactly once); Write is forwarded to the upgraded
-// connection.
-type releaseRWBody struct {
-	*releaseBody
-	w io.Writer
-}
-
-func (r *releaseRWBody) Write(p []byte) (int, error) { return r.w.Write(p) }
 
 func isIdempotent(method string) bool { return upstream.RetrySafeMethod(method) }
 

@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.7 · Updated 2026-08-30
+> Version 2.8 · Updated 2026-09-15
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -69,13 +69,18 @@ not inherit an older GA row merely because it lives in the same package or guide
   cache record retains GA.
 - **Trusted client address and backend TLS:** merged Beta capabilities; stable
   publication and soak are still explicit promotion gates.
-- **Resilience:** admission, retry and circuit implementations are merged; the
-  integrated cross-protocol/soak and full external-contract closure remain in
-  #287/#144 at this baseline.
+- **Resilience:** admission, retry and circuit implementations are merged. The
+  pre-soak correction centralizes cross-protocol failure attribution and keeps
+  client/Jul-owned cancellation neutral; stable release and soak remain open.
 - **Routing, configuration authority, generated contracts and NGINX assessment:**
   merged after the current RC and therefore represented separately from older
   GA rows.
-- **Local diagnostics and support bundles:** merged Beta capability; stable remote API and remote CLI exposure remain #150/#151.
+- **Post-manifest additive surfaces:** admin TLS/mTLS, the versioned external
+  API, the remote CLI, selected runtime-policy hot reload and HTTP-over-Unix
+  upstreams are merged Beta capabilities. None inherits an older GA/soak row.
+- **Local diagnostics and support bundles:** merged Beta capability. Its later
+  reduced remote projection is tracked with the API/CLI rows and does not
+  promote the local capability.
 
 ## GA criteria legend
 
@@ -155,6 +160,11 @@ not yet at the GA bar. `merged` and `candidate` are not synonyms for released.
 | Generated configuration contracts and route identity | AUTO-CONTRACT | core | `merged` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | n/a | [generated/config-reference.md](generated/config-reference.md) |
 | NGINX migration assessment, provenance, and includes | MIG-ASSESS | `importer` | `merged` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ✅ | [nginx-assessment.md](nginx-assessment.md) |
 | Local diagnostics and support bundles | OPS-DIAG | core | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [diagnostics.md](diagnostics.md) |
+| Admin listener TLS and client authentication | ADMIN-TLS | core | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [deployment.md](deployment.md) |
+| Versioned external admin API | AUTO-API | core | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [admin-api.md](admin-api.md) |
+| Remote automation CLI | AUTO-CLI | core | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [remote-cli.md](remote-cli.md) |
+| Selected runtime policy hot reload | HR-SELECTED | core | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [hot-reload-strategy.md](hot-reload-strategy.md) |
+| HTTP proxy over Unix-domain upstreams | HTTP-UNIX | core | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [unix-http-upstreams.md](unix-http-upstreams.md) |
 
 ## Alpha
 
@@ -204,6 +214,7 @@ the [soak evidence log](soak-evidence.md).
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-09-15 | 2.8 | Reconciled post-2026-08-30 additive surfaces as separate merged Beta entries: admin TLS/mTLS, external API, remote CLI, selected runtime-policy hot reload and HTTP-over-Unix upstreams. Updated resilience attribution and removed stale future-work wording without claiming release or soak. | [feature-status.yaml](feature-status.yaml); [upstreams.md](upstreams.md); [known-limitations.md](known-limitations.md) |
 | 2026-08-30 | 2.7 | Reconciled maturity and delivery as separate axes; added explicit post-RC rows for egress, routing/response policy, resilience, configuration authority/generated contracts, and NGINX assessment/provenance/includes; removed stale programme language. | Issue #353; [feature-status.yaml](feature-status.yaml) |
 | 2026-08-17 | 2.6 | Bumped version to keep the status page in sync with the roadmap after reconciling stale #115/#116 status: both ADRs (0016, 0017) are accepted and closed, their unblocked implementation lanes (inbound identity #135→#136→#259, backend trust #137→#138→#139→#140) are complete, and generic resilience (#141-#144) is now READY/unblocked rather than gated. No feature maturity or GA criterion changed. | [roadmap/README.md](roadmap/README.md), Issues #115, #116 |
 | 2026-07-31 | 1.37 | Bumped version to keep the status page in sync with the roadmap after **Phase 4 egress was delivered** (P4-03, #76): rate-limited secret-safe egress block logs, a Console Security documentation link, and the full negative/integration/lifecycle/race test matrix land on top of the P4-01/P4-02 wiring, moving the roadmap Phase 4 row from *in progress* to *delivered*. No feature maturity or GA criteria changed. | [roadmap/README.md](roadmap/README.md), Issue #76 |

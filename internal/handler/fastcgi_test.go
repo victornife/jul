@@ -98,6 +98,24 @@ func TestWriteCGIResponse(t *testing.T) {
 			t.Errorf("body = %q", rec.Body.String())
 		}
 	})
+
+	for _, tt := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "empty status", raw: "Status:\r\n\r\n"},
+		{name: "invalid status", raw: "Status: nope\r\n\r\n"},
+		{name: "malformed header", raw: "not-a-header\r\n\r\n"},
+		{name: "unterminated header", raw: "Content-Type: text/plain"},
+		{name: "oversized header line", raw: "X-Large: " + strings.Repeat("x", cgiResponseHeaderMax) + "\r\n\r\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			if err := writeCGIResponse(bufio.NewReader(strings.NewReader(tt.raw)), rec); err == nil {
+				t.Fatal("malformed response was accepted")
+			}
+		})
+	}
 }
 
 // parseUWSGIVars decodes a uWSGI var block for test assertions.

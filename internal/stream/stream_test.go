@@ -878,7 +878,7 @@ func TestReloadBindFailureRollsBack(t *testing.T) {
 
 func TestSNIPeekDoesNotConsume(t *testing.T) {
 	hello := clientHelloBytes(t, "host.example.com")
-	br := bufio.NewReaderSize(bytes.NewReader(hello), tlsRecordMax+512)
+	br := bufio.NewReaderSize(bytes.NewReader(hello), tlsInspectMax)
 	host := peekSNI(br)
 	if host != "host.example.com" {
 		t.Fatalf("peekSNI: got %q want host.example.com", host)
@@ -888,6 +888,156 @@ func TestSNIPeekDoesNotConsume(t *testing.T) {
 	if !bytes.Equal(rest, hello) {
 		t.Errorf("peek consumed bytes: got %d want %d", len(rest), len(hello))
 	}
+}
+
+func TestSNIPeekAcrossRecords(t *testing.T) {
+	const host = "fragmented.example.com"
+	hello := clientHelloBytes(t, host)
+	payload := hello[5:]
+	hostAt := bytes.Index(payload, []byte(host))
+	if hostAt < 0 {
+		t.Fatal("captured ClientHello does not contain SNI")
+	}
+
+	for _, tt := range []struct {
+		name  string
+		sizes []int
+	}{
+		{name: "handshake header split", sizes: []int{2}},
+		{name: "several records", sizes: []int{1, 1, 2, 3, 5, 8}},
+		{name: "inside SNI name", sizes: []int{hostAt + 3}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fragmented := fragmentClientHello(t, hello, tt.sizes...)
+			br := bufio.NewReaderSize(bytes.NewReader(fragmented), tlsInspectMax)
+			if got := peekSNI(br); got != host {
+				t.Fatalf("peekSNI = %q, want %q", got, host)
+			}
+			rest, err := io.ReadAll(br)
+			if err != nil {
+				t.Fatalf("read after peek: %v", err)
+			}
+			if !bytes.Equal(rest, fragmented) {
+				t.Fatal("fragmented ClientHello bytes were consumed or changed")
+			}
+		})
+	}
+}
+
+func TestSNIPeekBoundsAndMalformedInput(t *testing.T) {
+	hello := clientHelloBytes(t, "host.example.com")
+	badHandshakeLength := append([]byte(nil), hello...)
+	badHandshakeLength[6], badHandshakeLength[7], badHandshakeLength[8] = 0, 0, 8
+	tooManySizes := make([]int, tlsClientHelloMaxRecords)
+	for i := range tooManySizes {
+		tooManySizes[i] = 1
+	}
+
+	for _, tt := range []struct {
+		name string
+		in   []byte
+	}{
+		{name: "truncated record", in: hello[:len(hello)-1]},
+		{name: "malformed handshake length", in: badHandshakeLength},
+		{name: "not handshake record", in: append([]byte{0x17}, hello[1:]...)},
+		{name: "invalid record version", in: append([]byte{0x16, 0x04, 0x00}, hello[3:]...)},
+		{name: "empty record", in: []byte{0x16, 0x03, 0x01, 0x00, 0x00}},
+		{name: "record above cap", in: []byte{0x16, 0x03, 0x01, 0x40, 0x01}},
+		{name: "declared hello above cap", in: []byte{0x16, 0x03, 0x01, 0x00, 0x04, 0x01, 0x00, 0x40, 0x00}},
+		{name: "record count above cap", in: fragmentClientHello(t, hello, tooManySizes...)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			br := bufio.NewReaderSize(bytes.NewReader(tt.in), tlsInspectMax)
+			if got := peekSNI(br); got != "" {
+				t.Fatalf("peekSNI = %q, want empty", got)
+			}
+		})
+	}
+}
+
+func TestSNIPeekNoSNI(t *testing.T) {
+	hello := clientHelloBytes(t, "")
+	br := bufio.NewReaderSize(bytes.NewReader(hello), tlsInspectMax)
+	if got := peekSNI(br); got != "" {
+		t.Fatalf("ClientHello without SNI = %q, want empty", got)
+	}
+}
+
+func TestSNIPeekAcceptedRecordVersions(t *testing.T) {
+	hello := clientHelloBytes(t, "versions.example.com")
+	for _, minor := range []byte{0x00, 0x01, 0x02, 0x03, 0x04} {
+		t.Run(strconv.Itoa(int(minor)), func(t *testing.T) {
+			versioned := append([]byte(nil), hello...)
+			versioned[1], versioned[2] = 0x03, minor
+			br := bufio.NewReaderSize(bytes.NewReader(versioned), tlsInspectMax)
+			if got := peekSNI(br); got != "versions.example.com" {
+				t.Fatalf("record version 3.%d SNI = %q", minor, got)
+			}
+		})
+	}
+}
+
+func TestSNIPeekTimeoutMidClientHello(t *testing.T) {
+	hello := clientHelloBytes(t, "timeout.example.com")
+	r := io.MultiReader(bytes.NewReader(hello[:len(hello)/2]), timeoutSNIReader{})
+	br := bufio.NewReaderSize(r, tlsInspectMax)
+	if got := peekSNI(br); got != "" {
+		t.Fatalf("timed-out ClientHello SNI = %q, want empty", got)
+	}
+}
+
+type timeoutSNIReader struct{}
+
+func (timeoutSNIReader) Read([]byte) (int, error) { return 0, timeoutSNIError{} }
+
+type timeoutSNIError struct{}
+
+func (timeoutSNIError) Error() string   { return "timeout" }
+func (timeoutSNIError) Timeout() bool   { return true }
+func (timeoutSNIError) Temporary() bool { return true }
+
+func TestParseClientHelloRejectsMalformedExtensions(t *testing.T) {
+	const host = "host.example.com"
+	record := clientHelloBytes(t, host)
+	hello := append([]byte(nil), record[5:]...)
+	hostAt := bytes.Index(hello, []byte(host))
+	if hostAt < 5 {
+		t.Fatal("captured ClientHello does not contain a complete SNI entry")
+	}
+	hello[hostAt-5] = 0x7f // corrupt server_name_list length
+	if got := parseClientHelloSNI(hello); got != "" {
+		t.Fatalf("malformed SNI = %q, want empty", got)
+	}
+}
+
+func fragmentClientHello(t *testing.T, record []byte, sizes ...int) []byte {
+	t.Helper()
+	if len(record) < 5 {
+		t.Fatal("short TLS record")
+	}
+	recordLen := int(record[3])<<8 | int(record[4])
+	if recordLen > len(record)-5 {
+		t.Fatal("truncated TLS record")
+	}
+	payload := record[5 : 5+recordLen]
+	version := record[1:3]
+	var out []byte
+	for _, size := range sizes {
+		if size <= 0 || size > len(payload) {
+			t.Fatalf("invalid fragment size %d with %d bytes remaining", size, len(payload))
+		}
+		out = appendHandshakeRecord(out, version, payload[:size])
+		payload = payload[size:]
+	}
+	if len(payload) > 0 {
+		out = appendHandshakeRecord(out, version, payload)
+	}
+	return out
+}
+
+func appendHandshakeRecord(dst, version, payload []byte) []byte {
+	dst = append(dst, 0x16, version[0], version[1], byte(len(payload)>>8), byte(len(payload)))
+	return append(dst, payload...)
 }
 
 func TestSNIPeekNonTLS(t *testing.T) {

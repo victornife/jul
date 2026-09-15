@@ -364,6 +364,13 @@ type AttemptResult struct {
 	// response body outlives the round trip that produced it, so its adapter
 	// sets this and then owns exactly one Release.
 	Retain bool
+	// RetainContext receives ownership of the retry driver's deadline cancel
+	// function when a successful retained result must keep using that context
+	// after Do returns. The caller initializes its variable to a no-op and must
+	// invoke the transferred function exactly once with its retained Release.
+	// It is ignored unless Retain is true and this request configured a retry
+	// deadline.
+	RetainContext *context.CancelFunc
 }
 
 // AttemptFunc performs one attempt against a chosen backend. n is 1-based.
@@ -381,12 +388,16 @@ type AttemptFunc func(ctx context.Context, b Attempt, n int) AttemptResult
 // successful attempt that asked to retain it.
 func (p *Pool) Do(ctx context.Context, rr RetryRequest, fn AttemptFunc) (StopReason, error) {
 	deadline := ctx
+	var ownedCancel context.CancelFunc
 	if rr.Deadline > 0 {
 		// WithTimeout already takes the minimum with any deadline the caller
 		// brought, so this is exactly min(request deadline, start + retry_deadline).
-		var cancel context.CancelFunc
-		deadline, cancel = context.WithTimeout(ctx, rr.Deadline)
-		defer cancel()
+		deadline, ownedCancel = context.WithTimeout(ctx, rr.Deadline)
+		defer func() {
+			if ownedCancel != nil {
+				ownedCancel()
+			}
+		}()
 	}
 
 	tried := make(map[BackendIdentity]struct{})
@@ -408,7 +419,12 @@ func (p *Pool) Do(ctx context.Context, rr RetryRequest, fn AttemptFunc) (StopRea
 
 		res := fn(deadline, b, n)
 		if res.Err == nil {
-			if !res.Retain {
+			if res.Retain {
+				if res.RetainContext != nil && ownedCancel != nil {
+					*res.RetainContext = ownedCancel
+					ownedCancel = nil
+				}
+			} else {
 				p.Release(b.Backend)
 			}
 			return StopSuccess, nil

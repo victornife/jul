@@ -1,6 +1,6 @@
 # Security Policy
 
-> Last reviewed: 2026-08-05
+> Last reviewed: 2026-09-15
 
 This is the umbrella security document for **Jul.IA** (`jul`). It defines the
 trust model the server is built around, the hardening defaults you should know
@@ -59,7 +59,7 @@ a set of **operator-chosen** upstreams. The boundaries are:
 | The TOML configuration | **trusted** | Operator-supplied. It can open files, dial hosts, and set headers; treat it as code and restrict who can edit it. |
 | The `jul` binary + host filesystem | **trusted** | Protect the working directory, the ACME `cache_dir`, and any htpasswd/CA/key files (service-user-only). |
 | Downstream client requests | **untrusted** | Headers, bodies, paths, tokens, and TLS client certs are all attacker-controlled and validated at the boundary. |
-| Upstreams you configure | **operator-chosen; authenticate deliberately** | Request input never selects the target. Default HTTPS uses the platform trust/hostname checks, but unified private-CA, backend mTLS, SNI override and explicit peer-identity policy are selected future core work. Reflection extends trust to the backend's self-description. |
+| Upstreams you configure | **operator-chosen; authenticate deliberately** | Request input never selects the target. Default HTTPS uses platform trust and hostname checks; the merged `backend_tls` policy adds private roots, backend mTLS, verified-name/SNI override, minimum TLS version and explicit peer identities across HTTP, native gRPC, transcoding/reflection and active probes. Reflection extends trust to the backend's self-description. |
 
 **Core invariant — request input never widens the attack surface.** The upstream
 target, the JWKS URL, the certificate set, and the FastCGI root are all
@@ -192,4 +192,3 @@ permanent regression seed.
 ## Admin Console and plugin-upload hot reload
 
 HR-06B (#157) treats admin authentication/RBAC, Console dispatch and plugin-upload policy as one immutable per-request generation. Disabling uploads rejects before request-body parsing; candidate upload storage is validated before Publish with reversible probes; admitted writes are confined to an `os.Root`, use owner-only files on Unix, and reject symbolic-link/special-file final destinations. Bounded runtime diagnostics do not expose upload paths, filenames, bearer tokens or resolved secrets as metric labels/status fields. See [`docs/admin-runtime-hot-reload.md`](docs/admin-runtime-hot-reload.md) for the complete security and concurrency contract.
-

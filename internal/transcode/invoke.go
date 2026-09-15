@@ -449,7 +449,7 @@ func (t *Transcoder) serveStreamingRoute(w http.ResponseWriter, r *http.Request,
 		code := http.StatusBadGateway
 		t.writeError(w, code, "grpc backend unreachable: "+err.Error())
 		t.report(method, code)
-		t.pool.MarkFailure(backend)
+		t.pool.RecordAttempt(backend, upstream.ClassifyAttemptError(err, r.Context(), r.Context()))
 		return
 	}
 	t.serveStreaming(w, r, rt, vars, conn, backend)
@@ -476,24 +476,22 @@ func (t *Transcoder) serveUnary(w http.ResponseWriter, r *http.Request, rt *rout
 		func(ctx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
 			conn, cerr := t.connFor(b.Identity(), b.LogicalID())
 			if cerr != nil {
-				t.pool.MarkFailure(b)
+				t.pool.RecordAttempt(b, upstream.ClassifyAttemptError(cerr, r.Context(), ctx))
 				return upstream.AttemptResult{Err: &backendDialError{err: cerr}}
 			}
 			// A fresh output message per attempt: reusing one would let a
 			// partially unmarshalled failed response merge into the next.
 			out := dynamicpb.NewMessage(rt.method.Output())
-			if ierr := conn.Invoke(outgoingContext(r), grpcMethodPath(rt.method), req, out); ierr != nil {
+			if ierr := conn.Invoke(outgoingContext(r.WithContext(ctx)), grpcMethodPath(rt.method), req, out); ierr != nil {
 				code := status.Code(ierr)
-				if isBackendFailure(code) {
-					t.pool.MarkFailure(b)
-				}
+				t.pool.RecordAttempt(b, classifyGRPCAttempt(ierr, r.Context(), ctx))
 				// Only Unavailable means "this backend could not take the
 				// call". Every other code is the application's answer, and
 				// asking a different backend the same question would just get
 				// the same answer more expensively.
 				return upstream.AttemptResult{Err: ierr, Terminal: code != codes.Unavailable}
 			}
-			t.pool.MarkSuccess(b)
+			t.pool.RecordAttempt(b, upstream.SuccessfulAttempt())
 			resp = out
 			return upstream.AttemptResult{}
 		})

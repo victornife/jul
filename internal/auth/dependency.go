@@ -44,13 +44,13 @@ func (d *dependency) do(req *http.Request) (*http.Response, error) {
 	// Admission first, as everywhere else: the subrequest is upstream work and
 	// is counted as such. The slot covers the exchange; both callers read the
 	// bounded response body immediately after this returns.
-	release, err := d.pool.Admission().Admit(req.Context(), nil)
+	releaseAdmission, err := d.pool.Admission().Admit(req.Context(), nil)
 	if err != nil {
 		return nil, err
 	}
-	defer release()
 
 	var resp *http.Response
+	finishRetryContext := context.CancelFunc(func() {})
 	_, err = d.pool.Do(req.Context(),
 		d.pool.RetryRequestFor(upstream.RetryOverride{}, upstream.RetrySafeMethod(req.Method)),
 		func(ctx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
@@ -58,18 +58,27 @@ func (d *dependency) do(req *http.Request) (*http.Response, error) {
 			out.URL.Host = b.Address
 			r, aerr := d.client.Do(out)
 			if aerr != nil {
-				d.pool.MarkFailure(b)
+				d.pool.RecordAttempt(b, upstream.ClassifyAttemptError(aerr, req.Context(), ctx))
 				return upstream.AttemptResult{Err: aerr}
 			}
-			// A received response ends the attempt whatever its status. Only
-			// the transport is in scope here: a 500 from an auth service is an
-			// answer, and treating it as a backend failure would let one
-			// misbehaving service take a healthy replica out of rotation.
-			d.pool.MarkSuccess(b)
+			// A completed response is success whatever its application status.
+			// Keep the attempt and admission slot through the bounded body read so
+			// a caller cancellation after headers cannot clear prior failures.
+			if r.Body == nil {
+				r.Body = http.NoBody
+			}
+			r.Body = upstream.WrapAttemptBody(r.Body, r.ContentLength, req.Context(), ctx,
+				func(classification upstream.AttemptClassification, _ error) {
+					d.pool.RecordAttempt(b, classification)
+					d.pool.Release(b.Backend)
+					finishRetryContext()
+					releaseAdmission()
+				})
 			resp = r
-			return upstream.AttemptResult{}
+			return upstream.AttemptResult{Retain: true, RetainContext: &finishRetryContext}
 		})
 	if err != nil {
+		releaseAdmission()
 		return nil, err
 	}
 	return resp, nil
