@@ -20,15 +20,16 @@ func (b *closingBody) Close() error           { return b.closeErr }
 type errorReadWriteBody struct{ err error }
 
 func (*errorReadWriteBody) Read([]byte) (int, error) { return 0, nil }
-func (*errorReadWriteBody) Close() error              { return nil }
+func (*errorReadWriteBody) Close() error             { return nil }
 func (b *errorReadWriteBody) Write([]byte) (int, error) {
 	return 0, b.err
 }
 
 type attributionTimeoutError struct{}
 
-func (attributionTimeoutError) Error() string { return "backend timed out" }
-func (attributionTimeoutError) Timeout() bool { return true }
+func (attributionTimeoutError) Error() string   { return "backend timed out" }
+func (attributionTimeoutError) Timeout() bool   { return true }
+func (attributionTimeoutError) Temporary() bool { return true }
 
 func TestAttemptBodyCloseClassification(t *testing.T) {
 	client, cancelClient := context.WithCancel(context.Background())

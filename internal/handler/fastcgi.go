@@ -191,7 +191,10 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Past this point a byte may reach the client, so nothing here is retried.
 	errBuffer := new(bytes.Buffer)
-	downstream := &writeTrackingResponseWriter{ResponseWriter: w}
+	downstream := &writeTrackingResponseWriter{
+		ResponseWriter: w,
+		onWriteError:   pipe.Close,
+	}
 	werr := pipe.WriteTo(downstream, errBuffer)
 	switch {
 	case r.Context().Err() != nil:
@@ -567,7 +570,8 @@ const (
 // selected backend when the failing side was the client connection.
 type writeTrackingResponseWriter struct {
 	http.ResponseWriter
-	writeErr error
+	writeErr     error
+	onWriteError func()
 }
 
 func (w *writeTrackingResponseWriter) Write(p []byte) (int, error) {
@@ -577,6 +581,9 @@ func (w *writeTrackingResponseWriter) Write(p []byte) (int, error) {
 	}
 	if err != nil && w.writeErr == nil {
 		w.writeErr = err
+		if w.onWriteError != nil {
+			w.onWriteError()
+		}
 	}
 	return n, err
 }
