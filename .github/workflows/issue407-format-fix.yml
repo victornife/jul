@@ -1,4 +1,5 @@
 name: issue407 final format fix
+# Temporary final formatting helper; removed before merge.
 
 on:
   push:
