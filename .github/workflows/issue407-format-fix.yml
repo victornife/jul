@@ -1,0 +1,46 @@
+name: issue407 final format fix
+
+on:
+  push:
+    branches:
+      - issue-407-unix-http-proxy
+    paths:
+      - .github/workflows/issue407-format-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: issue-407-unix-http-proxy
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Format changed Go files
+        shell: bash
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          changed="$(git diff --name-only origin/main...HEAD -- '*.go')"
+          if [ -n "$changed" ]; then gofmt -w $changed; fi
+          git diff --check
+      - name: Verify affected packages
+        run: |
+          go test ./internal/handler ./internal/upstream ./internal/admin ./internal/app ./internal/adminapi ./internal/apicontract
+          go test -tags importer ./cmd/jul ./internal/migrate/nginx/...
+      - name: Commit format fix
+        shell: bash
+        run: |
+          git config user.name "ChatGPT Codex Connector"
+          git config user.email "noreply@openai.com"
+          git add -- '*.go'
+          if git diff --cached --quiet; then
+            echo "No Go formatting changes required"
+            exit 0
+          fi
+          git commit -m "style: format issue 407 final tests"
+          git push origin HEAD:issue-407-unix-http-proxy
