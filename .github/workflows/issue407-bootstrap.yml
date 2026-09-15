@@ -25,6 +25,29 @@ jobs:
         run: python3 .github/issue407_bootstrap.py
       - name: Fix generated validation assertion
         run: sed -i '27c\    if len(errs) == 0 {' internal/config/validate_unix_http_test.go
+      - name: Fix retry callback scope
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("internal/handler/proxy.go")
+          s = p.read_text()
+          old = '''\t\tvar backendLabel string
+\t\tout, backendLabel, err = prepareProxyAttempt(out, b, t.tlsBackend)
+\t\tif err != nil {
+\t\t\treturn upstream.AttemptResult{Err: err, Terminal: true}
+\t\t}
+'''
+          new = '''\t\tprepared, backendLabel, prepErr := prepareProxyAttempt(out, b, t.tlsBackend)
+\t\tif prepErr != nil {
+\t\t\treturn upstream.AttemptResult{Err: prepErr, Terminal: true}
+\t\t}
+\t\tout = prepared
+'''
+          if old not in s:
+              raise SystemExit("retry callback patch target not found")
+          p.write_text(s.replace(old, new, 1))
+          PY
       - name: Format
         run: gofmt -w internal/handler/proxy.go internal/handler/proxy_unix.go internal/handler/proxy_unix_test.go internal/config/validate_backends.go internal/config/validate_unix_http_test.go
       - name: Targeted tests
