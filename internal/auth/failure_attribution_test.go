@@ -97,6 +97,29 @@ func TestAuthDependencyCancellationDuringBodyPreservesPriorFailure(t *testing.T)
 	}
 }
 
+func TestAuthDependencyNormalizesNilResponseBody(t *testing.T) {
+	p := authAttributionPool(t)
+	d := &dependency{
+		pool: p,
+		client: &http.Client{Transport: roundTripperFn(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusNoContent, ContentLength: 0}, nil
+		})},
+	}
+	req, _ := http.NewRequest(http.MethodGet, "http://auth.test/verify", nil)
+	resp, err := d.do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Body == nil {
+		t.Fatal("nil dependency response body was not normalized")
+	}
+	_ = resp.Body.Close()
+	b := p.Backends()[0]
+	if !b.Available() || b.FailCount() != 0 || b.Inflight() != 0 {
+		t.Fatalf("nil-body response did not complete cleanly: available=%t fails=%d inflight=%d", b.Available(), b.FailCount(), b.Inflight())
+	}
+}
+
 func TestAuthDependencyBackendFailureStillTripsCircuit(t *testing.T) {
 	p := authAttributionPool(t)
 	d := &dependency{
