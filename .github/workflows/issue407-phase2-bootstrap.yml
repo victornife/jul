@@ -36,7 +36,8 @@ jobs:
         run: |
           git config user.name "ChatGPT Codex Connector"
           git config user.email "noreply@openai.com"
-          git rm .github/workflows/issue407-phase2-bootstrap.yml .github/issue407_phase2.py .github/workflows/issue407-quality.yml
+          git rm .github/workflows/issue407-phase2-bootstrap.yml .github/issue407_phase2.py
+          rm -f .github/workflows/issue407-quality.yml
           git add README.md CHANGELOG.md docs internal
           git commit -m "test: certify Unix HTTP proxy integration (#407)"
           git push origin HEAD:issue-407-unix-http-proxy
