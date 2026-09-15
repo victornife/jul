@@ -1644,10 +1644,20 @@ func TestAdoptExternalRejectsWhilePlannedRestartPending(t *testing.T) {
 	}
 }
 
-func TestAdoptExternalAlreadyLiveNeedsNoReload(t *testing.T) {
+func TestAdoptExternalAlreadyLiveUsesResourceAwareNoop(t *testing.T) {
 	submitCalled := false
-	submit := func(server.ReloadRequest) error {
+	submit := func(req server.ReloadRequest) error {
 		submitCalled = true
+		if req.PreparedAdmin != nil {
+			req.PreparedAdmin.Abort()
+		}
+		req.Result <- server.ReloadResult{
+			ID:             req.ID,
+			Outcome:        server.ReloadNoChange,
+			Persisted:      true,
+			Published:      false,
+			ServingVersion: server.CanonicalVersion(req.Candidate.Effective),
+		}
 		return nil
 	}
 	c, path := newAuthorityTestCoordinator(t, AuthorityManaged, nil, submit)
@@ -1656,8 +1666,9 @@ func TestAdoptExternalAlreadyLiveNeedsNoReload(t *testing.T) {
 	if err := os.WriteFile(path, seed, 0o600); err != nil {
 		t.Fatalf("write seed: %v", err)
 	}
-	// The runtime already serves `seed` (LiveSnapshot below returns it), so
-	// adoption after a restart needs no reload (ADR 0019 §11.2.2).
+	// The runtime already serves `seed`. Adoption still submits it to the
+	// server's resource-aware proof so equal TOML cannot hide same-path TLS or
+	// other resource rotation; the server returns a successful no_change.
 	liveCfg := mustParseForTest(t, seed)
 	c.LiveSnapshot = func() server.LiveSnapshot {
 		return server.LiveSnapshot{EffectiveConfig: liveCfg}
@@ -1674,11 +1685,11 @@ func TestAdoptExternalAlreadyLiveNeedsNoReload(t *testing.T) {
 	if !res.OK {
 		t.Fatalf("expected success, got %+v", res)
 	}
-	if submitCalled {
-		t.Error("adoption of already-live bytes must not submit a reload")
+	if !submitCalled {
+		t.Error("adoption of already-live bytes must submit the resource-aware no-op assessment")
 	}
-	if res.Reload != nil {
-		t.Error("no reload should be attached when nothing was reloaded")
+	if res.Reload == nil || res.Reload.Outcome != server.ReloadNoChange || res.Reload.Published {
+		t.Errorf("reload = %+v, want terminal no_change without publication", res.Reload)
 	}
 }
 

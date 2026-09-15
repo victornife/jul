@@ -99,7 +99,7 @@ func (s *Server) v1ConfigApplyResponse(result ConfigApplyResult, status int) adm
 		Terminal:         terminal,
 		OK:               result.OK,
 		Mode:             result.Mode,
-		Outcome:          outcome,
+		Outcome:          adminapi.ReloadOutcome(outcome),
 		PersistedVersion: persistedVersion,
 		DesiredVersion:   result.DesiredVersion,
 		ServingVersion:   servingVersion,

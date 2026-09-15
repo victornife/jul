@@ -88,8 +88,11 @@ line — an error string, a debug field — is masked wherever it appears.
 
 Notes on the redactor:
 
-- The registry is **replaced wholesale** on every reload (via `Replace`), so
-  deleted secrets stop being masked and new ones are added.
+- A published generation installs its candidate redaction state while retaining
+  the prior generation's state until in-flight work drains. A semantic no-op
+  merges newly accepted secret metadata into the unchanged live generation, so
+  rewriting a reference as the same effective literal cannot expose a value
+  still held by live resources.
 - Values shorter than the **redaction floor** (default **4 characters**) are
   deliberately **not** masked, to avoid corrupting unrelated log text with a
   too-common substring (a secret that short is not meaningfully secret). Lower

@@ -230,6 +230,10 @@ type Server struct {
 	// reloads supply their already-prepared artifact on ReloadRequest; other
 	// reload sources invoke this hook during ReloadPlan.Prepare.
 	PrepareAdmin func(config.AdminConfig) (*PreparedCommit, error)
+	// AdminTLSInputsUnchanged proves that the candidate admin certificate/key
+	// content matches the provider currently installed by the admin listener.
+	// It is consulted only for an otherwise semantic no-op; nil fails closed.
+	AdminTLSInputsUnchanged func(config.AdminConfig) bool
 
 	// OnReloadStart, when set, is invoked at the beginning of every reload
 	// transaction so the composition root can increment an in-progress gauge.
@@ -238,7 +242,8 @@ type Server struct {
 
 	// OnReloadComplete, when set, is invoked once per reload transaction
 	// immediately after the ReloadResult is finalized and stored. It is called
-	// for every outcome (applied_live, applied_degraded, not_applied, etc.) so
+	// for every outcome (applied_live, applied_degraded, no_change,
+	// not_applied, etc.) so
 	// the composition root can update Prometheus counters and gauges without this
 	// package importing observability. source, outcome, and durationMs mirror the
 	// corresponding ReloadResult fields.
@@ -286,14 +291,19 @@ type Server struct {
 	// reload runs concurrently (R10-02).
 	runtimeState atomic.Pointer[runtimeState]
 
-	// redactMu guards redactGens and retiredRedaction. A generation is
+	// redactMu guards redactGens, redactGenBases, and retiredRedaction. A generation is
 	// registered when its handlers are published and retired after its
 	// in-flight requests drain, so secrets are masked as long as any request
 	// of that generation may still emit them (R7-02). Generations that do not
 	// drain before the resource grace timeout move to retiredRedaction so the
 	// secret union remains masked without blocking shutdown (R9-03).
-	redactMu         sync.Mutex
-	redactGens       map[uint64]redact.State
+	redactMu   sync.Mutex
+	redactGens map[uint64]redact.State
+	// redactGenBases retains the immutable redaction state captured when each
+	// handler generation was built. A no-op replaces that generation's mutable
+	// metadata overlay with base plus the current candidate, rather than
+	// accumulating every historical no-op candidate indefinitely.
+	redactGenBases   map[uint64]redact.State
 	retiredRedaction redact.State // union of grace-expired generations
 
 	wg       sync.WaitGroup
@@ -595,16 +605,17 @@ func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.F
 		}
 	}
 	s := &Server{
-		log:        log,
-		source:     source,
-		validate:   validate,
-		factory:    factory,
-		cfg:        cfg,
-		rawCfg:     rawStartupCfg,
-		startupFP:  startupFP,
-		listeners:  map[string]*listenerEntry{},
-		redactGens: make(map[uint64]redact.State),
-		serveErr:   make(chan error, 8),
+		log:            log,
+		source:         source,
+		validate:       validate,
+		factory:        factory,
+		cfg:            cfg,
+		rawCfg:         rawStartupCfg,
+		startupFP:      startupFP,
+		listeners:      map[string]*listenerEntry{},
+		redactGens:     make(map[uint64]redact.State),
+		redactGenBases: make(map[uint64]redact.State),
+		serveErr:       make(chan error, 8),
 	}
 	s.runtimeState.Store(&runtimeState{EffectiveConfig: cfg, RawConfig: rawStartupCfg, Listeners: map[string]BoundListenerInfo{}})
 	return s
@@ -1016,6 +1027,7 @@ func (s *Server) retireRedactionForGen(genID uint64) {
 		return
 	}
 	delete(s.redactGens, genID)
+	delete(s.redactGenBases, genID)
 	if s.retiredRedaction.Count() == 0 {
 		s.retiredRedaction = state
 	} else {
@@ -1062,7 +1074,41 @@ func (s *Server) dynamicHandler(addr string) http.Handler {
 func (s *Server) registerRedactionGen(genID uint64, state redact.State) {
 	s.redactMu.Lock()
 	defer s.redactMu.Unlock()
+	if s.redactGens == nil {
+		s.redactGens = make(map[uint64]redact.State)
+	}
+	if s.redactGenBases == nil {
+		s.redactGenBases = make(map[uint64]redact.State)
+	}
 	s.redactGens[genID] = state
+	s.redactGenBases[genID] = state
+	redact.Install(s.redactUnionLocked())
+}
+
+// mergeRedactionGen updates the bounded candidate-metadata overlay of an
+// existing handler generation without changing its identity. A semantic no-op
+// keeps the same handlers and resources, so their prior secrets must remain
+// masked even when the accepted raw representation no longer marks an equal
+// effective value as a secret reference.
+func (s *Server) mergeRedactionGen(genID uint64, candidate redact.State, effective *config.Config) {
+	s.redactMu.Lock()
+	defer s.redactMu.Unlock()
+	base, ok := s.redactGenBases[genID]
+	if !ok {
+		base = s.redactGens[genID]
+		if s.redactGenBases == nil {
+			s.redactGenBases = make(map[uint64]redact.State)
+		}
+		s.redactGenBases[genID] = base
+	}
+	// Preserve a previous reference's value when the accepted raw form becomes
+	// a literal with the same effective bytes. Drop metadata-only values once
+	// they no longer occur in the current effective config, keeping repeated
+	// ignored-only no-ops bounded to current state rather than event history.
+	retained := s.redactGens[genID].Retain(func(value string) bool {
+		return config.ContainsStringValue(effective, value)
+	})
+	s.redactGens[genID] = base.Union(retained).Union(candidate)
 	redact.Install(s.redactUnionLocked())
 }
 
@@ -1074,6 +1120,7 @@ func (s *Server) retireRedactionGen(genID uint64) {
 	s.redactMu.Lock()
 	defer s.redactMu.Unlock()
 	delete(s.redactGens, genID)
+	delete(s.redactGenBases, genID)
 	redact.Install(s.redactUnionLocked())
 }
 
@@ -1111,12 +1158,12 @@ func (s *Server) redactUnionLocked() redact.State {
 //  1. Resolve   — expand secrets, compute effective config + redaction + fingerprint.
 //  2. Validate  — structural/runtime validation on the raw source config.
 //  3. Lifecycle — compare candidate effective fingerprint to startup fingerprint.
-//  4. Prepare   — build handlers, stage upstream pools and closers.
-//  5. StageListeners — bind new TCP listeners (and HTTP/3) without serving.
-//  6. Publish   — commit generation, install redaction, swap configs + handlers.
-//  7. Activate  — start serving on staged listeners.
-//  8. Retire    — remove listeners no longer in the config.
-//  9. Refresh   — reload TLS certificates.
+//  4. ChangeAssessment — prove whether serving inputs are unchanged.
+//  5. Prepare   — build handlers, stage upstream pools and closers.
+//  6. StageListeners — bind new TCP listeners (and HTTP/3) without serving.
+//  7. Publish   — commit generation, install redaction, swap configs + handlers.
+//  8. Activate  — start serving on staged listeners.
+//  9. Retire    — remove listeners no longer in the config.
 //
 // 10. PostCommit — log level, GOMAXPROCS, stream reload.
 // On any failure before Publish, plan.Abort() releases candidate resources.
@@ -1219,7 +1266,9 @@ func (s *Server) doReload(req ReloadRequest) {
 	}
 	result.StartedAt = plan.start
 
-	// Phase 1–5: side-effect-free preparation.
+	// Phase 1–4: resolve and validate the candidate, enforce lifecycle, then
+	// assess whether serving semantics are proven unchanged. Assessment happens
+	// before HandlerFactory so a no-op consumes no generation ID or resources.
 	for _, phase := range []struct {
 		name string
 		fn   func() error
@@ -1227,8 +1276,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		{"resolve", plan.Resolve},
 		{"validate", plan.Validate},
 		{"lifecycle", plan.Lifecycle},
-		{"prepare", plan.Prepare},
-		{"stage_listeners", plan.StageListeners},
+		{"change_assessment", plan.AssessServingChange},
 	} {
 		if err := phase.fn(); err != nil {
 			plan.Abort()
@@ -1246,9 +1294,9 @@ func (s *Server) doReload(req ReloadRequest) {
 		}
 	}
 	result.DesiredVersion = CanonicalVersion(plan.Candidate.Effective)
-	// Preparation may be expensive. Recheck the exact persisted bytes at the
-	// Publish boundary so an external edit during preparation cannot cause this
-	// correlated admin transaction to publish a stale candidate.
+	// Recheck every managed CAS before either terminal no-change adoption or
+	// expensive preparation. A no-op cannot bless a stale persisted candidate,
+	// stale runtime authorization, or stale admin-auth generation.
 	if req.Candidate != nil && !s.candidateStillValid(req) {
 		plan.Abort()
 		result.CompletedAt = time.Now()
@@ -1281,7 +1329,86 @@ func (s *Server) doReload(req ReloadRequest) {
 		return
 	}
 
-	// Phase 6: publish — this is the point of no return.
+	if plan.ServingChange.NoChange {
+		plan.AdoptMetadata()
+		plan.Abort()
+		result.CompletedAt = time.Now()
+		result.DurationMS = time.Since(plan.start).Milliseconds()
+		result.Outcome = ReloadNoChange
+		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.HTTP = ReloadSubsystemResult{Status: ReloadSubsystemSkipped}
+		result.Stream = ReloadSubsystemResult{Status: ReloadSubsystemSkipped}
+		result.Admin = ReloadSubsystemResult{Status: ReloadSubsystemSkipped}
+		if len(plan.phaseDurations) > 0 {
+			result.PhaseDurations = make(map[string]int64, len(plan.phaseDurations))
+			for k, v := range plan.phaseDurations {
+				result.PhaseDurations[k] = v.Milliseconds()
+			}
+		}
+		s.log.Info("configuration reload skipped: serving state unchanged",
+			"source", req.Source.String(), "duration_ms", result.DurationMS, "reload_id", req.ID)
+		return
+	}
+
+	// Phase 5–6: build generation-owned resources and stage new listeners.
+	for _, phase := range []struct {
+		name string
+		fn   func() error
+	}{
+		{"prepare", plan.Prepare},
+		{"stage_listeners", plan.StageListeners},
+	} {
+		if err := phase.fn(); err != nil {
+			plan.Abort()
+			result.CompletedAt = time.Now()
+			result.DurationMS = time.Since(plan.start).Milliseconds()
+			result.Outcome = ReloadNotApplied
+			result.FailedPhase = phase.name
+			if errors.Is(reloadCtx.Err(), context.DeadlineExceeded) {
+				result.TimedOut = true
+				result.TimedOutPhase = phase.name
+			}
+			result.Error = phase.name + ": " + err.Error() + "; reload aborted"
+			s.log.Error("reload aborted", "stage", phase.name, "error", err, "reload_id", req.ID)
+			return
+		}
+	}
+
+	// Preparation may be expensive. Repeat the exact CAS checks at the Publish
+	// boundary so work performed after assessment cannot publish stale state.
+	if req.Candidate != nil && !s.candidateStillValid(req) {
+		plan.Abort()
+		result.CompletedAt = time.Now()
+		result.DurationMS = time.Since(plan.start).Milliseconds()
+		result.Outcome = ReloadNotApplied
+		result.FailedPhase = "persisted_cas"
+		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.Error = "persisted configuration changed while the managed candidate was preparing"
+		s.log.Warn("reload: managed candidate changed during preparation; aborting before publish", "source", s.source.Name(), "reload_id", req.ID)
+		return
+	}
+	if req.Candidate != nil && req.ExpectedGeneration != 0 && s.LiveSnapshot().Generation != req.ExpectedGeneration {
+		plan.Abort()
+		result.CompletedAt = time.Now()
+		result.DurationMS = time.Since(plan.start).Milliseconds()
+		result.Outcome = ReloadNotApplied
+		result.FailedPhase = "runtime_cas"
+		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.Error = "live runtime changed while the managed candidate was preparing"
+		return
+	}
+	if req.Candidate != nil && req.AuthGeneration != "" && req.ValidateAuthGeneration != nil && !req.ValidateAuthGeneration(req.AuthGeneration) {
+		plan.Abort()
+		result.CompletedAt = time.Now()
+		result.DurationMS = time.Since(plan.start).Milliseconds()
+		result.Outcome = ReloadNotApplied
+		result.FailedPhase = "auth_cas"
+		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.Error = "admin authentication changed while the managed candidate was preparing"
+		return
+	}
+
+	// Phase 7: publish — this is the point of no return.
 	if _, err := plan.Publish(); err != nil {
 		plan.Abort()
 		result.CompletedAt = time.Now()
@@ -1298,7 +1425,7 @@ func (s *Server) doReload(req ReloadRequest) {
 	}
 	result.Published = true
 
-	// Phase 7–10: activation and post-commit side effects. After Publish we
+	// Phases 8–10: activation and post-commit side effects. After Publish we
 	// complete the minimum safe work even if the deadline has expired.
 	if err := plan.Activate(); err != nil {
 		// Activation failure after publish is non-recoverable; log only.

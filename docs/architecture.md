@@ -133,7 +133,9 @@ unit-tested independently of a full process boot.
    runtime subsystems (tracing, ACME, stream server, build-tag feature gates)
    built once.
 2. **HandlerFactory** — `HandlerFactory` holds the process-lifetime dependencies
-   and rebuilds the per-listen-address HTTP handler tree on every reload.
+   and rebuilds the per-listen-address HTTP handler tree on every reload that
+   reaches Prepare. A candidate proven to be a serving no-op after lifecycle
+   checks adopts metadata and terminates before the factory is invoked.
    Generational teardown (`GenerationResources`) keeps old gRPC connections,
    plugin runtimes, access-log file/syslog sinks (#98), and static handles
    alive until in-flight requests drain.

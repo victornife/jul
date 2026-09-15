@@ -175,7 +175,7 @@ func TestV1ApplyResponseProjectionExhaustive(t *testing.T) {
 
 	reload := &julserver.ReloadResult{Outcome: julserver.ReloadAppliedLive}
 	got = s.v1ConfigApplyResponse(ConfigApplyResult{OK: true, Mode: "hot", Version: "v", Reload: reload}, http.StatusOK)
-	if !got.Terminal || got.State != "terminal" || got.Outcome != string(julserver.ReloadAppliedLive) || got.PersistedVersion != "v" {
+	if !got.Terminal || got.State != "terminal" || string(got.Outcome) != string(julserver.ReloadAppliedLive) || got.PersistedVersion != "v" {
 		t.Fatalf("terminal reload projection = %+v", got)
 	}
 	if v1PendingRestartFromApply(nil) != nil {

@@ -1,0 +1,219 @@
+name: "Issue #408 semantic no-op reload quality"
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'internal/server/**'
+      - 'internal/config/**'
+      - 'internal/lifecycle/**'
+      - 'internal/redact/**'
+      - 'internal/app/**'
+      - 'internal/admin/**'
+      - 'internal/adminapi/**'
+      - 'internal/adminclient/**'
+      - 'internal/apicontract/**'
+      - 'internal/observability/**'
+      - 'cmd/jul/**'
+      - 'docs/**'
+      - 'CHANGELOG.md'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/issue408-quality.yml'
+  push:
+    branches: [main, issue-408-semantic-noop-reload]
+    paths:
+      - 'internal/server/**'
+      - 'internal/config/**'
+      - 'internal/lifecycle/**'
+      - 'internal/redact/**'
+      - 'internal/app/**'
+      - 'internal/admin/**'
+      - 'internal/adminapi/**'
+      - 'internal/adminclient/**'
+      - 'internal/apicontract/**'
+      - 'internal/observability/**'
+      - 'cmd/jul/**'
+      - 'docs/**'
+      - 'CHANGELOG.md'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/issue408-quality.yml'
+
+permissions:
+  contents: read
+
+env:
+  FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+  COVERPKG: "./internal/server,./internal/admin,./internal/adminapi,./internal/adminclient,./internal/app,./internal/config,./internal/observability,./internal/redact"
+
+jobs:
+  semantic-noop-platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cross-platform semantic no-op contracts
+        run: go test -count=1 ./internal/server -run 'Test(SemanticNoop|CanonicalEquivalent|ChangedFileSecret|ManagedNoop|NoopAssessment|OpaqueReloadInputs|ServingChangeAssessment)'
+
+  semantic-noop-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Resolve comparison base
+        shell: bash
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if { [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; } && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            base="${{ github.event.before }}"
+            if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then base="$(git rev-parse HEAD^)"; fi
+          else
+            base="origin/main"
+          fi
+          git cat-file -e "${base}^{commit}"
+          echo "BASE_SHA=$base" >> "$GITHUB_ENV"
+      - name: Formatting and dependency graph
+        shell: bash
+        run: |
+          changed="$(git diff --name-only "$BASE_SHA"...HEAD -- '*.go')"
+          if [ -n "$changed" ]; then test -z "$(gofmt -d $changed)"; fi
+          go mod verify
+          cp go.mod /tmp/issue408-go.mod
+          cp go.sum /tmp/issue408-go.sum
+          go mod tidy
+          cmp -s go.mod /tmp/issue408-go.mod
+          cmp -s go.sum /tmp/issue408-go.sum
+      - name: Generated API and documentation contracts
+        run: |
+          make generated-check
+          python3 scripts/docs-check.py
+          python3 scripts/test_docs_check.py
+      - name: Vet affected packages
+        run: go vet -tags "${FULL_TAGS}" ./internal/server ./internal/app ./internal/admin ./internal/adminapi ./internal/adminclient ./internal/apicontract ./internal/config ./internal/lifecycle ./internal/observability ./internal/redact ./cmd/jul
+      - name: Focused semantic no-op contracts
+        run: |
+          go test -count=1 ./internal/server -run 'Test(SemanticNoop|CanonicalEquivalent|ChangedFileSecret|ManagedNoop|NoopAssessment|OpaqueReloadInputs|ServingChangeAssessment)'
+          go test -count=1 ./internal/admin -run 'TestTLSInputsUnchanged'
+          go test -count=1 ./internal/app -run 'Test(ManagedNoChange|NoChange)'
+          go test -count=1 ./internal/config -run 'TestContainsStringValue'
+          go test -count=1 ./internal/redact -run 'TestStateRetain'
+          go test -count=1 ./internal/adminapi -run 'TestReloadOutcomesContract'
+          go test -count=1 ./internal/adminclient -run 'TestOutcomeExitMatrix'
+          go test -count=1 ./internal/observability -run 'TestNoChangeReloadMetrics'
+          go test -count=1 ./cmd/jul -run 'TestNoChangeTerminalCopy'
+      - name: Full configured-neighbor matrix
+        run: go test -count=1 -tags "${FULL_TAGS}" ./internal/server ./internal/app ./internal/admin ./internal/adminapi ./internal/adminclient ./internal/apicontract ./internal/config ./internal/lifecycle ./internal/observability ./internal/redact ./cmd/jul
+      - name: Race
+        run: go test -race -count=1 -p 2 -tags "${FULL_TAGS}" ./internal/server ./internal/app ./internal/admin ./internal/adminapi ./internal/adminclient ./internal/config ./internal/lifecycle ./internal/observability ./internal/redact
+      - name: Added Go production statements >= 90%
+        shell: bash
+        run: |
+          go test -count=1 -tags "${FULL_TAGS}" -covermode=atomic -coverpkg="${COVERPKG}" -coverprofile=/tmp/issue408.cover ./internal/server ./internal/admin ./internal/adminapi ./internal/adminclient ./internal/app ./internal/config ./internal/observability ./internal/redact
+          git diff --unified=0 "$BASE_SHA"...HEAD -- '*.go' > /tmp/issue408.diff
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          roots = ('internal/server/', 'internal/admin/', 'internal/adminapi/',
+                   'internal/adminclient/', 'internal/app/', 'internal/config/',
+                   'internal/observability/', 'internal/redact/')
+          added = {}
+          current = None
+          for line in Path('/tmp/issue408.diff').read_text().splitlines():
+              if line.startswith('+++ b/'):
+                  current = line[6:]
+                  if current.endswith('_test.go') or not current.startswith(roots):
+                      current = None
+                  else:
+                      added.setdefault(current, set())
+                  continue
+              if current is None or not line.startswith('@@'):
+                  continue
+              match = re.search(r'\+(\d+)(?:,(\d+))?', line)
+              if not match:
+                  continue
+              start = int(match.group(1))
+              count = int(match.group(2) or '1')
+              added[current].update(range(start, start + count))
+
+          executions = {}
+          for line in Path('/tmp/issue408.cover').read_text().splitlines()[1:]:
+              span, statements, count = line.rsplit(' ', 2)
+              path, coords = span.split(':', 1)
+              if path.startswith('jul/'):
+                  path = path[4:]
+              if path not in added or not added[path]:
+                  continue
+              match = re.match(r'(\d+)\.\d+,(\d+)\.\d+', coords)
+              if not match:
+                  continue
+              lo, hi = int(match.group(1)), int(match.group(2))
+              if not any(lo <= line_no <= hi for line_no in added[path]):
+                  continue
+              key = (path, coords, int(statements))
+              executions[key] = executions.get(key, 0) + int(count)
+
+          total = sum(key[2] for key in executions)
+          covered = sum(key[2] for key, count in executions.items() if count > 0)
+          if total == 0:
+              raise SystemExit('no #408 production statements found')
+          pct = covered * 100.0 / total
+          print(f'#408 added Go production statements: {covered}/{total} = {pct:.2f}%')
+          if pct < 90.0:
+              for (path, coords, statements), count in sorted(executions.items()):
+                  if count == 0:
+                      print(f'UNCOVERED {path}:{coords} ({statements} statements)')
+              raise SystemExit(f'#408 added Go production coverage {pct:.2f}% < 90.0%')
+          PY
+
+  semantic-noop-console:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: internal/admin/ui/package.json
+      - name: Install
+        run: pnpm --dir internal/admin/ui install --frozen-lockfile
+      - name: Typecheck and lint
+        run: |
+          pnpm --dir internal/admin/ui run typecheck
+          pnpm --dir internal/admin/ui run lint
+      - name: Outcome coverage >= 90% in all dimensions
+        run: |
+          pnpm --dir internal/admin/ui exec vitest run src/test/apply-outcome.test.tsx --coverage.enabled --coverage.include=src/lib/applyOutcome.ts --coverage.reporter=json-summary --coverage.reportsDirectory=/tmp/issue408-ui-cov
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path('/tmp/issue408-ui-cov/coverage-summary.json').read_text())
+          targets = [value for path, value in data.items() if path.endswith('applyOutcome.ts')]
+          if len(targets) != 1:
+              raise SystemExit(f'expected one applyOutcome.ts coverage entry, found {len(targets)}')
+          for dimension in ('lines', 'statements', 'functions', 'branches'):
+              pct = float(targets[0][dimension]['pct'])
+              print(f'#408 frontend {dimension}: {pct:.2f}%')
+              if pct < 90.0:
+                  raise SystemExit(f'#408 frontend {dimension} coverage {pct:.2f}% < 90.0%')
+          PY
+      - name: Full Console tests and embedded build
+        run: |
+          pnpm --dir internal/admin/ui run test:coverage
+          pnpm --dir internal/admin/ui run build
+          git diff --exit-code -- internal/admin/assets/dist

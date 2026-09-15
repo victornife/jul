@@ -105,3 +105,51 @@ func TestManagedApplyLookupCounter(t *testing.T) {
 		t.Errorf("empty result normalized to unknown count = %v, want 1", got)
 	}
 }
+
+func TestNoChangeReloadMetricsAreTerminalAndPhaseTruthful(t *testing.T) {
+	m := NewMetrics()
+	m.ReloadStarted()
+	m.ObserveReload("sighup", "no_change", 3)
+	m.ObserveReloadResult("no_change", map[string]int64{
+		"resolve":           1,
+		"validate":          1,
+		"lifecycle":         1,
+		"change_assessment": 0,
+	}, false, "")
+
+	if got := managedApplySeries(t, m, "jul_reload_total", map[string]string{"source": "sighup", "outcome": "no_change"}); got != 1 {
+		t.Errorf("no_change reload count = %v, want 1", got)
+	}
+	if got := managedApplySeries(t, m, "jul_reload_in_progress", map[string]string{}); got != 0 {
+		t.Errorf("reload in-progress gauge = %v, want 0", got)
+	}
+
+	families, err := m.registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPhases := map[string]bool{
+		"resolve": true, "validate": true, "lifecycle": true, "change_assessment": true,
+	}
+	for _, family := range families {
+		if family.GetName() != "jul_reload_phase_duration_seconds" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			labels := map[string]string{}
+			for _, pair := range metric.GetLabel() {
+				labels[pair.GetName()] = pair.GetValue()
+			}
+			if labels["outcome"] != "no_change" {
+				continue
+			}
+			if !wantPhases[labels["phase"]] {
+				t.Fatalf("no_change fabricated phase %q", labels["phase"])
+			}
+			delete(wantPhases, labels["phase"])
+		}
+	}
+	if len(wantPhases) != 0 {
+		t.Fatalf("no_change phase series missing: %v", wantPhases)
+	}
+}

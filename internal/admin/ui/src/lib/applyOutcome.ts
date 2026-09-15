@@ -23,6 +23,9 @@ export type ApplyOutcomeSeverity = "success" | "info" | "warning" | "blocked";
 export type ApplyOutcomeKind =
   // Applied and fully live: HTTP swapped and every subsystem reloaded cleanly.
   | "full-live"
+  // Accepted and already effective: metadata may advance, but no serving
+  // generation or subsystem resource was replaced.
+  | "no-change"
   // Accepted and persisted; the asynchronous runtime swap has not been
   // confirmed live yet (the transient state right after an apply).
   | "reload-pending"
@@ -171,7 +174,12 @@ export interface ApplyOutcomeInput {
    * backend also marks timed_out) is never rendered with "is now serving" copy.
    */
   readonly savedNotLive?: boolean;
-  readonly reloadOutcome?: "applied_live" | "applied_degraded" | "not_applied" | "saved_not_live";
+  readonly reloadOutcome?:
+    | "applied_live"
+    | "applied_degraded"
+    | "no_change"
+    | "not_applied"
+    | "saved_not_live";
   readonly published?: boolean;
   readonly restored?: boolean;
   readonly restoreError?: string;
@@ -218,7 +226,8 @@ export function streamReloadFailure(streamStatus: string | undefined): Subsystem
 /**
  * Folds the raw apply signals into a single explicit outcome. Precedence:
  * discard > pending-restart-blocks-hot > stage_restart > restart-required
- * > partial subsystem failure > still reloading > fully live.
+ * > saved-not-live > no-change > not-applied > timeout > partial subsystem
+ * failure > still reloading > fully live.
  */
 export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
   // Discard: the staged restart was abandoned and the previous config restored.
@@ -319,6 +328,18 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
       title: "Saved — final outcome pending",
       message:
         "The configuration was validated and saved, but the live reload did not confirm within the timeout window, so its final outcome is not yet known. It may still apply, or be rolled back to the previous configuration. This panel is not claiming the new configuration is serving; check the runtime overview for the final outcome.",
+      failures: [],
+    };
+  }
+
+  if (input.reloadOutcome === "no_change") {
+    return {
+      kind: "no-change",
+      severity: "success",
+      blocking: false,
+      title: "Configuration already effective",
+      message:
+        "The configuration was validated and accepted, but its serving semantics were already current. No runtime generation or subsystem resources were replaced.",
       failures: [],
     };
   }

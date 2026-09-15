@@ -326,13 +326,14 @@ func managedReloadOutcome(result admin.ConfigApplyResult) string {
 
 // managedRestoredLabel returns the bounded restoration label ("true", "false",
 // or "n/a") for the terminal metric. Restoration is only meaningful for a
-// non-committed reload; an applied_live or saved_not_live outcome — and any
-// result without a reload — labels "n/a". An enqueue_failure is treated as a
-// non-persisted outcome for labeling, mirroring the composition-root policy.
+// non-committed reload; an applied_live, no_change, or saved_not_live outcome —
+// and any result without a reload — labels "n/a". An enqueue_failure is treated
+// as a non-persisted outcome for labeling, mirroring the composition-root policy.
 func managedRestoredLabel(result admin.ConfigApplyResult) string {
 	outcome := managedReloadOutcome(result)
 	if outcome == "" ||
 		outcome == string(server.ReloadAppliedLive) ||
+		outcome == string(server.ReloadNoChange) ||
 		outcome == string(server.ReloadSavedNotLive) {
 		return "n/a"
 	}

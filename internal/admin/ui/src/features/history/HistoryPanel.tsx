@@ -99,9 +99,7 @@ function ProvenanceCell({ entry }: { readonly entry: HistoryEntry }) {
       </div>
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-jul-muted">
         {entry.actor !== undefined && <span>by {entry.actor}</span>}
-        {entry.apply_id !== undefined && (
-          <span className="font-mono">{entry.apply_id}</span>
-        )}
+        {entry.apply_id !== undefined && <span className="font-mono">{entry.apply_id}</span>}
       </div>
     </div>
   );
@@ -184,9 +182,7 @@ function RollbackConfirm({
   const adminChanges = challengeActive ? adminChallenge.changes : [];
   return (
     <ConfirmDialog
-      title={
-        challengeActive ? "Confirm admin access rollback?" : "Roll back to this snapshot?"
-      }
+      title={challengeActive ? "Confirm admin access rollback?" : "Roll back to this snapshot?"}
       confirmLabel={challengeActive ? "Confirm and roll back" : "Roll back"}
       danger
       busy={busy}
@@ -402,8 +398,8 @@ export function HistoryPanel() {
         void qc.invalidateQueries();
         return;
       }
-      // Immediate applied_live: close the dialog and refresh as before, but keep
-      // trackedRollback until the exact ledger record is retrieved.
+      // Immediate applied_live or no_change: close the dialog and refresh, but
+      // keep trackedRollback until the exact ledger record is retrieved.
       setConfirmId(null);
       setAdminChallenge(null);
       void qc.invalidateQueries();
@@ -480,7 +476,10 @@ export function HistoryPanel() {
     // The remainder handles a rollback that originally returned 202 saved_not_live.
     setAdminChallenge(null);
     const result = record.result;
-    if (result.ok && result.reload?.outcome === "applied_live") {
+    if (
+      result.ok &&
+      (result.reload?.outcome === "applied_live" || result.reload?.outcome === "no_change")
+    ) {
       setConfirmId(null);
       setTerminalError(null);
       setTrackedRollback(null);

@@ -12,15 +12,16 @@ package adminapi
 // A 202 response is non-terminal and carries the apply_id to poll through
 // GET /api/v1/config/applies/{apply_id}. A 200 response is terminal. Clients
 // should branch on Terminal/Outcome rather than inferring completion from the
-// status code alone.
+// status code alone. no_change is a successful terminal outcome with no runtime
+// generation publication.
 type ConfigApplyResponse struct {
-	APIVersion string `json:"api_version"`
-	ApplyID    string `json:"apply_id,omitempty"`
-	State      string `json:"state"`
-	Terminal   bool   `json:"terminal"`
-	OK         bool   `json:"ok"`
-	Mode       string `json:"mode,omitempty"`
-	Outcome    string `json:"outcome,omitempty"`
+	APIVersion string        `json:"api_version"`
+	ApplyID    string        `json:"apply_id,omitempty"`
+	State      string        `json:"state"`
+	Terminal   bool          `json:"terminal"`
+	OK         bool          `json:"ok"`
+	Mode       string        `json:"mode,omitempty"`
+	Outcome    ReloadOutcome `json:"outcome,omitempty"`
 
 	// IdempotentReplay is true only when this terminal result was returned from
 	// the retained idempotency binding rather than by executing the mutation.

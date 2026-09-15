@@ -364,7 +364,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 
 		reloadTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_reload_total",
-			Help: "Configuration reloads, labeled by source (admin/sighup/watch) and outcome (applied_live/applied_degraded/not_applied/saved_not_live).",
+			Help: "Configuration reloads, labeled by source (admin/sighup/watch) and outcome (applied_live/applied_degraded/no_change/not_applied/saved_not_live).",
 		}, []string{"source", "outcome"}),
 		reloadDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "jul_reload_duration_seconds",
@@ -413,7 +413,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		}, []string{"result"}),
 		reloadPhaseDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "jul_reload_phase_duration_seconds",
-			Help:    "Latency of individual reload phases (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate), labeled by phase and outcome.",
+			Help:    "Latency of individual reload phases (resolve/validate/lifecycle/change_assessment/prepare/stage_listeners/publish/activate), labeled by phase and outcome.",
 			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
 		}, []string{"phase", "outcome"}),
 		reloadTimeouts: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -913,7 +913,8 @@ func (m *Metrics) ObserveHTTPDialFailure(reason string) {
 // ObserveReload records the outcome and duration of a completed hot reload
 // (P2-05). source is the reload trigger ("admin", "sighup", or "watch");
 // outcome is the terminal classification ("applied_live", "applied_degraded",
-// "not_applied", or "saved_not_live"); durationMs is the reload wall time.
+// "no_change", "not_applied", or "saved_not_live"); durationMs is the reload
+// wall time.
 // inProgress must be decremented by the caller just before calling this.
 func (m *Metrics) ObserveReload(source, outcome string, durationMs int64) {
 	m.reloadTotal.WithLabelValues(source, outcome).Inc()

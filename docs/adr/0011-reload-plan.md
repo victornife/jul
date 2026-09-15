@@ -1,7 +1,7 @@
 # ADR 0011 — ReloadPlan: a single, side-effect-free reload transaction
 
-- **Status:** Accepted — ReloadPlan transaction implemented; the Go lifecycle registry is the sole machine authority for configuration lifecycle behavior and its human/machine mirrors are generated and checked (R5-01 through R5-17, 2026-07-19; closed-world amendment 2026-08-07)
-- **Date:** 2026-07-16 (updated 2026-07-19; amended 2026-08-07 for #89)
+- **Status:** Accepted — ReloadPlan transaction implemented; the Go lifecycle registry is the sole machine authority for configuration lifecycle behavior and its human/machine mirrors are generated and checked (R5-01 through R5-17, 2026-07-19; closed-world amendment 2026-08-07; semantic no-op amendment 2026-09-15)
+- **Date:** 2026-07-16 (updated 2026-07-19; amended 2026-08-07 for #89 and 2026-09-15 for #408)
 - **Deciders:** Jul.IA maintainers
 - **Applies to:** configuration reload, secret resolution, listener lifecycle, upstream pool lifecycle, HTTP/3, ACME, admin preflight, lifecycle governance
 - **Source:** Round 5 external re-audit (R5-01 through R5-17)
@@ -23,16 +23,34 @@ Adopt a single **`ReloadPlan`** value that owns every piece of candidate state f
 1. **Resolve** — expand secrets once and build the immutable `config.Candidate` (raw config, effective config, redaction state, secret digests, candidate fingerprint).
 2. **Validate** — run structural/runtime validation on `Candidate.Effective`.
 3. **Lifecycle** — compare `CandidateFP` against the bound startup fingerprint.
-4. **Prepare** — build handlers and stage upstream/generation resources.
-5. **StageListeners** — bind new TCP listeners and HTTP/3 resources without serving.
-6. **Publish** — atomically install redaction state, swap configs, publish handler generation, and commit pool/generation resources.
-7. **Activate** — start serving on staged listeners.
-8. **Retire** — stop listeners no longer in the config, retire the old handler generation, and retire committed `PreparedRuntime` resources within their bounded lifetime.
-9. **PostCommit** — apply committed dynamic side effects that do not need a prepared resource (currently log level/format, metrics host-label mode, cache scalar policy/capacity, `GOMAXPROCS`, and stream reload).
+4. **ChangeAssessment** — prove whether effective serving inputs changed, including independently mutable external resources.
+5. **Prepare** — build handlers and stage upstream/generation resources.
+6. **StageListeners** — bind new TCP listeners and HTTP/3 resources without serving.
+7. **Publish** — atomically install redaction state, swap configs, publish handler generation, and commit pool/generation resources.
+8. **Activate** — start serving on staged listeners.
+9. **Retire** — stop listeners no longer in the config, retire the old handler generation, and retire committed `PreparedRuntime` resources within their bounded lifetime.
+10. **PostCommit** — apply committed dynamic side effects that do not need a prepared resource (currently log level/format, metrics host-label mode, cache scalar policy/capacity, `GOMAXPROCS`, and stream reload).
 
 Static certificate rotation is no longer a separate `Refresh` phase: since #100, candidate certificate providers are built during **Prepare** and published through `PreparedRuntime` before the new handler generation becomes reachable.
 
 On any failure before Publish, `Abort` releases all candidate resources without touching live state.
+
+### 1a. Semantic no-op terminal path (#408)
+
+After Lifecycle and before Prepare, the plan may terminate with `no_change`
+only after a proof that every classified difference is lifecycle-`ignored` (or
+there is no effective difference) and every independently mutable resource
+with an exposed installed identity is unchanged. Resources without such an
+identity force the normal Prepare/Publish path. Same-path static and admin TLS
+certificate rotations are real changes because the proof compares installed
+content fingerprints, not path strings.
+
+This path adopts raw/effective configuration and current redaction metadata,
+but it preserves the handler pointer, generation ID, listener set and all
+generation-owned resources. It runs no Prepare, StageListeners, Publish,
+Activate, Retire or PostCommit side effect. `no_change` is therefore a terminal
+success with `persisted=true` and `published=false`, not a synonym for the
+non-terminal `saved_not_live` outcome.
 
 ### 2. Pure secret resolution and redaction state
 

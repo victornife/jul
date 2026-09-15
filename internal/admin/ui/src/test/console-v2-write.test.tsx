@@ -255,14 +255,14 @@ function installRouter(): Counters {
       );
     }
     if (url === "/api/config/pending-restart") {
-  return Promise.resolve(
-    new Response(JSON.stringify({ pending: false }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-}
-throw new Error(`unexpected fetch: ${url}`);
+      return Promise.resolve(
+        new Response(JSON.stringify({ pending: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+    throw new Error(`unexpected fetch: ${url}`);
   }) as unknown as typeof fetch;
   return counters;
 }
@@ -356,6 +356,88 @@ describe("ConfigPanel apply flow", () => {
     expect(await screen.findByText("Applied — runtime reloading")).toBeInTheDocument();
   });
 
+  it("renders a terminal no-change apply without claiming a runtime swap", async () => {
+    let overviewReads = 0;
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config") {
+        return Promise.resolve(
+          json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml", base_version: "v1" }),
+        );
+      }
+      if (input === "/api/config/validate") {
+        return Promise.resolve(json({ ok: true, message: "Configuration is valid." }));
+      }
+      if (input === "/api/config/diff") {
+        return Promise.resolve(json({ summary: "formatting-only change" }));
+      }
+      if (input.startsWith("/api/config/apply")) {
+        return Promise.resolve(
+          json({
+            ok: true,
+            apply_id: "rl_noop",
+            mode: "hot",
+            version: "v1",
+            persisted_version: "v1",
+            serving_version: "v1",
+            reload: {
+              id: "rl_noop",
+              outcome: "no_change",
+              persisted: true,
+              published: false,
+              http: { status: "skipped" },
+              stream: { status: "skipped" },
+              admin: { status: "skipped" },
+            },
+          }),
+        );
+      }
+      if (input === "/api/config/applies/rl_noop") {
+        return Promise.resolve(
+          json({
+            id: "rl_noop",
+            state: "terminal",
+            operation: "config.apply",
+            result: {
+              ok: true,
+              apply_id: "rl_noop",
+              mode: "hot",
+              reload: { id: "rl_noop", outcome: "no_change", published: false },
+            },
+          }),
+        );
+      }
+      if (input === "/api/config/pending-restart") {
+        return Promise.resolve(json({ pending: false }));
+      }
+      if (input === "/api/runtime/overview") {
+        overviewReads += 1;
+        return Promise.resolve(json({ product: "jul", version: "1", status: [] }));
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+
+    render(
+      <Wrapper>
+        <ConfigPanel />
+      </Wrapper>,
+    );
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    fireEvent.change(editor, { target: { value: '# comment\nlisten = ":8443"\n' } });
+    const applyButton = await screen.findByRole("button", { name: "Apply live" });
+    await waitFor(() => {
+      expect(applyButton).toBeEnabled();
+    });
+    fireEvent.click(applyButton);
+    await confirmApplyLive();
+
+    expect(await screen.findByText("Configuration already effective")).toBeInTheDocument();
+    expect(
+      screen.getByText(/No runtime generation or subsystem resources were replaced/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/is now serving/i)).not.toBeInTheDocument();
+    expect(overviewReads).toBe(0);
+  });
+
   it("shows an apply-progress spinner while the apply request is in flight", async () => {
     let resolveApply: (r: Response) => void = () => {
       /* set below */
@@ -387,14 +469,14 @@ describe("ConfigPanel apply flow", () => {
         return Promise.resolve(json({ product: "jul", version: "1", status: [] }));
       }
       if (url === "/api/config/pending-restart") {
-  return Promise.resolve(
-    new Response(JSON.stringify({ pending: false }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-}
-throw new Error(`unexpected fetch: ${url}`);
+        return Promise.resolve(
+          new Response(JSON.stringify({ pending: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     render(
@@ -447,14 +529,14 @@ throw new Error(`unexpected fetch: ${url}`);
         );
       }
       if (url === "/api/config/pending-restart") {
-  return Promise.resolve(
-    new Response(JSON.stringify({ pending: false }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-}
-throw new Error(`unexpected fetch: ${url}`);
+        return Promise.resolve(
+          new Response(JSON.stringify({ pending: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     render(
@@ -521,14 +603,14 @@ throw new Error(`unexpected fetch: ${url}`);
         return Promise.resolve(json({ summary: "1 change" }));
       }
       if (url === "/api/config/pending-restart") {
-  return Promise.resolve(
-    new Response(JSON.stringify({ pending: false }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-}
-throw new Error(`unexpected fetch: ${url}`);
+        return Promise.resolve(
+          new Response(JSON.stringify({ pending: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     setPendingDraft(
@@ -621,14 +703,14 @@ throw new Error(`unexpected fetch: ${url}`);
         );
       }
       if (url === "/api/config/pending-restart") {
-  return Promise.resolve(
-    new Response(JSON.stringify({ pending: false }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-}
-throw new Error(`unexpected fetch: ${url}`);
+        return Promise.resolve(
+          new Response(JSON.stringify({ pending: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     setPendingDraft(
@@ -691,14 +773,14 @@ throw new Error(`unexpected fetch: ${url}`);
         );
       }
       if (url === "/api/config/pending-restart") {
-  return Promise.resolve(
-    new Response(JSON.stringify({ pending: false }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-}
-throw new Error(`unexpected fetch: ${url}`);
+        return Promise.resolve(
+          new Response(JSON.stringify({ pending: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     setPendingDraft(
@@ -760,14 +842,14 @@ throw new Error(`unexpected fetch: ${url}`);
         );
       }
       if (url === "/api/config/pending-restart") {
-  return Promise.resolve(
-    new Response(JSON.stringify({ pending: false }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-}
-throw new Error(`unexpected fetch: ${url}`);
+        return Promise.resolve(
+          new Response(JSON.stringify({ pending: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     setPendingDraft(
@@ -830,14 +912,14 @@ throw new Error(`unexpected fetch: ${url}`);
         );
       }
       if (url === "/api/config/pending-restart") {
-  return Promise.resolve(
-    new Response(JSON.stringify({ pending: false }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-}
-throw new Error(`unexpected fetch: ${url}`);
+        return Promise.resolve(
+          new Response(JSON.stringify({ pending: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     setPendingDraft(
@@ -906,14 +988,14 @@ throw new Error(`unexpected fetch: ${url}`);
         );
       }
       if (url === "/api/config/pending-restart") {
-  return Promise.resolve(
-    new Response(JSON.stringify({ pending: false }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-}
-throw new Error(`unexpected fetch: ${url}`);
+        return Promise.resolve(
+          new Response(JSON.stringify({ pending: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     setPendingDraft(
@@ -980,14 +1062,14 @@ throw new Error(`unexpected fetch: ${url}`);
         return Promise.resolve(json({ ok: true, message: "Configuration is valid." }));
       }
       if (url === "/api/config/pending-restart") {
-  return Promise.resolve(
-    new Response(JSON.stringify({ pending: false }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-}
-throw new Error(`unexpected fetch: ${url}`);
+        return Promise.resolve(
+          new Response(JSON.stringify({ pending: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     render(
@@ -1039,14 +1121,14 @@ throw new Error(`unexpected fetch: ${url}`);
         return Promise.resolve(json({ ok: true, message: "Configuration is valid." }));
       }
       if (url === "/api/config/pending-restart") {
-  return Promise.resolve(
-    new Response(JSON.stringify({ pending: false }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-}
-throw new Error(`unexpected fetch: ${url}`);
+        return Promise.resolve(
+          new Response(JSON.stringify({ pending: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
     render(
@@ -2243,7 +2325,7 @@ describe("HistoryPanel rollback flow", () => {
     expect(postConflict.body.base_version).toBe("v2");
   });
 
-  it("keeps a provisional rollback open until its correlated terminal record", async () => {
+  it("settles a provisional rollback when its correlated record becomes no-change", async () => {
     let recordReads = 0;
     globalThis.fetch = vi.fn((input: string) => {
       if (input === "/api/config/history")
@@ -2298,7 +2380,7 @@ describe("HistoryPanel rollback flow", () => {
               ok: true,
               apply_id: "rl_rb",
               mode: "hot",
-              reload: { id: "rl_rb", outcome: "applied_live" },
+              reload: { id: "rl_rb", outcome: "no_change", published: false },
             },
           }),
         );

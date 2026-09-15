@@ -140,7 +140,8 @@ not silently retried.
 
 Apply, stage, rollback and adoption poll `GET /api/v1/config/applies/{apply_id}`.
 The server's `terminal` boolean is authoritative. `saved_not_live` is progress,
-not success, so polling continues.
+not success, so polling continues. `no_change` is terminal success and stops
+polling immediately.
 
 Polling has a bounded interval and local deadline. Ctrl-C stops only the local
 wait; it does **not** cancel the server transaction. Human output surfaces the
@@ -197,7 +198,7 @@ The canonical table is `internal/adminapi.ExitCodes()` and is also exposed by
 
 | Exit | Meaning |
 | ---: | --- |
-| 0 | successful live/read/ordinary operation |
+| 0 | successful live/no-change/read/ordinary operation |
 | 1 | validation/configuration failure |
 | 2 | usage/request error |
 | 3 | successful operation requiring restart/convergence |

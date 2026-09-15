@@ -1,7 +1,7 @@
 # ADR 0019 — Configuration authority, generated contracts, resource identity and remote automation
 
 - **Status:** Accepted
-- **Date:** 2026-08-24 (revised 2026-08-26 after nine rounds of external review)
+- **Date:** 2026-08-24 (revised 2026-08-26 after nine rounds of external review; amended 2026-09-15 for #408)
 - **Deciders:** Jul.IA maintainer
 - **Applies to:** configuration ownership and persistence, the file watcher and SIGHUP, managed apply,
   drift and adoption, configuration history and rollback, planned restart, durable resource identity,
@@ -23,6 +23,7 @@
 | Date | Change |
 | --- | --- |
 | 2026-08-24 | Initial record. |
+| 2026-09-15 | **#408 semantic no-op amendment.** The accepted authority, persistence, CAS, idempotency, ledger and history decisions are unchanged. The external reload-outcome enum gains the additive terminal success `no_change`: a managed candidate may be persisted and terminalized without crossing the runtime Publish boundary when the shared reload transaction proves before Prepare that no serving input changed. The proof preserves the handler generation and all runtime resources, reports `persisted=true`/`published=false`, runs no subsystem hook, maps to CLI exit 0 unless a separate app-layer degradation is present, and is explicitly distinct from non-terminal `saved_not_live`. |
 | 2026-08-24 | External review. Three architectural defects and one insufficiently-evidenced decision, all fixed rather than argued down. **§9.1: the derived default is withdrawn.** `[admin].enabled` proves the admin *surface* exists, not that it *owns configuration* — a deployment running the Console for visibility while operating by GitOps would have been derived into `managed` and silently lost SIGHUP, which is the exact population the derivation was meant to protect. There is no other signal in the schema to derive from, so the default is now fixed at **`file_owned`**, chosen on the asymmetry of failure visibility: a wrong `managed` default fails *silently* (SIGHUP no-ops), a wrong `file_owned` default fails *loudly* (a Console banner naming the field). **§11/§12: invariant M1 was falsified by §12's own restart row** — M1 said "no restart" and §12 said the file wins — and `baseline_adopted_at_startup` was unimplementable, because nothing persisted the baseline for a new process to compare against. A managed baseline **digest marker** now persists it, reusing the `PlannedRestartMarker` pattern, and a restart into drift starts in `managed_drift` instead of adopting. **§27: a client-supplied idempotency key is added**, reversing this record's own rejection of one; mandatory CAS prevents the lost update but leaves the client unable to distinguish "my retry lost" from "someone else won", which for a pipeline is exit 0 versus exit 5. **§4.7: preview now mints and returns the `route_id`** and the client's apply carries it — the earlier text had preview and apply minting independently, so the previewed diff showed an identifier that never existed. **§24: `/api/v1/config/raw` is withdrawn from v1**, resolving a direct contradiction with #150's "no secret readback". **§28.1: plaintext remote mutation is now *rejected*, not warned about.** Corrections: §3 defines **seven** identity classes, not six; §29 includes `StabilityDeprecated` in OpenAPI; the resource catalog covers *configuration* resources only; §27's CAS basis was wrong in the safe direction — `verifyBaselineLocked` compares **raw** bytes, so a comment-only change already conflicts; `--json` output goes to stdout on failure too; §24a fixes collection ordering, pagination, retention, limits and content types; §23 fixes the JSON Schema dialect and the TOML↔JSON representation; §33 gains the error-code-to-exit-code matrix. |
 | 2026-08-24 | Second external review round. Three blocking findings, all upheld. **§11.2: the digest-only baseline marker could not satisfy §14.** Adoption must diff against the previous managed configuration and snapshot its exact bytes, and after an external overwrite a digest cannot reconstruct them — so the baseline is now a marker **plus a snapshot of the exact last-managed bytes**, updated through a two-phase `preparing` → `current` protocol with the crash-recovery decision procedure `PlannedRestartStore` already implements. The `.bak` sidecar is the precedent; this is not a second source of desired state. **§11.2.1: an absent marker no longer means "first managed boot".** It meant ownership could be reset by deleting a file, so it becomes `managed_unadopted` — one of **three origins behind one gate**, distinct from `managed_drift` and `managed_inconsistent` because they differ in what adoption can produce and in whether they are worth alerting on. `managed_inconsistent` gains a bounded `reason`, having previously named two unrelated events. **§11.2.2: the "cannot silently execute an external edit" claim is withdrawn.** It contradicted this record's own restart behaviour — the external bytes are served, because refusing to start would convert a configuration problem into an outage. M1 is narrowed to what is true and achievable: no external edit becomes Jul's *desired state* without an explicit act. The two alternatives, serving the snapshot and failing startup, are recorded as rejected with the incident case that decides it. **§27.1: the idempotency key is bound to `principal + method + path + request fingerprint`**, registered *before* side effects in a `pending` state, with typed conflicts for reuse and for in-flight duplicates — a principal-scoped key could return a previous success for a different operation, and completion-time registration left concurrent duplicates undefined. `--idempotency-key` is added because a per-invocation key defeats the crash-and-rerun case the mechanism exists for. Contract fixes: `payload_too_large` and `unsupported_media_type` become codes of their own rather than overloading `invalid_request`, which is fixed at 400; parameters accompanying a raw TOML body travel as query parameters; §28's pre-authentication `403` is documented as a named exception that discloses nothing; and §28.1's claim is scoped to `/api/v1` rather than to the admin API as a whole. |
 | 2026-08-24 | Third external review round. **§11.2's transaction was wrong in a way that defeated its own purpose.** It wrote the snapshot from the *current* bytes and never updated it, so a completed write left marker and file at revision N+1 and the snapshot at N — and the next adoption would have diffed against the wrong revision and preserved the wrong configuration. The cause was following the `.bak` precedent one step too far: `.bak` holds the **old** bytes because it is rollback material, whereas a steady-state baseline must finish holding the **new** ones. The snapshot is now written after the rename, from the bytes in hand, and recovery takes the **snapshot digest as a third input** — an earlier draft could resolve a missing or stale snapshot to `managed_clean`, the one state that asserts the baseline is trustworthy. A `.next` slot with garbage collection was considered and rejected: whenever the file matches `current_digest` the file *is* the snapshot's content, so a lost snapshot is repairable rather than fatal, which removes the need for a third artifact and a promotion step. **§17.1 contradicted §11.2.1** by having startup establish the baseline automatically, which reintroduced the hole `managed_unadopted` exists to close; the transition now enters `managed_unadopted` and an explicit adoption creates the marker and snapshot. **§17.2 had nobody delete the baseline artifacts**, leaving a snapshot of exact configuration bytes — possibly containing literal secrets — beside a file the operator now believes their pipeline owns; `file_owned` startup now removes them once, as a named and bounded exception to writing nothing. **§27.1's fingerprint is defined as a tuple** over method, path, canonical query, content type and a digest of the exact body bytes, because the earlier description named only the body, `mode` and `base_version` while §24a puts other parameters in the query string; the method and path are stored rather than only hashed, since `idempotency_key_reused` promises them. Also: the 1 MiB cap applies to every body-bearing request rather than only mutations; `insecure_transport` no longer returns the listen address, which is a configuration value returned before authentication; the failure matrix covers a restart into an unparseable drifted file, where startup fails rather than substituting the snapshot; a merged row in the §10 state table is repaired; and the downstream table stops describing the withdrawn derived default and states `[DRAFT]` removal as happening on merge. |
@@ -210,7 +211,7 @@ not touch that decision; §6 states why the fingerprint must not become the publ
 | Admin transport | `internal/admin/server.go` | plaintext HTTP, bearer token or RBAC principals, loopback assumed, warning when bound elsewhere. **No TLS, no mTLS.** |
 | Error shapes | `internal/admin` | five structured shapes (`validationErrorResponse`, `conflictResponse`, `adminGuardResponse`, `patchOperationFailureResponse`, `ConfigApplyResult`) plus ad-hoc `map[string]string{"error": …}`. **No stable machine codes, no request correlation id.** |
 | Optimistic concurrency | apply, patch, rollback | optional `base_version`; 409 with `current_version` on mismatch; omitted means force |
-| Apply outcomes | `internal/server/reload_result.go` | `applied_live`, `applied_degraded`, `not_applied`, `saved_not_live`; **`owned_not_serving` is added by this record at the app layer** (§33.1) and, like `saved_not_live`, is never produced by the server |
+| Apply outcomes | `internal/server/reload_result.go` | `applied_live`, `applied_degraded`, `no_change`, `not_applied`, `saved_not_live`; **`owned_not_serving` is added by this record at the app layer** (§33.1) and, like `saved_not_live`, is never produced by the server |
 | Pending restart | `internal/app/planned_restart.go` | `none`, `managed_staged`, `external_divergence`, `inconsistent` |
 | Schema inventory | `internal/config/inventory.go` | `SchemaPaths()` 322, `SchemaLeaves()` 274, build-tag independent |
 | Lifecycle authority | `internal/lifecycle` | 274 entries, 49 subsystems, 5 classes, 8 flags; `lifecyclegen`; `make lifecycle-generate` / `make generated-check` |
@@ -3115,7 +3116,7 @@ the API report the same code for the same condition.
 
 | Exit | Meaning |
 | --- | --- |
-| 0 | success — applied live, or a read completed |
+| 0 | success — applied live, proven no-change, or a read completed |
 | 1 | validation or configuration error *(unchanged)* |
 | 2 | usage error: bad flags, missing argument, disabled admin *(unchanged)* |
 | 3 | success; **a restart is required to converge** — either an explicitly staged candidate (`staged`) or a configuration that is owned but not serving (`owned_not_serving`). The JSON outcome distinguishes them |
@@ -3143,6 +3144,7 @@ same server condition differently. It is exhaustive over §26.
 | §26 error code | Exit | Why |
 | --- | --- | --- |
 | *(none — success, `applied_live`)* | 0 | |
+| *(none — success, `no_change`)* | 0 | accepted without a serving-generation change |
 | *(none — success, `staged`)* | 3 | restart required to converge |
 | *(none — success, `applied_degraded`)* | 4 | published, but a subsystem rejected it |
 | `validation_failed` | 1 | the candidate is not a valid configuration |
@@ -3221,6 +3223,8 @@ tenth code for it would split one operator action across two.
 | --- | --- | --- | --- |
 | `applied_live` | n/a | empty | 0 |
 | `applied_live` | n/a | non-empty | **4** |
+| `no_change` | n/a | empty | 0 |
+| `no_change` | n/a | non-empty | **4** |
 | `applied_degraded` | n/a | either | **4** |
 | `staged` | n/a | empty | 3 |
 | `staged` | n/a | non-empty | **4** — degradation takes precedence over staging |
@@ -3236,6 +3240,14 @@ outcome is not yet known"*, `isTerminalApplyResult` returns **false** for it, an
 deadline is `operation_timeout` (§26) and exits through §33.1's error map. An earlier draft listed it
 as a terminal row worth exit 3, which would have told a client to stop waiting for an outcome that
 had not happened yet.
+
+**`no_change` is deliberately present.** It is a successful terminal decision,
+not an intermediate wait state: the accepted candidate is current, and the
+reload transaction proved before Prepare that there is no serving change to
+publish. The result therefore carries `persisted=true`, `published=false`; the
+handler generation, listeners, resources and existing subsystem degradation
+remain exactly as they were. It does not weaken any managed authority or CAS
+fence—the proof runs only after those gates have succeeded.
 
 **`owned_not_serving` is new, and it is what §11.2.4 row 4 and §14 step 10 actually produce**: the
 configuration is owned and on disk, the runtime is not serving it, and **no restart is staged**. It is

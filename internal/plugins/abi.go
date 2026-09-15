@@ -7,8 +7,8 @@
 // wazero runtime (pure Go, no cgo, so the server stays a single static binary).
 //
 // A Manager is created once for the process and owns the shared compilation
-// cache and the key/value store. On startup and on every reload the server calls
-// Manager.Build with the current [plugins] config to produce a *Set: the
+// cache and the key/value store. On startup and on every reload that reaches
+// Prepare the server calls Manager.Build with the current [plugins] config to produce a *Set: the
 // compiled, instantiated plugins for that generation. A Set exposes each plugin
 // as middleware (wraps a handler, may pass through) or as a terminal handler
 // (the location's action). The previous generation's Set is closed after the new

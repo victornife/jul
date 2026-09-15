@@ -112,6 +112,28 @@ func TestExpandSecretsNoRefIsNoop(t *testing.T) {
 	}
 }
 
+func TestContainsStringValueUsesSecretTraversal(t *testing.T) {
+	c := &Config{
+		Admin: AdminConfig{Token: "prefix-needle-suffix"},
+		Servers: []ServerConfig{{Locations: []LocationConfig{{
+			Headers: map[string]string{"X-Token": "map-secret"},
+		}}}},
+	}
+	for _, value := range []string{"needle", "map-secret"} {
+		if !ContainsStringValue(c, value) {
+			t.Fatalf("ContainsStringValue(%q) = false, want true", value)
+		}
+	}
+	for _, value := range []string{"", "absent"} {
+		if ContainsStringValue(c, value) {
+			t.Fatalf("ContainsStringValue(%q) = true, want false", value)
+		}
+	}
+	if ContainsStringValue(nil, "needle") {
+		t.Fatal("ContainsStringValue(nil) = true, want false")
+	}
+}
+
 // TestExpandSecretsResolvesEgressAllow proves a secret-referenced [egress].allow
 // entry resolves through the same reflection walk as every other string field,
 // so a startup-bound egress policy sees consistent, resolved destinations. The

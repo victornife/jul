@@ -156,7 +156,7 @@ func (s *Server) lastApplySummary() *adminapi.ApplySummary {
 	return &adminapi.ApplySummary{
 		ApplyID:     last.ID,
 		State:       string(ManagedApplyTerminal),
-		Outcome:     last.Outcome,
+		Outcome:     adminapi.ReloadOutcome(last.Outcome),
 		Mode:        last.Mode,
 		CompletedAt: adminapi.Timestamp(last.CompletedAt),
 		Degraded:    degradationsOf(last),

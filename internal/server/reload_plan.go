@@ -26,15 +26,17 @@ import (
 //  1. Resolve   — expand secrets, compute effective config + redaction state + candidate fingerprint.
 //  2. Validate  — run structural/runtime validation on the raw source config.
 //  3. Lifecycle — compare the candidate fingerprint against the startup fingerprint.
-//  4. Prepare   — build handlers, stage upstream/generation resources, and
+//  4. ChangeAssessment — prove whether serving inputs are unchanged.
+//  5. Prepare   — build handlers, stage upstream/generation resources, and
 //     prepare any PreparedRuntime components (e.g. #100's
 //     candidate certificate providers for retained TLS addresses).
-//  5. StageListeners — bind new TCP listeners (and HTTP/3 resources) without serving.
-//  6. Publish   — commit the PreparedRuntime, handler generation, redaction,
+//  6. StageListeners — bind new TCP listeners (and HTTP/3 resources) without serving.
+//  7. Publish   — commit the PreparedRuntime, handler generation, redaction,
 //     configs and handler pointer.
-//  7. Activate  — start serving on staged listeners.
-//  8. Retire    — remove listeners no longer in the config and retire old handler generation.
-//  9. PostCommit — apply dynamic side effects (log level, GOMAXPROCS, stream reload).
+//  8. Activate  — start serving on staged listeners.
+//  9. Retire    — remove listeners no longer in the config and retire old handler generation.
+//
+// 10. PostCommit — apply dynamic side effects (log level, GOMAXPROCS, stream reload).
 //
 // On any failure before Publish, Abort must be called to release all candidate
 // resources without touching live state.
@@ -72,6 +74,9 @@ type ReloadPlan struct {
 	// CandidateFP is the effective fingerprint of Candidate.Effective.
 	CandidateFP lifecycle.Fingerprint
 
+	// ServingChange is the result of the proof performed before Prepare.
+	ServingChange ServingChangeAssessment
+
 	// Handlers is the per-listen-address handler tree built by the factory.
 	Handlers map[string]http.Handler
 
@@ -91,6 +96,23 @@ type ReloadPlan struct {
 	published bool
 	// phaseDurations records wall-clock time spent in each named phase.
 	phaseDurations map[string]time.Duration
+}
+
+// AdoptMetadata advances the accepted raw/effective configuration snapshot for
+// a proven serving no-op while preserving the handler pointer, listeners,
+// generation ID, and generation-owned resources. Candidate redaction metadata
+// is merged into the current generation's entry in place: accepted secret
+// metadata becomes active, while the immutable handler-generation base keeps a
+// reference-to-literal rewrite from unmasking a value still held by live
+// resources. No redaction generation is allocated or retired, and successive
+// no-ops do not accumulate historical metadata secrets.
+func (p *ReloadPlan) AdoptMetadata() {
+	p.s.cfg = p.Candidate.Effective
+	p.s.rawCfg = p.Candidate.Raw
+	if current := p.s.handlers.Load(); current != nil {
+		p.s.mergeRedactionGen(current.genID, p.Candidate.Redaction, p.Candidate.Effective)
+	}
+	p.publishRuntimeState()
 }
 
 // newReloadPlan creates a plan for reloading raw (unexpanded) config into s.

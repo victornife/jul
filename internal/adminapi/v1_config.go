@@ -58,9 +58,9 @@ type ApplyResultResponse struct {
 	Operation string `json:"operation,omitempty"`
 	Mode      string `json:"mode,omitempty"`
 	// Outcome is the terminal reload outcome, empty until the record is
-	// terminal.
-	Outcome string `json:"outcome,omitempty"`
-	OK      bool   `json:"ok"`
+	// terminal. no_change is successful even though it does not publish.
+	Outcome ReloadOutcome `json:"outcome,omitempty"`
+	OK      bool          `json:"ok"`
 
 	StartedAt   string `json:"started_at,omitempty"`
 	CompletedAt string `json:"completed_at,omitempty"`
@@ -104,10 +104,10 @@ type HistoryEntry struct {
 	RecordedAt string `json:"recorded_at"`
 	SizeBytes  int64  `json:"size_bytes"`
 
-	ApplyID   string `json:"apply_id,omitempty"`
-	Operation string `json:"operation,omitempty"`
-	Mode      string `json:"mode,omitempty"`
-	Outcome   string `json:"outcome,omitempty"`
+	ApplyID   string        `json:"apply_id,omitempty"`
+	Operation string        `json:"operation,omitempty"`
+	Mode      string        `json:"mode,omitempty"`
+	Outcome   ReloadOutcome `json:"outcome,omitempty"`
 
 	PreviousVersion  string `json:"previous_version,omitempty"`
 	CandidateVersion string `json:"candidate_version,omitempty"`

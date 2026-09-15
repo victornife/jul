@@ -591,6 +591,11 @@ func OutcomeExit(outcome string, restored bool, restoreError string, degraded []
 			return 4, true
 		}
 		return 0, true
+	case "no_change":
+		if len(degraded) != 0 {
+			return 4, true
+		}
+		return 0, true
 	case "applied_degraded":
 		return 4, true
 	case "staged", "owned_not_serving":

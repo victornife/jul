@@ -22,6 +22,9 @@ const (
 	// least one post-commit side effect (certificate refresh, stream reload,
 	// etc.) failed or the reload exceeded its deadline after Publish.
 	ReloadAppliedDegraded ReloadOutcome = "applied_degraded"
+	// ReloadNoChange means the validated candidate was accepted as current but
+	// no serving runtime generation needed to cross the Publish boundary.
+	ReloadNoChange ReloadOutcome = "no_change"
 	// ReloadNotApplied means the reload did not reach Publish and the
 	// previous runtime state remains serving.
 	ReloadNotApplied ReloadOutcome = "not_applied"
@@ -68,7 +71,8 @@ type ReloadResult struct {
 	TimedOutPhase  string        `json:"timed_out_phase,omitempty"`
 	FailedPhase    string        `json:"failed_phase,omitempty"`
 	// PhaseDurations records wall-clock time spent in each named reload phase
-	// (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate) in
+	// (resolve/validate/lifecycle/change_assessment/prepare/stage_listeners/
+	// publish/activate) in
 	// milliseconds. Present only when phases ran; absent if the result comes
 	// from a cached store.
 	PhaseDurations map[string]int64      `json:"phase_durations_ms,omitempty"`

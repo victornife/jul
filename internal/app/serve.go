@@ -233,7 +233,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// ── Section 2: HandlerFactory ──────────────────────────────────────────
 	//
 	// The factory holds the process-lifetime dependencies and rebuilds the
-	// per-listen-address handler tree on every reload. See factory.go.
+	// per-listen-address handler tree on every reload that reaches Prepare. See
+	// factory.go.
 	f := &HandlerFactory{
 		Log:           log,
 		Metrics:       metrics,
@@ -404,8 +405,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// by pre-Publish failures, which fixes the defect where a failed pre-Publish
 	// reload overwrites the LastReload pointer and silently clears a previously
 	// degraded state reported by a published reload.
-	var activeAdminDegraded atomic.Bool
-	var lastAdminDegradedErr atomic.Pointer[string]
+	var adminReloadState adminReloadHealth
 	// lastManagedApplyFinalization is the ADVISORY, non-readiness finalization-
 	// health state of the most recent managed apply (WS02 §3.9). It is surfaced
 	// in the runtime overview as managed_apply_finalization and is deliberately
@@ -420,19 +420,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	var lastManagedApplyFinalization atomic.Pointer[admin.ManagedApplyAdvisory]
 	srv.OnReloadResult = func(r server.ReloadResult) {
 		metrics.ObserveReloadResult(string(r.Outcome), r.PhaseDurations, r.TimedOut, r.TimedOutPhase)
-		// Only published reloads affect the durable admin-health flag.
-		// Pre-Publish failures leave it unchanged.
-		if r.Published {
-			if r.Admin.Status == server.ReloadSubsystemFailed || r.Admin.Status == server.ReloadSubsystemTimedOut {
-				msg := "admin subsystem reload failed: " + r.Admin.Error
-				lastAdminDegradedErr.Store(&msg)
-				activeAdminDegraded.Store(true)
-			} else {
-				// Successful post-Publish admin clears the degraded state.
-				lastAdminDegradedErr.Store(nil)
-				activeAdminDegraded.Store(false)
-			}
-		}
+		adminReloadState.observe(r)
 	}
 	srv.ACME = rt.ACME
 
@@ -481,16 +469,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// updates LastReload to a result with Published=false, which would
 	// previously erase a degraded state from a prior published failure.
 	deps.AdminHealth = func() error {
-		if activeAdminDegraded.Load() {
-			detail := "admin subsystem reload failed"
-			if p := lastAdminDegradedErr.Load(); p != nil && *p != "" {
-				detail = *p
-			}
-			return &admin.AdminHealthStatus{
-				Healthy: false,
-				Reason:  "admin_reload",
-				Detail:  detail,
-			}
+		if err := adminReloadState.health(); err != nil {
+			return err
 		}
 		// WS02 §3.9: managed-apply finalization health is ADVISORY and MUST NOT
 		// gate readiness. It is surfaced separately through
@@ -938,6 +918,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 		pf.PrepareAdmin = prepareAdmin
 		srv.PrepareAdmin = prepareAdmin
+		srv.AdminTLSInputsUnchanged = adminSrv.TLSInputsUnchanged
 		go func() {
 			if err := adminSrv.Run(ctx); err != nil {
 				log.Error("admin listener failed", "error", err)

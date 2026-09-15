@@ -1,6 +1,6 @@
 # Jul.IA — compatibility & versioning policy
 
-> Version 1.7 · Updated 2026-08-30
+> Version 1.8 · Updated 2026-09-15
 
 This document defines what "stable" means for Jul.IA and what a **GA** label
 guarantees about a feature's contract. It is the fleet-wide answer to GA
@@ -275,6 +275,7 @@ cut at the first GA release.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-09-15 | 1.8 | Added the `no_change` value to the v1 reload-outcome enum for a validated, accepted candidate that provably leaves serving state unchanged. | Existing outcome values, HTTP status rules, polling terminality, and exit codes keep their meanings; `no_change` is an additive terminal success using exit 0. | #408; [reload semantics](reload-semantics.md#identity-planes-and-the-no-change-proof) |
 | 2026-08-30 | 1.7 | Separated released compatibility from merged/candidate delivery and clarified that unversioned Console routes are internal until #150 publishes a supported external API subset. | Existing released GA configuration, CLI, metric and wire contracts remain governed by SemVer. | Issue #353; [status.md](status.md) |
 | 2026-08-19 | 1.6 | Replaced the boolean `healthy` field on backends with a five-state `state` enum (`available`, `circuit_open`, `circuit_half_open`, `health_unhealthy`, `at_capacity`) on `GET /api/apps` and `GET /api/upstreams`, and added a server-computed pool `verdict` (`healthy`/`degraded`/`down`/`unknown`) to `GET /api/apps`. The boolean was fed only by the health checker, so a backend taken out of rotation by the circuit breaker or by a per-backend concurrency cap still reported `healthy` while receiving no traffic — the field said the opposite of what an operator needed during an incident. | The field is still absent when no live status has been observed, and absent still means *unknown*, not *down*. Every other field on both projections keeps its name and type. | #144; [console.md](console.md#upstreams) |
 | 2026-08-19 | 1.5 | The access log gained an `upstream_reason` field, carrying the bounded reason an upstream call failed. It is emitted only when one did, following the same omit-what-adds-nothing rule as `trace_id` and `peer_ip`. | Every existing field keeps its name, type and meaning. The value set is closed, so a backend address, route path or raw error text will never appear in it. | #144; [failure taxonomy](core-http.md#upstream-failure-taxonomy) |

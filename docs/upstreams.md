@@ -218,7 +218,8 @@ proxy_pass = "http://api"
 ```
 
 A literal `proxy_pass = "http://10.0.0.5:8080"` target builds an unregistered pool of one that is
-rebuilt on every reload, so **its admission counters reset on reload**. Name the upstream if you need
+rebuilt on every published handler generation, so **its admission counters reset on a real reload**
+but remain stable across a proven semantic no-op. Name the upstream if you need
 that state to survive.
 
 For a named upstream, reuse is deliberately exact. The registry key is

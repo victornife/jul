@@ -155,6 +155,21 @@ func (s State) Union(other State) State {
 	return out
 }
 
+// Retain returns a new State containing only values for which keep returns
+// true. It is used when accepted metadata changes without replacing its
+// handler generation: obsolete metadata-only secrets can be dropped while
+// values still present in the effective configuration remain masked.
+func (s State) Retain(keep func(string) bool) State {
+	out := NewState(nil, s.minLen)
+	for value := range s.values {
+		if keep(value) {
+			out.values[value] = struct{}{}
+		}
+	}
+	out.sorted = sortedLongestFirst(out.values)
+	return out
+}
+
 type stateRedactingWriter struct {
 	state State
 	w     io.Writer

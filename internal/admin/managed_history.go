@@ -15,7 +15,7 @@ import (
 // snapshot and its redacted metadata sidecar and is never logged or retained.
 //
 // The reason matrix is derived purely from the terminal result:
-//   - a committed apply (applied_live / applied_degraded) or a committed stage
+//   - a committed apply (applied_live / applied_degraded / no_change) or a committed stage
 //     (create or update) or a committed rollback records a pre_apply snapshot
 //     of the prior configuration;
 //   - a failed apply whose restoration also FAILED records a recovery snapshot
@@ -71,7 +71,7 @@ func (s *Server) RecordManagedHistory(reqCtx ApplyRequestContext, result ConfigA
 // bytes — only the structured outcome flags — so the policy stays auditable.
 func managedHistoryDecision(result ConfigApplyResult) (reason string, record bool) {
 	if result.OK {
-		// applied_live, applied_degraded, committed stage, committed rollback.
+		// applied_live, applied_degraded, no_change, committed stage, committed rollback.
 		return historyReasonPreApply, true
 	}
 	// A failed apply only snapshots when restoration was attempted and failed,

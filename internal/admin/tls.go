@@ -40,6 +40,25 @@ func (s *Server) PrepareTLS(cfg config.AdminConfig) (*PreparedTLS, error) {
 	return &PreparedTLS{provider: provider, fingerprint: fp}, nil
 }
 
+// TLSInputsUnchanged reports whether cfg's certificate/key content matches the
+// provider currently installed on the admin listener. It performs no mutation
+// and lets the reload coordinator prove a semantic no-op without constructing
+// a candidate provider. If TLS was not active at startup, an enabled candidate
+// is not equivalent.
+func (s *Server) TLSInputsUnchanged(cfg config.AdminConfig) bool {
+	if cfg.TLS == nil || !cfg.TLS.Enabled {
+		return s.certProvider == nil
+	}
+	if s.certProvider == nil {
+		return false
+	}
+	fp := server.SingleCertFingerprint(cfg.TLS.Cert, cfg.TLS.Key)
+	s.certMu.Lock()
+	unchanged := fp == s.certFingerprint
+	s.certMu.Unlock()
+	return unchanged
+}
+
 func (s *Server) CommitPreparedTLS(prepared *PreparedTLS) {
 	if prepared == nil || s.certProvider == nil {
 		return
