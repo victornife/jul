@@ -46,6 +46,9 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 	if err != nil {
 		return nil, err
 	}
+	if err := validateHTTPPoolNetwork(scheme, pool); err != nil {
+		return nil, err
+	}
 
 	// The backend trust policy is resolved here, while the handler generation
 	// is being prepared, so unreadable or malformed material aborts the reload
@@ -73,6 +76,7 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 			dialFailure:   dialFailure,
 		},
 		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out = pr.Out.WithContext(withOriginalProxyHost(pr.Out.Context(), pr.In.Host))
 			pr.SetURL(target)
 			// Secure defaults: clears client-supplied X-Forwarded-* and sets
 			// them from Jul's own trusted view of the request.
@@ -209,6 +213,9 @@ func (h *proxyHandler) Close() error {
 // nil (for example in unit tests) named upstreams are built directly without
 // lifecycle management.
 func resolvePool(ctx context.Context, loc config.LocationConfig, upstreams map[string]config.UpstreamConfig, reg *upstream.Registry) (*upstream.Pool, string, string, error) {
+	if err := rejectDirectUnixProxyPass(loc.ProxyPass); err != nil {
+		return nil, "", "", err
+	}
 	u, err := url.Parse(loc.ProxyPass)
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return nil, "", "", fmt.Errorf("invalid proxy_pass %q (want http(s)://host:port or http://upstream-name)", loc.ProxyPass)
@@ -317,23 +324,17 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		} else if actx != req.Context() {
 			out = req.Clone(actx)
 		}
-		if t.tlsBackend && (b.URL == nil || b.URL.Scheme != "https") {
-			// Fail closed rather than downgrade. Reaching here would mean a
-			// backend entered the pool with a different scheme than the route
-			// was configured with. It is terminal: every retry would face the
-			// same misconfiguration, and none of them may downgrade either.
-			return upstream.AttemptResult{
-				Err:      fmt.Errorf("backend %s is not https but the route is: refusing to downgrade", b.Address),
-				Terminal: true,
-			}
+		prepared, backendLabel, prepErr := prepareProxyAttempt(out, b, t.tlsBackend)
+		if prepErr != nil {
+			return upstream.AttemptResult{Err: prepErr, Terminal: true}
 		}
-		out.URL.Scheme = b.URL.Scheme
-		out.URL.Host = b.URL.Host
+		out = prepared
 
 		// Child span per backend attempt. Inject W3C tracecontext from the
 		// attempt's context so the upstream continues this trace under it.
 		sctx, aspan := tr.Start(ctx, "upstream.request")
-		aspan.SetString("upstream.backend", b.URL.Host)
+		aspan.SetString("upstream.backend", backendLabel)
+		aspan.SetString("upstream.network", b.Network)
 		aspan.SetInt("retry.attempt", int64(n))
 		if n > 1 {
 			aspan.SetInt("retry.backoff_ms", backoff.Load())
@@ -343,7 +344,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		r, err := t.base.RoundTrip(out)
 		if err == nil {
 			if t.pool.MarkSuccess(b) && t.log != nil {
-				t.log.Info("proxy backend recovered", "upstream", t.pool.Name(), "backend", b.URL.Host)
+				t.log.Info("proxy backend recovered", "upstream", t.pool.Name(), "backend", backendLabel)
 			}
 			aspan.SetStatus(r.StatusCode)
 			aspan.End()
@@ -492,7 +493,16 @@ func newProxyTransport(loc config.LocationConfig, policy *backendtls.Policy, max
 	// successive I/O operations (NGINX proxy_read_timeout / proxy_send_timeout
 	// semantics) rather than the total transfer — a steadily streaming response
 	// (SSE, chunked downloads) is never interrupted while data keeps flowing.
-	dial := dialer.DialContext
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if target, ok := unixDialTarget(ctx); ok {
+			c, err := dialer.DialContext(ctx, upstream.NetworkUnix, target)
+			if err != nil {
+				return nil, unixDialError{err: err}
+			}
+			return c, nil
+		}
+		return dialer.DialContext(ctx, network, addr)
+	}
 	if pool != nil {
 		// net/http enforces MaxConnsPerHost internally and exposes no live count,
 		// so the only honest source for jul_upstream_connections is Jul's own
