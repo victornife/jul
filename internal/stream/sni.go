@@ -18,10 +18,10 @@ import (
 // caller falls back to the catch-all/default route.
 
 const (
-	tlsRecordMax            = 16384
-	tlsClientHelloMax       = 16384 // handshake header plus declared body
+	tlsRecordMax             = 16384
+	tlsClientHelloMax        = 16384 // handshake header plus declared body
 	tlsClientHelloMaxRecords = 64
-	tlsInspectMax           = tlsClientHelloMax + 5*tlsClientHelloMaxRecords
+	tlsInspectMax            = tlsClientHelloMax + 5*tlsClientHelloMaxRecords
 )
 
 // peekSNI returns the SNI host name from the buffered TLS ClientHello, or an
