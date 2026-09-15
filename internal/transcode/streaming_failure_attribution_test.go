@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"jul/internal/config"
@@ -25,15 +26,21 @@ import (
 )
 
 type scriptedClientStream struct {
-	ctx  context.Context
-	send func(any) error
-	recv func(any) error
+	ctx       context.Context
+	send      func(any) error
+	recv      func(any) error
+	closeSend func() error
 }
 
 func (*scriptedClientStream) Header() (metadata.MD, error) { return nil, nil }
 func (*scriptedClientStream) Trailer() metadata.MD         { return nil }
-func (*scriptedClientStream) CloseSend() error             { return nil }
-func (s *scriptedClientStream) Context() context.Context   { return s.ctx }
+func (s *scriptedClientStream) CloseSend() error {
+	if s.closeSend != nil {
+		return s.closeSend()
+	}
+	return nil
+}
+func (s *scriptedClientStream) Context() context.Context { return s.ctx }
 func (s *scriptedClientStream) SendMsg(msg any) error {
 	if s.send != nil {
 		return s.send(msg)
@@ -114,7 +121,7 @@ func TestServerStreamSendFailureRecordsBackendFault(t *testing.T) {
 		},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/v1/down", strings.NewReader(`{"value":"x"}`))
-	if got := tr.serveServerStream(httptest.NewRecorder(), req, rt, nil, cs, "Down", pickStreamAttempt(t, p)); got != healthRecorded {
+	if got := tr.serveServerStream(httptest.NewRecorder(), req, rt, nil, cs, ctx, "Down", pickStreamAttempt(t, p)); got != healthRecorded {
 		t.Fatalf("health = %d, want recorded", got)
 	}
 	if got := p.Backends()[0].FailCount(); got != 1 {
@@ -133,7 +140,7 @@ func TestClientStreamTransportFailuresRecordBackendFault(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := streamingFailurePool(t)
-			tr := &Transcoder{pool: p}
+			tr := &Transcoder{pool: p, maxMsg: 1 << 20}
 			rt := streamingFailureRoute(t, "Up")
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -143,7 +150,7 @@ func TestClientStreamTransportFailuresRecordBackendFault(t *testing.T) {
 				recv: func(any) error { return tc.recvErr },
 			}
 			req := httptest.NewRequest(http.MethodPost, "/v1/up", strings.NewReader(`{"value":"x"}`)).WithContext(ctx)
-			if got := tr.serveClientStream(httptest.NewRecorder(), req, rt, nil, cs, cancel, "Up", pickStreamAttempt(t, p)); got != healthRecorded {
+			if got := tr.serveClientStream(httptest.NewRecorder(), req, rt, nil, cs, ctx, cancel, "Up", pickStreamAttempt(t, p)); got != healthRecorded {
 				t.Fatalf("health = %d, want recorded", got)
 			}
 			if got := p.Backends()[0].FailCount(); got != 1 {
@@ -178,7 +185,7 @@ func TestBidiSendFailuresKeepTheirOriginalAttribution(t *testing.T) {
 				},
 			}
 			req := httptest.NewRequest(http.MethodPost, "/v1/both", strings.NewReader(tc.body)).WithContext(ctx)
-			if got := tr.serveBidiStream(httptest.NewRecorder(), req, rt, nil, cs, cancel, "Both", pickStreamAttempt(t, p)); got != healthRecorded {
+			if got := tr.serveBidiStream(httptest.NewRecorder(), req, rt, nil, cs, ctx, cancel, "Both", pickStreamAttempt(t, p)); got != healthRecorded {
 				t.Fatalf("health = %d, want recorded", got)
 			}
 			if got := p.Backends()[0].FailCount(); got != tc.wantFails {
@@ -198,7 +205,7 @@ func TestPumpRepliesClassifiesBackendAndDownstreamFailures(t *testing.T) {
 			recv: func(any) error { return status.Error(codes.Unavailable, "receive failed") },
 		}
 		resp := newStreamResponder(httptest.NewRecorder(), "ndjson")
-		if got := tr.pumpReplies(resp, cs, rt, "Down", pickStreamAttempt(t, p), context.Background()); got != healthRecorded {
+		if got := tr.pumpReplies(resp, cs, rt, "Down", pickStreamAttempt(t, p), context.Background(), context.Background()); got != healthRecorded {
 			t.Fatalf("health = %d, want recorded", got)
 		}
 		if got := p.Backends()[0].FailCount(); got != 1 {
@@ -222,7 +229,7 @@ func TestPumpRepliesClassifiesBackendAndDownstreamFailures(t *testing.T) {
 			},
 		}
 		resp := newStreamResponder(&streamFailingWriter{}, "ndjson")
-		if got := tr.pumpReplies(resp, cs, rt, "Down", attempt, context.Background()); got != healthRecorded {
+		if got := tr.pumpReplies(resp, cs, rt, "Down", attempt, context.Background(), context.Background()); got != healthRecorded {
 			t.Fatalf("health = %d, want recorded", got)
 		}
 		if got := p.Backends()[0].FailCount(); got != 0 {
@@ -263,12 +270,132 @@ func TestBidiReceiveAndDownstreamFailuresAreAttributedOnce(t *testing.T) {
 			defer cancel()
 			cs := &scriptedClientStream{ctx: ctx, recv: tc.recv}
 			req := httptest.NewRequest(http.MethodPost, "/v1/both", strings.NewReader(`{"value":"x"}`)).WithContext(ctx)
-			if got := tr.serveBidiStream(tc.writer, req, rt, nil, cs, cancel, "Both", pickStreamAttempt(t, p)); got != healthRecorded {
+			if got := tr.serveBidiStream(tc.writer, req, rt, nil, cs, ctx, cancel, "Both", pickStreamAttempt(t, p)); got != healthRecorded {
 				t.Fatalf("health = %d, want recorded", got)
 			}
 			if got := p.Backends()[0].FailCount(); got != tc.wantFails {
 				t.Fatalf("failure count = %d, want %d", got, tc.wantFails)
 			}
 		})
+	}
+}
+
+func TestClientStreamDownstreamWriteFailureIsNeutral(t *testing.T) {
+	p := streamingFailurePool(t)
+	tr := &Transcoder{pool: p}
+	rt := streamingFailureRoute(t, "Up")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cs := &scriptedClientStream{
+		ctx: ctx,
+		recv: func(msg any) error {
+			out := msg.(*dynamicpb.Message)
+			field := out.Descriptor().Fields().ByName("value")
+			out.Set(field, out.NewField(field))
+			return nil
+		},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/up", strings.NewReader(`[{"value":"x"}]`)).WithContext(ctx)
+	if got := tr.serveClientStream(&streamFailingWriter{}, req, rt, nil, cs, ctx, cancel, "Up", pickStreamAttempt(t, p)); got != healthRecorded {
+		t.Fatalf("health = %d, want neutral recorded result", got)
+	}
+	if got := p.Backends()[0].FailCount(); got != 0 {
+		t.Fatalf("downstream write failure changed backend failure count to %d", got)
+	}
+}
+
+func TestServerStreamSSEEndWriteFailureIsNeutral(t *testing.T) {
+	p := streamingFailurePool(t)
+	tr := &Transcoder{pool: p}
+	rt := streamingFailureRoute(t, "Down")
+	cs := &scriptedClientStream{ctx: context.Background()}
+	resp := newStreamResponder(&streamFailingWriter{}, "sse")
+	if got := tr.pumpReplies(resp, cs, rt, "Down", pickStreamAttempt(t, p), context.Background(), context.Background()); got != healthRecorded {
+		t.Fatalf("health = %d, want neutral recorded result", got)
+	}
+	if got := p.Backends()[0].FailCount(); got != 0 {
+		t.Fatalf("SSE completion write failure changed backend failure count to %d", got)
+	}
+}
+
+func TestStreamingJulAttemptTimeoutIsNeutral(t *testing.T) {
+	p := streamingFailurePool(t)
+	tr := &Transcoder{pool: p}
+	rt := streamingFailureRoute(t, "Down")
+	attempt, cancel := context.WithCancel(context.Background())
+	cancel()
+	cs := &scriptedClientStream{
+		ctx:  attempt,
+		recv: func(any) error { return status.Error(codes.DeadlineExceeded, "attempt deadline") },
+	}
+	resp := newStreamResponder(httptest.NewRecorder(), "ndjson")
+	if got := tr.pumpReplies(resp, cs, rt, "Down", pickStreamAttempt(t, p), context.Background(), attempt); got != healthRecorded {
+		t.Fatalf("health = %d, want neutral recorded result", got)
+	}
+	if got := p.Backends()[0].FailCount(); got != 0 {
+		t.Fatalf("Jul timeout changed backend failure count to %d", got)
+	}
+}
+
+func TestStreamingCloseSendFailuresKeepBackendAttribution(t *testing.T) {
+	for _, kind := range []string{"server", "client", "bidi"} {
+		t.Run(kind, func(t *testing.T) {
+			p := streamingFailurePool(t)
+			tr := &Transcoder{pool: p, maxMsg: 1 << 20}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var closes atomic.Int32
+			var sends atomic.Int32
+			closeErr := status.Error(codes.Unavailable, "close send failed")
+			cs := &scriptedClientStream{
+				ctx:       ctx,
+				send:      func(any) error { sends.Add(1); return nil },
+				closeSend: func() error { closes.Add(1); return closeErr },
+				recv: func(any) error {
+					<-ctx.Done()
+					return status.Error(codes.Canceled, ctx.Err().Error())
+				},
+			}
+			body := `[{"value":"x"}]`
+			path := "/v1/" + map[string]string{"server": "down", "client": "up", "bidi": "both"}[kind]
+			if kind == "server" {
+				body = `{"value":"x"}`
+			}
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)).WithContext(ctx)
+			var got streamHealth
+			switch kind {
+			case "server":
+				got = tr.serveServerStream(httptest.NewRecorder(), req, streamingFailureRoute(t, "Down"), nil, cs, ctx, "Down", pickStreamAttempt(t, p))
+			case "client":
+				got = tr.serveClientStream(httptest.NewRecorder(), req, streamingFailureRoute(t, "Up"), nil, cs, ctx, cancel, "Up", pickStreamAttempt(t, p))
+			default:
+				got = tr.serveBidiStream(httptest.NewRecorder(), req, streamingFailureRoute(t, "Both"), nil, cs, ctx, cancel, "Both", pickStreamAttempt(t, p))
+			}
+			if got != healthRecorded {
+				t.Fatalf("health = %d, want recorded", got)
+			}
+			if closes.Load() != 1 {
+				t.Fatalf("CloseSend calls = %d, want 1 (SendMsg calls=%d)", closes.Load(), sends.Load())
+			}
+			if fails := p.Backends()[0].FailCount(); fails != 1 {
+				classification := classifyGRPCAttempt(closeErr, req.Context(), ctx)
+				t.Fatalf("failure count = %d, want 1 (classification origin=%q health=%d)", fails, classification.Origin(), classification.Health())
+			}
+		})
+	}
+}
+
+func TestBidiSSEEndWriteFailureIsNeutral(t *testing.T) {
+	p := streamingFailurePool(t)
+	tr := &Transcoder{pool: p, streamMode: "sse"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cs := &scriptedClientStream{ctx: ctx}
+	req := httptest.NewRequest(http.MethodPost, "/v1/both", strings.NewReader(""))
+	if got := tr.serveBidiStream(&streamFailingWriter{}, req, streamingFailureRoute(t, "Both"), nil, cs, ctx, cancel, "Both", pickStreamAttempt(t, p)); got != healthRecorded {
+		t.Fatalf("health = %d, want neutral recorded result", got)
+	}
+	if fails := p.Backends()[0].FailCount(); fails != 0 {
+		t.Fatalf("SSE end write failure changed backend failure count to %d", fails)
 	}
 }

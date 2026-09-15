@@ -191,7 +191,12 @@ L4 traffic.
 | `FuzzReadHeader` | `internal/proxyproto/proxyproto_test.go` | Random and oversized PROXY protocol v1/v2 headers | No panic; accepted addresses are validated TCP addresses; LOCAL/UNKNOWN may yield nil |
 | `FuzzPeekSNI` | `internal/stream/fuzz_test.go` | Random byte streams as TLS ClientHello | No panic; result is valid string or empty |
 
-Run: `go test -tags stream -fuzz='FuzzReadProxyHeader|FuzzPeekSNI' -fuzztime=15s ./internal/stream/`
+Run each package's target independently:
+
+```bash
+go test -tags stream -fuzz=FuzzReadHeader -fuzztime=15s ./internal/proxyproto
+go test -tags stream -fuzz=FuzzPeekSNI -fuzztime=15s ./internal/stream
+```
 
 ## GA status
 
@@ -204,5 +209,5 @@ Run: `go test -tags stream -fuzz='FuzzReadProxyHeader|FuzzPeekSNI' -fuzztime=15s
 | ⑤ Soak test | **Met** | 8h Linux isolated soak 2026-07-11 (`TestSoakUDPChurn`, 54,892,354 sends, 0% err, bounded goroutines/heap) plus 1h isolated Windows evidence 2026-07-06 — [evidence](soak-evidence.md#2026-07-11--l4-stream-proxy-8h-isolated-soak-linux-completed) |
 | ⑥ Feature documentation | **Met** | This document + [configuration.md](configuration.md) + [testdata/stream.toml](../testdata/stream.toml) |
 | ⑦ Threat model | **Met** | 6-row threat table above |
-| ⑧ Parser/input fuzzing | **Met** | `FuzzReadProxyHeader`, `FuzzPeekSNI` in `internal/stream/fuzz_test.go` |
+| ⑧ Parser/input fuzzing | **Met** | `FuzzReadHeader` in `internal/proxyproto/proxyproto_test.go`; `FuzzPeekSNI` in `internal/stream/fuzz_test.go` |
 | ⑨ Console surface | **Met** | Stream status surfaced in admin `/api/stats` and Console v2 dashboard |

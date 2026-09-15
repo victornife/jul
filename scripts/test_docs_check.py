@@ -631,6 +631,32 @@ def test_status_heading_contract_rejects_legacy_beta_section():
         _, fail = _run_in_tmp(root, docs_check.check_status_heading_uniqueness)
         assert fail == 1, f"expected one legacy-section failure, got {fail}"
 
+
+def test_documented_fuzz_commands_require_real_target_and_package():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        docs = root / "docs"
+        package = root / "internal" / "parser"
+        docs.mkdir(parents=True)
+        package.mkdir(parents=True)
+        (package / "parser_test.go").write_text(
+            "package parser\n\nfunc FuzzReadHeader(f *testing.F) {}\n", encoding="utf-8"
+        )
+        doc = docs / "parser.md"
+        doc.write_text(
+            "`go test -fuzz=FuzzReadHeader -fuzztime=15s ./internal/parser`\n",
+            encoding="utf-8",
+        )
+        _, fail = _run_in_tmp(root, docs_check.check_documented_fuzz_commands)
+        assert fail == 0, f"expected valid documented fuzz command to pass, got {fail}"
+
+        doc.write_text(
+            "`go test -fuzz=FuzzMissing -fuzztime=15s ./internal/parser`\n",
+            encoding="utf-8",
+        )
+        _, fail = _run_in_tmp(root, docs_check.check_documented_fuzz_commands)
+        assert fail == 1, f"expected missing documented fuzz target to fail, got {fail}"
+
 if __name__ == "__main__":
     _run_existing_tests()
     test_feature_manifest_rejects_readme_all_ga_claim()
@@ -640,4 +666,5 @@ if __name__ == "__main__":
     test_living_doc_header_detects_newer_changelog()
     test_status_heading_uniqueness_rejects_duplicate_anchor()
     test_status_heading_contract_rejects_legacy_beta_section()
+    test_documented_fuzz_commands_require_real_target_and_package()
     print("OK")

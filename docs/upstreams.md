@@ -370,6 +370,15 @@ transcoding, FastCGI, uWSGI, forward-auth dependencies and L4 TCP dialing.
 Neutral half-open attempts return their probe slot without closing or reopening
 the circuit; the next real result decides recovery.
 
+Transcoded streaming calls retain the Jul-owned context passed to
+`grpc.NewStream` and classify terminal errors against that context. They never
+use `grpc.ClientStream.Context()` for ownership: grpc-go cancels that derived
+context when a stream terminates, including after a genuine backend status such
+as `Unavailable`. The preserved inbound context takes precedence for proven
+client cancellation/deadline; otherwise a concrete backend terminal status
+observed while the Jul-owned context is live keeps its backend classification.
+The stream's `retry_deadline` bounds its one non-retried attempt.
+
 The cross-protocol audit below is the normative adapter matrix. **N** means
 neutral, **F** means passive-health failure, **S** means passive-health success,
 and **—** means the adapter does not interpret that event. “Jul timeout” means
@@ -395,6 +404,19 @@ and trust policy; they do not call the passive attempt seam. Discovery updates
 membership and preserves compatible backend objects but does not manufacture
 success or failure results. Admin/control-plane code has no additional direct
 consumer of `upstream.Pool` beyond the auth dependencies listed here.
+
+The transcoder connection cache uses `(scheme, network, address, logical
+workload ID)` as its key. One cache lock serializes active-to-retired moves,
+same-identity promotion, expiry and closure; dialing occurs outside that lock
+and a losing same-identity speculative dial is closed. Retired generations have
+separate composite keys, so address reuse (`A → B → A`) cannot return a
+connection across workloads or let stale retirement delete the replacement.
+They remain reachable only for the fixed retirement grace and are removed by
+the level-triggered eviction worker or `Close`. A transcoder owns at most 256
+retired connections: if hostile logical-identity churn reaches that ceiling,
+the oldest retired generation is closed before its grace expires. This bounds
+memory and socket retention while preserving the full grace window during
+ordinary churn; the active generation is never selected for early closure.
 
 ### The deadline dominates
 
