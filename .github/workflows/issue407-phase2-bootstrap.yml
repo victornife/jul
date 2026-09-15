@@ -1,0 +1,42 @@
+name: issue407 phase2 bootstrap
+
+on:
+  push:
+    branches:
+      - issue-407-unix-http-proxy
+    paths:
+      - .github/workflows/issue407-phase2-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: issue-407-unix-http-proxy
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Apply integration changes
+        run: python3 .github/issue407_phase2.py
+      - name: Format
+        run: gofmt -w internal/handler/proxy_unix.go internal/handler/proxy_unix_test.go internal/migrate/nginx/translate.go internal/migrate/nginx/unix_http_test.go
+      - name: Targeted tests
+        run: |
+          go test ./internal/handler ./internal/upstream ./internal/config
+          go test -tags importer ./internal/migrate/nginx/...
+      - name: Race targeted
+        run: go test -race -p 2 ./internal/handler ./internal/upstream ./internal/config
+      - name: Commit integration
+        shell: bash
+        run: |
+          git config user.name "ChatGPT Codex Connector"
+          git config user.email "noreply@openai.com"
+          git rm .github/workflows/issue407-phase2-bootstrap.yml .github/issue407_phase2.py
+          git add README.md CHANGELOG.md docs internal .github/workflows/issue407-quality.yml
+          git commit -m "test: certify Unix HTTP proxy integration (#407)"
+          git push origin HEAD:issue-407-unix-http-proxy
