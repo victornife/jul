@@ -39,6 +39,10 @@ func inspectableHTTPProxy(t *testing.T, address string, maxFails int) (*proxyHan
 }
 
 func inspectableHTTPProxyWithLocation(t *testing.T, address string, maxFails int, loc config.LocationConfig) (*proxyHandler, *upstream.Pool) {
+	return inspectableHTTPProxyWithCircuit(t, address, maxFails, 5*time.Millisecond, loc)
+}
+
+func inspectableHTTPProxyWithCircuit(t *testing.T, address string, maxFails int, failTimeout time.Duration, loc config.LocationConfig) (*proxyHandler, *upstream.Pool) {
 	t.Helper()
 	ups := map[string]config.UpstreamConfig{
 		"health": {
@@ -46,7 +50,7 @@ func inspectableHTTPProxyWithLocation(t *testing.T, address string, maxFails int
 			Strategy:    "round_robin",
 			Servers:     []config.UpstreamServer{{Address: address, Weight: 1}},
 			MaxFails:    maxFails,
-			FailTimeout: config.Duration(5 * time.Millisecond),
+			FailTimeout: config.Duration(failTimeout),
 		},
 	}
 	loc.ProxyPass = "http://health"
@@ -113,14 +117,25 @@ func TestHTTPHalfOpenClientCancellationReturnsProbe(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	h, pool := inspectableHTTPProxy(t, strings.TrimPrefix(backend.URL, "http://"), 1)
+	// The half-open window uses fail_timeout too. Keep it comfortably wider
+	// than a canceled HTTP round trip on loaded Windows runners; the old 5 ms
+	// fixture could expire the replacement-probe window before ServeHTTP
+	// returned and turn this attribution test into a scheduler benchmark.
+	h, pool := inspectableHTTPProxyWithCircuit(t, strings.TrimPrefix(backend.URL, "http://"), 1, 250*time.Millisecond, config.LocationConfig{})
 	failed, err := pool.Pick()
 	if err != nil {
 		t.Fatal(err)
 	}
 	pool.RecordAttempt(failed, upstream.BackendProtocolFailure(upstream.ReasonUpstreamConnectFailed))
 	pool.Release(failed.Backend)
-	time.Sleep(10 * time.Millisecond)
+	b := pool.Backends()[0]
+	deadline := time.Now().Add(2 * time.Second)
+	for b.CircuitStatus().State != upstream.StateCircuitHalfOpen {
+		if time.Now().After(deadline) {
+			t.Fatal("circuit did not reach the half-open precondition")
+		}
+		time.Sleep(time.Millisecond)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "http://edge/cancel", nil).WithContext(ctx)
@@ -132,13 +147,15 @@ func TestHTTPHalfOpenClientCancellationReturnsProbe(t *testing.T) {
 	<-accepted
 	cancel()
 	<-done
+	if status := b.CircuitStatus(); status.State != upstream.StateCircuitHalfOpen || status.ProbesRemaining != 1 {
+		t.Fatalf("neutral cancellation did not return half-open probe: state=%q remaining=%d", status.State, status.ProbesRemaining)
+	}
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://edge/ok", nil))
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("replacement half-open probe = %d, want 204", rec.Code)
 	}
-	b := pool.Backends()[0]
 	if !b.Available() || b.FailCount() != 0 || b.Inflight() != 0 {
 		t.Fatalf("half-open cancellation leaked state: available=%t fails=%d inflight=%d", b.Available(), b.FailCount(), b.Inflight())
 	}
