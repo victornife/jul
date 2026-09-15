@@ -7,10 +7,14 @@ on:
       - 'internal/handler/**'
       - 'internal/upstream/**'
       - 'internal/config/**'
+      - 'internal/app/**'
+      - 'internal/admin/**'
       - 'internal/migrate/nginx/**'
       - 'docs/**'
       - 'README.md'
       - 'CHANGELOG.md'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/issue407-quality.yml'
   push:
     branches: [main, issue-407-unix-http-proxy]
@@ -18,10 +22,14 @@ on:
       - 'internal/handler/**'
       - 'internal/upstream/**'
       - 'internal/config/**'
+      - 'internal/app/**'
+      - 'internal/admin/**'
       - 'internal/migrate/nginx/**'
       - 'docs/**'
       - 'README.md'
       - 'CHANGELOG.md'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/issue407-quality.yml'
 
 permissions:
@@ -59,16 +67,25 @@ jobs:
         run: |
           changed="$(git diff --name-only "$BASE_SHA"...HEAD -- '*.go')"
           if [ -n "$changed" ]; then test -z "$(gofmt -d $changed)"; fi
+      - name: Dependency graph consistency
+        shell: bash
+        run: |
+          go mod verify
+          cp go.mod /tmp/go.mod.before
+          cp go.sum /tmp/go.sum.before
+          go mod tidy
+          cmp -s go.mod /tmp/go.mod.before
+          cmp -s go.sum /tmp/go.sum.before
       - name: Targeted lean and real Unix E2E
         run: |
-          go test -count=1 ./internal/handler ./internal/upstream ./internal/config
+          go test -count=1 ./internal/handler ./internal/upstream ./internal/config ./internal/app ./internal/admin
           go test -count=1 ./internal/handler -run 'TestProxyUnixHTTP|TestUnixHTTPPoolKeyIsolation'
       - name: Importer Unix contract
         run: go test -count=1 -tags importer ./internal/migrate/nginx/... -run 'TestTranslate.*Unix|TestTranslateNamedUnixHTTPUpstream|TestTranslateDirectUnixProxyPassIsActionableFinding'
       - name: Full configured-neighbor matrix
-        run: go test -count=1 -tags "${FULL_TAGS}" ./internal/handler ./internal/upstream ./internal/config ./internal/migrate/nginx/...
+        run: go test -count=1 -tags "${FULL_TAGS}" ./internal/handler ./internal/upstream ./internal/config ./internal/app ./internal/admin ./internal/migrate/nginx/...
       - name: Race
-        run: go test -race -count=1 -p 2 -tags "${FULL_TAGS}" ./internal/handler ./internal/upstream ./internal/config ./internal/migrate/nginx/...
+        run: go test -race -count=1 -p 2 -tags "${FULL_TAGS}" ./internal/handler ./internal/upstream ./internal/config ./internal/app ./internal/admin ./internal/migrate/nginx/...
       - name: Added Go production statements >= 90%
         shell: bash
         run: |
@@ -113,4 +130,62 @@ jobs:
               for (path, coords, stmts), n in sorted(executions.items()):
                   if n == 0: print(f'UNCOVERED {path}:{coords} ({stmts})')
               raise SystemExit(f'#407 added Go production coverage {pct:.2f}% < 90.0%')
+          PY
+
+  unix-http-platforms:
+    name: Unix HTTP E2E (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Real AF_UNIX HTTP contract
+        shell: bash
+        run: go test -count=1 ./internal/handler -run 'TestProxyUnixHTTP(PreservesHostAndForwardsBody|MultipleSocketsAreIsolated|MaxConnectionsAreIsolatedPerBackend|KeepAliveAndGenerationRetirement|ServerSentEventsStreaming|WebSocketPassthrough)$'
+
+  tcp-hot-path-benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Compare current TCP proxy benchmark with base
+        shell: bash
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            base="${{ github.event.before }}"
+            if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then base="$(git rev-parse HEAD^)"; fi
+          else
+            base="origin/main"
+          fi
+          git worktree add --detach /tmp/jul407-base "$base"
+          (cd /tmp/jul407-base && go test ./internal/handler -run '^$' -bench '^BenchmarkProxyRoundTrip$' -benchmem -count=7 -benchtime=500ms) | tee /tmp/base.bench
+          go test ./internal/handler -run '^$' -bench '^BenchmarkProxyRoundTrip$' -benchmem -count=7 -benchtime=500ms | tee /tmp/head.bench
+          python3 - <<'PY'
+          import re, statistics
+          def samples(path):
+              out=[]
+              for line in open(path):
+                  m=re.match(r'^BenchmarkProxyRoundTrip-\d+\s+\d+\s+([0-9.]+) ns/op', line)
+                  if m: out.append(float(m.group(1)))
+              if not out: raise SystemExit(f'no BenchmarkProxyRoundTrip samples in {path}')
+              return out
+          base=samples('/tmp/base.bench'); head=samples('/tmp/head.bench')
+          b=statistics.median(base); h=statistics.median(head); delta=(h/b-1)*100
+          print(f'BASE median ns/op: {b:.2f}')
+          print(f'HEAD median ns/op: {h:.2f}')
+          print(f'TCP hot-path delta: {delta:+.2f}% (target <= +2%; investigate materially larger regressions)')
+          if delta > 5.0:
+              raise SystemExit(f'material TCP hot-path regression: {delta:.2f}% > 5% noise guard')
           PY
