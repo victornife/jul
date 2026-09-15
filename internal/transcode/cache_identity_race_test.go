@@ -355,3 +355,168 @@ func TestConnCacheChurnHasHardRetiredBound(t *testing.T) {
 		}
 	}
 }
+
+// TestConnForSameIdentityRetirementRaceDoesNotCloseEarly reproduces the
+// A1/A2/B interleaving: two concurrent speculative dials for the same
+// logical identity race a third identity's dial at the same address.
+//
+//	A1, A2 := connFor(X, A) (both racing, speculative dial in flight)
+//	A1 finishes first -> active(A) = A1
+//	B := connFor(X, B) -> retires A1 -> retired(A) = A1, active(B) = B
+//	A2 finishes -> post-dial revalidation must see retired(A1) (not just
+//	active), promote/reuse it, and retire B in turn.
+//
+// A post-dial check that only inspects the active map instead publishes A2 as
+// a second, redundant connection for identity A and retires B, leaving
+// active(A2) + retired(A1) + retired(B): a stale-eviction sweep can then close
+// the still in-flight A1 connection before its retirement grace expires.
+func TestConnForSameIdentityRetirementRaceDoesNotCloseEarly(t *testing.T) {
+	key := upstream.BackendIdentity{Scheme: "http", Network: "tcp", Address: "127.0.0.1:1"}
+	connA1, connA2, connB := newCacheTestConn(t), newCacheTestConn(t), newCacheTestConn(t)
+
+	// releases[0] gates whichever of the two concurrent identity-A dials
+	// reaches dialConn first; releases[1] gates the other. Which physical
+	// goroutine gets which slot does not matter: the test only cares about
+	// release ORDER (first released becomes the initial active winner).
+	releases := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
+	dialConns := [2]*grpc.ClientConn{connA1, connA2}
+	var calls atomic.Int64
+	arrived := make(chan struct{}, 2)
+
+	var clockMu sync.Mutex
+	now := time.Unix(9_000, 0)
+	closed := make(map[*grpc.ClientConn]int)
+	var closeMu sync.Mutex
+
+	pool, err := upstream.NewPool(config.UpstreamConfig{
+		Name:     "cache-retirement-race",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: key.Address, Weight: 1}},
+	}, "http")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	tr := &Transcoder{
+		pool: pool,
+		now:  func() time.Time { clockMu.Lock(); defer clockMu.Unlock(); return now },
+		closeConn: func(conn *grpc.ClientConn) error {
+			closeMu.Lock()
+			closed[conn]++
+			closeMu.Unlock()
+			return conn.Close()
+		},
+	}
+	tr.dialConn = func(string, bool, *backendtls.Policy) (*grpc.ClientConn, error) {
+		i := calls.Add(1) - 1
+		if i < int64(len(releases)) {
+			arrived <- struct{}{}
+			<-releases[i]
+			return dialConns[i], nil
+		}
+		return connB, nil // identity B's dial: uncontested, returns immediately.
+	}
+
+	resultA := make(chan *grpc.ClientConn, 2)
+	for range 2 {
+		go func() {
+			conn, err := tr.connFor(key, "A")
+			if err != nil {
+				t.Error(err)
+				resultA <- nil
+				return
+			}
+			resultA <- conn
+		}()
+	}
+	<-arrived
+	<-arrived
+
+	// 1. Release the first identity-A dial; it must become active.
+	close(releases[0])
+	firstActive := <-resultA
+	if got, ok := tr.conns.Load(connectionIdentity{dial: key, logicalID: "A"}); !ok || got.(*cachedConn).conn != firstActive {
+		t.Fatal("first identity-A dial did not become active")
+	}
+
+	// 2. Request B and let it replace/retire A while the second A dial is
+	// still blocked.
+	bConn, err := tr.connFor(key, "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bConn != connB {
+		t.Fatal("unexpected connection returned for identity B")
+	}
+	if _, ok := tr.retired.Load(connectionIdentity{dial: key, logicalID: "A"}); !ok {
+		t.Fatal("identity A was not retired when B became active")
+	}
+
+	// 3. Release the second (now stale) identity-A speculative dial.
+	close(releases[1])
+	secondActive := <-resultA
+	if secondActive != firstActive {
+		t.Fatal("the second A dial did not converge on the still-unexpired retired A connection")
+	}
+	closeMu.Lock()
+	loserCloses := closed[dialConns[1]]
+	closeMu.Unlock()
+	if loserCloses != 1 {
+		t.Fatalf("losing speculative A dial close calls = %d, want exactly 1", loserCloses)
+	}
+
+	// Cache must now read: active(A) = the promoted connection, retired(B).
+	if active, ok := tr.conns.Load(connectionIdentity{dial: key, logicalID: "A"}); !ok || active.(*cachedConn).conn != firstActive {
+		t.Fatal("identity A is not the sole active entry after the race")
+	}
+	if _, ok := tr.conns.Load(connectionIdentity{dial: key, logicalID: "B"}); ok {
+		t.Fatal("identity B is still active after A was promoted back")
+	}
+	if _, ok := tr.retired.Load(connectionIdentity{dial: key, logicalID: "B"}); !ok {
+		t.Fatal("identity B was not retired when A was promoted back to active")
+	}
+	if _, ok := tr.retired.Load(connectionIdentity{dial: key, logicalID: "A"}); ok {
+		t.Fatal("identity A is still retired after being promoted back to active")
+	}
+
+	// 4. Run eviction before B's retirement grace expires. The connection
+	// held by the first A caller must remain open: this is the exact
+	// defect, an eviction sweep must never close a same-identity connection
+	// just because it was briefly retired and then promoted back.
+	pool.UpdateTargets([]upstream.Target{{Address: key.Address, ID: "A"}})
+	tr.evictStaleConns()
+	closeMu.Lock()
+	earlyCloses := closed[firstActive]
+	closeMu.Unlock()
+	if earlyCloses != 0 {
+		t.Fatalf("in-flight A connection closed %d time(s) before retirement grace expired", earlyCloses)
+	}
+	if firstActive.GetState() == connectivity.Shutdown {
+		t.Fatal("in-flight A connection was shut down before retirement grace expired")
+	}
+	if active, retired := cacheEntryCounts(tr); active != 1 || retired != 1 {
+		t.Fatalf("pre-expiry cache counts = active %d, retired %d; want 1/1", active, retired)
+	}
+
+	// 5. Advance the clock through B's retirement grace and evict again:
+	// retired connections must close exactly once, and cardinality returns
+	// to the live baseline.
+	clockMu.Lock()
+	now = now.Add(retiredConnGrace)
+	clockMu.Unlock()
+	tr.evictStaleConns()
+	closeMu.Lock()
+	bCloses := closed[connB]
+	aCloses := closed[firstActive]
+	closeMu.Unlock()
+	if bCloses != 1 {
+		t.Fatalf("retired B connection close calls = %d, want exactly 1 after grace expiry", bCloses)
+	}
+	if aCloses != 0 {
+		t.Fatalf("active A connection was closed by eviction: %d calls, want 0", aCloses)
+	}
+	if active, retired := cacheEntryCounts(tr); active != 1 || retired != 0 {
+		t.Fatalf("post-expiry cache counts = active %d, retired %d; want baseline 1/0", active, retired)
+	}
+}

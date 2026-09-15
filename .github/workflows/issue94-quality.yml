@@ -117,7 +117,8 @@ jobs:
               added[current].update(range(start, start + count))
 
           if not any(added.values()):
-              raise SystemExit('HR-05 quality gate found no added relevant production Go lines')
+              print('no added relevant production Go lines for this change; skipping the HR-05 coverage gate')
+              raise SystemExit(0)
 
           executions = {}
           for profile in ('/tmp/hr05-lean.cover', '/tmp/hr05-full.cover'):

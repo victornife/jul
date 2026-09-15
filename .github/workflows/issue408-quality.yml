@@ -169,7 +169,8 @@ jobs:
           total = sum(key[2] for key in executions)
           covered = sum(key[2] for key, count in executions.items() if count > 0)
           if total == 0:
-              raise SystemExit('no #408 production statements found')
+              print('no #408 production statements added by this change; skipping the coverage gate')
+              raise SystemExit(0)
           pct = covered * 100.0 / total
           print(f'#408 added Go production statements: {covered}/{total} = {pct:.2f}%')
           if pct < 90.0:

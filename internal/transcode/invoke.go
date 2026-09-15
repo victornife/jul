@@ -308,16 +308,21 @@ func (t *Transcoder) evictStaleConns() {
 		}
 		expired := now.Sub(rc.retiredAt) >= retiredConnGrace
 		if liveID, live := valid[id.dial]; live && liveID == id.logicalID && rc.id == id.logicalID && !expired {
-			// The same workload reappeared. The lock makes removal and promotion
-			// one transition, so stale retirement cannot delete the replacement.
-			t.retired.Delete(key)
-			if actual, loaded := t.conns.Load(id); loaded {
-				if actual.(*cachedConn).conn != rc.conn {
-					closeAfter = append(closeAfter, rc.conn)
-				}
-			} else {
-				t.conns.Store(id, &cachedConn{conn: rc.conn, id: rc.id})
+			if _, loaded := t.conns.Load(id); loaded {
+				// The exact same identity is already active under a
+				// different connection. This should not occur once dial
+				// revalidation enforces one connection per identity, but
+				// defensively: the retired twin may still have in-flight
+				// streams, so it is left to expire through the normal grace
+				// path rather than closed early just because an active twin
+				// exists (R13-01 defensive eviction).
+				return true
 			}
+			// The same workload reappeared with no active twin. The lock
+			// makes removal and promotion one transition, so stale
+			// retirement cannot delete a genuine replacement.
+			t.retired.Delete(key)
+			t.conns.Store(id, &cachedConn{conn: rc.conn, id: rc.id})
 			return true
 		}
 		if expired {
@@ -499,7 +504,13 @@ func (t *Transcoder) connFor(key upstream.BackendIdentity, id string) (*grpc.Cli
 	}
 
 	// Revalidate after the speculative dial. A same-identity winner is reused;
-	// other identities remain isolated under their own keys.
+	// other identities remain isolated under their own keys. Both the active
+	// AND retired maps must be checked: another goroutine racing the same
+	// identity may have published its own dial as active and then, before
+	// this goroutine reacquires the lock, had that active entry retired by an
+	// unrelated identity change at the same dial address (R13-01). Checking
+	// only the active map would miss that still-unexpired winner and publish
+	// a redundant second connection for the same identity.
 	t.connMu.Lock()
 	if t.closed {
 		t.connMu.Unlock()
@@ -511,10 +522,29 @@ func (t *Transcoder) connFor(key upstream.BackendIdentity, id string) (*grpc.Cli
 		_ = t.closeBackendConn(conn)
 		return actual.(*cachedConn).conn, nil
 	}
+	now = t.cacheNow()
+	if v, ok := t.retired.Load(identity); ok {
+		rc := v.(retiredConn)
+		if now.Sub(rc.retiredAt) < retiredConnGrace {
+			// An unexpired same-identity connection already exists (a raced
+			// speculative dial that lost the active slot to a retirement in
+			// flight). Promote and reuse it instead of publishing a second,
+			// redundant connection for the same identity; the losing
+			// speculative dial is closed below like any other loser.
+			t.retired.Delete(identity)
+			t.conns.Store(identity, &cachedConn{conn: rc.conn, id: id})
+			closeAfter = t.retireOtherActiveLocked(identity, now)
+			t.connMu.Unlock()
+			t.closeConnections(closeAfter)
+			_ = t.closeBackendConn(conn)
+			return rc.conn, nil
+		}
+		t.retired.Delete(identity)
+		closeAfter = append(closeAfter, rc.conn)
+	}
 	// A request for a replacement identity retires active predecessors at the
 	// same dial destination, but never deletes their composite cache entries by
 	// address alone. Their in-flight streams retain the grace contract.
-	now = t.cacheNow()
 	closeAfter = append(closeAfter, t.retireOtherActiveLocked(identity, now)...)
 	t.conns.Store(identity, &cachedConn{conn: conn, id: id})
 	t.connMu.Unlock()

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"jul/internal/upstream"
 
@@ -114,38 +115,109 @@ func (t *Transcoder) serveServerStream(w http.ResponseWriter, r *http.Request, r
 }
 
 // serveClientStream reads a sequence of JSON request frames (a JSON array or
-// newline/whitespace-delimited objects), forwards each as a gRPC message, then
+// newline/whitespace-delimited objects), forwards each as a gRPC message, and
 // returns the single reply as one JSON object.
+//
+// Sending and receiving run concurrently: grpc-go permits one goroutine
+// calling SendMsg while another calls RecvMsg on the same stream. This lets a
+// backend that answers (or fails) before the upload finishes be observed
+// immediately, instead of only after a downstream body read that may never
+// unblock on its own. Once RecvMsg returns for any reason, the request body
+// is aborted so a blocked sender goroutine always exits before the handler
+// returns; the gRPC attempt itself is left to the sender's own classified
+// cancellation (or the caller's deferred cancel) so a coordinating cancel
+// here never races the classification of an independently failing sender.
 func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, attempt context.Context, cancel context.CancelFunc, method string, backend upstream.Attempt) streamHealth {
-	if err := t.sendRequestFrames(r, rt, vars, cs); err != nil {
-		var de *decodeError
-		if errors.As(err, &de) {
-			cancel()
-			t.writeError(w, http.StatusBadRequest, de.Error())
+	body := newAbortableBody(r.Body)
+	defer body.closeIfNeeded()
+
+	var (
+		mu           sync.Mutex
+		sendErr      error
+		sendSet      bool
+		sendIsDecode bool
+		sendClass    upstream.AttemptClassification
+	)
+	// setSendErr classifies its error using r.Context()/attempt BEFORE calling
+	// cancel(): cancel() makes attempt.Err() non-nil, and classification must
+	// see the state that produced the error, not the coordination cancel that
+	// follows it (which would otherwise be misread as Jul's own deadline).
+	setSendErr := func(err error) {
+		mu.Lock()
+		if !sendSet {
+			sendSet = true
+			sendErr = err
+			switch {
+			case isUploadAborted(err):
+				// Jul's own abort produced this; the real cause is owned by
+				// whichever path called abort, not by this send.
+			case isDecodeError(err):
+				sendIsDecode = true
+			default:
+				sendClass = classifyGRPCAttempt(err, r.Context(), attempt)
+			}
+		}
+		mu.Unlock()
+		cancel()
+		body.abort()
+	}
+
+	sendDone := make(chan struct{})
+	go func() {
+		defer close(sendDone)
+		if err := t.sendRequestFrames(body, rt, vars, cs); err != nil {
+			setSendErr(err)
+			return
+		}
+		if err := cs.CloseSend(); err != nil {
+			setSendErr(err)
+		}
+	}()
+
+	out := dynamicpb.NewMessage(rt.method.Output())
+	recvErr := cs.RecvMsg(out)
+	var recvClassification upstream.AttemptClassification
+	if recvErr != nil {
+		recvClassification = classifyGRPCAttempt(recvErr, r.Context(), attempt)
+	}
+
+	// Whatever just happened, unblock a sender that may still be blocked
+	// reading the downstream body (the reported deadlock is a blocked body
+	// read, not a blocked gRPC call, so this alone guarantees sendDone
+	// closes). The attempt context is left to the sender's own setSendErr,
+	// or the caller's deferred cancel, so this can never race a fresh
+	// classification with a coordinating cancel it didn't ask for.
+	body.abort()
+	<-sendDone
+
+	mu.Lock()
+	se, sSet, seIsDecode, seClass := sendErr, sendSet, sendIsDecode, sendClass
+	mu.Unlock()
+
+	if sSet && !isUploadAborted(se) {
+		// The sender saw its own terminal cause (a decode failure, or a
+		// genuine send/close failure) independent of our own cancellation;
+		// that is the real cause even when RecvMsg also failed as a symptom
+		// of the same cancellation.
+		if seIsDecode {
+			t.writeError(w, http.StatusBadRequest, se.Error())
 			t.report(method, http.StatusBadRequest)
 			t.pool.RecordAttempt(backend, upstream.JulPolicyFailure(""))
 			return healthRecorded
 		}
-		classification := classifyGRPCAttempt(err, r.Context(), attempt)
-		cancel()
-		t.pool.RecordAttempt(backend, classification)
-		t.streamSetupError(w, err, method)
-		return healthRecorded
-	}
-	if err := cs.CloseSend(); err != nil {
-		t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), attempt))
-		t.streamSetupError(w, err, method)
+		t.pool.RecordAttempt(backend, seClass)
+		t.streamSetupError(w, se, method)
 		return healthRecorded
 	}
 
-	out := dynamicpb.NewMessage(rt.method.Output())
-	if err := cs.RecvMsg(out); err != nil {
-		t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), attempt))
-		t.streamSetupError(w, err, method)
+	if recvErr != nil {
+		t.pool.RecordAttempt(backend, recvClassification)
+		t.streamSetupError(w, recvErr, method)
 		return healthRecorded
 	}
+
 	t.streamMsg(method, "recv")
-	body, err := t.marshalReply(out)
+	respBody, err := t.marshalReply(out)
 	if err != nil {
 		t.writeError(w, http.StatusInternalServerError, "encode response: "+err.Error())
 		t.report(method, http.StatusInternalServerError)
@@ -154,7 +226,7 @@ func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, r
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if n, writeErr := w.Write(body); writeErr != nil || n != len(body) {
+	if n, writeErr := w.Write(respBody); writeErr != nil || n != len(respBody) {
 		t.pool.RecordAttempt(backend, upstream.ClientCancellationResult())
 		t.report(method, http.StatusOK)
 		return healthRecorded
@@ -165,7 +237,19 @@ func (t *Transcoder) serveClientStream(w http.ResponseWriter, r *http.Request, r
 
 // serveBidiStream pumps request frames to the backend while concurrently
 // streaming reply frames back to the client over the same HTTP/2 request.
+//
+// Every receive-side terminal path (backend error, clean EOF, marshal
+// failure, downstream write failure) must guarantee the sender can exit
+// before waiting on done: aborting the body unblocks a blocked downstream
+// Read, which is the reported deadlock (a stalled client upload blocks on
+// the request body, not on the gRPC stream). The attempt context itself is
+// cancelled only by the sender's own classified failure or the caller's
+// deferred cancel, never as a bare coordination signal here, so a fresh
+// classification never races a cancel it didn't ask for.
 func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream, attempt context.Context, cancel context.CancelFunc, method string, backend upstream.Attempt) streamHealth {
+	body := newAbortableBody(r.Body)
+	defer body.closeIfNeeded()
+
 	var (
 		mu                 sync.Mutex
 		sendErr            error
@@ -181,12 +265,21 @@ func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt 
 		}
 		mu.Unlock()
 		cancel()
+		body.abort()
+	}
+	// stopSender unblocks a sender that may still be blocked reading the
+	// downstream body before any receive path waits on <-done. It does not
+	// cancel the attempt here: classification of a fresh error (below) must
+	// see attempt.Err() as it was when the error occurred, not as mutated by
+	// a coordinating cancel this function issues for an unrelated reason.
+	stopSender := func() {
+		body.abort()
 	}
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if err := t.sendRequestFrames(r, rt, vars, cs); err != nil {
+		if err := t.sendRequestFrames(body, rt, vars, cs); err != nil {
 			setSendErr(err)
 			return
 		}
@@ -199,17 +292,23 @@ func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt 
 	for {
 		out := dynamicpb.NewMessage(rt.method.Output())
 		if err := cs.RecvMsg(out); err != nil {
+			// Read the sender's own state and classify this error (when it
+			// will actually be used) BEFORE stopSender(): cancel() makes
+			// attempt.Err() non-nil, which would otherwise be misread as a
+			// Jul-owned timeout rather than the real terminal cause.
 			mu.Lock()
 			se := sendErr
 			sc := sendClassification
 			mu.Unlock()
-			if se != nil {
+			if se != nil && !isUploadAborted(se) {
+				stopSender()
 				t.pool.RecordAttempt(backend, sc)
 				t.finishStreamError(w, resp, se, method)
 				<-done
 				return healthRecorded
 			}
 			if errors.Is(err, io.EOF) {
+				stopSender()
 				if err := resp.end(); err != nil {
 					t.pool.RecordAttempt(backend, upstream.ClientCancellationResult())
 					t.report(method, http.StatusOK)
@@ -220,21 +319,23 @@ func (t *Transcoder) serveBidiStream(w http.ResponseWriter, r *http.Request, rt 
 				<-done
 				return healthSuccess
 			}
-			t.pool.RecordAttempt(backend, classifyGRPCAttempt(err, r.Context(), attempt))
+			classification := classifyGRPCAttempt(err, r.Context(), attempt)
+			stopSender()
+			t.pool.RecordAttempt(backend, classification)
 			t.finishStreamError(w, resp, err, method)
 			<-done
 			return healthRecorded
 		}
-		body, mErr := t.marshalReply(out)
+		respBody, mErr := t.marshalReply(out)
 		if mErr != nil {
 			t.finishStreamError(w, resp, mErr, method)
-			cancel()
+			stopSender()
 			<-done
 			t.pool.RecordAttempt(backend, upstream.JulPolicyFailure(""))
 			return healthRecorded
 		}
-		if err := resp.message(body); err != nil {
-			cancel()
+		if err := resp.message(respBody); err != nil {
+			stopSender()
 			<-done
 			t.report(method, http.StatusOK)
 			t.pool.RecordAttempt(backend, upstream.ClientCancellationResult())
@@ -281,9 +382,11 @@ func (t *Transcoder) pumpReplies(resp *streamResponder, cs grpc.ClientStream, rt
 
 // sendRequestFrames decodes the request body as a stream of JSON messages and
 // forwards each to the backend. A malformed frame is returned as a *decodeError
-// so callers can map it to 400.
-func (t *Transcoder) sendRequestFrames(r *http.Request, rt *route, vars map[string]string, cs grpc.ClientStream) error {
-	fd, err := newFrameDecoder(r.Body)
+// so callers can map it to 400. body is the downstream request body (directly,
+// or wrapped so it can be aborted once a terminal event elsewhere makes
+// further upload unnecessary).
+func (t *Transcoder) sendRequestFrames(body io.Reader, rt *route, vars map[string]string, cs grpc.ClientStream) error {
+	fd, err := newFrameDecoder(body)
 	if err != nil {
 		return &decodeError{err}
 	}
@@ -312,8 +415,14 @@ func (t *Transcoder) sendRequestFrames(r *http.Request, rt *route, vars map[stri
 }
 
 // streamSetupError maps a gRPC error that occurs before any response bytes are
-// written to an HTTP error response.
+// written to an HTTP error response. A local frame-decode failure always maps
+// to 400, regardless of what status.Code an incidental wrapping might imply.
 func (t *Transcoder) streamSetupError(w http.ResponseWriter, err error, method string) {
+	if isDecodeError(err) {
+		t.writeError(w, http.StatusBadRequest, err.Error())
+		t.report(method, http.StatusBadRequest)
+		return
+	}
 	code := httpStatusFromCode(status.Code(err))
 	t.writeError(w, code, status.Convert(err).Message())
 	t.report(method, code)
@@ -325,6 +434,11 @@ func (t *Transcoder) streamSetupError(w http.ResponseWriter, err error, method s
 func (t *Transcoder) finishStreamError(w http.ResponseWriter, resp *streamResponder, err error, method string) {
 	if !resp.started {
 		t.streamSetupError(w, err, method)
+		return
+	}
+	if isDecodeError(err) {
+		resp.errorFrame(codes.InvalidArgument, err.Error())
+		t.report(method, http.StatusOK)
 		return
 	}
 	st := status.Convert(err)
@@ -366,6 +480,60 @@ func isDecodeError(err error) bool {
 	var de *decodeError
 	return errors.As(err, &de)
 }
+
+// abortableBody lets Jul stop a blocked downstream request-body read once a
+// terminal event elsewhere in the call makes further upload unnecessary,
+// without turning the resulting read error into backend or client
+// attribution evidence.
+//
+// Cancelling the gRPC attempt context alone does not unblock a body read: the
+// request body is tied to the inbound HTTP connection, not to Jul's outbound
+// attempt context. abort closes the underlying body so a blocked Read
+// actually returns, and marks any resulting error as Jul-induced so callers
+// can ignore it instead of misclassifying it as a backend or client fault.
+type abortableBody struct {
+	rc        io.ReadCloser
+	closeOnce sync.Once
+	aborted   atomic.Bool
+}
+
+func newAbortableBody(rc io.ReadCloser) *abortableBody {
+	return &abortableBody{rc: rc}
+}
+
+// Read satisfies io.Reader. A genuine clean end-of-body (io.EOF) is always
+// reported as-is so a normal upload racing with abort still completes
+// normally. Any other error is reported as errUploadAborted once abort has
+// been called, regardless of what the underlying Close produced.
+func (b *abortableBody) Read(p []byte) (int, error) {
+	n, err := b.rc.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) && b.aborted.Load() {
+		return n, errUploadAborted
+	}
+	return n, err
+}
+
+// abort closes the underlying body at most once so a concurrently blocked
+// Read unblocks, and marks the upload as intentionally, locally terminated.
+func (b *abortableBody) abort() {
+	b.aborted.Store(true)
+	b.closeOnce.Do(func() { _ = b.rc.Close() })
+}
+
+// closeIfNeeded closes the underlying body at most once for the ordinary
+// completion path. net/http may close the request body again itself; that is
+// tolerated (Close is idempotent from this type's perspective).
+func (b *abortableBody) closeIfNeeded() {
+	b.closeOnce.Do(func() { _ = b.rc.Close() })
+}
+
+// errUploadAborted marks a request-body read that failed only because Jul
+// intentionally closed the body after a terminal event elsewhere in the call
+// (backend termination, downstream cancellation, or a local failure). It must
+// never be classified as a backend or client fault.
+var errUploadAborted = errors.New("transcode: downstream upload stopped after terminal result")
+
+func isUploadAborted(err error) bool { return errors.Is(err, errUploadAborted) }
 
 // streamResponder writes framed streaming responses (NDJSON or SSE) and flushes
 // after each frame. Headers are written lazily on the first frame so a failure
