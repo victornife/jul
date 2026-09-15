@@ -23,7 +23,7 @@ jobs:
           go-version-file: go.mod
       - name: Apply implementation
         run: python3 .github/issue407_bootstrap.py
-      - name: Apply bootstrap corrections
+      - name: Apply bootstrap corrections and Host semantics
         run: python3 .github/issue407_postpatch.py
       - name: Format
         run: gofmt -w internal/handler/proxy.go internal/handler/proxy_unix.go internal/handler/proxy_unix_test.go internal/config/validate_backends.go internal/config/validate_unix_http_test.go
