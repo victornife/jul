@@ -51,6 +51,12 @@ replace(
     "internal/admin/projections.go",
     "func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjection {",
     '''func backendProjectionKey(network, address string) string {
+\t// Network was added as a bounded projection field by #407. Tests and any
+\t// in-process callers built against the previous shape may still construct a
+\t// status with an empty network; the historical backend kind was TCP.
+\tif network == "" {
+\t\tnetwork = "tcp"
+\t}
 \treturn network + "\\x00" + address
 }
 
@@ -112,7 +118,11 @@ replace(
 \t\t\tif seen[backendProjectionKey(b.Network, b.Address)] {
 \t\t\t\tcontinue
 \t\t\t}
-\t\t\tbp := BackendProjection{Address: b.Address, Network: b.Network, Weight: b.Weight}
+\t\t\tnetwork := b.Network
+\t\t\tif network == "" {
+\t\t\t\tnetwork = "tcp"
+\t\t\t}
+\t\t\tbp := BackendProjection{Address: b.Address, Network: network, Weight: b.Weight}
 ''',
 )
 
