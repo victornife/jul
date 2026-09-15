@@ -136,6 +136,7 @@ func TestApplyStageAndDegradedExitCodes(t *testing.T) {
 		want          int
 	}{
 		{"live", "applied_live", cmdRemoteApply, 0},
+		{"no change", "no_change", cmdRemoteApply, 0},
 		{"stage", "staged", cmdRemoteStage, 3},
 	}
 	for _, tc := range cases {
@@ -156,6 +157,18 @@ func TestApplyStageAndDegradedExitCodes(t *testing.T) {
 		code := cmdRemoteApply([]string{"--endpoint", ts.URL, "--config", candidate, "--base-version", "base", "--idempotency-key", "stable-key-456", "--json"})
 		if code != 4 {
 			t.Fatalf("degraded exit=%d out=%s err=%s", code, out, errOut)
+		}
+	})
+}
+
+func TestNoChangeTerminalCopy(t *testing.T) {
+	candidate := writeRemoteCandidate(t)
+	ts := mutationServer(t, "no_change", false)
+	defer ts.Close()
+	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+		code := cmdRemoteApply([]string{"--endpoint", ts.URL, "--config", candidate, "--base-version", "base", "--idempotency-key", "stable-key-no-change"})
+		if code != 0 || !strings.Contains(out.String(), "already effective; no runtime generation change") {
+			t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
 		}
 	})
 }

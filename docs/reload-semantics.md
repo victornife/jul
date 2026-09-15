@@ -46,6 +46,13 @@ After the authority-specific gate, every path that actually adopts a candidate
 uses the same `ReloadPlan` transaction and the same lifecycle classifier. There
 is no reduced SIGHUP/file-watch reload and no separate Admin-API runtime model.
 
+After resolution, validation and lifecycle checks, the transaction proves
+whether any input to the serving runtime changed. If it can prove there was no
+serving change, it records the terminal success `no_change` before Prepare: no
+handler factory, listener staging, runtime commit, post-commit hook or
+generation retirement runs. This applies equally to managed apply/adoption and
+to file-owned SIGHUP/file-watch reloads.
+
 The managed admin write/adoption path runs the full preflight (parse, dry-run,
 bind-probe, and all restart-required checks) *before* Jul persists a candidate.
 Nothing is saved unless the configuration is validated to build and bind under
@@ -173,8 +180,8 @@ The admin apply path waits for the live reload outcome up to the **currently
 serving** config's `reload_timeout` plus a small scheduling margin. A candidate
 that changes `reload_timeout` affects the *next* apply, never the one that
 submits it (R15-01). The response includes a `reload` object that carries the
-correlated result: `outcome` (`applied_live`, `applied_degraded`,
-`not_applied`, or `saved_not_live`), `started_at`, `completed_at`,
+  correlated result: `outcome` (`applied_live`, `applied_degraded`,
+`no_change`, `not_applied`, or `saved_not_live`), `started_at`, `completed_at`,
 `duration_ms`, `persisted`, per-subsystem status (`http`, `stream`, and
 `admin`), per-phase timings in `phase_durations_ms` (milliseconds), and the
 `desired_version` / `serving_version` fingerprints. If the reload is still in
@@ -278,8 +285,8 @@ browser retrieving the exact ID observes the record only once its history and
 audit provenance are attached; the `finalizing` state (step 1) is the externally
 observable window during which those steps run.
 
-**History rules.** A committed apply (`applied_live` or `applied_degraded`) and
-a rollback each receive a history snapshot. A restoration failure creates an
+**History rules.** An accepted apply (`applied_live`, `applied_degraded`, or
+`no_change`) and a rollback each receive a history snapshot. A restoration failure creates an
 **emergency recovery snapshot** containing the exact pre-apply configuration
 even though the attempted apply failed.
 
@@ -414,16 +421,20 @@ are:
 2. **Validate** — run structural/runtime validation on `Candidate.Effective`.
 3. **Lifecycle** — compare the candidate fingerprint against the startup
    fingerprint; then check kept listeners for bind-time property changes.
-4. **Prepare** — build the handler tree, stage upstream pools and closers, and
+4. **ChangeAssessment** — compare the effective candidate with the live
+   configuration through the authoritative lifecycle registry, then verify
+   independently mutable resource identities. A proof of equality terminates
+   as `no_change`; uncertainty fails closed into the normal reload path.
+5. **Prepare** — build the handler tree, stage upstream pools and closers, and
    prepare any `PreparedRuntime` components for this transaction (D08, #90):
    #100's candidate certificate providers for retained TLS addresses whose
    certificate identity changed are built and validated here, so a malformed
    candidate aborts the reload before any live mutation.
-5. **StageListeners** — bind every newly added listen address; HTTP/3 QUIC
+6. **StageListeners** — bind every newly added listen address; HTTP/3 QUIC
    resources are created but their accept loops are **not** started. A bind
    failure aborts the reload before Publish, leaving the old generation
    authoritative.
-6. **Publish** — the ordered commit boundary. Commit the `PreparedRuntime`
+7. **Publish** — the ordered commit boundary. Commit the `PreparedRuntime`
    (e.g. #100's certificate provider swaps, applied before the handler
    generation is stored so a new vhost route can never be selected against a
    stale certificate mapping), then commit the handler generation, install the
@@ -432,12 +443,12 @@ are:
    transaction; the swap is race-free because the handler pointer is stored
    with one atomic operation and because downstream readers observe the new
    generation only after it is fully built.
-7. **Activate** — start serving on staged TCP and HTTP/3 listeners.
-8. **Retire** — remove listeners no longer in the config, retire the old
+8. **Activate** — start serving on staged TCP and HTTP/3 listeners.
+9. **Retire** — remove listeners no longer in the config, retire the old
    handler generation after it drains, and retire the `PreparedRuntime`
    asynchronously (bounded by `[global] shutdown_timeout`, like handler
    generation retirement) so Publish never waits on it.
-9. **PostCommit** — apply committed dynamic side effects that do not need a
+10. **PostCommit** — apply committed dynamic side effects that do not need a
    prepared resource: log level/format, metrics host-label mode, cache scalar
    policy/capacity, GOMAXPROCS, and stream-proxy reload.
 
@@ -451,6 +462,42 @@ unsafe rollback would risk mixed state. Every phase records its wall-clock
 duration in milliseconds; the total `duration_ms`, per-phase
 `phase_durations_ms`, and per-subsystem timings are exposed in the
 `ReloadResult`.
+
+### Identity planes and the no-change proof
+
+The proof deliberately separates six identities:
+
+| Identity | Meaning | A proven `no_change` does |
+| --- | --- | --- |
+| Raw source | Exact TOML bytes owned by persistence/history, plus the server's parsed pre-expansion config | Persists and records the bytes normally, and advances the server's parsed raw metadata snapshot |
+| Effective/canonical configuration | Resolved values used for versioning and comparison | Advances the effective metadata snapshot; preserves the handler-generation redaction base and replaces its bounded current-metadata overlay |
+| Lifecycle semantics | Closed-world disposition of every field, resolved against retained/new listeners | Must contain no restart, validation-reserved, new-listener, or hot serving delta; ignored-only changes are eligible |
+| Installed runtime resources | Current content identity of TLS and every reload-sensitive external input | Must be proven equal; an opaque identity forces the normal path |
+| Handler generation | Handler pointer, generation ID, listeners, pools, closers, background leases, and retirement ownership | Preserves it exactly and consumes no generation ID |
+| Transaction/history | Persistence, authority, audit, exact-ID ledger, and history identity of this accepted event | Advances normally and records the distinct terminal outcome |
+
+Consequently, raw-only edits such as comments/formatting, or changes confined
+to lifecycle-`ignored` fields, can be accepted without manufacturing a new
+serving generation. An ignored effective change may advance the canonical
+configuration version while the handler generation stays fixed; after adoption
+`desired_version == serving_version` and `published=false` truthfully states
+that no runtime Publish occurred. Raw-only formatting can advance provenance
+without changing either canonical version.
+
+The proof is conservative. Same-path data-plane and admin certificate/key
+rotations are detected from the installed content fingerprints. Inputs whose
+installed content identity is not yet exposed to the coordinator—plugin and
+static-root paths, gRPC descriptors/reflection, htpasswd and WAF files,
+backend/discovery TLS policy or HTTPS transport identity, and Kubernetes
+in-cluster identity—force the normal reload path. Unknown never means
+unchanged.
+
+For `no_change`, `persisted=true`, `published=false`, HTTP/stream/admin
+subsystems are `skipped`, the handler pointer and generation ID stay stable,
+and no generation-owned resource is allocated, committed, retired or closed.
+Only phases that actually ran appear in `phase_durations_ms`; metrics use the
+bounded outcome `no_change` and phase `change_assessment`. A prior degraded
+subsystem remains degraded because no commit occurred to replace or repair it.
 
 The `admin` subsystem reports RBAC policy update failures independently of the
 `stream` subsystem, so a policy installation problem does not mask the L4
@@ -692,7 +739,7 @@ inherits.
 
 Not every reloaded component owns teardown-sensitive resources. Per-location
 **authenticators** (CIDR / Basic / JWT / forward-auth) are rebuilt fresh on each
-reload and the previous set is dropped for the garbage collector: an
+reload that reaches `Prepare` and the previous set is dropped for the garbage collector: an
 authenticator holds no background worker, timer, or long-lived socket — its
 JWKS cache refreshes lazily on the request path, never from a goroutine — so
 there is nothing to close and no retire callback to schedule. This is validated

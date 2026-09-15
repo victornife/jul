@@ -21,6 +21,7 @@ export const ReloadSubsystemStatusSchema = z.enum([
 export const ReloadOutcomeSchema = z.enum([
   "applied_live",
   "applied_degraded",
+  "no_change",
   "not_applied",
   "saved_not_live",
 ]);

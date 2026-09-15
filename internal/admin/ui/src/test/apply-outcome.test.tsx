@@ -15,6 +15,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { deriveApplyOutcome, streamReloadFailure, type ApplyOutcome } from "@/lib/applyOutcome.ts";
 import { ApplyOutcomeBanner } from "@/features/config/ApplyOutcomeBanner.tsx";
+import { ReloadOutcomeSchema } from "@/api/client.ts";
 
 afterEach(() => {
   cleanup();
@@ -42,6 +43,104 @@ describe("streamReloadFailure", () => {
 });
 
 describe("deriveApplyOutcome", () => {
+  it("no-change: successful without claiming a runtime publication", () => {
+    expect(ReloadOutcomeSchema.parse("no_change")).toBe("no_change");
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: true,
+      reloadOutcome: "no_change",
+      published: false,
+    });
+    expect(o.kind).toBe("no-change");
+    expect(o.severity).toBe("success");
+    expect(o.message).toContain("No runtime generation");
+    expect(o.message).not.toContain("now live");
+  });
+
+  it("not-applied: unconfirmed restoration uses bounded disk-state guidance", () => {
+    const withReason = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: false,
+      reloadOutcome: "not_applied",
+      reloadError: "candidate rejected",
+    });
+    expect(withReason.kind).toBe("restoration-failed");
+    expect(withReason.message).toBe("candidate rejected");
+
+    const withoutReason = deriveApplyOutcome({
+      accepted: false,
+      pendingReload: false,
+      runtimeObserved: false,
+      reloadOutcome: "not_applied",
+    });
+    expect(withoutReason.message).toMatch(/restoration could not be confirmed/i);
+  });
+
+  it("correlated subsystem failures preserve names and optional details", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: true,
+      http: { status: "failed", error: "handler commit" },
+      stream: { status: "timed_out" },
+      admin: { status: "timed_out" },
+    });
+    expect(o.kind).toBe("partial-reload");
+    expect(o.failures).toEqual([
+      { name: "HTTP runtime", detail: "handler commit" },
+      { name: "L4 stream proxy", detail: undefined },
+      { name: "admin subsystem", detail: undefined },
+    ]);
+  });
+
+  it("correlated HTTP timeout and stream failure take their second status arms", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: true,
+      http: { status: "timed_out" },
+      stream: { status: "failed", error: "bind rejected" },
+    });
+    expect(o.failures).toEqual([
+      { name: "HTTP runtime", detail: undefined },
+      { name: "L4 stream proxy", detail: "bind rejected" },
+    ]);
+  });
+
+  it("applied-degraded uses server detail or the safe fallback", () => {
+    const withReason = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: true,
+      reloadOutcome: "applied_degraded",
+      reloadError: "post-commit hook failed",
+    });
+    expect(withReason.kind).toBe("partial-reload");
+    expect(withReason.message).toBe("post-commit hook failed");
+
+    const withoutReason = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: true,
+      reloadOutcome: "applied_degraded",
+    });
+    expect(withoutReason.message).toMatch(/server reported a degraded apply/i);
+  });
+
+  it("reload timeout can be identified by its published timed-out phase", () => {
+    const o = deriveApplyOutcome({
+      accepted: true,
+      pendingReload: false,
+      runtimeObserved: true,
+      timedOutPhase: "activate",
+      published: true,
+    });
+    expect(o.kind).toBe("reload-timed-out");
+    expect(o.message).toContain("phase: activate");
+  });
+
   it("full-live: accepted, runtime observed, stream ok", () => {
     const o = deriveApplyOutcome({
       accepted: true,

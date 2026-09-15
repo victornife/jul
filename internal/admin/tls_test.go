@@ -187,6 +187,49 @@ func TestPrepareTLSSkipsUnchangedCertificate(t *testing.T) {
 	}
 }
 
+func TestTLSInputsUnchangedDetectsSamePathRotation(t *testing.T) {
+	dir := t.TempDir()
+	cert, key := writeAdminTestCert(t, dir, "a")
+	cfg := config.AdminConfig{TLS: &config.AdminTLSConfig{Enabled: true, Cert: cert, Key: key}}
+	s := newTestServer(t, cfg, Deps{})
+	if !s.TLSInputsUnchanged(cfg) {
+		t.Fatal("installed certificate was not recognized as unchanged")
+	}
+
+	newCert, newKey := writeAdminTestCert(t, dir, "b")
+	certBytes, err := os.ReadFile(newCert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyBytes, err := os.ReadFile(newKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cert, certBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(key, keyBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if s.TLSInputsUnchanged(cfg) {
+		t.Fatal("same-path certificate rotation was classified as unchanged")
+	}
+}
+
+func TestTLSInputsUnchangedRequiresMatchingProviderState(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	if !s.TLSInputsUnchanged(config.AdminConfig{}) {
+		t.Fatal("disabled candidate and absent provider should be unchanged")
+	}
+	if s.TLSInputsUnchanged(config.AdminConfig{TLS: &config.AdminTLSConfig{
+		Enabled: true,
+		Cert:    "candidate-cert.pem",
+		Key:     "candidate-key.pem",
+	}}) {
+		t.Fatal("enabled candidate without an installed provider should be changed")
+	}
+}
+
 func TestPrepareTLSRejectsMalformedCandidateBeforeMutation(t *testing.T) {
 	dir := t.TempDir()
 	cert, key := writeAdminTestCert(t, dir, "a")

@@ -464,18 +464,8 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 		result.Degraded = append(result.Degraded, DegradedEntry{Kind: DegradedDriftAfterAdopt, Message: "the file no longer matches the adopted candidate"})
 	}
 
-	liveVersion := ""
 	if c.LiveSnapshot != nil {
-		liveVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
-	}
-	result.ServingVersion = liveVersion
-	if liveVersion == desiredVersion {
-		// ADR 0019 §11.2.2: adoption after a restart is cheap — the bytes are
-		// already live, so no reload is needed or performed.
-		result.FinalServingVersion = liveVersion
-		result.Message = "External configuration adopted; it was already live."
-		result = c.completeManagedApply(reqCtx, result, prevRaw)
-		return result, nil
+		result.ServingVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
 	}
 
 	rawDigest := sha256.Sum256(raw)
@@ -510,7 +500,9 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 	result.Reload = &rr
 	result.ServingVersion = rr.ServingVersion
 	result.FinalServingVersion = rr.ServingVersion
-	if rr.Published {
+	if rr.Outcome == server.ReloadNoChange {
+		result.Message = "External configuration adopted; it is already effective, so no runtime generation change was required."
+	} else if rr.Published {
 		result.Message = "External configuration adopted and applied live."
 	} else {
 		// ADR 0019 §14 step 10: a reload that does not take does not fail the

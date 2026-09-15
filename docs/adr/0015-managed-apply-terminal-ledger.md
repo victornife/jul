@@ -130,8 +130,8 @@ it deadline-aware rather than by a fixed attempt count.
 
 ### 7. Finalization degradation is advisory
 
-Runtime apply success and finalization success are orthogonal. A committed apply
-(`applied_live` or `applied_degraded`) stays a success even if its history
+Runtime apply success and finalization success are orthogonal. An accepted apply
+(`applied_live`, `applied_degraded`, or `no_change`) stays a success even if its history
 snapshot or its ledger/audit finalization degrades; the degradation is surfaced
 as a non-blocking advisory on the terminal record (`history_error`,
 `finalization_error`) and rendered alongside — never replacing — the apply

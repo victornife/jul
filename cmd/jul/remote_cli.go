@@ -206,7 +206,7 @@ func cmdRemoteStatus(args []string) int {
 		if common.json {
 			return renderJSONMap("status", true, r.Body, nil)
 		}
-		fmt.Fprintf(stdout, "apply %s: state=%s terminal=%t outcome=%s\n", v.ApplyID, v.State, v.Terminal, emptyDash(v.Outcome))
+		fmt.Fprintf(stdout, "apply %s: state=%s terminal=%t outcome=%s\n", v.ApplyID, v.State, v.Terminal, emptyDash(string(v.Outcome)))
 		fmt.Fprintf(stdout, "serving=%s persisted=%s boot_id=%s\n", emptyDash(v.ServingVersion), emptyDash(v.PersistedVersion), emptyDash(v.BootID))
 		if len(v.Degraded) != 0 {
 			fmt.Fprintf(stdout, "degraded: %d condition(s)\n", len(v.Degraded))
@@ -225,7 +225,7 @@ func cmdRemoteStatus(args []string) int {
 	fmt.Fprintf(stdout, "serving: %s\npersisted: %s\n", emptyDash(v.ServingVersion), emptyDash(v.PersistedVersion))
 	fmt.Fprintf(stdout, "drift: %t\npending restart: %t\nboot_id: %s\n", v.Drift.Detected, v.PendingRestart.Pending, v.BootID)
 	if v.LastApply != nil {
-		fmt.Fprintf(stdout, "last apply: %s state=%s outcome=%s\n", v.LastApply.ApplyID, v.LastApply.State, emptyDash(v.LastApply.Outcome))
+		fmt.Fprintf(stdout, "last apply: %s state=%s outcome=%s\n", v.LastApply.ApplyID, v.LastApply.State, emptyDash(string(v.LastApply.Outcome)))
 	}
 	return 0
 }
@@ -386,9 +386,9 @@ func executeMutationWithContext(ctx context.Context, client *adminclient.Client,
 			}
 			return renderMutationWaitError(common.json, command, pollErr, v.ApplyID, prepared.IdempotencyKey, pollRaw.RequestID)
 		}
-		return renderTerminal(common, command, terminal.Outcome, terminal.Restored, terminal.RestoreError, terminal.Degraded, terminal.ApplyID, prepared.IdempotencyKey, terminal.BootID, pollRaw.Body)
+		return renderTerminal(common, command, string(terminal.Outcome), terminal.Restored, terminal.RestoreError, terminal.Degraded, terminal.ApplyID, prepared.IdempotencyKey, terminal.BootID, pollRaw.Body)
 	}
-	return renderTerminal(common, command, v.Outcome, v.Restored, v.RestoreError, v.Degraded, v.ApplyID, prepared.IdempotencyKey, v.BootID, r.Body)
+	return renderTerminal(common, command, string(v.Outcome), v.Restored, v.RestoreError, v.Degraded, v.ApplyID, prepared.IdempotencyKey, v.BootID, r.Body)
 }
 
 func cmdRemoteExport(args []string) int {
@@ -465,6 +465,9 @@ func renderTerminal(common remoteCommon, command, outcome string, restored bool,
 		return writeJSON(obj, exit)
 	}
 	fmt.Fprintf(stdout, "%s: outcome=%s apply_id=%s\n", command, outcome, emptyDash(applyID))
+	if outcome == "no_change" {
+		fmt.Fprintln(stdout, "Configuration is already effective; no runtime generation change was required.")
+	}
 	if len(degraded) != 0 {
 		fmt.Fprintf(stdout, "degraded: %d condition(s); inspect JSON/status before continuing\n", len(degraded))
 	}

@@ -131,6 +131,17 @@ func TestStateUnion(t *testing.T) {
 	}
 }
 
+func TestStateRetain(t *testing.T) {
+	original := NewState([]string{"keep-secret", "drop-secret"}, DefaultMinLen)
+	retained := original.Retain(func(value string) bool { return value == "keep-secret" })
+	if got := retained.Apply("keep-secret drop-secret"); got != "*** drop-secret" {
+		t.Fatalf("Retain result = %q, want %q", got, "*** drop-secret")
+	}
+	if original.Apply("drop-secret") != "***" {
+		t.Fatal("Retain mutated the original state")
+	}
+}
+
 func TestDynamicWriterObservesLaterInstalls(t *testing.T) {
 	Install(EmptyState())
 

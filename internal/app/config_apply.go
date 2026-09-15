@@ -1789,7 +1789,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 	// sends that value to both the callback and the synchronous waiter.
 	go func() {
 		rr := <-resultCh
-		restoreNeeded := !rr.Published && rr.Outcome != server.ReloadAppliedLive && rr.Outcome != server.ReloadAppliedDegraded
+		restoreNeeded := !rr.Published && !reloadOutcomeSucceeded(rr.Outcome)
 		c.mu.Lock()
 		if restoreNeeded {
 			if c.Authority == AuthorityManaged && c.ManagedBaseline != nil {
@@ -2252,7 +2252,7 @@ func (c *ConfigApplyCoordinator) decorateResultNoRestore(mode ApplyMode, persist
 		// instead of dropping them as sequence-0. The server echoes the
 		// request ID back into ReloadResult.ID.
 		ApplyID:          rr.ID,
-		OK:               rr.Outcome == server.ReloadAppliedLive || rr.Outcome == server.ReloadAppliedDegraded,
+		OK:               reloadOutcomeSucceeded(rr.Outcome),
 		Mode:             mode,
 		Version:          persistedVersion,
 		PersistedVersion: persistedVersion,
@@ -2265,12 +2265,18 @@ func (c *ConfigApplyCoordinator) decorateResultNoRestore(mode ApplyMode, persist
 		res.Message = "Configuration validated, saved, and applied live."
 	case server.ReloadAppliedDegraded:
 		res.Message = "Configuration applied live with degradation: " + rr.Error
+	case server.ReloadNoChange:
+		res.Message = "Configuration validated and saved; it is already effective, so no runtime generation change was required."
 	case server.ReloadSavedNotLive:
 		res.Message = "Configuration saved; the live reload is still in flight. Check the runtime overview for the final outcome."
 	default:
 		res.Message = "Configuration was saved but the live reload did not apply: " + rr.Error
 	}
 	return res
+}
+
+func reloadOutcomeSucceeded(outcome server.ReloadOutcome) bool {
+	return outcome == server.ReloadAppliedLive || outcome == server.ReloadAppliedDegraded || outcome == server.ReloadNoChange
 }
 
 // restorePrevious is the safe restoration entry point. It verifies the disk

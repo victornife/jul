@@ -113,10 +113,10 @@ func newFastCGIHandler(ctx context.Context, loc config.LocationConfig, upstreams
 // It deliberately does not use gofast.ClientPool. That pool spawns an endless
 // producer goroutine over an unbuffered channel with an eagerly dialled client
 // blocked on the handoff, and offers no Close: every handler generation leaked
-// one goroutine and one open backend connection, on every reload, for the life
-// of the process. Because the pool was created with scale 0 it never actually
-// reused a connection either, so dialling per request costs nothing that was
-// previously being saved.
+// one goroutine and one open backend connection per rebuilt handler generation,
+// for the life of the process. Because the pool was created with scale 0 it
+// never actually reused a connection either, so dialling per request costs
+// nothing that was previously being saved.
 //
 // It also does not use gofast.NewHandler. That handler hardcodes 502 for a dial
 // failure and 500 for a session failure, and reports both with log.Printf to

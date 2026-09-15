@@ -321,7 +321,7 @@
     {
       "name": "jul_reload_phase_duration_seconds",
       "type": "histogram",
-      "help": "Latency of individual reload phases (resolve/validate/lifecycle/prepare/stage_listeners/publish/activate), labeled by phase and outcome.",
+      "help": "Latency of individual reload phases (resolve/validate/lifecycle/change_assessment/prepare/stage_listeners/publish/activate), labeled by phase and outcome.",
       "labels": [
         "outcome",
         "phase"
@@ -340,7 +340,7 @@
     {
       "name": "jul_reload_total",
       "type": "counter",
-      "help": "Configuration reloads, labeled by source (admin/sighup/watch) and outcome (applied_live/applied_degraded/not_applied/saved_not_live).",
+      "help": "Configuration reloads, labeled by source (admin/sighup/watch) and outcome (applied_live/applied_degraded/no_change/not_applied/saved_not_live).",
       "labels": [
         "outcome",
         "source"

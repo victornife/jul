@@ -88,6 +88,12 @@ func addSchemas(doc *Document) error {
 		}
 		doc.Components.Schemas[name] = s
 	}
+	outcomes := adminapi.ReloadOutcomes()
+	outcomeEnum := make([]string, len(outcomes))
+	for i, outcome := range outcomes {
+		outcomeEnum[i] = string(outcome)
+	}
+	doc.Components.Schemas["ReloadOutcome"].Enum = outcomeEnum
 
 	codes := errorCodes()
 	enum := make([]string, 0, len(codes))

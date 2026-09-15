@@ -515,12 +515,14 @@ An apply is never just "success" or "error": the reload model has an
 L4 stream reload is asynchronous, so the console folds the raw apply signals —
 whether the write was accepted, whether a reload is still pending, the polled
 stream-reload status, and any restart-required rejection — into **one explicit,
-severity-tagged outcome banner**. Every apply resolves to exactly one of four
-outcomes so an operator never has to infer what actually happened:
+severity-tagged outcome banner**. The primary operator outcomes are:
 
 - **Applied and live** *(success)* — the write was accepted and the running
   server has been observed serving the new configuration. Nothing further is
   required.
+- **Configuration already effective** *(success)* — the write was validated
+  and accepted, but the server proved that its serving semantics were already
+  current. No runtime generation or subsystem resource was replaced.
 - **Applied — runtime reloading** *(info)* — the write was accepted and saved,
   but the hot reload has not yet been confirmed live. The banner clears itself
   to *Applied and live* once a runtime snapshot confirms the change; this is the

@@ -3939,7 +3939,7 @@
             "type": "string"
           },
           "outcome": {
-            "type": "string"
+            "$ref": "#/components/schemas/ReloadOutcome"
           },
           "persisted_version": {
             "type": "string"
@@ -3997,7 +3997,7 @@
             "type": "string"
           },
           "outcome": {
-            "type": "string"
+            "$ref": "#/components/schemas/ReloadOutcome"
           },
           "started_at": {
             "type": "string"
@@ -4249,7 +4249,7 @@
             "type": "string"
           },
           "outcome": {
-            "type": "string"
+            "$ref": "#/components/schemas/ReloadOutcome"
           },
           "pending_restart": {
             "$ref": "#/components/schemas/PendingRestartState"
@@ -5134,7 +5134,7 @@
             "type": "string"
           },
           "outcome": {
-            "type": "string"
+            "$ref": "#/components/schemas/ReloadOutcome"
           },
           "previous_version": {
             "type": "string"
@@ -6490,6 +6490,18 @@
       "RawTOML": {
         "type": "string",
         "description": "Exact candidate TOML bytes. The server hashes and processes the received bytes; clients retrying under Idempotency-Key must resend byte-identical content."
+      },
+      "ReloadOutcome": {
+        "type": "string",
+        "enum": [
+          "applied_live",
+          "applied_degraded",
+          "no_change",
+          "not_applied",
+          "saved_not_live",
+          "staged",
+          "owned_not_serving"
+        ]
       },
       "Route": {
         "type": "object",

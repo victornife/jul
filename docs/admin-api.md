@@ -233,6 +233,12 @@ reload result is not yet known; a client that stopped polling on it would wait
 forever for a result that had not happened yet. Reaching your poll deadline is
 `operation_timeout`.
 
+`no_change` is a terminal success. It means the accepted configuration and its
+provenance are current, but the server proved before Prepare that no serving
+input changed. It therefore reports `persisted=true`, `published=false`, keeps
+the handler generation stable, and does not run any runtime subsystem hook.
+Clients must not reinterpret it as `saved_not_live` or continue polling.
+
 The response carries `boot_id`, so a client that reconnects can tell an evicted
 record from a discarded ledger.
 

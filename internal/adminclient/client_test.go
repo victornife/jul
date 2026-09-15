@@ -112,6 +112,7 @@ func TestOutcomeExitMatrix(t *testing.T) {
 		terminal   bool
 	}{
 		{"applied_live", false, "", nil, 0, true}, {"applied_live", false, "", degraded, 4, true},
+		{"no_change", false, "", nil, 0, true}, {"no_change", false, "", degraded, 4, true},
 		{"applied_degraded", false, "", nil, 4, true}, {"staged", false, "", nil, 3, true}, {"staged", false, "", degraded, 4, true},
 		{"owned_not_serving", false, "", nil, 3, true}, {"owned_not_serving", false, "", degraded, 4, true},
 		{"not_applied", true, "", nil, 1, true}, {"not_applied", false, "disk", nil, 5, true},

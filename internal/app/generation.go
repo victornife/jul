@@ -21,7 +21,8 @@ type PoolStager interface {
 }
 
 // GenerationResources owns the generational teardown lifecycle of the handler
-// tree that the composition root rebuilds on every reload. Two kinds of resource
+// tree that the composition root rebuilds on every reload that reaches Prepare.
+// A proven semantic no-op retains this generation intact. Two kinds of resource
 // have a generational lifetime:
 //
 //   - the upstream pool registry's staging span (Begin -> Commit|Abort), and

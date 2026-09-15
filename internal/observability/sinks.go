@@ -26,7 +26,8 @@ import (
 // The returned closers (the rotating file and the syslog connection) must be
 // closed once the caller no longer needs this sink generation; the base logger
 // is never closed here. Called once per handler generation — at startup and on
-// every reload — so config changes hot-apply (#98): the caller stages the
+// every handler generation — so real config changes hot-apply (#98), while a
+// proven semantic no-op retains the existing sinks. The caller stages the
 // returned closers for generational teardown rather than closing them on
 // shutdown directly. On any error every resource opened so far is closed
 // before returning, and the real file/syslog target is never touched destructively:

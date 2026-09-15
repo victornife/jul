@@ -59,7 +59,7 @@ to run it. The check is performed once at startup by `waf.Check`.
 
 ## How it works
 
-1. At startup (and on each reload) Jul.IA assembles a SecLang directive program
+1. At startup (and on each reload that reaches `Prepare`) Jul.IA assembles a SecLang directive program
    from your policy — the embedded CRS, your directive files, your inline rules,
    and finally the enforcement-mode line — and compiles it into a Coraza engine.
    A rule that fails to compile fails the reload, so a typo never leaves a
@@ -309,10 +309,11 @@ the original, uncompressed request and response bodies.
 
 ## Operational notes
 
-- **Reload-safe.** The WAF policy is compiled on startup and on every reload. A
+- **Reload-safe.** The WAF policy is compiled on startup and on every reload
+  that reaches `Prepare`; a proven semantic no-op retains the current engine. A
   rule that fails to compile fails the reload with an error, so a bad rule never
   silently disables protection — the previous good configuration keeps serving.
-  Each reload compiles a fresh Coraza engine and drops the previous one; that
+  Each prepared reload compiles a fresh Coraza engine and drops the previous one; that
   build-drop cycle is proven **leak-free** (flat goroutines, bounded heap) under
   sustained reconfiguration churn by the `TestWAFReloadChurnNoLeak` lane — see the
   [reload-churn evidence](soak-evidence.md#2026-07-09--waf-reload-churn-leakstability-validation-local-windows-aux-06-50)

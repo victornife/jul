@@ -40,6 +40,7 @@ var schemaTypes = map[string]reflect.Type{
 	"ErrorBody":         reflect.TypeFor[Body](),
 	"ErrorDetails":      reflect.TypeFor[Details](),
 	"ValidationFinding": reflect.TypeFor[Finding](),
+	"ReloadOutcome":     reflect.TypeFor[ReloadOutcome](),
 
 	// The /api/v1 read surface and bounded mutation result.
 	"StatusResponse":       reflect.TypeFor[StatusResponse](),

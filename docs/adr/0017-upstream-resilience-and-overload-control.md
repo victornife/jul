@@ -97,7 +97,8 @@ upstream or a literal target. A literal target normalizes to a **pool-of-one tha
 generation-local and unregistered**, as it does today. Registering it would invent a public identity
 for something that has never had one and would attach health checkers and discovery refreshers it does
 not need. The consequence is stated rather than hidden: **a literal target's counters and breaker
-reset on every reload.** Operators who need continuity across reload name an upstream — that is now a
+reset on every published handler generation, but not on a proven semantic no-op.** Operators who need
+continuity across real reloads name an upstream — that is now a
 documented reason to promote a target.
 
 Public configuration is resolved once, at load time, into an immutable `resilience.Policy`, exactly as

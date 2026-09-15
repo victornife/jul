@@ -76,7 +76,7 @@ type ApplySummary struct {
 	ApplyID     string        `json:"apply_id"`
 	State       string        `json:"state"`
 	Operation   string        `json:"operation,omitempty"`
-	Outcome     string        `json:"outcome,omitempty"`
+	Outcome     ReloadOutcome `json:"outcome,omitempty"`
 	Mode        string        `json:"mode,omitempty"`
 	StartedAt   string        `json:"started_at,omitempty"`
 	CompletedAt string        `json:"completed_at,omitempty"`

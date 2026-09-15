@@ -7,10 +7,10 @@
 // internal/config) register their plaintext here; a redacting io.Writer wrapped
 // around the log sink then replaces any occurrence with a fixed mask.
 //
-// The registry is replaced wholesale on every config reload (via Replace or,
-// preferentially, Install) so deleted secrets stop being masked and new ones
-// are added. It is safe for concurrent use and deliberately ignores very short
-// values to avoid masking incidental substrings.
+// A published config generation installs the union of active generation states;
+// a semantic no-op updates the current generation's bounded metadata overlay
+// without retiring it. It is safe for concurrent use and deliberately ignores
+// very short values to avoid masking incidental substrings.
 //
 // New code should construct a redact.State during secret resolution and call
 // Install only at the reload commit boundary. The legacy Add/Replace/Snapshot
@@ -54,10 +54,10 @@ func Install(s State) {
 }
 
 // SetMinLen sets the shortest value Add will mask. It is applied from the
-// configuration during secret resolution (and on every reload), so an operator
-// whose secrets are shorter than the default can opt into masking them at the
-// cost of possibly masking incidental short substrings of log text. A value
-// below 1 restores DefaultMinLen.
+// configuration during secret resolution, so an operator whose secrets are
+// shorter than the default can opt into masking them at the cost of possibly
+// masking incidental short substrings of log text. A value below 1 restores
+// DefaultMinLen.
 //
 // Deprecated: build a redact.State and call Install at reload commit time.
 func SetMinLen(n int) {

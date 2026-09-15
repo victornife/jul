@@ -111,10 +111,11 @@ func ResolveContext(ctx context.Context, c *Config) (*Config, redact.State, map[
 // redaction State as the live global state. Resolved values are masked from
 // logs. It returns an error that joins every reference it could not resolve.
 //
-// It is invoked on the serving configuration just before the runtime is built
-// (and on every reload). The on-disk and admin-facing representations keep the
-// unresolved references, so secrets are never written back to disk or surfaced
-// through the console.
+// This compatibility helper resolves and installs in one step. Production
+// startup and reload paths use Resolve to keep resolution separate from the
+// publish or no-change metadata-adoption boundary. The on-disk and admin-facing
+// representations keep unresolved references, so secrets are never written
+// back to disk or surfaced through the console.
 //
 // Deprecated: prefer Resolve for new code and call redact.Install only at the
 // reload commit boundary.
@@ -152,6 +153,24 @@ func IsResolved(c *Config) bool {
 		return s
 	})
 	return resolved
+}
+
+// ContainsStringValue reports whether needle occurs in any string field of c.
+// It shares the secret walker's reflection traversal so newly added config
+// fields cannot be omitted accidentally. Callers use it only with an already
+// resolved candidate; it never resolves or exposes secret references itself.
+func ContainsStringValue(c *Config, needle string) bool {
+	if c == nil || needle == "" {
+		return false
+	}
+	found := false
+	walkConfigStrings(c, func(value string) string {
+		if strings.Contains(value, needle) {
+			found = true
+		}
+		return value
+	})
+	return found
 }
 
 // containsSecretRef reports whether s carries at least one supported secret
