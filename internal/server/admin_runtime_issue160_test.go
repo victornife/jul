@@ -26,6 +26,33 @@ func issue160Factory(addr string) HandlerFactory {
 	}
 }
 
+// TestAdminRuntimeNeedsHealthProof covers every branch of the admin-config
+// predicate that decides whether a no-op reload must consult
+// AdminRuntimeHealthy at all: disabled admin, an audit sink alone, plugin
+// upload alone (with no audit sink configured), and plugin upload disabled or
+// unsized.
+func TestAdminRuntimeNeedsHealthProof(t *testing.T) {
+	enabled, disabled := true, false
+	for _, tc := range []struct {
+		name string
+		cfg  config.AdminConfig
+		want bool
+	}{
+		{"admin disabled", config.AdminConfig{Enabled: false, AuditLogFile: "a.jsonl"}, false},
+		{"audit sink configured", config.AdminConfig{Enabled: true, AuditLogFile: "a.jsonl"}, true},
+		{"plugin upload only", config.AdminConfig{Enabled: true, PluginUploadEnabled: &enabled, PluginUploadMaxSize: 32}, true},
+		{"plugin upload disabled", config.AdminConfig{Enabled: true, PluginUploadEnabled: &disabled, PluginUploadMaxSize: 32}, false},
+		{"plugin upload unsized", config.AdminConfig{Enabled: true, PluginUploadEnabled: &enabled, PluginUploadMaxSize: 0}, false},
+		{"nothing configured", config.AdminConfig{Enabled: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := adminRuntimeNeedsHealthProof(tc.cfg); got != tc.want {
+				t.Fatalf("adminRuntimeNeedsHealthProof(%+v) = %v, want %v", tc.cfg, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestServingChangeForcesReloadWhenAdminRuntimeDegraded reproduces a
 // post-#412 pre-soak review finding: an admin runtime resource (durable
 // audit sink, plugin-upload directory) that is currently degraded must not

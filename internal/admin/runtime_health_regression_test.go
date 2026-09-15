@@ -102,3 +102,44 @@ func TestRuntimeHealthyDetectsDegradedPluginUploadDirectory(t *testing.T) {
 		t.Fatal("RuntimeHealthy = false after plugin_upload_dir was externally repaired")
 	}
 }
+
+// TestRuntimeHealthyNoResourcesConfiguredIsHealthy covers the trivial case: no
+// audit sink and no plugin upload configured, so there is nothing that could
+// have degraded independently of configuration.
+func TestRuntimeHealthyNoResourcesConfiguredIsHealthy(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	if !s.RuntimeHealthy(config.AdminConfig{}) {
+		t.Fatal("RuntimeHealthy = false with no audit sink or plugin upload configured")
+	}
+}
+
+// TestRuntimeHealthyNilServerIsHealthy covers RuntimeHealthy's nil-receiver
+// guard, exercised in production only when the composition root wires the
+// hook without an admin listener.
+func TestRuntimeHealthyNilServerIsHealthy(t *testing.T) {
+	var s *Server
+	if !s.RuntimeHealthy(config.AdminConfig{AuditLogFile: "audit.jsonl"}) {
+		t.Fatal("RuntimeHealthy = false on a nil *Server, want true")
+	}
+}
+
+// TestAuditLogHealthyForDisabledConfig covers healthyFor's disabled-config
+// branch directly: unreachable from RuntimeHealthy (which only calls
+// healthyFor with an enabled config), but healthyFor must still answer
+// correctly on its own for a config with no audit sink at all.
+func TestAuditLogHealthyForDisabledConfig(t *testing.T) {
+	a := newAuditLog(4)
+	if !a.healthyFor(auditSinkConfig{}) {
+		t.Fatal("healthyFor(disabled) = false with no sink ever configured, want true")
+	}
+	cfg := mustAuditCfg(t, filepath.Join(t.TempDir(), "a.jsonl"), 100, 14)
+	prepared, err := a.prepareTransition(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared.commit()
+	t.Cleanup(func() { _ = a.Close() })
+	if a.healthyFor(auditSinkConfig{}) {
+		t.Fatal("healthyFor(disabled) = true while a sink is actually configured, want false")
+	}
+}
