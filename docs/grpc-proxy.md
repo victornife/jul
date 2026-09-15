@@ -161,7 +161,7 @@ What passthrough supports today, enumerated so the boundary is explicit
 | Path routing | mixed gRPC + HTTP on one listener by location prefix | ✅ |
 | Mid-stream retry | a started stream is **not** replayed to another backend | ❌ (by design) |
 | Active health probes | gRPC-level health checks (`grpc.health.v1`) | ❌ (passive only) |
-| mTLS to backend | client-certificate origination on the backend dial | ❌ |
+| mTLS to backend | client-certificate origination on the backend dial | ✅ [`backend_tls`](upstreams.md#backend-tls) |
 
 A gRPC stream is not replayable, so a connection failure after a call has begun
 surfaces to the client as a gateway error (the backend is marked failed for

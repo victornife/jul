@@ -234,6 +234,14 @@ type Server struct {
 	// content matches the provider currently installed by the admin listener.
 	// It is consulted only for an otherwise semantic no-op; nil fails closed.
 	AdminTLSInputsUnchanged func(config.AdminConfig) bool
+	// AdminRuntimeHealthy proves that the admin runtime's own live resources —
+	// the durable audit sink and the plugin-upload directory — are currently
+	// usable for cfg. It is consulted only for an otherwise semantic no-op, and
+	// only when cfg configures one of those resources; nil fails closed. This
+	// keeps a no-op reload from skipping PrepareAdminRuntime's repair attempt
+	// when a resource's live state, not its configuration, has changed (e.g. an
+	// unopenable audit-log path became writable again without any config edit).
+	AdminRuntimeHealthy func(config.AdminConfig) bool
 
 	// OnReloadStart, when set, is invoked at the beginning of every reload
 	// transaction so the composition root can increment an in-progress gauge.

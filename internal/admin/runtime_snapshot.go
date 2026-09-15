@@ -72,6 +72,35 @@ func (s *Server) PrepareAdminRuntime(cfg config.AdminConfig, prepared *PreparedA
 	return result, nil
 }
 
+// RuntimeHealthy reports whether the admin runtime's own live resources —
+// the durable audit sink and the plugin-upload directory — are currently
+// usable for cfg. It performs no mutation of live state, but it does run the
+// same reversible checks PrepareAdminRuntime would (resolving the audit sink
+// identity, probing the upload directory), so a semantic no-op reload can
+// safely skip PrepareAdminRuntime's repair attempt only when this proves
+// there is nothing for it to repair. A resource that is currently degraded —
+// for example an audit sink that failed to open, or an upload directory that
+// lost required permissions — reports unhealthy even when cfg is unchanged,
+// since the underlying failure could have been resolved externally without
+// any config edit, and an ordinary reload is the mechanism that repairs it.
+func (s *Server) RuntimeHealthy(cfg config.AdminConfig) bool {
+	if s == nil {
+		return true
+	}
+	if strings.TrimSpace(cfg.AuditLogFile) != "" {
+		resolved, err := resolveAuditSinkConfig(cfg.AuditLogFile, cfg.AuditLogRotateMaxMB, cfg.AuditLogRotateKeep)
+		if err != nil || s.audit == nil || !s.audit.healthyFor(resolved) {
+			return false
+		}
+	}
+	if pluginUploadEnabled(cfg) && cfg.PluginUploadMaxSize > 0 {
+		if err := preflightPluginUploadDir(cfg.PluginUploadDir); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Server) completeAdminRuntimeSnapshot(in *authSnapshot) *authSnapshot {
 	if in == nil {
 		return nil

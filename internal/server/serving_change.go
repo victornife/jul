@@ -73,6 +73,10 @@ func (p *ReloadPlan) AssessServingChange() error {
 			p.ServingChange = ServingChangeAssessment{Evidence: ServingRuntimeInputChanged}
 			return nil
 		}
+		if !p.s.adminRuntimeHealthy(p.Candidate.Effective.Admin) {
+			p.ServingChange = ServingChangeAssessment{Evidence: ServingRuntimeInputChanged}
+			return nil
+		}
 		if hasOpaqueReloadInputs(p.Candidate.Effective) {
 			p.ServingChange = ServingChangeAssessment{Evidence: ServingUnknownExternalInput}
 			return nil
@@ -117,6 +121,35 @@ func (s *Server) adminTLSInputsUnchanged(cfg config.AdminConfig) bool {
 		return true
 	}
 	return s.AdminTLSInputsUnchanged != nil && s.AdminTLSInputsUnchanged(cfg)
+}
+
+// adminRuntimeHealthy delegates to the admin listener, which owns the live
+// audit-sink and plugin-upload-directory health. It is only consulted when
+// cfg actually configures one of those resources; otherwise there is nothing
+// whose live state could have diverged from configuration, and the normal
+// admin-TLS/opaque-input checks already cover everything else PrepareAdmin
+// would touch.
+func (s *Server) adminRuntimeHealthy(cfg config.AdminConfig) bool {
+	if !adminRuntimeNeedsHealthProof(cfg) {
+		return true
+	}
+	return s.AdminRuntimeHealthy != nil && s.AdminRuntimeHealthy(cfg)
+}
+
+// adminRuntimeNeedsHealthProof reports whether cfg configures an admin
+// runtime resource whose usability can change independently of configuration
+// content: a durable audit sink (its target path can become writable or
+// unwritable without any config edit) or the plugin-upload directory (its
+// permissions can change the same way).
+func adminRuntimeNeedsHealthProof(cfg config.AdminConfig) bool {
+	if !cfg.Enabled {
+		return false
+	}
+	if strings.TrimSpace(cfg.AuditLogFile) != "" {
+		return true
+	}
+	uploadEnabled := cfg.PluginUploadEnabled == nil || *cfg.PluginUploadEnabled
+	return uploadEnabled && cfg.PluginUploadMaxSize > 0
 }
 
 // hasOpaqueReloadInputs identifies resources whose current installed content
