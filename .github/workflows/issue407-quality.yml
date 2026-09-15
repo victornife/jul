@@ -1,0 +1,116 @@
+name: CGC-FOLLOWUP #407 Unix HTTP proxy quality
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'internal/handler/**'
+      - 'internal/upstream/**'
+      - 'internal/config/**'
+      - 'internal/migrate/nginx/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - '.github/workflows/issue407-quality.yml'
+  push:
+    branches: [main, issue-407-unix-http-proxy]
+    paths:
+      - 'internal/handler/**'
+      - 'internal/upstream/**'
+      - 'internal/config/**'
+      - 'internal/migrate/nginx/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - '.github/workflows/issue407-quality.yml'
+
+permissions:
+  contents: read
+
+env:
+  FULL_TAGS: "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+  COVERPKG: "./internal/handler,./internal/upstream,./internal/config,./internal/migrate/nginx"
+
+jobs:
+  unix-http-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Resolve comparison base
+        shell: bash
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            base="${{ github.event.before }}"
+            if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then base="$(git rev-parse HEAD^)"; fi
+          else
+            base="origin/main"
+          fi
+          git cat-file -e "${base}^{commit}"
+          echo "BASE_SHA=$base" >> "$GITHUB_ENV"
+      - name: Formatting
+        shell: bash
+        run: |
+          changed="$(git diff --name-only "$BASE_SHA"...HEAD -- '*.go')"
+          if [ -n "$changed" ]; then test -z "$(gofmt -d $changed)"; fi
+      - name: Targeted lean and real Unix E2E
+        run: |
+          go test -count=1 ./internal/handler ./internal/upstream ./internal/config
+          go test -count=1 ./internal/handler -run 'TestProxyUnixHTTP|TestUnixHTTPPoolKeyIsolation'
+      - name: Importer Unix contract
+        run: go test -count=1 -tags importer ./internal/migrate/nginx/... -run 'TestTranslate.*Unix|TestTranslateNamedUnixHTTPUpstream|TestTranslateDirectUnixProxyPassIsActionableFinding'
+      - name: Full configured-neighbor matrix
+        run: go test -count=1 -tags "${FULL_TAGS}" ./internal/handler ./internal/upstream ./internal/config ./internal/migrate/nginx/...
+      - name: Race
+        run: go test -race -count=1 -p 2 -tags "${FULL_TAGS}" ./internal/handler ./internal/upstream ./internal/config ./internal/migrate/nginx/...
+      - name: Added Go production statements >= 90%
+        shell: bash
+        run: |
+          go test -count=1 -covermode=atomic -coverpkg="${COVERPKG}" -coverprofile=/tmp/issue407-lean.cover ./internal/handler ./internal/upstream ./internal/config
+          go test -count=1 -tags importer -covermode=atomic -coverpkg="${COVERPKG}" -coverprofile=/tmp/issue407-importer.cover ./internal/migrate/nginx/... ./internal/handler ./internal/upstream ./internal/config
+          git diff --unified=0 "$BASE_SHA"...HEAD -- '*.go' > /tmp/issue407.diff
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          roots = ('internal/handler/', 'internal/upstream/', 'internal/config/', 'internal/migrate/nginx/')
+          added = {}; current = None
+          for line in Path('/tmp/issue407.diff').read_text().splitlines():
+              if line.startswith('+++ b/'):
+                  current = line[6:]
+                  if current.endswith('_test.go') or not current.startswith(roots): current = None
+                  else: added.setdefault(current, set())
+                  continue
+              if current is None or not line.startswith('@@'): continue
+              m = re.search(r'\+(\d+)(?:,(\d+))?', line)
+              if not m: continue
+              start = int(m.group(1)); count = int(m.group(2) or '1')
+              added[current].update(range(start, start + count))
+          executions = {}
+          for profile in ('/tmp/issue407-lean.cover', '/tmp/issue407-importer.cover'):
+              for line in Path(profile).read_text().splitlines()[1:]:
+                  span, stmts, count = line.rsplit(' ', 2)
+                  path, coords = span.split(':', 1)
+                  if path.startswith('jul/'): path = path[4:]
+                  if path not in added or not added[path]: continue
+                  m = re.match(r'(\d+)\.\d+,(\d+)\.\d+', coords)
+                  if not m: continue
+                  lo, hi = int(m.group(1)), int(m.group(2))
+                  if not any(lo <= n <= hi for n in added[path]): continue
+                  key = (path, coords, int(stmts))
+                  executions[key] = executions.get(key, 0) + int(count)
+          total = sum(k[2] for k in executions)
+          covered = sum(k[2] for k, n in executions.items() if n > 0)
+          if total == 0: raise SystemExit('no #407 production statements found')
+          pct = covered * 100.0 / total
+          print(f'#407 added Go production statements: {covered}/{total} = {pct:.2f}%')
+          if pct < 90.0:
+              for (path, coords, stmts), n in sorted(executions.items()):
+                  if n == 0: print(f'UNCOVERED {path}:{coords} ({stmts})')
+              raise SystemExit(f'#407 added Go production coverage {pct:.2f}% < 90.0%')
+          PY
