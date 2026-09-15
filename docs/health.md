@@ -206,3 +206,13 @@ Active health checks have reached **GA** against the [ADR 0003](adr/0003-maturit
 | 9. Self-explanatory Console surface | ✅ | Status panel counts + per-backend health |
 
 Soak gate (post-GA, ADR 0005): tracked in [status.md](status.md#soak-tracking-post-ga-gate).
+
+## Unix-domain-socket HTTP backends (#407)
+
+A Unix backend (`unix:/path.sock`) may serve a named plaintext HTTP upstream.
+The active-health contract remains intentionally narrow: `type = "http"` is
+rejected for a pool containing a Unix member, while `type = "tcp"` means a
+connect/liveness probe and therefore performs `DialContext(..., "unix", path)`
+for that member. The word `tcp` is the existing public health-check type name;
+it does not force the wire network to TCP. TLS-over-Unix and `backend_tls` on a
+Unix member are unsupported and rejected during configuration validation.

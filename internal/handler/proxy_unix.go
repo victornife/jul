@@ -45,8 +45,9 @@ func (e unixDialError) Unwrap() error { return e.err }
 // existing URL semantics. Unix uses a stable opaque URL host solely as
 // net/http's connection-pool key, while DialContext receives the real socket
 // path through request context. Request.Host is intentionally untouched, so the
-// current named-upstream Host contract (incoming Host unless explicitly
-// overridden) remains unchanged.
+// Unix HTTP authority contract (incoming Host unless explicitly overridden)
+// is kept separate from the synthetic connection-pool identity. TCP behavior is
+// left unchanged.
 func prepareProxyAttempt(req *http.Request, b upstream.Attempt, tlsBackend bool) (*http.Request, string, error) {
 	if b.Backend == nil {
 		return req, "", fmt.Errorf("selected upstream backend is nil")

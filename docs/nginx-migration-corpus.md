@@ -265,3 +265,9 @@ does not match and resolves to 404. The assessment remains `approximated` under
 `NGX_LOCATION_LIMIT_EXCEPT`, and the real NGINX/Jul scenarios pin the
 selected-dimension difference.
 
+### Unix HTTP upstream scenario (#407)
+
+The migration corpus now treats a named NGINX upstream containing a Unix socket
+and an HTTP location referencing that upstream as a supported #407 scenario.
+Direct NGINX Unix `proxy_pass` remains a blocking/manual mapping because Jul's
+public contract intentionally requires the socket to live in a named upstream.

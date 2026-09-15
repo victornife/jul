@@ -594,3 +594,11 @@ TLS/plaintext+h2c socket interpretation (#105 retained), and history directory
 relocation (#159 retained). `admin.history_keep` is hot; `admin.history_dir` is
 not. See [hot-reload-strategy.md](hot-reload-strategy.md) for objective revisit
 triggers.
+
+## Unix HTTP residual boundaries (#407)
+
+HTTP-over-Unix is supported through named upstreams, but the deliberately small
+first contract has three boundaries: no direct Unix spelling in `proxy_pass`, no
+TLS-over-Unix/`backend_tls`, and no HTTP active-health probe over Unix (use the
+connect/liveness `tcp` health type). HTTP/2-over-Unix/h2c is not advertised.
+These are explicit product boundaries rather than hidden runtime failures.

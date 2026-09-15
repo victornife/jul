@@ -368,3 +368,13 @@ have not completed a separate stable-release and long-running-soak promotion.
 Their machine contract and operating boundary are documented in
 [nginx-assessment.md](nginx-assessment.md) and tracked explicitly in
 [status.md](status.md).
+
+## Unix HTTP upstream migration (#407)
+
+A named NGINX upstream containing `server unix:/path.sock;` is preserved as a
+Jul named upstream and can be referenced by `proxy_pass http://name;`. NGINX's
+separate direct-Unix `proxy_pass` grammar is not copied into Jul: the importer
+emits a source-located manual finding and omits that location rather than
+producing malformed Jul configuration. Map it to a deterministic operator-chosen
+`[[upstreams]]` name with `servers = ["unix:/path.sock"]`, then reference
+`proxy_pass = "http://name"`.

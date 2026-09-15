@@ -4,6 +4,7 @@
 package handler
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"net"
@@ -14,8 +15,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"jul/internal/config"
+	"jul/internal/upstream"
+
+	"golang.org/x/net/websocket"
 )
 
 func startUnixHTTPBackend(t *testing.T, h http.Handler) string {
@@ -179,5 +184,93 @@ func TestProxyUnixHTTPGatewayErrorDoesNotExposePath(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), path) || strings.Contains(rec.Body.String(), "secret-sentinel") {
 		t.Fatalf("client error leaked unix path: %q", rec.Body.String())
+	}
+}
+
+func TestUnixHTTPPoolKeyIsolation(t *testing.T) {
+	a := upstream.BackendIdentity{Scheme: "http", Network: upstream.NetworkUnix, Address: "/tmp/a.sock"}
+	b := upstream.BackendIdentity{Scheme: "http", Network: upstream.NetworkUnix, Address: "/tmp/b.sock"}
+	ka, kb := unixHTTPPoolKey(a), unixHTTPPoolKey(b)
+	if ka == kb {
+		t.Fatalf("distinct sockets share pool key %q", ka)
+	}
+	if ka != unixHTTPPoolKey(a) {
+		t.Fatal("pool key is not stable")
+	}
+	if strings.Contains(ka, a.Address) || strings.Contains(kb, b.Address) {
+		t.Fatalf("pool key leaks filesystem path: %q / %q", ka, kb)
+	}
+}
+
+func TestProxyUnixHTTPRetryUnixToUnix(t *testing.T) {
+	live := startUnixHTTPBackend(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "unix-b")
+	}))
+	missing := filepath.Join(t.TempDir(), "missing.sock")
+	ups := map[string]config.UpstreamConfig{
+		"pool": {Name: "pool", Strategy: "round_robin", MaxFails: 1, Servers: []config.UpstreamServer{{Address: "unix:" + missing, Weight: 1}, {Address: "unix:" + live, Weight: 1}}},
+	}
+	h := newProxy(t, config.LocationConfig{ProxyPass: "http://pool"}, ups)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://edge/", nil))
+	if rec.Code != http.StatusOK || rec.Body.String() != "unix-b" {
+		t.Fatalf("Unix->Unix retry = %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestProxyUnixHTTPServerSentEventsStreaming(t *testing.T) {
+	releaseSecond := make(chan struct{})
+	path := startUnixHTTPBackend(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fl := w.(http.Flusher)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: first\n\n")
+		fl.Flush()
+		<-releaseSecond
+		_, _ = io.WriteString(w, "data: second\n\n")
+		fl.Flush()
+	}))
+	front := httptest.NewServer(unixProxy(t, "events", path, config.LocationConfig{}))
+	defer front.Close()
+	resp, err := http.Get(front.URL + "/events")
+	if err != nil {
+		t.Fatalf("GET SSE through Unix proxy: %v", err)
+	}
+	defer resp.Body.Close()
+	br := bufio.NewReader(resp.Body)
+	if got := readSSEDataWithin(t, br, 5*time.Second); got != "first" {
+		t.Fatalf("first SSE event = %q", got)
+	}
+	close(releaseSecond)
+	if got := readSSEDataWithin(t, br, 5*time.Second); got != "second" {
+		t.Fatalf("second SSE event = %q", got)
+	}
+}
+
+func TestProxyUnixHTTPWebSocketPassthrough(t *testing.T) {
+	path := startUnixHTTPBackend(t, websocket.Handler(func(ws *websocket.Conn) {
+		var msg []byte
+		if err := websocket.Message.Receive(ws, &msg); err != nil {
+			return
+		}
+		_ = websocket.Message.Send(ws, msg)
+	}))
+	front := httptest.NewServer(unixProxy(t, "ws", path, config.LocationConfig{}))
+	defer front.Close()
+	wsURL := "ws" + strings.TrimPrefix(front.URL, "http")
+	ws, err := websocket.Dial(wsURL, "", front.URL)
+	if err != nil {
+		t.Fatalf("WebSocket dial through Unix proxy: %v", err)
+	}
+	defer ws.Close()
+	want := []byte("unix-websocket")
+	if err := websocket.Message.Send(ws, want); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	var got []byte
+	if err := websocket.Message.Receive(ws, &got); err != nil {
+		t.Fatalf("receive: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("echo = %q, want %q", got, want)
 	}
 }
