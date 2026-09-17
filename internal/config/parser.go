@@ -282,6 +282,9 @@ func (c *Config) applyDefaultsWithPresence(tracingSampleRatioPresent bool) {
 		enabled := true
 		c.Admin.Console = &enabled
 	}
+	if c.Admin.Enabled && c.Admin.PprofEnabled == nil {
+		c.Admin.PprofEnabled = boolPtrAdmin(true)
+	}
 	if c.Admin.Enabled {
 		if c.Admin.HistoryDir == "" {
 			c.Admin.HistoryDir = "./jul-data/config-history"

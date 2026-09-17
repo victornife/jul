@@ -1338,6 +1338,14 @@ type AdminConfig struct {
 	// and, optionally, requires or requests a client certificate (#336). Nil
 	// means plaintext, the existing default.
 	TLS *AdminTLSConfig `toml:"tls"`
+
+	// PprofEnabled controls whether the runtime profiler (/debug/pprof/,
+	// already gated behind the admin:manage permission and the secure-transport
+	// gate) is reachable at all. It is a pointer so an omitted value defaults to
+	// enabled, preserving existing behavior; an explicit `pprof = false` removes
+	// the surface entirely for a production deployment that does not want it
+	// present regardless of credential compromise.
+	PprofEnabled *bool `toml:"pprof"`
 }
 
 // AdminTLSConfig configures TLS for the admin listener (#336). It reuses the

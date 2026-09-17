@@ -120,6 +120,13 @@ func pluginUploadEnabled(cfg config.AdminConfig) bool {
 	return cfg.PluginUploadEnabled == nil || *cfg.PluginUploadEnabled
 }
 
+// pprofEnabled reports whether the runtime profiler (/debug/pprof/) should be
+// reachable at all. Nil (an in-memory config predating parser normalization)
+// defaults to enabled, matching the pre-existing behavior.
+func pprofEnabled(cfg config.AdminConfig) bool {
+	return cfg.PprofEnabled == nil || *cfg.PprofEnabled
+}
+
 func normalizePluginUploadDir(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

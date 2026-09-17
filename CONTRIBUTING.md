@@ -35,12 +35,17 @@ technical merit aligned with the project's vision.
    `make ci-pr` also runs this focused security gate.
 
    **What `ci-pr` does not cover** (still requires a CI push):
-   - race detector (needs a CGO C toolchain)
    - repository-wide coverage floor enforcement
    - Windows / macOS platform lanes
    - frontend typecheck/lint/unit tests (run `make console-check` separately)
    - Playwright E2E
    - benchmark / fuzz / soak smoke
+
+   The race detector needs a CGO C toolchain, so it is not part of `ci-pr`, but
+   it is reproducible locally with `make test-race` (mirrors the CI `race` job;
+   ~20–25 min). Run it before touching `internal/app`, `internal/server`,
+   `internal/admin`, or `internal/upstream` — those packages carry the
+   concurrency-sensitive apply/reload and admission paths.
 
 ### Git hooks (optional local gate parity)
 

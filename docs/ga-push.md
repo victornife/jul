@@ -2,6 +2,18 @@
 
 > - Version 1.37 · Updated 2026-07-31
 
+> **Historical execution log — Wave 1 only.** This page records the push that
+> promoted the initial 20-feature set to GA and closed on 2026-07-31. It is
+> preserved as evidence, not re-verified against later work. Capabilities
+> merged after this page's date (trusted client identity, backend TLS trust,
+> RBAC, routing/response policy, generic resilience, configuration authority,
+> admin TLS, the external API/remote CLI, HTTP-over-Unix upstreams, and more)
+> are **not** covered here and are **not** GA — see the current maturity
+> matrix in [docs/status.md](status.md) and
+> [docs/feature-status.yaml](feature-status.yaml), and open soak/promotion
+> items in [docs/known-limitations.md](known-limitations.md). Do not read this
+> page's closing summary as a present-tense claim about `main`.
+
 A focused, tracked effort to move the **existing** feature set from **Beta** to
 **GA** before starting new features. Per [ADR 0005](adr/0005-soak-post-ga-gate.md)
 the long-running **soak test** is a *post-GA* gate, so GA here is declared against
@@ -88,7 +100,10 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 >   WAF + compression + TLS + mTLS + health-checks + OTel + service discovery +
 >   secrets + WASM exercised simultaneously
 >
-> **All shipped features are GA. Soak gate is CLOSED for the entire v1 feature set.**
+> **This Wave-1 push's 20 features are GA with completed soak evidence; the
+> Wave-1 soak gate closed on 2026-07-31.** This is not a claim about `main` as
+> a whole — see the banner at the top of this page and
+> [docs/status.md](status.md) for capabilities merged since.
 ## Soak tracking (post-GA gate per ADR 0005)
 
 A soak failure is a release-blocking regression. Dated soak runs and artifacts are recorded in the [soak evidence log](soak-evidence.md).

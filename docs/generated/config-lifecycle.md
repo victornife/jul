@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 356 |
-| Schema leaves (configurable values) | 302 |
-| Registry entries | 302 |
+| Schema paths (containers included) | 357 |
+| Schema leaves (configurable values) | 303 |
+| Registry entries | 303 |
 | Startup-consumed entries | 32 |
-| Class `hot_reload` | 256 |
+| Class `hot_reload` | 257 |
 | Class `restart_required` | 32 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -130,6 +130,7 @@ value is compared as a digest so no secret material leaves the process.
 | `admin.plugin_upload_dir` | `hot_reload` | `admin` | — | candidate storage is preflighted before Publish and each upload is confined to the directory captured at request start |
 | `admin.plugin_upload_enabled` | `hot_reload` | `admin` | — | new upload requests read admission state from the immutable admin runtime snapshot captured at request start |
 | `admin.plugin_upload_max_size` | `hot_reload` | `admin` | — | each upload captures its size limit from the immutable admin runtime snapshot before body processing |
+| `admin.pprof` | `hot_reload` | `admin` | — | the pprof handler reads its enablement from the same immutable admin authentication snapshot admin.console/admin.token already publish atomically at Publish |
 | `admin.rate_limit_apply_per_min` | `hot_reload` | `admin` | — | new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload |
 | `admin.rate_limit_read_per_min` | `hot_reload` | `admin` | — | new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload |
 | `admin.rate_limit_write_per_min` | `hot_reload` | `admin` | — | new admin requests use the rate policy from the immutable admin runtime generation captured at request start while stable per-client bucket state survives reload |

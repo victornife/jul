@@ -56,6 +56,7 @@ func fullConfig() *config.Config {
 			PluginUploadDir:      "./jul-data/plugins",
 			PluginUploadMaxSize:  32,
 			PluginUploadEnabled:  config.Bool(false),
+			PprofEnabled:         config.Bool(true),
 			TLS: &config.AdminTLSConfig{
 				Enabled:    true,
 				Cert:       "admin-cert.pem",
