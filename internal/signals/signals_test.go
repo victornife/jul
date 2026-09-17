@@ -23,7 +23,16 @@ func TestShutdownSignalsNonEmpty(t *testing.T) {
 
 // TestListenShutdownSignalCancelsContext proves the documented contract:
 // sending a shutdown signal to the process cancels the returned context.
+// Skipped on Windows: os.Process.Signal(os.Interrupt) against the test
+// binary's own pid requires GenerateConsoleCtrlEvent to reach a process
+// group sharing a console, which a non-interactive CI runner does not
+// attach — the OS call itself fails there ("not supported by windows"),
+// not the code under test.
 func TestListenShutdownSignalCancelsContext(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("self-signaling os.Interrupt is not reliable on a non-interactive Windows runner")
+	}
+
 	ctx, _, stop := Listen(context.Background())
 	defer stop()
 
