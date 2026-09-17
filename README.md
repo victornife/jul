@@ -84,9 +84,9 @@ human view and evidence matrix are in [`docs/status.md`](docs/status.md).
 | **GA — soak pending** | None at this snapshot |
 
 A capability merged on `main` is not automatically released or GA. In
-particular, the published `v1.32.1-rc.1` checkpoint is an independently verified
+particular, the published `v2.0.0-rc.1` checkpoint is an independently verified
 **prerelease**, while current `main` contains substantial later work. See the
-[release-candidate evidence](docs/release-candidates/v1.32.1-rc.1.md) and the
+[release-candidate evidence](docs/release-candidates/v2.0.0-rc.1.md) and the
 [current status matrix](docs/status.md) rather than inferring publication from a
 feature guide.
 

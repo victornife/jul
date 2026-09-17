@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.8 · Updated 2026-09-15
+> Version 2.9 · Updated 2026-09-17
 >
 > This roadmap owns the **durable portfolio sequence**. It deliberately does
 > not duplicate volatile READY/NEXT/blocked issue state. The current issue-level
@@ -86,14 +86,18 @@ outcome changes.
 
 ## Release-candidate checkpoint
 
-`v1.32.1-rc.1` is an immutable published prerelease at
-`9a936d0cc1bc3f7086f38ca87741d9d09f950e25`. Its release-path checks, platform
+`v2.0.0-rc.1` is an immutable published prerelease at
+`c9ab3a05af6a6088b2721de0a87995ce37d468cf`. Its release-path checks, platform
 matrix, checksums, embedded SBOMs and attestations are recorded in the
-[candidate evidence](../release-candidates/v1.32.1-rc.1.md).
+[candidate evidence](../release-candidates/v2.0.0-rc.1.md). It supersedes the
+prior `v1.32.1-rc.1` checkpoint
+([its own evidence](../release-candidates/v1.32.1-rc.1.md) remains a preserved
+historical record).
 
-Current `main` is intentionally ahead of that checkpoint. A later stable tag is
-a separate publication decision and must reconcile the changelog, status,
-security posture, limitations and exact artifacts for that SHA.
+Current `main` may already be ahead of that checkpoint. A stable `v2.0.0` tag
+is a separate publication decision — gated on the ADR 0005 final soak against
+this exact candidate — and must reconcile the changelog, status, security
+posture, limitations and exact artifacts for that SHA.
 
 ## Core Gateway Completeness boundary
 

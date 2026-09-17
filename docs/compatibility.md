@@ -286,11 +286,11 @@ capability as the new baseline and starting a fresh, externally-facing
 contract line from it — not evidence that the v1 line failed to hold its own
 promises.
 
-The published `v1.32.1-rc.1` is a prerelease, not a stable tag. Later `main`
-changes — including trusted client identity, backend trust, routing/response
-policy, resilience, configuration authority/generated contracts, and NGINX
-assessment/provenance/includes — do not become released compatibility promises
-until an explicit publication and maturity decision says so.
+The published `v1.32.1-rc.1` and its successor `v2.0.0-rc.1` are both
+prereleases, not stable tags. Later `main` changes beyond whichever RC is
+current — see [status.md](status.md) for what that is — do not become
+released compatibility promises until an explicit publication and maturity
+decision says so.
 
 Existing Console routes are implementation surfaces for the embedded UI. This
 policy does not accidentally freeze all of them as an external automation API.
