@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.8 · Updated 2026-09-15
+> Version 2.9 · Updated 2026-09-17
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -46,16 +46,13 @@ not inherit an older GA row merely because it lives in the same package or guide
 
 ### Current product snapshot
 
-- **Published checkpoint:** `v1.32.1-rc.1` is an independently verified
-  prerelease candidate at `9a936d0cc1bc3f7086f38ca87741d9d09f950e25`.
-  It is not a stable release.
-- **Current `main`:** contains substantial later work, including cache
-  recertification, closed-world lifecycle authority, structured configuration,
-  trusted client identity, backend trust, routing/response policy,
-  configuration authority/generated contracts, resilience slices, NGINX
-  assessment/provenance/include traversal, and local diagnostics/support bundles.
-  Those additions retain their own
-  delivery and maturity rows below.
+- **Published checkpoint:** `v2.0.0-rc.1` is an independently verified
+  prerelease candidate at `c9ab3a05af6a6088b2721de0a87995ce37d468cf`,
+  superseding the prior `v1.32.1-rc.1` checkpoint. It is not a stable release.
+- **Current `main`:** may already be ahead of that checkpoint; check this
+  page and `feature-status.yaml` for delivery/maturity of anything not yet
+  reflected in the RC evidence at
+  [release-candidates/v2.0.0-rc.1.md](release-candidates/v2.0.0-rc.1.md).
 - **Volatile execution state:** lives in
   [#62](https://github.com/victornife/jul/issues/62). The
   [roadmap](roadmap/README.md) intentionally keeps only durable portfolio state.
