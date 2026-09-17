@@ -852,11 +852,21 @@ var Catalog = []RouteSpec{
 
 	// ── Admin manage (admin:manage) ───────────────────────────────────────────
 	// Runtime profiling is restricted to admin:manage because profiles expose
-	// sensitive heap/goroutine state.
+	// sensitive heap/goroutine state. It can also be removed entirely via
+	// `[admin] pprof = false`, for a deployment that wants the surface absent
+	// regardless of credential compromise.
 	{
 		Pattern:    "/debug/pprof/",
 		Methods:    []string{http.MethodGet},
 		Permission: rbac.AdminManage,
-		Handler:    func(s *Server) http.Handler { return http.DefaultServeMux },
+		Handler: func(s *Server) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if !pprofEnabled(s.currentAdminConfig()) {
+					http.NotFound(w, r)
+					return
+				}
+				http.DefaultServeMux.ServeHTTP(w, r)
+			})
+		},
 	},
 }

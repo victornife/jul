@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 302 configurable leaves.
+Coverage: 303 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -183,6 +183,18 @@ PluginUploadMaxSize caps the size of an uploaded .wasm file in megabytes.
 | Constraint | positive when upload is enabled; otherwise non-negative |
 | Zero/empty semantics | omitted/zero defaults to 32 MiB when upload is enabled |
 | Active when | always |
+
+## `admin.pprof` {#admin-pprof}
+
+PprofEnabled controls whether the runtime profiler (/debug/pprof/, already gated behind the admin:manage permission and the secure-transport gate) is reachable at all.
+
+| | |
+| --- | --- |
+| Type | `bool` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the pprof handler reads its enablement from the same immutable admin authentication snapshot admin.console/admin.token already publish atomically at Publish |
 
 ## `admin.rate_limit_apply_per_min` {#admin-rate_limit_apply_per_min}
 

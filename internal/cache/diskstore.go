@@ -27,9 +27,12 @@ type diskStore struct {
 	dir      string
 	maxBytes int64
 	curBytes int64
-	ll       *list.List // front = most recently used; values are *diskItem
-	items    map[string]*list.Element
-	log      *slog.Logger
+	// evictions counts LRU-capacity evictions from evictLocked and Resize (not
+	// explicit del/purge calls), for jul_cache_evictions_total{tier="disk"}.
+	evictions int64
+	ll        *list.List // front = most recently used; values are *diskItem
+	items     map[string]*list.Element
+	log       *slog.Logger
 }
 
 type diskItem struct {
@@ -194,7 +197,15 @@ func (d *diskStore) evictLocked() {
 		delete(d.items, it.hash)
 		d.curBytes -= it.size
 		_ = os.Remove(d.path(it.hash))
+		d.evictions++
 	}
+}
+
+// stats returns a snapshot of the tier's live occupancy; see memStore.stats.
+func (d *diskStore) stats() (curBytes, maxBytes int64, entries int, evictions int64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.curBytes, d.maxBytes, d.ll.Len(), d.evictions
 }
 
 func (d *diskStore) del(key string) {
@@ -255,5 +266,6 @@ func (d *diskStore) Resize(maxBytes int64) (evictedCount int, evictedBytes int64
 		evictedCount++
 		evictedBytes += it.size
 	}
+	d.evictions += int64(evictedCount)
 	return evictedCount, evictedBytes, failedRemovals
 }

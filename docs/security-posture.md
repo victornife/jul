@@ -90,7 +90,7 @@ console = true
 | Token strength | Minimum 32 random bytes (256-bit); use a password manager or `openssl rand -base64 32`. |
 | Token storage | Use `${env:}`, `${file:}`, or `${secret:}` references. See [docs/secrets.md](secrets.md). |
 | Token rotation | Rotate through the validated configuration lifecycle; legacy shared-token cutover hot-reloads with no restart and no overlap window (#95). RBAC token IDs can be revoked independently. |
-| pprof endpoints | `/debug/pprof/` is mounted behind bearer-token auth. Do not disable auth when pprof is needed — authenticate with the admin token. |
+| pprof endpoints | `/debug/pprof/` is mounted behind bearer-token auth and the `admin:manage` permission. Do not disable auth when pprof is needed — authenticate with the admin token. For a production deployment that never needs live profiling, set `[admin] pprof = false` to remove the surface entirely regardless of credential compromise. |
 | Rate limiting | The admin API has a built-in rate limiter (reads, writes, applies separately). Default limits are conservative. |
 
 ---

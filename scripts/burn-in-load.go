@@ -12,6 +12,7 @@ package main
 import (
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -60,6 +61,18 @@ func main() {
 		clientKey    = flag.String("clientKey", "testdata/tls/client.key", "Client key for mTLS")
 		phase2a      = flag.Bool("phase2a", false, "Phase 2A: exercise transcoding + passthrough + discovery + secrets + zero-config + WASM plugins")
 		http3        = flag.Bool("http3", false, "HTTP/3 isolated soak: exercise / and /health on HTTPS (no backend)")
+		current      = flag.Bool("current", false, "burn-in-current.toml: exercise bounded/unlimited/unix/discovered/secure/predicates/plugin routes (JUL-AUD-004)")
+		slowClient   = flag.Bool("slow-client", false, "Send a byte-paced (slow) POST body to /bounded/, exercising slow-client handling")
+		slowUpstream = flag.Bool("slow-upstream", false, "Request /bounded/slow?ms=N (a deliberately slow backend response), exercising pending-timeout/circuit accounting")
+		fault        = flag.Bool("fault", false, "Request /bounded/flaky?rate=N (an intermittently failing backend), exercising retry/circuit behavior")
+		rbac         = flag.Bool("rbac", false, "Run a concurrent RBAC allow/deny probe against -admin using burn-in-current.toml's viewer/operator/admin principals")
+		applyChurn   = flag.Bool("apply-churn", false, "Run a concurrent config-apply churn against -admin, resubmitting -applyConfig as a semantic no-op reload")
+		applyConfig  = flag.String("applyConfig", "burn-in-current.toml", "Config file to resubmit for -apply-churn (read from local disk, same host as the server)")
+		applyEvery   = flag.Duration("applyEvery", 10*time.Second, "Interval between -apply-churn attempts")
+		adminToken   = flag.String("adminToken", "burnintoken", "Admin bearer token for pprof snapshots (and -apply-churn when RBAC is disabled)")
+		viewerToken  = flag.String("viewerToken", "burnin-viewer-token-please-rotate-me-0001", "RBAC viewer-role token for -rbac/-apply-churn")
+		operatorTok  = flag.String("operatorToken", "burnin-operator-token-please-rotate-me-0001", "RBAC operator-role token for -rbac/-apply-churn")
+		adminRoleTok = flag.String("adminRoleToken", "burnin-admin-token-please-rotate-me-00001", "RBAC admin-role token for -rbac/-apply-churn")
 	)
 	flag.Parse()
 
@@ -85,7 +98,7 @@ func main() {
 
 	// T+0 pprof snapshots
 	fmt.Println("Capturing T+0 pprof snapshots...")
-	snapPProf(*adminURL, *pprofDir, "T0", "burnintoken")
+	snapPProf(*adminURL, *pprofDir, "T0", *adminToken)
 
 	// Load client certificate for mTLS (TLS :8443) if available.
 	var tlsConfig *tls.Config
@@ -224,6 +237,58 @@ func main() {
 						path = "/api/static/test"
 						url = *baseURL + path
 					}
+				} else if *slowUpstream {
+					// Slow-upstream mode: every request hits a deliberately slow
+					// backend response (see burn-in-backend.go's /slow handler),
+					// exercising pending-timeout/circuit accounting rather than
+					// throughput.
+					ms := 200 + rand.Intn(800)
+					path = fmt.Sprintf("/bounded/slow?ms=%d", ms)
+					url = *baseURL + path
+				} else if *fault {
+					// Fault mode: every request hits an intermittently-failing
+					// backend response (see burn-in-backend.go's /flaky handler),
+					// exercising retry attempts and circuit transitions without
+					// needing to kill a sibling process.
+					path = "/bounded/flaky?rate=40"
+					url = *baseURL + path
+				} else if *current {
+					// burn-in-current.toml — the merged-Beta surface (JUL-AUD-004):
+					//   25% /bounded/     (resilience: admission/retry/circuit)
+					//   15% /unlimited/   (resilience compatibility path)
+					//   15% /unix/        (HTTP-over-Unix upstream, #407)
+					//   15% /discovered/  (DNS service discovery)
+					//   10% /secure/      (backend_tls policy)
+					//   10% /predicates/  (routing predicates/response headers/CORS)
+					//   5%  /plugin/      (WASM plugin middleware)
+					//   5%  /             (baseline)
+					r := rand.Intn(100)
+					switch {
+					case r < 25:
+						path = "/bounded/"
+						url = *baseURL + path
+					case r < 40:
+						path = "/unlimited/"
+						url = *baseURL + path
+					case r < 55:
+						path = "/unix/"
+						url = *baseURL + path
+					case r < 70:
+						path = "/discovered/"
+						url = *baseURL + path
+					case r < 80:
+						path = "/secure/"
+						url = *baseURL + path
+					case r < 90:
+						path = "/predicates/?version=v2"
+						url = *baseURL + path
+					case r < 95:
+						path = "/plugin/"
+						url = *baseURL + path
+					default:
+						path = "/"
+						url = *baseURL + path
+					}
 				} else if *http3 {
 					// HTTP/3 isolated soak — paths that exist in burn-in-http3.toml
 					// No backend required for / and /health
@@ -296,7 +361,21 @@ func main() {
 					}
 				}
 
-				req, err := http.NewRequest("GET", url, nil)
+				method := "GET"
+				var body io.Reader
+				if *slowClient {
+					// Slow-client mode: every request is a POST with a
+					// byte-paced body, exercising slow-client/read-timeout
+					// handling on the proxy path rather than throughput.
+					// 4096 bytes at 64B/50ms = ~3.2s to drain, safely under
+					// the client's own 10s request timeout below.
+					method = "POST"
+					path = "/bounded/"
+					url = *baseURL + path
+					body = newSlowReader([]byte(strings.Repeat("x", 4096)), 64, 50*time.Millisecond)
+				}
+
+				req, err := http.NewRequest(method, url, body)
 				if err != nil {
 					atomic.AddInt64(&totalReqs, 1)
 					atomic.AddInt64(&errOther, 1)
@@ -308,6 +387,14 @@ func main() {
 				}
 				if *compress || *full {
 					req.Header.Set("Accept-Encoding", "gzip, br, zstd")
+				}
+				if *slowClient {
+					// CRS (WAF, when enabled) rejects a POST body without an
+					// allow-listed Content-Type (rule 920420).
+					req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				}
+				if strings.HasPrefix(path, "/predicates/") {
+					req.Header.Set("X-Tenant", "public")
 				}
 
 				start := time.Now()
@@ -369,6 +456,29 @@ func main() {
 		}
 	}()
 
+	// RBAC allow/deny probe (JUL-AUD-004): concurrently proves the viewer
+	// role can read status but not apply, and the admin role can do both,
+	// against the running admin API — not just at config-parse time.
+	if *rbac {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runRBACProbe(*adminURL, *duration, *viewerToken, *operatorTok, *adminRoleTok)
+		}()
+	}
+
+	// Config-apply churn (JUL-AUD-004/019): repeatedly resubmits the same
+	// config as a semantic no-op reload through the real managed-apply
+	// coordinator, so the apply/reload path accumulates hours of hot-reload
+	// evidence instead of only the handful of applies a functional test does.
+	if *applyChurn {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runApplyChurn(*adminURL, *duration, *applyEvery, *applyConfig, *adminRoleTok)
+		}()
+	}
+
 	wg.Wait()
 	fmt.Println()
 	fmt.Println("Load test complete. Collecting results...")
@@ -423,7 +533,7 @@ func main() {
 
 	// T+end pprof snapshots
 	fmt.Println("Capturing T+end pprof snapshots...")
-	snapPProf(*adminURL, *pprofDir, "Tend", "burnintoken")
+	snapPProf(*adminURL, *pprofDir, "Tend", *adminToken)
 	fmt.Printf("Artifacts saved to %s/\n", *pprofDir)
 }
 
@@ -470,4 +580,261 @@ var maliciousSQLPayloads = []string{
 	"1; DROP TABLE users--",
 	"UNION SELECT password FROM users--",
 	"1 AND 1=1",
+}
+
+// slowReader releases chunkSize bytes of buf per Read call, pausing delay
+// between calls, so a POST body drains over many seconds instead of one
+// syscall — the client-side half of a slow-client soak (-slow-client).
+type slowReader struct {
+	buf       []byte
+	pos       int
+	chunkSize int
+	delay     time.Duration
+	slept     bool
+}
+
+func newSlowReader(buf []byte, chunkSize int, delay time.Duration) *slowReader {
+	return &slowReader{buf: buf, chunkSize: chunkSize, delay: delay}
+}
+
+func (r *slowReader) Read(p []byte) (int, error) {
+	if r.pos >= len(r.buf) {
+		return 0, io.EOF
+	}
+	if r.slept {
+		time.Sleep(r.delay)
+	}
+	r.slept = true
+	n := r.chunkSize
+	if remaining := len(r.buf) - r.pos; n > remaining {
+		n = remaining
+	}
+	if n > len(p) {
+		n = len(p)
+	}
+	copy(p, r.buf[r.pos:r.pos+n])
+	r.pos += n
+	return n, nil
+}
+
+// runRBACProbe repeatedly exercises the admin API's allow/deny boundary
+// against a running server (not just at config-parse time). All three
+// predefined roles hold status:read, so /api/v1/status must be 200 for
+// each. Only viewer lacks config:write, so a POST to
+// /api/v1/config/validate must be 403 for viewer and must NOT be 403 for
+// operator/admin (whatever else it returns depends on the submitted body,
+// which this probe does not attempt to make valid).
+func runRBACProbe(adminURL string, duration time.Duration, viewerToken, operatorToken, adminToken string) {
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	end := time.Now().Add(duration)
+	var checks, violations int64
+	do := func(method, token, path string) (int, error) {
+		req, err := http.NewRequest(method, adminURL+path, nil)
+		if err != nil {
+			return 0, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := client.Do(req)
+		if err != nil {
+			return 0, err
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode, nil
+	}
+	assertEqual := func(label string, code int, err error, want int) {
+		checks++
+		if err != nil {
+			violations++
+			logErrorOnce("rbac probe " + label + ": " + err.Error())
+			return
+		}
+		if code != want {
+			violations++
+			logErrorOnce(fmt.Sprintf("rbac probe %s: got %d, want %d", label, code, want))
+		}
+	}
+	assertNotForbidden := func(label string, code int, err error) {
+		checks++
+		if err != nil {
+			violations++
+			logErrorOnce("rbac probe " + label + ": " + err.Error())
+			return
+		}
+		if code == http.StatusForbidden {
+			violations++
+			logErrorOnce(fmt.Sprintf("rbac probe %s: got 403, permission should have been granted", label))
+		}
+	}
+	for time.Now().Before(end) {
+		for _, tok := range []string{viewerToken, operatorToken, adminToken} {
+			code, err := do(http.MethodGet, tok, "/api/v1/status")
+			assertEqual("status:read for "+tok, code, err, http.StatusOK)
+		}
+		code, err := do(http.MethodPost, viewerToken, "/api/v1/config/validate")
+		assertEqual("viewer denied config:write", code, err, http.StatusForbidden)
+		code, err = do(http.MethodPost, operatorToken, "/api/v1/config/validate")
+		assertNotForbidden("operator granted config:write", code, err)
+		code, err = do(http.MethodPost, adminToken, "/api/v1/config/validate")
+		assertNotForbidden("admin granted config:write", code, err)
+		time.Sleep(2 * time.Second)
+	}
+	fmt.Printf("%s rbac probe: checks=%d violations=%d\n", time.Now().Format("15:04:05"), checks, violations)
+}
+
+// adoptExternalConfigIfNeeded checks the server's config_state and, when the
+// on-disk file has not yet been adopted as the managed baseline
+// ("managed_unadopted"), previews and adopts it — otherwise every apply is
+// refused with 409 drift_detected. A no-op when already "managed_clean".
+func adoptExternalConfigIfNeeded(client *http.Client, adminURL, token string) error {
+	req, err := http.NewRequest(http.MethodGet, adminURL+"/api/v1/config", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	var meta struct {
+		ServingVersion string `json:"serving_version"`
+		ConfigState    string `json:"config_state"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&meta)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if meta.ConfigState != "managed_unadopted" {
+		return nil
+	}
+
+	previewReq, err := http.NewRequest(http.MethodPost, adminURL+"/api/v1/config/adopt-external/preview", strings.NewReader("{}"))
+	if err != nil {
+		return err
+	}
+	previewReq.Header.Set("Authorization", "Bearer "+token)
+	previewReq.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(previewReq)
+	if err != nil {
+		return err
+	}
+	var preview struct {
+		OK             bool   `json:"ok"`
+		ObservedDigest string `json:"observed_digest"`
+		CandidateVer   string `json:"candidate_version"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&preview)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if !preview.OK || preview.ObservedDigest == "" {
+		return fmt.Errorf("adopt-external/preview did not return an observed_digest")
+	}
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"observed_digest": preview.ObservedDigest,
+		"base_version":    meta.ServingVersion,
+		"confirm":         true,
+	})
+	adoptReq, err := http.NewRequest(http.MethodPost, adminURL+"/api/v1/config/adopt-external", strings.NewReader(string(body)))
+	if err != nil {
+		return err
+	}
+	adoptReq.Header.Set("Authorization", "Bearer "+token)
+	adoptReq.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(adoptReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		var errBody strings.Builder
+		io.Copy(&errBody, resp.Body)
+		return fmt.Errorf("adopt-external returned %d: %s", resp.StatusCode, errBody.String())
+	}
+	fmt.Println("apply-churn: adopted the on-disk config as the managed baseline")
+	return nil
+}
+
+// runApplyChurn resubmits a local config file as a candidate through the
+// real managed-apply coordinator every `every`, for `duration`. Reapplying
+// byte-identical content is a semantic no-op reload (a real reload-plan
+// pass, not a synthetic one), so this accumulates hot-apply/hot-reload hours
+// against the actual admin API rather than only a handful of applies a
+// functional test exercises. Requires `config_authority = "managed"` in the
+// server's own config; adopts the on-disk file as the managed baseline first
+// if it has not been adopted yet (ADR 0019).
+func runApplyChurn(adminURL string, duration, every time.Duration, configPath, token string) {
+	client := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		fmt.Printf("apply-churn: cannot read %s: %v\n", configPath, err)
+		return
+	}
+
+	if err := adoptExternalConfigIfNeeded(client, adminURL, token); err != nil {
+		fmt.Printf("apply-churn: adopt-external: %v\n", err)
+		return
+	}
+
+	end := time.Now().Add(duration)
+	var attempts, failures int64
+	for time.Now().Before(end) {
+		req, err := http.NewRequest(http.MethodGet, adminURL+"/api/v1/config", nil)
+		if err == nil {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		var version string
+		if err == nil {
+			resp, derr := client.Do(req)
+			if derr == nil {
+				var meta struct {
+					ServingVersion string `json:"serving_version"`
+				}
+				_ = json.NewDecoder(resp.Body).Decode(&meta)
+				resp.Body.Close()
+				version = meta.ServingVersion
+			} else {
+				err = derr
+			}
+		}
+		attempts++
+		if err != nil || version == "" {
+			failures++
+			logErrorOnce(fmt.Sprintf("apply-churn: fetch serving_version: %v", err))
+			time.Sleep(every)
+			continue
+		}
+
+		applyReq, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/v1/config/apply?base_version=%s&mode=hot", adminURL, version), strings.NewReader(string(raw)))
+		if err != nil {
+			failures++
+			time.Sleep(every)
+			continue
+		}
+		applyReq.Header.Set("Authorization", "Bearer "+token)
+		applyReq.Header.Set("Content-Type", "application/toml")
+		resp, err := client.Do(applyReq)
+		if err != nil {
+			failures++
+			logErrorOnce("apply-churn: apply: " + err.Error())
+			time.Sleep(every)
+			continue
+		}
+		var out struct {
+			OK      bool   `json:"ok"`
+			Outcome string `json:"outcome"`
+			State   string `json:"state"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		resp.Body.Close()
+		if resp.StatusCode >= 300 || !out.OK {
+			failures++
+			logErrorOnce(fmt.Sprintf("apply-churn: apply returned %d ok=%v outcome=%q state=%q", resp.StatusCode, out.OK, out.Outcome, out.State))
+		}
+		time.Sleep(every)
+	}
+	fmt.Printf("%s apply-churn: attempts=%d failures=%d\n", time.Now().Format("15:04:05"), attempts, failures)
 }

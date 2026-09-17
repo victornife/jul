@@ -8,6 +8,16 @@ present (for example `[waf]` requires the `waf` tag, `[[stream]]` the `stream`
 tag, and `[plugins.<name>]` the `wasmplugins` tag); absent tags are rejected at
 preflight rather than silently ignored.
 
+> **Relative paths resolve against the process's current working directory,
+> not the configuration file's location.** Fields such as `root`,
+> `descriptor_set`, `history_dir`, `disk_path`, `plugin_upload_dir`, and any
+> other filesystem path taken as-is unless absolute. Running `jul` from a
+> directory other than the one the config file lives in (for example a
+> systemd unit with a different `WorkingDirectory`, or invoking `jul` from a
+> script) changes what a relative path in that config actually resolves to.
+> Use an absolute path, or set the process's working directory to match the
+> config file's directory, when the two might differ.
+
 > **Looking for an exhaustive, field-by-field reference?** This page stays a
 > conceptual guide — what each area means, how to configure it, and worked
 > examples. The generated, factual reference over every configurable leaf
@@ -1377,6 +1387,7 @@ plugin_upload_max_size = 32
 | `plugin_upload_dir` | string | Directory for uploaded `.wasm` modules from the Console Plugins panel (default `./jul-data/plugins`) |
 | `plugin_upload_enabled` | bool | Default `false`; set `true` to enable the `.wasm` upload endpoint. Also requires positive `plugin_upload_max_size`. |
 | `plugin_upload_max_size` | int | Maximum `.wasm` upload size in megabytes (default `32`) |
+| `pprof` | bool | Default `true`. The runtime profiler (`/debug/pprof/`) is already gated behind the `admin:manage` permission and the secure-transport gate; set `false` to remove the surface entirely for a production deployment that does not want it present regardless of credential compromise. |
 
 ### `[admin.tls]`
 
@@ -1866,7 +1877,7 @@ intentionally not implemented because it would weaken the raw/secret boundary.
 
 ## Admin Console/upload reloadability
 
-On a running admin server, `admin.console`, `admin.plugin_upload_enabled`, `admin.plugin_upload_max_size` and `admin.plugin_upload_dir` are hot-reloadable. They are published as one immutable request-generation policy with admin authentication/RBAC. The upload directory is preflighted before Publish; changing it does not migrate files. `admin.enabled` and `admin.listen` remain restart-required.
+On a running admin server, `admin.console`, `admin.pprof`, `admin.plugin_upload_enabled`, `admin.plugin_upload_max_size` and `admin.plugin_upload_dir` are hot-reloadable. They are published as one immutable request-generation policy with admin authentication/RBAC. The upload directory is preflighted before Publish; changing it does not migrate files. `admin.enabled` and `admin.listen` remain restart-required.
 
 See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
 

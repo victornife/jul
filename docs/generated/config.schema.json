@@ -75,6 +75,10 @@
           "type": "integer",
           "x-jul-constraint": "positive when upload is enabled; otherwise non-negative"
         },
+        "pprof": {
+          "description": "PprofEnabled controls whether the runtime profiler (/debug/pprof/, already gated behind the admin:manage permission and the secure-transport gate) is reachable at all",
+          "type": "boolean"
+        },
         "rate_limit_apply_per_min": {
           "default": 30,
           "description": "RateLimitApplyPerMin caps the high-impact config validate/diff/apply endpoints per client per minute, separately and more strictly than other mutations",

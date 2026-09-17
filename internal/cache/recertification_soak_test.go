@@ -319,13 +319,10 @@ func cacheSoakDo(client *http.Client, method, target string, headers map[string]
 }
 
 func cacheSoakUsage(c *Cache) (memBytes, memMax, diskBytes, diskMax int64) {
-	c.mem.mu.Lock()
-	memBytes, memMax = c.mem.curBytes, c.mem.maxBytes
-	c.mem.mu.Unlock()
-	if c.disk != nil {
-		c.disk.mu.Lock()
-		diskBytes, diskMax = c.disk.curBytes, c.disk.maxBytes
-		c.disk.mu.Unlock()
+	mem, disk := c.Stats()
+	memBytes, memMax = mem.Bytes, mem.MaxBytes
+	if disk != nil {
+		diskBytes, diskMax = disk.Bytes, disk.MaxBytes
 	}
 	return
 }

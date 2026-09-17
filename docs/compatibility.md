@@ -209,6 +209,36 @@ the schema. Likewise, a configuration may satisfy both the schema and
 `jul check` while `jul lint` reports an error-severity finding — lint policy
 is never encoded as schema-level invalidity.
 
+### No config schema version field (deliberate)
+
+The TOML configuration itself carries no `schema_version` (or similar) key,
+and none is planned. This is a stated decision, not an omission:
+
+- **The lifecycle registry is closed-world.** Every leaf reachable from
+  `config.Config` must have exactly one disposition
+  (`hot_reload`/`restart_required`/`new_listener_only`/`ignored_deprecated`/
+  `validation_rejected_reserved`) in `internal/lifecycle/registry.go`, enforced
+  by a test that fails the build the moment a field is added or removed
+  without a matching entry. A schema-version field would need the same
+  closed-world discipline to mean anything, and the registry already gives
+  every leaf that discipline individually — a single top-level version number
+  could not describe *which* leaves changed meaning without the per-leaf
+  ledger the registry already is.
+- **Strict decoding already rejects the unknown-field case a version field
+  would otherwise flag.** `config.Parse` decodes with unknown keys treated as
+  errors, so a config written for a materially different schema (a renamed or
+  removed key) fails fast at `jul check`/startup with the offending key named,
+  rather than silently loading under stale assumptions.
+- **Additive change needs no migration.** New optional fields default to
+  today's behavior (see the parser-default pattern used throughout
+  `internal/config/parser.go`), so the common case — a new release adding
+  configuration surface — never requires a version bump or a reader capable of
+  understanding multiple schema generations at once.
+- **Re-opening this is possible.** If a future change needs genuine
+  multi-generation config migration (rather than addition), a version field
+  can be introduced then, additive and optional, without disturbing existing
+  files that omit it.
+
 ## Delivery state and compatibility
 
 Compatibility promises attach to a released contract, not merely to code merged

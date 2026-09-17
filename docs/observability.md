@@ -84,7 +84,11 @@ are never reset and previously recorded host-labeled series are not deleted.
 | --- | --- | --- | --- | --- |
 | `jul_acme_renewals_total` | Counter | — | Released `v1.32.0` | ACME certificate renewals observed (expiry advanced for a domain). |
 | `jul_auth_decisions_total` | Counter | `method`, `result` | Released `v1.32.0` | Access-control decisions, labeled by method (cidr/basic/jwt/forward) and result (allow/deny). |
+| `jul_cache_bytes` | Gauge | `tier` | Merged, release pending | Current bytes occupied by a cache tier, labeled by tier (`memory`/`disk`). Read at scrape time, not pushed from the request path. |
+| `jul_cache_entries` | Gauge | `tier` | Merged, release pending | Current entry count in a cache tier, labeled by tier (`memory`/`disk`). |
 | `jul_cache_events_total` | Counter | `state` | Released `v1.32.0` | Response cache outcomes, labeled by state (HIT/MISS/STALE/BYPASS). |
+| `jul_cache_evictions_total` | Counter | `tier` | Merged, release pending | Cumulative LRU-capacity evictions from a cache tier since startup, labeled by tier (`memory`/`disk`). Explicit invalidation is not an eviction and is not counted here. |
+| `jul_cache_max_bytes` | Gauge | `tier` | Merged, release pending | Configured byte cap for a cache tier, labeled by tier (`memory`/`disk`). |
 | `jul_cache_revalidations_total` | Counter | `outcome` | Merged, release pending | Cache validation and revalidation decisions, labeled by bounded outcome (`stored`, `not_modified`, `uncacheable`, `origin_error`, `canceled`, `panic`, `no_lease`, `deduplicated`). |
 | `jul_config_authority_denied_total` | Counter | `reason` | Merged / release pending | Mutating configuration requests refused because the process is `file_owned` (ADR 0019 §15), labeled by the bounded operation name — never a path or actor. |
 | `jul_config_authority_drift` | Gauge | — | Merged / release pending | 1 when managed configuration authority has detected an unresolved external edit to the configuration file; 0 otherwise. Carries no path, digest, or version. |

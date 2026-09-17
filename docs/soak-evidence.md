@@ -127,11 +127,12 @@ reproducible command is more useful than a claim.
 
 ```sh
 go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul ./cmd/jul
-go run scripts/burn-in-backend.go            # HTTP backends :8081/:8082
-go run scripts/stream-echo-backend.go        # TCP echo :55432
+go run scripts/burn-in-backend.go -port 8081                # HTTP backend :8081
+go run scripts/burn-in-backend.go -port 8082                # HTTP backend :8082
+go run scripts/stream-echo.go -port 55432                   # TCP echo backend for the L4 pool
 ./jul -config burn-in-resilience.toml
-go run scripts/burn-in-load.go -duration 24h -workers 64
-go run scripts/burn-in-load.go -duration 24h -workers 16 -stream-tcp
+go run scripts/burn-in-load.go -duration 24h -workers 64 -health "http://127.0.0.1:8080/bounded/"  # HTTP admission/resilience load
+go run scripts/burn-in-stream-load.go -duration 24h -workers 16 -target 127.0.0.1:15432             # L4 TCP stream load
 ```
 
 **Pass criteria, all falsifiable:**

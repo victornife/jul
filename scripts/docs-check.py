@@ -815,6 +815,72 @@ def check_roadmap_active_ids():
         ok(f"roadmap active IDs are unique and do not overlap delivered items")
 
 
+def check_roadmap_stage_reconciliation():
+    """The 'Active operating roadmap' stage table must not describe a
+    capability as outstanding when feature-status.yaml already records the
+    same issue as merged/candidate/released/soaked (JUL-AUD-013): the Stage 8
+    row once read "support bundle and doctor remain later work" while
+    feature-status.yaml's OPS-DIAG entry already said 'merged through
+    #155/#156'."""
+    try:
+        import yaml
+    except ModuleNotFoundError:
+        error(DOCS / "feature-status.yaml", 0,
+              "pyyaml is required for YAML manifest checks — install with: pip install pyyaml")
+        return
+
+    manifest = DOCS / "feature-status.yaml"
+    roadmap = DOCS / "roadmap" / "README.md"
+    if not manifest.exists() or not roadmap.exists():
+        return  # reported by other checks
+
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    features = data.get("features") if isinstance(data, dict) else None
+    if not isinstance(features, list):
+        return  # reported by check_feature_status_manifest
+
+    delivered_states = {"merged", "candidate", "released", "soaked"}
+    delivered_issue_refs: set[str] = set()
+    for entry in features:
+        if entry.get("delivery") not in delivered_states:
+            continue
+        blob = json.dumps(entry)
+        delivered_issue_refs.update(re.findall(r"#\d+", blob))
+
+    if not delivered_issue_refs:
+        return
+
+    regressive_phrases = re.compile(
+        r"remains?\s+later\s+work|not\s+yet\s+(?:implemented|available|built)"
+        r"|(?:has|have)\s+not\s+(?:yet\s+)?been\s+built|still\s+(?:needs?|remains?)\s+to\s+be\s+(?:built|implemented)",
+        re.IGNORECASE,
+    )
+
+    text = roadmap.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    in_active = False
+    checked = 0
+    for line_no, line in enumerate(lines, 1):
+        if line.startswith("## Active operating roadmap"):
+            in_active = True
+            continue
+        if in_active and line.startswith("## "):
+            break
+        if not in_active or not line.startswith("| **"):
+            continue
+
+        row_refs = set(re.findall(r"#\d+", line))
+        stale_refs = row_refs & delivered_issue_refs
+        if stale_refs and regressive_phrases.search(line):
+            error(roadmap, line_no,
+                  f"roadmap row describes {sorted(stale_refs)} as outstanding, but "
+                  f"feature-status.yaml already records delivery as merged/released/soaked for it")
+        checked += 1
+
+    if checked:
+        ok("roadmap stage snapshots do not contradict feature-status.yaml delivery states")
+
+
 def check_finding_uniqueness():
     """Verify that no finding ID appears in the current audit doc with two
     conflicting status values (one resolved, one open) in the same table.
@@ -981,6 +1047,36 @@ def check_documented_fuzz_commands():
         error(DOCS, 0, "no documented go-test fuzz commands found")
 
 
+def check_changelog_unreleased_categories():
+    """CHANGELOG.md's [Unreleased] section must have at most one heading per
+    Keep-a-Changelog category (JUL-AUD-009) — interleaved duplicates (e.g. two
+    separate ### Added blocks) are exactly the drift that made the section hard
+    to turn into release notes."""
+    path = ROOT / "CHANGELOG.md"
+    if not path.exists():
+        error(path, 0, "CHANGELOG.md is missing")
+        return
+    lines = path.read_text(encoding="utf-8").splitlines()
+    start = next((i for i, l in enumerate(lines) if l.startswith("## [Unreleased]")), None)
+    if start is None:
+        error(path, 0, "CHANGELOG.md has no ## [Unreleased] section")
+        return
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## [")), len(lines))
+    seen: dict[str, int] = {}
+    for offset, line in enumerate(lines[start:end]):
+        match = re.match(r"^### (\w+)\s*$", line)
+        if not match:
+            continue
+        line_no = start + offset + 1
+        category = match.group(1)
+        if category in seen:
+            error(path, line_no, f"duplicate ### {category} heading in [Unreleased]; first declared on line {seen[category]} — merge them")
+        else:
+            seen[category] = line_no
+    if seen:
+        ok(f"CHANGELOG.md [Unreleased] has one heading per category: {sorted(seen)}")
+
+
 def main():
     SKIP_DIRS = {"node_modules", "vendor", ".git", "__pycache__", "reviews"}
     md_files = [
@@ -1009,10 +1105,12 @@ def main():
     check_adr_numbering()
     check_active_roadmap_links()
     check_roadmap_active_ids()
+    check_roadmap_stage_reconciliation()
     check_readme_go_version()
     check_living_doc_headers()
     check_status_heading_uniqueness()
     check_documented_fuzz_commands()
+    check_changelog_unreleased_categories()
 
     print()
     print(f"Results: {OK} passed, {FAIL} failed")

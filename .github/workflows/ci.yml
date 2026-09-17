@@ -334,6 +334,22 @@ jobs:
           name: soak-results
           path: soak-results.txt
 
+  soak-repro-smoke:
+    name: soak repro smoke (JUL-AUD-003)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Runs the exact #287 resilience-soak reproduction published in
+      # docs/soak-evidence.md at a trivial duration, so a stale command line
+      # (wrong script name, removed flag, wrong port) fails here instead of at
+      # the start of the next real 24-hour soak attempt.
+      - name: run soak reproduction at trivial duration
+        run: FULL_TAGS="${{ env.FULL_TAGS }}" scripts/soak-repro-smoke.sh
+
   format:
     name: gofmt
     runs-on: ubuntu-latest
@@ -499,6 +515,18 @@ jobs:
         run: python scripts/docs-check.py
       - name: run docs-check unit tests
         run: python scripts/test_docs_check.py
+
+  config-check:
+    name: config-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: validate every shipped config loads (JUL-AUD-002)
+        run: FULL_TAGS="${{ env.FULL_TAGS }}" scripts/config-check.sh
 
   full-tags-sync:
     name: full-tags-sync

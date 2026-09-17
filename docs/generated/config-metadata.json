@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 356,
-    "schema_leaves": 302,
+    "schema_paths": 357,
+    "schema_leaves": 303,
     "resources": 9
   },
   "capability_build_tags": {
@@ -200,6 +200,18 @@
       "default": 32,
       "description": "PluginUploadMaxSize caps the size of an uploaded .wasm file in megabytes",
       "anchor": "admin-plugin_upload_max_size"
+    },
+    "admin.pprof": {
+      "kind": "scalar",
+      "scalar": "bool",
+      "go_type": "*bool",
+      "optional": true,
+      "dynamic": false,
+      "subsystem": "admin",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the pprof handler reads its enablement from the same immutable admin authentication snapshot admin.console/admin.token already publish atomically at Publish",
+      "description": "PprofEnabled controls whether the runtime profiler (/debug/pprof/, already gated behind the admin:manage permission and the secure-transport gate) is reachable at all",
+      "anchor": "admin-pprof"
     },
     "admin.rate_limit_apply_per_min": {
       "kind": "scalar",

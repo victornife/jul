@@ -306,6 +306,7 @@ func adminEntries() []Entry {
 		hot("admin.audit_log_rotate_keep", SubAdmin, "path and rotation policy publish as one prepared durable-sink generation; existing audit events and files are not migrated"),
 		hot("admin.audit_log_rotate_max_mb", SubAdmin, "path and rotation policy publish as one prepared durable-sink generation; existing audit events and files are not migrated"),
 		hot("admin.console", SubAdmin, "the live admin server dispatches Console mode from one immutable per-request runtime snapshot published atomically"),
+		hot("admin.pprof", SubAdmin, "the pprof handler reads its enablement from the same immutable admin authentication snapshot admin.console/admin.token already publish atomically at Publish"),
 		hot("admin.plugin_upload_enabled", SubAdmin, "new upload requests read admission state from the immutable admin runtime snapshot captured at request start"),
 		hot("admin.plugin_upload_max_size", SubAdmin, "each upload captures its size limit from the immutable admin runtime snapshot before body processing"),
 		hot("admin.plugin_upload_dir", SubAdmin, "candidate storage is preflighted before Publish and each upload is confined to the directory captured at request start"),

@@ -23,6 +23,24 @@
       "state": "released_v1.32.0"
     },
     {
+      "name": "jul_cache_bytes",
+      "type": "gauge",
+      "help": "Current bytes occupied by a cache tier, labeled by tier (memory/disk).",
+      "labels": [
+        "tier"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_cache_entries",
+      "type": "gauge",
+      "help": "Current entry count in a cache tier, labeled by tier (memory/disk).",
+      "labels": [
+        "tier"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_cache_events_total",
       "type": "counter",
       "help": "Response cache outcomes, labeled by state (HIT/MISS/STALE/BYPASS).",
@@ -30,6 +48,24 @@
         "state"
       ],
       "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_cache_evictions_total",
+      "type": "counter",
+      "help": "Cumulative LRU-capacity evictions from a cache tier since startup, labeled by tier (memory/disk). Explicit invalidation is not an eviction and is not counted here.",
+      "labels": [
+        "tier"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_cache_max_bytes",
+      "type": "gauge",
+      "help": "Configured byte cap for a cache tier, labeled by tier (memory/disk).",
+      "labels": [
+        "tier"
+      ],
+      "state": "merged_release_pending"
     },
     {
       "name": "jul_cache_revalidations_total",

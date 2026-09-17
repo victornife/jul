@@ -49,7 +49,7 @@ The durable current sequence is summarized in the active operating roadmap below
 | **5 — Generic resilience** | Admission, queue/connection bounds, retry budget/deadline/backoff, circuit state and bounded operations evidence | Core implementations are merged; integrated cross-protocol/soak and complete external-contract closure remain under #287/#144 at this baseline |
 | **6 — Configuration authority and automation** | Managed/file-owned authority, generated contracts, supported external API, thin remote CLI | Authority and generated contracts are merged; external OpenAPI #150 and CLI #151 remain separate gates |
 | **7 — Selected runtime dynamics** | High-value certificate, credential, logging, sink, cache-policy and Alt-Svc transitions | Planned and value-ranked; universal hot reload is not a requirement |
-| **8 — Migration and diagnostics** | NGINX assessment/provenance/includes, compatibility corpus, support bundle and `jul doctor` | Assessment/provenance/includes are merged; corpus work has started; support bundle and doctor remain later work |
+| **8 — Migration and diagnostics** | NGINX assessment/provenance/includes, compatibility corpus, support bundle and `jul doctor` | Assessment/provenance/includes, `jul doctor` and support bundles are merged (#155/#156); NGINX migration corpus work continues under #366-#368 |
 | **9 — One bounded experiment** | AI Gateway or another explicitly approved category | Gated; not an automatic continuation of core work |
 | **10 — Integrated closure** | Fresh exact-SHA audit, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Planned after the selected programme |
 

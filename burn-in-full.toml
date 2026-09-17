@@ -164,21 +164,3 @@ server_names = ["health"]
     enabled = false
     [servers.locations.waf]
     enabled = false
-
-[servers.locations.debug]
-    match = "/hello"
-    compression = false
-
-[servers.locations.static]
-    match = "/static/"
-    root = "testdata/www/"
-    compression = false
-
-[servers.locations.health]
-    match = "/healthz"
-    proxy_to = "backend"
-    healthz = true
-    rate_limit = false
-    cache = false
-    waf = false
-    compression = false

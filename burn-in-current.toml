@@ -1,0 +1,264 @@
+# Track 2 burn-in config — CURRENT merged-Beta surface (JUL-AUD-004)
+#
+# burn-in-full.toml models the July feature set (Phase 2A). This profile
+# models everything merged since: trusted client identity, backend TLS trust,
+# RBAC, the egress allow-list, routing predicates/response-header policy/CORS,
+# generic resilience (admission/retry/circuit — shares burn-in-resilience.toml's
+# pools), HTTP-over-Unix upstreams, DNS service discovery, admin TLS, WASM
+# plugins, WAF and the L4 stream proxy — so a soak run actually exercises the
+# ~627-commit delta rather than only re-confirming July's evidence.
+#
+# Build:
+#   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul ./cmd/jul
+#
+# Run:
+#   Window 1: go run scripts/burn-in-backend.go -port 8081
+#   Window 2: go run scripts/burn-in-backend.go -port 8082
+#   Window 3: go run scripts/burn-in-backend.go -unix /tmp/jul-burnin-current.sock
+#   Window 4: go run scripts/burn-in-backend.go -port 8444 -tls
+#   Window 5: go run scripts/stream-echo.go -port 55432
+#   Window 6: ./jul -config burn-in-current.toml
+#   Window 7: go run scripts/burn-in-load.go -duration <dur> -workers <n> -current \
+#               -health "http://127.0.0.1:8080/bounded/"
+#   Window 8: go run scripts/burn-in-stream-load.go -duration <dur> -workers <n> -target 127.0.0.1:15432
+#
+# Backend_tls is intentionally the one merged-Beta capability NOT re-exercised
+# here beyond a single pool (see the "secure" upstream below): its full
+# cross-protocol certification matrix (private CA, SNI override, expired/wrong-
+# name/untrusted failures, discovery-address churn) is #409's dedicated scope
+# and testdata/backend-tls.toml's existing fixture, not something a second,
+# looser copy in a burn-in profile should re-litigate.
+
+[global]
+log_level = "warn"
+
+# Managed authority (ADR 0019, merged Beta): required for -apply-churn's
+# repeated config-apply calls against the admin API to be accepted at all —
+# a file_owned server (the default) refuses every mutating endpoint.
+config_authority = "managed"
+
+[observability]
+
+[observability.access_log]
+sinks = ["file"]
+file = "jul-data/access.log"
+format = "json"
+rotate_max_mb = 250
+rotate_keep = 5
+
+# ---------------------------------------------------------------------------
+# Admin: TLS-terminated listener (merged Beta, #336) + RBAC (opt-in, Phase 3)
+# with three named principals covering the predefined role ladder.
+# ---------------------------------------------------------------------------
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+console = true
+
+  [admin.tls]
+  enabled = true
+  cert = "testdata/tls/localhost.crt"
+  key = "testdata/tls/localhost.key"
+  min_version = "1.2"
+
+  [admin.rbac]
+  enabled = true
+
+  [[admin.rbac.principals]]
+  name  = "burnin-viewer"
+  role  = "viewer"
+  token = "burnin-viewer-token-please-rotate-me-0001"
+
+  [[admin.rbac.principals]]
+  name  = "burnin-operator"
+  role  = "operator"
+  token = "burnin-operator-token-please-rotate-me-0001"
+
+  [[admin.rbac.principals]]
+  name  = "burnin-admin"
+  role  = "admin"
+  token = "burnin-admin-token-please-rotate-me-00001"
+
+# ---------------------------------------------------------------------------
+# Egress allow-list (opt-in hardening, never soaked before): constrains the
+# server's own auxiliary fetches. DNS discovery below resolves "localhost",
+# which this policy must explicitly permit.
+# ---------------------------------------------------------------------------
+[egress]
+enabled = true
+allow = ["127.0.0.1/32", "::1/128", "localhost"]
+
+[waf]
+enabled = true
+crs_enabled = true
+mode = "block"
+block_status = 403
+paranoia = 1
+request_body_limit = "128kb"
+response_body_check = false
+
+# ---------------------------------------------------------------------------
+# Plugin: reuses the committed testdata WASM module (no build step needed).
+# ---------------------------------------------------------------------------
+[plugins.header-inject]
+path = "testdata/plugins/header-inject.wasm"
+type = "middleware"
+config = { header = "X-Plugin", value = "burnin-current" }
+
+# ---------------------------------------------------------------------------
+# Resilience pools (ADR 0017): bounded admission below offered load so the
+# queue is exercised continuously, plus the unlimited compatibility path.
+# ---------------------------------------------------------------------------
+[[upstreams]]
+name = "bounded"
+strategy = "least_conn"
+servers = [
+  { address = "127.0.0.1:8081", weight = 1 },
+  { address = "127.0.0.1:8082", weight = 1 },
+]
+max_fails = 3
+fail_timeout = "10s"
+
+  [upstreams.resilience]
+  max_active_requests         = 32
+  max_active_per_backend      = 24
+  max_pending_requests        = 64
+  pending_timeout             = "2s"
+  max_connections_per_backend = 16
+
+[[upstreams]]
+name = "unlimited"
+strategy = "round_robin"
+servers = [
+  { address = "127.0.0.1:8081", weight = 1 },
+  { address = "127.0.0.1:8082", weight = 1 },
+]
+max_fails = 3
+
+# HTTP-over-Unix-domain-socket upstream (#407, merged Beta).
+[[upstreams]]
+name = "unix_backend"
+servers = ["unix:/tmp/jul-burnin-current.sock"]
+
+# DNS service discovery (GA, but never previously exercised alongside the
+# rest of the post-RC surface in one soak): resolves "localhost" live, no
+# reload, and keeps the last-good backend set on a failed/empty resolve.
+[[upstreams]]
+name = "discovered"
+strategy = "round_robin"
+  [upstreams.discovery]
+  type = "dns"
+  target = "localhost:8082"
+  refresh = "15s"
+
+# One backend_tls-trusting pool (ADR 0016, merged Beta): private CA, verified
+# server name. See the file header note on why this is intentionally the only
+# backend_tls exercise here.
+[[upstreams]]
+name = "secure"
+servers = ["127.0.0.1:8444"]
+
+  [upstreams.backend_tls]
+  ca_file     = "testdata/tls/localhost.crt"
+  ca_mode     = "file_only"
+  server_name = "localhost"
+
+# L4 TCP pool for the [[stream]] listener below.
+[[upstreams]]
+name = "l4_pool"
+strategy = "round_robin"
+servers = [{ address = "127.0.0.1:55432", weight = 1 }]
+max_fails = 1
+
+  [upstreams.resilience]
+  max_active_requests = 64
+
+# ---------------------------------------------------------------------------
+# Main HTTP listener: trusted client identity, routing predicates,
+# response-header policy and CORS (all merged Beta, ADR 0016/0018).
+# ---------------------------------------------------------------------------
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["example.com"]
+
+  [servers.client_address]
+  trusted_proxies   = ["127.0.0.1/32", "::1/128"]
+  forwarded_headers = ["x-forwarded-for"]
+  max_hops          = 4
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/bounded/" }
+  proxy_pass = "http://bounded"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/unlimited/" }
+  proxy_pass = "http://unlimited"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/unix/" }
+  proxy_pass = "http://unix_backend"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/discovered/" }
+  proxy_pass = "http://discovered"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/secure/" }
+  proxy_pass = "https://secure"
+
+  # Method/header/query predicates, response-header operations and CORS, all
+  # on one route (ADR 0018): only a GET or POST carrying X-Tenant: public and
+  # ?version=v2 is a candidate; every response gets a deterministic
+  # add/set/remove header rewrite plus a CORS grant for one allowed origin.
+  [[servers.locations]]
+  proxy_pass = "http://bounded"
+
+    [servers.locations.match]
+    type = "prefix"
+    path = "/predicates/"
+    methods = ["GET", "POST"]
+
+    [[servers.locations.match.headers]]
+    name  = "X-Tenant"
+    op    = "exact"
+    value = "public"
+
+    [[servers.locations.match.query]]
+    name  = "version"
+    op    = "exact"
+    value = "v2"
+
+    [[servers.locations.response_headers]]
+    op    = "set"
+    name  = "X-Frame-Options"
+    value = "DENY"
+
+    [[servers.locations.response_headers]]
+    op    = "remove"
+    name  = "X-Powered-By"
+
+    [servers.locations.cors]
+    enabled           = true
+    allowed_origins   = ["https://app.burnin.test"]
+    allowed_methods   = ["GET", "POST"]
+    allowed_headers   = ["Content-Type", "X-Tenant"]
+    exposed_headers   = ["X-Request-Id"]
+    max_age           = "10m"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/plugin/" }
+  proxy_pass = "http://bounded"
+  plugins = ["header-inject"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 204
+
+# ---------------------------------------------------------------------------
+# L4 TCP stream with admission (ADR 0017, merged Beta).
+# ---------------------------------------------------------------------------
+[[stream]]
+listen = "127.0.0.1:15432"
+proxy_pass = "l4_pool"
+connect_timeout = "5s"
+idle_timeout = "1h"
