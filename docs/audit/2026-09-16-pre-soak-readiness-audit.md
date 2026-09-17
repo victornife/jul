@@ -15,6 +15,29 @@
 
 ---
 
+> ## Implementation status update — 2026-09-17
+>
+> All P0 items (BL-01…BL-07) plus P1/P2/P3 items BL-08, BL-09, BL-10, BL-13, BL-16,
+> BL-24, BL-25 and BL-26 from §18's reconciled backlog are closed via **PR #416**
+> (merged `03fda9f8`), following the sequencing this audit recommended. Each item
+> was verified with real tests/builds (live server + curl/python-socket testing,
+> `jul check`, full-tag build/test, `make ci-pr`, `make generated-check`,
+> `python3 scripts/docs-check.py`) rather than by inspection alone — see the
+> **Status update** notes on the individual findings in §18 for what changed and
+> what, if anything, remains open per item (BL-05/JUL-AUD-019 and BL-09/JUL-AUD-008
+> each have a residual noted inline). Every named **soak blocker** is now cleared;
+> this audit's own "ready to start final soak, after specific prerequisites"
+> verdict (§1, [Final decision summary](#final-decision-summary)) should now read
+> as **prerequisites met**, pending the actual soak run itself (still open, tracked
+> on #287/#144/#409) and the still-open backlog items below P0/BL-08..BL-26
+> (BL-11/12/14/15/17-23/27-30), which this update round did not touch.
+>
+> This document itself is **not rewritten retrospectively** — the analysis, evidence
+> and severity ratings below are preserved exactly as authored on 2026-09-16. Only
+> explicit "Status update" annotations were added.
+
+---
+
 ## Table of contents
 
 - [0. Audit basis and coverage](#0-audit-basis-and-coverage)
@@ -1049,6 +1072,9 @@ amplification number as the proof point.
 - **Acceptance criteria:** `jul check -config burn-in-full.toml` exits 0 with the full-tag
   binary; a CI job asserts it.
 - **Effort:** S · **Dependencies:** none · **Tracking status:** new · **Existing issue:** none
+- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-01). The three orphaned
+  `[servers.locations.*]` tables were converted to `[[servers.locations]]` entries;
+  `jul check -config burn-in-full.toml` exits 0.
 
 ### JUL-AUD-002 — No gate validates shipped configuration examples against the parser
 
@@ -1071,6 +1097,10 @@ amplification number as the proof point.
 - **Acceptance criteria:** CI fails on any config that no longer loads; adding an
   unvalidatable config requires an explicit allow-list entry with a reason.
 - **Effort:** S · **Dependencies:** JUL-AUD-001 · **Tracking status:** new
+- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-02). `scripts/config-check.sh` plus
+  a `make config-check` target and CI job validate every root/`examples/**` `.toml` via
+  `jul check`, with placeholder env vars for the env-dependent profiles; verified to fail on an
+  injected defect.
 
 ### JUL-AUD-003 — Published reproduction for the outstanding 24h resilience soak cannot run
 
@@ -1094,6 +1124,10 @@ amplification number as the proof point.
   `docs/soak-procedures.md` executes successfully at a trivial duration in CI.
 - **Effort:** S · **Dependencies:** none · **Tracking status:** closed-with-residual (#287's
   acceptance item) · **Existing issue:** #287
+- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-03). The stale script/flag names
+  in `docs/soak-evidence.md` and three `burn-in-*.toml` profiles were fixed; a new
+  `scripts/soak-repro-smoke.sh` plus `make soak-repro-smoke` CI job runs the real reproduction
+  end-to-end at trivial duration, catching doc/harness drift in CI going forward.
 
 ### JUL-AUD-004 — Burn-in harness covers no capability merged since the release candidate
 
@@ -1129,6 +1163,12 @@ amplification number as the proof point.
   but incomplete — #287 and #144 each name a soak but neither scopes the consolidated post-RC
   profile; #409 names certification scenarios without naming the harness · **Existing
   issues:** #287, #144, #409
+- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-05). `burn-in-current.toml` plus six
+  new `burn-in-load.go` modes (`-current`, `-rbac`, `-apply-churn`, `-slow-client`,
+  `-slow-upstream`, `-fault`) now exercise RBAC, `[egress]`, `client_address`, `backend_tls`,
+  HTTP-over-Unix upstreams, DNS discovery, predicates/response-header policy/CORS, admin TLS
+  and stream — every merged-Beta capability the finding named. All manually verified live
+  end-to-end. #287/#144/#409 remain the issue-level trackers for the eventual soak run itself.
 
 ### JUL-AUD-005 — Cache occupancy is not observable at runtime
 
@@ -1155,6 +1195,11 @@ amplification number as the proof point.
 - **Acceptance criteria:** A running `jul` with a populated cache reports non-zero
   `jul_cache_bytes` for both tiers, and the values track the in-test helper within tolerance.
 - **Effort:** M · **Dependencies:** none · **Tracking status:** new
+- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-04). `jul_cache_bytes`,
+  `jul_cache_max_bytes`, `jul_cache_entries` and `jul_cache_evictions_total`, labeled by tier,
+  are now scraped from a live process; verified against a real running `jul` with a populated
+  cache, and unit-tested directly (`internal/cache/stats_test.go`,
+  `internal/app/cache_stats_test.go`).
 
 ### JUL-AUD-006 — Soak procedure document does not describe the procedure that produces the evidence
 
@@ -1181,6 +1226,11 @@ amplification number as the proof point.
   start-to-finish from this one document.
 - **Effort:** M · **Dependencies:** JUL-AUD-003, JUL-AUD-004, JUL-AUD-005, JUL-AUD-018 ·
   **Tracking status:** new
+- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-07). `docs/soak-procedures.md` was
+  fully rewritten Linux-first against the real `burn-in-*.toml`/`scripts/burn-in-*.go` harness,
+  with Procedures 0/A/B/C plus entry/exit criteria. Dry-running the doc verbatim caught and
+  fixed a real path-mismatch bug in the Unix-socket upstream example before it could waste time
+  during an actual 24-hour attempt.
 
 ### JUL-AUD-007 — `ga-push.md` declares the soak gate closed for the entire feature set
 
@@ -1204,6 +1254,10 @@ amplification number as the proof point.
 - **Acceptance criteria:** No document other than `status.md`/`feature-status.yaml` makes an
   unqualified present-tense GA or soak-closure claim; `docs-check.py` asserts it.
 - **Effort:** S · **Dependencies:** none · **Tracking status:** new
+- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-08). `docs/ga-push.md` now carries a
+  historical-scope banner pointing to `status.md`/`feature-status.yaml`/`known-limitations.md`
+  for current state, and its closing claim is scoped to "this Wave-1 push's 20 features" rather
+  than the whole feature set.
 
 ### JUL-AUD-008 — 627 unreleased commits since the last tag; last stable release two months old
 
@@ -1229,6 +1283,11 @@ amplification number as the proof point.
 - **Acceptance criteria:** The final soak's build SHA corresponds to a published prerelease tag
   with SBOM, provenance and checksums.
 - **Effort:** M · **Dependencies:** JUL-AUD-009 · **Tracking status:** new
+- **Status update (2026-09-17):** ⚠️ Partially addressed via PR #416 (BL-09). `[Unreleased]`
+  is consolidated (see JUL-AUD-009). **The maintainer has since set the target release to
+  v2.0.0, not v1.33.0** — a placeholder note to that effect is in `CHANGELOG.md`. No prerelease
+  tag has been cut yet and no soak has been run against a tagged build; that half of this
+  finding remains open.
 
 ### JUL-AUD-009 — `CHANGELOG [Unreleased]` has 23 interleaved subsections
 
@@ -1245,6 +1304,11 @@ amplification number as the proof point.
   first step of JUL-AUD-008. Add a `docs-check.py` assertion that `[Unreleased]` contains at
   most one heading per category.
 - **Effort:** M · **Tracking status:** new
+- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-09). The 23 interleaved subsections
+  were merged into exactly one `### Added`/`### Changed`/`### Fixed`/`### Security` each, in
+  canonical Keep-a-Changelog order — verified byte-identical (sorted-diff of all 238 bullets,
+  empty diff). `check_changelog_unreleased_categories()` was added to `scripts/docs-check.py`
+  and verified to fail on an injected duplicate heading.
 
 ### JUL-AUD-010 — Console coverage floor lowered to the measured baseline (58%)
 
@@ -1277,7 +1341,7 @@ amplification number as the proof point.
 - **Area:** `internal/signals`
 - **Evidence:** `internal/signals/` contains `signals.go` (54), `signals_unix.go` (21),
   `signals_windows.go` (22) — 97 LOC, zero `_test.go`. It is the only package in the tree with
-  no tests. Noted as a risk in `docs/audit/2026-07-31-full-repository-audit.md` and still open.
+  no tests. Noted as a risk in `docs/audit/old/2026-07-31-full-repository-audit.md` and still open.
 - **Fact:** SIGHUP-reload and SIGTERM-shutdown dispatch is untested, on both platform variants.
 - **Inference:** Low defect probability (97 LOC of straightforward `signal.Notify` wiring), but
   it is the entry point to the two lifecycle operations the soak most depends on.
@@ -1288,6 +1352,11 @@ amplification number as the proof point.
   and SIGTERM graceful shutdown as explicit soak steps.
 - **Effort:** S · **Tracking status:** closed-with-residual (2026-07-31 audit) · **Existing
   issue:** none current
+- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-10). `internal/signals/signals_test.go`
+  adds 6 tests covering shutdown-signal delivery, reload-signal delivery, a reload-burst
+  non-blocking-send proof, `stop()` semantics, and parent-context-cancellation propagation with a
+  goroutine-leak check; verified stable across 5x `-race` runs. `internal/signals` is no longer
+  the only untested package in the tree.
 
 ### JUL-AUD-012 — No external protocol conformance or interoperability evidence
 
@@ -1328,6 +1397,10 @@ amplification number as the proof point.
 - **Recommendation:** Update Stage 8's snapshot column. Add a `docs-check.py` assertion
   cross-referencing roadmap stage snapshots against `feature-status.yaml` delivery states.
 - **Effort:** S · **Tracking status:** new
+- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-13). Stage 8's snapshot cell was
+  corrected to reflect that assessment/provenance/includes, `jul doctor` and support bundles
+  are merged. `check_roadmap_stage_reconciliation()` was added to `scripts/docs-check.py` and
+  verified to fire on the exact original regression text via injection/restore.
 
 ### JUL-AUD-014 — Console maturity badges are hardcoded, not derived from `feature-status.yaml`
 
@@ -1385,6 +1458,9 @@ amplification number as the proof point.
 - **Recommendation:** Add `make test-race` mirroring the CI invocation; reference it in
   `CONTRIBUTING.md` as required before touching `app`/`server`/`admin`/`upstream`.
 - **Effort:** S · **Tracking status:** new
+- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-16). `make test-race` exists
+  (`go test -race -p 2 -tags "$(FULL_TAGS)" ./...`), and `CONTRIBUTING.md` now recommends it
+  before touching `internal/app`/`internal/server`/`internal/admin`/`internal/upstream`.
 
 ### JUL-AUD-018 — No evidence-retention contract for the soak
 
@@ -1405,6 +1481,10 @@ amplification number as the proof point.
   conclusion. Codify it in `docs/soak-procedures.md`; assert the manifest fields in
   `docs-check.py`.
 - **Effort:** S–M · **Dependencies:** JUL-AUD-006 · **Tracking status:** new
+- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-06). `soak-artifacts/README.md`,
+  `MANIFEST.template.md` and `scripts/soak-manifest-init.sh` (`make soak-manifest-init
+  SCOPE=<x>`) establish the dated-directory-plus-manifest convention, pre-filled with build
+  SHA, dirty flag, go version, host uname and `jul capabilities -json`; verified end-to-end.
 
 ### JUL-AUD-019 — Fault injection is absent from the burn-in tooling
 
@@ -1421,52 +1501,65 @@ amplification number as the proof point.
   checklist for DNS failure, FD limit reduction, disk-full and cgroup CPU/memory constraint.
 - **Effort:** M · **Dependencies:** JUL-AUD-004 · **Tracking status:** tracked but incomplete ·
   **Existing issue:** #287
+- **Status update (2026-09-17):** ⚠️ Substantially addressed via PR #416 (BL-05).
+  `scripts/burn-in-backend.go` gained `/…/slow?ms=N` (injected latency) and `/…/flaky?rate=N`
+  (5xx storms) endpoints, driven by `burn-in-load.go`'s new `-slow-upstream` and `-fault`
+  modes; verified live. Scheduled kill/restore, mid-body connection reset, malformed responses,
+  and the host-level DNS/FD/disk/cgroup checklist remain unimplemented — this finding is not
+  fully closed.
 
 ## P0 — Immediate (pre-soak, sequential)
 
-| ID | Findings | Title | Area | Sev | Soak | Effort | Deps | Acceptance | Owner | Tracking |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| BL-01 | JUL-AUD-001 | Repair `burn-in-full.toml` location syntax | soak assets | High | Blocks | S | — | `jul check` exit 0 | Maintainer | new |
-| BL-02 | JUL-AUD-002 | `make config-check` + CI job over all shipped `.toml` | CI | Med | Blocks | S | BL-01 | CI fails on any unloadable config | Release eng | new |
-| BL-03 | JUL-AUD-003 | Fix the published soak repro command + CI smoke of doc commands | docs/scripts | Med | Blocks | S | — | Every doc command runs at `-duration 2s` | Maintainer | #287 residual |
-| BL-04 | JUL-AUD-005 | Export cache occupancy metrics | observability | Med | Blocks | M | — | `jul_cache_bytes{tier}` non-zero on a live process | Backend | new |
-| BL-05 | JUL-AUD-004, 019 | `burn-in-current.toml` + load modes (`-apply-churn`, `-slow-client`, `-slow-upstream`, `-fault`, `-rbac`) | soak harness | High | Blocks | L | BL-01, BL-04 | §16 workload matrix fully exercised | Maintainer + QA | #287/#144/#409 incomplete |
-| BL-06 | JUL-AUD-018 | Evidence-retention convention + `MANIFEST.md` | process | Med | Blocks | S–M | — | Manifest fields asserted by docs-check | Release eng | new |
-| BL-07 | JUL-AUD-006 | Rewrite `docs/soak-procedures.md` (Linux-first, real harness) | docs | Med | Blocks | M | BL-03..BL-06 | A newcomer can run the soak from this doc alone | Docs lead | new |
+> **Status update (2026-09-17):** all seven P0 items below are closed or substantially
+> closed via PR #416 (merged `03fda9f8`), with real end-to-end verification (live server +
+> curl/python-socket testing, `jul check`, full-tag build/test, `make ci-pr`). BL-05 closes
+> most of JUL-AUD-004/019's scope but the kill/restore, connection-reset and malformed-response
+> fault modes remain open (see JUL-AUD-019's status update). Every other soak blocker this
+> audit identified is now cleared.
+
+| ID | Findings | Title | Area | Sev | Soak | Effort | Deps | Acceptance | Owner | Tracking | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| BL-01 | JUL-AUD-001 | Repair `burn-in-full.toml` location syntax | soak assets | High | Blocks | S | — | `jul check` exit 0 | Maintainer | new | ✅ Closed — PR #416 |
+| BL-02 | JUL-AUD-002 | `make config-check` + CI job over all shipped `.toml` | CI | Med | Blocks | S | BL-01 | CI fails on any unloadable config | Release eng | new | ✅ Closed — PR #416 |
+| BL-03 | JUL-AUD-003 | Fix the published soak repro command + CI smoke of doc commands | docs/scripts | Med | Blocks | S | — | Every doc command runs at `-duration 2s` | Maintainer | #287 residual | ✅ Closed — PR #416 |
+| BL-04 | JUL-AUD-005 | Export cache occupancy metrics | observability | Med | Blocks | M | — | `jul_cache_bytes{tier}` non-zero on a live process | Backend | new | ✅ Closed — PR #416 |
+| BL-05 | JUL-AUD-004, 019 | `burn-in-current.toml` + load modes (`-apply-churn`, `-slow-client`, `-slow-upstream`, `-fault`, `-rbac`) | soak harness | High | Blocks | L | BL-01, BL-04 | §16 workload matrix fully exercised | Maintainer + QA | #287/#144/#409 incomplete | ⚠️ Substantially closed — PR #416; JUL-AUD-019's kill/restore, connection-reset and malformed-response modes still open |
+| BL-06 | JUL-AUD-018 | Evidence-retention convention + `MANIFEST.md` | process | Med | Blocks | S–M | — | Manifest fields asserted by docs-check | Release eng | new | ✅ Closed — PR #416 |
+| BL-07 | JUL-AUD-006 | Rewrite `docs/soak-procedures.md` (Linux-first, real harness) | docs | Med | Blocks | M | BL-03..BL-06 | A newcomer can run the soak from this doc alone | Docs lead | new | ✅ Closed — PR #416 |
 
 ## P1 — Pre-soak / next-release critical (parallel)
 
-| ID | Findings | Title | Sev | Soak | Effort | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| BL-08 | JUL-AUD-007 | Scope or historicize `ga-push.md`'s soak-closure claim | Med | Non-blocking | S | Highest trust-per-hour item in the audit |
-| BL-09 | JUL-AUD-008, 009 | Consolidate `[Unreleased]`; cut `v1.33.0-rc.1` and soak **that tag** | High | Post-soak gate | M | Changes what the soak is run against |
-| BL-10 | JUL-AUD-011 | Tests for `internal/signals`; SIGHUP/SIGTERM as explicit soak steps | Med | Validate during | S | |
-| BL-11 | JUL-AUD-010 | Path-scoped Console coverage floors (config/history/client ≥80%) | Med | Post-soak gate | L | |
+| ID | Findings | Title | Sev | Soak | Effort | Notes | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| BL-08 | JUL-AUD-007 | Scope or historicize `ga-push.md`'s soak-closure claim | Med | Non-blocking | S | Highest trust-per-hour item in the audit | ✅ Closed — PR #416 |
+| BL-09 | JUL-AUD-008, 009 | Consolidate `[Unreleased]`; cut `v1.33.0-rc.1` and soak **that tag** | High | Post-soak gate | M | Changes what the soak is run against | ✅ `[Unreleased]` consolidated — PR #416. **The target release was set by the maintainer to v2.0.0, not v1.33.0**; no tag has been cut yet, so the "soak that tag" half of this item remains open |
+| BL-10 | JUL-AUD-011 | Tests for `internal/signals`; SIGHUP/SIGTERM as explicit soak steps | Med | Validate during | S | | ✅ Closed — PR #416 |
+| BL-11 | JUL-AUD-010 | Path-scoped Console coverage floors (config/history/client ≥80%) | Med | Post-soak gate | L | | Open |
 
 ## P2 — Near term
 
-| ID | Findings | Title | Effort |
-| --- | --- | --- | --- |
-| BL-12 | JUL-AUD-012 | Conformance lane (h2spec + Autobahn + ambiguous-framing differential corpus); reword `core-http.md:614` | L |
-| BL-13 | JUL-AUD-013 | Reconcile roadmap Stage 8; add roadmap↔feature-status assertion to docs-check | S |
-| BL-14 | JUL-AUD-014 | Generate Console maturity map from `feature-status.yaml` | M |
-| BL-15 | JUL-AUD-016 | Decide and document benchmark regression policy | M |
-| BL-16 | JUL-AUD-017 | `make test-race` + CONTRIBUTING note | S |
-| BL-17 | — | Publish JSON Schema for CLI `--json` outputs | M |
-| BL-18 | — | Promote discovery (Consul/Kubernetes) from nightly/manual to a blocking lane | M |
+| ID | Findings | Title | Effort | Status |
+| --- | --- | --- | --- | --- |
+| BL-12 | JUL-AUD-012 | Conformance lane (h2spec + Autobahn + ambiguous-framing differential corpus); reword `core-http.md:614` | L | Open |
+| BL-13 | JUL-AUD-013 | Reconcile roadmap Stage 8; add roadmap↔feature-status assertion to docs-check | S | ✅ Closed — PR #416 |
+| BL-14 | JUL-AUD-014 | Generate Console maturity map from `feature-status.yaml` | M | Open |
+| BL-15 | JUL-AUD-016 | Decide and document benchmark regression policy | M | Open |
+| BL-16 | JUL-AUD-017 | `make test-race` + CONTRIBUTING note | S | ✅ Closed — PR #416 |
+| BL-17 | — | Publish JSON Schema for CLI `--json` outputs | M | Open |
+| BL-18 | — | Promote discovery (Consul/Kubernetes) from nightly/manual to a blocking lane | M | Open |
 
 ## P3 — Medium term
 
-| ID | Findings | Title | Area | Effort | Dependencies | Acceptance criteria |
-| --- | --- | --- | --- | --- | --- | --- |
-| BL-19 | — | Backup/restore + disaster-recovery runbook | docs/ops | M | — | A documented, tested procedure restores a node from scratch: config + history + ACME cache + RBAC token store + cache disk tier |
-| BL-20 | — | Incident-indexed operational runbooks | docs/ops | M | BL-19 | `troubleshooting.md` is symptom-indexed today; add "upstream pool down", "reload stuck", "cert expiry", "admin locked out", "disk full" entries |
-| BL-21 | — | Packaged distributions (deb/rpm/brew/winget); make `full` the default download | release eng | L | JUL-AUD-008 | `apt install jul` works; the README's first install instruction yields a binary with all optional tags |
-| BL-22 | JUL-AUD-015 | Extract `internal/app/config_apply.go` along existing seams — **post-GA only** | `internal/app` | L | GA declared | Gate sequence, persistence/marker interaction, finalization/ledger and restore separable and independently testable; no behaviour change |
-| BL-23 | — | Console interactive token creation/revocation (currently `preview`) | `internal/admin/ui` | M | BL-11 | `MaturityBadge` for the panel moves off `preview`; RBAC token lifecycle operable without editing TOML |
-| BL-24 | — | `[admin] pprof = false` switch | `internal/admin` | S | — | pprof mount is config-gated; default documented in `deployment.md` |
-| BL-25 | — | Record the "no config schema version field" decision explicitly | `docs/compatibility.md` | S | — | §14's open question is a stated decision rather than an omission |
-| BL-26 | — | One line in `docs/configuration.md` on CWD-relative path resolution | docs | S | — | Behaviour that bit the audit's own validation sweep is documented |
+| ID | Findings | Title | Area | Effort | Dependencies | Acceptance criteria | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| BL-19 | — | Backup/restore + disaster-recovery runbook | docs/ops | M | — | A documented, tested procedure restores a node from scratch: config + history + ACME cache + RBAC token store + cache disk tier | Open |
+| BL-20 | — | Incident-indexed operational runbooks | docs/ops | M | BL-19 | `troubleshooting.md` is symptom-indexed today; add "upstream pool down", "reload stuck", "cert expiry", "admin locked out", "disk full" entries | Open |
+| BL-21 | — | Packaged distributions (deb/rpm/brew/winget); make `full` the default download | release eng | L | JUL-AUD-008 | `apt install jul` works; the README's first install instruction yields a binary with all optional tags | Open |
+| BL-22 | JUL-AUD-015 | Extract `internal/app/config_apply.go` along existing seams — **post-GA only** | `internal/app` | L | GA declared | Gate sequence, persistence/marker interaction, finalization/ledger and restore separable and independently testable; no behaviour change | Open |
+| BL-23 | — | Console interactive token creation/revocation (currently `preview`) | `internal/admin/ui` | M | BL-11 | `MaturityBadge` for the panel moves off `preview`; RBAC token lifecycle operable without editing TOML | Open |
+| BL-24 | — | `[admin] pprof = false` switch | `internal/admin` | S | — | pprof mount is config-gated; default documented in `deployment.md` | ✅ Closed — PR #416 |
+| BL-25 | — | Record the "no config schema version field" decision explicitly | `docs/compatibility.md` | S | — | §14's open question is a stated decision rather than an omission | ✅ Closed — PR #416 |
+| BL-26 | — | One line in `docs/configuration.md` on CWD-relative path resolution | docs | S | — | Behaviour that bit the audit's own validation sweep is documented | ✅ Closed — PR #416 |
 
 ## Strategic / demand-gated
 

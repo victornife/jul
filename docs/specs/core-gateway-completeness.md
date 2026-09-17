@@ -599,7 +599,7 @@ acceptable final outcome.
 | AI experiment | experiment governance | #113, #162 |
 
 See [operating-model.md](../operating-model.md), the
-[combined audit](../audit/combined-audit-2026-08-03.md) and #62.
+[combined audit](../audit/old/combined-audit-2026-08-03.md) and #62.
 
 ## Unix HTTP completeness follow-up (#407)
 

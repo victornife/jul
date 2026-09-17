@@ -5,7 +5,7 @@
 - **Deciders:** Jul.IA maintainer
 - **Applies to:** roadmap entry, issue classification, implementation sequencing, experiments, and programme closure
 - **Supersedes/amends:** the demand-only interpretation of [ADR 0003](0003-maturity-and-ga.md)
-- **Related:** [operating model](../operating-model.md), [Core Gateway Completeness](../specs/core-gateway-completeness.md), [combined audit](../audit/combined-audit-2026-08-03.md), #62
+- **Related:** [operating model](../operating-model.md), [Core Gateway Completeness](../specs/core-gateway-completeness.md), [combined audit](../audit/old/combined-audit-2026-08-03.md), #62
 
 > **Document roles:** ADR 0013 decides how work enters the portfolio; ADR 0014 decides the required operator/developer surfaces; `docs/operating-model.md` defines execution discipline; `docs/specs/core-gateway-completeness.md` defines the bounded product; the roadmap and #62 own current order and status.
 

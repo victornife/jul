@@ -8,11 +8,20 @@ live issue tracker.
 
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
-| [2026-08-31 NGINX migration corpus closure](audit/2026-08-31-nginx-migration-corpus-closure.md) | PR #352 merge `ec098502` plus the #154 closure tranche | Current bounded migration-corpus and selected-dimension E2E evidence | Closure contract; exact-head CI and merge are recorded on #154 and its closure PR |
-| [2026-08-07 response-cache recertification](audit/2026-08-07-cache-recertification.md) | Post-#131/#132/#133 cache tree | Current cache conformance and retained-GA evidence | Complete; #107/#134 closed |
-| [2026-08-03 combined repository re-audit](audit/combined-audit-2026-08-03.md) | `66c71b2c...` | Dated programme-opening audit and historical finding source | Superseded for current issue state by #62 and later implementation evidence; not rewritten retrospectively |
-| [Stage 0/1 programme closure](audit/2026-08-05-stage-0-1-programme-closure.md) | `0de8541e...` | Exact-SHA programme-foundation disposition | Complete, with residuals transferred explicitly |
-| [2026-07-31 full repository audit](audit/2026-07-31-full-repository-audit.md) | `e8865615` plus recorded remediations | Historical audit and remediation evidence | Maintainer-certified and superseded under #130; no independent two-human certification claimed |
+| [2026-09-16 pre-soak readiness audit](audit/2026-09-16-pre-soak-readiness-audit.md) | `b1e2dfc5` plus PR #416 | Current pre-soak readiness audit and reconciled backlog (BL-01..BL-30) | P0 items BL-01..BL-07 and P1 items BL-08..BL-10/BL-13/BL-16/BL-24..BL-26 closed via PR #416 (merged `03fda9f8`); remaining backlog items open, tracked in the doc's own backlog table |
+
+## Archived records
+
+Superseded or fully closed audits, preserved as historical evidence under
+[`audit/old/`](audit/old/):
+
+| Record | Source baseline | Current role | Disposition |
+| --- | --- | --- | --- |
+| [2026-08-31 NGINX migration corpus closure](audit/old/2026-08-31-nginx-migration-corpus-closure.md) | PR #352 merge `ec098502` plus the #154 closure tranche | Bounded migration-corpus and selected-dimension E2E evidence at the time | Closure contract; exact-head CI and merge are recorded on #154 and its closure PR |
+| [2026-08-07 response-cache recertification](audit/old/2026-08-07-cache-recertification.md) | Post-#131/#132/#133 cache tree | Cache conformance and retained-GA evidence at the time | Complete; #107/#134 closed |
+| [2026-08-03 combined repository re-audit](audit/old/combined-audit-2026-08-03.md) | `66c71b2c...` | Dated programme-opening audit and historical finding source | Superseded for current issue state by #62 and later implementation evidence; not rewritten retrospectively |
+| [Stage 0/1 programme closure](audit/old/2026-08-05-stage-0-1-programme-closure.md) | `0de8541e...` | Exact-SHA programme-foundation disposition | Complete, with residuals transferred explicitly |
+| [2026-07-31 full repository audit](audit/old/2026-07-31-full-repository-audit.md) | `e8865615` plus recorded remediations | Historical audit and remediation evidence | Maintainer-certified and superseded under #130; no independent two-human certification claimed |
 
 ## Current programme disposition
 

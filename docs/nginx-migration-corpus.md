@@ -32,7 +32,7 @@ reviewed NGINX-side expectation is not represented as a captured process result,
 match its separately declared expectation exactly.
 
 The final acceptance record is
-[NGINX migration corpus closure](audit/2026-08-31-nginx-migration-corpus-closure.md).
+[NGINX migration corpus closure](audit/old/2026-08-31-nginx-migration-corpus-closure.md).
 
 ## Corpus admission policy
 

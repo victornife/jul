@@ -19,7 +19,7 @@
 > tagged release pending*, and the Phase 2/3 configuration write/apply/reload subsystem is
 > *remediated; formal audit closure pending* (exact-SHA CI + two sign-offs) — see the
 > [reopened configuration-audit report](../audit/old/2026-07-25-configuration-audit-closure.md)
-> and the [2026-07-31 repository audit](../audit/2026-07-31-full-repository-audit.md). One
+> and the [2026-07-31 repository audit](../audit/old/2026-07-31-full-repository-audit.md). One
 > Phase 3 item stays **deferred**: interactive RBAC token management (mint/revoke from the
 > Console/API), now surfaced in the Console as **Preview**. **Phase 5** is next; Phases 6–7
 > stay evidence-gated. The canonical, continuously-updated status lives in

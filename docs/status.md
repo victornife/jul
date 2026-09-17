@@ -14,7 +14,7 @@ it stands against the nine-criteria GA bar ([ADR 0003](adr/0003-maturity-and-ga.
 > [`feature-status.yaml`](feature-status.yaml). Volatile issue sequencing lives
 > in [#62](https://github.com/victornife/jul/issues/62), and dated audit
 > disposition lives in the [audit register](audit-register.md). The
-> [2026-08-03 combined audit](audit/combined-audit-2026-08-03.md) remains a
+> [2026-08-03 combined audit](audit/old/combined-audit-2026-08-03.md) remains a
 > preserved programme-opening baseline, not a second current-status source.
 
 **Keep this current.** When a feature's maturity or any GA criterion changes,

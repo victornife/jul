@@ -269,7 +269,7 @@ Fixtures can be supported, approximated, ignored, blocking, or equivalent only
 for their asserted dimensions. Corpus admission rejects proprietary/user source,
 private-key material, unsafe request headers, non-loopback replay, symlinks, and
 unbounded files. See the corpus guide and the
-[closure record](audit/2026-08-31-nginx-migration-corpus-closure.md) for the
+[closure record](audit/old/2026-08-31-nginx-migration-corpus-closure.md) for the
 category matrix, image isolation, protocol decisions, commands, and rollback
 boundary.
 
