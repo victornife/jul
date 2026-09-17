@@ -15,7 +15,7 @@ commitment to implement every unsupported directive.
 ## Final inventory
 
 The committed aggregate report is
-[`testdata/nginx-corpus/inventory.json`](../../testdata/nginx-corpus/inventory.json).
+[`testdata/nginx-corpus/inventory.json`](../../../testdata/nginx-corpus/inventory.json).
 It is generated from strict fixture manifests and the reviewed category matrix,
 not edited by hand.
 
@@ -31,7 +31,7 @@ not edited by hand.
 ## Minimum-category disposition
 
 The machine authority is
-[`testdata/nginx-corpus/coverage.json`](../../testdata/nginx-corpus/coverage.json).
+[`testdata/nginx-corpus/coverage.json`](../../../testdata/nginx-corpus/coverage.json).
 Every minimum category from #154 is represented by executable evidence:
 
 | Category | Primary fixtures | Closure boundary |

@@ -18,7 +18,7 @@ as hypotheses and checked against the merged source and executable tests.
 
 ## Executable evidence
 
-The authoritative row-by-row matrix is in [cache.md](../cache.md#executable-behaviour-matrix).
+The authoritative row-by-row matrix is in [cache.md](../../cache.md#executable-behaviour-matrix).
 It covers keying, methods/statuses, request/response directives, mandatory
 validation, SWR/SIE, Authorization and Set-Cookie, Vary membership/invalidation,
 validators/304, Range, WebSocket/101, SSE/flushing/oversize, two-tier persistence,
@@ -58,7 +58,7 @@ Benchmark command:
 go test -run '^$' -bench='BenchmarkCache.*' -benchmem -benchtime=100x -count=5 ./internal/cache
 ```
 
-Median values and allocation data are recorded in [cache.md](../cache.md#benchmarks).
+Median values and allocation data are recorded in [cache.md](../../cache.md#benchmarks).
 
 Soak command:
 
@@ -69,7 +69,7 @@ SOAK_SCENARIO=cache SOAK_DURATION=30s SOAK_WORKERS=16 scripts/soak.sh
 Result: 422,042 requests, zero errors, all HIT/MISS/STALE/REVALIDATED/BYPASS
 classes observed, 37,884 deliberate origin 5xx responses handled by
 stale-if-error, no stranded call state, bounded memory/disk usage, and decreasing
-goroutine/FD counts. Full numbers are in [soak-evidence.md](../soak-evidence.md#2026-08-07--cache-recertification-correctness-soak-linux-30-seconds-16-workers).
+goroutine/FD counts. Full numbers are in [soak-evidence.md](../../soak-evidence.md#2026-08-07--cache-recertification-correctness-soak-linux-30-seconds-16-workers).
 
 ## Metrics decision
 

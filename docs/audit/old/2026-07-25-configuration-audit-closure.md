@@ -177,5 +177,5 @@ Final residual disposition:
 - cache correctness #107/#131-#134 is the next active programme gate.
 
 See the
-[Stage 0/1 programme closure](../2026-08-05-stage-0-1-programme-closure.md)
+[Stage 0/1 programme closure](2026-08-05-stage-0-1-programme-closure.md)
 and [audit register](../../audit-register.md) for the current relationship.

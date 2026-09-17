@@ -27,7 +27,7 @@ has landed on `main` since; open items carry forward to the backlog in §13.
 | Finding | Status | Commit | Notes |
 |---|---|---|---|
 | **F-01** gofmt / gate integrity | ✅ Resolved | `1f4488d1` + hooks activated | `cmd/jul/capabilities.go` reformatted; `gofmt -l` is clean tree-wide. **Corrected root cause:** the canonical `.githooks/pre-commit` **already** runs `gofmt` and CI already has a `gofmt` job — but this clone ran a stale hand-installed `.git/hooks/pre-commit` (no gofmt) with `core.hooksPath` unset, so the canonical gate never fired. Fixed by activating it (`make hooks`). |
-| **F-02** maturity vocabulary | ✅ Resolved | `1f4488d1` | "Delivery state vs. maturity" table added to [status.md](../status.md) (implemented → merged → released → soaked → audit-closed) and reconciled across roadmap, `CHANGELOG.md`, `feature-status.yaml`, and README. |
+| **F-02** maturity vocabulary | ✅ Resolved | `1f4488d1` | "Delivery state vs. maturity" table added to [status.md](../../status.md) (implemented → merged → released → soaked → audit-closed) and reconciled across roadmap, `CHANGELOG.md`, `feature-status.yaml`, and README. |
 | **F-04** SECURITY.md RBAC drift | ✅ Resolved | `1f4488d1` | RBAC now documented as delivered opt-in `[admin.rbac]` (Phase 3); only interactive token management is future. |
 | **F-05** capabilities under-reports | ✅ Resolved | `73466263` | `jul capabilities` now reports all 13 optional subsystems (verified: lean all-false, full all-true) via tag-gated files, plus a regression test. |
 | **F-06** `lint -strict` exit-code overload | ✅ Resolved (documented) | `73466263` | The global exit-code contract now documents code 2 = usage error **or** `lint -strict` warnings. Behavior is intentionally unchanged: `2 = strict warnings` is documented in configuration.md/getting-started.md/specs, so harmonizing the docs was the proportionate, non-breaking fix. |
@@ -120,7 +120,7 @@ Go (CGO-free), with opt-in build tags for advanced protocols. Composition root i
 (`cmd/jul/main.go` is ~96 LOC and only wires signals + config + `app.Serve`). The top-level config
 tables (`internal/config/schema.go`) are `[global]`, `[[servers]]`, `[[upstreams]]`, `[cache]`,
 `[admin]`, `[compression]`, `[rate_limit]`, `[egress]`, `[observability]`, `[waf]`,
-`[plugins.<name>]`, `[[stream]]` — and [docs/configuration.md](../configuration.md) documents exactly
+`[plugins.<name>]`, `[[stream]]` — and [docs/configuration.md](../../configuration.md) documents exactly
 these.
 
 **Core value proposition.** "Zero-config HTTPS in under a minute, then grow into a serious protocol
@@ -129,7 +129,7 @@ limiting, health checks, gzip, response cache, reload transaction, and the Conso
 adds brotli/zstd, ACME, OTel, gRPC (passthrough + transcode), HTTP/3, importer, WASM plugins, L4
 stream, Consul/Kubernetes discovery, and WAF.
 
-**Target users (from [docs/vision/README.md](../vision/README.md)).** Small-to-medium platform/infra
+**Target users (from [docs/vision/README.md](../../vision/README.md)).** Small-to-medium platform/infra
 teams who want NGINX-class capability with Caddy-class ergonomics on one node. Explicit anti-personas:
 hyperscale CDN operators, service-mesh seekers, teams already standardized on a larger platform.
 
@@ -187,7 +187,7 @@ restart-required changes from the lifecycle registry; history + rollback.
 (0007 composition root — verified `main.go` <100 LOC; 0011 ReloadPlan; 0015 ledger), and the audit
 register (Rounds 9–13) ties each fix to a test. The one architectural smell is scale, not design:
 `internal/admin` is very large (100+ files) and `internal/app` carries a lot of apply/finalize logic
-(~20 test files). These are *decomposed by seam* (per [docs/architecture.md](../architecture.md)) and
+(~20 test files). These are *decomposed by seam* (per [docs/architecture.md](../../architecture.md)) and
 well-tested, so this is "large but governed," not a god package — but it is the area most at risk of
 becoming one.
 
@@ -300,7 +300,7 @@ cross-cutting policies (e.g., future quotas) are added.
 ## 5. Feature maturity review
 
 Coverage figures below are measured this audit (full tags). "Repo label" is the claim in
-[docs/status.md](../status.md)/[feature-status.yaml](../feature-status.yaml).
+[docs/status.md](../../status.md)/[feature-status.yaml](../../feature-status.yaml).
 
 | Feature | Repo label | Evidence (verified) | Auditor verdict |
 |---|---|---|---|
@@ -396,12 +396,12 @@ with a machine-readable manifest; `known-limitations.md`; a per-feature threat-n
 `SECURITY.md`; and a `docs-check.py` gate that passed with **1346 checks**.
 
 **Drift / issues found:**
-- **F-04 (medium):** [SECURITY.md](../../SECURITY.md) admin bullet still says full RBAC "remains a
+- **F-04 (medium):** [SECURITY.md](../../../SECURITY.md) admin bullet still says full RBAC "remains a
   future milestone," but RBAC shipped in Phase 3 as opt-in `[admin.rbac]` (`internal/rbac` +
   `console_rbac_e2e_test`). The accurate statement is "RBAC roles/scoped tokens/audit delivered;
   interactive token management remains future."
-- **F-07 (low):** [docs/ga-push.md](../ga-push.md) header is version 1.32 (2026-07-09) while the
-  canonical [docs/status.md](../status.md) is 1.37 (2026-07-31), though its content is current — a
+- **F-07 (low):** [docs/ga-push.md](../../ga-push.md) header is version 1.32 (2026-07-09) while the
+  canonical [docs/status.md](../../status.md) is 1.37 (2026-07-31), though its content is current — a
   version-stamp lag.
 - **F-02 (see §9):** headline docs use "GA/delivered" uniformly and do not expose the
   implemented/merged/released/soaked/audit-closed distinction.
@@ -423,14 +423,14 @@ that merged-to-`main` ≠ released.
 with matching tests; ADR-0006 (build-time SPA, drift guard) ✅ (build output matched committed
 assets). ADR-0010 (RBAC) is implemented in `internal/rbac`.
 
-**Audit register (Fact, strength).** [docs/audit-register.md](../audit-register.md) tracks Rounds
+**Audit register (Fact, strength).** [docs/audit-register.md](../../audit-register.md) tracks Rounds
 9–13 with fix location → test name → commit → status. Two items are explicitly **deferred**:
 R9-14.4 (never-draining shutdown test) and R9-14.5 (hot-added TLS rotation test).
 
 ### Finding F-02: Maturity vocabulary collapses distinct states into one public word
 - **Severity:** high (product clarity)
 - **Area:** README, docs/status.md, docs/roadmap/README.md, CHANGELOG, feature-status.yaml
-- **Evidence:** [docs/roadmap/README.md](../roadmap/README.md) (v1.37) shows Phase 2 "in progress
+- **Evidence:** [docs/roadmap/README.md](../../roadmap/README.md) (v1.37) shows Phase 2 "in progress
   (remediation pass)" and Phase 3 RBAC "implemented; in security remediation," and Phase 4 egress
   "delivered" — yet egress sits under CHANGELOG `[Unreleased]` and is merged to `main` but not
   released; meanwhile status.md declares "all 20 features GA, soak gate closed."
@@ -452,7 +452,7 @@ R9-14.4 (never-draining shutdown test) and R9-14.5 (hot-added TLS rotation test)
 
 ### Finding F-08: Reopened configuration audit is remediated in code but not formally closed
 - **Severity:** medium
-- **Area:** [docs/audit/old/2026-07-25-configuration-audit-closure.md](old/2026-07-25-configuration-audit-closure.md)
+- **Area:** [docs/audit/old/2026-07-25-configuration-audit-closure.md](2026-07-25-configuration-audit-closure.md)
 - **Evidence:** all AC-01…AC-16 are "Reopened → remediated" with named workstream SHAs (WS01–WS07)
   and existing test files (`internal/app/managed_apply_finalizer_test.go`, `config_apply_deadline_
   test.go`, `managed_apply_id_test.go`, `promote_verified_test.go`, plus Console tests). Outstanding
@@ -546,7 +546,7 @@ that holds admin-reachability edits for confirmation. RBAC (roles/scoped tokens/
 3. **F-02/F-08** — labeling: an unreleased hardening feature (egress) and a not-formally-closed config
    audit are presented as done; a security reviewer needs the precise state.
 4. **Release attestations** — Sigstore provenance + SPDX SBOM are documented in
-   [docs/release.md](../release.md); not re-verified here (§16).
+   [docs/release.md](../../release.md); not re-verified here (§16).
 
 ---
 

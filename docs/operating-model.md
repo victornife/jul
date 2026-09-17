@@ -2,7 +2,7 @@
 
 **Status:** current operating model  
 **Effective date:** 2026-08-03  
-**Programme authority:** #62 and the [combined repository audit](audit/combined-audit-2026-08-03.md)
+**Programme authority:** #62 and the [combined repository audit](audit/old/combined-audit-2026-08-03.md)
 
 > **Document roles:** ADR 0013 decides how work enters the portfolio; ADR 0014 decides the required operator/developer surfaces; `docs/operating-model.md` defines execution discipline; `docs/specs/core-gateway-completeness.md` defines the bounded product; the roadmap and #62 own current order and status.
 

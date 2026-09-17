@@ -333,7 +333,7 @@ documented future enhancement, not a gap that will be filled implicitly. See
 ## Executable behaviour matrix
 
 This is the authoritative post-#134 matrix. Every row names executable evidence;
-the complete audit record is [the 2026-08-07 cache recertification](audit/2026-08-07-cache-recertification.md).
+the complete audit record is [the 2026-08-07 cache recertification](audit/old/2026-08-07-cache-recertification.md).
 
 | Behaviour | Contract | Executable evidence |
 | --- | --- | --- |
@@ -878,7 +878,7 @@ paths.
 
 | Criterion | Status | Evidence |
 | --- | --- | --- |
-| 1 — Conformance / behaviour matrix | ✅ | [Executable behaviour matrix](#executable-behaviour-matrix) and [audit record](audit/2026-08-07-cache-recertification.md) |
+| 1 — Conformance / behaviour matrix | ✅ | [Executable behaviour matrix](#executable-behaviour-matrix) and [audit record](audit/old/2026-08-07-cache-recertification.md) |
 | 2 — Published benchmark numbers | ✅ | Six refreshed benchmarks above, including mandatory validation and populated-variant invalidation |
 | 3 — Known-limitations list | ✅ | 13-item list above and [known-limitations.md](known-limitations.md), separated by product/conservative/performance/lifecycle meaning |
 | 4 — Semver-guarded config/API contract | ✅ | v1 config freeze and #126 metric compatibility guard; the released `jul_cache_events_total` help remains unchanged |
