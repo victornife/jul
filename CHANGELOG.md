@@ -9,14 +9,19 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
-> Targeted next version: **v2.0.0** (not v1.33.0 — a maintainer decision;
-> the exact justification for the major bump belongs in
-> [compatibility.md](docs/compatibility.md) when the release is cut). This
-> note is a placeholder only: renaming this section to `## [2.0.0] –
-> <date>` happens at the actual release, not before.
+## [2.0.0-rc.1] – 2026-09-17
+
+> First release candidate of the v2.0.0 line (not v1.33.0 — a maintainer
+> decision recorded in
+> [compatibility.md](docs/compatibility.md#why-v200-not-v1330-2026-09-17)).
+> An RC tag is a build/release-path validation point, not a claim that every
+> item below has completed a long-running GA soak; see
+> [release.md](docs/release.md#release-candidates) and
+> [status.md](docs/status.md) for current maturity/delivery state.
 
 ### Added
 
+- **Scheduled backend kill/restore, mid-body TCP reset, and malformed-response fault injection (JUL-AUD-019).** `scripts/burn-in-backend.go` gains `POST /control/kill?duration=Ns` (refuses every path for the window via an abortive `SO_LINGER 0` close, then auto-restores — no process restart needed), `/…/reset` (a genuine mid-body TCP RST) and `/…/malformed[?kind=bad-chunk]` (a declared-but-unfulfilled `Content-Length`, or an invalid chunk-size line under `Transfer-Encoding: chunked`). `burn-in-load.go`'s `-fault` mode now drives a weighted mix of all of these plus its existing 5xx-storm/slow-response modes against `/bounded/`, and a separate goroutine schedules the kill/restore cycle directly against each backend in turn. Verified live end-to-end, including confirming the resilience layer correctly fast-fails with 503 rather than continuing to hammer both backends when both are simultaneously unhealthy. The remaining host-level fault classes (DNS failure, FD-limit reduction, disk-full, cgroup constraint) are not code-automatable and are documented as manual soak steps in `docs/soak-procedures.md`.
 - **`[admin] pprof = false` production hardening switch (JUL-AUD backlog).** `/debug/pprof/` was previously always reachable whenever the admin listener was enabled, gated only by the `admin:manage` RBAC permission and the secure-transport gate. `admin.pprof` (default `true`, preserving existing behavior) can now be set `false` to remove the surface entirely, for a deployment that does not want live profiling present regardless of credential compromise. It reads from the same immutable admin authentication snapshot `admin.console`/`admin.token` already publish atomically at Publish, so it is `hot_reload`, not restart-required. See [configuration.md](docs/configuration.md#admin-consoleupload-reloadability) and [security-posture.md](docs/security-posture.md#admin-listener-hardening-checklist).
 - **Cache-tier occupancy metrics (JUL-AUD-005).** `jul_cache_bytes`, `jul_cache_max_bytes`, `jul_cache_entries` and `jul_cache_evictions_total`, labeled by tier (`memory`/`disk`), are read at scrape time like the upstream resilience gauges — "the cache stays within its configured bounds" is now a falsifiable, observable claim against a running process rather than something only an in-tree test can see. See [cache.md](docs/cache.md#observability).
 - **Pre-soak readiness audit and harness modernization.** A repository-wide pre-soak audit (`docs/audit/2026-09-16-pre-soak-readiness-audit.md`) found the soak harness had drifted from the shipped feature set. Closed: a `make config-check` CI gate validates every root/`examples/` config still loads (`jul check`) — the exact failure class that let `burn-in-full.toml` stop parsing unnoticed; `make soak-repro-smoke` runs the #287 resilience-soak reproduction at trivial duration in CI so a stale command/script/flag name fails the build instead of the next real 24-hour attempt; a new consolidated `burn-in-current.toml` profile plus six new `burn-in-load.go` modes (`-current`, `-rbac`, `-apply-churn`, `-slow-client`, `-slow-upstream`, `-fault`) exercise the merged-Beta surface that had never been soaked together (RBAC, `[egress]`, `client_address`, `backend_tls`, HTTP-over-Unix upstreams, DNS discovery, routing predicates/response-header policy/CORS, admin TLS); a dated evidence-retention convention (`soak-artifacts/README.md`, `MANIFEST.template.md`, `scripts/soak-manifest-init.sh`) makes a soak run reproducible later; and `docs/soak-procedures.md` is rewritten Linux-first against the harness that actually produces the evidence in `docs/soak-evidence.md`, rather than the prior Windows/PowerShell procedure for the in-tree `go test -tags soak` scenarios alone.

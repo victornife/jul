@@ -1163,12 +1163,15 @@ amplification number as the proof point.
   but incomplete — #287 and #144 each name a soak but neither scopes the consolidated post-RC
   profile; #409 names certification scenarios without naming the harness · **Existing
   issues:** #287, #144, #409
-- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-05). `burn-in-current.toml` plus six
-  new `burn-in-load.go` modes (`-current`, `-rbac`, `-apply-churn`, `-slow-client`,
-  `-slow-upstream`, `-fault`) now exercise RBAC, `[egress]`, `client_address`, `backend_tls`,
-  HTTP-over-Unix upstreams, DNS discovery, predicates/response-header policy/CORS, admin TLS
-  and stream — every merged-Beta capability the finding named. All manually verified live
-  end-to-end. #287/#144/#409 remain the issue-level trackers for the eventual soak run itself.
+- **Status update (2026-09-17):** ✅ Closed via PR #416 (BL-05) and a follow-up commit
+  (BL-05 completion). `burn-in-current.toml` plus six new `burn-in-load.go` modes
+  (`-current`, `-rbac`, `-apply-churn`, `-slow-client`, `-slow-upstream`, `-fault`) now exercise
+  RBAC, `[egress]`, `client_address`, `backend_tls`, HTTP-over-Unix upstreams, DNS discovery,
+  predicates/response-header policy/CORS, admin TLS and stream — every merged-Beta capability
+  the finding named. `-fault` was subsequently extended to cover JUL-AUD-019's full scope
+  (kill/restore, connection reset, malformed framing — see that finding's own status update).
+  All manually verified live end-to-end. #287/#144/#409 remain the issue-level trackers for the
+  eventual soak run itself.
 
 ### JUL-AUD-005 — Cache occupancy is not observable at runtime
 
@@ -1501,21 +1504,24 @@ amplification number as the proof point.
   checklist for DNS failure, FD limit reduction, disk-full and cgroup CPU/memory constraint.
 - **Effort:** M · **Dependencies:** JUL-AUD-004 · **Tracking status:** tracked but incomplete ·
   **Existing issue:** #287
-- **Status update (2026-09-17):** ⚠️ Substantially addressed via PR #416 (BL-05).
-  `scripts/burn-in-backend.go` gained `/…/slow?ms=N` (injected latency) and `/…/flaky?rate=N`
-  (5xx storms) endpoints, driven by `burn-in-load.go`'s new `-slow-upstream` and `-fault`
-  modes; verified live. Scheduled kill/restore, mid-body connection reset, malformed responses,
-  and the host-level DNS/FD/disk/cgroup checklist remain unimplemented — this finding is not
-  fully closed.
+- **Status update (2026-09-17):** ✅ Closed via a follow-up commit after PR #416. `-fault` now
+  drives a weighted mix of 5xx storms, slow responses, mid-body TCP resets (a genuine RST via
+  `SO_LINGER 0`, verified with `curl`), and malformed framing (declared-but-unfulfilled
+  `Content-Length`; invalid chunk-size line), plus a separate goroutine that schedules a
+  kill/restore cycle directly against each backend in turn via a new `/control/kill` endpoint.
+  Verified live end-to-end against `burn-in-current.toml` and the real `jul` binary — including
+  confirming the resilience layer correctly marks both backends down and fast-fails with 503
+  when both are unhealthy simultaneously, rather than continuing to hammer them. The host-level
+  checklist (DNS failure, FD-limit reduction, disk-full, cgroup CPU/memory constraint) is not
+  code-automatable and is documented as a manual soak step in `docs/soak-procedures.md` instead.
 
 ## P0 — Immediate (pre-soak, sequential)
 
-> **Status update (2026-09-17):** all seven P0 items below are closed or substantially
-> closed via PR #416 (merged `03fda9f8`), with real end-to-end verification (live server +
-> curl/python-socket testing, `jul check`, full-tag build/test, `make ci-pr`). BL-05 closes
-> most of JUL-AUD-004/019's scope but the kill/restore, connection-reset and malformed-response
-> fault modes remain open (see JUL-AUD-019's status update). Every other soak blocker this
-> audit identified is now cleared.
+> **Status update (2026-09-17):** all seven P0 items below are closed via PR #416
+> (merged `03fda9f8`) plus a follow-up commit completing BL-05's fault-injection
+> scope, with real end-to-end verification (live server + curl/python-socket
+> testing, `jul check`, full-tag build/test, `make ci-pr`). Every soak blocker
+> this audit identified is now cleared.
 
 | ID | Findings | Title | Area | Sev | Soak | Effort | Deps | Acceptance | Owner | Tracking | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1523,7 +1529,7 @@ amplification number as the proof point.
 | BL-02 | JUL-AUD-002 | `make config-check` + CI job over all shipped `.toml` | CI | Med | Blocks | S | BL-01 | CI fails on any unloadable config | Release eng | new | ✅ Closed — PR #416 |
 | BL-03 | JUL-AUD-003 | Fix the published soak repro command + CI smoke of doc commands | docs/scripts | Med | Blocks | S | — | Every doc command runs at `-duration 2s` | Maintainer | #287 residual | ✅ Closed — PR #416 |
 | BL-04 | JUL-AUD-005 | Export cache occupancy metrics | observability | Med | Blocks | M | — | `jul_cache_bytes{tier}` non-zero on a live process | Backend | new | ✅ Closed — PR #416 |
-| BL-05 | JUL-AUD-004, 019 | `burn-in-current.toml` + load modes (`-apply-churn`, `-slow-client`, `-slow-upstream`, `-fault`, `-rbac`) | soak harness | High | Blocks | L | BL-01, BL-04 | §16 workload matrix fully exercised | Maintainer + QA | #287/#144/#409 incomplete | ⚠️ Substantially closed — PR #416; JUL-AUD-019's kill/restore, connection-reset and malformed-response modes still open |
+| BL-05 | JUL-AUD-004, 019 | `burn-in-current.toml` + load modes (`-apply-churn`, `-slow-client`, `-slow-upstream`, `-fault`, `-rbac`) | soak harness | High | Blocks | L | BL-01, BL-04 | §16 workload matrix fully exercised | Maintainer + QA | #287/#144/#409 incomplete | ✅ Closed |
 | BL-06 | JUL-AUD-018 | Evidence-retention convention + `MANIFEST.md` | process | Med | Blocks | S–M | — | Manifest fields asserted by docs-check | Release eng | new | ✅ Closed — PR #416 |
 | BL-07 | JUL-AUD-006 | Rewrite `docs/soak-procedures.md` (Linux-first, real harness) | docs | Med | Blocks | M | BL-03..BL-06 | A newcomer can run the soak from this doc alone | Docs lead | new | ✅ Closed — PR #416 |
 
