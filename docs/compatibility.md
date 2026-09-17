@@ -1,6 +1,6 @@
 # Jul.IA — compatibility & versioning policy
 
-> Version 1.8 · Updated 2026-09-15
+> Version 1.9 · Updated 2026-09-17
 
 This document defines what "stable" means for Jul.IA and what a **GA** label
 guarantees about a feature's contract. It is the fleet-wide answer to GA
@@ -246,6 +246,46 @@ on `main`. `implemented`, `merged`, and `candidate` capabilities may be usable
 and documented while remaining Beta and outside the stable GA surface. The
 canonical classification is [`feature-status.yaml`](feature-status.yaml).
 
+### Why v2.0.0, not v1.33.0 (2026-09-17)
+
+The next tag is **v2.0.0**, not the next MINOR in the v1 line. This is a
+maintainer decision about what the version number *signals*, not a claim that
+every individual change since `v1.32.1-rc.1` was independently a breaking
+change — most of them were deliberately, explicitly shipped **inside** the v1
+line as correctness fixes (see the response-cache, configuration-authority,
+and admin-transport-security entries above, each of which says so directly).
+Two things are true at once:
+
+1. **Individually, the accumulated changes were kept non-breaking on purpose.**
+   Each one that touched an existing contract did so as a documented
+   correctness fix with a stated migration path, not a silent break — that
+   discipline does not change with this release.
+2. **Collectively, they add up to a different product than the v1 line
+   describes.** `v1.32.1-rc.1` (`2026-07-09`) was cut before RBAC, trusted
+   client identity, backend trust, routing/response policy, generic
+   resilience (admission/retry/circuit), the configuration-authority model,
+   the generated configuration contract, NGINX assessment/provenance/corpus
+   tooling, the versioned external Admin API (`/api/v1`), the remote CLI,
+   local diagnostics/support bundles, HTTP-over-Unix upstreams, and this
+   audit's own hardening pass (cache occupancy observability, pprof
+   hardening switch, soak-harness fault injection) existed. `main` is 629
+   commits ahead of that tag. Continuing to call this v1.33.0 would describe
+   a routine MINOR bump; what actually changed is the shape of the product —
+   from "a correctness-hardened core HTTP proxy" to "an operable platform
+   with its own external contract, control plane, and migration tooling" —
+   and **this is the first release the project asserts is ready for external
+   consumption** rather than an internal hardening milestone. A version
+   number is also a signal to operators deciding whether to adopt, and a
+   MINOR bump would understate what changed.
+
+This is a versioning-line decision, not a retroactive claim that prior v1 GA
+contracts are broken: every v1 GA contract this policy already covers keeps
+its stated guarantees, under the same deprecation rules, on entry to the
+v2.0.0 line. v2.0.0 is the vehicle for adopting the accumulated post-RC
+capability as the new baseline and starting a fresh, externally-facing
+contract line from it — not evidence that the v1 line failed to hold its own
+promises.
+
 The published `v1.32.1-rc.1` is a prerelease, not a stable tag. Later `main`
 changes — including trusted client identity, backend trust, routing/response
 policy, resilience, configuration authority/generated contracts, and NGINX
@@ -305,6 +345,7 @@ cut at the first GA release.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-09-17 | 1.9 | Recorded the decision to cut **v2.0.0** rather than v1.33.0 as the next tag, and why: [see above](#why-v200-not-v1330-2026-09-17). | Every v1 GA contract already covered by this policy keeps its stated guarantees under the same deprecation rules on entry to the v2.0.0 line. | v2.0.0-rc.1; pre-soak readiness audit backlog BL-09 |
 | 2026-09-15 | 1.8 | Added the `no_change` value to the v1 reload-outcome enum for a validated, accepted candidate that provably leaves serving state unchanged. | Existing outcome values, HTTP status rules, polling terminality, and exit codes keep their meanings; `no_change` is an additive terminal success using exit 0. | #408; [reload semantics](reload-semantics.md#identity-planes-and-the-no-change-proof) |
 | 2026-08-30 | 1.7 | Separated released compatibility from merged/candidate delivery and clarified that unversioned Console routes are internal until #150 publishes a supported external API subset. | Existing released GA configuration, CLI, metric and wire contracts remain governed by SemVer. | Issue #353; [status.md](status.md) |
 | 2026-08-19 | 1.6 | Replaced the boolean `healthy` field on backends with a five-state `state` enum (`available`, `circuit_open`, `circuit_half_open`, `health_unhealthy`, `at_capacity`) on `GET /api/apps` and `GET /api/upstreams`, and added a server-computed pool `verdict` (`healthy`/`degraded`/`down`/`unknown`) to `GET /api/apps`. The boolean was fed only by the health checker, so a backend taken out of rotation by the circuit breaker or by a per-backend concurrency cap still reported `healthy` while receiving no traffic — the field said the opposite of what an operator needed during an incident. | The field is still absent when no live status has been observed, and absent still means *unknown*, not *down*. Every other field on both projections keeps its name and type. | #144; [console.md](console.md#upstreams) |

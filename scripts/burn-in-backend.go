@@ -25,8 +25,16 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
+
+// killUntilNano is a Unix-nanosecond deadline (0 = not killed) set by
+// POST /control/kill?duration=Ns, simulating a scheduled backend kill/restore
+// cycle (JUL-AUD-019) without actually terminating the process: every request
+// on every path is refused for the window, and service resumes on its own
+// once the window elapses — no separate "restore" call is needed.
+var killUntilNano atomic.Int64
 
 func main() {
 	port := flag.Int("port", 8081, "TCP port to listen on")
@@ -37,6 +45,7 @@ func main() {
 	flag.Parse()
 
 	http.HandleFunc("/", handler)
+	http.HandleFunc("/control/kill", controlKillHandler)
 
 	if *unixSocket != "" {
 		_ = os.Remove(*unixSocket)
@@ -67,7 +76,75 @@ func main() {
 	}
 }
 
+// controlKillHandler is the fault-injection control plane, not a proxied
+// route: burn-in-load.go's -fault mode calls it directly against the
+// backend's own address (bypassing Jul) to schedule a kill/restore cycle.
+func controlKillHandler(w http.ResponseWriter, r *http.Request) {
+	dur := 5 * time.Second
+	if v := r.URL.Query().Get("duration"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			dur = d
+		}
+	}
+	killUntilNano.Store(time.Now().Add(dur).UnixNano())
+	w.WriteHeader(http.StatusAccepted)
+	fmt.Printf("killswitch: refusing all requests for %s\n", dur)
+}
+
 func handler(w http.ResponseWriter, r *http.Request) {
+	// Kill/restore (JUL-AUD-019): while a /control/kill window is active,
+	// every request on every path is refused by hijacking and abortively
+	// closing the connection (SO_LINGER 0 forces a real TCP RST rather than a
+	// graceful FIN), simulating the backend being fully down. Service resumes
+	// automatically once the window elapses.
+	if until := killUntilNano.Load(); until != 0 && time.Now().UnixNano() < until {
+		abortiveClose(w)
+		return
+	}
+	// /…/reset: accept the request, write a declared-but-unfulfilled
+	// Content-Length, then abortively close mid-body — a genuine TCP RST
+	// (via SO_LINGER 0), not just a truncated read — exercising how the
+	// reverse proxy handles an upstream that dies mid-response.
+	if strings.Contains(r.URL.Path, "/reset") {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijack unsupported", http.StatusInternalServerError)
+			return
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return
+		}
+		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4096\r\n\r\n{\"truncated\":")
+		_ = buf.Flush()
+		abortiveCloseConn(conn)
+		return
+	}
+	// /…/malformed?kind=short-body|bad-chunk: a genuine protocol-framing
+	// violation rather than a dropped connection, exercising response
+	// parsing rather than failure detection. short-body (default) is a
+	// declared Content-Length the body never reaches, closed gracefully
+	// (FIN, not RST) so it is distinguishable from /reset. bad-chunk sends
+	// an invalid chunk-size line under Transfer-Encoding: chunked.
+	if strings.Contains(r.URL.Path, "/malformed") {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijack unsupported", http.StatusInternalServerError)
+			return
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return
+		}
+		if r.URL.Query().Get("kind") == "bad-chunk" {
+			_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\nZZZ_not_hex\r\n{}\r\n")
+		} else {
+			_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4096\r\n\r\n{\"short\":true}")
+		}
+		_ = buf.Flush()
+		_ = conn.Close()
+		return
+	}
 	// /…/slow?ms=N: sleep N ms (default 500) before responding, for exercising
 	// pending-timeout/circuit accounting against a genuinely slow upstream
 	// (-slow-upstream mode in burn-in-load.go). Matched by substring, not
@@ -107,4 +184,29 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		"path":      r.URL.Path,
 		"goroutine": runtime.NumGoroutine(),
 	})
+}
+
+// abortiveClose hijacks a not-yet-written response and abortively closes it,
+// for the /control/kill window on a path that hasn't decided to hijack
+// itself yet (the general request path, above).
+func abortiveClose(w http.ResponseWriter) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		return
+	}
+	conn, _, err := hj.Hijack()
+	if err != nil {
+		return
+	}
+	abortiveCloseConn(conn)
+}
+
+// abortiveCloseConn sets SO_LINGER to 0 before closing so the OS sends a real
+// TCP RST instead of a graceful FIN — net.Conn has no direct "send RST"
+// call, but an abortive close is the standard portable way to produce one.
+func abortiveCloseConn(conn net.Conn) {
+	if tc, ok := conn.(*net.TCPConn); ok {
+		_ = tc.SetLinger(0)
+	}
+	_ = conn.Close()
 }

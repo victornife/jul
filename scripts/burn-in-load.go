@@ -64,7 +64,10 @@ func main() {
 		current      = flag.Bool("current", false, "burn-in-current.toml: exercise bounded/unlimited/unix/discovered/secure/predicates/plugin routes (JUL-AUD-004)")
 		slowClient   = flag.Bool("slow-client", false, "Send a byte-paced (slow) POST body to /bounded/, exercising slow-client handling")
 		slowUpstream = flag.Bool("slow-upstream", false, "Request /bounded/slow?ms=N (a deliberately slow backend response), exercising pending-timeout/circuit accounting")
-		fault        = flag.Bool("fault", false, "Request /bounded/flaky?rate=N (an intermittently failing backend), exercising retry/circuit behavior")
+		fault        = flag.Bool("fault", false, "Request a weighted mix of failure modes against a bounded backend (5xx storms, slow responses, mid-body TCP resets, malformed framing) plus a scheduled backend kill/restore cycle, exercising retry/circuit behavior")
+		backendCtls  = flag.String("backendControlAddrs", "http://127.0.0.1:8081,http://127.0.0.1:8082", "Comma-separated backend addresses to POST /control/kill against directly (bypassing the proxy) for -fault's scheduled kill/restore cycle")
+		killEvery    = flag.Duration("killEvery", 20*time.Second, "Interval between -fault's scheduled backend kill cycles")
+		killFor      = flag.Duration("killFor", 5*time.Second, "How long each -fault kill cycle refuses requests on the targeted backend before it auto-restores")
 		rbac         = flag.Bool("rbac", false, "Run a concurrent RBAC allow/deny probe against -admin using burn-in-current.toml's viewer/operator/admin principals")
 		applyChurn   = flag.Bool("apply-churn", false, "Run a concurrent config-apply churn against -admin, resubmitting -applyConfig as a semantic no-op reload")
 		applyConfig  = flag.String("applyConfig", "burn-in-current.toml", "Config file to resubmit for -apply-churn (read from local disk, same host as the server)")
@@ -246,11 +249,26 @@ func main() {
 					path = fmt.Sprintf("/bounded/slow?ms=%d", ms)
 					url = *baseURL + path
 				} else if *fault {
-					// Fault mode: every request hits an intermittently-failing
-					// backend response (see burn-in-backend.go's /flaky handler),
-					// exercising retry attempts and circuit transitions without
-					// needing to kill a sibling process.
-					path = "/bounded/flaky?rate=40"
+					// Fault mode (JUL-AUD-019): a weighted mix of every failure
+					// class the backend harness can inject at the request path
+					// (scheduled kill/restore runs separately, in its own
+					// goroutine below, since it targets the backend directly
+					// rather than a per-request path): 5xx storms, slow
+					// responses, mid-body TCP resets, and malformed framing.
+					switch r := rand.Intn(100); {
+					case r < 40:
+						path = "/bounded/flaky?rate=40"
+					case r < 60:
+						path = fmt.Sprintf("/bounded/slow?ms=%d", 200+rand.Intn(800))
+					case r < 80:
+						path = "/bounded/reset"
+					default:
+						if rand.Intn(2) == 0 {
+							path = "/bounded/malformed"
+						} else {
+							path = "/bounded/malformed?kind=bad-chunk"
+						}
+					}
 					url = *baseURL + path
 				} else if *current {
 					// burn-in-current.toml — the merged-Beta surface (JUL-AUD-004):
@@ -479,6 +497,18 @@ func main() {
 		}()
 	}
 
+	// Scheduled backend kill/restore (JUL-AUD-019): alongside -fault's
+	// per-request failure mix above, periodically take one backend fully
+	// down for a window by calling its control endpoint directly, rather
+	// than injecting failures only at the request path.
+	if *fault {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runFaultKillCycle(strings.Split(*backendCtls, ","), *duration, *killEvery, *killFor)
+		}()
+	}
+
 	wg.Wait()
 	fmt.Println()
 	fmt.Println("Load test complete. Collecting results...")
@@ -615,6 +645,35 @@ func (r *slowReader) Read(p []byte) (int, error) {
 	copy(p, r.buf[r.pos:r.pos+n])
 	r.pos += n
 	return n, nil
+}
+
+// runFaultKillCycle periodically POSTs /control/kill directly to one backend
+// at a time (round-robin across addrs, bypassing the proxy — this is a
+// control-plane call to the backend process, not routed traffic), so the pool
+// alternates a genuinely-down backend with healthy ones rather than every
+// backend failing at once, exercising admission/circuit behavior against a
+// partial-outage pool (JUL-AUD-019) rather than a full one.
+func runFaultKillCycle(addrs []string, duration, every, killFor time.Duration) {
+	client := &http.Client{Timeout: 3 * time.Second}
+	end := time.Now().Add(duration)
+	var cycles, failures int64
+	for i := 0; time.Now().Before(end); i++ {
+		target := strings.TrimSpace(addrs[i%len(addrs)])
+		req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/control/kill?duration=%s", target, killFor), nil)
+		if err == nil {
+			resp, err := client.Do(req)
+			cycles++
+			if err != nil {
+				failures++
+				logErrorOnce("fault kill cycle " + target + ": " + err.Error())
+			} else {
+				io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+			}
+		}
+		time.Sleep(every)
+	}
+	fmt.Printf("%s fault kill cycle: cycles=%d failures=%d\n", time.Now().Format("15:04:05"), cycles, failures)
 }
 
 // runRBACProbe repeatedly exercises the admin API's allow/deny boundary

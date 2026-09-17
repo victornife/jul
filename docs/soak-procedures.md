@@ -47,7 +47,7 @@ apply/reload path.
 | Component | Role |
 | --- | --- |
 | `burn-in-*.toml` | Real server configs, one per scenario. `burn-in-current.toml` is the consolidated profile covering every merged-Beta capability (JUL-AUD-004); the others are single-feature or historical-regression profiles. |
-| `scripts/burn-in-backend.go` | HTTP backend. `-port N` (TCP), `-unix /path.sock` (HTTP-over-Unix, #407), `-tls` (HTTPS, for `backend_tls`). Also serves `/…/slow?ms=N` (deliberately slow response) and `/…/flaky?rate=N` (intermittent 500s) for fault-adjacent load patterns. |
+| `scripts/burn-in-backend.go` | HTTP backend. `-port N` (TCP), `-unix /path.sock` (HTTP-over-Unix, #407), `-tls` (HTTPS, for `backend_tls`). Also serves `/…/slow?ms=N` (deliberately slow response), `/…/flaky?rate=N` (intermittent 500s), `/…/reset` (mid-body TCP RST via `SO_LINGER 0`), `/…/malformed[?kind=bad-chunk]` (declared-but-unfulfilled `Content-Length`, or an invalid chunk-size line), and `POST /control/kill?duration=Ns` (refuses every path for the window, then auto-restores — a scheduled kill/restore cycle without actually stopping the process) for fault-injection load patterns (JUL-AUD-019). |
 | `scripts/stream-echo.go` | TCP echo backend for `[[stream]]` L4 profiles. |
 | `scripts/burn-in-load.go` | HTTP/HTTPS load generator. Mode flags select the traffic pattern (see below); `-duration`/`-workers` control load. |
 | `scripts/burn-in-stream-load.go` | L4 TCP load generator (`-target host:port`). |
@@ -65,7 +65,7 @@ apply/reload path.
 | `-cache`, `-ratelimit`, `-waf`, `-compress`, `-http3` | Single-feature patterns for the matching `burn-in-<feature>.toml`. |
 | `-slow-client` | Paces a POST body over ~3.2s, exercising slow-client/read-timeout handling. |
 | `-slow-upstream` | Requests `/bounded/slow?ms=N`, exercising pending-timeout/circuit accounting against a genuinely slow backend. |
-| `-fault` | Requests `/bounded/flaky?rate=40`, exercising retry/circuit behavior against an intermittently failing backend — without needing to kill a sibling process. |
+| `-fault` | A weighted mix of every failure class the backend can inject against `/bounded/` (5xx storms, slow responses, mid-body TCP resets, malformed framing), plus a separate goroutine that schedules a kill/restore cycle directly against each backend in turn — exercising retry/circuit/admission behavior against a genuinely, alternately unhealthy pool rather than a clean one. |
 | `-rbac` | Runs a concurrent allow/deny probe against `-admin` using `burn-in-current.toml`'s viewer/operator/admin principals. |
 | `-apply-churn` | Runs a concurrent config-apply churn against `-admin`, resubmitting `-applyConfig` (default `burn-in-current.toml`) as a semantic no-op reload every `-applyEvery` (default 10s). Adopts the on-disk file as the managed baseline automatically on first use. Requires `config_authority = "managed"` in the target config. |
 
@@ -190,26 +190,47 @@ go run scripts/burn-in-load.go -duration 24h -workers 1 -rbac \
 go run scripts/burn-in-load.go -duration 24h -workers 1 -apply-churn \
   -applyEvery 5m -admin "https://127.0.0.1:9090" \
   -health "http://127.0.0.1:8080/bounded/" | tee "$DIR/apply-churn.log" &
+
+# Fault injection, continuous: 5xx storms, slow responses, mid-body resets,
+# malformed framing against /bounded/, plus a scheduled kill/restore cycle
+# against each backend in turn (JUL-AUD-019)
+go run scripts/burn-in-load.go -duration 24h -workers 4 -fault \
+  -killEvery 10m -killFor 30s -health "http://127.0.0.1:8080/bounded/" \
+  | tee "$DIR/fault.log" &
 ```
 
 ### Fault injection (required — see rationale below)
 
 A clean-path 24-hour run proves memory/goroutine bounds but proves **nothing**
 about the resilience capabilities (admission, retry, circuit) the run exists
-to certify. Schedule these manually during the run, logging each into
-`$DIR/MANIFEST.md`'s event log with a UTC timestamp:
+to certify. `-fault` (added to the workload above) automates the request-path
+and backend-outage fault classes continuously for the whole run; the
+remaining rows are host-level conditions `-fault` cannot reach from inside the
+process and must still be scheduled manually, logged into `$DIR/MANIFEST.md`'s
+event log with a UTC timestamp:
 
 | Fault | How |
 | --- | --- |
-| Backend kill + restart | `kill` one `burn-in-backend.go` instance for 1–2 minutes, then restart it on the same port |
-| Backend 5xx storm | Run a load-generator window with `-fault` for 5–10 minutes against the same server |
-| Slow backend | Run a load-generator window with `-slow-upstream` for 5–10 minutes |
+| Backend 5xx storm, mid-body reset, malformed framing, slow response | Automated by `-fault` in the workload above — no manual step |
+| Backend kill/restore | Automated by `-fault`'s scheduled kill/restore cycle (`-killEvery`/`-killFor`) — no manual step; for a true process-level kill instead of the in-process kill-switch, `kill` one `burn-in-backend.go` instance for 1–2 minutes and restart it on the same port |
+| DNS failure | Point `[[upstreams]] discovery.dns` at a name that stops resolving mid-run (edit `/etc/hosts` or firewall off the resolver), confirm the `discovered` pool holds its last-known-good targets rather than emptying |
+| FD-limit reduction | `ulimit -n 512` in the shell that launches `jul` (or `LimitNOFILE=` in a systemd override), confirm admission/backpressure rather than a crash once the limit is approached |
+| Disk pressure | Fill `jul-data/cache-disk` toward its configured cap (e.g. `fallocate -l <size> jul-data/cache-disk/filler`) and confirm eviction, not failure |
+| cgroup CPU/memory constraint | Run `jul` under `systemd-run --scope -p MemoryMax=256M -p CPUQuota=50%` (or an equivalent container limit) and confirm graceful degradation (GC pressure, slower responses) rather than an OOM kill under the expected workload |
 | Admin op during apply | Send a deliberately invalid config via a one-off `curl` with a broken TOML body mid-run; confirm the live config is unaffected |
-| Disk pressure (optional) | Fill `jul-data/cache-disk` toward its configured cap and confirm eviction, not failure |
 
 Do not add fault modes beyond this table "for completeness" — each one must
 map to a documented recovery behavior in the exit criteria below, or it is
 noise a reviewer has to explain away.
+
+> **Expect a high error rate while `-fault` is running against a small
+> (two-backend) pool.** If both backends happen to be marked down at the same
+> moment (reset/malformed errors and the kill cycle are independent and can
+> overlap), the pool has zero healthy backends and every request fast-fails
+> with 503 until one recovers. That is the circuit breaker and admission
+> control doing their job, not a regression — see the exit criteria's
+> distinction between an *expected* fault-window failure and an *unexplained*
+> one.
 
 ### Observability
 
