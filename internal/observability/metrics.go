@@ -54,6 +54,7 @@ type Metrics struct {
 	circuitTransitions *prometheus.CounterVec
 	transportRetired   *prometheus.CounterVec
 	resilience         *resilienceCollector
+	cache              *cacheCollector
 	discoveryErrors    *prometheus.CounterVec
 	probes             *prometheus.CounterVec
 	probeDuration      *prometheus.HistogramVec
@@ -269,6 +270,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Help: "Handler-generation transports retired, labeled by mode (graceful/forced).",
 		}, []string{"mode"}),
 		resilience: newResilienceCollector(),
+		cache:      newCacheCollector(),
 		upstreamBackends: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "jul_upstream_backends",
 			Help: "Current number of backends in a pool, labeled by pool (tracks dynamic service discovery).",
@@ -435,6 +437,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.circuitTransitions,
 		m.transportRetired,
 		m.resilience,
+		m.cache,
 		m.requests,
 		m.duration,
 		m.inflight,

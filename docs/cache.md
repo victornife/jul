@@ -496,6 +496,22 @@ label set: `stored`, `not_modified`, `uncacheable`, `origin_error`, `canceled`,
 error string is ever used as a label. Structured logs carry only the bounded
 operation name, the generation id and a bounded reason.
 
+Live occupancy of each configured tier is exported as four gauges/counters,
+labeled by `tier` (`memory`/`disk`; the disk series is absent when no
+`disk_path` is configured), read at scrape time rather than pushed from the
+request path — the same pattern as the upstream resilience gauges:
+
+- `jul_cache_bytes` — current bytes occupied.
+- `jul_cache_max_bytes` — the configured byte cap.
+- `jul_cache_entries` — current entry count.
+- `jul_cache_evictions_total` — cumulative LRU-capacity evictions since
+  startup. Explicit invalidation (a purge or a `del`) is a different operation
+  and is not counted here.
+
+These are what make "the cache stays within its configured bounds" a
+falsifiable, observable claim against a running process rather than something
+only an in-tree test can see.
+
 ## Entry immutability
 
 A cache entry is **immutable once published**. After an entry is handed to the

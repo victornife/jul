@@ -1,7 +1,7 @@
-.PHONY: build test bench fuzz soak format format-check lint vulncheck clean \
+.PHONY: build test bench fuzz soak soak-repro-smoke soak-manifest-init format format-check lint vulncheck clean \
         console-dev console-build console-check build-console build-full license-check \
 hooks waf-churn security-gates lifecycle-generate config-contract-generate \
-	api-contract-generate generated-check \
+	api-contract-generate generated-check config-check test-race \
         nginx-corpus-check nginx-migration-e2e
 
 # ── Default ──────────────────────────────────────────────────────────
@@ -13,6 +13,11 @@ test:
 
 test-full:
 	go test -tags "$(FULL_TAGS)" ./...
+
+# Race detector, full tags — mirrors the CI-only `race` job so a contributor
+# can reproduce it locally before pushing. ~20-25 min on a modest machine.
+test-race:
+	go test -race -p 2 -tags "$(FULL_TAGS)" ./...
 
 bench:
 	scripts/bench.sh
@@ -40,6 +45,18 @@ nginx-migration-e2e:
 # release-style run, e.g. `SOAK_DURATION=5m SOAK_WORKERS=32 make soak`.
 soak:
 	scripts/soak.sh
+
+# Soak-reproduction smoke test (JUL-AUD-003): runs the #287 resilience-soak
+# reproduction documented in docs/soak-evidence.md at a trivial duration, so a
+# stale command line in that document fails the build instead of the next
+# 24-hour soak attempt.
+soak-repro-smoke:
+	FULL_TAGS="$(FULL_TAGS)" scripts/soak-repro-smoke.sh
+
+# Create a dated soak-evidence directory with a pre-filled MANIFEST.md
+# (JUL-AUD-018). Usage: `make soak-manifest-init SCOPE=resilience-24h`.
+soak-manifest-init:
+	scripts/soak-manifest-init.sh "$(SCOPE)"
 
 # WAF reload-churn leak/stability gate (AUX-06). Rebuilds the Coraza/CRS engine
 # on a sustained reload churn and asserts flat goroutines + bounded heap. Runs in
@@ -76,6 +93,12 @@ vulncheck-full:
 
 security-gates:
 	scripts/security-gates.sh
+
+# Config-example validation gate (JUL-AUD-002): every root-level and
+# examples/ TOML config must still load with `jul check`. Reuses a full-tag
+# binary if JUL_BIN is set; otherwise builds one.
+config-check:
+	FULL_TAGS="$(FULL_TAGS)" scripts/config-check.sh
 
 ci-fast: format-check lint test build license-check
 
@@ -120,6 +143,7 @@ ci-full: format-check lint-full test-full vulncheck-full build-full license-chec
 ci-pr: ci-full security-gates
 	go vet -tags "$(FULL_TAGS)" ./...
 	$(MAKE) generated-check
+	$(MAKE) config-check
 	python3 scripts/docs-check.py
 
 # Install the repo-managed Git hooks (local CI gate parity, SEQ-08). One command;

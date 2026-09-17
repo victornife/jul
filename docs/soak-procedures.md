@@ -1,332 +1,314 @@
-# Jul.IA — Soak Procedures (Local Windows)
+# Jul.IA — Soak Procedures (Linux)
 
-> Version 1.30 · Updated 2026-07-03
+> Version 2.0 · Updated 2026-09-17
 >
-> Step-by-step soak guide for three target durations. All procedures target a
-> Windows/amd64 development workstation with Go 1.26+ and PowerShell.
+> Rewritten from scratch (JUL-AUD-006): the previous version documented only
+> the in-tree `go test -tags soak` scenarios on Windows/PowerShell, but every
+> authoritative run recorded in [soak-evidence.md](soak-evidence.md) actually
+> used the `burn-in-*.toml` + `scripts/burn-in-*.go` real-binary harness on
+> Linux. This version documents the harness that is actually used.
 >
 > How to read the pass/fail signals is summarised in
 > [troubleshooting.md](troubleshooting.md#soak--load-test-interpretation).
+> Dated run evidence lives in [soak-evidence.md](soak-evidence.md); this page
+> is the procedure, not the log.
+
+## Why Linux, not Windows
+
+The proxy load pattern dials a fresh connection at a meaningful rate; on
+Windows this exhausts ephemeral client-side ports within about two minutes at
+16 workers, which is a client-OS limitation, not a server leak. Windows is
+therefore only viable for a ≤20s smoke run. Run every procedure below on
+Linux. The in-tree `go test -tags soak` scenarios (Procedure 0) remain a
+useful pre-flight smoke and are cross-platform, but they are not a substitute
+for a real-binary burn-in: they exercise one handler directly through
+`httptest.NewServer`, not the admin API, RBAC, TLS, discovery, or the config
+apply/reload path.
 
 ## Prerequisites
 
+- [ ] Linux host that can run unattended for the target duration
 - [ ] Go 1.26+ installed (`go version`)
-- [ ] Jul repository cloned locally (`c:\Users\victornf\...\http_server`)
-- [ ] PowerShell session open in repository root
-- [ ] No other processes bound to ports likely used by soak tests (e.g. 8080–8099). The tests use `httptest.NewServer` which binds to random high ports.
-- [ ] Machine can be left running unattended for the target duration.
+- [ ] Repository cloned, working tree clean, exact commit SHA recorded
+  (`git rev-parse HEAD`)
+- [ ] `make config-check` passes (every shipped `.toml` still loads)
+- [ ] `make soak-repro-smoke` passes (the documented reproduction commands
+  below actually run)
+- [ ] No other process bound to the ports a chosen profile uses (`8080-8082`,
+  `8443-8444`, `9090`, `15432`, `55432-55433` across the various profiles —
+  check the profile's own header comment)
+- [ ] A `soak-artifacts/<date>-<scope>/` directory created via
+  `make soak-manifest-init SCOPE=<scope>` (see
+  [soak-artifacts/README.md](../soak-artifacts/README.md)) — **do this before
+  starting the run**, not after
 
-## Common environment
+## The harness
 
-```powershell
-# Set once per PowerShell session
-$env:FULL_TAGS="brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
-$env:SOAK_WORKERS="16"   # see per-duration guidance below
+| Component | Role |
+| --- | --- |
+| `burn-in-*.toml` | Real server configs, one per scenario. `burn-in-current.toml` is the consolidated profile covering every merged-Beta capability (JUL-AUD-004); the others are single-feature or historical-regression profiles. |
+| `scripts/burn-in-backend.go` | HTTP backend. `-port N` (TCP), `-unix /path.sock` (HTTP-over-Unix, #407), `-tls` (HTTPS, for `backend_tls`). Also serves `/…/slow?ms=N` (deliberately slow response) and `/…/flaky?rate=N` (intermittent 500s) for fault-adjacent load patterns. |
+| `scripts/stream-echo.go` | TCP echo backend for `[[stream]]` L4 profiles. |
+| `scripts/burn-in-load.go` | HTTP/HTTPS load generator. Mode flags select the traffic pattern (see below); `-duration`/`-workers` control load. |
+| `scripts/burn-in-stream-load.go` | L4 TCP load generator (`-target host:port`). |
+| `scripts/soak.sh` (`make soak`) | The three in-tree `go test -tags soak` scenarios — pre-flight smoke, not the soak itself. |
+| `scripts/soak-repro-smoke.sh` (`make soak-repro-smoke`) | Runs the #287 resilience-soak reproduction at trivial duration; a CI gate against this exact class of doc rot. |
+| `scripts/soak-manifest-init.sh` (`make soak-manifest-init`) | Creates a dated, pre-filled evidence directory (JUL-AUD-018). |
+
+### Load-generator mode flags (`scripts/burn-in-load.go`)
+
+| Flag | Exercises |
+| --- | --- |
+| `-full` | The July Phase 2A feature set (cache, rate limit, WAF, auth, compression, TLS/mTLS) — use with `burn-in-full.toml`. |
+| `-phase2a` | Transcoding, passthrough, discovery, secrets, zero-config, WASM — use with `burn-in-phase2a.toml`. |
+| `-current` | The merged-Beta surface: resilience pools, Unix upstream, DNS discovery, `backend_tls`, routing predicates/response headers/CORS, WASM plugin — use with `burn-in-current.toml` (JUL-AUD-004). |
+| `-cache`, `-ratelimit`, `-waf`, `-compress`, `-http3` | Single-feature patterns for the matching `burn-in-<feature>.toml`. |
+| `-slow-client` | Paces a POST body over ~3.2s, exercising slow-client/read-timeout handling. |
+| `-slow-upstream` | Requests `/bounded/slow?ms=N`, exercising pending-timeout/circuit accounting against a genuinely slow backend. |
+| `-fault` | Requests `/bounded/flaky?rate=40`, exercising retry/circuit behavior against an intermittently failing backend — without needing to kill a sibling process. |
+| `-rbac` | Runs a concurrent allow/deny probe against `-admin` using `burn-in-current.toml`'s viewer/operator/admin principals. |
+| `-apply-churn` | Runs a concurrent config-apply churn against `-admin`, resubmitting `-applyConfig` (default `burn-in-current.toml`) as a semantic no-op reload every `-applyEvery` (default 10s). Adopts the on-disk file as the managed baseline automatically on first use. Requires `config_authority = "managed"` in the target config. |
+
+Combine independent modes freely (e.g. run `-current` in one window and
+`-rbac` plus `-apply-churn` in another against the same server) — each is a
+separate process. Do not combine two request-pattern flags in the *same*
+invocation; the tool selects one pattern per process by design.
+
+## Procedure 0 — in-tree smoke (2–10 minutes, any OS)
+
+Not a soak; a pre-flight check that the soak-relevant code paths have not
+regressed before spending real wall-clock time.
+
+```sh
+make soak                    # 30s default per scenario (proxy, cache, udp-churn)
+make soak-repro-smoke        # the #287 reproduction, at trivial duration
+make config-check            # every shipped .toml still loads
 ```
 
-> **Windows note:** `SOAK_WORKERS=32` can exhaust ephemeral ports on the client side (the test dials repeatedly from the same machine). Even at 16 workers, the proxy soak fails on Windows within ~2 minutes (2026-07-03/04). **The proxy soak is only viable on Windows for smoke durations (≤20s).** For longer proxy validation, use the Linux CI release gate or a real binary burn-in (see procedure C below). The UDP-churn soak works reliably on Windows at 16 workers.
+All three must pass before proceeding to a real-binary run.
 
----
+## Procedure A — 5-minute local validation
 
-## Procedure A — 5‑minute release gate
+**Goal:** reproduce the CI release gate's scale locally before a real run.
+**When:** before every version tag, after any reload-timeout, connection-pool,
+or middleware/handler change.
 
-**Goal:** Reproduce the CI release gate locally. Proves no rapid goroutine or heap leak under sustained concurrent load.
+```sh
+make soak-manifest-init SCOPE=validation-5m
+DIR=$(ls -td soak-artifacts/*-validation-5m | head -1)
 
-**When to run:** Before every version tag, after any reload-timeout or connection-pool change, after any middleware or handler change.
+FULL_TAGS="brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+go build -tags "$FULL_TAGS" -o jul ./cmd/jul
 
-### Commands
+go run scripts/burn-in-backend.go -port 8081 &
+go run scripts/burn-in-backend.go -port 8082 &
+go run scripts/burn-in-backend.go -unix /tmp/jul-burnin-current.sock &
+go run scripts/burn-in-backend.go -port 8444 -tls &
+go run scripts/stream-echo.go -port 55432 &
+sleep 2
+./jul -config burn-in-current.toml > "$DIR/jul.log" 2>&1 &
 
-```powershell
-# 1. Proxy soak (5 min)
-$env:SOAK_DURATION="5m"
-$env:SOAK_WORKERS="16"
-go test -tags "soak $env:FULL_TAGS" -run '^TestSoak$' -count=1 -timeout=0 -v ./internal/handler/ | Tee-Object -FilePath soak-proxy-5m.log
-
-# 2. UDP churn soak (5 min)
-go test -tags "soak stream $env:FULL_TAGS" -run '^TestSoakUDPChurn$' -count=1 -timeout=0 -v ./internal/stream/ | Tee-Object -FilePath soak-udp-5m.log
+go run scripts/burn-in-load.go -duration 5m -workers 32 -current \
+  -health "http://127.0.0.1:8080/bounded/" | tee "$DIR/load-current.log"
+go run scripts/burn-in-stream-load.go -duration 5m -workers 16 -target 127.0.0.1:15432 \
+  | tee "$DIR/load-stream.log"
 ```
 
-### What to observe
+**Pass criteria:** `errors=0` / `HTTP 5xx = 0`; goroutine growth ≤ `4×workers+32`;
+heap growth ≤ 64 MiB. See [Stability indicators](#stability-indicators) below
+for what a failure looks like.
 
-The test output will show lines like:
+## Procedure B — 1-hour stability run
 
-```
-soak: duration=5m0s workers=16 requests=XXXXXX errors=0
-soak: goroutines XX -> YY, heap XXXXXX -> YYYYYY bytes
-```
+**Goal:** catch slow leaks a 5-minute run misses.
+**When:** after any allocator/pooling change (cache, buffer pool), before a
+minor release.
 
-| Metric | Pass criterion |
-|--------|---------------|
-| `errors=0` | Must be exactly zero |
-| Goroutine growth | ≤ `4*workers+32` (so ≤ 96 for 16 workers) |
-| Heap growth | ≤ 64 MiB |
+Same stack and commands as Procedure A, with `-duration 1h` on both load
+generators. `burn-in-current.toml` already includes the bounded/unlimited
+resilience pools, so no second profile or port remapping is needed.
 
-### Artifact
 
-- `soak-proxy-5m.log`
-- `soak-udp-5m.log`
+## Procedure C — final soak (≥24 hours)
 
----
+**Goal:** the ADR-0005 release gate. Long enough for memory/goroutine/FD
+trends, hundreds of config applies, and multi-hour stream/connection
+accounting to become statistically meaningful.
+**When:** before a GA declaration or a major version tag.
 
-## Procedure B — 1‑hour stability run
+### Entry criteria
 
-**Goal:** Detect slow leaks that a 5‑minute gate misses. Measures GC pressure, connection-pool health, and bounded heap growth over a longer window.
+1. `main` green on every gate in this repo (`make ci-pr`, plus `-race` via
+   `make test-race`) at the exact soak SHA.
+2. Procedure 0 and Procedure A both pass at that SHA.
+3. `soak-artifacts/<date>-final/MANIFEST.md` created
+   (`make soak-manifest-init SCOPE=final`).
+4. A metrics scrape (Prometheus or equivalent) configured against `/metrics`
+   at ≤15s interval, retained for the full run — not stdout tailing.
+5. RBAC, `[egress]`, `client_address`, and `backend_tls` all enabled for the
+   run (i.e. run `burn-in-current.toml`, not a single-feature profile alone),
+   so the soak's evidence covers capabilities that have never been soaked.
 
-**When to run:** After any memory-allocator change (cache, buffer pool, large-object retention), before a minor release (v1.x.0), after any stream or UDP session cleanup change.
+### Workload
 
-### Commands
+Run every scenario the profiles below cover, concurrently, for the same
+≥24h window:
 
-```powershell
-# Proxy soak (1 hr)
-$env:SOAK_DURATION="1h"
-$env:SOAK_WORKERS="16"
-go test -tags "soak $env:FULL_TAGS" -run '^TestSoak$' -count=1 -timeout=0 -v ./internal/handler/ | Tee-Object -FilePath soak-proxy-1h.log
+```sh
+DIR=$(ls -td soak-artifacts/*-final | head -1)
+FULL_TAGS="brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
+go build -tags "$FULL_TAGS" -o jul ./cmd/jul
+cp burn-in-current.toml "$DIR/"
+git rev-parse HEAD > "$DIR/build-sha.txt"
 
-# UDP churn soak (1 hr)
-go test -tags "soak stream $env:FULL_TAGS" -run '^TestSoakUDPChurn$' -count=1 -timeout=0 -v ./internal/stream/ | Tee-Object -FilePath soak-udp-1h.log
-```
+# Backends
+go run scripts/burn-in-backend.go -port 8081 &
+go run scripts/burn-in-backend.go -port 8082 &
+go run scripts/burn-in-backend.go -unix /tmp/jul-burnin-current.sock &
+go run scripts/burn-in-backend.go -port 8444 -tls &
+go run scripts/stream-echo.go -port 55432 &
+sleep 2
 
-### What to observe
+# Server
+./jul -config burn-in-current.toml > "$DIR/jul.log" 2>&1 &
 
-| Metric | Pass criterion |
-|--------|---------------|
-| `errors=0` | Exactly zero |
-| Goroutine growth | Same bounded gate (≤ 96) — if it leaks slowly it will still be caught |
-| Heap growth | ≤ 64 MiB — a slow leak will be caught because the budget is absolute, not per-minute |
+# Load: the merged-Beta surface, sustained
+go run scripts/burn-in-load.go -duration 24h -workers 64 -current \
+  -health "http://127.0.0.1:8080/bounded/" | tee "$DIR/load-current.log" &
 
-> **Time expectation:** Each scenario runs for the full wall-clock duration. Two scenarios back-to-back = 2 hours.
+# Load: L4 stream
+go run scripts/burn-in-stream-load.go -duration 24h -workers 16 \
+  -target 127.0.0.1:15432 | tee "$DIR/load-stream.log" &
 
-### Artifacts
+# RBAC allow/deny probe, continuous
+go run scripts/burn-in-load.go -duration 24h -workers 1 -rbac \
+  -admin "https://127.0.0.1:9090" -health "http://127.0.0.1:8080/bounded/" \
+  | tee "$DIR/rbac-probe.log" &
 
-- `soak-proxy-1h.log`
-- `soak-udp-1h.log`
-
----
-
-## Procedure C — 24‑hour burn‑in
-
-**Goal:** Validate true long-term stability on Windows. This is the closest you can get to a production-like burn-in without dedicated staging hardware.
-
-**When to run:** Before a major release (v2.0.0), after any runtime upgrade (Go version bump), after any architectural change affecting goroutine lifecycle, after any plugin ABI or stream proxy change.
-
-### Setup
-
-1. **Ensure the machine will not sleep:**
-   ```powershell
-   powercfg /change standby-timeout-ac 0
-   powercfg /change monitor-timeout-ac 30
-   ```
-
-2. **Create a logging directory:**
-   ```powershell
-   New-Item -ItemType Directory -Force -Path "soak-artifacts\2026-07-04"
-   cd soak-artifacts\2026-07-04
-   ```
-
-3. **Capture a baseline sample** (before soak starts):
-   ```powershell
-   # We capture the Go runtime stats from the test itself, but you can also snapshot the host:
-   Get-Process | Where-Object {$_.ProcessName -like "go*"} | Select-Object Name, Id, WorkingSet | Out-File baseline-processes.txt
-   systeminfo | findstr /B /C:"OS Name" /C:"Total Physical Memory" | Out-File baseline-system.txt
-   ```
-
-### Commands
-
-```powershell
-$env:SOAK_DURATION="24h"
-$env:SOAK_WORKERS="8"   # lower to reduce client-side port pressure over 24h
-
-# Proxy soak (24 hrs)
-go test -tags "soak $env:FULL_TAGS" -run '^TestSoak$' -count=1 -timeout=0 -v ./internal/handler/ | Tee-Object -FilePath soak-proxy-24h.log
-
-# UDP churn soak (24 hrs)
-go test -tags "soak stream $env:FULL_TAGS" -run '^TestSoakUDPChurn$' -count=1 -timeout=0 -v ./internal/stream/ | Tee-Object -FilePath soak-udp-24h.log
+# Config-apply churn, continuous (requires config_authority = "managed",
+# already set in burn-in-current.toml)
+go run scripts/burn-in-load.go -duration 24h -workers 1 -apply-churn \
+  -applyEvery 5m -admin "https://127.0.0.1:9090" \
+  -health "http://127.0.0.1:8080/bounded/" | tee "$DIR/apply-churn.log" &
 ```
 
-> **Important:** Run each scenario in a separate PowerShell window. If one fails, the other is not blocked. Do not run simultaneously — each scenario is CPU-intensive and will interfere with the other.
+### Fault injection (required — see rationale below)
 
-### What to observe
+A clean-path 24-hour run proves memory/goroutine bounds but proves **nothing**
+about the resilience capabilities (admission, retry, circuit) the run exists
+to certify. Schedule these manually during the run, logging each into
+`$DIR/MANIFEST.md`'s event log with a UTC timestamp:
 
-Same gates as 1‑hour, but over 24 hours the signal is much stronger:
+| Fault | How |
+| --- | --- |
+| Backend kill + restart | `kill` one `burn-in-backend.go` instance for 1–2 minutes, then restart it on the same port |
+| Backend 5xx storm | Run a load-generator window with `-fault` for 5–10 minutes against the same server |
+| Slow backend | Run a load-generator window with `-slow-upstream` for 5–10 minutes |
+| Admin op during apply | Send a deliberately invalid config via a one-off `curl` with a broken TOML body mid-run; confirm the live config is unaffected |
+| Disk pressure (optional) | Fill `jul-data/cache-disk` toward its configured cap and confirm eviction, not failure |
 
-| Metric | Interpretation |
-|--------|---------------|
-| `errors=0` | Any non-zero error is a regression |
-| Goroutine growth ≤ 96 | Catches slow per-request goroutine leaks |
-| Heap growth ≤ 64 MiB | Caches slow object retention leaks |
-| Wall-clock runtime | If the test exits early (panic, timeout), it's a critical failure |
+Do not add fault modes beyond this table "for completeness" — each one must
+map to a documented recovery behavior in the exit criteria below, or it is
+noise a reviewer has to explain away.
 
-### Post-run capture
+### Observability
 
-After both scenarios finish, collect:
+Scrape `/metrics` at ≤15s. At minimum retain:
+`jul_http_requests_total`, `jul_http_request_duration_seconds`,
+`jul_upstream_active_requests`, `jul_upstream_pending_requests`,
+`jul_upstream_admission_rejected_total`, `jul_upstream_circuit_state`,
+`jul_upstream_circuit_transitions_total`, `jul_upstream_retry_attempts_total`,
+`jul_upstream_retry_budget_denied_total`,
+`jul_cache_bytes`, `jul_cache_max_bytes`, `jul_cache_entries`,
+`jul_cache_evictions_total` (JUL-AUD-005), `jul_cache_events_total`,
+`jul_reload_total`, `jul_reload_duration_seconds`, `jul_reload_in_progress`,
+`jul_reload_timeout_total`, `jul_managed_apply_finalized_total`,
+`jul_managed_apply_finalization_errors_total`, `jul_transport_retired_total`,
+`jul_plugin_invocations_total`, `jul_plugin_panics_total`,
+`jul_stream_active_conns`, `jul_stream_udp_sessions_evicted_total`,
+`jul_mtls_handshakes_total`, `jul_waf_events_total`, `jul_egress_decisions_total`,
+`jul_client_addr_derivations_total`, plus `go_goroutines`, `go_memstats_*`,
+`process_resident_memory_bytes`, `process_open_fds`, `process_cpu_seconds_total`.
 
-```powershell
-# Copy logs
-copy soak-proxy-24h.log soak-udp-24h.log ..\
+Capture heap and goroutine pprof profiles at T0, T+2h, T+12h, T+24h into
+`$DIR/`:
 
-# Capture system state
-systeminfo | findstr /B /C:"OS Name" /C:"Total Physical Memory" | Out-File post-system.txt
-
-# Zip artifacts
-Compress-Archive -Path *.log,*.txt -DestinationPath soak-2026-07-04.zip
+```sh
+for suffix in T0 T2h T12h T24h; do   # run at the appropriate wall-clock time
+  curl -sk -H "Authorization: Bearer <admin-role-token>" \
+    "https://127.0.0.1:9090/debug/pprof/heap?debug=1" -o "$DIR/heap-$suffix.out"
+  curl -sk -H "Authorization: Bearer <admin-role-token>" \
+    "https://127.0.0.1:9090/debug/pprof/goroutine?debug=1" -o "$DIR/goroutine-$suffix.out"
+done
 ```
 
-### Artifacts
+### Stability indicators
 
-- `soak-proxy-24h.log`
-- `soak-udp-24h.log`
-- `baseline-*.txt`, `post-*.txt` (optional)
-- `soak-2026-07-04.zip` (upload to release notes or GitHub Actions artifact)
+| Symptom | Signal |
+| --- | --- |
+| Memory leak | `process_resident_memory_bytes`/heap rising monotonically after a 2h warm-up, tracking cumulative requests rather than concurrency |
+| Goroutine leak | `go_goroutines` trending with cumulative load rather than concurrency |
+| FD/socket leak | `process_open_fds` not returning to baseline at a load pause |
+| Admission-slot leak | `jul_upstream_active_requests` floor creeping upward across hours |
+| Queue unboundedness | any `jul_upstream_pending_requests` excursion above configured `max_pending_requests` |
+| Cache runaway | occupancy gauge exceeding configured max, or the disk tier growing without eviction |
+| Reload instability | `jul_reload_duration_seconds` p95 drifting upward across applies, or any `jul_reload_timeout_total`/`jul_managed_apply_finalization_errors_total` increment |
+| Drain failure | any `jul_transport_retired_total{mode="forced"}` |
 
----
+### Exit criteria
+
+1. ≥24h continuous, single process, no unplanned restart.
+2. Zero unexplained client errors — every 4xx/5xx attributable to an injected
+   fault or an expected policy decision (429/403).
+3. RSS/heap plateau: last-6h slope ≤ +1%/h, absolute growth after warm-up
+   ≤ 64 MiB.
+4. `go_goroutines` end-of-run within the bounded gate (`≤ 4×workers+32`) of
+   the post-warm-up baseline.
+5. `process_open_fds` returns to within 5% of baseline at each load pause.
+6. `jul_upstream_active_requests` reaches exactly 0 at every load pause.
+7. `jul_upstream_pending_requests` never exceeds configuration.
+8. Cache occupancy never exceeds configured maxima; the disk tier
+   demonstrably evicts.
+9. `-apply-churn` accumulates ≥200 successful applies;
+   `jul_reload_timeout_total` = 0; `jul_managed_apply_finalization_errors_total` = 0;
+   `jul_transport_retired_total{mode="forced"}` = 0.
+10. `-rbac` probe reports `violations=0` for the whole run.
+11. Every injected fault produced the expected behavior (circuit opened,
+    budget denied, degraded response, or a clean 4xx) **and** full recovery
+    afterward.
+12. Zero `jul_plugin_panics_total`.
+13. Zero secret values in any retained log or artifact (`grep` the directory
+    before committing anything).
+
+### After the run
+
+1. Fill in the remaining sections of `$DIR/MANIFEST.md` (event log, metric
+   snapshot location, exit-criteria table, conclusion).
+2. Append a dated entry to [soak-evidence.md](soak-evidence.md) linking to
+   `$DIR/`.
+3. If any exit criterion failed, file it as a focused issue with exact
+   reproduction before considering the release — do not weaken the criterion
+   to make the run "pass" (see ADR 0017 Amendment 4 for the precedent: when an
+   acceptance criterion proved unachievable by design, the criterion was
+   amended in public with reasoning, not the measurement).
 
 ## Interpreting a failure
 
 | Failure mode | Likely cause | Action |
-|-------------|-------------|--------|
-| `errors > 0` | Handler panic, connection reset, backend failure | Check log for stack trace; run with `-v` |
-| Goroutine growth > 96 | Goroutine leak in handler, middleware, or connection pool | Capture `goroutine` profile: `curl http://localhost:9090/debug/pprof/goroutine` if admin is running |
-| Heap growth > 64 MiB | Object retention (cache, buffer pool, session table) | Capture `heap` profile: `curl http://localhost:9090/debug/pprof/heap` |
-| Test panics / exits early | Critical bug (nil pointer, index out of range) | Full stack trace in log; treat as release blocker |
-| `WSASocket` error (Windows) | Ephemeral port exhaustion | Reduce `SOAK_WORKERS` to 8 or 4; this is a test client limitation, not a server leak |
-
----
-
-## Health check during a long soak
-
-If you want to verify the server is still alive mid-soak, the soak tests themselves do not expose an admin port. For a **true 24-hour production burn-in**, you would instead:
-
-1. Build and run the real binary:
-   ```powershell
-   go build -tags "$env:FULL_TAGS" -o jul.exe ./cmd/jul
-   .\jul.exe -config testdata/static.toml
-   ```
-
-2. Drive traffic with an external load generator (`wrk2`, `k6`, or a custom PowerShell script) in a loop.
-
-3. Poll health every 5 minutes:
-   ```powershell
-   while ($true) { (Measure-Command { curl -s http://localhost:8082/ }).TotalMilliseconds; Start-Sleep -Seconds 300 }
-   ```
-
-4. Capture pprof snapshots at T+0, T+12h, T+24h.
-
-The in-tree soak tests (`TestSoak`, `TestSoakUDPChurn`) use `httptest.NewServer` and are **self-contained** — they are designed for CI gates, not for monitoring a live process. For a monitored 24-hour burn-in, use the real binary + external traffic.
-
----
-
-## Quick reference
-
-| Duration | Workers | Scenario | Command prefix | Time | Use case |
-|----------|---------|----------|----------------|------|----------|
-| 5 min | 16 | **udp-churn only** | `SOAK_DURATION=5m` | 5 min | Release gate, local validation |
-| 20 s | 16–24 | proxy (smoke) | `SOAK_DURATION=20s` | 20 s | Quick proxy sanity check |
-| 1 hour | 16 | udp-churn only | `SOAK_DURATION=1h` | 1 hour | Medium validation |
-| 24 hours | 16 | udp-churn only | `SOAK_DURATION=24h` | 24 hours | Major burn-in |
-
-> **Windows limitation:** The `proxy` scenario exhausts ephemeral TCP ports on the test client within ~2 minutes at 16 workers. It is **only viable for smoke durations (≤20s)** on Windows. For full proxy soak coverage, see the Linux CI release gate or use a real binary burn-in (procedure below).
-
----
-
-## Track 2 — Real binary burn-in (for production-like soak)
-
-The in-tree soak tests are self-contained CI gates. For a **true production burn-in** that validates the full stack (config parser, admin API, TLS, reload, middleware chain):
-
-### 1. Build (with console tag)
-
-```powershell
-$env:FULL_TAGS="brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf"
-go build -tags "$env:FULL_TAGS" -o jul.exe ./cmd/jul
-```
-
-> **Always include the `console` tag.** The web console on the admin listener gives you live traffic, latency, error-rate, and feature-status visibility during the soak. Without it, the admin root serves a static page and the dashboard is unavailable.
-
-### 2. Create a production-like `burn-in.toml`
-
-Use static + proxy routes, health checks, rate limiting, and the admin API.
-The admin listener **must** be enabled and carry a token so the console is reachable:
-
-```toml
-[global]
-log_level = "info"
-
-[admin]
-enabled = true
-listen  = "127.0.0.1:9090"
-token   = "change-me"
-
-[[servers]]
-listen = "127.0.0.1:8080"
-server_names = ["localhost"]
-
-  [[servers.locations]]
-  match = { type = "prefix", path = "/api/" }
-  proxy_pass = "http://127.0.0.1:8081"
-
-  [[servers.locations]]
-  match = { type = "prefix", path = "/static/" }
-  root = "testdata/www"
-```
-
-### 3. Start the backend
-
-Spin up a simple backend server (or use `python -m http.server 8081`).
-
-### 4. Start Jul
-
-```powershell
-.\jul.exe -config burn-in.toml
-```
-
-### 5. Drive traffic with `wrk2` or `k6`
-
-```powershell
-# In another PowerShell window:
-wrk -t4 -c100 -d24h --latency http://127.0.0.1:8080/static/
-```
-
-Or with k6:
-
-```powershell
-k6 run --duration 24h --vus 50 burn-in.js
-```
-
-### 6. Monitor
-
-```powershell
-# Health check every 5 minutes
-while ($true) {
-    $r = curl -s http://127.0.0.1:9090/api/healthz
-    $t = (Measure-Command { curl -s http://127.0.0.1:8080/ }).TotalMilliseconds
-    Write-Host "$(Get-Date -Format 'HH:mm:ss') health=$r latency=${t}ms"
-    Start-Sleep -Seconds 300
-}
-```
-
-> **Prefer the web console:** Open `http://127.0.0.1:9090/` in a browser and enter the admin token. The **Overview** panel shows real-time req/s, error rate (5xx), latency (avg/p50/p95/p99), in-flight requests, active connections, cache hit ratio, and 2-minute trend sparklines — far richer than CLI polling. Keep a browser tab open during the soak for at-a-glance health checks.
-
-### 7. Capture pprof snapshots
-
-```powershell
-# T+0, T+12h, T+24h
-curl -s http://127.0.0.1:9090/debug/pprof/goroutine -o goroutine-T0.out
-curl -s http://127.0.0.1:9090/debug/pprof/heap -o heap-T0.out
-curl -s http://127.0.0.1:9090/debug/pprof/profile -o cpu-T0.out
-```
-
-### 8. Assert
-
-- Zero HTTP 5xx errors
-- Goroutine count flat (+/- 10%)
-- Heap growth < 10 MiB over 24h post-GC
-- p99 latency stable (±20%)
-- Jul process did not restart
-
----
+| --- | --- | --- |
+| `errors > 0` / `HTTP 5xx > 0` (unexpected) | Handler panic, connection reset, backend failure | Check `jul.log` for a stack trace |
+| Goroutine growth beyond bound | Leak in handler, middleware, or connection pool | Compare `goroutine-T0.out` vs the latest capture |
+| Heap growth beyond bound | Object retention (cache, buffer pool, session table) | Compare `heap-T0.out` vs the latest capture; check `jul_cache_bytes` |
+| Process exits early | Critical bug (panic, deadlock) | Full stack trace in `jul.log`; release blocker |
+| `-rbac` reports violations | A permission boundary regressed | Reproduce with a single `curl` against the failing check in the log |
+| `-apply-churn` failures | Config-apply/reload regression, or the profile drifted from what `adopt-external` expects | Reproduce manually: `curl` the same `/api/v1/config` → `/api/v1/config/apply` sequence and inspect the error body |
 
 ## Related documents
 
 - [soak-evidence.md](soak-evidence.md) — dated run log and artifact links
+- [soak-artifacts/README.md](../soak-artifacts/README.md) — the evidence
+  retention convention (JUL-AUD-018)
+- [docs/audit/2026-09-16-pre-soak-readiness-audit.md](audit/2026-09-16-pre-soak-readiness-audit.md) —
+  the audit that identified this document's prior drift from the actual
+  harness (JUL-AUD-006) and the full proposed soak plan this page implements
 - [ADR 0005](adr/0005-soak-post-ga-gate.md) — why soak is a post-GA gate
-- [scripts/soak.sh](../scripts/soak.sh) — bash harness (Linux CI)
-- [status.md](status.md#soak-tracking-post-ga-gate) — per-feature soak status

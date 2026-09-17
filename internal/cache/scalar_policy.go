@@ -113,3 +113,31 @@ func (c *Cache) DiskEvictionFailures() int64 {
 	}
 	return c.diskEvictionFailures.Load()
 }
+
+// TierStats is one tier's live occupancy: current bytes, the configured cap,
+// entry count, and cumulative LRU-capacity evictions since startup (not
+// explicit invalidation).
+type TierStats struct {
+	Bytes     int64
+	MaxBytes  int64
+	Entries   int
+	Evictions int64
+}
+
+// Stats returns a snapshot of every configured tier's live occupancy
+// (JUL-AUD-005): "cache is bounded" is otherwise an unfalsifiable claim
+// against a running process. Read at scrape time rather than pushed from the
+// request path, like the upstream resilience gauges. The disk tier is absent
+// when no disk_path is configured, matching the tier's own optionality.
+func (c *Cache) Stats() (mem TierStats, disk *TierStats) {
+	if c == nil {
+		return TierStats{}, nil
+	}
+	bytes, maxBytes, entries, evictions := c.mem.stats()
+	mem = TierStats{Bytes: bytes, MaxBytes: maxBytes, Entries: entries, Evictions: evictions}
+	if c.disk == nil {
+		return mem, nil
+	}
+	dBytes, dMaxBytes, dEntries, dEvictions := c.disk.stats()
+	return mem, &TierStats{Bytes: dBytes, MaxBytes: dMaxBytes, Entries: dEntries, Evictions: dEvictions}
+}

@@ -196,6 +196,12 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveUpstreamBackends("pool-a", 3)
 	m.ObserveDiscoveryError("pool-a")
 	m.ObserveProbe("pool-a", "http", true, time.Millisecond)
+	m.SetCacheStatsSource(func() []CacheTierStats {
+		return []CacheTierStats{
+			{Tier: "memory", Bytes: 1024, MaxBytes: 8192, Entries: 4, Evictions: 1},
+			{Tier: "disk", Bytes: 2048, MaxBytes: 16384, Entries: 2, Evictions: 0},
+		}
+	})
 	m.ObserveGRPCTranscode("pkg.Svc/Method", "200")
 	m.ObserveGRPCTranscodeStreamMsg("pkg.Svc/Method", "sent")
 	m.ObserveGRPCProxyStream()

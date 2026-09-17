@@ -25,7 +25,7 @@ technical merit aligned with the project's vision.
    ```
    For the closest local approximation of the full merge gate, run:
    ```bash
-   make ci-pr            # ci-full + go vet + docs-check
+   make ci-pr            # ci-full + go vet + generated-check + config-check + docs-check
    ```
    Changes to RBAC, WAF, WASM plugins, or their build-tag boundaries can run the
    focused gate directly:

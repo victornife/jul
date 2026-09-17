@@ -130,6 +130,13 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// plain callback installed here, before any traffic is served.
 	responseCache.SetRevalidationObserver(metrics.ObserveCacheRevalidation)
 
+	// The live cache-occupancy gauges are read at scrape time rather than
+	// pushed from the request path, for the same reason the upstream
+	// resilience gauges are (JUL-AUD-005).
+	metrics.SetCacheStatsSource(func() []observability.CacheTierStats {
+		return cacheStats(responseCache)
+	})
+
 	// The optional egress allow-list guards the server's config-driven auxiliary
 	// fetches (JWKS, forward-auth, Consul/Kubernetes discovery, ACME/OCSP PKI
 	// calls, and WASM plugin fetches). The process-lifetime manager is built
@@ -1418,6 +1425,24 @@ func upstreamStats(reg *upstream.Registry) []observability.UpstreamPoolStats {
 			Eligible:    s.Eligible,
 			ByState:     byState,
 		})
+	}
+	return out
+}
+
+// cacheStats adapts the process-lifetime Cache's live tier occupancy to the
+// shape the metrics collector consumes, so neither package has to import the
+// other. Returns an empty slice when caching is disabled (c == nil): there is
+// no tier to report, not a zero-occupied one.
+func cacheStats(c *cache.Cache) []observability.CacheTierStats {
+	if c == nil {
+		return nil
+	}
+	mem, disk := c.Stats()
+	out := []observability.CacheTierStats{
+		{Tier: "memory", Bytes: mem.Bytes, MaxBytes: mem.MaxBytes, Entries: mem.Entries, Evictions: mem.Evictions},
+	}
+	if disk != nil {
+		out = append(out, observability.CacheTierStats{Tier: "disk", Bytes: disk.Bytes, MaxBytes: disk.MaxBytes, Entries: disk.Entries, Evictions: disk.Evictions})
 	}
 	return out
 }

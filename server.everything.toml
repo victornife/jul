@@ -32,8 +32,9 @@
 #     .\jul.exe -config server.everything.toml
 #
 # Companion backends (start before jul to exercise proxying/health checks):
-#   go run scripts/burn-in-backend.go             # HTTP backend :8081/:8082 (health)
-#   go run scripts/stream-echo-backend.go          # TCP echo backend :55432 for [[stream]]
+#   go run scripts/burn-in-backend.go -port 8081  # HTTP backend :8081
+#   go run scripts/burn-in-backend.go -port 8082  # HTTP backend :8082 (health)
+#   go run scripts/stream-echo.go -port 55432      # TCP echo backend :55432 for [[stream]]
 #   go run scripts/grpc-echo-server.go             # gRPC backend :50051 for transcoding/passthrough
 #
 # Known-external-dependency blocks (config is valid and "activated"; the

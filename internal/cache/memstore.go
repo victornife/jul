@@ -15,9 +15,12 @@ type memStore struct {
 	mu       sync.Mutex
 	maxBytes int64
 	curBytes int64
-	ll       *list.List // front = most recently used
-	items    map[string]*list.Element
-	onEvict  func(key string, e *Entry)
+	// evictions counts LRU-capacity evictions (not explicit del/purge calls),
+	// for the jul_cache_evictions_total{tier="memory"} gauge-read counter.
+	evictions int64
+	ll        *list.List // front = most recently used
+	items     map[string]*list.Element
+	onEvict   func(key string, e *Entry)
 }
 
 type memItem struct {
@@ -90,7 +93,17 @@ func (m *memStore) evictLocked() []*memItem {
 		m.curBytes -= it.size
 		victims = append(victims, it)
 	}
+	m.evictions += int64(len(victims))
 	return victims
+}
+
+// stats returns a snapshot of the tier's live occupancy for the
+// jul_cache_bytes/jul_cache_max_bytes/jul_cache_entries/jul_cache_evictions_total
+// gauges, read at scrape time rather than pushed from the request path.
+func (m *memStore) stats() (curBytes, maxBytes int64, entries int, evictions int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.curBytes, m.maxBytes, m.ll.Len(), m.evictions
 }
 
 func (m *memStore) del(key string) {

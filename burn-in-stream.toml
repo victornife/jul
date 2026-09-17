@@ -5,10 +5,11 @@
 #   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul.exe ./cmd/jul
 #
 # Run:
-#   Window 1: go run scripts/burn-in-backend.go      (HTTP backend :8081)
-#   Window 2: go run scripts/stream-echo-backend.go  (TCP echo :5432 backends)
-#   Window 3: .\jul.exe -config burn-in-stream.toml
-#   Window 4: go run scripts/burn-in-load.go -duration 5m -workers 20 -stream-tcp
+#   Window 1: go run scripts/burn-in-backend.go               (HTTP backend :8081)
+#   Window 2: go run scripts/stream-echo.go -port 55432        (postgres_pool member 1)
+#   Window 3: go run scripts/stream-echo.go -port 55433        (postgres_pool member 2)
+#   Window 4: .\jul.exe -config burn-in-stream.toml
+#   Window 5: go run scripts/burn-in-stream-load.go -duration 5m -workers 20 -target 127.0.0.1:15432
 
 [global]
 log_level = "warn"
