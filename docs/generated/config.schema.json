@@ -643,6 +643,15 @@
             ],
             "x-jul-constraint": "non-negative"
           },
+          "max_invocations": {
+            "description": "MaxInvocations retires a pooled module instance after this many guest calls (WASM linear memory only grows, so an indefinitely reused instance accumulates unbounded heap)",
+            "minimum": 0,
+            "type": "integer",
+            "x-jul-capability": [
+              "wasm_plugins"
+            ],
+            "x-jul-constraint": "non-negative"
+          },
           "max_request_body": {
             "default": "1m",
             "description": "MaxRequestBody caps the request body the host buffers for a guest",

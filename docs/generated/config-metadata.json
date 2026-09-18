@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 357,
-    "schema_leaves": 303,
+    "schema_paths": 358,
+    "schema_leaves": 304,
     "resources": 9
   },
   "capability_build_tags": {
@@ -1292,6 +1292,25 @@
       "default": "1m",
       "description": "MaxFetchResponse caps a fetch response body",
       "anchor": "plugins-x-max_fetch_response"
+    },
+    "plugins.*.max_invocations": {
+      "kind": "scalar",
+      "scalar": "integer",
+      "go_type": "int",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "plugins",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the plugin set is rebuilt and re-instantiated on each successful reload",
+      "capabilities": [
+        "wasm_plugins"
+      ],
+      "value_kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 1000",
+      "active_when": "always",
+      "description": "MaxInvocations retires a pooled module instance after this many guest calls (WASM linear memory only grows, so an indefinitely reused instance accumulates unbounded heap)",
+      "anchor": "plugins-x-max_invocations"
     },
     "plugins.*.max_request_body": {
       "kind": "scalar",

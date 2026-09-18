@@ -76,12 +76,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 357
-  schema_leaves: 303
-  registry_entries: 303
+  schema_paths: 358
+  schema_leaves: 304
+  registry_entries: 304
   startup_consumed: 32
   by_class:
-    hot_reload: 257
+    hot_reload: 258
     restart_required: 32
     new_listener_only: 7
     ignored_deprecated: 4
@@ -445,6 +445,10 @@ fields:
     subsystem: plugins
     reason: "the plugin set is rebuilt and re-instantiated on each successful reload"
   - path: "plugins.*.max_fetch_response"
+    class: hot_reload
+    subsystem: plugins
+    reason: "the plugin set is rebuilt and re-instantiated on each successful reload"
+  - path: "plugins.*.max_invocations"
     class: hot_reload
     subsystem: plugins
     reason: "the plugin set is rebuilt and re-instantiated on each successful reload"

@@ -32,6 +32,33 @@ const wasmPageSize = 1 << 16
 // _initialize), independent of the much shorter per-request call timeout.
 const instantiateTimeout = 10 * time.Second
 
+// defaultMaxInstanceInvocations bounds how many guest calls a single pooled
+// module instance serves before it is retired. WebAssembly linear memory only
+// grows (memory.grow is monotonic) — an instance reused indefinitely can
+// accumulate unbounded heap even with zero errors, since nothing else ever
+// shrinks it back down. Retiring and re-instantiating periodically bounds the
+// per-instance high-water mark; instantiation cost is amortized across this
+// many calls.
+const defaultMaxInstanceInvocations = 1000
+
+// poolCapacity bounds how many idle module instances a plugin keeps ready for
+// reuse. A plain sync.Pool is not safe here: wazero's Runtime keeps its own
+// internal reference to every instantiated module (so Close can tear them all
+// down at once), so an instance sync.Pool silently drops during GC's victim-
+// cache eviction is never garbage collected and never explicitly Closed either
+// — it leaks for the life of the process. A fixed-capacity channel means every
+// instance is always either reused or explicitly closed, never silently
+// dropped.
+
+const poolCapacity = 64
+
+// pooledModule pairs a pooled WASM module instance with its lifetime call
+// count so acquire/release can retire it once maxInstanceInvocations is hit.
+type pooledModule struct {
+	mod   api.Module
+	calls int
+}
+
 // Options configures a Manager.
 type Options struct {
 	// Logger receives guest log messages and host diagnostics. Required.
@@ -147,7 +174,7 @@ type plugin struct {
 	name      string
 	runtime   wazero.Runtime
 	compiled  wazero.CompiledModule
-	pool      sync.Pool // of api.Module
+	pool      chan *pooledModule // fixed-capacity; see poolCapacity
 	timeout   time.Duration
 	isHandler bool
 
@@ -183,6 +210,10 @@ type plugin struct {
 	kvKeys  map[string]int
 	kvBytes int
 
+	// maxInstanceInvocations bounds how many calls a pooled instance serves
+	// before release() retires it instead of returning it to the pool.
+	maxInstanceInvocations int
+
 	log      *slog.Logger
 	onInvoke func(string, string, time.Duration)
 	onPanic  func(string)
@@ -210,6 +241,7 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		name:         name,
 		timeout:      pc.Timeout.Std(),
 		isHandler:    pc.Type == "handler",
+		pool:         make(chan *pooledModule, poolCapacity),
 		capKV:        pc.KV,
 		capFetch:     pc.Fetch,
 		allowedHosts: pc.AllowedHosts,
@@ -235,6 +267,10 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 	}
 	if p.timeout <= 0 {
 		p.timeout = 100 * time.Millisecond
+	}
+	p.maxInstanceInvocations = pc.MaxInvocations
+	if p.maxInstanceInvocations <= 0 {
+		p.maxInstanceInvocations = defaultMaxInstanceInvocations
 	}
 
 	dialer := &net.Dialer{Timeout: p.fetchTimeout}
@@ -300,7 +336,7 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 	if err != nil {
 		return closeOnErr(fmt.Errorf("instantiate module: %w", err))
 	}
-	p.pool.Put(mod)
+	p.pool <- &pooledModule{mod: mod}
 
 	return p, nil
 }
@@ -338,16 +374,36 @@ func (p *plugin) instantiate(ctx context.Context) (api.Module, error) {
 	return p.runtime.InstantiateModule(ctx, p.compiled, cfg)
 }
 
-func (p *plugin) acquire() (api.Module, error) {
-	if v := p.pool.Get(); v != nil {
-		return v.(api.Module), nil
+func (p *plugin) acquire() (*pooledModule, error) {
+	select {
+	case pm := <-p.pool:
+		return pm, nil
+	default:
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), instantiateTimeout)
 	defer cancel()
-	return p.instantiate(ctx)
+	mod, err := p.instantiate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &pooledModule{mod: mod}, nil
 }
 
-func (p *plugin) release(mod api.Module) { p.pool.Put(mod) }
+// release returns pm to the pool for reuse, unless it has served its lifetime
+// call budget or the pool is already at capacity, in which case it is closed
+// instead — every instance is always either reused or explicitly closed, never
+// silently dropped (see poolCapacity).
+func (p *plugin) release(pm *pooledModule) {
+	pm.calls++
+	if pm.calls < p.maxInstanceInvocations {
+		select {
+		case p.pool <- pm:
+			return
+		default:
+		}
+	}
+	_ = pm.mod.Close(context.Background())
+}
 
 // kvSet stores a value under an already-namespaced key, enforcing the plugin's
 // per-namespace quota: it rejects (returns false) a value that would push the
@@ -375,11 +431,12 @@ func (p *plugin) kvSet(key string, val []byte) bool {
 // caller turns into a 500). On error the instance is discarded, not pooled,
 // because a trapped module may be in an undefined state.
 func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.Request) (action uint32, inv *invocation, err error) {
-	mod, err := p.acquire()
+	pm, err := p.acquire()
 	if err != nil {
 		p.onPanic(p.name)
 		return 0, nil, err
 	}
+	mod := pm.mod
 
 	inv = &invocation{r: r, w: w, log: p.log, maxReqBody: p.maxReqBody, maxRespBody: p.maxRespBody}
 	ctx, cancel := context.WithTimeout(withInvocation(parent, inv), p.timeout)
@@ -415,7 +472,7 @@ func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.R
 		return 0, inv, inv.err
 	}
 
-	p.release(mod)
+	p.release(pm)
 	action = uint32(results[0])
 	result := "stop"
 	if action == 1 {
