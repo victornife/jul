@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 357 |
-| Schema leaves (configurable values) | 303 |
-| Registry entries | 303 |
+| Schema paths (containers included) | 358 |
+| Schema leaves (configurable values) | 304 |
+| Registry entries | 304 |
 | Startup-consumed entries | 32 |
-| Class `hot_reload` | 257 |
+| Class `hot_reload` | 258 |
 | Class `restart_required` | 32 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -199,6 +199,7 @@ value is compared as a digest so no secret material leaves the process.
 | `plugins.*.kv_max_bytes` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.kv_max_entries` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.max_fetch_response` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
+| `plugins.*.max_invocations` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.max_request_body` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.max_response_body` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.memory_limit` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |

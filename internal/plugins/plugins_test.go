@@ -87,6 +87,43 @@ func TestMiddlewareInjectsResponseHeader(t *testing.T) {
 	}
 }
 
+// TestPooledInstanceRetiresAfterMaxInvocations locks in the fix for the
+// pre-soak finding that a pooled WASM instance reused indefinitely
+// accumulates unbounded heap (WASM linear memory only grows). A pooled
+// instance must be closed and replaced once it serves its invocation budget,
+// rather than returned to the pool forever.
+func TestPooledInstanceRetiresAfterMaxInvocations(t *testing.T) {
+	m := testManager(t)
+	s := buildSet(t, m, map[string]config.PluginConfig{
+		"hi": pcfg("header-inject", func(pc *config.PluginConfig) { pc.MaxInvocations = 2 }),
+	})
+	p := s.plugins["hi"]
+
+	pm1, err := p.acquire()
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	p.release(pm1) // 1st call served; below the cap, goes back to the pool.
+
+	pm2, err := p.acquire()
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	if pm2 != pm1 {
+		t.Fatal("expected the same pooled instance to be reused below the invocation cap")
+	}
+	p.release(pm2) // 2nd call served; hits the cap, must be closed rather than pooled.
+
+	pm3, err := p.acquire()
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	if pm3 == pm2 {
+		t.Fatal("expected a fresh instance after the retired one hit its invocation cap")
+	}
+	p.release(pm3)
+}
+
 func TestMiddlewareBlocksRequest(t *testing.T) {
 	m := testManager(t)
 	s := buildSet(t, m, map[string]config.PluginConfig{"rb": pcfg("request-block")})

@@ -670,6 +670,14 @@
       "active_when": "always"
     },
     {
+      "go_field": "PluginConfig.MaxInvocations",
+      "path": "plugins.<name>.max_invocations",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 1000",
+      "active_when": "always"
+    },
+    {
       "go_field": "PluginConfig.MaxRequestBody",
       "path": "plugins.<name>.max_request_body",
       "kind": "size",

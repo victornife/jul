@@ -142,6 +142,10 @@ type PluginConfig struct {
 	KVMaxEntries int `toml:"kv_max_entries"`
 	// KVMaxBytes caps total stored bytes per plugin. Zero applies a 1 MiB default.
 	KVMaxBytes Size `toml:"kv_max_bytes"`
+	// MaxInvocations retires a pooled module instance after this many guest
+	// calls (WASM linear memory only grows, so an indefinitely reused instance
+	// accumulates unbounded heap). Zero applies a 1000 default.
+	MaxInvocations int `toml:"max_invocations"`
 }
 
 // WAFConfig configures the Coraza-based web application firewall, either
