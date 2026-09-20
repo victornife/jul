@@ -1,0 +1,77 @@
+# Soak run manifest
+
+> Copy this file to `soak-artifacts/<YYYY-MM-DD>-<scope>/MANIFEST.md` and fill
+> in every section. `scripts/soak-manifest-init.sh <scope>` does the copy and
+> pre-fills the fields it can determine automatically.
+
+## Identity
+
+| Field | Value |
+| --- | --- |
+| Scope | validation-5m-fix2 |
+| Date started (UTC) | 2026-09-18T20:11:23Z |
+| Date ended (UTC) | |
+| Operator | |
+| Build SHA | a2c9705adbba7f25cc5557dc787290aa3e9200a7 (working tree NOT clean) |
+| Working tree clean at build time? | |
+| `go version` | go version go1.26.6 linux/arm64 |
+| OS / kernel | Linux AXLZ00399204189 6.18.33.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:38:49 UTC 2026 aarch64 GNU/Linux |
+| Host spec (CPU, RAM, disk) | |
+| `jul capabilities -json` | ```<paste here>``` |
+
+## Configuration
+
+List every config file used, and paste its exact content (or attach a copy in
+this directory alongside this manifest).
+
+| File | Copied to |
+| --- | --- |
+| | |
+
+## Commands executed
+
+Paste every command line, in order, exactly as run (build, backends, server,
+load generator(s), any fault-injection commands).
+
+```sh
+
+```
+
+## Event log
+
+A timestamped log of every apply, rollback, restart, and injected fault
+during the run. One line per event.
+
+```
+<UTC timestamp>  <event>
+```
+
+## Metric snapshots
+
+List where scrape snapshots / exported CSVs / dashboards for this run are
+stored (attach in this directory, or link to a retained dashboard/TSDB
+snapshot). Note the scrape interval used.
+
+## pprof captures
+
+| Timestamp | heap | goroutine |
+| --- | --- | --- |
+| T0 | | |
+| ... | | |
+| Tend | | |
+
+## Exit criteria and result
+
+Restate the run's exit criteria (see `docs/soak-procedures.md`) and record the
+actual measured value for each — not just pass/fail.
+
+| Criterion | Target | Measured | Pass? |
+| --- | --- | --- | --- |
+| | | | |
+
+## Conclusion
+
+Free-form: what this run proves, what it does not, any anomaly observed and
+how it was investigated, and whether this run's evidence should be cited in
+`docs/soak-evidence.md` (if so, add a dated entry there linking back to this
+directory).

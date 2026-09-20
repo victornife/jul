@@ -1,0 +1,61 @@
+{
+  "product": "Jul.IA",
+  "version": "dev",
+  "features": {
+    "waf": true,
+    "stream_proxy": true,
+    "wasm_plugins": true,
+    "acme": true,
+    "grpc": true,
+    "http3": true,
+    "otel": true,
+    "console": true,
+    "brotli": true,
+    "zstd": true,
+    "importer": true,
+    "consul": true,
+    "kubernetes": true
+  },
+  "exit_codes": [
+    {
+      "code": 0,
+      "meaning": "success: applied live, read completed, clean shutdown, or healthy probe"
+    },
+    {
+      "code": 1,
+      "meaning": "validation or configuration error"
+    },
+    {
+      "code": 2,
+      "meaning": "usage error: bad flags, missing argument, disabled admin, malformed request, or missing resource"
+    },
+    {
+      "code": 3,
+      "meaning": "success; restart required to converge (staged or owned_not_serving)"
+    },
+    {
+      "code": 4,
+      "meaning": "success with a degraded outcome"
+    },
+    {
+      "code": 5,
+      "meaning": "conflict or state left uncertain by failed restoration"
+    },
+    {
+      "code": 6,
+      "meaning": "configuration authority denial: server is file_owned"
+    },
+    {
+      "code": 7,
+      "meaning": "authentication, authorization, or insecure-transport refusal"
+    },
+    {
+      "code": 8,
+      "meaning": "connectivity, TLS, or rate-limit failure"
+    },
+    {
+      "code": 9,
+      "meaning": "server, capability, storage, timeout, or internal failure"
+    }
+  ]
+}

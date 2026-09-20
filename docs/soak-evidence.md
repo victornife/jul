@@ -64,6 +64,82 @@ whether the duration meets the ADR-0005 minimum for that scope.
 
 ## Run log
 
+### 2026-09-19 — Final soak (ADR 0005 Procedure C), `burn-in-current.toml`, ~25h Linux — **plugin-pool fix certified; two deviations recorded, not papered over**
+
+Ahead of `v2.0.0-rc.1`'s ≥24h final soak, Procedure A (5-minute validation)
+caught a real, reproducible unbounded-memory bug in the WASM plugin instance
+pool (`internal/plugins/runtime.go`): a `sync.Pool`-managed instance could be
+silently evicted by Go's GC without ever being `Close`d, because
+`wazero.Runtime` keeps its own reference to every instantiated module — so an
+evicted-but-never-closed instance leaked for the life of the process, and
+WASM linear memory only grows (`memory.grow` is monotonic), so the leak was
+unbounded with invocation volume. Fixed in
+[PR #420](https://github.com/victornife/jul/pull/420) (bounded channel pool,
+`poolCapacity = 64`, plus a per-instance invocation cap,
+`plugins.<name>.max_invocations`, default 1000). Verified fixed via an
+isolated 96,000-request targeted burst (retained memory plateaued at
+~8–13MB, versus climbing unbounded to 600MB+ before the fix) before this
+final soak was launched against the fix commit.
+
+| | |
+| --- | --- |
+| Build SHA | `4a0b3d3ea5478c0ce8324a44b7fa447ec6139310` (merged as `c3f433d7`, PR #420) |
+| Duration | Main workload: 22:41:54Z–22:59:49Z (2026-09-18→19), 24h18m wall-clock. Apply-churn/fault top-up (see below): 23:06:05Z–23:55:24Z. |
+| Profile | `burn-in-current.toml` — the merged-Beta surface (resilience pools, RBAC, egress, routing predicates/response headers/CORS, HTTP-over-Unix, DNS discovery, `backend_tls`, WAF, WASM plugin, L4 stream) |
+| Workload | `-current` (64 workers), L4 stream (16 workers), `-rbac` probe, `-apply-churn` (5m), `-fault` (10m kill cycle), concurrently |
+| Traffic | 94.18M HTTP 200s, 9.54M 204s, 148M+ stream echo rounds, 5.02M WASM plugin invocations, 0 unattributable errors |
+| Full evidence | [`soak-artifacts/2026-09-18-final/MANIFEST.md`](../soak-artifacts/2026-09-18-final/MANIFEST.md) |
+
+**What passed cleanly:** the plugin-pool fix itself (the run's primary
+purpose) — heap for that component stayed flat at 5–13MB across the entire
+window and two decisive targeted bursts, never re-approaching the pre-fix
+runaway. Upstream admission/circuit recovery (active/pending requests back
+to exactly 0 after every fault window), RBAC (0 violations), and — after a
+targeted top-up, see below — config-apply-churn (202 successful applies, 0
+timeouts, 0 finalization errors) all came back clean.
+
+**Two deviations, recorded rather than hidden:**
+
+1. **Sandbox clock anomaly.** This run's host (WSL2) was suspended for a
+   large cumulative span mid-run; wall-clock kept advancing (confirmed via
+   `date` and continuous `jul.log` timestamps — one unbroken process, no
+   restart) but the kernel's monotonic clock did not, so Go's long-interval
+   tickers (`-apply-churn` every 5m, `-fault`'s kill-cycle every 10m)
+   fired far fewer times than 24h of wall-clock implies (10 applies and 15
+   kill-cycles instead of the expected ~288 and ~144). Network-I/O-gated
+   request loops were unaffected (100M+ requests delivered normally). Closed
+   the apply-churn gap with a focused ~50-minute top-up (`-applyEvery 15s`)
+   against the same still-live, uninterrupted `jul` process, reaching 202
+   successful applies. The scheduled kill-cycle count remains lower than a
+   clean 24h run would produce; per-request fault classes (5xx storms,
+   resets, malformed framing) were unaffected and ran continuously the whole
+   time.
+2. **15 plugin "panics"** (`jul_plugin_panics_total`, out of 5,023,629
+   invocations — 0.0003%). Zero literal recovered-panic log lines found;
+   root-caused to the plugin's 100ms per-call timeout being hit under real,
+   transient CPU contention on a shared sandbox (concurrent `make ci-pr` /
+   `test-race` / git-hook runs happened during the window) — not a WASM
+   trap or crash. Each was contained cleanly (500, instance discarded, zero
+   cascading impact). The exit criterion (zero) is not met as measured; not
+   weakened to call it a pass.
+
+Also not exercised this run: DNS-failure, FD-limit, and cgroup-constraint
+manual faults (would have required restarting the tracked process — avoided
+to preserve continuity); disk-pressure fault (N/A — this profile has no
+`[cache]` block). Continuous Prometheus scraping (the entry criteria call
+for ≤15s interval) was not configured; evidence relies on point-in-time
+`/metrics` snapshots plus continuous log review instead.
+
+**Classification:** ✅ authoritative, ≥24h soak evidence for the WASM
+plugin-pool memory fix specifically — the reason this soak was run.
+⚠️ two recorded, root-caused, low-severity deviations (see above) and four
+open follow-up items (manual faults, continuous scraping) remain; none of
+them indicate a defect in the fix under review. **Maintainer decision
+(2026-09-20):** the point-in-time metric checks are accepted as sufficient,
+and the three real deferred manual faults are accepted as non-blocking
+follow-up work — neither gates a stable `v2.0.0` tag. Tracked in
+[#422](https://github.com/victornife/jul/issues/422).
+
 ### 2026-08-19 — Resilience amplification — **measured deterministically; 24h soak still NOT RUN**
 
 #144 requires that a total outage at `retry_budget_percent = 10` hold upstream

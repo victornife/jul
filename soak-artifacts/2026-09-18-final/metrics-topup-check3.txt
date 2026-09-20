@@ -1,0 +1,461 @@
+# HELP go_gc_duration_seconds A summary of the wall-time pause (stop-the-world) duration in garbage collection cycles.
+# TYPE go_gc_duration_seconds summary
+go_gc_duration_seconds{quantile="0"} 0.0001622
+go_gc_duration_seconds{quantile="0.25"} 0.0002806
+go_gc_duration_seconds{quantile="0.5"} 0.0003493
+go_gc_duration_seconds{quantile="0.75"} 0.0004289
+go_gc_duration_seconds{quantile="1"} 0.0009305
+go_gc_duration_seconds_sum 313.654778488
+go_gc_duration_seconds_count 167054
+# HELP go_gc_gogc_percent Heap size target percentage configured by the user, otherwise 100. This value is set by the GOGC environment variable, and the runtime/debug.SetGCPercent function. Sourced from /gc/gogc:percent.
+# TYPE go_gc_gogc_percent gauge
+go_gc_gogc_percent 100
+# HELP go_gc_gomemlimit_bytes Go runtime memory limit configured by the user, otherwise math.MaxInt64. This value is set by the GOMEMLIMIT environment variable, and the runtime/debug.SetMemoryLimit function. Sourced from /gc/gomemlimit:bytes.
+# TYPE go_gc_gomemlimit_bytes gauge
+go_gc_gomemlimit_bytes 9.223372036854776e+18
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 105
+# HELP go_info Information about the Go environment.
+# TYPE go_info gauge
+go_info{version="go1.26.6"} 1
+# HELP go_memstats_alloc_bytes Number of bytes allocated in heap and currently in use. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_alloc_bytes gauge
+go_memstats_alloc_bytes 1.0468244e+08
+# HELP go_memstats_alloc_bytes_total Total number of bytes allocated in heap until now, even if released already. Equals to /gc/heap/allocs:bytes.
+# TYPE go_memstats_alloc_bytes_total counter
+go_memstats_alloc_bytes_total 1.5108802193664e+13
+# HELP go_memstats_buck_hash_sys_bytes Number of bytes used by the profiling bucket hash table. Equals to /memory/classes/profiling/buckets:bytes.
+# TYPE go_memstats_buck_hash_sys_bytes gauge
+go_memstats_buck_hash_sys_bytes 4.644472e+06
+# HELP go_memstats_frees_total Total number of heap objects frees. Equals to /gc/heap/frees:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_frees_total counter
+go_memstats_frees_total 2.26580345217e+11
+# HELP go_memstats_gc_sys_bytes Number of bytes used for garbage collection system metadata. Equals to /memory/classes/metadata/other:bytes.
+# TYPE go_memstats_gc_sys_bytes gauge
+go_memstats_gc_sys_bytes 7.78784e+06
+# HELP go_memstats_heap_alloc_bytes Number of heap bytes allocated and currently in use, same as go_memstats_alloc_bytes. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_heap_alloc_bytes gauge
+go_memstats_heap_alloc_bytes 1.0468244e+08
+# HELP go_memstats_heap_idle_bytes Number of heap bytes waiting to be used. Equals to /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_idle_bytes gauge
+go_memstats_heap_idle_bytes 2.04849152e+08
+# HELP go_memstats_heap_inuse_bytes Number of heap bytes that are in use. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes
+# TYPE go_memstats_heap_inuse_bytes gauge
+go_memstats_heap_inuse_bytes 1.47243008e+08
+# HELP go_memstats_heap_objects Number of currently allocated objects. Equals to /gc/heap/objects:objects.
+# TYPE go_memstats_heap_objects gauge
+go_memstats_heap_objects 694555
+# HELP go_memstats_heap_released_bytes Number of heap bytes released to OS. Equals to /memory/classes/heap/released:bytes.
+# TYPE go_memstats_heap_released_bytes gauge
+go_memstats_heap_released_bytes 1.40361728e+08
+# HELP go_memstats_heap_sys_bytes Number of heap bytes obtained from system. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes + /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_sys_bytes gauge
+go_memstats_heap_sys_bytes 3.5209216e+08
+# HELP go_memstats_last_gc_time_seconds Number of seconds since 1970 of last garbage collection.
+# TYPE go_memstats_last_gc_time_seconds gauge
+go_memstats_last_gc_time_seconds 1.7898601399881265e+09
+# HELP go_memstats_mallocs_total Total number of heap objects allocated, both live and gc-ed. Semantically a counter version for go_memstats_heap_objects gauge. Equals to /gc/heap/allocs:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_mallocs_total counter
+go_memstats_mallocs_total 2.26581039772e+11
+# HELP go_memstats_mcache_inuse_bytes Number of bytes in use by mcache structures. Equals to /memory/classes/metadata/mcache/inuse:bytes.
+# TYPE go_memstats_mcache_inuse_bytes gauge
+go_memstats_mcache_inuse_bytes 27552
+# HELP go_memstats_mcache_sys_bytes Number of bytes used for mcache structures obtained from system. Equals to /memory/classes/metadata/mcache/inuse:bytes + /memory/classes/metadata/mcache/free:bytes.
+# TYPE go_memstats_mcache_sys_bytes gauge
+go_memstats_mcache_sys_bytes 32144
+# HELP go_memstats_mspan_inuse_bytes Number of bytes in use by mspan structures. Equals to /memory/classes/metadata/mspan/inuse:bytes.
+# TYPE go_memstats_mspan_inuse_bytes gauge
+go_memstats_mspan_inuse_bytes 1.6408e+06
+# HELP go_memstats_mspan_sys_bytes Number of bytes used for mspan structures obtained from system. Equals to /memory/classes/metadata/mspan/inuse:bytes + /memory/classes/metadata/mspan/free:bytes.
+# TYPE go_memstats_mspan_sys_bytes gauge
+go_memstats_mspan_sys_bytes 4.63488e+06
+# HELP go_memstats_next_gc_bytes Number of heap bytes when next garbage collection will take place. Equals to /gc/heap/goal:bytes.
+# TYPE go_memstats_next_gc_bytes gauge
+go_memstats_next_gc_bytes 1.6720989e+08
+# HELP go_memstats_other_sys_bytes Number of bytes used for other system allocations. Equals to /memory/classes/other:bytes.
+# TYPE go_memstats_other_sys_bytes gauge
+go_memstats_other_sys_bytes 2.789136e+06
+# HELP go_memstats_stack_inuse_bytes Number of bytes obtained from system for stack allocator in non-CGO environments. Equals to /memory/classes/heap/stacks:bytes.
+# TYPE go_memstats_stack_inuse_bytes gauge
+go_memstats_stack_inuse_bytes 4.42368e+06
+# HELP go_memstats_stack_sys_bytes Number of bytes obtained from system for stack allocator. Equals to /memory/classes/heap/stacks:bytes + /memory/classes/os-stacks:bytes.
+# TYPE go_memstats_stack_sys_bytes gauge
+go_memstats_stack_sys_bytes 4.42368e+06
+# HELP go_memstats_sys_bytes Number of bytes obtained from system. Equals to /memory/classes/total:byte.
+# TYPE go_memstats_sys_bytes gauge
+go_memstats_sys_bytes 3.76404312e+08
+# HELP go_sched_gomaxprocs_threads The current runtime.GOMAXPROCS setting, or the number of operating system threads that can execute user-level Go code simultaneously. Sourced from /sched/gomaxprocs:threads.
+# TYPE go_sched_gomaxprocs_threads gauge
+go_sched_gomaxprocs_threads 12
+# HELP go_threads Number of OS threads created.
+# TYPE go_threads gauge
+go_threads 45
+# HELP jul_acme_renewals_total ACME certificate renewals observed (expiry advanced for a domain).
+# TYPE jul_acme_renewals_total counter
+jul_acme_renewals_total 0
+# HELP jul_client_addr_derivations_total Canonical client-address derivations, labeled by source (peer/forwarded/xff) and result (accepted/untrusted_peer/malformed/too_many_hops).
+# TYPE jul_client_addr_derivations_total counter
+jul_client_addr_derivations_total{result="accepted",source="peer"} 1.06117352e+08
+# HELP jul_config_authority_drift 1 when managed configuration authority has detected an unresolved external edit to the configuration file; 0 otherwise.
+# TYPE jul_config_authority_drift gauge
+jul_config_authority_drift 0
+# HELP jul_config_pending_restart 1 when a managed staged-restart candidate is pending (waiting for process restart); 0 otherwise.
+# TYPE jul_config_pending_restart gauge
+jul_config_pending_restart 0
+# HELP jul_grpc_proxy_streams_total Native gRPC calls forwarded by the HTTP/2 passthrough proxy (one per call, including each streaming call).
+# TYPE jul_grpc_proxy_streams_total counter
+jul_grpc_proxy_streams_total 0
+# HELP jul_http3_connections Current open HTTP/3 (QUIC) connections across all listeners.
+# TYPE jul_http3_connections gauge
+jul_http3_connections 0
+# HELP jul_http_backend_dial_failures_total HTTP reverse-proxy backend dial/connect failures, labeled by a bounded reason (timeout/refused/no_backend/other). Excludes client-cancelled requests and backend-TLS-identity failures, which are accounted separately. The accompanying log line is throttled once a backend is already known to be down; this counter is not.
+# TYPE jul_http_backend_dial_failures_total counter
+jul_http_backend_dial_failures_total{reason="no_backend"} 2.255736e+06
+jul_http_backend_dial_failures_total{reason="other"} 385152
+# HELP jul_http_request_duration_seconds HTTP request latency in seconds.
+# TYPE jul_http_request_duration_seconds histogram
+jul_http_request_duration_seconds_bucket{host="",method="GET",le="0.005"} 8.791255e+07
+jul_http_request_duration_seconds_bucket{host="",method="GET",le="0.01"} 1.01166706e+08
+jul_http_request_duration_seconds_bucket{host="",method="GET",le="0.025"} 1.05374464e+08
+jul_http_request_duration_seconds_bucket{host="",method="GET",le="0.05"} 1.05595174e+08
+jul_http_request_duration_seconds_bucket{host="",method="GET",le="0.1"} 1.05636516e+08
+jul_http_request_duration_seconds_bucket{host="",method="GET",le="0.25"} 1.05669163e+08
+jul_http_request_duration_seconds_bucket{host="",method="GET",le="0.5"} 1.05708633e+08
+jul_http_request_duration_seconds_bucket{host="",method="GET",le="1"} 1.05775244e+08
+jul_http_request_duration_seconds_bucket{host="",method="GET",le="2.5"} 1.05776063e+08
+jul_http_request_duration_seconds_bucket{host="",method="GET",le="5"} 1.05776067e+08
+jul_http_request_duration_seconds_bucket{host="",method="GET",le="10"} 1.05776067e+08
+jul_http_request_duration_seconds_bucket{host="",method="GET",le="+Inf"} 1.05776067e+08
+jul_http_request_duration_seconds_sum{host="",method="GET"} 399135.4738887504
+jul_http_request_duration_seconds_count{host="",method="GET"} 1.05776067e+08
+# HELP jul_http_requests_in_flight Number of HTTP requests currently being served.
+# TYPE jul_http_requests_in_flight gauge
+jul_http_requests_in_flight 1
+# HELP jul_http_requests_total Total HTTP requests handled, labeled by method, host, and status code.
+# TYPE jul_http_requests_total counter
+jul_http_requests_total{code="200",host="",method="GET"} 9.417717e+07
+jul_http_requests_total{code="204",host="",method="GET"} 9.216364e+06
+jul_http_requests_total{code="499",host="",method="GET"} 4
+jul_http_requests_total{code="500",host="",method="GET"} 83386
+jul_http_requests_total{code="502",host="",method="GET"} 219
+jul_http_requests_total{code="503",host="",method="GET"} 2.298924e+06
+# HELP jul_listener_conns Current concurrent connections across all listeners.
+# TYPE jul_listener_conns gauge
+jul_listener_conns 5
+# HELP jul_managed_apply_finalized_total Terminal async managed-apply outcomes, labeled by operation, mode, outcome and whether restoration succeeded (true/false/n/a).
+# TYPE jul_managed_apply_finalized_total counter
+jul_managed_apply_finalized_total{mode="hot",operation="config.apply",outcome="applied_live",restored="n/a"} 73
+# HELP jul_managed_apply_history_total Configuration-history snapshot attempts made by the terminal managed-apply finalizer (WS02 §3.7), labeled by operation and result (recorded/skipped/failed).
+# TYPE jul_managed_apply_history_total counter
+jul_managed_apply_history_total{operation="config.apply",result="recorded"} 73
+# HELP jul_managed_apply_terminal_registry_entries Number of terminal managed-apply records currently retained in the bounded ledger.
+# TYPE jul_managed_apply_terminal_registry_entries gauge
+jul_managed_apply_terminal_registry_entries 73
+# HELP jul_plugin_duration_seconds WASM plugin invocation latency in seconds, labeled by plugin name.
+# TYPE jul_plugin_duration_seconds histogram
+jul_plugin_duration_seconds_bucket{plugin="header-inject",le="0.005"} 5.016792e+06
+jul_plugin_duration_seconds_bucket{plugin="header-inject",le="0.01"} 5.021119e+06
+jul_plugin_duration_seconds_bucket{plugin="header-inject",le="0.025"} 5.023423e+06
+jul_plugin_duration_seconds_bucket{plugin="header-inject",le="0.05"} 5.023579e+06
+jul_plugin_duration_seconds_bucket{plugin="header-inject",le="0.1"} 5.023608e+06
+jul_plugin_duration_seconds_bucket{plugin="header-inject",le="0.25"} 5.023624e+06
+jul_plugin_duration_seconds_bucket{plugin="header-inject",le="0.5"} 5.023629e+06
+jul_plugin_duration_seconds_bucket{plugin="header-inject",le="1"} 5.023629e+06
+jul_plugin_duration_seconds_bucket{plugin="header-inject",le="2.5"} 5.023629e+06
+jul_plugin_duration_seconds_bucket{plugin="header-inject",le="5"} 5.023629e+06
+jul_plugin_duration_seconds_bucket{plugin="header-inject",le="10"} 5.023629e+06
+jul_plugin_duration_seconds_bucket{plugin="header-inject",le="+Inf"} 5.023629e+06
+jul_plugin_duration_seconds_sum{plugin="header-inject"} 398.6428758141581
+jul_plugin_duration_seconds_count{plugin="header-inject"} 5.023629e+06
+# HELP jul_plugin_invocations_total WASM plugin invocations, labeled by plugin name and result (continue/stop/error).
+# TYPE jul_plugin_invocations_total counter
+jul_plugin_invocations_total{plugin="header-inject",result="continue"} 5.023614e+06
+jul_plugin_invocations_total{plugin="header-inject",result="error"} 15
+# HELP jul_plugin_panics_total WASM plugin traps/panics contained by the host, labeled by plugin name.
+# TYPE jul_plugin_panics_total counter
+jul_plugin_panics_total{plugin="header-inject"} 15
+# HELP jul_reload_duration_seconds Configuration reload latency in seconds, labeled by source and outcome.
+# TYPE jul_reload_duration_seconds histogram
+jul_reload_duration_seconds_bucket{outcome="applied_live",source="admin",le="0.01"} 0
+jul_reload_duration_seconds_bucket{outcome="applied_live",source="admin",le="0.025"} 0
+jul_reload_duration_seconds_bucket{outcome="applied_live",source="admin",le="0.05"} 0
+jul_reload_duration_seconds_bucket{outcome="applied_live",source="admin",le="0.1"} 0
+jul_reload_duration_seconds_bucket{outcome="applied_live",source="admin",le="0.25"} 63
+jul_reload_duration_seconds_bucket{outcome="applied_live",source="admin",le="0.5"} 64
+jul_reload_duration_seconds_bucket{outcome="applied_live",source="admin",le="1"} 73
+jul_reload_duration_seconds_bucket{outcome="applied_live",source="admin",le="2.5"} 73
+jul_reload_duration_seconds_bucket{outcome="applied_live",source="admin",le="5"} 73
+jul_reload_duration_seconds_bucket{outcome="applied_live",source="admin",le="10"} 73
+jul_reload_duration_seconds_bucket{outcome="applied_live",source="admin",le="30"} 73
+jul_reload_duration_seconds_bucket{outcome="applied_live",source="admin",le="+Inf"} 73
+jul_reload_duration_seconds_sum{outcome="applied_live",source="admin"} 20.426
+jul_reload_duration_seconds_count{outcome="applied_live",source="admin"} 73
+# HELP jul_reload_in_progress 1 while a configuration reload transaction is in flight; 0 otherwise.
+# TYPE jul_reload_in_progress gauge
+jul_reload_in_progress 0
+# HELP jul_reload_phase_duration_seconds Latency of individual reload phases (resolve/validate/lifecycle/change_assessment/prepare/stage_listeners/publish/activate), labeled by phase and outcome.
+# TYPE jul_reload_phase_duration_seconds histogram
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="activate",le="0.001"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="activate",le="0.005"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="activate",le="0.01"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="activate",le="0.025"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="activate",le="0.05"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="activate",le="0.1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="activate",le="0.25"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="activate",le="0.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="activate",le="1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="activate",le="2.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="activate",le="5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="activate",le="+Inf"} 73
+jul_reload_phase_duration_seconds_sum{outcome="applied_live",phase="activate"} 0
+jul_reload_phase_duration_seconds_count{outcome="applied_live",phase="activate"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="change_assessment",le="0.001"} 0
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="change_assessment",le="0.005"} 64
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="change_assessment",le="0.01"} 68
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="change_assessment",le="0.025"} 72
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="change_assessment",le="0.05"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="change_assessment",le="0.1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="change_assessment",le="0.25"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="change_assessment",le="0.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="change_assessment",le="1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="change_assessment",le="2.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="change_assessment",le="5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="change_assessment",le="+Inf"} 73
+jul_reload_phase_duration_seconds_sum{outcome="applied_live",phase="change_assessment"} 0.3330000000000002
+jul_reload_phase_duration_seconds_count{outcome="applied_live",phase="change_assessment"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="lifecycle",le="0.001"} 72
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="lifecycle",le="0.005"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="lifecycle",le="0.01"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="lifecycle",le="0.025"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="lifecycle",le="0.05"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="lifecycle",le="0.1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="lifecycle",le="0.25"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="lifecycle",le="0.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="lifecycle",le="1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="lifecycle",le="2.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="lifecycle",le="5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="lifecycle",le="+Inf"} 73
+jul_reload_phase_duration_seconds_sum{outcome="applied_live",phase="lifecycle"} 0.005
+jul_reload_phase_duration_seconds_count{outcome="applied_live",phase="lifecycle"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="post_commit",le="0.001"} 72
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="post_commit",le="0.005"} 72
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="post_commit",le="0.01"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="post_commit",le="0.025"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="post_commit",le="0.05"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="post_commit",le="0.1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="post_commit",le="0.25"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="post_commit",le="0.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="post_commit",le="1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="post_commit",le="2.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="post_commit",le="5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="post_commit",le="+Inf"} 73
+jul_reload_phase_duration_seconds_sum{outcome="applied_live",phase="post_commit"} 0.006
+jul_reload_phase_duration_seconds_count{outcome="applied_live",phase="post_commit"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="prepare",le="0.001"} 0
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="prepare",le="0.005"} 0
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="prepare",le="0.01"} 0
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="prepare",le="0.025"} 0
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="prepare",le="0.05"} 0
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="prepare",le="0.1"} 0
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="prepare",le="0.25"} 64
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="prepare",le="0.5"} 72
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="prepare",le="1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="prepare",le="2.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="prepare",le="5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="prepare",le="+Inf"} 73
+jul_reload_phase_duration_seconds_sum{outcome="applied_live",phase="prepare"} 10.908000000000003
+jul_reload_phase_duration_seconds_count{outcome="applied_live",phase="prepare"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="publish",le="0.001"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="publish",le="0.005"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="publish",le="0.01"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="publish",le="0.025"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="publish",le="0.05"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="publish",le="0.1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="publish",le="0.25"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="publish",le="0.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="publish",le="1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="publish",le="2.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="publish",le="5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="publish",le="+Inf"} 73
+jul_reload_phase_duration_seconds_sum{outcome="applied_live",phase="publish"} 0
+jul_reload_phase_duration_seconds_count{outcome="applied_live",phase="publish"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="resolve",le="0.001"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="resolve",le="0.005"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="resolve",le="0.01"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="resolve",le="0.025"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="resolve",le="0.05"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="resolve",le="0.1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="resolve",le="0.25"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="resolve",le="0.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="resolve",le="1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="resolve",le="2.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="resolve",le="5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="resolve",le="+Inf"} 73
+jul_reload_phase_duration_seconds_sum{outcome="applied_live",phase="resolve"} 0
+jul_reload_phase_duration_seconds_count{outcome="applied_live",phase="resolve"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="retire",le="0.001"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="retire",le="0.005"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="retire",le="0.01"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="retire",le="0.025"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="retire",le="0.05"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="retire",le="0.1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="retire",le="0.25"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="retire",le="0.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="retire",le="1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="retire",le="2.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="retire",le="5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="retire",le="+Inf"} 73
+jul_reload_phase_duration_seconds_sum{outcome="applied_live",phase="retire"} 0
+jul_reload_phase_duration_seconds_count{outcome="applied_live",phase="retire"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="stage_listeners",le="0.001"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="stage_listeners",le="0.005"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="stage_listeners",le="0.01"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="stage_listeners",le="0.025"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="stage_listeners",le="0.05"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="stage_listeners",le="0.1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="stage_listeners",le="0.25"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="stage_listeners",le="0.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="stage_listeners",le="1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="stage_listeners",le="2.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="stage_listeners",le="5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="stage_listeners",le="+Inf"} 73
+jul_reload_phase_duration_seconds_sum{outcome="applied_live",phase="stage_listeners"} 0
+jul_reload_phase_duration_seconds_count{outcome="applied_live",phase="stage_listeners"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="validate",le="0.001"} 0
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="validate",le="0.005"} 0
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="validate",le="0.01"} 0
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="validate",le="0.025"} 0
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="validate",le="0.05"} 0
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="validate",le="0.1"} 45
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="validate",le="0.25"} 67
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="validate",le="0.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="validate",le="1"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="validate",le="2.5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="validate",le="5"} 73
+jul_reload_phase_duration_seconds_bucket{outcome="applied_live",phase="validate",le="+Inf"} 73
+jul_reload_phase_duration_seconds_sum{outcome="applied_live",phase="validate"} 9.056
+jul_reload_phase_duration_seconds_count{outcome="applied_live",phase="validate"} 73
+# HELP jul_reload_total Configuration reloads, labeled by source (admin/sighup/watch) and outcome (applied_live/applied_degraded/no_change/not_applied/saved_not_live).
+# TYPE jul_reload_total counter
+jul_reload_total{outcome="applied_live",source="admin"} 73
+# HELP jul_stream_active_conns Current active L4 stream connections/sessions, labeled by protocol (tcp/udp).
+# TYPE jul_stream_active_conns gauge
+jul_stream_active_conns{proto="tcp"} 0
+# HELP jul_stream_bytes_total Bytes relayed by the L4 stream proxy, labeled by protocol (tcp/udp) and direction (up to backend / down to client).
+# TYPE jul_stream_bytes_total counter
+jul_stream_bytes_total{direction="down",proto="tcp"} 4.805770861e+09
+jul_stream_bytes_total{direction="up",proto="tcp"} 4.805770861e+09
+# HELP jul_stream_udp_sessions_rejected_total New UDP clients dropped because a listener's max_udp_sessions cap was reached and no session was reclaimable.
+# TYPE jul_stream_udp_sessions_rejected_total counter
+jul_stream_udp_sessions_rejected_total 0
+# HELP jul_upstream_active_requests Admitted logical requests, streams and connections currently in flight for a pool, labeled by pool.
+# TYPE jul_upstream_active_requests gauge
+jul_upstream_active_requests{pool="bounded"} 0
+jul_upstream_active_requests{pool="discovered"} 0
+jul_upstream_active_requests{pool="secure"} 0
+jul_upstream_active_requests{pool="unix_backend"} 0
+jul_upstream_active_requests{pool="unlimited"} 0
+# HELP jul_upstream_backends Current number of backends in a pool, labeled by pool (tracks dynamic service discovery).
+# TYPE jul_upstream_backends gauge
+jul_upstream_backends{pool="bounded"} 2
+jul_upstream_backends{pool="discovered"} 1
+jul_upstream_backends{pool="secure"} 1
+jul_upstream_backends{pool="unix_backend"} 1
+jul_upstream_backends{pool="unlimited"} 2
+# HELP jul_upstream_backends_eligible Backends currently able to take a request, labeled by pool.
+# TYPE jul_upstream_backends_eligible gauge
+jul_upstream_backends_eligible{pool="bounded"} 0
+jul_upstream_backends_eligible{pool="discovered"} 1
+jul_upstream_backends_eligible{pool="secure"} 1
+jul_upstream_backends_eligible{pool="unix_backend"} 1
+jul_upstream_backends_eligible{pool="unlimited"} 2
+# HELP jul_upstream_backends_healthy Backends a pool's active health checks currently consider healthy, labeled by pool.
+# TYPE jul_upstream_backends_healthy gauge
+jul_upstream_backends_healthy{pool="bounded"} 2
+jul_upstream_backends_healthy{pool="discovered"} 1
+jul_upstream_backends_healthy{pool="secure"} 1
+jul_upstream_backends_healthy{pool="unix_backend"} 1
+jul_upstream_backends_healthy{pool="unlimited"} 2
+# HELP jul_upstream_circuit_state Backends per circuit state, labeled by pool and state (available/circuit_open/circuit_half_open/health_unhealthy/at_capacity).
+# TYPE jul_upstream_circuit_state gauge
+jul_upstream_circuit_state{pool="bounded",state="at_capacity"} 0
+jul_upstream_circuit_state{pool="bounded",state="available"} 0
+jul_upstream_circuit_state{pool="bounded",state="circuit_half_open"} 0
+jul_upstream_circuit_state{pool="bounded",state="circuit_open"} 2
+jul_upstream_circuit_state{pool="bounded",state="health_unhealthy"} 0
+jul_upstream_circuit_state{pool="discovered",state="at_capacity"} 0
+jul_upstream_circuit_state{pool="discovered",state="available"} 1
+jul_upstream_circuit_state{pool="discovered",state="circuit_half_open"} 0
+jul_upstream_circuit_state{pool="discovered",state="circuit_open"} 0
+jul_upstream_circuit_state{pool="discovered",state="health_unhealthy"} 0
+jul_upstream_circuit_state{pool="secure",state="at_capacity"} 0
+jul_upstream_circuit_state{pool="secure",state="available"} 1
+jul_upstream_circuit_state{pool="secure",state="circuit_half_open"} 0
+jul_upstream_circuit_state{pool="secure",state="circuit_open"} 0
+jul_upstream_circuit_state{pool="secure",state="health_unhealthy"} 0
+jul_upstream_circuit_state{pool="unix_backend",state="at_capacity"} 0
+jul_upstream_circuit_state{pool="unix_backend",state="available"} 1
+jul_upstream_circuit_state{pool="unix_backend",state="circuit_half_open"} 0
+jul_upstream_circuit_state{pool="unix_backend",state="circuit_open"} 0
+jul_upstream_circuit_state{pool="unix_backend",state="health_unhealthy"} 0
+jul_upstream_circuit_state{pool="unlimited",state="at_capacity"} 0
+jul_upstream_circuit_state{pool="unlimited",state="available"} 2
+jul_upstream_circuit_state{pool="unlimited",state="circuit_half_open"} 0
+jul_upstream_circuit_state{pool="unlimited",state="circuit_open"} 0
+jul_upstream_circuit_state{pool="unlimited",state="health_unhealthy"} 0
+# HELP jul_upstream_circuit_transitions_total Backend circuit transitions, labeled by pool and destination state.
+# TYPE jul_upstream_circuit_transitions_total counter
+jul_upstream_circuit_transitions_total{pool="bounded",to="available"} 456
+jul_upstream_circuit_transitions_total{pool="bounded",to="circuit_half_open"} 645
+jul_upstream_circuit_transitions_total{pool="bounded",to="circuit_open"} 647
+jul_upstream_circuit_transitions_total{pool="discovered",to="available"} 15
+jul_upstream_circuit_transitions_total{pool="discovered",to="circuit_half_open"} 45
+jul_upstream_circuit_transitions_total{pool="discovered",to="circuit_open"} 45
+jul_upstream_circuit_transitions_total{pool="unlimited",to="available"} 30
+jul_upstream_circuit_transitions_total{pool="unlimited",to="circuit_half_open"} 90
+jul_upstream_circuit_transitions_total{pool="unlimited",to="circuit_open"} 90
+# HELP jul_upstream_connections Physical connections currently open to a pool's backends, labeled by pool.
+# TYPE jul_upstream_connections gauge
+jul_upstream_connections{pool="bounded"} 1
+jul_upstream_connections{pool="discovered"} 0
+jul_upstream_connections{pool="secure"} 0
+jul_upstream_connections{pool="unix_backend"} 0
+jul_upstream_connections{pool="unlimited"} 0
+# HELP jul_upstream_pending_requests Requests currently waiting for an admission slot, labeled by pool.
+# TYPE jul_upstream_pending_requests gauge
+jul_upstream_pending_requests{pool="bounded"} 0
+jul_upstream_pending_requests{pool="discovered"} 0
+jul_upstream_pending_requests{pool="secure"} 0
+jul_upstream_pending_requests{pool="unix_backend"} 0
+jul_upstream_pending_requests{pool="unlimited"} 0
+# HELP jul_waf_events_total Web-application-firewall rule matches, labeled by action (block/detect) and matched rule ID.
+# TYPE jul_waf_events_total counter
+jul_waf_events_total{action="block",rule="920350"} 2439
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 127856.07
+# HELP process_max_fds Maximum number of open file descriptors.
+# TYPE process_max_fds gauge
+process_max_fds 1.048576e+06
+# HELP process_network_receive_bytes_total Number of bytes received by the process over the network.
+# TYPE process_network_receive_bytes_total counter
+process_network_receive_bytes_total 1.45210163861e+11
+# HELP process_network_transmit_bytes_total Number of bytes sent by the process over the network.
+# TYPE process_network_transmit_bytes_total counter
+process_network_transmit_bytes_total 1.46340754855e+11
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+process_open_fds 21
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 2.655232e+08
+# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
+# TYPE process_start_time_seconds gauge
+process_start_time_seconds 1.78984096669e+09
+# HELP process_virtual_memory_bytes Virtual memory size in bytes.
+# TYPE process_virtual_memory_bytes gauge
+process_virtual_memory_bytes 1.688633344e+09
+# HELP process_virtual_memory_max_bytes Maximum amount of virtual memory available in bytes.
+# TYPE process_virtual_memory_max_bytes gauge
+process_virtual_memory_max_bytes 1.8446744073709552e+19
