@@ -85,6 +85,11 @@ restart" continuity), disk pressure (N/A -- `burn-in-current.toml` has no
 `[cache]` block, so there is no `jul-data/cache-disk` tier to fill in this
 profile). These four remain open follow-up items, not evidence of a defect.
 
+**Decision (2026-09-20, maintainer):** the 3 real deferred faults (DNS
+failure, FD-limit reduction, cgroup constraint) are accepted as non-blocking
+follow-up work -- they do not gate a stable `v2.0.0` tag. Tracked in
+[#422](https://github.com/victornife/jul/issues/422).
+
 ## Metric snapshots
 
 No continuous Prometheus scrape was configured for this run (a deviation
@@ -97,6 +102,11 @@ in this directory). Point-in-time checks throughout consistently showed:
 0 panics/RBAC violations, upstream active/pending requests bounded, no
 reload timeouts. This is weaker evidence than a full time series would be
 and is flagged as a gap for future runs, not silently upgraded to "passed".
+
+**Decision (2026-09-20, maintainer):** the point-in-time checks are accepted
+as sufficient evidence for this run. Continuous Prometheus scraping for
+future soak runs is accepted as non-blocking follow-up work, tracked in
+[#422](https://github.com/victornife/jul/issues/422).
 
 ## pprof captures
 
@@ -179,3 +189,10 @@ primary purpose, fully met), while explicitly carrying forward the open
 items above (clock-anomaly caveat on tick-gated criteria, the 15 plugin
 timeouts, the metrics-scrape gap, and the 4 unperformed manual faults) as
 follow-up work rather than silently closing them.
+
+**Maintainer decision (2026-09-20):** the point-in-time metric checks are
+accepted as sufficient for this run, and the 3 real deferred manual faults
+(DNS failure, FD-limit reduction, cgroup constraint — disk pressure remains
+N/A for this profile) are accepted as non-blocking follow-up work. Neither
+gates a stable `v2.0.0` tag. Tracked for future work in
+[#422](https://github.com/victornife/jul/issues/422).

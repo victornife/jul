@@ -134,7 +134,11 @@ for ≤15s interval) was not configured; evidence relies on point-in-time
 plugin-pool memory fix specifically — the reason this soak was run.
 ⚠️ two recorded, root-caused, low-severity deviations (see above) and four
 open follow-up items (manual faults, continuous scraping) remain; none of
-them indicate a defect in the fix under review.
+them indicate a defect in the fix under review. **Maintainer decision
+(2026-09-20):** the point-in-time metric checks are accepted as sufficient,
+and the three real deferred manual faults are accepted as non-blocking
+follow-up work — neither gates a stable `v2.0.0` tag. Tracked in
+[#422](https://github.com/victornife/jul/issues/422).
 
 ### 2026-08-19 — Resilience amplification — **measured deterministically; 24h soak still NOT RUN**
 
