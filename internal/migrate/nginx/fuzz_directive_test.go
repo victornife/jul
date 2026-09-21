@@ -28,6 +28,12 @@ func FuzzParseDirective(f *testing.F) {
 		`server { listen 80; # comment
 location / { } }`,
 		`server { listen 80; location / { proxy_pass http://backend; proxy_set_header Host $host; } }`,
+		`stream { server { listen 5353; proxy_pass 1.2.3.4:80; } }`,
+		`stream { server { listen 5353 udp; proxy_pass 1.2.3.4:80; proxy_timeout 30s; } }`,
+		`stream { server { listen 5353 proxy_protocol; proxy_pass 1.2.3.4:80; proxy_protocol on; } }`,
+		`stream { server { listen 5353 ssl; server_name a.example.com; ssl_preread on; proxy_pass 1.2.3.4:80; } }`,
+		`stream { upstream u { server 1.2.3.4:80; } server { listen 5353; proxy_pass u; } }`,
+		`server { listen 80 proxy_protocol; set_real_ip_from 10.0.0.0/8; real_ip_header proxy_protocol; }`,
 	}
 	for _, s := range seeds {
 		f.Add(s)

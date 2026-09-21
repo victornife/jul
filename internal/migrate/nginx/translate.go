@@ -46,8 +46,10 @@ func Translate(src *ngx.Config, source string) (out *config.Config, rep *Report)
 			// The trusted-proxy policy is listener scoped, so it can only be
 			// resolved once every server block on an address is known.
 			t.hoistClientAddress(out)
-		case "stream", "mail":
-			t.report.skip(d, "the "+d.GetName()+" module is not supported")
+		case "stream":
+			t.translateStream(d, out)
+		case "mail":
+			t.report.skip(d, "the mail module is not supported")
 		case "include":
 			t.report.skip(d, "include not followed; import each included file separately")
 		default:
@@ -99,6 +101,7 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 	var realIP realIPPolicy
 	var tls config.TLSConfig
 	hasTLS := false
+	listenProxyProtocol := false
 	var serverRoot string
 	var serverIndex []string
 	var serverReturn []string
@@ -109,6 +112,9 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 		switch c.GetName() {
 		case "listen":
 			listen, ssl := parseListen(cp)
+			if hasListenToken(cp, "proxy_protocol") {
+				listenProxyProtocol = true
+			}
 			if listen == "" {
 				t.report.skip(c, "unsupported listen address (e.g. a unix socket)")
 			} else if s.Listen == "" {
@@ -202,7 +208,12 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 	if hasTLS {
 		s.TLS = &tls
 	}
-	s.ClientAddress = t.clientAddressFrom(t.httpRealIP.merge(realIP))
+	mergedRealIP := t.httpRealIP.merge(realIP)
+	if mergedRealIP.wantsProxyProtocolIdentity() {
+		t.applyHTTPProxyProtocolIdentity(&s, listenProxyProtocol, mergedRealIP)
+	} else {
+		s.ClientAddress = t.clientAddressFrom(mergedRealIP)
+	}
 	out.Servers = append(out.Servers, s)
 	t.report.Servers++
 }
@@ -551,6 +562,20 @@ func parseListen(params []string) (listen string, ssl bool) {
 	default:
 		return addr, ssl
 	}
+}
+
+// hasListenToken reports whether a listen directive's parameters (beyond the
+// address) contain the given token, case-insensitively.
+func hasListenToken(params []string, token string) bool {
+	if len(params) < 2 {
+		return false
+	}
+	for _, p := range params[1:] {
+		if strings.EqualFold(strings.TrimSpace(p), token) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchConfig maps an nginx location modifier and path to a Jul.IA match. ok is

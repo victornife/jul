@@ -27,6 +27,12 @@ func FuzzTranslate(f *testing.F) {
 		`http { gzip on; server { listen 80; location / { return 204; } } }`,
 		`events { worker_connections 1024; } http { server { listen 80; location / { return 200; } } }`,
 		`http { server { listen 80; location = /exact { return 200; } location ~ \.php$ { return 200; } } }`,
+		`stream { server { listen 5353; proxy_pass 1.2.3.4:80; proxy_timeout 30s; proxy_connect_timeout 5s; } }`,
+		`stream { server { listen 5353 udp; proxy_pass 1.2.3.4:80; } }`,
+		`stream { server { listen 5353 proxy_protocol; proxy_pass 1.2.3.4:80; proxy_protocol on; } }`,
+		`stream { server { listen 5353; server_name a.example.com; ssl_preread on; proxy_pass 1.2.3.4:80; } server { listen 5353; ssl_preread on; proxy_pass 5.6.7.8:80; } }`,
+		`stream { upstream u { server 1.2.3.4:80 weight=2; } server { listen 5353; proxy_pass u; } }`,
+		`http { server { listen 80 proxy_protocol; set_real_ip_from 10.0.0.0/8; real_ip_header proxy_protocol; location / { return 200; } } }`,
 	}
 	for _, s := range seeds {
 		f.Add(s)

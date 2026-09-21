@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
-  "id": "protocol-boundaries",
-  "tier": "full",
-  "description": "Negative protocol fixture proving that stream TLS termination (not representable - Jul's stream listener only ever passes TLS through via SNI preread) and mail configuration remain explicit blocking evidence while an independent HTTP candidate stays structurally valid. See stream-tcp-basic, stream-named-upstream, stream-udp, stream-outbound-proxy-protocol, and stream-sni-bounded for the bounded subset #426 now translates.",
+  "id": "stream-security-boundaries",
+  "tier": "core",
+  "description": "Negative bounded-stream fixture (#426) proving four security-significant stream forms stay explicit blocking findings: inbound PROXY protocol (nginx's stream module has no trusted-source directive to supply Jul's required trusted_proxies), stream TLS termination (Jul's stream listener only passes TLS through via SNI preread), outbound PROXY protocol combined with udp (Jul only supports it for tcp streams), and an unrecognized listen option.",
   "origin": {
     "kind": "repository_authored",
     "license": "AGPL-3.0-only",
-    "source": "victornife/jul#154"
+    "source": "victornife/jul#426"
   },
   "categories": [
-    "mail",
     "protocol-gateways",
-    "stream"
+    "security"
   ],
   "build_tags": [
-    "importer"
+    "importer",
+    "stream"
   ],
   "root": "nginx/nginx.conf",
   "follow_includes": false,
@@ -61,14 +61,6 @@
       },
       {
         "source": "nginx.conf",
-        "code": "NGX_SERVER_NAME",
-        "class": "supported",
-        "risk": "routing",
-        "context": "server",
-        "directive": "server_name"
-      },
-      {
-        "source": "nginx.conf",
         "code": "NGX_SERVER_LOCATION",
         "class": "supported",
         "risk": "routing",
@@ -97,7 +89,16 @@
         "class": "supported",
         "risk": "routing",
         "context": "stream",
-        "directive": "server"
+        "directive": "server",
+        "count": 4
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_LISTEN_PROXY_PROTOCOL_IN",
+        "class": "blocking",
+        "risk": "security",
+        "context": "stream",
+        "directive": "listen"
       },
       {
         "source": "nginx.conf",
@@ -109,43 +110,36 @@
       },
       {
         "source": "nginx.conf",
-        "code": "NGX_STREAM_PROXY_PASS",
+        "code": "NGX_STREAM_LISTEN",
         "class": "supported",
-        "risk": "routing",
+        "risk": "availability",
         "context": "stream",
-        "directive": "proxy_pass"
-      },
-      {
-        "source": "nginx.conf",
-        "code": "NGX_MAIN_MAIL",
-        "class": "blocking",
-        "risk": "routing",
-        "context": "main",
-        "directive": "mail"
-      },
-      {
-        "source": "nginx.conf",
-        "code": "NGX_MAIL_UNSUPPORTED",
-        "class": "blocking",
-        "risk": "routing",
-        "context": "mail",
-        "directive": "server"
-      },
-      {
-        "source": "nginx.conf",
-        "code": "NGX_MAIL_UNSUPPORTED",
-        "class": "blocking",
-        "risk": "routing",
-        "context": "mail",
         "directive": "listen"
       },
       {
         "source": "nginx.conf",
-        "code": "NGX_MAIL_UNSUPPORTED",
+        "code": "NGX_STREAM_PROXY_PROTOCOL_UDP",
         "class": "blocking",
+        "risk": "security",
+        "context": "stream",
+        "directive": "proxy_protocol"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_LISTEN_OPTION",
+        "class": "blocking",
+        "risk": "security",
+        "context": "stream",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_PROXY_PASS",
+        "class": "supported",
         "risk": "routing",
-        "context": "mail",
-        "directive": "protocol"
+        "context": "stream",
+        "directive": "proxy_pass",
+        "count": 4
       }
     ]
   },

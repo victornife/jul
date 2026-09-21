@@ -78,10 +78,10 @@ func TestTranslateRealIPUnsupportedForms(t *testing.T) {
 		fragment  string
 	}{
 		{
-			name:      "proxy protocol source",
+			name:      "proxy protocol without listen token",
 			directive: "real_ip_header proxy_protocol;",
 			findName:  "real_ip_header",
-			fragment:  "PROXY-protocol",
+			fragment:  "proxy_protocol requires",
 		},
 		{
 			name:      "x-real-ip",

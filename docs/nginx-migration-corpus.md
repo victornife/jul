@@ -34,6 +34,32 @@ match its separately declared expectation exactly.
 The final acceptance record is
 [NGINX migration corpus closure](audit/old/2026-08-31-nginx-migration-corpus-closure.md).
 
+## Bounded NGINX stream and HTTP PROXY-protocol identity evidence (#426)
+
+Issue #426 adds a bounded first tranche of NGINX `stream` (L4) translation plus
+HTTP inbound PROXY-protocol identity on top of the #154 baseline above, without
+reopening its closed acceptance record. Six fixtures were added:
+
+- `stream-tcp-basic` — direct TCP `proxy_pass` plus `proxy_timeout`/
+  `proxy_connect_timeout`;
+- `stream-named-upstream` — a stream server reusing a named `upstream` block,
+  weighted members, and outbound PROXY protocol;
+- `stream-udp` — a `udp` listener documenting Jul's bounded session model;
+- `stream-sni-bounded` — `server_name` + `ssl_preread` merged into one
+  listener's `sni_routes`;
+- `stream-security-boundaries` — four still-blocking stream forms (inbound
+  PROXY protocol, TLS termination, `udp` + `proxy_protocol`, an unrecognized
+  listen option);
+- `realip-proxy-protocol-supported` — the complete HTTP
+  `listen ... proxy_protocol` + `real_ip_header proxy_protocol` +
+  `set_real_ip_from` trio.
+
+See [the `stream` block table](nginx-importer.md#stream-block) and
+[HTTP PROXY-protocol identity](nginx-importer.md#http-proxy-protocol-identity-426)
+for exactly which forms are supported, approximate, or blocking. Real
+NGINX-vs-Jul runtime evidence for these translated forms is #366/#367's
+responsibility, not this issue's.
+
 ## Corpus admission policy
 
 Core fixtures are repository-authored or generated from repository-owned source.

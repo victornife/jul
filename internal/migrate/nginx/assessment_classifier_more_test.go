@@ -27,45 +27,51 @@ func TestClassifyRealIP(t *testing.T) {
 		name      string
 		directive string
 		params    []string
+		facts     walkFacts
 		want      AssessmentClass
 	}{
-		{"missing source", "set_real_ip_from", nil, AssessmentBlocking},
-		{"unix source", "set_real_ip_from", []string{"unix:"}, AssessmentBlocking},
-		{"invalid source", "set_real_ip_from", []string{"not-an-address"}, AssessmentBlocking},
-		{"CIDR source", "set_real_ip_from", []string{"10.0.0.0/8"}, AssessmentSupported},
-		{"missing header", "real_ip_header", nil, AssessmentBlocking},
-		{"XFF", "real_ip_header", []string{"X-Forwarded-For"}, AssessmentSupported},
-		{"Forwarded", "real_ip_header", []string{"Forwarded"}, AssessmentSupported},
-		{"X-Real-IP", "real_ip_header", []string{"X-Real-IP"}, AssessmentBlocking},
-		{"recursive off", "real_ip_recursive", []string{"off"}, AssessmentBlocking},
-		{"recursive on", "real_ip_recursive", []string{"on"}, AssessmentSupported},
-		{"unknown", "real_ip_unknown", nil, AssessmentBlocking},
+		{"missing source", "set_real_ip_from", nil, walkFacts{}, AssessmentBlocking},
+		{"unix source", "set_real_ip_from", []string{"unix:"}, walkFacts{}, AssessmentBlocking},
+		{"invalid source", "set_real_ip_from", []string{"not-an-address"}, walkFacts{}, AssessmentBlocking},
+		{"CIDR source", "set_real_ip_from", []string{"10.0.0.0/8"}, walkFacts{}, AssessmentSupported},
+		{"missing header", "real_ip_header", nil, walkFacts{}, AssessmentBlocking},
+		{"XFF", "real_ip_header", []string{"X-Forwarded-For"}, walkFacts{}, AssessmentSupported},
+		{"Forwarded", "real_ip_header", []string{"Forwarded"}, walkFacts{}, AssessmentSupported},
+		{"X-Real-IP", "real_ip_header", []string{"X-Real-IP"}, walkFacts{}, AssessmentBlocking},
+		{"proxy_protocol usable", "real_ip_header", []string{"proxy_protocol"}, walkFacts{httpProxyProtocolUsable: true}, AssessmentSupported},
+		{"proxy_protocol unusable", "real_ip_header", []string{"proxy_protocol"}, walkFacts{}, AssessmentBlocking},
+		{"recursive off", "real_ip_recursive", []string{"off"}, walkFacts{}, AssessmentBlocking},
+		{"recursive on", "real_ip_recursive", []string{"on"}, walkFacts{}, AssessmentSupported},
+		{"unknown", "real_ip_unknown", nil, walkFacts{}, AssessmentBlocking},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assertCapabilityClass(t, classifyRealIP(tt.directive, tt.params), tt.want)
+			assertCapabilityClass(t, classifyRealIP(tt.directive, tt.params, tt.facts), tt.want)
 		})
 	}
 }
 
 func TestClassifyListenAndTLS(t *testing.T) {
 	listenTests := []struct {
-		name   string
-		params []string
-		extra  bool
-		want   AssessmentClass
+		name            string
+		params          []string
+		extra           bool
+		proxyProtocolOK bool
+		want            AssessmentClass
 	}{
-		{"extra", []string{"8081"}, true, AssessmentApproximated},
-		{"missing", nil, false, AssessmentBlocking},
-		{"plain", []string{"8080"}, false, AssessmentSupported},
-		{"TLS", []string{"443", "ssl"}, false, AssessmentSupported},
-		{"HTTP2", []string{"443", "http2"}, false, AssessmentApproximated},
-		{"default server", []string{"443", "default_server"}, false, AssessmentApproximated},
-		{"unsupported option", []string{"443", "reuseport"}, false, AssessmentBlocking},
+		{"extra", []string{"8081"}, true, false, AssessmentApproximated},
+		{"missing", nil, false, false, AssessmentBlocking},
+		{"plain", []string{"8080"}, false, false, AssessmentSupported},
+		{"TLS", []string{"443", "ssl"}, false, false, AssessmentSupported},
+		{"HTTP2", []string{"443", "http2"}, false, false, AssessmentApproximated},
+		{"default server", []string{"443", "default_server"}, false, false, AssessmentApproximated},
+		{"unsupported option", []string{"443", "reuseport"}, false, false, AssessmentBlocking},
+		{"proxy_protocol usable", []string{"443", "proxy_protocol"}, false, true, AssessmentSupported},
+		{"proxy_protocol unusable", []string{"443", "proxy_protocol"}, false, false, AssessmentBlocking},
 	}
 	for _, tt := range listenTests {
 		t.Run("listen/"+tt.name, func(t *testing.T) {
-			assertCapabilityClass(t, classifyListen(tt.params, tt.extra), tt.want)
+			assertCapabilityClass(t, classifyListen(tt.params, tt.extra, tt.proxyProtocolOK), tt.want)
 		})
 	}
 
