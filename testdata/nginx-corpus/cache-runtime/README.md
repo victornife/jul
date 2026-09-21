@@ -1,0 +1,5 @@
+# cache-runtime
+
+Repository-authored, sanitized NGINX migration fixture for issue #365. It uses only synthetic local addresses, hostnames, paths, and values; it contains no production configuration, credentials, private keys, external endpoints, or user traffic.
+
+The exact assessment contract, candidate disposition, categories, origin, and license are recorded in `manifest.json`. It proves the bounded `proxy_cache_path`/`proxy_cache` -> Jul `[cache]` translation added alongside this fixture: exactly one declared cache zone, referenced consistently by the one location that uses `proxy_cache`, translates onto Jul's single process-wide cache. The real-Jul stateful cache E2E (a real MISS-then-HIT transition through a real backend) lives in `cmd/jul/corpus_runtime_test.go` (`TestNGINXCorpusCacheRealE2E`) rather than the generic manifest `scenarios` array, because it asserts a *sequence* of two requests and their `X-Cache` disposition, not a single request/response comparison.

@@ -1,0 +1,5 @@
+# upstream-failover-runtime
+
+Repository-authored, sanitized NGINX migration fixture for issue #365. It uses only synthetic local addresses, hostnames, paths, and values; it contains no production configuration, credentials, private keys, external endpoints, or user traffic.
+
+The exact assessment contract, candidate disposition, categories, origin, and license are recorded in `manifest.json`. It proves the `max_fails`/`fail_timeout` -> Jul `[upstreams.resilience]` translation added alongside this fixture: two backends declaring the same consecutive-failure threshold and open duration translate onto Jul's upstream-wide circuit breaker (Jul has one breaker per pool, not one per backend, so translation is only lossless when every backend agrees). The real-Jul passive-failover E2E (a backend that refuses every connection is silently routed around, with no request ever failing at the client) lives in `cmd/jul/corpus_runtime_test.go` (`TestNGINXCorpusUpstreamFailoverRealE2E`) rather than the generic manifest `scenarios` array, because it needs a backend that is deliberately never listening.

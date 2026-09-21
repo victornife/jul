@@ -172,20 +172,28 @@ func TestClassifyProxyReturnRewriteAndHeader(t *testing.T) {
 
 func TestClassifyUpstreamServer(t *testing.T) {
 	tests := []struct {
-		name   string
-		params []string
-		want   AssessmentClass
+		name                  string
+		params                []string
+		maxFailsConsistent    bool
+		failTimeoutConsistent bool
+		want                  AssessmentClass
 	}{
-		{"missing", nil, AssessmentBlocking},
-		{"blank", []string{""}, AssessmentBlocking},
-		{"weight", []string{"127.0.0.1:8080", "weight=2"}, AssessmentSupported},
-		{"bad weight", []string{"127.0.0.1:8080", "weight=0"}, AssessmentBlocking},
-		{"down", []string{"127.0.0.1:8080", "down"}, AssessmentApproximated},
-		{"unsupported", []string{"127.0.0.1:8080", "backup"}, AssessmentBlocking},
+		{"missing", nil, true, true, AssessmentBlocking},
+		{"blank", []string{""}, true, true, AssessmentBlocking},
+		{"weight", []string{"127.0.0.1:8080", "weight=2"}, true, true, AssessmentSupported},
+		{"bad weight", []string{"127.0.0.1:8080", "weight=0"}, true, true, AssessmentBlocking},
+		{"down", []string{"127.0.0.1:8080", "down"}, true, true, AssessmentApproximated},
+		{"unsupported", []string{"127.0.0.1:8080", "backup"}, true, true, AssessmentBlocking},
+		{"max_fails consistent", []string{"127.0.0.1:8080", "max_fails=2"}, true, true, AssessmentSupported},
+		{"max_fails inconsistent", []string{"127.0.0.1:8080", "max_fails=2"}, false, true, AssessmentApproximated},
+		{"bad max_fails", []string{"127.0.0.1:8080", "max_fails=-1"}, true, true, AssessmentBlocking},
+		{"fail_timeout consistent", []string{"127.0.0.1:8080", "fail_timeout=30s"}, true, true, AssessmentSupported},
+		{"fail_timeout inconsistent", []string{"127.0.0.1:8080", "fail_timeout=30s"}, true, false, AssessmentApproximated},
+		{"bad fail_timeout", []string{"127.0.0.1:8080", "fail_timeout=nope"}, true, true, AssessmentBlocking},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assertCapabilityClass(t, classifyUpstreamServer(tt.params), tt.want)
+			assertCapabilityClass(t, classifyUpstreamServer(tt.params, tt.maxFailsConsistent, tt.failTimeoutConsistent), tt.want)
 		})
 	}
 }

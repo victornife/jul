@@ -89,7 +89,26 @@ var capabilityRegistry = map[capabilityKey]capability{
 	{ContextLocation, "deny"}:                 blocking("NGX_LOCATION_DENY", RiskSecurity, "source-address access controls are not translated"),
 	{ContextLocation, "limit_req"}:            blocking("NGX_LOCATION_RATE_LIMIT", RiskAvailability, "NGINX request-rate limiting is not translated"),
 	{ContextLocation, "limit_conn"}:           blocking("NGX_LOCATION_CONN_LIMIT", RiskAvailability, "NGINX connection limiting is not translated"),
-	{ContextLocation, "proxy_cache"}:          blocking("NGX_LOCATION_CACHE", RiskSecurity, "NGINX cache policy is not translated"),
+
+	// Bounded proxy_cache subset: a single proxy_cache_path zone declared at
+	// http level and referenced consistently by every proxy_cache in the
+	// file translates onto Jul's one process-wide [cache]. Anything wider
+	// (multiple zones, an undeclared zone, or a dynamic/expression-driven
+	// cache-control directive) stays blocking - see cache_translate.go.
+	{ContextHTTP, "proxy_cache_path"}:                  supported("NGX_HTTP_CACHE_PATH", RiskPerformance, "cache zone declaration is translated", []string{"cache.enabled", "cache.disk_path", "cache.disk_max_size"}),
+	{ContextLocation, "proxy_cache"}:                   supported("NGX_LOCATION_CACHE", RiskSecurity, "cache enablement is translated", []string{"servers[].locations[].cache"}),
+	{ContextLocation, "proxy_cache_valid"}:             approximated("NGX_LOCATION_CACHE_VALID", RiskPerformance, "proxy_cache_valid maps to [cache].default_ttl, which Jul applies only as a fallback when the upstream gives no explicit Cache-Control/Expires freshness"),
+	{ContextLocation, "proxy_cache_bypass"}:            blocking("NGX_LOCATION_CACHE_BYPASS", RiskSecurity, "expression-driven cache bypass conditions are not translated"),
+	{ContextLocation, "proxy_no_cache"}:                blocking("NGX_LOCATION_CACHE_NO_CACHE", RiskSecurity, "expression-driven cache-skip conditions are not translated"),
+	{ContextLocation, "proxy_cache_key"}:               blocking("NGX_LOCATION_CACHE_KEY", RiskSecurity, "a custom cache key expression is not translated; Jul's key is always method + host + URI"),
+	{ContextLocation, "proxy_ignore_headers"}:          blocking("NGX_LOCATION_CACHE_IGNORE_HEADERS", RiskSecurity, "Jul always honors upstream Cache-Control/Expires; a policy to ignore them is not translated"),
+	{ContextLocation, "proxy_cache_min_uses"}:          ignored("NGX_LOCATION_CACHE_MIN_USES", RiskPerformance, "Jul has no minimum-uses gate before caching a response"),
+	{ContextLocation, "proxy_cache_lock"}:              ignored("NGX_LOCATION_CACHE_LOCK", RiskPerformance, "Jul has no equivalent same-key fetch-serialization toggle"),
+	{ContextLocation, "proxy_cache_lock_age"}:          ignored("NGX_LOCATION_CACHE_LOCK", RiskPerformance, "Jul has no equivalent same-key fetch-serialization toggle"),
+	{ContextLocation, "proxy_cache_lock_timeout"}:      ignored("NGX_LOCATION_CACHE_LOCK", RiskPerformance, "Jul has no equivalent same-key fetch-serialization toggle"),
+	{ContextLocation, "proxy_cache_background_update"}: ignored("NGX_LOCATION_CACHE_BACKGROUND_UPDATE", RiskPerformance, "Jul's stale-while-revalidate background refresh is unconditional and cannot be independently toggled"),
+	{ContextLocation, "proxy_cache_revalidate"}:        approximated("NGX_LOCATION_CACHE_REVALIDATE", RiskPerformance, "Jul's background revalidation always reissues the request; it does not send conditional If-Modified-Since/If-None-Match"),
+	{ContextLocation, "proxy_cache_use_stale"}:         approximated("NGX_LOCATION_CACHE_USE_STALE", RiskAvailability, "Jul's stale-while-revalidate/stale-if-error serving is unconditional and cannot be selectively disabled per error condition"),
 
 	{ContextUpstream, "server"}:             supported("NGX_UPSTREAM_SERVER", RiskAvailability, "upstream backend is translated", []string{"upstreams[].servers[]"}),
 	{ContextUpstream, "least_conn"}:         supported("NGX_UPSTREAM_LEAST_CONN", RiskAvailability, "least-connections balancing is translated", []string{"upstreams[].strategy"}),

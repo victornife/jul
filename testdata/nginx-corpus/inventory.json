@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "fixture_schema_version": 1,
-  "fixture_count": 22,
-  "core_fixtures": 20,
+  "fixture_count": 24,
+  "core_fixtures": 22,
   "full_fixtures": 2,
   "categories": [
     {
       "name": "cache-compression",
-      "count": 2
+      "count": 3
     },
     {
       "name": "client-identity",
@@ -75,7 +75,7 @@
     },
     {
       "name": "upstreams-resiliency",
-      "count": 2
+      "count": 3
     },
     {
       "name": "variables",
@@ -85,7 +85,7 @@
   "classes": [
     {
       "name": "approximated",
-      "count": 4
+      "count": 5
     },
     {
       "name": "blocking",
@@ -97,17 +97,17 @@
     },
     {
       "name": "informational",
-      "count": 21
+      "count": 23
     },
     {
       "name": "supported",
-      "count": 212
+      "count": 232
     }
   ],
   "risks": [
     {
       "name": "availability",
-      "count": 42
+      "count": 47
     },
     {
       "name": "observability",
@@ -115,22 +115,26 @@
     },
     {
       "name": "operational",
-      "count": 49
+      "count": 53
     },
     {
       "name": "performance",
-      "count": 5
+      "count": 7
     },
     {
       "name": "routing",
-      "count": 134
+      "count": 144
     },
     {
       "name": "security",
-      "count": 34
+      "count": 36
     }
   ],
   "codes": [
+    {
+      "name": "NGX_CACHE_ZONE_CONFLICT",
+      "count": 1
+    },
     {
       "name": "NGX_DIRECTIVE_UNSUPPORTED",
       "count": 1
@@ -148,6 +152,10 @@
       "count": 1
     },
     {
+      "name": "NGX_HTTP_CACHE_PATH",
+      "count": 1
+    },
+    {
       "name": "NGX_HTTP_GZIP",
       "count": 2
     },
@@ -161,11 +169,11 @@
     },
     {
       "name": "NGX_HTTP_SERVER",
-      "count": 22
+      "count": 24
     },
     {
       "name": "NGX_HTTP_UPSTREAM",
-      "count": 5
+      "count": 7
     },
     {
       "name": "NGX_INCLUDE_RESOLVED",
@@ -189,6 +197,10 @@
     },
     {
       "name": "NGX_LOCATION_CACHE",
+      "count": 2
+    },
+    {
+      "name": "NGX_LOCATION_CACHE_VALID",
       "count": 1
     },
     {
@@ -201,7 +213,7 @@
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS",
-      "count": 5
+      "count": 7
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS_DYNAMIC",
@@ -229,11 +241,11 @@
     },
     {
       "name": "NGX_MAIN_EVENTS",
-      "count": 20
+      "count": 22
     },
     {
       "name": "NGX_MAIN_HTTP",
-      "count": 22
+      "count": 24
     },
     {
       "name": "NGX_MAIN_MAIL",
@@ -281,15 +293,15 @@
     },
     {
       "name": "NGX_SERVER_LISTEN",
-      "count": 22
+      "count": 24
     },
     {
       "name": "NGX_SERVER_LOCATION",
-      "count": 28
+      "count": 30
     },
     {
       "name": "NGX_SERVER_NAME",
-      "count": 16
+      "count": 18
     },
     {
       "name": "NGX_SERVER_TLS_CERT",
@@ -365,7 +377,7 @@
     },
     {
       "name": "NGX_UPSTREAM_SERVER",
-      "count": 9
+      "count": 12
     },
     {
       "name": "NGX_VARIABLE_BLOCK_UNSUPPORTED",
@@ -387,12 +399,13 @@
       "id": "cache-compression",
       "status": "represented",
       "fixtures": [
+        "cache-runtime",
         "compression-runtime",
         "security-cache-boundaries"
       ],
       "deferred_dimensions": [
-        "shared/distributed cache directives",
-        "stateful cache/Vary/range replay (blocked on a future proxy_cache -\u003e [cache] translation decision, out of #365's scope to invent unilaterally)"
+        "proxy_cache_bypass/proxy_no_cache/proxy_cache_key (expression-driven; not statically representable)",
+        "shared/distributed cache directives (multiple proxy_cache_path zones - a genuine architectural mismatch with Jul's single process-wide cache, not a scope gap)"
       ]
     },
     {
@@ -466,6 +479,7 @@
       "fixtures": [
         "blocking-dynamic-proxy",
         "unix-http-upstream",
+        "upstream-failover-runtime",
         "upstream-weighted",
         "upstream-weighted-runtime"
       ],
@@ -473,7 +487,7 @@
         "WebSocket/gRPC upstream runtime replay",
         "active-health migration replay",
         "backend TLS/private-CA migration replay",
-        "retry/circuit migration replay beyond the dedicated product-level resilience evidence"
+        "circuit-breaker recovery/half-open-probe migration replay beyond the dedicated product-level resilience evidence"
       ]
     }
   ]

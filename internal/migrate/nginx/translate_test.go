@@ -8,6 +8,7 @@ package nginx
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 )
@@ -220,6 +221,54 @@ http {
 	}
 	if len(rep.Notes) == 0 {
 		t.Error("expected a note about the omitted down server")
+	}
+}
+
+func TestTranslateUpstreamConsistentMaxFailsAndFailTimeout(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  upstream pool {
+    server a:80 max_fails=2 fail_timeout=5s;
+    server b:80 max_fails=2 fail_timeout=5s;
+  }
+}`)
+	u := cfg.Upstreams[0]
+	if u.Resilience == nil {
+		t.Fatalf("expected a Resilience block, got nil")
+	}
+	if u.Resilience.MaxFails != 2 {
+		t.Errorf("MaxFails: got %d want 2", u.Resilience.MaxFails)
+	}
+	if u.Resilience.FailTimeout.Std() != 5*time.Second {
+		t.Errorf("FailTimeout: got %s want 5s", u.Resilience.FailTimeout.Std())
+	}
+	for _, n := range rep.Notes {
+		if strings.Contains(n, "declare different") {
+			t.Errorf("unexpected disagreement note for consistent backends: %q", n)
+		}
+	}
+}
+
+func TestTranslateUpstreamInconsistentMaxFailsAndFailTimeoutKeepsDefault(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  upstream pool {
+    server a:80 max_fails=2 fail_timeout=5s;
+    server b:80 max_fails=5 fail_timeout=9s;
+  }
+}`)
+	u := cfg.Upstreams[0]
+	if u.Resilience != nil {
+		t.Errorf("expected no Resilience block when backends disagree, got %+v", u.Resilience)
+	}
+	found := 0
+	for _, n := range rep.Notes {
+		if strings.Contains(n, "declare different") {
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("expected 2 disagreement notes (max_fails and fail_timeout), got %d: %+v", found, rep.Notes)
 	}
 }
 

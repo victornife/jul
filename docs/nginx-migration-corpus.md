@@ -62,7 +62,7 @@ responsibility, not this issue's.
 
 ## Expanded HTTP/upstream/WebSocket/compression migration E2E (#365)
 
-Issue #365 expands the #154 real-Jul runtime evidence with four more fixtures:
+Issue #365 expands the #154 real-Jul runtime evidence with six more fixtures:
 
 - `routing-precedence-runtime` — proves the exact / longest-non-root-prefix /
   regex / root location-precedence order end to end, plus a `limit_except`
@@ -90,16 +90,29 @@ Issue #365 expands the #154 real-Jul runtime evidence with four more fixtures:
   binary message exchange, and clean close through a real Jul instance
   proxying to a real local WebSocket-echoing backend. This is H1 WebSocket
   migration evidence only; H2/H3 Extended CONNECT WebSocket remains #435's
-  scope, not implemented here.
+  scope, not implemented here;
+- `cache-runtime` — a single `proxy_cache_path` zone referenced consistently
+  by `proxy_cache` translates onto Jul's single process-wide `[cache]`; the
+  test asserts a real `X-Cache: MISS` → `X-Cache: HIT` transition through a
+  real Jul instance and real backend, and that the cached response's own
+  `X-Corpus-Backend-Id` header is replayed verbatim on the hit (per the
+  stored-headers contract in `docs/cache.md`);
+- `upstream-failover-runtime` — two backends declaring the same
+  `max_fails`/`fail_timeout` translate onto Jul's upstream-wide
+  `[upstreams.resilience]` circuit breaker; the test proves a backend that
+  refuses every connection is excluded after tripping the breaker, with every
+  client request still succeeding (Jul's default retry-every-distinct-backend
+  behavior masks the failure) against a real Jul instance.
 
-The weighted-upstream, compression, and WebSocket scenarios live in
-`cmd/jul/corpus_runtime_test.go` rather than a fixture's manifest `scenarios`
-array, because each needs assertions the generic single-request/response
-Scenario/Dimension model does not express (repeated-request distribution
-counts, raw-header/decoded-body inspection, and a persistent bidirectional
-connection respectively). `startCorpusTCPBackends` in
-`cmd/jul/import_corpus_test.go` gives any fixture's named-upstream TCP members
-a real local backend for the real-Jul path, the same way
+The weighted-upstream, compression, WebSocket, cache, and upstream-failover
+scenarios live in `cmd/jul/corpus_runtime_test.go` rather than a fixture's
+manifest `scenarios` array, because each needs assertions the generic
+single-request/response Scenario/Dimension model does not express
+(repeated-request distribution counts, raw-header/decoded-body inspection, a
+persistent bidirectional connection, a two-request MISS/HIT sequence, and a
+deliberately-never-listening backend, respectively). `startCorpusTCPBackends`
+in `cmd/jul/import_corpus_test.go` gives any fixture's named-upstream TCP
+members a real local backend for the real-Jul path, the same way
 `startCorpusUnixHTTPBackends` already does for `unix:` addresses.
 
 **Why only `routing-precedence-runtime` runs against the pinned NGINX
@@ -121,13 +134,21 @@ recorded as a deliberate, reasoned scope boundary — not an oversight — and i
 natural candidate for the heavier, more elaborate reference infrastructure
 #368 already governs for the full/scheduled lane, if a concrete need arises.
 
-Stateful cache E2E (miss/fill/hit/bypass) is explicitly **not** included:
-`proxy_cache` remains a correct, intentional blocking assessment finding (Jul's
-`[cache]` activation has no importer translation from any NGINX directive), so
-there is no imported candidate to exercise cache state against without
-inventing importer scope unilaterally. `security-cache-boundaries` already
-documents this boundary; see `coverage.json`'s `cache-compression` category for
-the recorded revisit trigger.
+Stateful cache E2E (miss/hit) and passive-failover/circuit-breaker E2E are
+covered by `cache-runtime` and `upstream-failover-runtime` above, once the
+bounded `proxy_cache_path`/`proxy_cache` → `[cache]` and per-backend
+`max_fails`/`fail_timeout` → upstream-wide `[upstreams.resilience]`
+translations were added alongside them. Both translations are deliberately
+bounded to the case that is actually lossless: a single cache zone used
+consistently everywhere, and backends that agree on the same failure
+threshold/open duration. A wider case (multiple cache zones, or disagreeing
+per-backend thresholds) is a genuine architectural mismatch — Jul's cache and
+circuit breaker are process-/pool-wide, not per-zone or per-backend — and is
+left blocking (cache) or approximated with a note (resilience) rather than
+guessed. `security-cache-boundaries` documents the multi/undeclared-zone
+conflict case; see `coverage.json`'s `cache-compression` and
+`upstreams-resiliency` categories for the recorded evidence and any residual
+revisit triggers (e.g. circuit-breaker recovery/half-open-probe replay).
 
 ## Corpus admission policy
 

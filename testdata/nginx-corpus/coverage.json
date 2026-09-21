@@ -5,20 +5,24 @@
       "id": "cache-compression",
       "status": "represented",
       "fixtures": [
+        "cache-runtime",
         "compression-runtime",
         "security-cache-boundaries"
       ],
       "evidence": [
+        "NGX_HTTP_CACHE_PATH",
         "NGX_HTTP_GZIP",
         "NGX_LOCATION_CACHE",
-        "issue #365 real-Jul gzip engagement + decoded-content E2E"
+        "NGX_LOCATION_CACHE_VALID",
+        "issue #365 real-Jul gzip engagement + decoded-content E2E",
+        "issue #365 real-Jul stateful cache MISS-then-HIT E2E"
       ],
-      "rationale": "The corpus proves direct gzip classification, a real-backend Jul gzip engagement/decoded-content E2E (#365), and an explicit blocking NGINX cache-policy boundary. Stateful cache E2E is not yet achievable through the migration pipeline: Jul's [cache] activation has no nginx proxy_cache-derived translation (proxy_cache stays a correct, intentional blocking finding), so there is no imported candidate to exercise cache state against without inventing importer scope.",
+      "rationale": "The corpus proves direct gzip classification, a real-backend Jul gzip engagement/decoded-content E2E (#365), and the bounded proxy_cache_path/proxy_cache -> Jul [cache] translation: exactly one declared cache zone referenced consistently by every proxy_cache in the file translates onto Jul's single process-wide cache (cache-runtime, with a real MISS-then-HIT E2E), while an undeclared or multi-zone reference is rejected as a synthetic NGX_CACHE_ZONE_CONFLICT rather than silently guessed (security-cache-boundaries).",
       "deferred_dimensions": [
-        "shared/distributed cache directives",
-        "stateful cache/Vary/range replay (blocked on a future proxy_cache -> [cache] translation decision, out of #365's scope to invent unilaterally)"
+        "proxy_cache_bypass/proxy_no_cache/proxy_cache_key (expression-driven; not statically representable)",
+        "shared/distributed cache directives (multiple proxy_cache_path zones - a genuine architectural mismatch with Jul's single process-wide cache, not a scope gap)"
       ],
-      "revisit_trigger": "Add stateful cache E2E once a dedicated issue defines how (or whether) an nginx cache directive maps to Jul's [cache] configuration; until then proxy_cache correctly stays blocking."
+      "revisit_trigger": "Revisit only if Jul's cache model itself grows multiple named zones; the single-zone bounded translation already covers the representable case."
     },
     {
       "id": "core-http-routing",
@@ -113,18 +117,20 @@
       "fixtures": [
         "blocking-dynamic-proxy",
         "unix-http-upstream",
+        "upstream-failover-runtime",
         "upstream-weighted",
         "upstream-weighted-runtime"
       ],
       "evidence": [
-        "issue #365 real-Jul deterministic weighted-round-robin distribution E2E"
+        "issue #365 real-Jul deterministic weighted-round-robin distribution E2E",
+        "issue #365 real-Jul passive-failover/circuit-breaker E2E"
       ],
-      "rationale": "The corpus covers named weighted upstreams, least-connections translation, ignored connection-pool tuning, proxy routing, blocking variable-derived destinations, a real NGINX/Jul named HTTP upstream served over a Unix-domain socket (#407), and a real-Jul weighted-round-robin backend-selection E2E proving the exact deterministic 3:1 distribution over two real local backends (#365).",
+      "rationale": "The corpus covers named weighted upstreams, least-connections translation, ignored connection-pool tuning, proxy routing, blocking variable-derived destinations, a real NGINX/Jul named HTTP upstream served over a Unix-domain socket (#407), a real-Jul weighted-round-robin backend-selection E2E proving the exact deterministic 3:1 distribution over two real local backends (#365), and the bounded per-backend max_fails/fail_timeout -> Jul upstream-wide [upstreams.resilience] translation with a real-Jul passive-failover E2E: a backend that refuses every connection is transparently routed around with no client-visible failure (#365).",
       "deferred_dimensions": [
         "WebSocket/gRPC upstream runtime replay",
         "active-health migration replay",
         "backend TLS/private-CA migration replay",
-        "retry/circuit migration replay beyond the dedicated product-level resilience evidence"
+        "circuit-breaker recovery/half-open-probe migration replay beyond the dedicated product-level resilience evidence"
       ],
       "revisit_trigger": "Expand after a stable runtime contract and a deterministic local backend can assert one additional migration semantic without becoming a general gateway conformance suite."
     }
