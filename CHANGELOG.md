@@ -9,9 +9,30 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+## [2.0.0] – 2026-09-21
+
+> First stable release of the v2.0.0 line, cut from a post-#420 commit.
+> `v2.0.0-rc.1` remains an immutable prerelease that predates the WASM
+> plugin-pool fix below; it was never retagged, moved, or described as
+> promoted to stable — this is a separate, later tag with a separate release
+> run.
+
+### Fixed
+
+- **WASM plugin-pool unbounded memory growth (#420).** The final pre-stable soak found that `sync.Pool` could silently drop a `wazero`-backed WASM instance without ever `Close`-ing it (the `wazero.Runtime` keeps its own reference to every instantiated module), and WASM linear memory only grows, so an evicted-but-unclosed instance leaked for the life of the process. Fixed with a bounded channel pool (`poolCapacity = 64`) plus a per-instance invocation cap (`plugins.<name>.max_invocations`, default 1000). Verified via an isolated 96,000-request targeted burst (retained memory plateaued at ~8–13MB, versus climbing unbounded to 600MB+ before the fix) and the ~25h final soak below.
+
+### Added
+
+- **Final post-fix soak recorded (#421).** ~25h `burn-in-current.toml` run against the #420 fix commit: 94.18M HTTP 200s, 9.54M 204s, 148M+ stream echo rounds, 5.02M WASM plugin invocations, memory bounded throughout. Two deviations recorded rather than hidden (a sandbox clock/suspend anomaly that starved long-interval tickers, topped up separately; a 0.0003% plugin call-timeout rate under real CPU contention) — neither indicates a defect in the fix under review; both accepted as non-blocking by the maintainer. Three deferred manual host-level faults and a continuous-metrics-scraping gap are tracked as non-blocking follow-up in #422. See [soak-evidence.md](docs/soak-evidence.md#2026-09-19--final-soak-adr-0005-procedure-c-burn-in-currenttoml-25h-linux).
+
 ### Changed
 
+- **Trusted client identity and backend TLS trust promoted Beta → GA (#409).** Certification evidence — the client-identity spoof/trust-chain matrix, the backend TLS/mTLS/discovery-identity-stability/health-parity matrix across HTTP, native gRPC, transcoding and active health, `-race`-clean runs, clean fuzz smoke, a secret/metric-cardinality review, and the #421 soak above (which already exercised both capabilities) — all passed. No new long-running soak was required. `docs/feature-status.yaml` delivery moves `merged` → `soaked` for both, matching every other GA row in the manifest.
 - **Post-soak product-truth reconciliation (#353).** `docs/status.md` now records the #420 WASM plugin-pool fix and #421 final ~25h post-fix soak (both previously merged but not reflected on the status page), and reiterates that `v2.0.0-rc.1` is immutable/pre-#420 while stable `v2.0.0` must be cut from a post-#420 commit. Corrected two stale claims found to contradict current code and the generated lifecycle authority: `docs/known-limitations.md` no longer claims UDP streams have a single backend per listener — each new UDP client session dials the route's `upstream.Pool` through the same balancer as TCP/HTTP, so distinct sessions distribute across every configured backend (a single session's own datagrams stay pinned to its chosen backend; see `TestUDPProxyLoadBalancesAcrossBackends`); `docs/http3.md` no longer claims static certificate-file replacement is restart-bound for HTTP/3 — it shares the same hot `dynamicCertProvider` as its sibling TCP listener (#100), proven by the existing `TestReloadRotatesHTTP3CertificateWithoutRebind`. Added an explicit MQTT/generic-UDP transport boundary: MQTT/TCP is ordinary TCP relay, MQTT/TLS can use SNI passthrough, MQTT-over-WebSocket uses existing HTTP/1.1 WebSocket support, and Jul.IA is not a QUIC-Connection-ID-aware load balancer and has no MQTT-aware topic/QoS/ClientID routing or health checks.
+
+### Deferred
+
+- **#422** (manual host-level fault injection: DNS failure, FD-limit, cgroup constraint; continuous Prometheus scraping during a soak) remains open, non-blocking follow-up evidence work. It does not gate this release.
 
 ## [2.0.0-rc.1] – 2026-09-17
 

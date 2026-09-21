@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.10 · Updated 2026-09-21
+> Version 2.11 · Updated 2026-09-21
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -46,13 +46,16 @@ not inherit an older GA row merely because it lives in the same package or guide
 
 ### Current product snapshot
 
-- **Published checkpoint:** `v2.0.0-rc.1` is an independently verified
-  prerelease candidate at `c9ab3a05af6a6088b2721de0a87995ce37d468cf`,
-  superseding the prior `v1.32.1-rc.1` checkpoint. It is not a stable release.
-- **Current `main`:** may already be ahead of that checkpoint; check this
+- **Published release:** stable `v2.0.0` is the current published release, cut
+  from a post-#420 commit (see `CHANGELOG.md` and the release evidence linked
+  from [#425](https://github.com/victornife/jul/issues/425)).
+  `v2.0.0-rc.1` is an independently verified prerelease at
+  `c9ab3a05af6a6088b2721de0a87995ce37d468cf` that predates the #420 WASM
+  plugin-pool fix; it is immutable and was never retagged or promoted — stable
+  `v2.0.0` is a separate, later tag.
+- **Current `main`:** may already be ahead of the stable tag; check this
   page and `feature-status.yaml` for delivery/maturity of anything not yet
-  reflected in the RC evidence at
-  [release-candidates/v2.0.0-rc.1.md](release-candidates/v2.0.0-rc.1.md).
+  released.
 - **Volatile execution state:** lives in
   [#62](https://github.com/victornife/jul/issues/62). The
   [roadmap](roadmap/README.md) intentionally keeps only durable portfolio state.
@@ -64,8 +67,6 @@ not inherit an older GA row merely because it lives in the same package or guide
 
 - **Response cache:** #134 completed integrated recertification; the released
   cache record retains GA.
-- **Trusted client address and backend TLS:** merged Beta capabilities; stable
-  publication and soak are still explicit promotion gates.
 - **Resilience:** admission, retry and circuit implementations are merged. The
   pre-soak correction centralizes cross-protocol failure attribution and keeps
   client/Jul-owned cancellation neutral; stable release and soak remain open.
@@ -142,6 +143,8 @@ Released and soaked capabilities that satisfy all applicable GA criteria.
 | Response cache (memory + disk) | core-cache | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [cache.md](cache.md) |
 | Core HTTP (static / proxy / FastCGI / vhosts / routing) | core-http | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [core-http.md](core-http.md) |
 | Configuration reload transaction | reload-tx | core | `soaked` | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |
+| Trusted client address (client_address) | CGC-IN | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [configuration.md](configuration.md) |
+| Backend TLS trust (backend_tls) | UT-BE | core · `grpc` | `soaked` | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [upstreams.md](upstreams.md) |
 
 ## GA — soak pending
 
@@ -159,8 +162,6 @@ not yet at the GA bar. `merged` and `candidate` are not synonyms for released.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| Trusted client address (client_address) | CGC-IN | core | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [configuration.md](configuration.md) |
-| Backend TLS trust (backend_tls) | UT-BE | core · `grpc` | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [upstreams.md](upstreams.md) |
 | Auxiliary egress allow-list | SEC-EGRESS | core | `candidate` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [egress.md](egress.md) |
 | Request predicates, response headers, and CORS | CGC-ROUTE | core | `merged` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
 | Upstream resilience (admission, retry, circuit) | CGC-RES | core · `grpc` · `stream` | `merged` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ☐ | [upstreams.md](upstreams.md) |
@@ -222,6 +223,7 @@ the [soak evidence log](soak-evidence.md).
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-09-21 | 2.11 | **Stable v2.0.0 cut; trusted client identity and backend TLS trust promoted Beta → GA (#409).** Certification evidence (protocol/spoof matrix, backend TLS/mTLS/discovery-identity-stability/health-parity matrix, race, fuzz, security/cardinality review, and the existing #421 ~25h soak) all passed; no new soak was required. Delivery moves `merged` → `soaked` for both, consistent with every other GA row in this manifest. | Issue #409; [feature-status.yaml](feature-status.yaml); [known-limitations.md](known-limitations.md); [README.md](../README.md) |
 | 2026-09-21 | 2.10 | Wave 0 post-soak product-truth reconciliation (#353): recorded the #420 WASM plugin-pool fix and #421 final ~25h soak (previously missing from this page); corrected the stale "UDP has no load balancing" claim (UDP sessions do select across the route's backend pool, one dial per new client, pinned for the session's life); corrected the stale "HTTP/3 static certificate replacement is restart-bound" claim (it hot-applies via the shared `dynamicCertProvider`, same as TCP); added an explicit MQTT/generic-UDP transport non-goal boundary. | Issue #353; [known-limitations.md](known-limitations.md); [http3.md](http3.md); [soak-evidence.md](soak-evidence.md) |
 | 2026-09-15 | 2.8 | Reconciled post-2026-08-30 additive surfaces as separate merged Beta entries: admin TLS/mTLS, external API, remote CLI, selected runtime-policy hot reload and HTTP-over-Unix upstreams. Updated resilience attribution and removed stale future-work wording without claiming release or soak. | [feature-status.yaml](feature-status.yaml); [upstreams.md](upstreams.md); [known-limitations.md](known-limitations.md) |
 | 2026-08-30 | 2.7 | Reconciled maturity and delivery as separate axes; added explicit post-RC rows for egress, routing/response policy, resilience, configuration authority/generated contracts, and NGINX assessment/provenance/includes; removed stale programme language. | Issue #353; [feature-status.yaml](feature-status.yaml) |
