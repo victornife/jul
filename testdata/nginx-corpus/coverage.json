@@ -5,19 +5,20 @@
       "id": "cache-compression",
       "status": "represented",
       "fixtures": [
+        "compression-runtime",
         "security-cache-boundaries"
       ],
       "evidence": [
         "NGX_HTTP_GZIP",
-        "NGX_LOCATION_CACHE"
+        "NGX_LOCATION_CACHE",
+        "issue #365 real-Jul gzip engagement + decoded-content E2E"
       ],
-      "rationale": "The corpus proves direct gzip classification and an explicit blocking NGINX cache-policy boundary. This is migration evidence, not a stateful cache conformance suite.",
+      "rationale": "The corpus proves direct gzip classification, a real-backend Jul gzip engagement/decoded-content E2E (#365), and an explicit blocking NGINX cache-policy boundary. Stateful cache E2E is not yet achievable through the migration pipeline: Jul's [cache] activation has no nginx proxy_cache-derived translation (proxy_cache stays a correct, intentional blocking finding), so there is no imported candidate to exercise cache state against without inventing importer scope.",
       "deferred_dimensions": [
-        "decoded compression-byte parity",
         "shared/distributed cache directives",
-        "stateful cache/Vary/range replay"
+        "stateful cache/Vary/range replay (blocked on a future proxy_cache -> [cache] translation decision, out of #365's scope to invent unilaterally)"
       ],
-      "revisit_trigger": "Add a selected-dimension fixture only when deterministic cache reset/state orchestration or a concrete migration incident justifies the maintenance cost."
+      "revisit_trigger": "Add stateful cache E2E once a dedicated issue defines how (or whether) an nginx cache directive maps to Jul's [cache] configuration; until then proxy_cache correctly stays blocking."
     },
     {
       "id": "core-http-routing",
@@ -26,11 +27,18 @@
         "approximate-alias",
         "blocking-dynamic-proxy",
         "core-multifile-return",
-        "routing-cors-policy"
+        "routing-cors-policy",
+        "routing-precedence-runtime",
+        "websocket-runtime"
       ],
-      "rationale": "Core fixtures cover multi-file servers, exact/prefix/regex locations, static files, returns, redirects, method constraints, response headers, CORS, and safe blocking of dynamic proxy targets.",
+      "evidence": [
+        "issue #365 pinned real-NGINX reference confirmation for the precedence order",
+        "issue #365 real-Jul H1 WebSocket upgrade/echo/close E2E",
+        "issue #365 real-Jul exact/prefix/regex/root location-precedence E2E"
+      ],
+      "rationale": "Core fixtures cover multi-file servers, exact/prefix/regex/root location-precedence order proven through both a real Jul instance and the pinned real-NGINX reference container (#365), static files, returns, redirects, method constraints, response headers, CORS, safe blocking of dynamic proxy targets, and H1 WebSocket migration evidence through a real backend. H2/H3 Extended CONNECT WebSocket remains explicitly out of scope (#435).",
       "deferred_dimensions": [
-        "full NGINX location-precedence cross-product",
+        "full NGINX location-precedence cross-product beyond the four-tier order already proven",
         "proxy_pass URI edge matrix beyond the classified approximation",
         "rewrite control-flow beyond static supported flags"
       ],
@@ -105,9 +113,13 @@
       "fixtures": [
         "blocking-dynamic-proxy",
         "unix-http-upstream",
-        "upstream-weighted"
+        "upstream-weighted",
+        "upstream-weighted-runtime"
       ],
-      "rationale": "The corpus covers named weighted upstreams, least-connections translation, ignored connection-pool tuning, proxy routing, blocking variable-derived destinations, and a real NGINX/Jul named HTTP upstream served over a Unix-domain socket (#407).",
+      "evidence": [
+        "issue #365 real-Jul deterministic weighted-round-robin distribution E2E"
+      ],
+      "rationale": "The corpus covers named weighted upstreams, least-connections translation, ignored connection-pool tuning, proxy routing, blocking variable-derived destinations, a real NGINX/Jul named HTTP upstream served over a Unix-domain socket (#407), and a real-Jul weighted-round-robin backend-selection E2E proving the exact deterministic 3:1 distribution over two real local backends (#365).",
       "deferred_dimensions": [
         "WebSocket/gRPC upstream runtime replay",
         "active-health migration replay",

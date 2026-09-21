@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "fixture_schema_version": 1,
-  "fixture_count": 18,
-  "core_fixtures": 16,
+  "fixture_count": 22,
+  "core_fixtures": 20,
   "full_fixtures": 2,
   "categories": [
     {
       "name": "cache-compression",
-      "count": 1
+      "count": 2
     },
     {
       "name": "client-identity",
@@ -16,6 +16,10 @@
     {
       "name": "core-http",
       "count": 5
+    },
+    {
+      "name": "core-http-routing",
+      "count": 2
     },
     {
       "name": "fastcgi",
@@ -71,7 +75,7 @@
     },
     {
       "name": "upstreams-resiliency",
-      "count": 1
+      "count": 2
     },
     {
       "name": "variables",
@@ -81,7 +85,7 @@
   "classes": [
     {
       "name": "approximated",
-      "count": 3
+      "count": 4
     },
     {
       "name": "blocking",
@@ -93,17 +97,17 @@
     },
     {
       "name": "informational",
-      "count": 17
+      "count": 21
     },
     {
       "name": "supported",
-      "count": 171
+      "count": 212
     }
   ],
   "risks": [
     {
       "name": "availability",
-      "count": 34
+      "count": 42
     },
     {
       "name": "observability",
@@ -111,19 +115,19 @@
     },
     {
       "name": "operational",
-      "count": 41
+      "count": 49
     },
     {
       "name": "performance",
-      "count": 4
+      "count": 5
     },
     {
       "name": "routing",
-      "count": 107
+      "count": 134
     },
     {
       "name": "security",
-      "count": 32
+      "count": 34
     }
   ],
   "codes": [
@@ -145,7 +149,7 @@
     },
     {
       "name": "NGX_HTTP_GZIP",
-      "count": 1
+      "count": 2
     },
     {
       "name": "NGX_HTTP_LOG_FORMAT",
@@ -157,11 +161,11 @@
     },
     {
       "name": "NGX_HTTP_SERVER",
-      "count": 18
+      "count": 22
     },
     {
       "name": "NGX_HTTP_UPSTREAM",
-      "count": 2
+      "count": 5
     },
     {
       "name": "NGX_INCLUDE_RESOLVED",
@@ -169,7 +173,7 @@
     },
     {
       "name": "NGX_LIMIT_EXCEPT_DENY",
-      "count": 1
+      "count": 2
     },
     {
       "name": "NGX_LOCATION_ADD_HEADER",
@@ -193,11 +197,11 @@
     },
     {
       "name": "NGX_LOCATION_LIMIT_EXCEPT",
-      "count": 1
+      "count": 2
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS",
-      "count": 2
+      "count": 5
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS_DYNAMIC",
@@ -209,7 +213,7 @@
     },
     {
       "name": "NGX_LOCATION_RETURN",
-      "count": 14
+      "count": 19
     },
     {
       "name": "NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT",
@@ -225,11 +229,11 @@
     },
     {
       "name": "NGX_MAIN_EVENTS",
-      "count": 16
+      "count": 20
     },
     {
       "name": "NGX_MAIN_HTTP",
-      "count": 18
+      "count": 22
     },
     {
       "name": "NGX_MAIN_MAIL",
@@ -277,15 +281,15 @@
     },
     {
       "name": "NGX_SERVER_LISTEN",
-      "count": 18
+      "count": 22
     },
     {
       "name": "NGX_SERVER_LOCATION",
-      "count": 20
+      "count": 28
     },
     {
       "name": "NGX_SERVER_NAME",
-      "count": 12
+      "count": 16
     },
     {
       "name": "NGX_SERVER_TLS_CERT",
@@ -361,7 +365,7 @@
     },
     {
       "name": "NGX_UPSTREAM_SERVER",
-      "count": 5
+      "count": 9
     },
     {
       "name": "NGX_VARIABLE_BLOCK_UNSUPPORTED",
@@ -371,11 +375,11 @@
   "verdicts": [
     {
       "name": "equivalent_for_asserted_dimensions",
-      "count": 3
+      "count": 8
     },
     {
       "name": "expected_difference",
-      "count": 2
+      "count": 3
     }
   ],
   "coverage": [
@@ -383,12 +387,12 @@
       "id": "cache-compression",
       "status": "represented",
       "fixtures": [
+        "compression-runtime",
         "security-cache-boundaries"
       ],
       "deferred_dimensions": [
-        "decoded compression-byte parity",
         "shared/distributed cache directives",
-        "stateful cache/Vary/range replay"
+        "stateful cache/Vary/range replay (blocked on a future proxy_cache -\u003e [cache] translation decision, out of #365's scope to invent unilaterally)"
       ]
     },
     {
@@ -398,10 +402,12 @@
         "approximate-alias",
         "blocking-dynamic-proxy",
         "core-multifile-return",
-        "routing-cors-policy"
+        "routing-cors-policy",
+        "routing-precedence-runtime",
+        "websocket-runtime"
       ],
       "deferred_dimensions": [
-        "full NGINX location-precedence cross-product",
+        "full NGINX location-precedence cross-product beyond the four-tier order already proven",
         "proxy_pass URI edge matrix beyond the classified approximation",
         "rewrite control-flow beyond static supported flags"
       ]
@@ -460,7 +466,8 @@
       "fixtures": [
         "blocking-dynamic-proxy",
         "unix-http-upstream",
-        "upstream-weighted"
+        "upstream-weighted",
+        "upstream-weighted-runtime"
       ],
       "deferred_dimensions": [
         "WebSocket/gRPC upstream runtime replay",

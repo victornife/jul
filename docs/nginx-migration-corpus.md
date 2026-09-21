@@ -60,6 +60,75 @@ for exactly which forms are supported, approximate, or blocking. Real
 NGINX-vs-Jul runtime evidence for these translated forms is #366/#367's
 responsibility, not this issue's.
 
+## Expanded HTTP/upstream/WebSocket/compression migration E2E (#365)
+
+Issue #365 expands the #154 real-Jul runtime evidence with four more fixtures:
+
+- `routing-precedence-runtime` — proves the exact / longest-non-root-prefix /
+  regex / root location-precedence order end to end, plus a `limit_except`
+  method predicate. This fixture runs against **both** a real Jul instance
+  and the pinned real-NGINX reference container (see
+  `scripts/nginx-migration-e2e.sh`'s `FIXTURE_SPECS`): every reference value
+  in its manifest was captured by running the exact same `nginx.conf` against
+  the pinned image, not guessed. One scenario (`POST /methods`, excluded by
+  `limit_except`) is a confirmed, intentional difference — real NGINX returns
+  403, Jul's route simply does not match and falls through to the next
+  candidate (204) — recorded as `expected_difference` with the existing
+  `NGX_LOCATION_LIMIT_EXCEPT` code, matching the importer's own documented
+  approximation;
+- `upstream-weighted-runtime` — a named upstream with a weighted and a
+  default-weight member proxied to two real local backends; asserts the
+  *exact* smooth-weighted-round-robin distribution (3:1 over 40 requests ⇒
+  30:10) against a real Jul instance, since the algorithm is fully
+  deterministic;
+- `compression-runtime` — `gzip on` proxying to a real backend; the test
+  sets `Accept-Encoding` itself (opting out of Go's transparent
+  decompression) so it can assert `Content-Encoding: gzip` actually engaged
+  against a real Jul instance, then decodes the body to confirm logical
+  content equivalence — the corpus never compares raw compressed bytes;
+- `websocket-runtime` — a real WebSocket upgrade, bidirectional text and
+  binary message exchange, and clean close through a real Jul instance
+  proxying to a real local WebSocket-echoing backend. This is H1 WebSocket
+  migration evidence only; H2/H3 Extended CONNECT WebSocket remains #435's
+  scope, not implemented here.
+
+The weighted-upstream, compression, and WebSocket scenarios live in
+`cmd/jul/corpus_runtime_test.go` rather than a fixture's manifest `scenarios`
+array, because each needs assertions the generic single-request/response
+Scenario/Dimension model does not express (repeated-request distribution
+counts, raw-header/decoded-body inspection, and a persistent bidirectional
+connection respectively). `startCorpusTCPBackends` in
+`cmd/jul/import_corpus_test.go` gives any fixture's named-upstream TCP members
+a real local backend for the real-Jul path, the same way
+`startCorpusUnixHTTPBackends` already does for `unix:` addresses.
+
+**Why only `routing-precedence-runtime` runs against the pinned NGINX
+container.** The reference lane's isolation model runs NGINX on an
+`--internal` Docker network with no external connectivity; a fixture with a
+real TCP backend needs that backend reachable from inside NGINX's own network
+namespace, which the pinned lane only currently solves for `unix-http-upstream`
+(a Unix-domain-socket path is just a bind-mounted file, so it needs no network
+namespace sharing at all). Extending that to a TCP backend for the weighted/
+compression/WebSocket fixtures would mean either introducing a second pinned
+sidecar container image (a new supply-chain dependency to justify and pin) or
+running repeated-request/persistent-connection comparisons the reference
+lane's single-request harness (`TestNGINXCorpusReferenceRuntime`) does not
+support today. Both nginx and Jul already document the same "smooth weighted
+round-robin" algorithm, and the compression/WebSocket real-Jul evidence above
+already proves engagement and fidelity directly; a real-NGINX comparison for
+those three would be confirmatory rather than divergence-hunting. This is
+recorded as a deliberate, reasoned scope boundary — not an oversight — and is a
+natural candidate for the heavier, more elaborate reference infrastructure
+#368 already governs for the full/scheduled lane, if a concrete need arises.
+
+Stateful cache E2E (miss/fill/hit/bypass) is explicitly **not** included:
+`proxy_cache` remains a correct, intentional blocking assessment finding (Jul's
+`[cache]` activation has no importer translation from any NGINX directive), so
+there is no imported candidate to exercise cache state against without
+inventing importer scope unilaterally. `security-cache-boundaries` already
+documents this boundary; see `coverage.json`'s `cache-compression` category for
+the recorded revisit trigger.
+
 ## Corpus admission policy
 
 Core fixtures are repository-authored or generated from repository-owned source.
