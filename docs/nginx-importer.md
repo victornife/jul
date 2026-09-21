@@ -117,7 +117,8 @@ the Jul request path.
 | --- | --- | --- |
 | `http` | ✅ | Recursively translated. |
 | `include` | ⚠️ | Blocking by default; informational after complete bounded expansion. |
-| `stream`, `mail` | ❌ | No stream/mail translation today. |
+| `stream` | ⚠️ | Bounded subset translated (#426); see [`stream` block](#stream-block). |
+| `mail` | ❌ | No mail translation today. |
 | `events`, `worker_processes`, `worker_rlimit_nofile`, `pid`, `user`, `daemon`, `master_process`, `load_module`, `pcre_jit`, `error_log` | ignored | Explicit assessment results, no generated effect. |
 
 ### `http` block
@@ -182,6 +183,44 @@ max-age, and wildcard-origin-plus-credentials remain blocking.
 | `keepalive`, `keepalive_timeout`, `keepalive_requests`, `zone` | ignored | Connection-pool/process tuning. |
 | `include` | ⚠️ | Expanded in upstream context through the bounded resolver. |
 
+An `upstream` block nested inside `stream {}` reuses this exact same translation.
+
+### `stream` block
+
+Bounded first-tranche translation (#426) for the intersection nginx's stream
+module and Jul's `[[stream]]` L4 proxy can both represent honestly. This is not
+stream-module parity — see [known limitations](#known-limitations) for the
+residual boundary.
+
+| Directive | Status | Notes |
+| --- | --- | --- |
+| `server` | ✅ | One `[[stream]]` entry, or merged into one when `server_name`-distinguished siblings share a listen address (see SNI below). |
+| `upstream` | ✅ | Reuses the `http` upstream translation verbatim. |
+| `listen` (address, `udp`) | ✅ | TCP is the default; `udp` selects Jul's datagram/session model. |
+| `listen ... ssl` | ❌ | Stream TLS termination is not representable; Jul's stream listener only ever passes TLS through via SNI preread (`ssl_preread`), never terminates it. |
+| `listen ... proxy_protocol` (inbound) | ❌ | Jul requires an explicit `trusted_proxies` allow-list whenever it ingests a PROXY header; nginx's stream module has no equivalent trusted-source directive to supply one, so this must be added to `[[stream]]` by hand. |
+| `proxy_protocol on\|off` (outbound, `ngx_stream_proxy_module`) | ✅ (tcp) / ❌ (udp) | Maps to `proxy_protocol = "out"`. No trust-boundary concern — Jul is asserting its own peer address to its own backend. Jul only supports it for tcp streams. |
+| `proxy_pass` | ✅ | A named upstream or literal `host:port`. Variable-derived (`$...`) targets are blocking. |
+| `proxy_timeout`, `proxy_connect_timeout` | ✅ | Map to `idle_timeout`/`connect_timeout`. Bare digits mean seconds; `ms`/`s`/`m`/`h` suffixes are supported. nginx's `d`/`w`/`M`/`y` units are not. |
+| `server_name` + `ssl_preread on` | ✅ | See SNI below. |
+| `map` (including `$ssl_preread_server_name` routing) | ❌ | Arbitrary variable maps are not representable in the bounded Jul stream model; this is a deliberate non-goal, not an oversight. |
+| Anything else (Lua, third-party stream modules, unrecognized `listen`/directive options) | ❌ | Falls through to an explicit blocking finding by default. |
+
+**Bounded SNI routing.** nginx can route a stream listener by inspecting the
+TLS ClientHello (`ssl_preread on;`) and dispatching to one of several `server`
+blocks sharing a `listen` address, each distinguished by `server_name`. Jul
+represents that as a single `[[stream]]` entry's `sni_routes` map (a
+separate `[[stream]]` per `server_name` would collide as a duplicate listener).
+The importer merges such a group only when every member sets `ssl_preread on`
+and at most one lacks a `server_name` (used as the fallback `proxy_pass`); a
+mixed group, a missing `ssl_preread`, a duplicate `server_name`, or more than
+one fallback candidate blocks the whole group rather than guessing.
+
+**UDP.** A `udp` listener documents Jul's actual session model: one bounded,
+client-address-keyed session per source, a configurable idle timeout, and a
+session-count cap (`max_udp_sessions`). This is not QUIC Connection-ID-aware
+load balancing, and the importer never implies otherwise.
+
 ### Location modifiers
 
 | Modifier | Jul `match.type` | Notes |
@@ -204,7 +243,7 @@ express a trusted-proxy boundary.
 | `real_ip_header X-Forwarded-For` | `forwarded_headers = ["x-forwarded-for"]` |
 | `real_ip_header Forwarded` | `forwarded_headers = ["forwarded"]` |
 | `real_ip_header X-Real-IP` | blocking; a single unchained value is unsupported |
-| `real_ip_header proxy_protocol` | blocking |
+| `real_ip_header proxy_protocol` | ✅ (bounded) / ❌ | See [HTTP PROXY-protocol identity](#http-proxy-protocol-identity-426) below. |
 | `real_ip_recursive on` | Jul already evaluates right to left |
 | `real_ip_recursive off` | blocking |
 
@@ -218,6 +257,30 @@ For one proxy this matches NGINX; for longer chains intermediate trusted hops ar
 intentionally dropped. See [forwarded headers to the
 backend](core-http.md#forwarded-headers-to-the-backend).
 
+### HTTP PROXY-protocol identity (#426)
+
+`real_ip_header proxy_protocol;` asserts client identity from the HAProxy PROXY
+protocol rather than a forwarded header. Jul's HTTP listener supports ingesting
+it (`servers[].proxy_protocol = "in"`), but only ever promotes it straight to
+the canonical client address — there is no way to parse it without trusting it.
+Translating it therefore requires all three source elements together, in the
+same server block:
+
+```nginx
+listen 443 proxy_protocol;
+set_real_ip_from 10.0.0.0/8;
+real_ip_header proxy_protocol;
+```
+
+| NGINX | Jul |
+| --- | --- |
+| `listen ... proxy_protocol` + `real_ip_header proxy_protocol` + `set_real_ip_from` (all three) | `proxy_protocol = "in"` + `client_address.trusted_proxies` |
+| Any one of the three missing | blocking |
+
+An untrusted direct peer can never acquire trusted client identity this way:
+Jul's HTTP listener never emits a broad/default trust range, and validation
+rejects `proxy_protocol = "in"` without a non-empty `trusted_proxies`.
+
 ## Known limitations
 
 1. **Traversal is explicit, not automatic.** A default import remains
@@ -227,8 +290,12 @@ backend](core-http.md#forwarded-headers-to-the-backend).
    tree; there is no unsafe host-root bypass.
 2. **No network includes or arbitrary filesystem crawl.** Only explicit files
    and globs are followed.
-3. **`stream` and `mail` are not translated.**
-4. **`map`, `geo`, and `split_clients` require manual design.**
+3. **`stream` is bounded (#426), `mail` is not translated.** See the [`stream`
+   block](#stream-block) table for exactly which stream forms are supported,
+   approximate, or blocking.
+4. **`map`, `geo`, and `split_clients` require manual design**, including a
+   `stream`-level `map` used for `ssl_preread`-driven routing — use bounded
+   `server_name` + `ssl_preread on` instead (see above).
 5. **Complex `if` and unsupported rewrite control flow require manual design.**
 6. **Per-virtual-host realip policies cannot be represented on one listener.**
 7. **Named locations such as `@fallback` are not translated.**
@@ -256,13 +323,17 @@ Two machine-readable files keep the evidence honest:
   dispositions. It is checked in CI and deliberately contains no compatibility
   percentage.
 
-The baseline represents core routing, upstreams, trusted-client identity, TLS
-and other security controls, cache/compression boundaries, FastCGI plus blocked
-stream/mail sources, and operational/include behavior. Protocol-heavy or
-stateful dimensions such as migration-specific H2/H3, WebSocket, gRPC/uWSGI,
-L4, mTLS, cache-state, and resolver replay remain explicitly deferred in the
-coverage matrix. Existing product-level protocol tests remain authoritative for
-Jul runtime capability; they do not turn an unimported NGINX source into an
+The baseline represents core routing, upstreams, trusted-client identity
+(including bounded HTTP/stream PROXY-protocol identity, #426), TLS and other
+security controls, cache/compression boundaries, FastCGI, a bounded stream
+subset (direct/named-upstream TCP and UDP, outbound PROXY protocol,
+server_name+ssl_preread SNI routing) plus blocked stream/mail residuals, and
+operational/include behavior. Protocol-heavy or stateful dimensions such as
+migration-specific H2/H3, WebSocket, gRPC/uWSGI, L4 real-runtime replay, mTLS,
+cache-state, and resolver replay remain explicitly deferred in the coverage
+matrix (#365/#366/#367 own that evidence). Existing product-level protocol
+tests remain authoritative for Jul runtime capability; they do not turn an
+unimported NGINX source into an
 equivalence claim.
 
 Fixtures can be supported, approximated, ignored, blocking, or equivalent only

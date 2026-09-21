@@ -22,6 +22,19 @@ import (
 	"jul/internal/config"
 )
 
+// proxyProtocolHeaderSentinel marks a realIPPolicy as wanting inbound
+// PROXY-protocol identity (`real_ip_header proxy_protocol;`) rather than a
+// forwarded header. It is stored in the same `header` field so the existing
+// scope-inheritance logic in merge() threads it down from http to server
+// without duplicating that logic for a separate field.
+const proxyProtocolHeaderSentinel = "proxy_protocol"
+
+// wantsProxyProtocolIdentity reports whether this policy resolved to
+// real_ip_header proxy_protocol rather than a forwarded header.
+func (p realIPPolicy) wantsProxyProtocolIdentity() bool {
+	return len(p.header) == 1 && p.header[0] == proxyProtocolHeaderSentinel
+}
+
 // realIPPolicy is the realip configuration collected from one nginx scope
 // (the http block, or one server block).
 type realIPPolicy struct {
@@ -108,8 +121,10 @@ func (t *translator) realIPDirective(name string, params []string, line int, p *
 		case "forwarded":
 			p.header = []string{clientaddr.HeaderForwarded}
 		case "proxy_protocol":
-			t.report.skipNamed(name, line, "PROXY-protocol source addresses are not supported on HTTP listeners")
-			p.blocked = true
+			// Deferred: whether this is usable depends on the sibling listen
+			// directive's proxy_protocol token, which is only known once the
+			// whole server block has been walked. See applyHTTPProxyProtocolIdentity.
+			p.header = []string{proxyProtocolHeaderSentinel}
 		default:
 			// X-Real-IP is nginx's default and the most common explicit value.
 			// It carries a single address with no chain, so it cannot be
@@ -133,8 +148,14 @@ func (t *translator) realIPDirective(name string, params []string, line int, p *
 }
 
 // clientAddressFrom builds the policy block for a server, or nil when the
-// scope declared nothing usable.
+// scope declared nothing usable. It never handles proxy_protocol identity:
+// that mechanism asserts identity at the transport layer rather than via a
+// forwarded header, so it is resolved separately by
+// applyHTTPProxyProtocolIdentity before this is even called.
 func (t *translator) clientAddressFrom(p realIPPolicy) *config.ClientAddressConfig {
+	if p.wantsProxyProtocolIdentity() {
+		return nil
+	}
 	if !p.declared || p.blocked || len(p.trusted) == 0 {
 		if p.declared && !p.blocked && len(p.trusted) == 0 {
 			t.report.note("realip at line %d declared no set_real_ip_from, so no trusted-proxy policy was emitted; the client address stays the transport peer", p.line)
@@ -153,6 +174,25 @@ func (t *translator) clientAddressFrom(p realIPPolicy) *config.ClientAddressConf
 		TrustedProxies:   append([]string(nil), p.trusted...),
 		ForwardedHeaders: append([]string(nil), p.header...),
 	}
+}
+
+// applyHTTPProxyProtocolIdentity resolves `real_ip_header proxy_protocol;`
+// into Jul's inbound HTTP PROXY-protocol listener setting plus its required
+// trusted-proxy policy. It requires all three source elements together -
+// listenHasToken (the listen directive's own proxy_protocol token), a
+// resolved real_ip_header value of proxy_protocol (p.wantsProxyProtocolIdentity,
+// already true when this is called), and at least one valid set_real_ip_from
+// - because Jul's ProxyProtocol="in" unconditionally promotes the asserted
+// address to the canonical client identity: translating it without every
+// element present would either parse a header nginx never reads for
+// $remote_addr, or trust it with no declared source at all.
+func (t *translator) applyHTTPProxyProtocolIdentity(s *config.ServerConfig, listenHasToken bool, p realIPPolicy) {
+	if listenHasToken && !p.blocked && len(p.trusted) > 0 {
+		s.ProxyProtocol = "in"
+		s.ClientAddress = &config.ClientAddressConfig{TrustedProxies: append([]string(nil), p.trusted...)}
+		return
+	}
+	t.report.skipNamed("real_ip_header", p.line, "proxy_protocol requires a matching 'listen ... proxy_protocol;' and at least one valid set_real_ip_from in the same server block")
 }
 
 // hoistClientAddress makes the emitted policy listener scoped.

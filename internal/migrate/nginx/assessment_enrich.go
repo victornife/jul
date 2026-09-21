@@ -379,6 +379,8 @@ func guidanceCodesForResult(result AssessmentResult) []string {
 	code := strings.ToUpper(result.Code)
 	directive := strings.ToLower(result.Directive)
 	switch {
+	case strings.Contains(code, "PROXY_PROTOCOL"):
+		return []string{"GUIDE_PROXY_PROTOCOL_IDENTITY"}
 	case strings.Contains(code, "REALIP_HEADER") || strings.Contains(code, "REAL_IP_HEADER"):
 		return []string{"GUIDE_REALIP_HEADER"}
 	case strings.Contains(code, "REALIP_CONFLICT") || strings.Contains(code, "REAL_IP_CONFLICT"):

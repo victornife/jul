@@ -9,6 +9,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Added
+
+- **Bounded NGINX `stream` migration support (#426).** The importer now translates a deliberately bounded subset of NGINX's `stream` module into Jul's `[[stream]]` L4 listeners: direct and named-upstream TCP/UDP proxy targets (reusing the existing upstream translation), `proxy_timeout`/`proxy_connect_timeout`, outbound PROXY-protocol propagation to the backend, and `server_name` + `ssl_preread` bounded SNI routing merged into one listener's `sni_routes`. This is not stream-module parity: stream TLS termination, inbound stream PROXY protocol (nginx's stream module has no trusted-source directive to supply Jul's required `trusted_proxies`), `udp` combined with `proxy_protocol`, arbitrary `map`/variable-driven routing, `mail`, and Lua/third-party stream modules remain explicit blocking findings.
+- **HTTP `real_ip_header proxy_protocol` migration support (#426).** The importer now translates the complete, self-consistent trio `listen ... proxy_protocol;` + `real_ip_header proxy_protocol;` + `set_real_ip_from <cidr>;` in one server block into `servers[].proxy_protocol = "in"` plus a trusted-proxy `client_address` policy. Any one of the three missing stays blocking rather than emitting an inert or unbounded trust policy.
+- Six new NGINX migration corpus fixtures for the above (`stream-tcp-basic`, `stream-named-upstream`, `stream-udp`, `stream-sni-bounded`, `stream-security-boundaries`, `realip-proxy-protocol-supported`).
+
 ## [2.0.0] – 2026-09-21
 
 > First stable release of the v2.0.0 line, cut from a post-#420 commit.

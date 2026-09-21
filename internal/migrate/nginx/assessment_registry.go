@@ -31,7 +31,7 @@ var capabilityRegistry = map[capabilityKey]capability{
 	{ContextMain, "load_module"}:          blocking("NGX_MAIN_MODULE", RiskSecurity, "dynamic NGINX modules are not imported"),
 	{ContextMain, "pcre_jit"}:             ignored("NGX_MAIN_PCRE_JIT", RiskPerformance, "regular-expression engine tuning is runtime-owned"),
 	{ContextMain, "error_log"}:            ignored("NGX_MAIN_ERROR_LOG", RiskObservability, "process logging must be configured through Jul observability and the service manager"),
-	{ContextMain, "stream"}:               blocking("NGX_MAIN_STREAM", RiskRouting, "the NGINX stream module is not translated"),
+	{ContextMain, "stream"}:               supported("NGX_MAIN_STREAM", RiskOperational, "bounded stream configuration is translated", nil),
 	{ContextMain, "mail"}:                 blocking("NGX_MAIN_MAIL", RiskRouting, "the NGINX mail module is not translated"),
 	{ContextMain, "include"}:              blocking("NGX_MAIN_INCLUDE", RiskOperational, "included files are not traversed by this importer"),
 
@@ -103,6 +103,24 @@ var capabilityRegistry = map[capabilityKey]capability{
 
 	{ContextLimitExcept, "deny"}:   supported("NGX_LIMIT_EXCEPT_DENY", RiskSecurity, "bare deny-all body is consumed by the method-predicate translation", nil),
 	{ContextLimitExcept, "return"}: supported("NGX_LIMIT_EXCEPT_RETURN", RiskSecurity, "bare return-403 body is consumed by the method-predicate translation", nil),
+
+	// Bounded NGINX stream (L4) subset (#426). Anything not listed here falls
+	// through to the ContextStream catch-all in classifyDirective, which stays
+	// blocking by default - mail, Lua, third-party stream modules, arbitrary
+	// map/variable programs, and unknown directives never need an entry to
+	// remain safely blocking.
+	{ContextStream, "server"}:                supported("NGX_STREAM_SERVER", RiskRouting, "stream server block is translated", []string{"stream[]"}),
+	{ContextStream, "upstream"}:              supported("NGX_STREAM_UPSTREAM", RiskRouting, "named upstream is reused from the HTTP upstream translation", []string{"upstreams[]"}),
+	{ContextStream, "listen"}:                supported("NGX_STREAM_LISTEN", RiskAvailability, "stream listener address is translated", []string{"stream[].listen", "stream[].protocol"}),
+	{ContextStream, "server_name"}:           supported("NGX_STREAM_SERVER_NAME", RiskRouting, "stream server_name is translated into bounded SNI routing", []string{"stream[].sni_routes"}),
+	{ContextStream, "ssl_preread"}:           supported("NGX_STREAM_SSL_PREREAD", RiskRouting, "ssl_preread is translated to Jul's bounded ClientHello SNI passthrough", []string{"stream[].sni_routes", "stream[].tls_passthrough"}),
+	{ContextStream, "proxy_pass"}:            supported("NGX_STREAM_PROXY_PASS", RiskRouting, "stream proxy target is translated", []string{"stream[].proxy_pass"}),
+	{ContextStream, "proxy_timeout"}:         supported("NGX_STREAM_PROXY_TIMEOUT", RiskAvailability, "proxy_timeout is translated to the stream idle timeout", []string{"stream[].idle_timeout"}),
+	{ContextStream, "proxy_connect_timeout"}: supported("NGX_STREAM_PROXY_CONNECT_TIMEOUT", RiskAvailability, "proxy_connect_timeout is translated to the stream connect timeout", []string{"stream[].connect_timeout"}),
+	{ContextStream, "proxy_protocol"}:        supported("NGX_STREAM_PROXY_PROTOCOL_OUT", RiskSecurity, "outbound PROXY-protocol propagation to the backend is translated", []string{"stream[].proxy_protocol"}),
+	{ContextStream, "ssl"}:                   blocking("NGX_STREAM_TLS_TERMINATION", RiskSecurity, "stream TLS termination is not representable; Jul's stream listener only supports SNI-preread passthrough"),
+	{ContextStream, "map"}:                   blocking("NGX_STREAM_MAP", RiskRouting, "variable maps (including ssl_preread-driven routing) are not representable in the bounded Jul stream model"),
+	{ContextStream, "return"}:                blocking("NGX_STREAM_RETURN", RiskRouting, "stream return is not translated"),
 }
 
 func supported(code string, risk AssessmentRisk, message string, targets []string) capability {

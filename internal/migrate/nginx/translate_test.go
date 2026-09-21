@@ -307,13 +307,33 @@ http {
 	}
 }
 
-func TestTranslateStreamModuleSkipped(t *testing.T) {
-	_, rep := translate(t, `
+func TestTranslateStreamBasicTCP(t *testing.T) {
+	cfg, rep := translate(t, `
 stream {
-  server { listen 5353; }
+  server {
+    listen 5353;
+    proxy_pass 127.0.0.1:6000;
+  }
 }`)
-	if !hasSkip(rep, "stream") {
-		t.Errorf("expected a skip for the stream module, got %+v", rep.Skipped)
+	if len(cfg.Streams) != 1 {
+		t.Fatalf("want 1 stream, got %d: %+v", len(cfg.Streams), cfg.Streams)
+	}
+	st := cfg.Streams[0]
+	if st.Listen != ":5353" || st.ProxyPass != "127.0.0.1:6000" || st.Protocol != "" {
+		t.Errorf("unexpected stream: %+v", st)
+	}
+	if rep.Streams != 1 {
+		t.Errorf("report.Streams = %d, want 1", rep.Streams)
+	}
+}
+
+func TestTranslateMailModuleSkipped(t *testing.T) {
+	_, rep := translate(t, `
+mail {
+  server { listen 25; }
+}`)
+	if !hasSkip(rep, "mail") {
+		t.Errorf("expected a skip for the mail module, got %+v", rep.Skipped)
 	}
 }
 

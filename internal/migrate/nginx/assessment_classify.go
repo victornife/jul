@@ -22,6 +22,16 @@ type assessmentWalker struct {
 type walkFacts struct {
 	extraListen  bool
 	corsConflict bool
+	// httpProxyProtocolUsable is true when an HTTP server block declares a
+	// complete, self-consistent PROXY-protocol identity trio: a `listen ...
+	// proxy_protocol;` token, `real_ip_header proxy_protocol;`, and at least
+	// one valid `set_real_ip_from`. It gates both the listen token and the
+	// real_ip_header directive so neither can be classified supported alone.
+	httpProxyProtocolUsable bool
+	// streamIsUDP is true when a stream server block's listen directive
+	// carries the udp token. It gates the standalone outbound `proxy_protocol`
+	// directive, which Jul only supports for tcp streams.
+	streamIsUDP bool
 }
 
 func (w *assessmentWalker) walk(context AssessmentContext, d ngx.IDirective, facts walkFacts) {
@@ -47,8 +57,13 @@ func (w *assessmentWalker) walk(context AssessmentContext, d ngx.IDirective, fac
 	}
 	kids := orderedChildren(d)
 	locationFacts := walkFacts{}
-	if childContext == ContextLocation {
+	switch {
+	case childContext == ContextLocation:
 		locationFacts.corsConflict = hasStaticCORSConflict(kids)
+	case childContext == ContextServer:
+		locationFacts.httpProxyProtocolUsable = serverHasUsableHTTPProxyProtocolIdentity(kids)
+	case childContext == ContextStream && d.GetName() == "server":
+		locationFacts.streamIsUDP = streamServerListenIsUDP(kids)
 	}
 	seenListen := false
 	for _, child := range kids {
@@ -65,12 +80,24 @@ func classifyDirective(context AssessmentContext, d ngx.IDirective, facts walkFa
 	name := d.GetName()
 	params := paramValues(d)
 	if isRealIPDirective(name) {
-		return classifyRealIP(name, params)
+		return classifyRealIP(name, params, facts)
 	}
 	if cap, ok := capabilityRegistry[capabilityKey{context: context, name: name}]; ok {
 		switch {
 		case context == ContextServer && name == "listen":
-			return classifyListen(params, facts.extraListen)
+			return classifyListen(params, facts.extraListen, facts.httpProxyProtocolUsable)
+		case context == ContextStream && name == "listen":
+			return classifyStreamListen(params)
+		case context == ContextStream && name == "proxy_pass":
+			return classifyStreamProxyPass(params)
+		case context == ContextStream && name == "proxy_protocol":
+			return classifyStreamProxyProtocol(params, facts.streamIsUDP)
+		case context == ContextStream && name == "proxy_timeout":
+			return classifyStreamDuration("proxy_timeout", "NGX_STREAM_PROXY_TIMEOUT", params)
+		case context == ContextStream && name == "proxy_connect_timeout":
+			return classifyStreamDuration("proxy_connect_timeout", "NGX_STREAM_PROXY_CONNECT_TIMEOUT", params)
+		case context == ContextStream && name == "ssl_preread":
+			return classifyStreamSSLPreread(params)
 		case context == ContextServer && name == "ssl_protocols":
 			return classifyTLSProtocols(params)
 		case context == ContextLocation && name == "proxy_pass":
@@ -108,7 +135,7 @@ func classifyDirective(context AssessmentContext, d ngx.IDirective, facts walkFa
 	}
 }
 
-func classifyRealIP(name string, params []string) capability {
+func classifyRealIP(name string, params []string, facts walkFacts) capability {
 	switch name {
 	case "set_real_ip_from":
 		if len(params) == 0 || strings.HasPrefix(strings.TrimSpace(params[0]), "unix:") {
@@ -125,6 +152,11 @@ func classifyRealIP(name string, params []string) capability {
 		switch strings.ToLower(strings.TrimSpace(params[0])) {
 		case "x-forwarded-for", "forwarded":
 			return supported("NGX_REALIP_HEADER", RiskSecurity, "trusted forwarded header is translated", []string{"servers[].client_address.forwarded_headers"})
+		case "proxy_protocol":
+			if facts.httpProxyProtocolUsable {
+				return supported("NGX_REALIP_HEADER_PROXY_PROTOCOL", RiskSecurity, "trusted inbound PROXY-protocol identity is translated", []string{"servers[].proxy_protocol", "servers[].client_address.trusted_proxies"})
+			}
+			return blocking("NGX_REALIP_HEADER_PROXY_PROTOCOL", RiskSecurity, "real_ip_header proxy_protocol requires a matching 'listen ... proxy_protocol;' and at least one valid set_real_ip_from in the same server block")
 		default:
 			return blocking("NGX_REALIP_HEADER", RiskSecurity, "this real_ip_header form is not safely representable")
 		}
@@ -138,7 +170,7 @@ func classifyRealIP(name string, params []string) capability {
 	}
 }
 
-func classifyListen(params []string, extra bool) capability {
+func classifyListen(params []string, extra bool, proxyProtocolUsable bool) capability {
 	if extra {
 		return approximated("NGX_SERVER_EXTRA_LISTEN", RiskAvailability, "only the first distinct listen address in a server block is kept")
 	}
@@ -152,6 +184,10 @@ func classifyListen(params []string, extra bool) capability {
 			continue
 		case "http2", "default_server":
 			return approximated("NGX_SERVER_LISTEN_OPTION", RiskAvailability, "listen option is implicit or has different selection semantics in Jul")
+		case "proxy_protocol":
+			if !proxyProtocolUsable {
+				return blocking("NGX_SERVER_LISTEN_PROXY_PROTOCOL", RiskSecurity, "proxy_protocol requires a matching real_ip_header proxy_protocol and at least one valid set_real_ip_from in the same server block")
+			}
 		default:
 			return blocking("NGX_SERVER_LISTEN_OPTION", RiskSecurity, "listen option is not translated")
 		}
@@ -315,6 +351,149 @@ func classifyUpstreamServer(params []string) capability {
 		}
 	}
 	return capabilityRegistry[capabilityKey{ContextUpstream, "server"}]
+}
+
+// serverHasUsableHTTPProxyProtocolIdentity reports whether an HTTP server
+// block declares the complete trio Jul needs to translate inbound
+// PROXY-protocol identity: the listen token, the matching real_ip_header
+// value, and at least one valid trusted CIDR. Any one missing keeps the
+// listen token and the real_ip_header directive both blocking, rather than
+// promoting an incomplete or inert declaration.
+func serverHasUsableHTTPProxyProtocolIdentity(kids []ngx.IDirective) bool {
+	var listenHasToken, headerIsProxyProtocol, hasValidTrustedSource bool
+	for _, c := range kids {
+		switch c.GetName() {
+		case "listen":
+			for _, p := range paramValues(c) {
+				if strings.EqualFold(p, "proxy_protocol") {
+					listenHasToken = true
+				}
+			}
+		case "real_ip_header":
+			p := paramValues(c)
+			if len(p) > 0 && strings.EqualFold(strings.TrimSpace(p[0]), "proxy_protocol") {
+				headerIsProxyProtocol = true
+			}
+		case "set_real_ip_from":
+			p := paramValues(c)
+			if len(p) == 0 {
+				continue
+			}
+			entry := strings.TrimSpace(p[0])
+			if strings.HasPrefix(entry, "unix:") {
+				continue
+			}
+			if _, err := clientaddr.ParsePrefix(entry); err == nil {
+				hasValidTrustedSource = true
+			}
+		}
+	}
+	return listenHasToken && headerIsProxyProtocol && hasValidTrustedSource
+}
+
+// streamServerListenIsUDP reports whether a stream server block's listen
+// directive carries the udp token, gating the standalone outbound
+// proxy_protocol directive (Jul only supports it for tcp streams).
+func streamServerListenIsUDP(kids []ngx.IDirective) bool {
+	for _, c := range kids {
+		if c.GetName() != "listen" {
+			continue
+		}
+		for _, p := range paramValues(c) {
+			if strings.EqualFold(p, "udp") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// streamListenTokens are the recognized stream `listen` parameters beyond the
+// address itself. Anything else is an unrecognized option and stays blocking.
+var streamListenOperationalTokens = map[string]bool{
+	"bind": true, "reuseport": true,
+}
+
+// classifyStreamListen judges a stream server's listen directive in isolation,
+// reusing the exact same token validation translateStreamServer applies so
+// the assessment and the generated candidate can never disagree about which
+// listen forms are representable.
+func classifyStreamListen(params []string) capability {
+	_, _, code, message := parseStreamListen(params)
+	if code != "" {
+		risk := RiskSecurity
+		if code == "NGX_STREAM_LISTEN_UNSUPPORTED" {
+			risk = RiskAvailability
+		}
+		return blocking(code, risk, message)
+	}
+	return capabilityRegistry[capabilityKey{ContextStream, "listen"}]
+}
+
+// classifyStreamProxyPass judges a stream proxy_pass target in isolation. Only
+// a literal backend (a named upstream or a host:port) is representable; any
+// variable-derived target cannot be resolved statically.
+func classifyStreamProxyPass(params []string) capability {
+	if len(params) == 0 || strings.TrimSpace(params[0]) == "" {
+		return blocking("NGX_STREAM_PROXY_PASS", RiskRouting, "proxy_pass target is missing")
+	}
+	if strings.Contains(params[0], "$") {
+		return blocking("NGX_STREAM_PROXY_PASS_DYNAMIC", RiskSecurity, "variable-derived proxy targets are not translated")
+	}
+	return capabilityRegistry[capabilityKey{ContextStream, "proxy_pass"}]
+}
+
+// classifyStreamProxyProtocol judges the standalone outbound `proxy_protocol
+// on|off;` directive (ngx_stream_proxy_module). Unlike inbound PROXY protocol,
+// this has no trust-boundary concern - Jul is asserting its own peer address
+// to its own backend - so it is fully representable for tcp streams. Jul's
+// own validation rejects proxy_protocol on udp streams, so that combination
+// stays blocking rather than emitting a candidate known to fail validation.
+func classifyStreamProxyProtocol(params []string, isUDP bool) capability {
+	if len(params) == 0 {
+		return blocking("NGX_STREAM_PROXY_PROTOCOL_OUT", RiskSecurity, "proxy_protocol requires an on or off value")
+	}
+	switch strings.ToLower(strings.TrimSpace(params[0])) {
+	case "on":
+		if isUDP {
+			return blocking("NGX_STREAM_PROXY_PROTOCOL_UDP", RiskSecurity, "outbound PROXY protocol is only supported for tcp stream listeners")
+		}
+		return capabilityRegistry[capabilityKey{ContextStream, "proxy_protocol"}]
+	case "off":
+		return ignored("NGX_STREAM_PROXY_PROTOCOL_OUT_OFF", RiskSecurity, "proxy_protocol off matches Jul's default (no outbound header)")
+	default:
+		return blocking("NGX_STREAM_PROXY_PROTOCOL_OUT", RiskSecurity, "proxy_protocol requires an on or off value")
+	}
+}
+
+// classifyStreamDuration judges an nginx stream duration directive (bare
+// digits meaning seconds, or a Go-compatible duration string).
+func classifyStreamDuration(directive, code string, params []string) capability {
+	if len(params) == 0 {
+		return blocking(code, RiskAvailability, "duration value is missing")
+	}
+	if _, ok := parseNginxDuration(params[0]); !ok {
+		return blocking(code, RiskAvailability, "duration value is not representable (supported units: ms, s, m, h)")
+	}
+	return capabilityRegistry[capabilityKey{ContextStream, directive}]
+}
+
+// classifyStreamSSLPreread judges the `ssl_preread on|off;` directive itself.
+// Whether it actually produces bounded SNI routing depends on sibling
+// server_name/proxy_pass values across every server sharing the listen
+// address, which is a cross-block decision made at translate time (mirroring
+// how conflicting client_address policies are resolved after every server on
+// an address is known); this directive is fine on its own either way.
+func classifyStreamSSLPreread(params []string) capability {
+	if len(params) == 0 {
+		return blocking("NGX_STREAM_SSL_PREREAD", RiskRouting, "ssl_preread requires an on or off value")
+	}
+	switch strings.ToLower(strings.TrimSpace(params[0])) {
+	case "on", "off":
+		return capabilityRegistry[capabilityKey{ContextStream, "ssl_preread"}]
+	default:
+		return blocking("NGX_STREAM_SSL_PREREAD", RiskRouting, "ssl_preread requires an on or off value")
+	}
 }
 
 func nestedContext(parent AssessmentContext, name string) (AssessmentContext, bool) {

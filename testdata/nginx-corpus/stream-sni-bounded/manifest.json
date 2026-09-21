@@ -1,26 +1,25 @@
 {
   "schema_version": 1,
-  "id": "protocol-boundaries",
-  "tier": "full",
-  "description": "Negative protocol fixture proving that stream TLS termination (not representable - Jul's stream listener only ever passes TLS through via SNI preread) and mail configuration remain explicit blocking evidence while an independent HTTP candidate stays structurally valid. See stream-tcp-basic, stream-named-upstream, stream-udp, stream-outbound-proxy-protocol, and stream-sni-bounded for the bounded subset #426 now translates.",
+  "id": "stream-sni-bounded",
+  "tier": "core",
+  "description": "Bounded NGINX stream (#426) fixture covering SNI-based stream routing: three server blocks sharing one listen address, distinguished by server_name plus ssl_preread, merged into one Jul stream listener with sni_routes and a fallback proxy_pass.",
   "origin": {
     "kind": "repository_authored",
     "license": "AGPL-3.0-only",
-    "source": "victornife/jul#154"
+    "source": "victornife/jul#426"
   },
   "categories": [
-    "mail",
-    "protocol-gateways",
-    "stream"
+    "protocol-gateways"
   ],
   "build_tags": [
-    "importer"
+    "importer",
+    "stream"
   ],
   "root": "nginx/nginx.conf",
   "follow_includes": false,
   "expected_assessment": {
-    "status": "manual_action_required",
-    "ready": false,
+    "status": "ready_for_review",
+    "ready": true,
     "complete": true,
     "files_read": 1,
     "sources": [
@@ -61,14 +60,6 @@
       },
       {
         "source": "nginx.conf",
-        "code": "NGX_SERVER_NAME",
-        "class": "supported",
-        "risk": "routing",
-        "context": "server",
-        "directive": "server_name"
-      },
-      {
-        "source": "nginx.conf",
         "code": "NGX_SERVER_LOCATION",
         "class": "supported",
         "risk": "routing",
@@ -97,15 +88,35 @@
         "class": "supported",
         "risk": "routing",
         "context": "stream",
-        "directive": "server"
+        "directive": "server",
+        "count": 3
       },
       {
         "source": "nginx.conf",
-        "code": "NGX_STREAM_TLS_TERMINATION",
-        "class": "blocking",
-        "risk": "security",
+        "code": "NGX_STREAM_LISTEN",
+        "class": "supported",
+        "risk": "availability",
         "context": "stream",
-        "directive": "listen"
+        "directive": "listen",
+        "count": 3
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_SERVER_NAME",
+        "class": "supported",
+        "risk": "routing",
+        "context": "stream",
+        "directive": "server_name",
+        "count": 2
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_SSL_PREREAD",
+        "class": "supported",
+        "risk": "routing",
+        "context": "stream",
+        "directive": "ssl_preread",
+        "count": 3
       },
       {
         "source": "nginx.conf",
@@ -113,43 +124,21 @@
         "class": "supported",
         "risk": "routing",
         "context": "stream",
-        "directive": "proxy_pass"
-      },
-      {
-        "source": "nginx.conf",
-        "code": "NGX_MAIN_MAIL",
-        "class": "blocking",
-        "risk": "routing",
-        "context": "main",
-        "directive": "mail"
-      },
-      {
-        "source": "nginx.conf",
-        "code": "NGX_MAIL_UNSUPPORTED",
-        "class": "blocking",
-        "risk": "routing",
-        "context": "mail",
-        "directive": "server"
-      },
-      {
-        "source": "nginx.conf",
-        "code": "NGX_MAIL_UNSUPPORTED",
-        "class": "blocking",
-        "risk": "routing",
-        "context": "mail",
-        "directive": "listen"
-      },
-      {
-        "source": "nginx.conf",
-        "code": "NGX_MAIL_UNSUPPORTED",
-        "class": "blocking",
-        "risk": "routing",
-        "context": "mail",
-        "directive": "protocol"
+        "directive": "proxy_pass",
+        "count": 3
       }
     ]
   },
   "expected_candidate": {
-    "required": false
+    "required": true,
+    "contains": [
+      "'a.stream-sni.test' = '10.0.1.1:19051'",
+      "'b.stream-sni.test' = '10.0.1.2:19051'",
+      "[[stream]]",
+      "[stream.sni_routes]",
+      "listen = ':19050'",
+      "proxy_pass = '10.0.1.3:19051'",
+      "tls_passthrough = true"
+    ]
   }
 }

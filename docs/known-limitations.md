@@ -531,10 +531,18 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   under bounded depth/file/byte limits, rejects cycles and lexical/symlink
   escape, and never offers an unrestricted host-root mode. Estates that include
   files outside one safe root must first be staged into a bounded tree.
-- **`stream`, `mail`, Lua, and dynamic variable-driven behavior are not
-  translated.** They produce blocking assessment evidence and require manual
-  design; Jul does not manufacture a candidate that pretends the behavior was
-  preserved.
+- **`mail`, Lua, and dynamic variable-driven behavior are not translated.**
+  They produce blocking assessment evidence and require manual design; Jul does
+  not manufacture a candidate that pretends the behavior was preserved.
+- **`stream` translates only a bounded subset (#426).** Direct/named-upstream
+  TCP and UDP targets, `proxy_timeout`/`proxy_connect_timeout`, outbound
+  PROXY protocol, and `server_name`+`ssl_preread` bounded SNI routing are
+  translated. Stream TLS termination, inbound stream PROXY protocol (nginx's
+  stream module has no trusted-source directive Jul's required
+  `trusted_proxies` could come from), `udp` combined with `proxy_protocol`,
+  arbitrary `map`/variable routing, and unrecognized listen options remain
+  explicit blocking findings — this is not stream-module parity. See the
+  [`stream` block table](nginx-importer.md#stream-block).
 - **Many directives are mapped only in bounded forms.** For example, static
   `add_header ... always`, narrow `limit_except`, canonical real-IP policies,
   and static proxy targets are supported or explicitly approximate; unsupported

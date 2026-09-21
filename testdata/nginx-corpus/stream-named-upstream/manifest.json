@@ -1,26 +1,26 @@
 {
   "schema_version": 1,
-  "id": "protocol-boundaries",
-  "tier": "full",
-  "description": "Negative protocol fixture proving that stream TLS termination (not representable - Jul's stream listener only ever passes TLS through via SNI preread) and mail configuration remain explicit blocking evidence while an independent HTTP candidate stays structurally valid. See stream-tcp-basic, stream-named-upstream, stream-udp, stream-outbound-proxy-protocol, and stream-sni-bounded for the bounded subset #426 now translates.",
+  "id": "stream-named-upstream",
+  "tier": "core",
+  "description": "Bounded NGINX stream (#426) fixture covering a named upstream reused from the HTTP upstream translation, weighted members, and outbound PROXY-protocol propagation to the backend.",
   "origin": {
     "kind": "repository_authored",
     "license": "AGPL-3.0-only",
-    "source": "victornife/jul#154"
+    "source": "victornife/jul#426"
   },
   "categories": [
-    "mail",
     "protocol-gateways",
-    "stream"
+    "upstreams-resiliency"
   ],
   "build_tags": [
-    "importer"
+    "importer",
+    "stream"
   ],
   "root": "nginx/nginx.conf",
   "follow_includes": false,
   "expected_assessment": {
-    "status": "manual_action_required",
-    "ready": false,
+    "status": "ready_for_review",
+    "ready": true,
     "complete": true,
     "files_read": 1,
     "sources": [
@@ -61,14 +61,6 @@
       },
       {
         "source": "nginx.conf",
-        "code": "NGX_SERVER_NAME",
-        "class": "supported",
-        "risk": "routing",
-        "context": "server",
-        "directive": "server_name"
-      },
-      {
-        "source": "nginx.conf",
         "code": "NGX_SERVER_LOCATION",
         "class": "supported",
         "risk": "routing",
@@ -93,6 +85,23 @@
       },
       {
         "source": "nginx.conf",
+        "code": "NGX_STREAM_UPSTREAM",
+        "class": "supported",
+        "risk": "routing",
+        "context": "stream",
+        "directive": "upstream"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_UPSTREAM_SERVER",
+        "class": "supported",
+        "risk": "availability",
+        "context": "upstream",
+        "directive": "server",
+        "count": 2
+      },
+      {
+        "source": "nginx.conf",
         "code": "NGX_STREAM_SERVER",
         "class": "supported",
         "risk": "routing",
@@ -101,9 +110,9 @@
       },
       {
         "source": "nginx.conf",
-        "code": "NGX_STREAM_TLS_TERMINATION",
-        "class": "blocking",
-        "risk": "security",
+        "code": "NGX_STREAM_LISTEN",
+        "class": "supported",
+        "risk": "availability",
         "context": "stream",
         "directive": "listen"
       },
@@ -117,39 +126,23 @@
       },
       {
         "source": "nginx.conf",
-        "code": "NGX_MAIN_MAIL",
-        "class": "blocking",
-        "risk": "routing",
-        "context": "main",
-        "directive": "mail"
-      },
-      {
-        "source": "nginx.conf",
-        "code": "NGX_MAIL_UNSUPPORTED",
-        "class": "blocking",
-        "risk": "routing",
-        "context": "mail",
-        "directive": "server"
-      },
-      {
-        "source": "nginx.conf",
-        "code": "NGX_MAIL_UNSUPPORTED",
-        "class": "blocking",
-        "risk": "routing",
-        "context": "mail",
-        "directive": "listen"
-      },
-      {
-        "source": "nginx.conf",
-        "code": "NGX_MAIL_UNSUPPORTED",
-        "class": "blocking",
-        "risk": "routing",
-        "context": "mail",
-        "directive": "protocol"
+        "code": "NGX_STREAM_PROXY_PROTOCOL_OUT",
+        "class": "supported",
+        "risk": "security",
+        "context": "stream",
+        "directive": "proxy_protocol"
       }
     ]
   },
   "expected_candidate": {
-    "required": false
+    "required": true,
+    "contains": [
+      "[[stream]]",
+      "listen = ':19030'",
+      "name = 'stream_pool'",
+      "proxy_pass = 'stream_pool'",
+      "proxy_protocol = 'out'",
+      "servers = ['10.0.0.1:19031 weight=5', '10.0.0.2:19031']"
+    ]
   }
 }

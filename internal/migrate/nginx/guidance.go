@@ -89,6 +89,14 @@ var guidanceCatalog = map[string]AssessmentGuidance{
 		Docs:        "nginx-assessment#trusted-client-address-realip",
 		Blocking:    true,
 	},
+	"GUIDE_PROXY_PROTOCOL_IDENTITY": {
+		Code:        "GUIDE_PROXY_PROTOCOL_IDENTITY",
+		Title:       "Complete the PROXY-protocol trust boundary",
+		Action:      "For an HTTP listener, declare 'listen ... proxy_protocol;', 'real_ip_header proxy_protocol;', and at least one set_real_ip_from CIDR together in the same server block. For a stream listener, Jul has no directive-derived trust source for inbound PROXY protocol - add [[stream]] trusted_proxies by hand; outbound proxy_protocol only works on tcp streams.",
+		Consequence: "Promoting a PROXY-protocol-asserted address to canonical client identity without every element present would either trust an unnamed source or parse a header nginx never used for identity.",
+		Docs:        "nginx-assessment#proxy-protocol-identity",
+		Blocking:    true,
+	},
 	"GUIDE_CANDIDATE_VALIDATION": {
 		Code:        "GUIDE_CANDIDATE_VALIDATION",
 		Title:       "Correct the generated Jul candidate",

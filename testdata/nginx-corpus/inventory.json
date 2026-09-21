@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "fixture_schema_version": 1,
-  "fixture_count": 12,
-  "core_fixtures": 10,
+  "fixture_count": 18,
+  "core_fixtures": 16,
   "full_fixtures": 2,
   "categories": [
     {
@@ -35,7 +35,7 @@
     },
     {
       "name": "protocol-gateways",
-      "count": 2
+      "count": 7
     },
     {
       "name": "request-policy",
@@ -51,7 +51,7 @@
     },
     {
       "name": "security",
-      "count": 3
+      "count": 5
     },
     {
       "name": "static-files",
@@ -70,6 +70,10 @@
       "count": 2
     },
     {
+      "name": "upstreams-resiliency",
+      "count": 1
+    },
+    {
       "name": "variables",
       "count": 2
     }
@@ -81,7 +85,7 @@
     },
     {
       "name": "blocking",
-      "count": 25
+      "count": 26
     },
     {
       "name": "ignored",
@@ -89,17 +93,17 @@
     },
     {
       "name": "informational",
-      "count": 11
+      "count": 17
     },
     {
       "name": "supported",
-      "count": 93
+      "count": 171
     }
   ],
   "risks": [
     {
       "name": "availability",
-      "count": 17
+      "count": 34
     },
     {
       "name": "observability",
@@ -107,7 +111,7 @@
     },
     {
       "name": "operational",
-      "count": 23
+      "count": 41
     },
     {
       "name": "performance",
@@ -115,11 +119,11 @@
     },
     {
       "name": "routing",
-      "count": 65
+      "count": 107
     },
     {
       "name": "security",
-      "count": 24
+      "count": 32
     }
   ],
   "codes": [
@@ -153,7 +157,7 @@
     },
     {
       "name": "NGX_HTTP_SERVER",
-      "count": 12
+      "count": 18
     },
     {
       "name": "NGX_HTTP_UPSTREAM",
@@ -205,7 +209,7 @@
     },
     {
       "name": "NGX_LOCATION_RETURN",
-      "count": 8
+      "count": 14
     },
     {
       "name": "NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT",
@@ -221,11 +225,11 @@
     },
     {
       "name": "NGX_MAIN_EVENTS",
-      "count": 10
+      "count": 16
     },
     {
       "name": "NGX_MAIN_HTTP",
-      "count": 12
+      "count": 18
     },
     {
       "name": "NGX_MAIN_MAIL",
@@ -233,7 +237,7 @@
     },
     {
       "name": "NGX_MAIN_STREAM",
-      "count": 1
+      "count": 6
     },
     {
       "name": "NGX_MAIN_WORKERS",
@@ -241,6 +245,10 @@
     },
     {
       "name": "NGX_REALIP_HEADER",
+      "count": 1
+    },
+    {
+      "name": "NGX_REALIP_HEADER_PROXY_PROTOCOL",
       "count": 2
     },
     {
@@ -249,7 +257,7 @@
     },
     {
       "name": "NGX_REALIP_TRUST_SOURCE",
-      "count": 3
+      "count": 4
     },
     {
       "name": "NGX_SERVER_ALLOW",
@@ -269,11 +277,11 @@
     },
     {
       "name": "NGX_SERVER_LISTEN",
-      "count": 12
+      "count": 18
     },
     {
       "name": "NGX_SERVER_LOCATION",
-      "count": 14
+      "count": 20
     },
     {
       "name": "NGX_SERVER_NAME",
@@ -292,8 +300,56 @@
       "count": 1
     },
     {
-      "name": "NGX_STREAM_UNSUPPORTED",
+      "name": "NGX_STREAM_LISTEN",
+      "count": 7
+    },
+    {
+      "name": "NGX_STREAM_LISTEN_OPTION",
+      "count": 1
+    },
+    {
+      "name": "NGX_STREAM_LISTEN_PROXY_PROTOCOL_IN",
+      "count": 1
+    },
+    {
+      "name": "NGX_STREAM_PROXY_CONNECT_TIMEOUT",
+      "count": 1
+    },
+    {
+      "name": "NGX_STREAM_PROXY_PASS",
+      "count": 11
+    },
+    {
+      "name": "NGX_STREAM_PROXY_PROTOCOL_OUT",
+      "count": 1
+    },
+    {
+      "name": "NGX_STREAM_PROXY_PROTOCOL_UDP",
+      "count": 1
+    },
+    {
+      "name": "NGX_STREAM_PROXY_TIMEOUT",
+      "count": 1
+    },
+    {
+      "name": "NGX_STREAM_SERVER",
+      "count": 11
+    },
+    {
+      "name": "NGX_STREAM_SERVER_NAME",
+      "count": 2
+    },
+    {
+      "name": "NGX_STREAM_SSL_PREREAD",
       "count": 3
+    },
+    {
+      "name": "NGX_STREAM_TLS_TERMINATION",
+      "count": 2
+    },
+    {
+      "name": "NGX_STREAM_UPSTREAM",
+      "count": 1
     },
     {
       "name": "NGX_UPSTREAM_KEEPALIVE",
@@ -305,7 +361,7 @@
     },
     {
       "name": "NGX_UPSTREAM_SERVER",
-      "count": 3
+      "count": 5
     },
     {
       "name": "NGX_VARIABLE_BLOCK_UNSUPPORTED",
@@ -368,7 +424,12 @@
       "status": "represented",
       "fixtures": [
         "fastcgi-gateway",
-        "protocol-boundaries"
+        "protocol-boundaries",
+        "stream-named-upstream",
+        "stream-security-boundaries",
+        "stream-sni-bounded",
+        "stream-tcp-basic",
+        "stream-udp"
       ],
       "deferred_dimensions": [
         "H2/H3 migration replay",
@@ -382,8 +443,10 @@
       "status": "represented",
       "fixtures": [
         "realip-blocking",
+        "realip-proxy-protocol-supported",
         "realip-supported",
-        "security-cache-boundaries"
+        "security-cache-boundaries",
+        "stream-security-boundaries"
       ],
       "deferred_dimensions": [
         "WAF/module-specific migration replay",
