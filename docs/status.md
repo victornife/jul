@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.9 · Updated 2026-09-17
+> Version 2.10 · Updated 2026-09-21
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -78,6 +78,17 @@ not inherit an older GA row merely because it lives in the same package or guide
 - **Local diagnostics and support bundles:** merged Beta capability. Its later
   reduced remote projection is tracked with the API/CLI rows and does not
   promote the local capability.
+- **WASM plugin-pool memory fix (#420) and final soak (#421):** the final
+  pre-stable soak found a real unbounded memory-growth defect in the pooled
+  WASM instance runtime; [#420](https://github.com/victornife/jul/pull/420)
+  fixed it with a bounded pool and per-instance invocation cap, and #421
+  recorded a subsequent ~25h post-fix soak
+  ([evidence](soak-evidence.md#2026-09-19--final-soak-adr-0005-procedure-c-burn-in-currenttoml-25h-linux))
+  with memory bounded across 5.02M plugin invocations. `v2.0.0-rc.1` is
+  immutable and predates this fix; stable `v2.0.0` must be cut from a
+  post-#420 commit, never from a retagged/renamed RC. #422 tracks
+  non-blocking deferred follow-up evidence (manual host-level fault
+  injection, continuous metrics scraping) and does not block the stable cut.
 
 ## GA criteria legend
 
@@ -211,6 +222,7 @@ the [soak evidence log](soak-evidence.md).
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-09-21 | 2.10 | Wave 0 post-soak product-truth reconciliation (#353): recorded the #420 WASM plugin-pool fix and #421 final ~25h soak (previously missing from this page); corrected the stale "UDP has no load balancing" claim (UDP sessions do select across the route's backend pool, one dial per new client, pinned for the session's life); corrected the stale "HTTP/3 static certificate replacement is restart-bound" claim (it hot-applies via the shared `dynamicCertProvider`, same as TCP); added an explicit MQTT/generic-UDP transport non-goal boundary. | Issue #353; [known-limitations.md](known-limitations.md); [http3.md](http3.md); [soak-evidence.md](soak-evidence.md) |
 | 2026-09-15 | 2.8 | Reconciled post-2026-08-30 additive surfaces as separate merged Beta entries: admin TLS/mTLS, external API, remote CLI, selected runtime-policy hot reload and HTTP-over-Unix upstreams. Updated resilience attribution and removed stale future-work wording without claiming release or soak. | [feature-status.yaml](feature-status.yaml); [upstreams.md](upstreams.md); [known-limitations.md](known-limitations.md) |
 | 2026-08-30 | 2.7 | Reconciled maturity and delivery as separate axes; added explicit post-RC rows for egress, routing/response policy, resilience, configuration authority/generated contracts, and NGINX assessment/provenance/includes; removed stale programme language. | Issue #353; [feature-status.yaml](feature-status.yaml) |
 | 2026-08-17 | 2.6 | Bumped version to keep the status page in sync with the roadmap after reconciling stale #115/#116 status: both ADRs (0016, 0017) are accepted and closed, their unblocked implementation lanes (inbound identity #135→#136→#259, backend trust #137→#138→#139→#140) are complete, and generic resilience (#141-#144) is now READY/unblocked rather than gated. No feature maturity or GA criterion changed. | [roadmap/README.md](roadmap/README.md), Issues #115, #116 |

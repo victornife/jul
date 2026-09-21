@@ -145,11 +145,14 @@ policy change applies after the planned restart and to subsequent handshakes.
    socket, HTTP/3 startup fails with a clear "address already in use" error.
    This is rare in practice because most services bind TCP only.
 
-4. **Static certificate-file replacement remains restart-bound.** HTTP/3 and
-   TCP share the same certificate callback, but changing a configured static
-   `cert`/`key` file is not published to that callback until the dedicated
-   certificate-rotation lifecycle is implemented. ACME renewal continues while
-   the process is running.
+4. **Static certificate-file replacement is hot, like the sibling TCP
+   listener.** HTTP/3 and TCP share the exact same `dynamicCertProvider`
+   object (#100), so a candidate certificate/key file that validates is
+   published atomically and observed by new QUIC handshakes without a
+   rebind — see `TestReloadRotatesHTTP3CertificateWithoutRebind`. Only
+   structural HTTP/3 transitions (`[servers.http3].enabled`, listen address)
+   remain restart-bound; see limitation 2 above. ACME renewal continues
+   while the process is running either way.
 
 ## Benchmarks
 

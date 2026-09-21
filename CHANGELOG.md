@@ -9,6 +9,10 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Changed
+
+- **Post-soak product-truth reconciliation (#353).** `docs/status.md` now records the #420 WASM plugin-pool fix and #421 final ~25h post-fix soak (both previously merged but not reflected on the status page), and reiterates that `v2.0.0-rc.1` is immutable/pre-#420 while stable `v2.0.0` must be cut from a post-#420 commit. Corrected two stale claims found to contradict current code and the generated lifecycle authority: `docs/known-limitations.md` no longer claims UDP streams have a single backend per listener — each new UDP client session dials the route's `upstream.Pool` through the same balancer as TCP/HTTP, so distinct sessions distribute across every configured backend (a single session's own datagrams stay pinned to its chosen backend; see `TestUDPProxyLoadBalancesAcrossBackends`); `docs/http3.md` no longer claims static certificate-file replacement is restart-bound for HTTP/3 — it shares the same hot `dynamicCertProvider` as its sibling TCP listener (#100), proven by the existing `TestReloadRotatesHTTP3CertificateWithoutRebind`. Added an explicit MQTT/generic-UDP transport boundary: MQTT/TCP is ordinary TCP relay, MQTT/TLS can use SNI passthrough, MQTT-over-WebSocket uses existing HTTP/1.1 WebSocket support, and Jul.IA is not a QUIC-Connection-ID-aware load balancer and has no MQTT-aware topic/QoS/ClientID routing or health checks.
+
 ## [2.0.0-rc.1] – 2026-09-17
 
 > First release candidate of the v2.0.0 line (not v1.33.0 — a maintainer
