@@ -671,6 +671,9 @@ func translateProxyPass(v string, rep *Report, line int) string {
 	if trimmed != v {
 		rep.note("proxy_pass %q at line %d: trailing slash dropped; nginx rewrites the matched location prefix on a trailing-slash target, which Jul.IA does not — adjust the location/upstream path if needed", v, line)
 	}
+	if proxyPassHasURI(trimmed) {
+		rep.note("proxy_pass %q at line %d: the target path is not a location-prefix replacement - Jul.IA's proxy always prepends it to the client's full incoming request path (net/http/httputil.ProxyRequest.SetURL semantics) rather than first stripping the matched location prefix as nginx does, so the backend-visible path differs whenever the location path does not exactly match the request", v, line)
+	}
 	return trimmed
 }
 

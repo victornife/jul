@@ -1,0 +1,5 @@
+# proxy-pass-uri-runtime
+
+Repository-authored, sanitized NGINX migration fixture for issue #365. It uses only synthetic local addresses, hostnames, paths, and values; it contains no production configuration, credentials, private keys, external endpoints, or user traffic.
+
+The exact assessment contract, candidate disposition, categories, origin, and license are recorded in `manifest.json`. It precisely characterizes a difference the importer already flags as `approximated` (`NGX_LOCATION_PROXY_PASS_URI`) but had never proven end to end: nginx's `proxy_pass` with a URI strips the matched location prefix and replaces it with that URI, while Jul's proxy (`net/http/httputil.ProxyRequest.SetURL`) always *prepends* the `proxy_pass` path to the client's full incoming request path, never stripping anything first. The real-Jul E2E lives in `cmd/jul/corpus_runtime_test.go` (`TestNGINXCorpusProxyPassURIRealE2E`) because it asserts the exact backend-visible request path, which the generic manifest `scenarios` array (a client-visible response comparison) cannot express.

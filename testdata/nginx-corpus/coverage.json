@@ -31,6 +31,7 @@
         "approximate-alias",
         "blocking-dynamic-proxy",
         "core-multifile-return",
+        "proxy-pass-uri-runtime",
         "routing-cors-policy",
         "routing-precedence-runtime",
         "websocket-runtime"
@@ -38,12 +39,12 @@
       "evidence": [
         "issue #365 pinned real-NGINX reference confirmation for the precedence order",
         "issue #365 real-Jul H1 WebSocket upgrade/echo/close E2E",
-        "issue #365 real-Jul exact/prefix/regex/root location-precedence E2E"
+        "issue #365 real-Jul exact/prefix/regex/root location-precedence E2E",
+        "issue #365 real-Jul proxy_pass URI prepend-vs-location-prefix-replacement E2E"
       ],
-      "rationale": "Core fixtures cover multi-file servers, exact/prefix/regex/root location-precedence order proven through both a real Jul instance and the pinned real-NGINX reference container (#365), static files, returns, redirects, method constraints, response headers, CORS, safe blocking of dynamic proxy targets, and H1 WebSocket migration evidence through a real backend. H2/H3 Extended CONNECT WebSocket remains explicitly out of scope (#435).",
+      "rationale": "Core fixtures cover multi-file servers, exact/prefix/regex/root location-precedence order proven through both a real Jul instance and the pinned real-NGINX reference container (#365), static files, returns, redirects, method constraints, response headers, CORS, safe blocking of dynamic proxy targets, H1 WebSocket migration evidence through a real backend, and a real-Jul E2E precisely characterizing proxy_pass URI-rewriting semantics: nginx strips the matched location prefix and replaces it with the proxy_pass path, while Jul's proxy (net/http/httputil.ProxyRequest.SetURL) always prepends the proxy_pass path to the client's full incoming request path without stripping anything first. H2/H3 Extended CONNECT WebSocket remains explicitly out of scope (#435).",
       "deferred_dimensions": [
         "full NGINX location-precedence cross-product beyond the four-tier order already proven",
-        "proxy_pass URI edge matrix beyond the classified approximation",
         "rewrite control-flow beyond static supported flags"
       ],
       "revisit_trigger": "Expand when a supported importer mapping changes or a representative source estate exposes a routing distinction not already classified."

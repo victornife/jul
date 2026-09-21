@@ -151,7 +151,7 @@ the Jul request path.
 
 | Directive | Status | Notes |
 | --- | --- | --- |
-| `proxy_pass` | ✅ | Bare hosts gain `http://`; a trailing URI slash is dropped with an approximation finding. |
+| `proxy_pass` | ✅ (⚠️ with a URI) | Bare hosts gain `http://`; a trailing URI slash is dropped with an approximation finding. Any retained path is not a location-prefix replacement: Jul's proxy (`net/http/httputil.ProxyRequest.SetURL`) always *prepends* it to the client's full incoming request path rather than stripping the matched location prefix first, so the backend-visible path differs from nginx's whenever the location path does not exactly match the request. See `proxy-pass-uri-runtime` in the [migration corpus](nginx-migration-corpus.md) for a real end-to-end proof. |
 | `fastcgi_pass` | ✅ | Maps directly. |
 | `root`, `index`, `try_files` | ✅ | Preserve location overrides. |
 | `alias` | ⚠️ | Maps to `root`; NGINX prefix-stripping semantics differ. |
@@ -348,8 +348,11 @@ cache), so it is deliberately not translated into that field; only `max_size=`
 6. **Per-virtual-host realip policies cannot be represented on one listener.**
 7. **Named locations such as `@fallback` are not translated.**
 8. **One listen address per Jul server.** Extra NGINX listens are approximate.
-9. **Trailing-slash `proxy_pass`, `alias`, and server-level `return` have
-   documented semantic differences.**
+9. **`proxy_pass` with a URI does not replace the matched location prefix.**
+   nginx strips the matched location prefix and substitutes the `proxy_pass`
+   path; Jul always prepends the `proxy_pass` path to the client's full
+   incoming request path instead. A trailing URI slash on `proxy_pass` and a
+   server-level `return` also have documented semantic differences.
 10. **Source formatting/comments are not preserved.** Provenance belongs to the
     report, not generated TOML.
 

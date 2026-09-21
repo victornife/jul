@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "id": "proxy-pass-uri-runtime",
+  "tier": "core",
+  "description": "Real NGINX-vs-Jul migration E2E fixture (#365) precisely characterizing proxy_pass URI-rewriting semantics: nginx strips the matched location prefix and replaces it with the proxy_pass path, while Jul's proxy (net/http/httputil.ProxyRequest.SetURL) always prepends the proxy_pass path to the client's full incoming request path without stripping anything first.",
+  "origin": {
+    "kind": "repository_authored",
+    "license": "AGPL-3.0-only",
+    "source": "victornife/jul#365"
+  },
+  "categories": [
+    "core-http-routing"
+  ],
+  "build_tags": [
+    "importer"
+  ],
+  "root": "nginx/nginx.conf",
+  "follow_includes": false,
+  "expected_assessment": {
+    "status": "ready_for_review",
+    "ready": true,
+    "complete": true,
+    "files_read": 1,
+    "sources": [
+      "nginx.conf"
+    ],
+    "results": [
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_EVENTS",
+        "class": "informational",
+        "risk": "operational",
+        "context": "main",
+        "directive": "events"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_HTTP",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "http"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_UPSTREAM",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "upstream"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_UPSTREAM_SERVER",
+        "class": "supported",
+        "risk": "availability",
+        "context": "upstream",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "server",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_NAME",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "server_name"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LOCATION",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "location"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_PROXY_PASS_URI",
+        "class": "approximated",
+        "risk": "routing",
+        "context": "location",
+        "directive": "proxy_pass"
+      }
+    ]
+  },
+  "expected_candidate": {
+    "required": true,
+    "contains": [
+      "listen = ':18104'",
+      "name = 'uri_runtime_pool'",
+      "path = '/api'",
+      "proxy_pass = 'http://uri_runtime_pool/v2'"
+    ]
+  }
+}

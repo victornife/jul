@@ -361,6 +361,82 @@ func TestNGINXCorpusUpstreamFailoverRealE2E(t *testing.T) {
 	}
 }
 
+// TestNGINXCorpusProxyPassURIRealE2E proves the precise, previously
+// undocumented difference between nginx's and Jul's proxy_pass URI-rewriting
+// semantics through a real Jul instance: nginx strips the matched location
+// prefix and replaces it with the proxy_pass path, while Jul's proxy
+// (net/http/httputil.ProxyRequest.SetURL) always prepends the proxy_pass path
+// to the client's full incoming request path without stripping anything -
+// location "/api" + proxy_pass ".../v2" turns a client request for "/api/foo"
+// into "/v2/api/foo" at the backend, not nginx's "/v2/foo". This bypasses
+// startRealJulForCorpus/startCorpusTCPBackends, which always overwrites every
+// upstream member with its own generic backend, because this test needs its
+// backend to record the exact path it received.
+func TestNGINXCorpusProxyPassURIRealE2E(t *testing.T) {
+	cfg := loadCorpusRuntimeCandidate(t, "proxy-pass-uri-runtime")
+	if len(cfg.Upstreams) != 1 || len(cfg.Upstreams[0].Servers) != 1 {
+		t.Fatalf("proxy-pass-uri-runtime: want 1 upstream with 1 server, got %+v", cfg.Upstreams)
+	}
+
+	var gotPath string
+	backendLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve backend port: %v", err)
+	}
+	backend := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	})}
+	go func() { _ = backend.Serve(backendLn) }()
+	defer backend.Close()
+
+	cfg.Upstreams[0].Servers[0].Address = backendLn.Addr().String()
+	cfg.Servers[0].Listen = reserveLoopbackAddress(t)
+
+	if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
+		t.Fatalf("runtime preflight: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reload := make(chan struct{})
+	var logs corpusLogBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- app.Serve(ctx, reload, memorySource{name: "<nginx-corpus:proxy-pass-uri-runtime>", cfg: cfg}, cfg, productName, version, app.WithLogOutput(&logs))
+	}()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	baseURL := "http://" + cfg.Servers[0].Listen
+	waitForCorpusServer(t, ctx, client, baseURL, corpus.Scenario{Request: corpus.RequestSpec{Method: "GET", Path: "/api/"}}, done, &logs)
+
+	defer func() {
+		cancel()
+		select {
+		case code := <-done:
+			if code != 0 {
+				t.Errorf("proxy-pass-uri-runtime: Jul exit code = %d\nlogs:\n%s", code, logs.String())
+			}
+		case <-time.After(5 * time.Second):
+			t.Errorf("proxy-pass-uri-runtime: Jul did not shut down\nlogs:\n%s", logs.String())
+		}
+	}()
+
+	resp, err := client.Get(baseURL + "/api/foo")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	client.CloseIdleConnections()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	const want = "/v2/api/foo"
+	if gotPath != want {
+		t.Fatalf("backend-visible path = %q, want %q (proxy_pass path prepended to the full incoming path, not location-prefix-replaced)", gotPath, want)
+	}
+}
+
 // TestNGINXCorpusCacheRealE2E proves the bounded proxy_cache_path/proxy_cache
 // -> Jul [cache] translation actually caches through a real Jul instance: the
 // first request is a real MISS served by the backend, the immediate second

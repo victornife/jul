@@ -62,7 +62,7 @@ responsibility, not this issue's.
 
 ## Expanded HTTP/upstream/WebSocket/compression migration E2E (#365)
 
-Issue #365 expands the #154 real-Jul runtime evidence with six more fixtures:
+Issue #365 expands the #154 real-Jul runtime evidence with seven more fixtures:
 
 - `routing-precedence-runtime` — proves the exact / longest-non-root-prefix /
   regex / root location-precedence order end to end, plus a `limit_except`
@@ -102,16 +102,26 @@ Issue #365 expands the #154 real-Jul runtime evidence with six more fixtures:
   `[upstreams.resilience]` circuit breaker; the test proves a backend that
   refuses every connection is excluded after tripping the breaker, with every
   client request still succeeding (Jul's default retry-every-distinct-backend
-  behavior masks the failure) against a real Jul instance.
+  behavior masks the failure) against a real Jul instance;
+- `proxy-pass-uri-runtime` — precisely characterizes `proxy_pass` URI-rewriting
+  semantics through a real Jul instance: a location `/api` with
+  `proxy_pass http://pool/v2` turns a client request for `/api/foo` into
+  `/v2/api/foo` at the backend, because Jul's proxy
+  (`net/http/httputil.ProxyRequest.SetURL`) always *prepends* the
+  `proxy_pass` path to the client's full incoming request path rather than
+  stripping the matched location prefix and substituting it, as nginx does.
+  This difference was already flagged (`NGX_LOCATION_PROXY_PASS_URI`,
+  approximated) but had never been proven end to end before this fixture.
 
-The weighted-upstream, compression, WebSocket, cache, and upstream-failover
-scenarios live in `cmd/jul/corpus_runtime_test.go` rather than a fixture's
-manifest `scenarios` array, because each needs assertions the generic
-single-request/response Scenario/Dimension model does not express
+The weighted-upstream, compression, WebSocket, cache, upstream-failover, and
+proxy_pass-URI scenarios live in `cmd/jul/corpus_runtime_test.go` rather than
+a fixture's manifest `scenarios` array, because each needs assertions the
+generic single-request/response Scenario/Dimension model does not express
 (repeated-request distribution counts, raw-header/decoded-body inspection, a
-persistent bidirectional connection, a two-request MISS/HIT sequence, and a
-deliberately-never-listening backend, respectively). `startCorpusTCPBackends`
-in `cmd/jul/import_corpus_test.go` gives any fixture's named-upstream TCP
+persistent bidirectional connection, a two-request MISS/HIT sequence, a
+deliberately-never-listening backend, and inspecting the exact backend-visible
+request path, respectively). `startCorpusTCPBackends` in
+`cmd/jul/import_corpus_test.go` gives any fixture's named-upstream TCP
 members a real local backend for the real-Jul path, the same way
 `startCorpusUnixHTTPBackends` already does for `unix:` addresses.
 

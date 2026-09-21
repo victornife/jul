@@ -501,6 +501,23 @@ http {
 	}
 }
 
+func TestTranslateProxyPassRetainedPathWarnsAboutPrependSemantics(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location /api { proxy_pass http://backend/v2; }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	if got := s.Locations[0].ProxyPass; got != "http://backend/v2" {
+		t.Errorf("proxy_pass: got %q want http://backend/v2", got)
+	}
+	if !hasNote(rep, "prepends it to the client's full incoming request path") {
+		t.Errorf("expected a prepend-semantics note, notes=%v", rep.Notes)
+	}
+}
+
 func TestTranslateExtraListenDropped(t *testing.T) {
 	cfg, rep := translate(t, `
 http {
