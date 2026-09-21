@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.10 · Updated 2026-09-21
+> Version 2.11 · Updated 2026-09-21
 >
 > This roadmap owns the **durable portfolio sequence**. It deliberately does
 > not duplicate volatile READY/NEXT/blocked issue state. The current issue-level
@@ -44,7 +44,7 @@ The durable current sequence is summarized in the active operating roadmap below
 | **0 — Programme and product truth** | One tracker, audit disposition, operating model and product boundary | Complete; this issue reconciles later documentation drift |
 | **1 — Correctness foundation** | Strict config, protocol/security corrections, cache recertification and quality gates | Complete for the selected tranche; new defects still interrupt later stages |
 | **2 — Lifecycle and structured configuration** | Closed-world lifecycle authority, transactional apply/stage/rollback, typed workflows | Complete |
-| **3 — Trust boundaries** | Canonical client identity and consistent backend TLS/mTLS identity | Implemented on `main`; represented as merged Beta capabilities |
+| **3 — Trust boundaries** | Canonical client identity and consistent backend TLS/mTLS identity | Complete; GA with stable v2.0.0 (#409) |
 | **4 — Routing and response policy** | Method/header/query predicates, response headers, CORS and typed operation surfaces | Implemented on `main`; represented separately from the older Core HTTP GA row |
 | **5 — Generic resilience** | Admission, queue/connection bounds, retry budget/deadline/backoff, circuit state and bounded operations evidence | Core implementations are merged; integrated cross-protocol/soak and complete external-contract closure remain under #287/#144 at this baseline |
 | **6 — Configuration authority and automation** | Managed/file-owned authority, generated contracts, supported external API, thin remote CLI | Authority and generated contracts are merged; external OpenAPI #150 and CLI #151 remain separate gates |

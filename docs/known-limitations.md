@@ -17,11 +17,6 @@ discovered correctness/security findings still pre-empt the roadmap.
 
 ## Implemented on `main`, not yet stable GA publication
 
-- **Trusted client address (`client_address`):** merged Beta; stable tag and
-  long-running soak promotion remain open.
-- **Backend TLS trust (`backend_tls`):** merged Beta across HTTP, native gRPC,
-  transcoding/reflection and active health probes; stable tag/soak promotion
-  remains open.
 - **Admin TLS/mTLS, external API and remote CLI:** merged Beta surfaces; none
   inherits the older admin/Console maturity or soak record.
 - **Selected runtime-policy hot reload:** merged Beta; explicit restart

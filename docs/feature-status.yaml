@@ -396,56 +396,60 @@ features:
   name: Trusted client address (client_address)
   tags:
   - core
-  maturity: Beta
+  maturity: GA
   doc: configuration.md
   criteria:
     1: true
     2: true
     3: true
     4: true
-    5: false
+    5: true
     6: true
     7: true
     8: true
     9: true
-  notes: 'Beta, not GA: the capability is merged under CHANGELOG [Unreleased] and has not been tagged, released or soaked,
-    so criterion 5 (the post-GA soak gate) is open by definition. Criterion 1 is the derivation algorithm and per-deployment
+  notes: 'GA (#409, promoted with stable v2.0.0): criterion 1 is the derivation algorithm and per-deployment
     forwarded-chain matrix in docs/configuration.md and docs/core-http.md; criterion 2 is BenchmarkDeriveDirect (~9 ns/op,
     zero allocations) and BenchmarkDeriveProxied (~265 ns/op) in docs/benchmarks.md; criterion 4 is the lifecycle registry
-    entries plus the docs/config-value-contract.json dispositions; criterion 7 is the ADR 0016 threat model with SECURITY.md
-    and docs/security-posture.md; criterion 8 is FuzzDerive and FuzzParsePrefix in internal/clientaddr; criterion 9 is the
-    Security panel listener editor and the Trusted client address status row.
+    entries plus the docs/config-value-contract.json dispositions; criterion 5 is the #421 ~25h burn-in-current.toml soak
+    (client_address under full sustained load and apply/fault churn, 94M+ requests, 0 unattributable errors) plus the
+    protocol/spoof matrix in internal/clientaddr, internal/server/clientaddr_parity_test.go and internal/auth/cidr_test.go,
+    all race- and fuzz-clean; criterion 7 is the ADR 0016 threat model with SECURITY.md and docs/security-posture.md;
+    criterion 8 is FuzzDerive and FuzzParsePrefix in internal/clientaddr; criterion 9 is the Security panel listener editor
+    and the Trusted client address status row.
 
     '
-  delivery: merged
+  delivery: soaked
 - id: UT-BE
   name: Backend TLS trust (backend_tls)
   tags:
   - core
   - grpc
-  maturity: Beta
+  maturity: GA
   doc: upstreams.md
   criteria:
     1: true
     2: null
     3: true
     4: true
-    5: false
+    5: true
     6: true
     7: true
     8: null
     9: true
-  notes: 'Beta, not GA: merged under CHANGELOG [Unreleased] and neither tagged, released nor soaked, so criterion 5 (the post-GA
-    soak gate) is open by definition. Criterion 1 is the enforcement table and per-consumer behaviour in docs/upstreams.md
+  notes: 'GA (#409, promoted with stable v2.0.0): criterion 1 is the enforcement table and per-consumer behaviour in docs/upstreams.md
     plus the failure-category table in docs/troubleshooting.md. Criterion 2 is n/a: the policy adds no measurable per-request
     work — it is resolved once per handler generation and the handshake cost is TLS itself, already covered by the existing
-    TLS benchmarks. Criterion 4 is the lifecycle registry entries plus the docs/config-value-contract.json dispositions. Criterion
-    7 is the ADR 0016 threat model with SECURITY.md and docs/security-posture.md. Criterion 8 is n/a: the block has no custom
+    TLS benchmarks. Criterion 4 is the lifecycle registry entries plus the docs/config-value-contract.json dispositions.
+    Criterion 5 is the #421 ~25h soak (one continuously-live backend_tls pool, no degradation) plus the full protocol/mTLS/
+    discovery-identity-stability/health-parity matrix in internal/handler/backendtls_test.go, internal/server/mtls_test.go
+    and internal/upstream/health_backendtls_test.go, all race-clean. Criterion 7 is the ADR 0016 threat model with SECURITY.md
+    and docs/security-posture.md. Criterion 8 is n/a: the block has no custom
     parser — PEM and certificate parsing are the standard library''s, and the enum/grammar validation is covered by table-driven
     tests. Criterion 9 is the Backend TLS trust status row.
 
     '
-  delivery: merged
+  delivery: soaked
 - id: SEC-EGRESS
   name: Auxiliary egress allow-list
   tags:
