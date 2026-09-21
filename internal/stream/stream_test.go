@@ -223,6 +223,28 @@ func udpEcho(t *testing.T) (addr string, stop func()) {
 	return uc.LocalAddr().String(), func() { _ = uc.Close() }
 }
 
+// udpAnnounce starts a UDP backend that ignores the datagram content and
+// always replies with tag, so a test can identify which backend answered.
+func udpAnnounce(t *testing.T, tag string) (addr string, stop func()) {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("udp announce listen: %v", err)
+	}
+	uc := pc.(*net.UDPConn)
+	go func() {
+		buf := make([]byte, 2048)
+		for {
+			_, a, err := uc.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			_, _ = uc.WriteToUDP([]byte(tag), a)
+		}
+	}()
+	return uc.LocalAddr().String(), func() { _ = uc.Close() }
+}
+
 // clientHelloBytes captures a real TLS ClientHello for the given server name.
 func clientHelloBytes(t *testing.T, serverName string) []byte {
 	t.Helper()
@@ -803,6 +825,55 @@ func TestUDPProxyRelay(t *testing.T) {
 	}
 	if conns.Load() != 1 {
 		t.Errorf("udp session gauge: got %d want 1", conns.Load())
+	}
+}
+
+// TestUDPProxyLoadBalancesAcrossBackends proves UDP backend selection goes
+// through the route's upstream.Pool balancer exactly like TCP/HTTP: distinct
+// client sessions are distributed across every configured backend, not
+// pinned to a single backend per listener (docs/known-limitations.md).
+func TestUDPProxyLoadBalancesAcrossBackends(t *testing.T) {
+	b1, stop1 := udpAnnounce(t, "AAA")
+	defer stop1()
+	b2, stop2 := udpAnnounce(t, "BBB")
+	defer stop2()
+	addr := freeUDPAddr(t)
+
+	s := newTestServer(t, Hooks{})
+	ups := map[string]config.UpstreamConfig{
+		"pool": {Name: "pool", Strategy: "round_robin", Servers: []config.UpstreamServer{
+			{Address: b1, Weight: 1},
+			{Address: b2, Weight: 1},
+		}, MaxFails: 1},
+	}
+	if err := s.Reload([]config.StreamServer{{
+		Listen: addr, Protocol: "udp", ProxyPass: "pool",
+	}}, ups); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	seen := map[string]bool{}
+	for i := 0; i < 8; i++ {
+		// A fresh UDP socket per iteration is a new client address, so each
+		// gets its own session and its own pool.Pick() call.
+		c, err := net.Dial("udp", addr)
+		if err != nil {
+			t.Fatalf("dial udp %d: %v", i, err)
+		}
+		if _, err := c.Write([]byte("ping")); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		buf := make([]byte, 8)
+		n, err := c.Read(buf)
+		_ = c.Close()
+		if err != nil {
+			t.Fatalf("read %d: %v", i, err)
+		}
+		seen[string(buf[:n])] = true
+	}
+	if len(seen) != 2 {
+		t.Fatalf("expected both backends to be selected across distinct UDP client sessions, got %v", seen)
 	}
 }
 

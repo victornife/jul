@@ -101,6 +101,7 @@ that an upstream used by both surfaces is probed twice, once per pool.
 | SNI catch-all fallback | TCP | Unknown SNI with `"*"` route | Falls back to wildcard backend | TestTCPSNICatchAll |
 | Inbound + outbound PROXY | TCP | `proxy_protocol = "both"` | Source address recovered and forwarded | TestProxyProtocolInAndOut |
 | UDP echo relay | UDP | Client datagram "ping" | Backend echoes back | TestUDPProxyRelay |
+| UDP balances across backends | UDP | 8 distinct client sockets, 2-backend `round_robin` pool | Both backends selected across sessions | TestUDPProxyLoadBalancesAcrossBackends |
 | Reload swaps target | TCP | Reload with new backend | New connections use new target | TestReloadSwapsTargetAndStops |
 | Reload bind failure rollback | TCP | Reload to busy address | Old listeners stay active | TestReloadBindFailureRollsBack |
 | PROXY protocol v2 round-trip | TCP | v2 TCP4/TCP6 header | Address recovered correctly | TestProxyProtocolV2RoundTrip, TestProxyProtocolV2IPv6RoundTrip |

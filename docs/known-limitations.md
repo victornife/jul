@@ -448,8 +448,19 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   original TLS bytes remain untouched for passthrough.
 - **UDP sessions are memory-backed.** Spoofed source addresses can fill the
   session table up to the configured cap; monitor `jul_stream_active_conns{proto="udp"}`.
-- **No UDP load balancing.** UDP streams have a single backend per listener;
-  multi-backend round-robin is TCP only.
+- **UDP backend selection is session-scoped, not per-datagram.** Each new
+  client address dials the route's `upstream.Pool` through the same balancer
+  used by TCP/HTTP (round-robin, weighted, etc.), so different clients are
+  distributed across every configured backend. A single session's datagrams
+  stay pinned to the backend chosen at session creation for the life of that
+  session — there is no per-datagram re-balancing, and Jul.IA is not a
+  QUIC-Connection-ID-aware load balancer: generic UDP relay does not imply
+  connection-migration-aware routing for QUIC or any other UDP-based
+  protocol (e.g. MQTT-over-UDP bridges, custom telemetry). MQTT over TCP is
+  ordinary TCP stream relay, MQTT over TLS can use SNI-based passthrough
+  routing, and MQTT over an HTTP/1.1 WebSocket upgrade uses Jul's existing
+  H1 WebSocket support; none of these paths parse MQTT topics, QoS or
+  ClientID, and Jul.IA does not provide MQTT-aware health checks or routing.
 
 ---
 
