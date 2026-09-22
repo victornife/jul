@@ -22,6 +22,114 @@ func assertCapabilityClass(t *testing.T, got capability, want AssessmentClass) {
 	}
 }
 
+func TestClassifyProxyCachePath(t *testing.T) {
+	tests := []struct {
+		name   string
+		params []string
+		want   AssessmentClass
+	}{
+		{"valid", []string{"/var/cache", "keys_zone=z:10m"}, AssessmentSupported},
+		{"missing keys_zone", []string{"/var/cache"}, AssessmentBlocking},
+		{"empty path", []string{"", "keys_zone=z:10m"}, AssessmentBlocking},
+		{"variable path", []string{"$var", "keys_zone=z:10m"}, AssessmentBlocking},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertCapabilityClass(t, classifyProxyCachePath(tt.params), tt.want)
+		})
+	}
+}
+
+func TestClassifyProxyCache(t *testing.T) {
+	tests := []struct {
+		name   string
+		params []string
+		want   AssessmentClass
+	}{
+		{"missing", nil, AssessmentBlocking},
+		{"blank", []string{""}, AssessmentBlocking},
+		{"off", []string{"off"}, AssessmentIgnored},
+		{"variable", []string{"$cache_zone"}, AssessmentBlocking},
+		{"named zone", []string{"my_zone"}, AssessmentSupported},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertCapabilityClass(t, classifyProxyCache(tt.params), tt.want)
+		})
+	}
+}
+
+func TestClassifyProxyCacheValid(t *testing.T) {
+	tests := []struct {
+		name   string
+		params []string
+		want   AssessmentClass
+	}{
+		{"bare time", []string{"10m"}, AssessmentApproximated},
+		{"default codes", []string{"200", "302", "5m"}, AssessmentApproximated},
+		{"any keyword", []string{"any", "1m"}, AssessmentBlocking},
+		{"non-default code", []string{"404", "1m"}, AssessmentBlocking},
+		{"malformed", nil, AssessmentBlocking},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertCapabilityClass(t, classifyProxyCacheValid(tt.params), tt.want)
+		})
+	}
+}
+
+func TestClassifyLocationDuration(t *testing.T) {
+	tests := []struct {
+		name   string
+		params []string
+		want   AssessmentClass
+	}{
+		{"valid", []string{"5s"}, AssessmentSupported},
+		{"missing", nil, AssessmentBlocking},
+		{"malformed", []string{"nope"}, AssessmentBlocking},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyLocationDuration("proxy_read_timeout", "NGX_LOCATION_PROXY_READ_TIMEOUT", tt.params)
+			assertCapabilityClass(t, got, tt.want)
+		})
+	}
+}
+
+func TestClassifyProxyNextUpstreamTries(t *testing.T) {
+	tests := []struct {
+		name   string
+		params []string
+		want   AssessmentClass
+	}{
+		{"missing", nil, AssessmentBlocking},
+		{"not a number", []string{"nope"}, AssessmentBlocking},
+		{"unlimited", []string{"0"}, AssessmentBlocking},
+		{"no retry", []string{"1"}, AssessmentBlocking},
+		{"explicit bound", []string{"3"}, AssessmentApproximated},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertCapabilityClass(t, classifyProxyNextUpstreamTries(tt.params), tt.want)
+		})
+	}
+}
+
+func TestAllStringsSame(t *testing.T) {
+	if !allStringsSame(nil) {
+		t.Error("nil should be vacuously true")
+	}
+	if !allStringsSame([]string{"a"}) {
+		t.Error("single element should be true")
+	}
+	if !allStringsSame([]string{"a", "a", "a"}) {
+		t.Error("identical elements should be true")
+	}
+	if allStringsSame([]string{"a", "b"}) {
+		t.Error("differing elements should be false")
+	}
+}
+
 func TestClassifyRealIP(t *testing.T) {
 	tests := []struct {
 		name      string
