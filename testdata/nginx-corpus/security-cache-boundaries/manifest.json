@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "security-cache-boundaries",
   "tier": "core",
-  "description": "Security and cache boundary fixture proving TLS references and gzip are visible while authentication, ACLs, request limits, rate limiting, and NGINX cache policy remain blocking.",
+  "description": "Security and cache boundary fixture proving TLS references and gzip are visible while authentication, ACLs, request limits, rate limiting remain blocking, and a proxy_cache referencing an undeclared zone is rejected as a cache-zone conflict rather than silently enabled.",
   "origin": {
     "kind": "repository_authored",
     "license": "AGPL-3.0-only",
@@ -166,6 +166,14 @@
       {
         "source": "nginx.conf",
         "code": "NGX_LOCATION_CACHE",
+        "class": "supported",
+        "risk": "security",
+        "context": "location",
+        "directive": "proxy_cache"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_CACHE_ZONE_CONFLICT",
         "class": "blocking",
         "risk": "security",
         "context": "location",

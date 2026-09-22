@@ -8,6 +8,7 @@ package nginx
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 )
@@ -220,6 +221,256 @@ http {
 	}
 	if len(rep.Notes) == 0 {
 		t.Error("expected a note about the omitted down server")
+	}
+}
+
+func TestTranslateUpstreamConsistentMaxFailsAndFailTimeout(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  upstream pool {
+    server a:80 max_fails=2 fail_timeout=5s;
+    server b:80 max_fails=2 fail_timeout=5s;
+  }
+}`)
+	u := cfg.Upstreams[0]
+	if u.Resilience == nil {
+		t.Fatalf("expected a Resilience block, got nil")
+	}
+	if u.Resilience.MaxFails != 2 {
+		t.Errorf("MaxFails: got %d want 2", u.Resilience.MaxFails)
+	}
+	if u.Resilience.FailTimeout.Std() != 5*time.Second {
+		t.Errorf("FailTimeout: got %s want 5s", u.Resilience.FailTimeout.Std())
+	}
+	for _, n := range rep.Notes {
+		if strings.Contains(n, "declare different") {
+			t.Errorf("unexpected disagreement note for consistent backends: %q", n)
+		}
+	}
+}
+
+func TestTranslateUpstreamInconsistentMaxFailsAndFailTimeoutKeepsDefault(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  upstream pool {
+    server a:80 max_fails=2 fail_timeout=5s;
+    server b:80 max_fails=5 fail_timeout=9s;
+  }
+}`)
+	u := cfg.Upstreams[0]
+	if u.Resilience != nil {
+		t.Errorf("expected no Resilience block when backends disagree, got %+v", u.Resilience)
+	}
+	found := 0
+	for _, n := range rep.Notes {
+		if strings.Contains(n, "declare different") {
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("expected 2 disagreement notes (max_fails and fail_timeout), got %d: %+v", found, rep.Notes)
+	}
+}
+
+func TestTranslateUpstreamFailTimeoutOnlyConsistent(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  upstream pool {
+    server a:80 fail_timeout=5s;
+    server b:80 fail_timeout=5s;
+  }
+}`)
+	u := cfg.Upstreams[0]
+	if u.Resilience == nil || u.Resilience.FailTimeout.Std() != 5*time.Second {
+		t.Fatalf("expected FailTimeout=5s with no max_fails set, got %+v", u.Resilience)
+	}
+	if u.Resilience.MaxFails != 0 {
+		t.Errorf("expected MaxFails unset (0), got %d", u.Resilience.MaxFails)
+	}
+}
+
+func TestServerSpecFromParamsMaxFailsAndFailTimeout(t *testing.T) {
+	s := serverSpecFromParams([]string{"10.0.0.1:80", "weight=2", "max_fails=3", "fail_timeout=15s"}, 12)
+	if s.addr != "10.0.0.1:80" || s.weight != 2 {
+		t.Fatalf("addr/weight: got %+v", s)
+	}
+	if !s.hasMaxFails || s.maxFails != 3 {
+		t.Errorf("maxFails: got %+v", s)
+	}
+	if !s.hasFailTimeout || s.failTimeout.Std() != 15*time.Second {
+		t.Errorf("failTimeout: got %+v", s)
+	}
+	down := serverSpecFromParams([]string{"10.0.0.1:80", "down", "max_fails=bad", "fail_timeout=bad"}, 1)
+	if !down.down {
+		t.Errorf("expected down=true, got %+v", down)
+	}
+	if down.hasMaxFails || down.hasFailTimeout {
+		t.Errorf("malformed max_fails/fail_timeout must not set has*, got %+v", down)
+	}
+}
+
+func TestTranslateCacheSingleZoneConsistent(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m max_size=100m;
+  server {
+    listen 80;
+    location / {
+      proxy_pass http://backend;
+      proxy_cache z;
+      proxy_cache_valid 200 302 10m;
+    }
+  }
+}`)
+	if !cfg.Cache.Enabled || cfg.Cache.DiskPath != "/var/cache/jul" {
+		t.Fatalf("cache: got %+v", cfg.Cache)
+	}
+	if cfg.Cache.DiskMaxSize != config.Size(100<<20) {
+		t.Errorf("DiskMaxSize: got %d want %d", cfg.Cache.DiskMaxSize, config.Size(100<<20))
+	}
+	if cfg.Cache.DefaultTTL.Std() != 10*time.Minute {
+		t.Errorf("DefaultTTL: got %s want 10m", cfg.Cache.DefaultTTL.Std())
+	}
+	if !onlyServer(t, cfg).Locations[0].Cache {
+		t.Error("expected the location's cache toggle to be enabled")
+	}
+	if len(rep.Skipped) != 0 {
+		t.Errorf("expected no skips, got %+v", rep.Skipped)
+	}
+}
+
+func TestTranslateCacheProxyCacheValidAtServerLevel(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m;
+  server {
+    listen 80;
+    proxy_cache_valid 5m;
+    location / {
+      proxy_pass http://backend;
+      proxy_cache z;
+    }
+  }
+}`)
+	if cfg.Cache.DefaultTTL.Std() != 5*time.Minute {
+		t.Errorf("DefaultTTL: got %s want 5m (from the server-level proxy_cache_valid)", cfg.Cache.DefaultTTL.Std())
+	}
+}
+
+func TestTranslateCacheUndeclaredZoneIsSkipped(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      proxy_pass http://backend;
+      proxy_cache undeclared;
+    }
+  }
+}`)
+	if cfg.Cache.Enabled {
+		t.Fatalf("expected cache disabled, got %+v", cfg.Cache)
+	}
+	if onlyServer(t, cfg).Locations[0].Cache {
+		t.Error("expected the location's cache toggle to stay disabled")
+	}
+	if !hasSkip(rep, "no matching proxy_cache_path declaration") {
+		t.Errorf("expected an undeclared-zone skip, got %+v", rep.Skipped)
+	}
+}
+
+func TestTranslateCacheOffAndDynamicAreIgnored(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m;
+  server {
+    listen 80;
+    location /off {
+      proxy_pass http://backend;
+      proxy_cache off;
+    }
+    location /dyn {
+      proxy_pass http://backend;
+      proxy_cache $cache_zone;
+    }
+  }
+}`)
+	for _, l := range onlyServer(t, cfg).Locations {
+		if l.Cache {
+			t.Errorf("location %s: expected cache disabled, got enabled", l.Match.Path)
+		}
+	}
+}
+
+func TestTranslateCacheDuplicateZoneDeclarationSkipped(t *testing.T) {
+	_, rep := translate(t, `
+http {
+  proxy_cache_path /var/cache/a keys_zone=z:10m;
+  proxy_cache_path /var/cache/b keys_zone=z:5m;
+  server {
+    listen 80;
+    location / {
+      proxy_pass http://backend;
+      proxy_cache z;
+    }
+  }
+}`)
+	if !hasSkip(rep, "duplicate proxy_cache_path") {
+		t.Errorf("expected a duplicate-zone skip, got %+v", rep.Skipped)
+	}
+}
+
+func TestTranslateCacheInvalidZoneDeclarationSkipped(t *testing.T) {
+	_, rep := translate(t, `
+http {
+  proxy_cache_path /var/cache/jul;
+  server { listen 80; location / { proxy_pass http://backend; } }
+}`)
+	if !hasSkip(rep, "proxy_cache_path is missing a path or a valid keys_zone") {
+		t.Errorf("expected an invalid-declaration skip, got %+v", rep.Skipped)
+	}
+}
+
+func TestTranslateCacheHTTPLevelProxyCacheValid(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m;
+  proxy_cache_valid 15m;
+  server {
+    listen 80;
+    location / {
+      proxy_pass http://backend;
+      proxy_cache z;
+    }
+  }
+}`)
+	if cfg.Cache.DefaultTTL.Std() != 15*time.Minute {
+		t.Errorf("DefaultTTL: got %s want 15m (from the http-level proxy_cache_valid)", cfg.Cache.DefaultTTL.Std())
+	}
+}
+
+func TestTranslateCacheBareProxyCacheAndInvalidValidAreIgnoredByCollectors(t *testing.T) {
+	// A bare proxy_cache with no argument and an unrepresentable
+	// proxy_cache_valid form must not panic or register as a use/TTL
+	// candidate; the location's own directive loop still reports the bare
+	// proxy_cache generically since it has no zone name to act on.
+	cfg, _ := translate(t, `
+http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m;
+  server {
+    listen 80;
+    location / {
+      proxy_pass http://backend;
+      proxy_cache;
+      proxy_cache_valid any 1m;
+    }
+  }
+}`)
+	if cfg.Cache.Enabled {
+		t.Fatalf("expected cache disabled (no valid proxy_cache use), got %+v", cfg.Cache)
+	}
+	if onlyServer(t, cfg).Locations[0].Cache {
+		t.Error("expected the location's cache toggle to stay disabled")
 	}
 }
 
@@ -449,6 +700,114 @@ http {
 	}
 	if !hasNote(rep, "trailing slash dropped") {
 		t.Errorf("expected trailing-slash note, notes=%v", rep.Notes)
+	}
+}
+
+func TestTranslateProxyPassRetainedPathWarnsAboutPrependSemantics(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location /api { proxy_pass http://backend/v2; }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	if got := s.Locations[0].ProxyPass; got != "http://backend/v2" {
+		t.Errorf("proxy_pass: got %q want http://backend/v2", got)
+	}
+	if !hasNote(rep, "prepends it to the client's full incoming request path") {
+		t.Errorf("expected a prepend-semantics note, notes=%v", rep.Notes)
+	}
+}
+
+func TestTranslateLocationProxyTimeouts(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      proxy_pass http://backend;
+      proxy_connect_timeout 2s;
+      proxy_read_timeout 5s;
+      proxy_send_timeout 7s;
+    }
+  }
+}`)
+	l := onlyServer(t, cfg).Locations[0]
+	if l.ProxyConnectTimeout.Std() != 2*time.Second {
+		t.Errorf("ProxyConnectTimeout: got %s want 2s", l.ProxyConnectTimeout.Std())
+	}
+	if l.ProxyReadTimeout.Std() != 5*time.Second {
+		t.Errorf("ProxyReadTimeout: got %s want 5s", l.ProxyReadTimeout.Std())
+	}
+	if l.ProxySendTimeout.Std() != 7*time.Second {
+		t.Errorf("ProxySendTimeout: got %s want 7s", l.ProxySendTimeout.Std())
+	}
+}
+
+func TestTranslateLocationProxyTimeoutsMalformedAreSkipped(t *testing.T) {
+	for _, tt := range []struct {
+		directive string
+		skipWant  string
+	}{
+		{"proxy_connect_timeout", "proxy_connect_timeout is not a representable duration"},
+		{"proxy_read_timeout", "proxy_read_timeout is not a representable duration"},
+		{"proxy_send_timeout", "proxy_send_timeout is not a representable duration"},
+	} {
+		t.Run(tt.directive, func(t *testing.T) {
+			_, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      proxy_pass http://backend;
+      `+tt.directive+` nope;
+    }
+  }
+}`)
+			if !hasSkip(rep, tt.skipWant) {
+				t.Errorf("expected a skip finding, got %+v", rep.Skipped)
+			}
+		})
+	}
+}
+
+func TestTranslateProxyNextUpstreamTriesExplicitBound(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      proxy_pass http://backend;
+      proxy_next_upstream_tries 3;
+    }
+  }
+}`)
+	l := onlyServer(t, cfg).Locations[0]
+	if l.Resilience == nil || l.Resilience.RetryAttempts != 2 {
+		t.Errorf("Resilience: got %+v want RetryAttempts=2", l.Resilience)
+	}
+}
+
+func TestTranslateProxyNextUpstreamTriesAmbiguousFormsSkipped(t *testing.T) {
+	for _, n := range []string{"0", "1"} {
+		cfg, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      proxy_pass http://backend;
+      proxy_next_upstream_tries `+n+`;
+    }
+  }
+}`)
+		l := onlyServer(t, cfg).Locations[0]
+		if l.Resilience != nil {
+			t.Errorf("tries=%s: expected no Resilience block, got %+v", n, l.Resilience)
+		}
+		if !hasSkip(rep, "proxy_next_upstream_tries") {
+			t.Errorf("tries=%s: expected a skip finding, got %+v", n, rep.Skipped)
+		}
 	}
 }
 

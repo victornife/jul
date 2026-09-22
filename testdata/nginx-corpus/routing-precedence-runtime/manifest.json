@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "id": "routing-precedence-runtime",
+  "tier": "core",
+  "description": "Real NGINX-vs-Jul migration E2E fixture (#365) covering the exact/prefix/regex/root location-precedence order and a method predicate, proxied through a real Jul instance.",
+  "origin": {
+    "kind": "repository_authored",
+    "license": "AGPL-3.0-only",
+    "source": "victornife/jul#365"
+  },
+  "categories": [
+    "core-http-routing"
+  ],
+  "build_tags": [
+    "importer"
+  ],
+  "root": "nginx/nginx.conf",
+  "follow_includes": false,
+  "expected_assessment": {
+    "status": "ready_for_review",
+    "ready": true,
+    "complete": true,
+    "files_read": 1,
+    "sources": [
+      "nginx.conf"
+    ],
+    "results": [
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_EVENTS",
+        "class": "informational",
+        "risk": "operational",
+        "context": "main",
+        "directive": "events"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_HTTP",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "http"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "server",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_NAME",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "server_name"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LOCATION",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "location",
+        "count": 5
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_RETURN",
+        "class": "supported",
+        "risk": "routing",
+        "context": "location",
+        "directive": "return",
+        "count": 5
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_LIMIT_EXCEPT",
+        "class": "approximated",
+        "risk": "security",
+        "context": "location",
+        "directive": "limit_except"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LIMIT_EXCEPT_DENY",
+        "class": "supported",
+        "risk": "security",
+        "context": "limit_except",
+        "directive": "deny"
+      }
+    ]
+  },
+  "expected_candidate": {
+    "required": true,
+    "contains": [
+      "listen = ':18099'",
+      "methods = ['GET']",
+      "path = '/exact'",
+      "path = '/methods'",
+      "path = '/prefix'",
+      "path = '^/regex/[0-9]+$'",
+      "server_names = ['precedence-runtime.test']",
+      "type = 'exact'",
+      "type = 'regex'"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "exact-tier-wins",
+      "safe": true,
+      "request": { "method": "GET", "path": "/exact", "host": "precedence-runtime.test" },
+      "assert": ["status"],
+      "reference": { "status": 201 },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "prefix-vs-regex-precedence",
+      "safe": true,
+      "request": { "method": "GET", "path": "/prefix/123", "host": "precedence-runtime.test" },
+      "assert": ["status"],
+      "reference": { "status": 202 },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "regex-tier-when-no-prefix-matches",
+      "safe": true,
+      "request": { "method": "GET", "path": "/regex/42", "host": "precedence-runtime.test" },
+      "assert": ["status"],
+      "reference": { "status": 203 },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "root-fallback",
+      "safe": true,
+      "request": { "method": "GET", "path": "/unmatched", "host": "precedence-runtime.test" },
+      "assert": ["status"],
+      "reference": { "status": 204 },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "method-predicate-allowed",
+      "safe": true,
+      "request": { "method": "GET", "path": "/methods", "host": "precedence-runtime.test" },
+      "assert": ["status"],
+      "reference": { "status": 205 },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "method-predicate-excluded-falls-through",
+      "safe": true,
+      "side_effect_free": true,
+      "request": { "method": "POST", "path": "/methods", "host": "precedence-runtime.test" },
+      "assert": ["status"],
+      "reference": { "status": 403 },
+      "jul": { "status": 204 },
+      "expected_verdict": "expected_difference",
+      "expected_difference_code": "NGX_LOCATION_LIMIT_EXCEPT"
+    }
+  ]
+}

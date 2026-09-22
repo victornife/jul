@@ -5,19 +5,25 @@
       "id": "cache-compression",
       "status": "represented",
       "fixtures": [
+        "cache-runtime",
+        "compression-runtime",
         "security-cache-boundaries"
       ],
       "evidence": [
+        "NGX_HTTP_CACHE_PATH",
         "NGX_HTTP_GZIP",
-        "NGX_LOCATION_CACHE"
+        "NGX_LOCATION_CACHE",
+        "NGX_LOCATION_CACHE_VALID",
+        "issue #365 real-Jul gzip engagement + decoded-content E2E",
+        "issue #365 real-Jul stateful cache MISS/HIT/BYPASS E2E"
       ],
-      "rationale": "The corpus proves direct gzip classification and an explicit blocking NGINX cache-policy boundary. This is migration evidence, not a stateful cache conformance suite.",
+      "rationale": "The corpus proves direct gzip classification, a real-backend Jul gzip engagement/decoded-content E2E (#365), and the bounded proxy_cache_path/proxy_cache -> Jul [cache] translation: exactly one declared cache zone referenced consistently by every proxy_cache in the file translates onto Jul's single process-wide cache (cache-runtime, with a real MISS/HIT/no-store-BYPASS E2E), while an undeclared or multi-zone reference is rejected as a synthetic NGX_CACHE_ZONE_CONFLICT rather than silently guessed (security-cache-boundaries).",
       "deferred_dimensions": [
-        "decoded compression-byte parity",
-        "shared/distributed cache directives",
-        "stateful cache/Vary/range replay"
+        "Vary/Range/stale-serving cache dimensions (already covered by internal/handler's own dedicated cache test suite; runtime behavior independent of anything the importer translates, so re-proving it here would be confirmatory, not migration-specific)",
+        "proxy_cache_bypass/proxy_no_cache/proxy_cache_key (expression-driven; not statically representable)",
+        "shared/distributed cache directives (multiple proxy_cache_path zones - a genuine architectural mismatch with Jul's single process-wide cache, not a scope gap)"
       ],
-      "revisit_trigger": "Add a selected-dimension fixture only when deterministic cache reset/state orchestration or a concrete migration incident justifies the maintenance cost."
+      "revisit_trigger": "Revisit only if Jul's cache model itself grows multiple named zones; the single-zone bounded translation already covers the representable case."
     },
     {
       "id": "core-http-routing",
@@ -26,12 +32,20 @@
         "approximate-alias",
         "blocking-dynamic-proxy",
         "core-multifile-return",
-        "routing-cors-policy"
+        "proxy-pass-uri-runtime",
+        "routing-cors-policy",
+        "routing-precedence-runtime",
+        "websocket-runtime"
       ],
-      "rationale": "Core fixtures cover multi-file servers, exact/prefix/regex locations, static files, returns, redirects, method constraints, response headers, CORS, and safe blocking of dynamic proxy targets.",
+      "evidence": [
+        "issue #365 pinned real-NGINX reference confirmation for the precedence order",
+        "issue #365 real-Jul H1 WebSocket upgrade/echo/close E2E",
+        "issue #365 real-Jul exact/prefix/regex/root location-precedence E2E",
+        "issue #365 real-Jul proxy_pass URI prepend-vs-location-prefix-replacement E2E"
+      ],
+      "rationale": "Core fixtures cover multi-file servers, exact/prefix/regex/root location-precedence order proven through both a real Jul instance and the pinned real-NGINX reference container (#365), static files, returns, redirects, method constraints, response headers, CORS, safe blocking of dynamic proxy targets, H1 WebSocket migration evidence through a real backend, and a real-Jul E2E precisely characterizing proxy_pass URI-rewriting semantics: nginx strips the matched location prefix and replaces it with the proxy_pass path, while Jul's proxy (net/http/httputil.ProxyRequest.SetURL) always prepends the proxy_pass path to the client's full incoming request path without stripping anything first. H2/H3 Extended CONNECT WebSocket remains explicitly out of scope (#435).",
       "deferred_dimensions": [
-        "full NGINX location-precedence cross-product",
-        "proxy_pass URI edge matrix beyond the classified approximation",
+        "full NGINX location-precedence cross-product beyond the four-tier order already proven",
         "rewrite control-flow beyond static supported flags"
       ],
       "revisit_trigger": "Expand when a supported importer mapping changes or a representative source estate exposes a routing distinction not already classified."
@@ -104,15 +118,24 @@
       "status": "represented",
       "fixtures": [
         "blocking-dynamic-proxy",
+        "timeout-runtime",
         "unix-http-upstream",
-        "upstream-weighted"
+        "upstream-failover-runtime",
+        "upstream-weighted",
+        "upstream-weighted-runtime"
       ],
-      "rationale": "The corpus covers named weighted upstreams, least-connections translation, ignored connection-pool tuning, proxy routing, blocking variable-derived destinations, and a real NGINX/Jul named HTTP upstream served over a Unix-domain socket (#407).",
+      "evidence": [
+        "issue #365 real-Jul deterministic weighted-round-robin distribution E2E",
+        "issue #365 real-Jul passive-failover/circuit-breaker E2E",
+        "issue #365 real-Jul proxy_connect_timeout/proxy_read_timeout enforcement E2E"
+      ],
+      "rationale": "The corpus covers named weighted upstreams, least-connections translation, ignored connection-pool tuning, proxy routing, blocking variable-derived destinations, a real Unix-socket HTTP upstream (#407), a real-Jul weighted-round-robin E2E proving the exact 3:1 distribution (#365), the bounded per-backend max_fails/fail_timeout -> upstream-wide [upstreams.resilience] translation with a real-Jul passive-failover E2E (#365), the proxy_connect_timeout/proxy_read_timeout -> location translation with a real-Jul E2E proving a stalling backend is cut off at the configured bound (504, #365), and the bounded proxy_next_upstream_tries -> retry_attempts translation (an explicit bound of 2+ only; nginx's 0/1 forms collide with Jul's retry_attempts=0 \"inherit\" sentinel and stay blocking).",
       "deferred_dimensions": [
         "WebSocket/gRPC upstream runtime replay",
         "active-health migration replay",
         "backend TLS/private-CA migration replay",
-        "retry/circuit migration replay beyond the dedicated product-level resilience evidence"
+        "circuit-breaker recovery/half-open-probe migration replay beyond the dedicated product-level resilience evidence",
+        "proxy_next_upstream_tries real-E2E (translation is unit-tested; a dedicated retry-count E2E is deferred as confirmatory of the already-proven passive-failover retry mechanism)"
       ],
       "revisit_trigger": "Expand after a stable runtime contract and a deterministic local backend can assert one additional migration semantic without becoming a general gateway conformance suite."
     }

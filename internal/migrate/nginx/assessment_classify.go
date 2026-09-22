@@ -31,7 +31,13 @@ type walkFacts struct {
 	// streamIsUDP is true when a stream server block's listen directive
 	// carries the udp token. It gates the standalone outbound `proxy_protocol`
 	// directive, which Jul only supports for tcp streams.
-	streamIsUDP bool
+	streamIsUDP bool // upstreamMaxFailsConsistent and upstreamFailTimeoutConsistent are true
+	// when every server in the enclosing upstream block that specifies
+	// max_fails (respectively fail_timeout) agrees on the same value. Jul's
+	// circuit breaker is upstream-wide, not per-backend, so a disagreement
+	// cannot be translated without silently picking one backend's threshold.
+	upstreamMaxFailsConsistent    bool
+	upstreamFailTimeoutConsistent bool
 }
 
 func (w *assessmentWalker) walk(context AssessmentContext, d ngx.IDirective, facts walkFacts) {
@@ -64,6 +70,8 @@ func (w *assessmentWalker) walk(context AssessmentContext, d ngx.IDirective, fac
 		locationFacts.httpProxyProtocolUsable = serverHasUsableHTTPProxyProtocolIdentity(kids)
 	case childContext == ContextStream && d.GetName() == "server":
 		locationFacts.streamIsUDP = streamServerListenIsUDP(kids)
+	case childContext == ContextUpstream:
+		locationFacts.upstreamMaxFailsConsistent, locationFacts.upstreamFailTimeoutConsistent = upstreamFailoverConsistency(kids)
 	}
 	seenListen := false
 	for _, child := range kids {
@@ -102,6 +110,20 @@ func classifyDirective(context AssessmentContext, d ngx.IDirective, facts walkFa
 			return classifyTLSProtocols(params)
 		case context == ContextLocation && name == "proxy_pass":
 			return classifyProxyPass(params)
+		case context == ContextHTTP && name == "proxy_cache_path":
+			return classifyProxyCachePath(params)
+		case context == ContextLocation && name == "proxy_cache":
+			return classifyProxyCache(params)
+		case context == ContextLocation && name == "proxy_cache_valid":
+			return classifyProxyCacheValid(params)
+		case context == ContextLocation && name == "proxy_connect_timeout":
+			return classifyLocationDuration("proxy_connect_timeout", "NGX_LOCATION_PROXY_CONNECT_TIMEOUT", params)
+		case context == ContextLocation && name == "proxy_read_timeout":
+			return classifyLocationDuration("proxy_read_timeout", "NGX_LOCATION_PROXY_READ_TIMEOUT", params)
+		case context == ContextLocation && name == "proxy_send_timeout":
+			return classifyLocationDuration("proxy_send_timeout", "NGX_LOCATION_PROXY_SEND_TIMEOUT", params)
+		case context == ContextLocation && name == "proxy_next_upstream_tries":
+			return classifyProxyNextUpstreamTries(params)
 		case context == ContextLocation && name == "return":
 			return classifyReturn(params, false)
 		case context == ContextLocation && name == "rewrite":
@@ -113,7 +135,7 @@ func classifyDirective(context AssessmentContext, d ngx.IDirective, facts walkFa
 		case context == ContextServer && name == "return":
 			return classifyReturn(params, true)
 		case context == ContextUpstream && name == "server":
-			return classifyUpstreamServer(params)
+			return classifyUpstreamServer(params, facts.upstreamMaxFailsConsistent, facts.upstreamFailTimeoutConsistent)
 		case context == ContextServer && name == "location":
 			return classifyLocation(d)
 		default:
@@ -254,6 +276,83 @@ func proxyPassHasURI(v string) bool {
 	return strings.Contains(trimmed, "/")
 }
 
+// classifyProxyCachePath judges a `proxy_cache_path` declaration in
+// isolation: a non-empty, non-variable path and a well-formed
+// keys_zone=name:size token. Whether this zone is the single one actually in
+// consistent use across every location is a whole-file question the
+// translator resolves separately (resolveHTTPCache) and surfaces as a
+// synthetic NGX_CACHE_ZONE_CONFLICT finding when it is not.
+func classifyProxyCachePath(params []string) capability {
+	if _, name, ok := parseCacheZonePath(params); !ok || name == "" {
+		return blocking("NGX_HTTP_CACHE_PATH", RiskPerformance, "proxy_cache_path is missing a path or a valid keys_zone=name:size")
+	}
+	return capabilityRegistry[capabilityKey{ContextHTTP, "proxy_cache_path"}]
+}
+
+// classifyProxyCache judges a location's `proxy_cache <name>;` in isolation.
+// An explicit "off" opts out (matching Jul's default of no per-location
+// cache) and a variable-derived name cannot be resolved statically; any
+// other name is optimistically supported here, the same pattern used for
+// set_real_ip_from/real_ip_header, with cross-location zone-consistency
+// conflicts added afterward as a synthetic finding rather than judged per
+// directive.
+func classifyProxyCache(params []string) capability {
+	if len(params) == 0 || strings.TrimSpace(params[0]) == "" {
+		return blocking("NGX_LOCATION_CACHE_MISSING", RiskSecurity, "proxy_cache has no zone name")
+	}
+	name := strings.TrimSpace(params[0])
+	if name == "off" {
+		return ignored("NGX_LOCATION_CACHE_OFF", RiskSecurity, "explicit proxy_cache off matches Jul's default of no per-location cache")
+	}
+	if strings.Contains(name, "$") {
+		return blocking("NGX_LOCATION_CACHE_DYNAMIC", RiskSecurity, "variable-derived cache zone selection is not translated")
+	}
+	return capabilityRegistry[capabilityKey{ContextLocation, "proxy_cache"}]
+}
+
+// classifyProxyCacheValid recognizes the bounded proxy_cache_valid forms Jul's
+// single default_ttl can represent, reusing parseSimpleCacheValidTime so the
+// assessment and the translator can never disagree about which forms
+// resolve.
+func classifyProxyCacheValid(params []string) capability {
+	if _, ok := parseSimpleCacheValidTime(params); !ok {
+		return blocking("NGX_LOCATION_CACHE_VALID_UNSUPPORTED", RiskPerformance, "proxy_cache_valid uses per-status-code times, the \"any\" keyword, or a malformed time; Jul has one default_ttl")
+	}
+	return capabilityRegistry[capabilityKey{ContextLocation, "proxy_cache_valid"}]
+}
+
+// classifyLocationDuration judges an HTTP location's proxy_connect_timeout/
+// proxy_read_timeout/proxy_send_timeout, reusing the same nginx duration
+// parser as the stream equivalents so the assessment and translator can never
+// disagree about which forms resolve.
+func classifyLocationDuration(directive, code string, params []string) capability {
+	if len(params) == 0 {
+		return blocking(code, RiskAvailability, "duration value is missing")
+	}
+	if _, ok := parseNginxDuration(params[0]); !ok {
+		return blocking(code, RiskAvailability, "duration value is not representable (supported units: ms, s, m, h)")
+	}
+	return capabilityRegistry[capabilityKey{ContextLocation, directive}]
+}
+
+// classifyProxyNextUpstreamTries judges proxy_next_upstream_tries: only an
+// explicit bound of 2 or more is representable, since Jul's retry_attempts=0
+// means "inherit the pool default", not an explicit zero, so nginx's 0
+// (unlimited) and 1 (no retry) cannot be distinguished from it.
+func classifyProxyNextUpstreamTries(params []string) capability {
+	if len(params) == 0 {
+		return blocking("NGX_LOCATION_RETRY_ATTEMPTS", RiskAvailability, "proxy_next_upstream_tries has no value")
+	}
+	n, err := strconv.Atoi(params[0])
+	if err != nil {
+		return blocking("NGX_LOCATION_RETRY_ATTEMPTS", RiskAvailability, "proxy_next_upstream_tries is not a whole number")
+	}
+	if n < 2 {
+		return blocking("NGX_LOCATION_RETRY_ATTEMPTS", RiskAvailability, "0 (unlimited) and 1 (no retry) cannot be distinguished from Jul's retry_attempts=0, which means \"inherit the pool default\"")
+	}
+	return capabilityRegistry[capabilityKey{ContextLocation, "proxy_next_upstream_tries"}]
+}
+
 func classifyReturn(params []string, serverLevel bool) capability {
 	if len(params) == 0 {
 		return blocking("NGX_RETURN_MALFORMED", RiskRouting, "return directive has no status or target")
@@ -334,7 +433,7 @@ func classifyLimitExcept(d ngx.IDirective, params []string) capability {
 	return capabilityRegistry[capabilityKey{ContextLocation, "limit_except"}]
 }
 
-func classifyUpstreamServer(params []string) capability {
+func classifyUpstreamServer(params []string, maxFailsConsistent, failTimeoutConsistent bool) capability {
 	if len(params) == 0 || strings.TrimSpace(params[0]) == "" {
 		return blocking("NGX_UPSTREAM_SERVER", RiskAvailability, "upstream server has no address")
 	}
@@ -346,11 +445,62 @@ func classifyUpstreamServer(params []string) capability {
 			}
 		case p == "down":
 			return approximated("NGX_UPSTREAM_SERVER_DOWN", RiskAvailability, "backend marked down is omitted from the generated pool")
+		case strings.HasPrefix(p, "max_fails="):
+			if n, err := strconv.Atoi(strings.TrimPrefix(p, "max_fails=")); err != nil || n < 0 {
+				return blocking("NGX_UPSTREAM_SERVER_MAX_FAILS", RiskAvailability, "max_fails is not a non-negative whole number")
+			}
+			if !maxFailsConsistent {
+				return approximated("NGX_UPSTREAM_SERVER_MAX_FAILS", RiskAvailability, "backends in this upstream disagree on max_fails; Jul's circuit breaker is upstream-wide, so its own default was kept")
+			}
+		case strings.HasPrefix(p, "fail_timeout="):
+			if _, ok := parseNginxDuration(strings.TrimPrefix(p, "fail_timeout=")); !ok {
+				return blocking("NGX_UPSTREAM_SERVER_FAIL_TIMEOUT", RiskAvailability, "fail_timeout is not a representable duration")
+			}
+			if !failTimeoutConsistent {
+				return approximated("NGX_UPSTREAM_SERVER_FAIL_TIMEOUT", RiskAvailability, "backends in this upstream disagree on fail_timeout; Jul's circuit breaker is upstream-wide, so its own default was kept")
+			}
 		default:
 			return blocking("NGX_UPSTREAM_SERVER_OPTION", RiskAvailability, "upstream server option is not translated")
 		}
 	}
 	return capabilityRegistry[capabilityKey{ContextUpstream, "server"}]
+}
+
+// upstreamFailoverConsistency scans every "server" directive in an upstream
+// block and reports whether every explicit max_fails value (respectively
+// fail_timeout value) agrees. Jul's circuit breaker is upstream-wide
+// (config.ResilienceConfig), unlike nginx's per-backend max_fails/
+// fail_timeout, so translation is only lossless when there is nothing to
+// disagree about.
+func upstreamFailoverConsistency(kids []ngx.IDirective) (maxFailsConsistent, failTimeoutConsistent bool) {
+	var maxFails []string
+	var failTimeout []string
+	for _, c := range kids {
+		if c.GetName() != "server" {
+			continue
+		}
+		for _, p := range paramValues(c) {
+			switch {
+			case strings.HasPrefix(p, "max_fails="):
+				maxFails = append(maxFails, strings.TrimPrefix(p, "max_fails="))
+			case strings.HasPrefix(p, "fail_timeout="):
+				failTimeout = append(failTimeout, strings.TrimPrefix(p, "fail_timeout="))
+			}
+		}
+	}
+	return allStringsSame(maxFails), allStringsSame(failTimeout)
+}
+
+func allStringsSame(vs []string) bool {
+	if len(vs) == 0 {
+		return true
+	}
+	for _, v := range vs[1:] {
+		if v != vs[0] {
+			return false
+		}
+	}
+	return true
 }
 
 // serverHasUsableHTTPProxyProtocolIdentity reports whether an HTTP server
@@ -617,6 +767,12 @@ func (w *assessmentWalker) addTranslationSynthetic(rep *Report) {
 				"NGX_REALIP_LISTENER_CONFLICT", AssessmentBlocking, AssessmentError, RiskSecurity,
 				ContextServer, "set_real_ip_from", 0,
 				"server blocks sharing a listen address declare incompatible trusted-proxy policies",
+			))
+		case f.Name == "proxy_cache" && strings.Contains(f.Reason, "cache zone"):
+			w.assessment.Results = append(w.assessment.Results, syntheticResult(
+				"NGX_CACHE_ZONE_CONFLICT", AssessmentBlocking, AssessmentError, RiskSecurity,
+				ContextLocation, "proxy_cache", f.Line,
+				f.Reason,
 			))
 		}
 	}

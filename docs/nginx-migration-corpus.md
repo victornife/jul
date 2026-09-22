@@ -60,6 +60,133 @@ for exactly which forms are supported, approximate, or blocking. Real
 NGINX-vs-Jul runtime evidence for these translated forms is #366/#367's
 responsibility, not this issue's.
 
+## Expanded HTTP/upstream/WebSocket/compression migration E2E (#365)
+
+Issue #365 expands the #154 real-Jul runtime evidence with eight more fixtures:
+
+- `routing-precedence-runtime` — proves the exact / longest-non-root-prefix /
+  regex / root location-precedence order end to end, plus a `limit_except`
+  method predicate. This fixture runs against **both** a real Jul instance
+  and the pinned real-NGINX reference container (see
+  `scripts/nginx-migration-e2e.sh`'s `FIXTURE_SPECS`): every reference value
+  in its manifest was captured by running the exact same `nginx.conf` against
+  the pinned image, not guessed. One scenario (`POST /methods`, excluded by
+  `limit_except`) is a confirmed, intentional difference — real NGINX returns
+  403, Jul's route simply does not match and falls through to the next
+  candidate (204) — recorded as `expected_difference` with the existing
+  `NGX_LOCATION_LIMIT_EXCEPT` code, matching the importer's own documented
+  approximation;
+- `upstream-weighted-runtime` — a named upstream with a weighted and a
+  default-weight member proxied to two real local backends; asserts the
+  *exact* smooth-weighted-round-robin distribution (3:1 over 40 requests ⇒
+  30:10) against a real Jul instance, since the algorithm is fully
+  deterministic;
+- `compression-runtime` — `gzip on` proxying to a real backend; the test
+  sets `Accept-Encoding` itself (opting out of Go's transparent
+  decompression) so it can assert `Content-Encoding: gzip` actually engaged
+  against a real Jul instance, then decodes the body to confirm logical
+  content equivalence — the corpus never compares raw compressed bytes;
+- `websocket-runtime` — a real WebSocket upgrade, bidirectional text and
+  binary message exchange, and clean close through a real Jul instance
+  proxying to a real local WebSocket-echoing backend. This is H1 WebSocket
+  migration evidence only; H2/H3 Extended CONNECT WebSocket remains #435's
+  scope, not implemented here;
+- `cache-runtime` — a single `proxy_cache_path` zone referenced consistently
+  by `proxy_cache` translates onto Jul's single process-wide `[cache]`; the
+  test asserts a real `X-Cache: MISS` → `X-Cache: HIT` transition through a
+  real Jul instance and real backend, that the cached response's own
+  `X-Corpus-Backend-Id` header is replayed verbatim on the hit (per the
+  stored-headers contract in `docs/cache.md`), and that a client
+  `Cache-Control: no-store` request gets `X-Cache: BYPASS` without disturbing
+  the already-stored entry;
+- `upstream-failover-runtime` — two backends declaring the same
+  `max_fails`/`fail_timeout` translate onto Jul's upstream-wide
+  `[upstreams.resilience]` circuit breaker; the test proves a backend that
+  refuses every connection is excluded after tripping the breaker, with every
+  client request still succeeding (Jul's default retry-every-distinct-backend
+  behavior masks the failure) against a real Jul instance;
+- `proxy-pass-uri-runtime` — precisely characterizes `proxy_pass` URI-rewriting
+  semantics through a real Jul instance: a location `/api` with
+  `proxy_pass http://pool/v2` turns a client request for `/api/foo` into
+  `/v2/api/foo` at the backend, because Jul's proxy
+  (`net/http/httputil.ProxyRequest.SetURL`) always *prepends* the
+  `proxy_pass` path to the client's full incoming request path rather than
+  stripping the matched location prefix and substituting it, as nginx does.
+  This difference was already flagged (`NGX_LOCATION_PROXY_PASS_URI`,
+  approximated) but had never been proven end to end before this fixture;
+- `timeout-runtime` — proves `proxy_connect_timeout`/`proxy_read_timeout` →
+  Jul's location-level timeouts actually take effect: a backend that stalls
+  before writing any response byte is cut off at the configured 1s
+  `proxy_read_timeout`, and Jul returns a real 504 well before the backend's
+  full 3s delay elapses (`docs/core-http.md`'s `upstream_timeout` → 504
+  mapping). The same commit adds the bounded `proxy_next_upstream_tries` →
+  `retry_attempts` translation (an explicit bound of 2 or more only; nginx's
+  `0`/`1` forms collide with Jul's `retry_attempts = 0` "inherit" sentinel
+  and stay blocking), unit-tested but not separately E2E'd since
+  `upstream-failover-runtime` already proves Jul's retry mechanism works end
+  to end.
+
+The weighted-upstream, compression, WebSocket, cache, upstream-failover,
+proxy_pass-URI, and timeout scenarios live in `cmd/jul/corpus_runtime_test.go`
+rather than a fixture's manifest `scenarios` array, because each needs
+assertions the generic single-request/response Scenario/Dimension model does
+not express (repeated-request distribution counts, raw-header/decoded-body
+inspection, a persistent bidirectional connection, a two-request MISS/HIT
+sequence, a deliberately-never-listening backend, inspecting the exact
+backend-visible request path, and a wall-clock bound on a deliberately
+stalling backend, respectively). `startCorpusTCPBackends` in
+`cmd/jul/import_corpus_test.go` gives any fixture's named-upstream TCP
+members a real local backend for the real-Jul path, the same way
+`startCorpusUnixHTTPBackends` already does for `unix:` addresses.
+
+**Why only `routing-precedence-runtime` runs against the pinned NGINX
+container.** The reference lane's isolation model runs NGINX on an
+`--internal` Docker network with no external connectivity; a fixture with a
+real TCP backend needs that backend reachable from inside NGINX's own network
+namespace, which the pinned lane only currently solves for `unix-http-upstream`
+(a Unix-domain-socket path is just a bind-mounted file, so it needs no network
+namespace sharing at all). Extending that to a TCP backend for the weighted/
+compression/WebSocket fixtures would mean either introducing a second pinned
+sidecar container image (a new supply-chain dependency to justify and pin) or
+running repeated-request/persistent-connection comparisons the reference
+lane's single-request harness (`TestNGINXCorpusReferenceRuntime`) does not
+support today. Both nginx and Jul already document the same "smooth weighted
+round-robin" algorithm, and the compression/WebSocket real-Jul evidence above
+already proves engagement and fidelity directly; a real-NGINX comparison for
+those three would be confirmatory rather than divergence-hunting. This is
+recorded as a deliberate, reasoned scope boundary — not an oversight — and is a
+natural candidate for the heavier, more elaborate reference infrastructure
+#368 already governs for the full/scheduled lane, if a concrete need arises.
+
+Stateful cache E2E (miss/hit/bypass) and passive-failover/circuit-breaker E2E
+are covered by `cache-runtime` and `upstream-failover-runtime` above, once the
+bounded `proxy_cache_path`/`proxy_cache` → `[cache]` and per-backend
+`max_fails`/`fail_timeout` → upstream-wide `[upstreams.resilience]`
+translations were added alongside them. Both translations are deliberately
+bounded to the case that is actually lossless: a single cache zone used
+consistently everywhere, and backends that agree on the same failure
+threshold/open duration. A wider case (multiple cache zones, or disagreeing
+per-backend thresholds) is a genuine architectural mismatch — Jul's cache and
+circuit breaker are process-/pool-wide, not per-zone or per-backend — and is
+left blocking (cache) or approximated with a note (resilience) rather than
+guessed. `security-cache-boundaries` documents the multi/undeclared-zone
+conflict case; see `coverage.json`'s `cache-compression` and
+`upstreams-resiliency` categories for the recorded evidence and any residual
+revisit triggers (e.g. circuit-breaker recovery/half-open-probe replay).
+
+**Cache dimensions deliberately not yet exercised here: `Vary`, `Range`, and
+stale-serving.** `cache-runtime` proves MISS, HIT, and the client-side
+`no-store` bypass — the three dispositions a migrated `proxy_cache` config
+most directly puts at risk of a silent behavior change. `Vary`-keyed
+multi-representation caching, `Range`/`If-Range` bypass, and
+`stale-while-revalidate`/`stale-if-error` serving are already covered by
+`internal/handler`'s own dedicated, extensive cache test suite (see
+`docs/cache.md`'s shared-cache contract table) and are runtime behavior
+independent of anything the importer translates — proving them again through
+the migration corpus would be confirmatory of already-tested runtime
+behavior, not migration-specific evidence, so they are left to that existing
+suite rather than duplicated here.
+
 ## Corpus admission policy
 
 Core fixtures are repository-authored or generated from repository-owned source.

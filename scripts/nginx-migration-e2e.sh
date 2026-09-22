@@ -11,6 +11,7 @@ readonly -a FIXTURE_SPECS=(
 	"core-multifile-return:18080"
 	"routing-cors-policy:18084"
 	"unix-http-upstream:18086"
+	"routing-precedence-runtime:18099"
 )
 
 mkdir -p "${ARTIFACT_DIR}"
@@ -260,7 +261,9 @@ cat >"${ARTIFACT_DIR}/result.txt" <<'EOF_RESULT'
 reference_passed: core-multifile-return
 reference_passed: routing-cors-policy
 reference_passed: unix-http-upstream
+reference_passed: routing-precedence-runtime
 expected_difference: core-multifile-return/relative-redirect NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT
 expected_difference: routing-cors-policy/limit-except-post NGX_LOCATION_LIMIT_EXCEPT
+expected_difference: routing-precedence-runtime/method-predicate-excluded-falls-through NGX_LOCATION_LIMIT_EXCEPT
 EOF_RESULT
 cat "${ARTIFACT_DIR}/result.txt"

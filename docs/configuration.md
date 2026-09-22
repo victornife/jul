@@ -744,7 +744,7 @@ proxy_read_timeout = "30s"
 
 | Key | Type | Description |
 | --- | ---- | ----------- |
-| `proxy_pass` | string | `http://upstream-name` or a concrete `http://host:port` |
+| `proxy_pass` | string | `http://upstream-name` or a concrete `http://host:port`. A path component is not a location-prefix replacement: it is prepended to the client's full incoming request path (`net/http/httputil.ProxyRequest.SetURL` semantics) rather than substituted for the matched location prefix |
 | `proxy_connect_timeout` | duration | Connection establishment timeout (default 10s) |
 | `proxy_read_timeout` | duration | Per-read inactivity bound on the upstream response — the maximum gap between successive reads, covering both the headers (time-to-first-byte) and a slow-trickle body. `0` (default) leaves it unbounded. A steadily streaming response is never interrupted while data keeps flowing |
 | `proxy_send_timeout` | duration | Per-write inactivity bound on sending the request to the upstream — the maximum gap between successive writes. `0` (default) leaves it unbounded |

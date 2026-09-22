@@ -21,6 +21,9 @@ type translator struct {
 	// httpRealIP is the http-level realip scope, inherited by every server
 	// block exactly as nginx inherits the directives.
 	httpRealIP realIPPolicy
+	// httpCache is the single globally-resolved proxy_cache zone/TTL for the
+	// whole http block, computed once before any server is translated.
+	httpCache httpCacheResolution
 }
 
 // Translate converts a parsed nginx configuration into a Jul.IA configuration,
@@ -72,6 +75,11 @@ func (t *translator) translateHTTP(d ngx.IDirective, out *config.Config) {
 			t.realIPDirective(c.GetName(), paramValues(c), c.GetLine(), &t.httpRealIP)
 		}
 	}
+	// The cache zone/TTL resolution likewise has to see the whole http block
+	// (every server and location) before any single location's proxy_cache
+	// reference can be judged, so it also runs before the main pass below.
+	t.httpCache = t.resolveHTTPCache(kids)
+	t.applyHTTPCacheConfig(out)
 	for _, c := range kids {
 		switch c.GetName() {
 		case "server":
@@ -86,6 +94,8 @@ func (t *translator) translateHTTP(d ngx.IDirective, out *config.Config) {
 			t.report.skip(c, "include not followed; import each included file separately")
 		case "map", "geo", "split_clients":
 			t.report.skip(c, c.GetName()+" blocks are not supported")
+		case "proxy_cache_path", "proxy_cache_valid":
+			// consumed by the cache pre-pass above
 		default:
 			if isRealIPDirective(c.GetName()) {
 				continue // consumed in the pre-pass above
@@ -264,6 +274,47 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 			if len(cp) > 0 {
 				loc.ProxyPass = translateProxyPass(cp[0], &t.report, c.GetLine())
 			}
+		case "proxy_connect_timeout":
+			if len(cp) > 0 {
+				if d, ok := parseNginxDuration(cp[0]); ok {
+					loc.ProxyConnectTimeout = d
+				} else {
+					t.report.skip(c, "proxy_connect_timeout is not a representable duration")
+				}
+			}
+		case "proxy_read_timeout":
+			if len(cp) > 0 {
+				if d, ok := parseNginxDuration(cp[0]); ok {
+					loc.ProxyReadTimeout = d
+				} else {
+					t.report.skip(c, "proxy_read_timeout is not a representable duration")
+				}
+			}
+		case "proxy_send_timeout":
+			if len(cp) > 0 {
+				if d, ok := parseNginxDuration(cp[0]); ok {
+					loc.ProxySendTimeout = d
+				} else {
+					t.report.skip(c, "proxy_send_timeout is not a representable duration")
+				}
+			}
+		case "proxy_next_upstream_tries":
+			if len(cp) > 0 {
+				// nginx counts the first attempt plus retries as "tries" (0
+				// means unlimited, 1 means no retry). Jul's retry_attempts
+				// counts only the retries after the first, and 0 means
+				// "inherit the pool default" rather than an explicit zero -
+				// so only an explicit bound of 2 or more translates without
+				// silently colliding with that inherit sentinel.
+				if n, err := strconv.Atoi(cp[0]); err == nil && n >= 2 {
+					if loc.Resilience == nil {
+						loc.Resilience = &config.LocationResilienceConfig{}
+					}
+					loc.Resilience.RetryAttempts = n - 1
+				} else {
+					t.report.skip(c, "proxy_next_upstream_tries is only translated for an explicit bound of 2 or more; 0 (unlimited) and 1 (no retry) cannot be distinguished from Jul's retry_attempts=0, which means \"inherit the pool default\"")
+				}
+			}
 		case "fastcgi_pass":
 			if len(cp) > 0 {
 				loc.FastCGIPass = cp[0]
@@ -291,6 +342,12 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 			t.applyAddHeader(&loc, cp, c.GetLine())
 		case "limit_except":
 			t.applyLimitExcept(&loc, c, cp)
+		case "proxy_cache":
+			if len(cp) > 0 {
+				t.applyProxyCache(&loc, cp[0])
+			}
+		case "proxy_cache_valid":
+			// consumed by the http-level cache pre-pass in translateHTTP
 		case "if":
 			t.report.skip(c, "location-level if is not translated")
 		default:
@@ -500,6 +557,8 @@ func (t *translator) translateUpstream(d ngx.IDirective, out *config.Config) {
 	u := config.UpstreamConfig{Name: name}
 	strategy := "round_robin"
 	weighted := false
+	var maxFailsValues []int
+	var failTimeoutValues []config.Duration
 	for _, s := range servers {
 		if s.addr == "" {
 			continue
@@ -512,6 +571,40 @@ func (t *translator) translateUpstream(d ngx.IDirective, out *config.Config) {
 		if s.weight > 1 {
 			weighted = true
 		}
+		if s.hasMaxFails {
+			maxFailsValues = append(maxFailsValues, s.maxFails)
+		}
+		if s.hasFailTimeout {
+			failTimeoutValues = append(failTimeoutValues, s.failTimeout)
+		}
+	}
+	// nginx's max_fails/fail_timeout are per-backend; Jul's circuit breaker is
+	// upstream-wide (config.ResilienceConfig has one MaxFails/FailTimeout for
+	// the whole pool). Only when every backend that specifies a given knob
+	// agrees on the same value is it representable without silently picking
+	// one backend's threshold over another's; a disagreement leaves that one
+	// knob at Jul's own upstream-wide default instead of guessing. The two
+	// knobs are resolved independently since nginx allows either to vary
+	// without the other.
+	if allSameInt(maxFailsValues) {
+		if len(maxFailsValues) > 0 {
+			if u.Resilience == nil {
+				u.Resilience = &config.ResilienceConfig{}
+			}
+			u.Resilience.MaxFails = maxFailsValues[0]
+		}
+	} else {
+		t.report.note("upstream %s: backends declare different max_fails values; Jul's circuit breaker is upstream-wide, so its own default was kept instead of one backend's threshold", name)
+	}
+	if allSameDuration(failTimeoutValues) {
+		if len(failTimeoutValues) > 0 {
+			if u.Resilience == nil {
+				u.Resilience = &config.ResilienceConfig{}
+			}
+			u.Resilience.FailTimeout = failTimeoutValues[0]
+		}
+	} else {
+		t.report.note("upstream %s: backends declare different fail_timeout values; Jul's circuit breaker is upstream-wide, so its own default was kept instead of one backend's threshold", name)
 	}
 	for _, o := range others {
 		switch o.GetName() {
@@ -619,6 +712,9 @@ func translateProxyPass(v string, rep *Report, line int) string {
 	if trimmed != v {
 		rep.note("proxy_pass %q at line %d: trailing slash dropped; nginx rewrites the matched location prefix on a trailing-slash target, which Jul.IA does not — adjust the location/upstream path if needed", v, line)
 	}
+	if proxyPassHasURI(trimmed) {
+		rep.note("proxy_pass %q at line %d: the target path is not a location-prefix replacement - Jul.IA's proxy always prepends it to the client's full incoming request path (net/http/httputil.ProxyRequest.SetURL semantics) rather than first stripping the matched location prefix as nginx does, so the backend-visible path differs whenever the location path does not exactly match the request", v, line)
+	}
 	return trimmed
 }
 
@@ -695,10 +791,42 @@ func minTLSFrom(params []string, rep *Report, line int) string {
 
 // serverSpec is an upstream backend extracted from a `server` directive.
 type serverSpec struct {
-	addr   string
-	weight int
-	down   bool
-	line   int
+	addr           string
+	weight         int
+	down           bool
+	line           int
+	maxFails       int
+	hasMaxFails    bool
+	failTimeout    config.Duration
+	hasFailTimeout bool
+}
+
+// allSameInt reports whether every element of vs is equal (vacuously true for
+// zero or one element).
+func allSameInt(vs []int) bool {
+	if len(vs) == 0 {
+		return true
+	}
+	for _, v := range vs[1:] {
+		if v != vs[0] {
+			return false
+		}
+	}
+	return true
+}
+
+// allSameDuration reports whether every element of vs is equal (vacuously
+// true for zero or one element).
+func allSameDuration(vs []config.Duration) bool {
+	if len(vs) == 0 {
+		return true
+	}
+	for _, v := range vs[1:] {
+		if v != vs[0] {
+			return false
+		}
+	}
+	return true
 }
 
 // topLevelDirectives returns the directives at the root of the configuration.
@@ -790,6 +918,16 @@ func serverSpecFromTyped(us *ngx.UpstreamServer) serverSpec {
 	if w, ok := us.Parameters["weight"]; ok {
 		s.weight = atoiSafe(w)
 	}
+	if mf, ok := us.Parameters["max_fails"]; ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(mf)); err == nil && n >= 0 {
+			s.maxFails, s.hasMaxFails = n, true
+		}
+	}
+	if ft, ok := us.Parameters["fail_timeout"]; ok {
+		if d, ok := parseNginxDuration(ft); ok {
+			s.failTimeout, s.hasFailTimeout = d, true
+		}
+	}
 	for _, f := range us.Flags {
 		if f == "down" {
 			s.down = true
@@ -809,6 +947,14 @@ func serverSpecFromParams(ps []string, line int) serverSpec {
 			s.weight = atoiSafe(strings.TrimPrefix(p, "weight="))
 		case p == "down":
 			s.down = true
+		case strings.HasPrefix(p, "max_fails="):
+			if n, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(p, "max_fails="))); err == nil && n >= 0 {
+				s.maxFails, s.hasMaxFails = n, true
+			}
+		case strings.HasPrefix(p, "fail_timeout="):
+			if d, ok := parseNginxDuration(strings.TrimPrefix(p, "fail_timeout=")); ok {
+				s.failTimeout, s.hasFailTimeout = d, true
+			}
 		}
 	}
 	return s

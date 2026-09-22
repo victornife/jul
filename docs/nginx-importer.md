@@ -151,13 +151,15 @@ the Jul request path.
 
 | Directive | Status | Notes |
 | --- | --- | --- |
-| `proxy_pass` | ✅ | Bare hosts gain `http://`; a trailing URI slash is dropped with an approximation finding. |
+| `proxy_pass` | ✅ (⚠️ with a URI) | Bare hosts gain `http://`; a trailing URI slash is dropped with an approximation finding. Any retained path is not a location-prefix replacement: Jul's proxy (`net/http/httputil.ProxyRequest.SetURL`) always *prepends* it to the client's full incoming request path rather than stripping the matched location prefix first, so the backend-visible path differs from nginx's whenever the location path does not exactly match the request. See `proxy-pass-uri-runtime` in the [migration corpus](nginx-migration-corpus.md) for a real end-to-end proof. |
 | `fastcgi_pass` | ✅ | Maps directly. |
 | `root`, `index`, `try_files` | ✅ | Preserve location overrides. |
 | `alias` | ⚠️ | Maps to `root`; NGINX prefix-stripping semantics differ. |
 | `return` | ✅ | Status and redirect preserved; response body text is not. |
 | `rewrite` | ✅ | Pattern, replacement, and recognized flags are preserved. |
 | `limit_except` | ⚠️ | Only the narrow denial form maps to `match.methods`; excluded requests may become a 404 rather than NGINX's 403. |
+| `proxy_connect_timeout`, `proxy_read_timeout`, `proxy_send_timeout` | ✅ | Direct duration mappings, verified end to end (`timeout-runtime`): a stalling backend is actually cut off at the configured bound and Jul returns 504. |
+| `proxy_next_upstream_tries` | ✅ (bound \u2265 2) / \u274c (0 or 1) | An explicit bound of 2 or more maps to `resilience.retry_attempts = tries - 1`. nginx's `0` (unlimited) and `1` (no retry) cannot be distinguished from Jul's `retry_attempts = 0`, which means "inherit the pool default", so both stay blocking rather than silently becoming an inherited value the source never asked for. |
 | `add_header` | ⚠️ | Static `NAME VALUE always;` maps to response-header/CORS policy. Missing `always` or variable values are blocking. |
 | `if` | ❌ | Never guessed or silently converted. |
 | `include` | ⚠️ | Expanded at the location include point through the bounded resolver. |
@@ -178,12 +180,34 @@ max-age, and wildcard-origin-plus-credentials remain blocking.
 | Directive | Status | Notes |
 | --- | --- | --- |
 | `server` | ✅ | Address and weight preserved; `down` omits the member with a finding. |
+| `server ... max_fails=N fail_timeout=T` | ✅ (consistent) / ⚠️ (disagreeing) | See [passive health (`max_fails`/`fail_timeout`)](#passive-health-max_fails-fail_timeout) below. |
 | `least_conn` | ✅ | Maps to `least_conn`. |
 | `ip_hash`, `hash`, `random` | ⚠️ | Falls back to round robin with review guidance. |
 | `keepalive`, `keepalive_timeout`, `keepalive_requests`, `zone` | ignored | Connection-pool/process tuning. |
 | `include` | ⚠️ | Expanded in upstream context through the bounded resolver. |
 
 An `upstream` block nested inside `stream {}` reuses this exact same translation.
+
+### Passive health (`max_fails`/`fail_timeout`)
+
+nginx's `max_fails`/`fail_timeout` are declared **per backend**; Jul's circuit
+breaker ([`[upstreams.resilience]`](configuration.md#resilience)) is
+**upstream-wide** — one threshold and one open duration for the whole pool.
+Translation is only lossless when every backend that declares these params in
+the same `upstream` block agrees on the same value:
+
+| NGINX | Jul |
+| --- | --- |
+| Every `server` line agreeing on the same `max_fails=N` | `upstreams[].resilience.max_fails = N` |
+| Every `server` line agreeing on the same `fail_timeout=T` | `upstreams[].resilience.fail_timeout = T` |
+| Backends disagreeing on `max_fails` (respectively `fail_timeout`) | ⚠️ that one knob is left at Jul's own default; a note identifies the conflict |
+| A malformed value (negative `max_fails`, unparseable `fail_timeout`) | ❌ |
+
+The two knobs are resolved independently — one can translate while the other
+falls back to Jul's default. Only a genuine *connect* failure (refused
+connection, reset, read/write failure, or timeout) counts against the circuit;
+an in-band 5xx from a live backend does not, matching nginx's own default
+`proxy_next_upstream` scope.
 
 ### `stream` block
 
@@ -281,6 +305,32 @@ An untrusted direct peer can never acquire trusted client identity this way:
 Jul's HTTP listener never emits a broad/default trust range, and validation
 rejects `proxy_protocol = "in"` without a non-empty `trusted_proxies`.
 
+### `proxy_cache` and `proxy_cache_path` (#365)
+
+nginx supports any number of independently named, independently sized cache
+zones (`proxy_cache_path ... keys_zone=name:size`), selected per location
+(`proxy_cache name;`). Jul's response cache
+([`[cache]`](cache.md#configuration)) is a single process-wide store — there
+is no per-location zone concept. Translation is therefore bounded to the case
+where exactly one zone is declared and every `proxy_cache` reference in the
+whole file names that same zone:
+
+| NGINX | Jul |
+| --- | --- |
+| One `proxy_cache_path <path> ... keys_zone=name:size [max_size=size] ...;`, referenced consistently by every `proxy_cache name;` | `[cache].enabled = true`, `disk_path`, `disk_max_size` |
+| `proxy_cache name;` (the resolved zone) | `servers[].locations[].cache = true` |
+| `proxy_cache off;` | ignored — already Jul's default |
+| `proxy_cache_valid [<codes>] <time>;` where `<codes>` is empty or a subset of nginx's own default cacheable set (`200`, `301`, `302`) | `[cache].default_ttl` (approximated: Jul only applies it when the upstream sends no explicit `Cache-Control`/`Expires`, while nginx's own default behavior is comparable but not identical depending on `proxy_ignore_headers`) |
+| More than one distinct zone declared, or a `proxy_cache` referencing an undeclared zone | ❌ — a genuine architectural mismatch, not a scope gap; every offending reference is reported |
+| `proxy_cache_bypass`, `proxy_no_cache`, `proxy_cache_key`, `proxy_ignore_headers` | ❌ — expression-driven or would silently change Jul's always-honored `Cache-Control`/`Expires` behavior |
+| `proxy_cache_min_uses`, `proxy_cache_lock*`, `proxy_cache_background_update` | ignored — no Jul equivalent knob |
+| `proxy_cache_revalidate`, `proxy_cache_use_stale` | ⚠️ — Jul's background revalidation/stale-serving is unconditional and cannot be selectively disabled |
+
+The `keys_zone=name:size` size bounds nginx's in-memory *key/metadata* index,
+a different quantity than Jul's `memory_max_size` (the actual response-data
+cache), so it is deliberately not translated into that field; only `max_size=`
+(the disk-tier data cap) maps to `disk_max_size`.
+
 ## Known limitations
 
 1. **Traversal is explicit, not automatic.** A default import remains
@@ -300,8 +350,11 @@ rejects `proxy_protocol = "in"` without a non-empty `trusted_proxies`.
 6. **Per-virtual-host realip policies cannot be represented on one listener.**
 7. **Named locations such as `@fallback` are not translated.**
 8. **One listen address per Jul server.** Extra NGINX listens are approximate.
-9. **Trailing-slash `proxy_pass`, `alias`, and server-level `return` have
-   documented semantic differences.**
+9. **`proxy_pass` with a URI does not replace the matched location prefix.**
+   nginx strips the matched location prefix and substitutes the `proxy_pass`
+   path; Jul always prepends the `proxy_pass` path to the client's full
+   incoming request path instead. A trailing URI slash on `proxy_pass` and a
+   server-level `return` also have documented semantic differences.
 10. **Source formatting/comments are not preserved.** Provenance belongs to the
     report, not generated TOML.
 

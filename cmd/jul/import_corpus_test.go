@@ -182,6 +182,8 @@ func runRealJulCorpusScenarios(t *testing.T, manifest corpus.Manifest, cfg *conf
 	cfg.Servers[0].Listen = address
 	stopUnixBackends := startCorpusUnixHTTPBackends(t, cfg)
 	defer stopUnixBackends()
+	stopTCPBackends := startCorpusTCPBackends(t, cfg)
+	defer stopTCPBackends()
 	if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
 		t.Fatalf("runtime preflight: %v", err)
 	}
@@ -306,6 +308,73 @@ func startCorpusUnixHTTPBackends(t *testing.T, cfg *config.Config) func() {
 			_ = os.Remove(item.path)
 		}
 	}
+}
+
+// startCorpusTCPBackends gives a fixture's named-upstream TCP members a real
+// local HTTP peer, exactly as startCorpusUnixHTTPBackends does for unix
+// sockets. The fixture declares a stable placeholder address (e.g.
+// 127.0.0.1:1, a port real deployments never target); this reserves a live
+// loopback port, rewrites the upstream member in place, and serves
+// corpusBackendHandler(id) on it, where id is "<upstream>-<member index>" so
+// scenarios can identify which backend answered via X-Corpus-Backend-Id.
+func startCorpusTCPBackends(t *testing.T, cfg *config.Config) func() {
+	t.Helper()
+	type ownedServer struct {
+		ln  net.Listener
+		srv *http.Server
+	}
+	var owned []ownedServer
+	for i := range cfg.Upstreams {
+		for j := range cfg.Upstreams[i].Servers {
+			addr := cfg.Upstreams[i].Servers[j].Address
+			if strings.HasPrefix(addr, "unix:") {
+				continue
+			}
+			if _, _, err := net.SplitHostPort(addr); err != nil {
+				continue
+			}
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("reserve corpus backend port: %v", err)
+			}
+			id := fmt.Sprintf("%s-%d", cfg.Upstreams[i].Name, j)
+			srv := &http.Server{Handler: corpusBackendHandler(id)}
+			go func() { _ = srv.Serve(ln) }()
+			cfg.Upstreams[i].Servers[j].Address = ln.Addr().String()
+			owned = append(owned, ownedServer{ln: ln, srv: srv})
+		}
+	}
+	return func() {
+		for _, item := range owned {
+			_ = item.srv.Close()
+			_ = item.ln.Close()
+		}
+	}
+}
+
+// corpusBackendHandler is a deterministic local backend shared by every
+// corpus fixture that needs a real TCP peer. It identifies itself via
+// X-Corpus-Backend-Id (upstream/weighted-distribution evidence), and echoes
+// a WebSocket connection so the same backend also serves WebSocket fixtures.
+func corpusBackendHandler(id string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Corpus-Backend-Id", id)
+		if isCorpusWebSocketUpgrade(r) {
+			corpusWebSocketEchoHandler().ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "max-age=60")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, strings.Repeat("corpus-backend-payload ", 100))
+	})
+}
+
+// isCorpusWebSocketUpgrade reports whether a request is an HTTP/1.1 WebSocket
+// upgrade (RFC 6455 §4.1): both Connection: Upgrade and Upgrade: websocket
+// must be present, matching the check Jul's own cache layer already applies.
+func isCorpusWebSocketUpgrade(r *http.Request) bool {
+	return strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade") &&
+		strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
 }
 
 func reserveLoopbackAddress(t *testing.T) string {

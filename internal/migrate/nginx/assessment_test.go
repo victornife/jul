@@ -170,6 +170,55 @@ http {
 	}
 }
 
+func TestAssessmentCacheZoneConflictIsSynthesized(t *testing.T) {
+	a, _ := assessString(t, `
+http {
+  server {
+    listen 8080;
+    location / {
+      proxy_cache undeclared_zone;
+      return 200;
+    }
+  }
+}
+`)
+	if !hasAssessmentCode(a, "NGX_CACHE_ZONE_CONFLICT") {
+		t.Fatalf("expected a synthetic cache-zone-conflict finding: %+v", a.Results)
+	}
+	if !a.HasBlocking() {
+		t.Fatal("an undeclared cache zone must block readiness")
+	}
+}
+
+func TestAssessmentUpstreamFailoverInconsistencyIsApproximated(t *testing.T) {
+	a, _ := assessString(t, `
+http {
+  upstream pool {
+    server a:80 max_fails=2 fail_timeout=5s;
+    server b:80 max_fails=5 fail_timeout=9s;
+  }
+}
+`)
+	// classifyUpstreamServer reports one result per "server" directive (not
+	// one per parameter, matching its existing weight=/down precedent), so
+	// with both max_fails and fail_timeout disagreeing across backends,
+	// exactly one approximated finding per server surfaces - whichever
+	// parameter gonginx's parser yields first (order is not source order;
+	// it is not guaranteed to be max_fails before fail_timeout).
+	found := 0
+	for _, r := range a.Results {
+		if r.Code == "NGX_UPSTREAM_SERVER_MAX_FAILS" || r.Code == "NGX_UPSTREAM_SERVER_FAIL_TIMEOUT" {
+			if r.Class != AssessmentApproximated {
+				t.Errorf("%s: class = %q, want approximated", r.Code, r.Class)
+			}
+			found++
+		}
+	}
+	if found != 2 {
+		t.Fatalf("expected 2 approximated findings (one per server), got %d: %+v", found, a.Results)
+	}
+}
+
 func TestAssessmentValidationFailure(t *testing.T) {
 	a := FailureAssessment("fixture.conf", AssessmentInformational, "TEST", "test")
 	a.SetValidation([]error{errors.New("invalid candidate")}, nil)
