@@ -116,6 +116,14 @@ func classifyDirective(context AssessmentContext, d ngx.IDirective, facts walkFa
 			return classifyProxyCache(params)
 		case context == ContextLocation && name == "proxy_cache_valid":
 			return classifyProxyCacheValid(params)
+		case context == ContextLocation && name == "proxy_connect_timeout":
+			return classifyLocationDuration("proxy_connect_timeout", "NGX_LOCATION_PROXY_CONNECT_TIMEOUT", params)
+		case context == ContextLocation && name == "proxy_read_timeout":
+			return classifyLocationDuration("proxy_read_timeout", "NGX_LOCATION_PROXY_READ_TIMEOUT", params)
+		case context == ContextLocation && name == "proxy_send_timeout":
+			return classifyLocationDuration("proxy_send_timeout", "NGX_LOCATION_PROXY_SEND_TIMEOUT", params)
+		case context == ContextLocation && name == "proxy_next_upstream_tries":
+			return classifyProxyNextUpstreamTries(params)
 		case context == ContextLocation && name == "return":
 			return classifyReturn(params, false)
 		case context == ContextLocation && name == "rewrite":
@@ -311,6 +319,38 @@ func classifyProxyCacheValid(params []string) capability {
 		return blocking("NGX_LOCATION_CACHE_VALID_UNSUPPORTED", RiskPerformance, "proxy_cache_valid uses per-status-code times, the \"any\" keyword, or a malformed time; Jul has one default_ttl")
 	}
 	return capabilityRegistry[capabilityKey{ContextLocation, "proxy_cache_valid"}]
+}
+
+// classifyLocationDuration judges an HTTP location's proxy_connect_timeout/
+// proxy_read_timeout/proxy_send_timeout, reusing the same nginx duration
+// parser as the stream equivalents so the assessment and translator can never
+// disagree about which forms resolve.
+func classifyLocationDuration(directive, code string, params []string) capability {
+	if len(params) == 0 {
+		return blocking(code, RiskAvailability, "duration value is missing")
+	}
+	if _, ok := parseNginxDuration(params[0]); !ok {
+		return blocking(code, RiskAvailability, "duration value is not representable (supported units: ms, s, m, h)")
+	}
+	return capabilityRegistry[capabilityKey{ContextLocation, directive}]
+}
+
+// classifyProxyNextUpstreamTries judges proxy_next_upstream_tries: only an
+// explicit bound of 2 or more is representable, since Jul's retry_attempts=0
+// means "inherit the pool default", not an explicit zero, so nginx's 0
+// (unlimited) and 1 (no retry) cannot be distinguished from it.
+func classifyProxyNextUpstreamTries(params []string) capability {
+	if len(params) == 0 {
+		return blocking("NGX_LOCATION_RETRY_ATTEMPTS", RiskAvailability, "proxy_next_upstream_tries has no value")
+	}
+	n, err := strconv.Atoi(params[0])
+	if err != nil {
+		return blocking("NGX_LOCATION_RETRY_ATTEMPTS", RiskAvailability, "proxy_next_upstream_tries is not a whole number")
+	}
+	if n < 2 {
+		return blocking("NGX_LOCATION_RETRY_ATTEMPTS", RiskAvailability, "0 (unlimited) and 1 (no retry) cannot be distinguished from Jul's retry_attempts=0, which means \"inherit the pool default\"")
+	}
+	return capabilityRegistry[capabilityKey{ContextLocation, "proxy_next_upstream_tries"}]
 }
 
 func classifyReturn(params []string, serverLevel bool) capability {

@@ -437,13 +437,93 @@ func TestNGINXCorpusProxyPassURIRealE2E(t *testing.T) {
 	}
 }
 
+// TestNGINXCorpusProxyReadTimeoutRealE2E proves the proxy_connect_timeout/
+// proxy_read_timeout -> Jul location translation actually takes effect
+// through a real Jul instance: a backend that stalls before writing any
+// response byte trips the configured 1s proxy_read_timeout, and Jul returns
+// a 504 (docs/core-http.md's upstream_timeout mapping) well before the
+// backend's full 3s delay elapses. This bypasses startRealJulForCorpus/
+// startCorpusTCPBackends because it needs a deliberately slow backend, not
+// the generic immediate-response one.
+func TestNGINXCorpusProxyReadTimeoutRealE2E(t *testing.T) {
+	cfg := loadCorpusRuntimeCandidate(t, "timeout-runtime")
+	if len(cfg.Upstreams) != 1 || len(cfg.Upstreams[0].Servers) != 1 {
+		t.Fatalf("timeout-runtime: want 1 upstream with 1 server, got %+v", cfg.Upstreams)
+	}
+	if cfg.Servers[0].Locations[0].ProxyReadTimeout.Std() != time.Second {
+		t.Fatalf("timeout-runtime: candidate proxy_read_timeout = %s, want 1s", cfg.Servers[0].Locations[0].ProxyReadTimeout.Std())
+	}
+
+	backendLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve backend port: %v", err)
+	}
+	backend := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(3 * time.Second)
+		w.WriteHeader(http.StatusOK)
+	})}
+	go func() { _ = backend.Serve(backendLn) }()
+	defer backend.Close()
+
+	cfg.Upstreams[0].Servers[0].Address = backendLn.Addr().String()
+	cfg.Servers[0].Listen = reserveLoopbackAddress(t)
+
+	if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
+		t.Fatalf("runtime preflight: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reload := make(chan struct{})
+	var logs corpusLogBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- app.Serve(ctx, reload, memorySource{name: "<nginx-corpus:timeout-runtime>", cfg: cfg}, cfg, productName, version, app.WithLogOutput(&logs))
+	}()
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	baseURL := "http://" + cfg.Servers[0].Listen
+	waitForCorpusServer(t, ctx, client, baseURL, corpus.Scenario{Request: corpus.RequestSpec{Method: "GET", Path: "/warmup"}}, done, &logs)
+
+	defer func() {
+		cancel()
+		select {
+		case code := <-done:
+			if code != 0 {
+				t.Errorf("timeout-runtime: Jul exit code = %d\nlogs:\n%s", code, logs.String())
+			}
+		case <-time.After(5 * time.Second):
+			t.Errorf("timeout-runtime: Jul did not shut down\nlogs:\n%s", logs.String())
+		}
+	}()
+
+	start := time.Now()
+	resp, err := client.Get(baseURL + "/")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	client.CloseIdleConnections()
+
+	if resp.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504 (proxy_read_timeout should have cut off the stalling backend)", resp.StatusCode)
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("elapsed = %s, want well under the backend's 3s stall (proxy_read_timeout=1s should have fired, not the client's own timeout or the full backend delay)", elapsed)
+	}
+}
+
 // TestNGINXCorpusCacheRealE2E proves the bounded proxy_cache_path/proxy_cache
 // -> Jul [cache] translation actually caches through a real Jul instance: the
 // first request is a real MISS served by the backend, the immediate second
 // request is a HIT served from the store without contacting the backend
 // again, and the cached representation (including the backend's own
 // X-Corpus-Backend-Id header, per the stored-headers contract in
-// docs/cache.md) is byte-identical to what the origin returned.
+// docs/cache.md) is byte-identical to what the origin returned. It also
+// proves the client's own `Cache-Control: no-store` privacy opt-out actually
+// bypasses lookup and storage (X-Cache: BYPASS) without disturbing the
+// already-stored entry, which the next plain request still finds as a HIT.
 func TestNGINXCorpusCacheRealE2E(t *testing.T) {
 	cfg := loadCorpusRuntimeCandidate(t, "cache-runtime")
 	if !cfg.Cache.Enabled {
@@ -508,5 +588,39 @@ func TestNGINXCorpusCacheRealE2E(t *testing.T) {
 	}
 	if secondBody != want {
 		t.Fatalf("second request body mismatch: got %d bytes, want %d bytes matching the first response", len(secondBody), len(want))
+	}
+
+	// A request `Cache-Control: no-store` bypasses lookup and storage
+	// entirely (docs/cache.md's shared-cache contract), proving privacy
+	// opt-out actually works through a real Jul instance, not just the
+	// unconditional MISS/HIT path above.
+	req, err := http.NewRequest(http.MethodGet, baseURL+path, nil)
+	if err != nil {
+		t.Fatalf("build no-store request: %v", err)
+	}
+	req.Header.Set("Cache-Control", "no-store")
+	third, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("no-store request: %v", err)
+	}
+	thirdBody := readAndClose(third)
+	client.CloseIdleConnections()
+	if got := third.Header.Get("X-Cache"); got != "BYPASS" {
+		t.Fatalf("no-store request X-Cache = %q, want BYPASS", got)
+	}
+	if thirdBody != want {
+		t.Fatalf("no-store request body mismatch: got %d bytes, want %d bytes matching the backend's payload", len(thirdBody), len(want))
+	}
+
+	// The bypassed request must not have evicted or altered the existing
+	// stored entry: the immediately following plain request is still a HIT.
+	fourth := get()
+	fourthBody := readAndClose(fourth)
+	client.CloseIdleConnections()
+	if got := fourth.Header.Get("X-Cache"); got != "HIT" {
+		t.Fatalf("post-bypass request X-Cache = %q, want HIT (no-store must not evict the existing stored entry)", got)
+	}
+	if fourthBody != want {
+		t.Fatalf("post-bypass request body mismatch: got %d bytes, want %d bytes matching the stored entry", len(fourthBody), len(want))
 	}
 }

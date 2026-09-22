@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "fixture_schema_version": 1,
-  "fixture_count": 25,
-  "core_fixtures": 23,
+  "fixture_count": 26,
+  "core_fixtures": 24,
   "full_fixtures": 2,
   "categories": [
     {
@@ -75,7 +75,7 @@
     },
     {
       "name": "upstreams-resiliency",
-      "count": 3
+      "count": 4
     },
     {
       "name": "variables",
@@ -97,17 +97,17 @@
     },
     {
       "name": "informational",
-      "count": 24
+      "count": 25
     },
     {
       "name": "supported",
-      "count": 239
+      "count": 249
     }
   ],
   "risks": [
     {
       "name": "availability",
-      "count": 49
+      "count": 53
     },
     {
       "name": "observability",
@@ -115,7 +115,7 @@
     },
     {
       "name": "operational",
-      "count": 55
+      "count": 57
     },
     {
       "name": "performance",
@@ -123,7 +123,7 @@
     },
     {
       "name": "routing",
-      "count": 149
+      "count": 154
     },
     {
       "name": "security",
@@ -169,11 +169,11 @@
     },
     {
       "name": "NGX_HTTP_SERVER",
-      "count": 25
+      "count": 26
     },
     {
       "name": "NGX_HTTP_UPSTREAM",
-      "count": 8
+      "count": 9
     },
     {
       "name": "NGX_INCLUDE_RESOLVED",
@@ -212,8 +212,12 @@
       "count": 2
     },
     {
+      "name": "NGX_LOCATION_PROXY_CONNECT_TIMEOUT",
+      "count": 1
+    },
+    {
       "name": "NGX_LOCATION_PROXY_PASS",
-      "count": 7
+      "count": 8
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS_DYNAMIC",
@@ -221,6 +225,10 @@
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS_URI",
+      "count": 1
+    },
+    {
+      "name": "NGX_LOCATION_PROXY_READ_TIMEOUT",
       "count": 1
     },
     {
@@ -245,11 +253,11 @@
     },
     {
       "name": "NGX_MAIN_EVENTS",
-      "count": 23
+      "count": 24
     },
     {
       "name": "NGX_MAIN_HTTP",
-      "count": 25
+      "count": 26
     },
     {
       "name": "NGX_MAIN_MAIL",
@@ -297,15 +305,15 @@
     },
     {
       "name": "NGX_SERVER_LISTEN",
-      "count": 25
+      "count": 26
     },
     {
       "name": "NGX_SERVER_LOCATION",
-      "count": 31
+      "count": 32
     },
     {
       "name": "NGX_SERVER_NAME",
-      "count": 19
+      "count": 20
     },
     {
       "name": "NGX_SERVER_TLS_CERT",
@@ -381,7 +389,7 @@
     },
     {
       "name": "NGX_UPSTREAM_SERVER",
-      "count": 13
+      "count": 14
     },
     {
       "name": "NGX_VARIABLE_BLOCK_UNSUPPORTED",
@@ -408,6 +416,7 @@
         "security-cache-boundaries"
       ],
       "deferred_dimensions": [
+        "Vary/Range/stale-serving cache dimensions (already covered by internal/handler's own dedicated cache test suite; runtime behavior independent of anything the importer translates, so re-proving it here would be confirmatory, not migration-specific)",
         "proxy_cache_bypass/proxy_no_cache/proxy_cache_key (expression-driven; not statically representable)",
         "shared/distributed cache directives (multiple proxy_cache_path zones - a genuine architectural mismatch with Jul's single process-wide cache, not a scope gap)"
       ]
@@ -482,6 +491,7 @@
       "status": "represented",
       "fixtures": [
         "blocking-dynamic-proxy",
+        "timeout-runtime",
         "unix-http-upstream",
         "upstream-failover-runtime",
         "upstream-weighted",
@@ -491,7 +501,8 @@
         "WebSocket/gRPC upstream runtime replay",
         "active-health migration replay",
         "backend TLS/private-CA migration replay",
-        "circuit-breaker recovery/half-open-probe migration replay beyond the dedicated product-level resilience evidence"
+        "circuit-breaker recovery/half-open-probe migration replay beyond the dedicated product-level resilience evidence",
+        "proxy_next_upstream_tries real-E2E (translation is unit-tested; a dedicated retry-count E2E is deferred as confirmatory of the already-proven passive-failover retry mechanism)"
       ]
     }
   ]

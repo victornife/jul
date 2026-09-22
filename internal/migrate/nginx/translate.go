@@ -274,6 +274,47 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 			if len(cp) > 0 {
 				loc.ProxyPass = translateProxyPass(cp[0], &t.report, c.GetLine())
 			}
+		case "proxy_connect_timeout":
+			if len(cp) > 0 {
+				if d, ok := parseNginxDuration(cp[0]); ok {
+					loc.ProxyConnectTimeout = d
+				} else {
+					t.report.skip(c, "proxy_connect_timeout is not a representable duration")
+				}
+			}
+		case "proxy_read_timeout":
+			if len(cp) > 0 {
+				if d, ok := parseNginxDuration(cp[0]); ok {
+					loc.ProxyReadTimeout = d
+				} else {
+					t.report.skip(c, "proxy_read_timeout is not a representable duration")
+				}
+			}
+		case "proxy_send_timeout":
+			if len(cp) > 0 {
+				if d, ok := parseNginxDuration(cp[0]); ok {
+					loc.ProxySendTimeout = d
+				} else {
+					t.report.skip(c, "proxy_send_timeout is not a representable duration")
+				}
+			}
+		case "proxy_next_upstream_tries":
+			if len(cp) > 0 {
+				// nginx counts the first attempt plus retries as "tries" (0
+				// means unlimited, 1 means no retry). Jul's retry_attempts
+				// counts only the retries after the first, and 0 means
+				// "inherit the pool default" rather than an explicit zero -
+				// so only an explicit bound of 2 or more translates without
+				// silently colliding with that inherit sentinel.
+				if n, err := strconv.Atoi(cp[0]); err == nil && n >= 2 {
+					if loc.Resilience == nil {
+						loc.Resilience = &config.LocationResilienceConfig{}
+					}
+					loc.Resilience.RetryAttempts = n - 1
+				} else {
+					t.report.skip(c, "proxy_next_upstream_tries is only translated for an explicit bound of 2 or more; 0 (unlimited) and 1 (no retry) cannot be distinguished from Jul's retry_attempts=0, which means \"inherit the pool default\"")
+				}
+			}
 		case "fastcgi_pass":
 			if len(cp) > 0 {
 				loc.FastCGIPass = cp[0]

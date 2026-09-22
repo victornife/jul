@@ -518,6 +518,70 @@ http {
 	}
 }
 
+func TestTranslateLocationProxyTimeouts(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      proxy_pass http://backend;
+      proxy_connect_timeout 2s;
+      proxy_read_timeout 5s;
+      proxy_send_timeout 7s;
+    }
+  }
+}`)
+	l := onlyServer(t, cfg).Locations[0]
+	if l.ProxyConnectTimeout.Std() != 2*time.Second {
+		t.Errorf("ProxyConnectTimeout: got %s want 2s", l.ProxyConnectTimeout.Std())
+	}
+	if l.ProxyReadTimeout.Std() != 5*time.Second {
+		t.Errorf("ProxyReadTimeout: got %s want 5s", l.ProxyReadTimeout.Std())
+	}
+	if l.ProxySendTimeout.Std() != 7*time.Second {
+		t.Errorf("ProxySendTimeout: got %s want 7s", l.ProxySendTimeout.Std())
+	}
+}
+
+func TestTranslateProxyNextUpstreamTriesExplicitBound(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      proxy_pass http://backend;
+      proxy_next_upstream_tries 3;
+    }
+  }
+}`)
+	l := onlyServer(t, cfg).Locations[0]
+	if l.Resilience == nil || l.Resilience.RetryAttempts != 2 {
+		t.Errorf("Resilience: got %+v want RetryAttempts=2", l.Resilience)
+	}
+}
+
+func TestTranslateProxyNextUpstreamTriesAmbiguousFormsSkipped(t *testing.T) {
+	for _, n := range []string{"0", "1"} {
+		cfg, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      proxy_pass http://backend;
+      proxy_next_upstream_tries `+n+`;
+    }
+  }
+}`)
+		l := onlyServer(t, cfg).Locations[0]
+		if l.Resilience != nil {
+			t.Errorf("tries=%s: expected no Resilience block, got %+v", n, l.Resilience)
+		}
+		if !hasSkip(rep, "proxy_next_upstream_tries") {
+			t.Errorf("tries=%s: expected a skip finding, got %+v", n, rep.Skipped)
+		}
+	}
+}
+
 func TestTranslateExtraListenDropped(t *testing.T) {
 	cfg, rep := translate(t, `
 http {
