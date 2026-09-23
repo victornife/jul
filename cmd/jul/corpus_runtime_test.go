@@ -7,6 +7,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/ecdsa"
@@ -33,6 +34,7 @@ import (
 	"jul/internal/config"
 	"jul/internal/migrate/nginx"
 	"jul/internal/migrate/nginx/corpus"
+	"jul/internal/proxyproto"
 )
 
 // loadCorpusRuntimeCandidate imports one repository corpus fixture's
@@ -659,15 +661,16 @@ func TestNGINXCorpusCacheRealE2E(t *testing.T) {
 // PROXY-protocol identity translation (#426, evidenced here per #366's own
 // 2026-09-21 amendment) actually enforces its trust boundary through a real
 // Jul instance: a connection whose own peer address matches the configured
-// trusted_proxies and carries a real PROXY v1 header is honored as the
-// canonical client (observable in the X-Forwarded-For Jul forwards
-// upstream), while the identical bytes from a peer address outside
-// trusted_proxies are refused outright rather than served on a spoofed or
-// fallback identity - per docs/configuration.md's "a connection from an
-// address outside the set is refused" contract. Both peer identities are
-// simulated locally via net.Dialer.LocalAddr binding to two distinct
-// loopback aliases (127.0.0.1 vs 127.0.0.2), which the fixture's
-// trusted_proxies=["127.0.0.2/32"] singles out as the only trusted one.
+// trusted_proxies and carries a real PROXY header (both v1 text and v2
+// binary wire formats) is honored as the canonical client (observable in
+// the X-Forwarded-For Jul forwards upstream), while the identical bytes
+// from a peer address outside trusted_proxies are refused outright rather
+// than served on a spoofed or fallback identity - per
+// docs/configuration.md's "a connection from an address outside the set is
+// refused" contract. Both peer identities are simulated locally via
+// net.Dialer.LocalAddr binding to two distinct loopback aliases (127.0.0.1
+// vs 127.0.0.2), which the fixture's trusted_proxies=["127.0.0.2/32"]
+// singles out as the only trusted one.
 func TestNGINXCorpusProxyProtocolRealE2E(t *testing.T) {
 	cfg := loadCorpusRuntimeCandidate(t, "proxy-protocol-runtime")
 	if len(cfg.Servers) != 1 || cfg.Servers[0].ProxyProtocol != "in" {
@@ -818,6 +821,30 @@ func TestNGINXCorpusProxyProtocolRealE2E(t *testing.T) {
 	}
 	if gotForwardedFor != assertedClient {
 		t.Fatalf("trusted relay with spoofed X-Forwarded-For: backend X-Forwarded-For = %q, want %q (the PROXY-derived identity, not the client-supplied header)", gotForwardedFor, assertedClient)
+	}
+
+	// Trusted relay, PROXY v2 binary header: nginx's real_ip_header
+	// proxy_protocol accepts either wire version from a balancer, and Jul's
+	// listener parses both v1 text and v2 binary through the same shared
+	// internal/proxyproto.ReadHeader, so this is a distinct wire format to
+	// prove, not merely a v1 retest.
+	gotForwardedFor = ""
+	var v2Header bytes.Buffer
+	if err := proxyproto.WriteV2(&v2Header,
+		&net.TCPAddr{IP: net.ParseIP(assertedClient), Port: 51235},
+		&net.TCPAddr{IP: net.ParseIP("127.0.0.2"), Port: 18108},
+	); err != nil {
+		t.Fatalf("encode PROXY v2 header: %v", err)
+	}
+	status, err = sendRaw("127.0.0.2", v2Header.String()+request)
+	if err != nil {
+		t.Fatalf("trusted relay with PROXY v2: connection/request failed: %v", err)
+	}
+	if !strings.HasPrefix(status, "200") {
+		t.Fatalf("trusted relay with PROXY v2: status = %q, want 200", status)
+	}
+	if gotForwardedFor != assertedClient {
+		t.Fatalf("trusted relay with PROXY v2: backend X-Forwarded-For = %q, want %q (the PROXY-asserted client)", gotForwardedFor, assertedClient)
 	}
 }
 

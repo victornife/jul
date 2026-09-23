@@ -215,13 +215,16 @@ real-Jul evidence:
   configured `trusted_proxies` (simulated locally via
   `net.Dialer.LocalAddr` aliasing two distinct loopback addresses, since a
   single test machine has no other way to present two different network
-  positions) prepends a genuine PROXY v1 header, which Jul honors as the
-  canonical client address — observable in the `X-Forwarded-For` it forwards
-  upstream. The same bytes from a peer outside `trusted_proxies` are refused
-  outright, a malformed PROXY header from an otherwise-trusted peer is also
-  refused, and a client-supplied `X-Forwarded-For` attempting to override
-  the PROXY-derived identity is discarded (Jul always rebuilds it from its
-  own trusted view).
+  positions) prepends a genuine PROXY header — both the v1 text form and
+  the v2 binary form (encoded with the same `internal/proxyproto.WriteV2`
+  Jul's own outbound path uses) — which Jul honors as the canonical client
+  address in either wire version, since its listener parses both through
+  the same shared `internal/proxyproto.ReadHeader`. This is observable in
+  the `X-Forwarded-For` it forwards upstream. The same bytes from a peer
+  outside `trusted_proxies` are refused outright, a malformed PROXY header
+  from an otherwise-trusted peer is also refused, and a client-supplied
+  `X-Forwarded-For` attempting to override the PROXY-derived identity is
+  discarded (Jul always rebuilds it from its own trusted view).
 - **WAF boundary documented, not translated.** nginx has no first-party WAF
   directives, and no third-party WAF module directives (`modsecurity`,
   `naxsi`, etc.) appear anywhere in this corpus — there is no nginx-side
