@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"net/http"
 	"os"
 	"testing"
@@ -38,21 +39,17 @@ func h3ClientTrusting(t *testing.T, certPath string) *http3.Transport {
 	return &http3.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "a.example.com"}}
 }
 
-// getH3 issues an HTTP/3 GET against addr using tr, retrying with a short
-// per-attempt timeout over a generous overall deadline. Unlike TCP, QUIC has
-// no immediate refusal for "nothing is listening yet": a client dialing
-// before the accept loop has started just gets silence until its own
-// handshake timeout fires, so a single long-timeout attempt can consume the
-// entire retry budget by itself (observed on Windows CI, where listener
-// startup is measurably slower than on Linux). Many short attempts survive
-// that; a long per-attempt timeout with only a handful of retries does not.
+// getH3 retries a bounded QUIC request. Even after the listener is ready,
+// Windows CI can take longer than 500ms to complete the initial handshake
+// under the full-tag test load. A short timeout on every attempt would cancel
+// each handshake before it could succeed.
 func getH3(t *testing.T, tr *http3.Transport, addr string) (*http.Response, error) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	var resp *http.Response
 	var err error
 	for {
-		client := &http.Client{Transport: tr, Timeout: 500 * time.Millisecond}
+		client := &http.Client{Transport: tr, Timeout: 3 * time.Second}
 		resp, err = client.Get("https://" + addr + "/")
 		if err == nil || time.Now().After(deadline) {
 			return resp, err
@@ -99,14 +96,40 @@ func TestReloadRotatesHTTP3CertificateWithoutRebind(t *testing.T) {
 	}
 	srv := New(initial, nil, lifecycle.Fingerprint{}, quietLogger(), factory, src, func(context.Context, *config.Config) error { return nil })
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ready := make(chan struct{})
+	stopped := make(chan struct{})
+	srv.OnInitialGenerationReady = func() { close(ready) }
 	reload := make(chan ReloadRequest, 2)
-	go func() { _ = srv.Run(ctx, reload, redact.EmptyState()) }()
+	var runErr error
+	go func() {
+		runErr = srv.Run(ctx, reload, redact.EmptyState())
+		close(stopped)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-stopped:
+		case <-time.After(5 * time.Second):
+			t.Error("server did not stop after cancellation")
+		}
+	})
+	select {
+	case <-ready:
+	case <-stopped:
+		t.Fatalf("server stopped before HTTP/3 listener was ready: %v", runErr)
+	case <-time.After(10 * time.Second):
+		t.Fatal("server did not finish binding the HTTP/3 listener")
+	}
 
 	trA := h3ClientTrusting(t, certA)
 	defer func() { _ = trA.Close() }()
 	respA, err := getH3(t, trA, addr)
 	if err != nil {
+		select {
+		case <-stopped:
+			t.Fatalf("server stopped before certificate A request: %v (request: %v)", runErr, err)
+		default:
+		}
 		t.Fatalf("HTTP/3 request against certificate A never succeeded: %v", err)
 	}
 	_ = respA.Body.Close()
@@ -130,6 +153,11 @@ func TestReloadRotatesHTTP3CertificateWithoutRebind(t *testing.T) {
 	defer func() { _ = trAAfter.Close() }()
 	if _, err := getH3Once(t, trAAfter, addr); err == nil {
 		t.Fatal("expected a client trusting only the old certificate to fail after rotation")
+	} else {
+		var unknownAuthority x509.UnknownAuthorityError
+		if !errors.As(err, &unknownAuthority) {
+			t.Fatalf("old certificate was rejected for an unexpected reason: %v", err)
+		}
 	}
 
 	// A client trusting B must succeed, over HTTP/3, without any rebind.
@@ -137,6 +165,11 @@ func TestReloadRotatesHTTP3CertificateWithoutRebind(t *testing.T) {
 	defer func() { _ = trB.Close() }()
 	respB, err := getH3(t, trB, addr)
 	if err != nil {
+		select {
+		case <-stopped:
+			t.Fatalf("server stopped before certificate B request: %v (request: %v)", runErr, err)
+		default:
+		}
 		t.Fatalf("HTTP/3 request against certificate B never succeeded after rotation: %v", err)
 	}
 	defer func() { _ = respB.Body.Close() }()
