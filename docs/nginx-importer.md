@@ -142,6 +142,9 @@ the Jul request path.
 | `location` | ✅ | See the location table. |
 | `ssl_certificate`, `ssl_certificate_key` | ✅ | Map to server TLS fields. |
 | `ssl_protocols` | ⚠️ | Maps to a minimum version; legacy versions raise the floor to TLS 1.2. |
+| `ssl_verify_client` + `ssl_client_certificate` | ✅ (bounded) / ❌ | See [mTLS](#mtls-ssl_verify_client-and-ssl_client_certificate-366) below. |
+| `ssl_crl` | ✅ | Maps to `client_auth.crl_file`, only when the bounded mTLS pairing above resolves. |
+| `ssl_verify_depth`, `ssl_trusted_certificate` | ignored | No corresponding Jul knob (chain-verification depth is not independently configurable; OCSP stapling is ACME-managed). |
 | `return` | ⚠️ | Synthesizes `/`; NGINX server-level precedence differs. |
 | `set_real_ip_from`, `real_ip_header`, `real_ip_recursive` | ⚠️ | See [realip](#realip-set_real_ip_from--real_ip_header). |
 | `if`, server-level `rewrite` | ❌ | Reported with provenance and guidance. |
@@ -304,6 +307,39 @@ real_ip_header proxy_protocol;
 An untrusted direct peer can never acquire trusted client identity this way:
 Jul's HTTP listener never emits a broad/default trust range, and validation
 rejects `proxy_protocol = "in"` without a non-empty `trusted_proxies`.
+
+### mTLS: ssl_verify_client and ssl_client_certificate (#366)
+
+nginx enables mutual TLS through two directives that only take effect
+together: `ssl_verify_client on|optional;` alone changes nothing without a
+trusted-CA bundle, and `ssl_client_certificate` alone is inert without
+`ssl_verify_client`. Jul's `client_auth` mirrors that pairing — its `mode`
+field always requires a non-empty `ca_file` whenever it is not `"none"` — so
+translation resolves both directives together, in the same server block:
+
+```nginx
+ssl_verify_client on;
+ssl_client_certificate /etc/ssl/ca.pem;
+ssl_crl /etc/ssl/ca.crl;
+```
+
+| NGINX | Jul |
+| --- | --- |
+| `ssl_verify_client on;` + non-empty `ssl_client_certificate` | `client_auth.mode = "require"` + `ca_file` |
+| `ssl_verify_client optional;` + non-empty `ssl_client_certificate` | `client_auth.mode = "request"` + `ca_file` |
+| `ssl_crl` (with either mode above) | `client_auth.crl_file` |
+| Either directive present without the other | blocking |
+| `ssl_verify_client optional_no_ca;` | blocking |
+| `ssl_verify_client off;` | ignored — matches Jul's default of no client-certificate verification |
+
+`optional_no_ca` accepts a client certificate without validating it against
+any CA at all. Jul's `client_auth` has no equivalent: once enabled, it always
+validates against `ca_file`, so this form is not representable and is left
+blocking rather than silently upgraded to `"request"` (which *would*
+validate) or silently dropped (which would validate nothing nginx asked for
+either — both are behavior changes, not migrations). See `mtls-runtime` in
+the [migration corpus](nginx-migration-corpus.md) for a real end-to-end proof
+of the accept/reject boundary this produces.
 
 ### `proxy_cache` and `proxy_cache_path` (#365)
 

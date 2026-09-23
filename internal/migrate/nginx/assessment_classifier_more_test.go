@@ -130,6 +130,71 @@ func TestAllStringsSame(t *testing.T) {
 	}
 }
 
+func TestClassifySSLVerifyClient(t *testing.T) {
+	tests := []struct {
+		name   string
+		params []string
+		usable bool
+		want   AssessmentClass
+	}{
+		{"missing", nil, false, AssessmentBlocking},
+		{"on usable", []string{"on"}, true, AssessmentSupported},
+		{"on not usable", []string{"on"}, false, AssessmentBlocking},
+		{"optional usable", []string{"optional"}, true, AssessmentSupported},
+		{"optional not usable", []string{"optional"}, false, AssessmentBlocking},
+		{"optional_no_ca", []string{"optional_no_ca"}, true, AssessmentBlocking},
+		{"off", []string{"off"}, false, AssessmentIgnored},
+		{"unrecognized", []string{"maybe"}, true, AssessmentBlocking},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertCapabilityClass(t, classifySSLVerifyClient(tt.params, tt.usable), tt.want)
+		})
+	}
+}
+
+func TestClassifySSLClientCertificate(t *testing.T) {
+	tests := []struct {
+		name   string
+		params []string
+		usable bool
+		want   AssessmentClass
+	}{
+		{"missing", nil, true, AssessmentBlocking},
+		{"blank", []string{""}, true, AssessmentBlocking},
+		{"usable", []string{"/etc/ssl/ca.pem"}, true, AssessmentSupported},
+		{"not usable", []string{"/etc/ssl/ca.pem"}, false, AssessmentBlocking},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertCapabilityClass(t, classifySSLClientCertificate(tt.params, tt.usable), tt.want)
+		})
+	}
+}
+
+func TestServerHasUsableClientAuth(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{"both present, on", `http { server { ssl_verify_client on; ssl_client_certificate /ca.pem; } }`, true},
+		{"both present, optional", `http { server { ssl_verify_client optional; ssl_client_certificate /ca.pem; } }`, true},
+		{"missing ca", `http { server { ssl_verify_client on; } }`, false},
+		{"missing mode", `http { server { ssl_client_certificate /ca.pem; } }`, false},
+		{"optional_no_ca with ca", `http { server { ssl_verify_client optional_no_ca; ssl_client_certificate /ca.pem; } }`, false},
+		{"off with ca", `http { server { ssl_verify_client off; ssl_client_certificate /ca.pem; } }`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := firstDirectiveNamed(t, tt.source, "server")
+			if got := serverHasUsableClientAuth(orderedChildren(server)); got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestClassifyRealIP(t *testing.T) {
 	tests := []struct {
 		name      string

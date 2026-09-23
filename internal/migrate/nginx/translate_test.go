@@ -431,6 +431,127 @@ http {
 	}
 }
 
+func TestTranslateClientAuthOnConsistent(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  server {
+    listen 443 ssl;
+    ssl_certificate /etc/ssl/server.pem;
+    ssl_certificate_key /etc/ssl/server.key;
+    ssl_verify_client on;
+    ssl_client_certificate /etc/ssl/ca.pem;
+    ssl_crl /etc/ssl/ca.crl;
+    location / { return 200; }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	if s.TLS == nil || s.TLS.ClientAuth == nil {
+		t.Fatalf("expected a ClientAuth block, got %+v", s.TLS)
+	}
+	ca := s.TLS.ClientAuth
+	if ca.Mode != "require" || ca.CAFile != "/etc/ssl/ca.pem" || ca.CRLFile != "/etc/ssl/ca.crl" {
+		t.Errorf("ClientAuth: got %+v", ca)
+	}
+}
+
+func TestTranslateClientAuthOptional(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  server {
+    listen 443 ssl;
+    ssl_certificate /etc/ssl/server.pem;
+    ssl_certificate_key /etc/ssl/server.key;
+    ssl_verify_client optional;
+    ssl_client_certificate /etc/ssl/ca.pem;
+    location / { return 200; }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	if s.TLS == nil || s.TLS.ClientAuth == nil || s.TLS.ClientAuth.Mode != "request" {
+		t.Fatalf("expected ClientAuth.Mode=request, got %+v", s.TLS)
+	}
+}
+
+func TestTranslateClientAuthMissingCAFileSkipped(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  server {
+    listen 443 ssl;
+    ssl_certificate /etc/ssl/server.pem;
+    ssl_certificate_key /etc/ssl/server.key;
+    ssl_verify_client on;
+    location / { return 200; }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	if s.TLS != nil && s.TLS.ClientAuth != nil {
+		t.Fatalf("expected no ClientAuth without ssl_client_certificate, got %+v", s.TLS.ClientAuth)
+	}
+	if !hasSkip(rep, "requires a non-empty ssl_client_certificate") {
+		t.Errorf("expected a skip finding, got %+v", rep.Skipped)
+	}
+}
+
+func TestTranslateClientAuthOptionalNoCASkipped(t *testing.T) {
+	cfg, rep := translate(t, `
+http {
+  server {
+    listen 443 ssl;
+    ssl_certificate /etc/ssl/server.pem;
+    ssl_certificate_key /etc/ssl/server.key;
+    ssl_verify_client optional_no_ca;
+    ssl_client_certificate /etc/ssl/ca.pem;
+    location / { return 200; }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	if s.TLS != nil && s.TLS.ClientAuth != nil {
+		t.Fatalf("expected no ClientAuth for optional_no_ca, got %+v", s.TLS.ClientAuth)
+	}
+	if !hasSkip(rep, "optional_no_ca accepts a client certificate without validating it against any CA") {
+		t.Errorf("expected an optional_no_ca skip, got %+v", rep.Skipped)
+	}
+}
+
+func TestTranslateClientAuthUnrecognizedValueSkipped(t *testing.T) {
+	_, rep := translate(t, `
+http {
+  server {
+    listen 443 ssl;
+    ssl_certificate /etc/ssl/server.pem;
+    ssl_certificate_key /etc/ssl/server.key;
+    ssl_verify_client maybe;
+    ssl_client_certificate /etc/ssl/ca.pem;
+    location / { return 200; }
+  }
+}`)
+	if !hasSkip(rep, "ssl_verify_client value is not recognized") {
+		t.Errorf("expected an unrecognized-value skip, got %+v", rep.Skipped)
+	}
+}
+
+func TestTranslateClientAuthOffAndTuningKnobsIgnored(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  server {
+    listen 443 ssl;
+    ssl_certificate /etc/ssl/server.pem;
+    ssl_certificate_key /etc/ssl/server.key;
+    ssl_verify_client off;
+    ssl_verify_depth 2;
+    ssl_trusted_certificate /etc/ssl/trust.pem;
+    location / { return 200; }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	if s.TLS == nil {
+		t.Fatal("expected TLS to still be enabled")
+	}
+	if s.TLS.ClientAuth != nil {
+		t.Errorf("expected no ClientAuth for ssl_verify_client off, got %+v", s.TLS.ClientAuth)
+	}
+}
+
 func TestTranslateCacheHTTPLevelProxyCacheValid(t *testing.T) {
 	cfg, _ := translate(t, `
 http {

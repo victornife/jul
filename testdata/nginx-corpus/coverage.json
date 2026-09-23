@@ -94,6 +94,8 @@
       "id": "security",
       "status": "represented",
       "fixtures": [
+        "mtls-runtime",
+        "proxy-protocol-runtime",
         "realip-blocking",
         "realip-proxy-protocol-supported",
         "realip-supported",
@@ -103,12 +105,13 @@
       "evidence": [
         "fixture admission secret/private-key scan",
         "issue #259 client-address runtime and spoofing E2E",
+        "issue #366 real-Jul PROXY-protocol trust-boundary accept/refuse E2E",
+        "issue #366 real-Jul mTLS handshake accept/reject E2E",
         "safe replay sensitive-header rejection"
       ],
-      "rationale": "The corpus covers IPv4/IPv6 trusted proxies, supported and blocking real-IP forms, TLS references/protocols, security headers, blocking authentication/ACL/body-limit/rate-limit/cache controls, and #426's bounded HTTP inbound PROXY-protocol identity (listen token + real_ip_header proxy_protocol + set_real_ip_from all required together) alongside its stream-side security boundaries.",
+      "rationale": "The corpus covers IPv4/IPv6 trusted proxies, supported and blocking real-IP forms, TLS references/protocols, security headers, blocking authentication/ACL/body-limit/rate-limit/cache controls, #426's bounded HTTP inbound PROXY-protocol identity (listen token + real_ip_header proxy_protocol + set_real_ip_from all required together) alongside its stream-side security boundaries, a real-Jul E2E proving that boundary's trust decision end to end (a trusted relay's PROXY-asserted client is honored, an untrusted peer is refused, #366), and the new bounded ssl_verify_client/ssl_client_certificate/ssl_crl -> tls.client_auth translation with a real-Jul mTLS E2E (an ephemeral CA-signed client certificate is accepted, no certificate and a different-CA certificate are both rejected, #366).",
       "deferred_dimensions": [
-        "WAF/module-specific migration replay",
-        "generated certificate mTLS replay",
+        "WAF/module-specific migration replay (no nginx WAF directive exists to translate from; Jul's [waf] block has nothing on the nginx side to map onto, so this is a boundary to document, not a translation gap)",
         "multi-proxy forwarded-chain runtime comparison"
       ],
       "revisit_trigger": "Add a security runtime fixture when generated test credentials and asserted dimensions can remain bounded, synthetic, and independent of product-level E2E already owned elsewhere."
