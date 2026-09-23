@@ -106,14 +106,17 @@ unpublished unless a maintainer explicitly decides otherwise; it is an artifact
 and release-path validation point, not a claim that all selected correctness or
 maturity work is complete.
 
-The [current roadmap checkpoint](roadmap/README.md#release-candidate-checkpoint)
-is the independently verified, published `v1.32.1-rc.1` prerelease at
-`9a936d0cc1bc3f7086f38ca87741d9d09f950e25`. Its exact evidence is recorded in
-[`docs/release-candidates/v1.32.1-rc.1.md`](release-candidates/v1.32.1-rc.1.md).
-Current `main` contains substantial later work; consult [status.md](status.md)
-for maturity/delivery and do not infer that a merged capability is present in
-the RC. A later stable tag requires a separate publication decision and fresh
-release run; the RC tag is never renamed or reused.
+The latest historical RC, [`v2.0.0-rc.1`](release-candidates/v2.0.0-rc.1.md),
+is an independently verified prerelease at
+`c9ab3a05af6a6088b2721de0a87995ce37d468cf`. It predates #420 and
+remains immutable. Stable [`v2.0.0`](https://github.com/victornife/jul/releases/tag/v2.0.0)
+was separately published 2026-09-21 from post-#420
+`d56f5ceaf7ddb8a3875cbe6e27c9540db4130f75`, with exact release evidence
+in [#425](https://github.com/victornife/jul/issues/425). The older
+[`v1.32.1-rc.1` evidence](release-candidates/v1.32.1-rc.1.md) remains
+historical. The [roadmap checkpoint](roadmap/README.md#published-stable-checkpoint)
+and [status matrix](status.md) distinguish the stable release from later
+unreleased work on `main`. No RC was renamed or reused as a stable tag.
 
 Before creating any tag:
 

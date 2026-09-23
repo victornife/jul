@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.11 · Updated 2026-09-21
+> Version 2.12 · Updated 2026-09-23
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -46,9 +46,10 @@ not inherit an older GA row merely because it lives in the same package or guide
 
 ### Current product snapshot
 
-- **Published release:** stable `v2.0.0` is the current published release, cut
-  from a post-#420 commit (see `CHANGELOG.md` and the release evidence linked
-  from [#425](https://github.com/victornife/jul/issues/425)).
+- **Published release:** stable `v2.0.0` is the current published release at
+  `d56f5ceaf7ddb8a3875cbe6e27c9540db4130f75`, cut after #420 and #421
+  (see `CHANGELOG.md` and the exact release evidence in
+  [#425](https://github.com/victornife/jul/issues/425)).
   `v2.0.0-rc.1` is an independently verified prerelease at
   `c9ab3a05af6a6088b2721de0a87995ce37d468cf` that predates the #420 WASM
   plugin-pool fix; it is immutable and was never retagged or promoted — stable
@@ -67,18 +68,20 @@ not inherit an older GA row merely because it lives in the same package or guide
 
 - **Response cache:** #134 completed integrated recertification; the released
   cache record retains GA.
-- **Resilience:** admission, retry and circuit implementations are merged. The
-  pre-soak correction centralizes cross-protocol failure attribution and keeps
-  client/Jul-owned cancellation neutral; stable release and soak remain open.
-- **Routing, configuration authority, generated contracts and NGINX assessment:**
-  merged after the current RC and therefore represented separately from older
-  GA rows.
-- **Post-manifest additive surfaces:** admin TLS/mTLS, the versioned external
-  API, the remote CLI, selected runtime-policy hot reload and HTTP-over-Unix
-  upstreams are merged Beta capabilities. None inherits an older GA/soak row.
-- **Local diagnostics and support bundles:** merged Beta capability. Its later
-  reduced remote projection is tracked with the API/CLI rows and does not
-  promote the local capability.
+- **Resilience:** admission, retry and circuit controls are published in
+  v2.0.0 as Beta. The cross-protocol failure-attribution correction is included;
+  feature-specific GA criteria remain open.
+- **Routing, configuration authority, generated contracts and NGINX
+  assessment:** published in v2.0.0 as separately tracked Beta capabilities;
+  none inherits the older core/importer GA maturity.
+- **Admin TLS/mTLS, external API, remote CLI, selected runtime-policy hot
+  reload, HTTP-over-Unix upstreams, local diagnostics and support bundles:**
+  published in v2.0.0 with separate Beta maturity. The reduced remote
+  diagnostics projection is tracked with the API/CLI rows.
+- **Post-release migration work:** #426 bounded stream/PROXY-protocol translation
+  and #365 HTTP migration evidence completed on `main` after the stable tag;
+  they are not retroactively included in v2.0.0. #366/#367 remain open, and
+  #368 tracks future migration guidance and an optional full corpus.
 - **WASM plugin-pool memory fix (#420) and final soak (#421):** the final
   pre-stable soak found a real unbounded memory-growth defect in the pooled
   WASM instance runtime; [#420](https://github.com/victornife/jul/pull/420)
@@ -86,10 +89,9 @@ not inherit an older GA row merely because it lives in the same package or guide
   recorded a subsequent ~25h post-fix soak
   ([evidence](soak-evidence.md#2026-09-19--final-soak-adr-0005-procedure-c-burn-in-currenttoml-25h-linux))
   with memory bounded across 5.02M plugin invocations. `v2.0.0-rc.1` is
-  immutable and predates this fix; stable `v2.0.0` must be cut from a
-  post-#420 commit, never from a retagged/renamed RC. #422 tracks
-  non-blocking deferred follow-up evidence (manual host-level fault
-  injection, continuous metrics scraping) and does not block the stable cut.
+  immutable and predates this fix; stable `v2.0.0` was cut separately from a
+  post-#420 commit. #422 tracks non-blocking deferred follow-up evidence
+  (manual host-level fault injection, continuous metrics scraping).
 
 ## GA criteria legend
 
@@ -158,22 +160,23 @@ long-running post-GA soak gate.
 ## Beta
 
 Usable capabilities whose contract, release, soak, or integrated evidence is
-not yet at the GA bar. `merged` and `candidate` are not synonyms for released.
+not yet at the GA bar. The rows below are published as Beta in stable v2.0.0;
+release does not complete the unchecked GA criteria.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| Auxiliary egress allow-list | SEC-EGRESS | core | `candidate` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [egress.md](egress.md) |
-| Request predicates, response headers, and CORS | CGC-ROUTE | core | `merged` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
-| Upstream resilience (admission, retry, circuit) | CGC-RES | core · `grpc` · `stream` | `merged` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ☐ | [upstreams.md](upstreams.md) |
-| Configuration authority and managed drift | AUTO-AUTH | core · `console` | `merged` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |
-| Generated configuration contracts and route identity | AUTO-CONTRACT | core | `merged` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | n/a | [generated/config-reference.md](generated/config-reference.md) |
-| NGINX migration assessment, provenance, and includes | MIG-ASSESS | `importer` | `merged` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ✅ | [nginx-assessment.md](nginx-assessment.md) |
-| Local diagnostics and support bundles | OPS-DIAG | core | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [diagnostics.md](diagnostics.md) |
-| Admin listener TLS and client authentication | ADMIN-TLS | core | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [deployment.md](deployment.md) |
-| Versioned external admin API | AUTO-API | core | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [admin-api.md](admin-api.md) |
-| Remote automation CLI | AUTO-CLI | core | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [remote-cli.md](remote-cli.md) |
-| Selected runtime policy hot reload | HR-SELECTED | core | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [hot-reload-strategy.md](hot-reload-strategy.md) |
-| HTTP proxy over Unix-domain upstreams | HTTP-UNIX | core | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [unix-http-upstreams.md](unix-http-upstreams.md) |
+| Auxiliary egress allow-list | SEC-EGRESS | core | `released` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [egress.md](egress.md) |
+| Request predicates, response headers, and CORS | CGC-ROUTE | core | `released` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
+| Upstream resilience (admission, retry, circuit) | CGC-RES | core · `grpc` · `stream` | `released` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ☐ | [upstreams.md](upstreams.md) |
+| Configuration authority and managed drift | AUTO-AUTH | core · `console` | `released` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |
+| Generated configuration contracts and route identity | AUTO-CONTRACT | core | `released` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | n/a | [generated/config-reference.md](generated/config-reference.md) |
+| NGINX migration assessment, provenance, and includes | MIG-ASSESS | `importer` | `released` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ✅ | [nginx-assessment.md](nginx-assessment.md) |
+| Local diagnostics and support bundles | OPS-DIAG | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [diagnostics.md](diagnostics.md) |
+| Admin listener TLS and client authentication | ADMIN-TLS | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [deployment.md](deployment.md) |
+| Versioned external admin API | AUTO-API | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [admin-api.md](admin-api.md) |
+| Remote automation CLI | AUTO-CLI | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [remote-cli.md](remote-cli.md) |
+| Selected runtime policy hot reload | HR-SELECTED | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [hot-reload-strategy.md](hot-reload-strategy.md) |
+| HTTP proxy over Unix-domain upstreams | HTTP-UNIX | core | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [unix-http-upstreams.md](unix-http-upstreams.md) |
 
 ## Alpha
 
@@ -223,6 +226,7 @@ the [soak evidence log](soak-evidence.md).
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-09-23 | 2.12 | Reconciled stable v2.0.0 delivery for twelve separately tracked Beta capabilities without changing maturity or unmet GA criteria; recorded #426/#365 as post-release completed migration work and #366/#367 as open. | [feature-status.yaml](feature-status.yaml); [roadmap/README.md](roadmap/README.md); [#62](https://github.com/victornife/jul/issues/62) |
 | 2026-09-21 | 2.11 | **Stable v2.0.0 cut; trusted client identity and backend TLS trust promoted Beta → GA (#409).** Certification evidence (protocol/spoof matrix, backend TLS/mTLS/discovery-identity-stability/health-parity matrix, race, fuzz, security/cardinality review, and the existing #421 ~25h soak) all passed; no new soak was required. Delivery moves `merged` → `soaked` for both, consistent with every other GA row in this manifest. | Issue #409; [feature-status.yaml](feature-status.yaml); [known-limitations.md](known-limitations.md); [README.md](../README.md) |
 | 2026-09-21 | 2.10 | Wave 0 post-soak product-truth reconciliation (#353): recorded the #420 WASM plugin-pool fix and #421 final ~25h soak (previously missing from this page); corrected the stale "UDP has no load balancing" claim (UDP sessions do select across the route's backend pool, one dial per new client, pinned for the session's life); corrected the stale "HTTP/3 static certificate replacement is restart-bound" claim (it hot-applies via the shared `dynamicCertProvider`, same as TCP); added an explicit MQTT/generic-UDP transport non-goal boundary. | Issue #353; [known-limitations.md](known-limitations.md); [http3.md](http3.md); [soak-evidence.md](soak-evidence.md) |
 | 2026-09-15 | 2.8 | Reconciled post-2026-08-30 additive surfaces as separate merged Beta entries: admin TLS/mTLS, external API, remote CLI, selected runtime-policy hot reload and HTTP-over-Unix upstreams. Updated resilience attribution and removed stale future-work wording without claiming release or soak. | [feature-status.yaml](feature-status.yaml); [upstreams.md](upstreams.md); [known-limitations.md](known-limitations.md) |

@@ -13,10 +13,10 @@
 # it its own entry or an explicit relationship. A GA row must be released and
 # soaked under ADR 0003/0005. Volatile issue sequencing belongs in #62, not here.
 #
-# Updated 2026-09-15 for the pre-soak reconciliation.
+# Updated 2026-09-23 for stable v2.0.0 delivery (Beta maturity unchanged).
 
 version: 2
-updated: '2026-09-15'
+updated: '2026-09-23'
 features:
 - id: Y1-01
   name: TLS + automatic HTTPS (ACME)
@@ -455,7 +455,7 @@ features:
   tags:
   - core
   maturity: Beta
-  delivery: candidate
+  delivery: released
   doc: egress.md
   criteria:
     1: true
@@ -467,14 +467,14 @@ features:
     7: true
     8: null
     9: true
-  notes: Published in v1.32.1-rc.1 as a prerelease capability; stable release and long-running soak promotion remain explicit
-    decisions.
+  notes: Published in v1.32.1-rc.1 as a prerelease capability and in stable v2.0.0; feature-specific GA certification
+    and soak remain explicit decisions.
 - id: CGC-ROUTE
   name: Request predicates, response headers, and CORS
   tags:
   - core
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: core-http.md
   criteria:
     1: true
@@ -495,7 +495,7 @@ features:
   - grpc
   - stream
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: upstreams.md
   criteria:
     1: true
@@ -508,15 +508,15 @@ features:
     8: true
     9: false
   notes: 'Admission, retry and circuit slices are merged. The pre-soak correction centralizes cross-protocol failure attribution,
-    keeps client and Jul-owned cancellation neutral, and returns neutral half-open probes; stable release and long-running
-    soak remain open.'
+    keeps client and Jul-owned cancellation neutral, and returns neutral half-open probes. Published in stable v2.0.0
+    as Beta; feature-specific GA certification and soak remain open.'
 - id: AUTO-AUTH
   name: Configuration authority and managed drift
   tags:
   - core
   - console
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: reload-semantics.md
   criteria:
     1: true
@@ -535,7 +535,7 @@ features:
   tags:
   - core
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: generated/config-reference.md
   criteria:
     1: true
@@ -554,7 +554,7 @@ features:
   tags:
   - importer
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: nginx-assessment.md
   criteria:
     1: true
@@ -573,7 +573,7 @@ features:
   tags:
   - core
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: diagnostics.md
   criteria:
     1: true
@@ -593,7 +593,7 @@ features:
   tags:
   - core
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: deployment.md
   criteria:
     1: true
@@ -607,13 +607,13 @@ features:
     9: true
   notes: 'Operator-supplied TLS termination, same-path certificate rotation and optional client-certificate authentication
     are merged through #336. TLS gates the connection and composes with bearer/RBAC authorization; ACME on the admin
-    listener is not claimed. Stable release and soak remain open.'
+    listener is not claimed. Published in stable v2.0.0 as Beta; feature-specific GA certification and soak remain open.'
 - id: AUTO-API
   name: Versioned external admin API
   tags:
   - core
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: admin-api.md
   criteria:
     1: true
@@ -627,13 +627,13 @@ features:
     9: true
   notes: 'The classified /api/v1 read and mutation surface, bounded error catalogue, generated OpenAPI contract, transport
     gate, CAS and idempotency behavior are merged through #150/#393. The older internal Console API remains outside this
-    contract. Stable release and soak remain open.'
+    contract. Published in stable v2.0.0 as Beta; feature-specific GA certification and soak remain open.'
 - id: AUTO-CLI
   name: Remote automation CLI
   tags:
   - core
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: remote-cli.md
   criteria:
     1: true
@@ -646,14 +646,14 @@ features:
     8: null
     9: null
   notes: 'The thin remote CLI over the supported /api/v1 contract, including credential precedence, machine output and
-    stable exit classes, is merged through #394. It never falls back to internal Console routes. Stable release and soak
-    remain open.'
+    stable exit classes, is merged through #394. It never falls back to internal Console routes. Published in stable v2.0.0 as Beta; feature-specific GA
+    certification and soak remain open.'
 - id: HR-SELECTED
   name: Selected runtime policy hot reload
   tags:
   - core
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: hot-reload-strategy.md
   criteria:
     1: true
@@ -673,7 +673,7 @@ features:
   tags:
   - core
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: unix-http-upstreams.md
   criteria:
     1: true
@@ -687,4 +687,4 @@ features:
     9: true
   notes: 'Named plaintext HTTP/1.1 Unix-socket upstreams are merged through #407 with mixed TCP/Unix balancing, retry,
     circuit, health, generation retirement, importer and API/Console projection coverage. TLS, backend_tls, HTTP/2 and
-    direct Unix proxy_pass remain explicitly outside the initial contract. Stable release and soak remain open.'
+    direct Unix proxy_pass remain explicitly outside the initial contract. Published in stable v2.0.0 as Beta; feature-specific GA certification and soak remain open.'
