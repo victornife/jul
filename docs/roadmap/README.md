@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.11 · Updated 2026-09-21
+> Version 2.12 · Updated 2026-09-23
 >
 > This roadmap owns the **durable portfolio sequence**. It deliberately does
 > not duplicate volatile READY/NEXT/blocked issue state. The current issue-level
@@ -41,17 +41,17 @@ The durable current sequence is summarized in the active operating roadmap below
 
 | Stage | Durable focus | Current snapshot |
 | --- | --- | --- |
-| **0 — Programme and product truth** | One tracker, audit disposition, operating model and product boundary | Complete; this issue reconciles later documentation drift |
+| **0 — Programme and product truth** | One tracker, audit disposition, operating model and product boundary | Complete; #62 owns current execution and this roadmap owns durable sequence |
 | **1 — Correctness foundation** | Strict config, protocol/security corrections, cache recertification and quality gates | Complete for the selected tranche; new defects still interrupt later stages |
 | **2 — Lifecycle and structured configuration** | Closed-world lifecycle authority, transactional apply/stage/rollback, typed workflows | Complete |
 | **3 — Trust boundaries** | Canonical client identity and consistent backend TLS/mTLS identity | Complete; GA with stable v2.0.0 (#409) |
-| **4 — Routing and response policy** | Method/header/query predicates, response headers, CORS and typed operation surfaces | Implemented on `main`; represented separately from the older Core HTTP GA row |
-| **5 — Generic resilience** | Admission, queue/connection bounds, retry budget/deadline/backoff, circuit state and bounded operations evidence | Core implementations are merged; integrated cross-protocol/soak and complete external-contract closure remain under #287/#144 at this baseline |
-| **6 — Configuration authority and automation** | Managed/file-owned authority, generated contracts, supported external API, thin remote CLI | Authority and generated contracts are merged; external OpenAPI #150 and CLI #151 remain separate gates |
-| **7 — Selected runtime dynamics** | High-value certificate, credential, logging, sink, cache-policy and Alt-Svc transitions | Planned and value-ranked; universal hot reload is not a requirement |
-| **8 — Migration and diagnostics** | NGINX assessment/provenance/includes, compatibility corpus, support bundle and `jul doctor` | Assessment/provenance/includes, `jul doctor` and support bundles are merged (#155/#156); NGINX migration corpus work continues under #366-#368 |
-| **9 — One bounded experiment** | AI Gateway or another explicitly approved category | Gated; not an automatic continuation of core work |
-| **10 — Integrated closure** | Fresh exact-SHA audit, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Planned after the selected programme |
+| **4 — Routing and response policy** | Method/header/query predicates, response headers, CORS and typed operation surfaces | Published in v2.0.0 as a separate Beta capability; older Core HTTP GA does not promote it |
+| **5 — Generic resilience** | Admission, queue/connection bounds, retry budget/deadline/backoff, circuit state and bounded operations evidence | #287/#144 closed; published in v2.0.0 as Beta. Further feature-specific GA evidence remains a separate decision |
+| **6 — Configuration authority and automation** | Managed/file-owned authority, generated contracts, supported external API, thin remote CLI | #150/#151 closed; authority, versioned external API and remote CLI published in v2.0.0 as separately tracked Beta capabilities |
+| **7 — Selected runtime dynamics** | Value-ranked runtime changes and truthful restart boundaries | Bounded tranche complete (#88); selected changes published as Beta. Further hot reload requires an explicit value trigger |
+| **8 — Migration and diagnostics** | NGINX assessment, evidence, support bundle and `jul doctor` | Base assessment/diagnostics published in v2.0.0 as Beta; #426/#365 completed on post-release `main`. Focused #366/#367 remain open; #368 owns follow-through guidance and optional full corpus |
+| **9 — One bounded experiment** | AI Gateway or another explicitly approved category | #162 remains deferred under #113; no experiment activated by the v2.0.0 release |
+| **10 — Integrated closure** | Exact-SHA verification, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Completed for stable v2.0.0 (#425/#421); new unreleased features require their own evidence and publication decision |
 
 For exact issue state, child decomposition, active pull requests and sequencing,
 read #62. This table changes only when the durable portfolio boundary or stage
@@ -72,32 +72,34 @@ outcome changes.
   configuration authority and generated configuration contracts are implemented
   on `main`.
 
-### Active or incomplete closure
+### Current follow-through
 
-- New post-RC capabilities are not promoted through older GA rows; their
-  maturity and delivery remain explicit in [status.md](../status.md).
-- Resilience includes the cross-protocol pre-soak failure-attribution
-  correction; stable publication and long-running soak remain later gates.
-- The supported versioned external Admin API and remote CLI are merged Beta
-  surfaces; Console-only routes remain outside the external contract unless
-  explicitly classified and generated into OpenAPI.
-- The selected NGINX compatibility corpus and selected-dimension E2E closure
-  are recorded separately from the released importer GA row.
+- Published additions with Beta maturity keep their own entries in
+  [feature status](../status.md), separate from older GA rows. Stable publication
+  changes delivery, not maturity or unmet GA criteria.
+- The versioned external Admin API and remote CLI are published Beta surfaces;
+  Console-only routes remain outside the external contract unless explicitly
+  classified and generated into OpenAPI.
+- #426 and #365 added bounded NGINX import translations and HTTP migration E2E
+  on post-v2.0.0 `main`; #366/#367 remain focused migration evidence work.
+  #368 owns the migration-impact rule in development guidance and an optional
+  heavier public corpus. These do not retroactively change the tagged importer.
+- #422 holds non-blocking host-fault/continuous-scrape soak follow-up; no new
+  v2.0.0 release gate is implied.
 
-## Release-candidate checkpoint
+## Published stable checkpoint
 
-`v2.0.0-rc.1` is an immutable published prerelease at
-`c9ab3a05af6a6088b2721de0a87995ce37d468cf`. Its release-path checks, platform
-matrix, checksums, embedded SBOMs and attestations are recorded in the
-[candidate evidence](../release-candidates/v2.0.0-rc.1.md). It supersedes the
-prior `v1.32.1-rc.1` checkpoint
-([its own evidence](../release-candidates/v1.32.1-rc.1.md) remains a preserved
-historical record).
+Stable [`v2.0.0`](https://github.com/victornife/jul/releases/tag/v2.0.0)
+was published 2026-09-21 at
+`d56f5ceaf7ddb8a3875cbe6e27c9540db4130f75`, after the #420 WASM fix
+and #421 post-fix soak. Exact release evidence is recorded in
+[#425](https://github.com/victornife/jul/issues/425).
 
-Current `main` may already be ahead of that checkpoint. A stable `v2.0.0` tag
-is a separate publication decision — gated on the ADR 0005 final soak against
-this exact candidate — and must reconcile the changelog, status, security
-posture, limitations and exact artifacts for that SHA.
+`v2.0.0-rc.1` remains a distinct immutable prerelease at
+`c9ab3a05af6a6088b2721de0a87995ce37d468cf`;
+its [candidate evidence](../release-candidates/v2.0.0-rc.1.md) and the older
+[`v1.32.1-rc.1` record](../release-candidates/v1.32.1-rc.1.md) are historical
+checkpoints. Unreleased changes on `main` require a separate future release.
 
 ## Core Gateway Completeness boundary
 
@@ -121,14 +123,14 @@ AI Gateway, and full parity with NGINX/Envoy/Kong/Caddy/Traefik.
 
 ## Selected runtime dynamics
 
-The product may finish with many fields deliberately restart-required. Selected
-runtime changes must reuse the existing transactional preparation/publication
-and resource-lifetime models rather than introducing a universal callback
-framework. Current candidates include certificate material, admin credentials,
-access-log sinks, selected cache scalars and Alt-Svc advertisement state.
+The bounded value-ranked tranche is complete (#88). Certificate material,
+selected admin/logging/cache policy, Alt-Svc advertisement and other selected
+transitions use the existing transactional preparation/publication and resource
+lifetime models. The corresponding additive status row remains Beta.
 
-A complete and truthful `stage_restart` path is an acceptable final design for
-unselected or structural transitions.
+Many structural fields deliberately remain restart-required. A complete and
+truthful `stage_restart` path is acceptable; further hot-reload work requires
+measured operator value or reusable architectural leverage.
 
 ## Migration and diagnostics
 
@@ -136,7 +138,8 @@ The migration lane is evidence-oriented:
 
 - deterministic per-directive assessment rather than a compatibility score;
 - source provenance and bounded root-confined include traversal;
-- a sanitized, licensed corpus with selected-dimension comparison;
+- a bounded reviewed corpus with selected-dimension comparison; an optional
+  public-derived full tier requires #368 provenance and admission review;
 - no automatic production cutover or unsafe traffic replay;
 - support bundles and diagnostics that are explicit, bounded and secret-safe;
 - no phone-home or automatic upload.
@@ -150,15 +153,15 @@ observability must be reused rather than duplicated inside the experiment.
 
 ## Completion evidence
 
-The selected programme closes only with:
+The stable v2.0.0 closure recorded an exact SHA, cross-platform lean/full
+artifacts, CI and release gates, the post-#420 soak and residual risk in #425.
+#422 remains a non-blocking follow-up. This evidence is specific to the tagged
+release; #426/#365 and other post-release work require their own verification
+and publication decision before a later release.
 
-- a fresh exact-SHA source and documentation audit;
-- consistent feature maturity/delivery records;
-- lean/full/build-tag and cross-platform verification;
-- real H1/H2/h2c/H3/TLS/mTLS/gRPC/L4 protocol suites;
-- failure-boundary, race/leak, browser E2E and long-running soak evidence;
-- bounded-label, secret/privacy and compatibility review;
-- release notes, residual limitations and an explicit publication decision.
+Future selected work must preserve consistent maturity/delivery records,
+protocol and failure-boundary evidence, race/leak and privacy review, and
+release notes appropriate to its scope.
 
 ## Historical relationship
 
