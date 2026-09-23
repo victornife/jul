@@ -329,15 +329,16 @@ rationale and revisit trigger for each deferred dimension live in
 - The dedicated Docker lane runs a digest-pinned NGINX process for the selected
   HTTP reference scenarios. Missing Docker is a failure when the lane is
   required.
-- FastCGI is represented at import and strict-candidate level. A real FastCGI
-  comparison is deferred until a migration-specific semantic can be asserted
-  without duplicating the product runtime suite.
+- FastCGI is represented at import and strict-candidate level. #367 owns
+  focused real-runtime comparison where a migration-specific semantic can be
+  asserted without duplicating the product runtime suite.
 - H2/H3 client-identity parity and spoofing are already real-server obligations
   of #259. They are evidence for the runtime capability, not a reason to claim
   that every imported NGINX protocol configuration is equivalent.
-- WebSocket, gRPC, uWSGI, and L4 migration replay require a separately selected
-  fixture/backend lane. Stream and mail are currently blocking source evidence,
-  so executing them as if Jul had imported them would be misleading.
+- H1 WebSocket migration replay is covered by #365. #367 owns focused
+  gRPC, FastCGI, uWSGI and L4 real-runtime comparison, including the bounded
+  `stream` subset translated by #426. Unsupported stream forms and `mail`
+  remain blocking; importer support alone does not establish runtime parity.
 
 ## Deterministic aggregate report
 
