@@ -187,6 +187,63 @@ the migration corpus would be confirmatory of already-tested runtime
 behavior, not migration-specific evidence, so they are left to that existing
 suite rather than duplicated here.
 
+## TLS, mTLS, and imported PROXY-protocol identity migration corpus (#366)
+
+Issue #366 extends the #154 baseline with two new capabilities and their
+real-Jul evidence:
+
+- **Bounded mTLS translation.** `ssl_verify_client on|optional;` plus a
+  non-empty `ssl_client_certificate` translates to
+  `servers[].tls.client_auth` (`mode = "require"`/`"request"`, `ca_file`,
+  `crl_file`). Mirrors the #426 bounded-pairing pattern: either directive
+  alone is not representable (nginx never actually enables verification
+  without both either), so it stays blocking with a specific reason rather
+  than an inert or guessed translation. `ssl_verify_client optional_no_ca`
+  (accept a client certificate without validating it against any CA) has no
+  Jul equivalent — Jul's `client_auth` always validates against `ca_file`
+  once enabled — and stays blocking too, not approximated.
+  `ssl_verify_depth`/`ssl_trusted_certificate` are ignored (no corresponding
+  Jul knob). `mtls-runtime` proves it end to end: a real Jul instance and a
+  freshly generated ephemeral CA/leaf certificate chain accept a client
+  certificate signed by the configured CA and reject both no certificate at
+  all and a certificate signed by a different CA, at the TLS handshake.
+- **Imported HTTP PROXY-protocol identity evidence**, per #366's own
+  2026-09-21 amendment. `proxy-protocol-runtime` reuses the already-merged
+  #426 `listen ... proxy_protocol;` + `real_ip_header proxy_protocol;` +
+  `set_real_ip_from` translation and proves its trust boundary through a
+  real Jul instance: a real local relay whose own peer address matches the
+  configured `trusted_proxies` (simulated locally via
+  `net.Dialer.LocalAddr` aliasing two distinct loopback addresses, since a
+  single test machine has no other way to present two different network
+  positions) prepends a genuine PROXY v1 header, which Jul honors as the
+  canonical client address — observable in the `X-Forwarded-For` it forwards
+  upstream. The same bytes from a peer outside `trusted_proxies` are refused
+  outright, a malformed PROXY header from an otherwise-trusted peer is also
+  refused, and a client-supplied `X-Forwarded-For` attempting to override
+  the PROXY-derived identity is discarded (Jul always rebuilds it from its
+  own trusted view).
+- **WAF boundary documented, not translated.** nginx has no first-party WAF
+  directives, and no third-party WAF module directives (`modsecurity`,
+  `naxsi`, etc.) appear anywhere in this corpus — there is no nginx-side
+  construct to translate *from* onto Jul's own `[waf]` (Coraza) block, so
+  this is a genuine, documented absence of source material rather than an
+  unimplemented translation. Any such directive that did appear would fall
+  through to the generic `NGX_DIRECTIVE_UNSUPPORTED` blocking finding today.
+
+**Protocol-lane disposition, explicit per #366's own acceptance criteria.**
+Both new real-Jul E2E tests exercise H1 only. Jul's own mTLS documentation
+states client-certificate verification applies uniformly across H1/H2/H3
+(the same TLS handshake underlies all three), so this is not a
+protocol-specific runtime path the migration corpus needs to separately
+prove — H2/H3 parity for the *runtime capability itself* is already a
+product-level obligation of #259, not a migration-specific claim. HTTP/3 is
+additionally out of scope here because PROXY protocol is a TCP-preamble
+mechanism with no meaning over QUIC/UDP. Config-reload-under-live-traffic for
+either capability is also not separately exercised: reload atomicity and
+timing are already governed by the dedicated `docs/reload-semantics.md`
+contract and its own test suite, independent of anything the importer
+translates.
+
 ## Corpus admission policy
 
 Core fixtures are repository-authored or generated from repository-owned source.
@@ -311,7 +368,7 @@ disposition, or deferred dimension changes without deliberate review.
 | --- | --- | --- |
 | Core HTTP routing | Multi-file servers, exact/prefix/regex locations, returns, redirects, alias approximation, method constraints, static response headers/CORS, and dynamic-proxy blocking. | Full location-precedence cross-product, broader `proxy_pass` URI edge matrix, and non-static rewrite control flow. |
 | Upstreams and resiliency | Named weighted pools, least-connections, proxy routing, ignored pool tuning, and variable-derived destination blocking. | Active-health, backend-TLS/private-CA, retry/circuit, and WebSocket/gRPC upstream migration replay. |
-| Security | IPv4/IPv6 trusted proxies, supported and blocking real-IP forms, TLS references/protocols, security headers, and blocking auth/ACL/body/rate/cache controls. | Generated-certificate mTLS, multi-proxy chain comparison, and WAF/module-specific replay. Product-level client-identity spoofing and H1/H2/H3 parity remain owned by #259. |
+| Security | IPv4/IPv6 trusted proxies, supported and blocking real-IP forms, TLS references/protocols, security headers, blocking auth/ACL/body/rate/cache controls, bounded mTLS translation with a real-Jul certificate-accept/reject E2E, and imported PROXY-protocol identity trust-boundary evidence (#366). | Multi-proxy chain comparison and WAF/module-specific replay (no nginx-side WAF directive exists to translate from). Product-level client-identity spoofing and H1/H2/H3 parity remain owned by #259. |
 | Cache and compression | Direct gzip classification and explicit blocking NGINX cache-policy evidence. | Stateful cache/Vary/range replay, decoded compression-byte comparison, and shared/distributed cache directives. |
 | Protocol/application gateways | Strict-valid FastCGI candidate plus explicit blocking stream and mail fixtures. | Migration-specific H2/H3, WebSocket, gRPC/uWSGI, and L4 runtime replay. |
 | Operations | Include-tree provenance plus ignored/blocking process, event, log, resolver, and variable-map evidence. | Live log-sink, resolver/DNS, and worker/process tuning parity. |
@@ -339,6 +396,11 @@ rationale and revisit trigger for each deferred dimension live in
   gRPC, FastCGI, uWSGI and L4 real-runtime comparison, including the bounded
   `stream` subset translated by #426. Unsupported stream forms and `mail`
   remain blocking; importer support alone does not establish runtime parity.
+- mTLS and imported PROXY-protocol identity migration replay (#366) is H1
+  only and loopback-only, real-Jul, real-NGINX-comparison-free by design: no
+  pinned NGINX reference lane runs TLS today (see the fixture READMEs), and
+  H2/H3 parity for the underlying runtime capability is already #259's
+  obligation, not a migration-specific claim.
 
 ## Deterministic aggregate report
 
