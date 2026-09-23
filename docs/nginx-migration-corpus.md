@@ -210,19 +210,23 @@ real-Jul evidence:
 - **Imported HTTP PROXY-protocol identity evidence**, per #366's own
   2026-09-21 amendment. `proxy-protocol-runtime` reuses the already-merged
   #426 `listen ... proxy_protocol;` + `real_ip_header proxy_protocol;` +
-  `set_real_ip_from` translation and proves its trust boundary through a
-  real Jul instance: a real local relay whose own peer address matches the
-  configured `trusted_proxies` (simulated locally via
-  `net.Dialer.LocalAddr` aliasing two distinct loopback addresses, since a
-  single test machine has no other way to present two different network
-  positions) prepends a genuine PROXY header — both the v1 text form and
-  the v2 binary form (encoded with the same `internal/proxyproto.WriteV2`
-  Jul's own outbound path uses) — which Jul honors as the canonical client
-  address in either wire version, since its listener parses both through
-  the same shared `internal/proxyproto.ReadHeader`. This is observable in
-  the `X-Forwarded-For` it forwards upstream. The same bytes from a peer
-  outside `trusted_proxies` are refused outright, a malformed PROXY header
-  from an otherwise-trusted peer is also refused, and a client-supplied
+  `set_real_ip_from` translation and proves its trust boundary through two
+  real Jul instances, both dialed only from the ordinary default loopback
+  address (macOS does not auto-alias 127.0.0.0/8 to lo0 the way Linux does,
+  so a second loopback alias is not a portable way to simulate a second
+  network position): one runs the fixture's own unmodified translated
+  candidate (`trusted_proxies = ["127.0.0.2/32"]`, straight from
+  `set_real_ip_from`) to prove the untrusted/CIDR-mismatch peer is refused
+  outright; the other overrides `trusted_proxies` to `["127.0.0.1/32"]`
+  purely so the trusted-peer positive cases are dialable on every platform.
+  Against the trusted instance, a genuine PROXY header — both the v1 text
+  form and the v2 binary form (encoded with the same
+  `internal/proxyproto.WriteV2` Jul's own outbound path uses) — is honored
+  as the canonical client address in either wire version, since its
+  listener parses both through the same shared
+  `internal/proxyproto.ReadHeader`. This is observable in the
+  `X-Forwarded-For` it forwards upstream. A malformed PROXY header from the
+  trusted instance is also refused, and a client-supplied
   `X-Forwarded-For` attempting to override the PROXY-derived identity is
   discarded (Jul always rebuilds it from its own trusted view).
 - **WAF boundary documented, not translated.** nginx has no first-party WAF
