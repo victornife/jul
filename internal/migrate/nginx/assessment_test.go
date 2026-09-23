@@ -219,6 +219,26 @@ http {
 	}
 }
 
+func TestAssessmentClientAuthUsableThroughFullWalker(t *testing.T) {
+	a, _ := assessString(t, `
+http {
+  server {
+    listen 8443 ssl;
+    ssl_certificate /fixture/server.pem;
+    ssl_certificate_key /fixture/server.key;
+    ssl_verify_client on;
+    ssl_client_certificate /fixture/ca.pem;
+    location / { return 200; }
+  }
+}
+`)
+	for _, code := range []string{"NGX_SERVER_CLIENT_AUTH_MODE", "NGX_SERVER_CLIENT_AUTH_CA"} {
+		if !hasAssessmentCode(a, code) || a.HasBlocking() {
+			t.Fatalf("expected %s supported and no blocking findings, got %+v", code, a.Results)
+		}
+	}
+}
+
 func TestAssessmentValidationFailure(t *testing.T) {
 	a := FailureAssessment("fixture.conf", AssessmentInformational, "TEST", "test")
 	a.SetValidation([]error{errors.New("invalid candidate")}, nil)

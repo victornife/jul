@@ -6,11 +6,21 @@
 package main
 
 import (
+	"bufio"
 	"compress/gzip"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -37,6 +47,18 @@ import (
 // migration-incomplete configuration.
 func loadCorpusRuntimeCandidate(t *testing.T, id string) *config.Config {
 	t.Helper()
+	cfg, _ := importCorpusRuntimeFixture(t, id)
+	return validateCorpusRuntimeCandidate(t, id, cfg)
+}
+
+// importCorpusRuntimeFixture is the shared first half of
+// loadCorpusRuntimeCandidate, split out for fixtures (like mtls-runtime) that
+// need to rewrite file-path fields (TLS cert/key/CA) to real generated
+// temp files before the marshal-reparse-validate round trip runs, since the
+// source nginx.conf's placeholder paths never need to exist on disk for the
+// assessment/translation step itself.
+func importCorpusRuntimeFixture(t *testing.T, id string) (*config.Config, *nginx.Report) {
+	t.Helper()
 	root := repositoryCorpusRoot(t)
 	fixture, err := corpus.Load(filepath.Join(root, id))
 	if err != nil {
@@ -55,6 +77,14 @@ func loadCorpusRuntimeCandidate(t *testing.T, id string) *config.Config {
 	if report.Assessment.HasBlocking() {
 		t.Fatalf("fixture %s: runtime E2E fixture must be strict-valid, found blocking results: %+v", id, report.Assessment.Results)
 	}
+	return cfg, report
+}
+
+// validateCorpusRuntimeCandidate is the shared second half of
+// loadCorpusRuntimeCandidate: marshal, reparse, and validate, exactly as Jul
+// would load this config from disk (so parser defaults apply).
+func validateCorpusRuntimeCandidate(t *testing.T, id string, cfg *config.Config) *config.Config {
+	t.Helper()
 	toml, err := config.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("fixture %s: marshal candidate: %v", id, err)
@@ -622,5 +652,369 @@ func TestNGINXCorpusCacheRealE2E(t *testing.T) {
 	}
 	if fourthBody != want {
 		t.Fatalf("post-bypass request body mismatch: got %d bytes, want %d bytes matching the stored entry", len(fourthBody), len(want))
+	}
+}
+
+// TestNGINXCorpusProxyProtocolRealE2E proves the imported HTTP
+// PROXY-protocol identity translation (#426, evidenced here per #366's own
+// 2026-09-21 amendment) actually enforces its trust boundary through a real
+// Jul instance: a connection whose own peer address matches the configured
+// trusted_proxies and carries a real PROXY v1 header is honored as the
+// canonical client (observable in the X-Forwarded-For Jul forwards
+// upstream), while the identical bytes from a peer address outside
+// trusted_proxies are refused outright rather than served on a spoofed or
+// fallback identity - per docs/configuration.md's "a connection from an
+// address outside the set is refused" contract. Both peer identities are
+// simulated locally via net.Dialer.LocalAddr binding to two distinct
+// loopback aliases (127.0.0.1 vs 127.0.0.2), which the fixture's
+// trusted_proxies=["127.0.0.2/32"] singles out as the only trusted one.
+func TestNGINXCorpusProxyProtocolRealE2E(t *testing.T) {
+	cfg := loadCorpusRuntimeCandidate(t, "proxy-protocol-runtime")
+	if len(cfg.Servers) != 1 || cfg.Servers[0].ProxyProtocol != "in" {
+		t.Fatalf("proxy-protocol-runtime: want 1 server with proxy_protocol=in, got %+v", cfg.Servers)
+	}
+
+	var gotForwardedFor string
+	backendLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve backend port: %v", err)
+	}
+	backend := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotForwardedFor = r.Header.Get("X-Forwarded-For")
+		w.WriteHeader(http.StatusOK)
+	})}
+	go func() { _ = backend.Serve(backendLn) }()
+	defer backend.Close()
+
+	if len(cfg.Upstreams) != 1 || len(cfg.Upstreams[0].Servers) != 1 {
+		t.Fatalf("proxy-protocol-runtime: want 1 upstream with 1 server, got %+v", cfg.Upstreams)
+	}
+	cfg.Upstreams[0].Servers[0].Address = backendLn.Addr().String()
+	cfg.Servers[0].Listen = reserveLoopbackAddress(t)
+
+	if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
+		t.Fatalf("runtime preflight: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reload := make(chan struct{})
+	var logs corpusLogBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- app.Serve(ctx, reload, memorySource{name: "<nginx-corpus:proxy-protocol-runtime>", cfg: cfg}, cfg, productName, version, app.WithLogOutput(&logs))
+	}()
+
+	defer func() {
+		cancel()
+		select {
+		case code := <-done:
+			if code != 0 {
+				t.Errorf("proxy-protocol-runtime: Jul exit code = %d\nlogs:\n%s", code, logs.String())
+			}
+		case <-time.After(5 * time.Second):
+			t.Errorf("proxy-protocol-runtime: Jul did not shut down\nlogs:\n%s", logs.String())
+		}
+	}()
+
+	julAddr := cfg.Servers[0].Listen
+	const assertedClient = "203.0.113.7"
+	proxyLine := "PROXY TCP4 " + assertedClient + " 127.0.0.2 51234 18108\r\n"
+	request := "GET / HTTP/1.1\r\nHost: proxy-protocol-runtime.test\r\nConnection: close\r\n\r\n"
+	spoofedXFFRequest := "GET / HTTP/1.1\r\nHost: proxy-protocol-runtime.test\r\nConnection: close\r\nX-Forwarded-For: 198.51.100.9\r\n\r\n"
+
+	sendRaw := func(localAddr, payload string) (statusLine string, connErr error) {
+		t.Helper()
+		dialer := &net.Dialer{Timeout: 2 * time.Second}
+		if localAddr != "" {
+			dialer.LocalAddr = &net.TCPAddr{IP: net.ParseIP(localAddr)}
+		}
+		conn, err := dialer.Dial("tcp", julAddr)
+		if err != nil {
+			return "", err
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		if _, err := conn.Write([]byte(payload)); err != nil {
+			return "", err
+		}
+		resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return resp.Status, nil
+	}
+	sendAndRead := func(localAddr string) (string, error) {
+		return sendRaw(localAddr, proxyLine+request)
+	}
+
+	// A proxy_protocol=in listener refuses any connection that does not open
+	// with a valid PROXY header from a trusted peer (per the assertions
+	// below), so the shared plain-HTTP waitForCorpusServer readiness probe
+	// cannot be reused here; poll with a real trusted PROXY-prefixed request
+	// instead.
+	deadline := time.Now().Add(5 * time.Second)
+	var readyErr error
+	for time.Now().Before(deadline) {
+		select {
+		case code := <-done:
+			done <- code
+			t.Fatalf("Jul exited during startup with code %d\nlogs:\n%s", code, logs.String())
+		default:
+		}
+		if _, err := sendAndRead("127.0.0.2"); err == nil {
+			readyErr = nil
+			break
+		} else {
+			readyErr = err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if readyErr != nil {
+		t.Fatalf("Jul did not become reachable before the startup deadline: %v\nlogs:\n%s", readyErr, logs.String())
+	}
+
+	// Trusted: dial from 127.0.0.2, the one address in trusted_proxies.
+	status, err := sendAndRead("127.0.0.2")
+	if err != nil {
+		t.Fatalf("trusted relay: connection/request failed: %v", err)
+	}
+	if !strings.HasPrefix(status, "200") {
+		t.Fatalf("trusted relay: status = %q, want 200", status)
+	}
+	if gotForwardedFor != assertedClient {
+		t.Fatalf("trusted relay: backend X-Forwarded-For = %q, want %q (the PROXY-asserted client)", gotForwardedFor, assertedClient)
+	}
+
+	// Untrusted: dial from the default loopback address (127.0.0.1), which
+	// is not in trusted_proxies. The connection must be refused rather than
+	// served on 127.0.0.1's own (or the spoofed) identity.
+	gotForwardedFor = ""
+	status, err = sendAndRead("")
+	if err == nil && strings.HasPrefix(status, "200") {
+		t.Fatalf("untrusted peer: got status 200 (X-Forwarded-For=%q), want the connection refused", gotForwardedFor)
+	}
+
+	// Malformed PROXY header from an otherwise-trusted peer must also be
+	// refused - trust in the source address does not extend to trusting
+	// whatever bytes it happens to send.
+	gotForwardedFor = ""
+	status, err = sendRaw("127.0.0.2", "PROXY GARBAGE NOT A REAL HEADER\r\n"+request)
+	if err == nil && strings.HasPrefix(status, "200") {
+		t.Fatalf("malformed PROXY header: got status 200 (X-Forwarded-For=%q), want the connection refused", gotForwardedFor)
+	}
+
+	// A client-supplied X-Forwarded-For must never override the
+	// PROXY-derived canonical identity: Jul clears client-supplied
+	// X-Forwarded-* and rebuilds it from its own trusted view.
+	gotForwardedFor = ""
+	status, err = sendRaw("127.0.0.2", proxyLine+spoofedXFFRequest)
+	if err != nil {
+		t.Fatalf("trusted relay with spoofed X-Forwarded-For: connection/request failed: %v", err)
+	}
+	if !strings.HasPrefix(status, "200") {
+		t.Fatalf("trusted relay with spoofed X-Forwarded-For: status = %q, want 200", status)
+	}
+	if gotForwardedFor != assertedClient {
+		t.Fatalf("trusted relay with spoofed X-Forwarded-For: backend X-Forwarded-For = %q, want %q (the PROXY-derived identity, not the client-supplied header)", gotForwardedFor, assertedClient)
+	}
+}
+
+// mtlsPKI is a throwaway CA used to issue a server certificate and client
+// certificates for the mTLS real-E2E test below, mirroring the reusable
+// pattern in internal/handler/backendtls_test.go (a different package, so
+// duplicated here rather than exported for one test's sake).
+type mtlsPKI struct {
+	cert *x509.Certificate
+	key  *ecdsa.PrivateKey
+	pem  []byte
+}
+
+func newMTLSPKI(t *testing.T, cn string) *mtlsPKI {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               pkix.Name{CommonName: cn},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &mtlsPKI{cert: cert, key: key, pem: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})}
+}
+
+// issue signs a leaf certificate (valid for both server and client auth) for
+// the given common name, with 127.0.0.1 as an IP SAN so a loopback dial can
+// verify the server leaf by address.
+func (p *mtlsPKI) issue(t *testing.T, cn string) tls.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano() + 1),
+		Subject:      pkix.Name{CommonName: cn},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, p.cert, &key.PublicKey, p.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := tls.X509KeyPair(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pair
+}
+
+func writeMTLSFile(t *testing.T, dir, name string, data []byte) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestNGINXCorpusMTLSRealE2E proves the ssl_verify_client/ssl_client_certificate
+// -> Jul servers[].tls.client_auth translation actually enforces mutual TLS
+// through a real Jul instance and a freshly generated ephemeral CA/leaf
+// certificate chain: a client certificate signed by the configured CA is
+// accepted, while no certificate at all and a certificate signed by a
+// different CA are both rejected at the TLS handshake (mode=require).
+func TestNGINXCorpusMTLSRealE2E(t *testing.T) {
+	cfg, _ := importCorpusRuntimeFixture(t, "mtls-runtime")
+	if len(cfg.Servers) != 1 || cfg.Servers[0].TLS == nil || cfg.Servers[0].TLS.ClientAuth == nil || cfg.Servers[0].TLS.ClientAuth.Mode != "require" {
+		t.Fatalf("mtls-runtime: want 1 server with ClientAuth.Mode=require, got %+v", cfg.Servers)
+	}
+
+	dir := t.TempDir()
+	serverCA := newMTLSPKI(t, "mtls-runtime server CA (test-only, ephemeral)")
+	otherCA := newMTLSPKI(t, "mtls-runtime other CA (test-only, ephemeral)")
+	serverCert := serverCA.issue(t, "mtls-runtime.test")
+	trustedClientCert := serverCA.issue(t, "trusted-client")
+	untrustedClientCert := otherCA.issue(t, "untrusted-client")
+
+	serverCertPath := writeMTLSFile(t, dir, "server.pem", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverCert.Certificate[0]}))
+	serverKeyDER, err := x509.MarshalECPrivateKey(serverCert.PrivateKey.(*ecdsa.PrivateKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverKeyPath := writeMTLSFile(t, dir, "server.key", pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: serverKeyDER}))
+	caPath := writeMTLSFile(t, dir, "ca.pem", serverCA.pem)
+
+	cfg.Servers[0].TLS.Cert = serverCertPath
+	cfg.Servers[0].TLS.Key = serverKeyPath
+	cfg.Servers[0].TLS.ClientAuth.CAFile = caPath
+	cfg.Servers[0].Listen = reserveLoopbackAddress(t)
+	loaded := validateCorpusRuntimeCandidate(t, "mtls-runtime", cfg)
+
+	if err := app.ValidateRuntimeConfig(context.Background(), loaded); err != nil {
+		t.Fatalf("runtime preflight: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reload := make(chan struct{})
+	var logs corpusLogBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- app.Serve(ctx, reload, memorySource{name: "<nginx-corpus:mtls-runtime>", cfg: loaded}, loaded, productName, version, app.WithLogOutput(&logs))
+	}()
+
+	rootPool := x509.NewCertPool()
+	rootPool.AddCert(serverCA.cert)
+	baseURL := "https://" + loaded.Servers[0].Listen
+
+	newClient := func(clientCert *tls.Certificate) *http.Client {
+		tlsCfg := &tls.Config{RootCAs: rootPool}
+		if clientCert != nil {
+			tlsCfg.Certificates = []tls.Certificate{*clientCert}
+		}
+		return &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{TLSClientConfig: tlsCfg}}
+	}
+
+	// The readiness probe itself needs the trusted client certificate, since
+	// mode=require refuses every handshake without one.
+	trustedClient := newClient(&trustedClientCert)
+	deadline := time.Now().Add(5 * time.Second)
+	var readyErr error
+	for time.Now().Before(deadline) {
+		select {
+		case code := <-done:
+			done <- code
+			t.Fatalf("Jul exited during startup with code %d\nlogs:\n%s", code, logs.String())
+		default:
+		}
+		resp, err := trustedClient.Get(baseURL + "/")
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			readyErr = nil
+			break
+		}
+		readyErr = err
+		time.Sleep(20 * time.Millisecond)
+	}
+	if readyErr != nil {
+		t.Fatalf("Jul did not become reachable before the startup deadline: %v\nlogs:\n%s", readyErr, logs.String())
+	}
+
+	defer func() {
+		cancel()
+		select {
+		case code := <-done:
+			if code != 0 {
+				t.Errorf("mtls-runtime: Jul exit code = %d\nlogs:\n%s", code, logs.String())
+			}
+		case <-time.After(5 * time.Second):
+			t.Errorf("mtls-runtime: Jul did not shut down\nlogs:\n%s", logs.String())
+		}
+	}()
+
+	// Positive: a client certificate signed by the configured CA is accepted.
+	resp, err := trustedClient.Get(baseURL + "/")
+	if err != nil {
+		t.Fatalf("trusted client cert: request failed: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("trusted client cert: status = %d, want 200", resp.StatusCode)
+	}
+
+	// Negative: no client certificate at all must fail the handshake.
+	if _, err := newClient(nil).Get(baseURL + "/"); err == nil {
+		t.Fatal("no client certificate: expected the handshake to fail, request succeeded")
+	}
+
+	// Negative: a client certificate signed by a different CA must fail.
+	if _, err := newClient(&untrustedClientCert).Get(baseURL + "/"); err == nil {
+		t.Fatal("client certificate from an untrusted CA: expected the handshake to fail, request succeeded")
 	}
 }

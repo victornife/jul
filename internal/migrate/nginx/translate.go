@@ -116,6 +116,10 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 	var serverIndex []string
 	var serverReturn []string
 	serverReturnLine := 0
+	var clientAuthMode string
+	var clientAuthCAFile string
+	var clientAuthCRLFile string
+	clientAuthLine := 0
 
 	for _, c := range children(d) {
 		cp := paramValues(c)
@@ -171,6 +175,21 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 				tls.MinVersion = mv
 				hasTLS = true
 			}
+		case "ssl_verify_client":
+			if len(cp) > 0 {
+				clientAuthMode = strings.ToLower(strings.TrimSpace(cp[0]))
+				clientAuthLine = c.GetLine()
+			}
+		case "ssl_client_certificate":
+			if len(cp) > 0 {
+				clientAuthCAFile = strings.TrimSpace(cp[0])
+			}
+		case "ssl_crl":
+			if len(cp) > 0 {
+				clientAuthCRLFile = strings.TrimSpace(cp[0])
+			}
+		case "ssl_verify_depth", "ssl_trusted_certificate":
+			// no Jul equivalent knob; already reported ignored by the assessment
 		case "return":
 			serverReturn = cp
 			serverReturnLine = c.GetLine()
@@ -207,6 +226,8 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 		s.Locations = append(s.Locations, loc)
 		t.report.Locations++
 	}
+
+	t.applyClientAuth(&tls, clientAuthMode, clientAuthCAFile, clientAuthCRLFile, clientAuthLine)
 
 	if s.Listen == "" {
 		if hasTLS {
@@ -716,6 +737,36 @@ func translateProxyPass(v string, rep *Report, line int) string {
 		rep.note("proxy_pass %q at line %d: the target path is not a location-prefix replacement - Jul.IA's proxy always prepends it to the client's full incoming request path (net/http/httputil.ProxyRequest.SetURL semantics) rather than first stripping the matched location prefix as nginx does, so the backend-visible path differs whenever the location path does not exactly match the request", v, line)
 	}
 	return trimmed
+}
+
+// applyClientAuth resolves the bounded mTLS pairing collected from a server
+// block's ssl_verify_client/ssl_client_certificate/ssl_crl directives. Jul's
+// client_auth always requires a ca_file whenever its mode is not "none", so
+// translation only proceeds when both a recognized mode and a CA bundle are
+// present together; every other combination is reported and left untranslated
+// rather than guessed.
+func (t *translator) applyClientAuth(tls *config.TLSConfig, mode, caFile, crlFile string, line int) {
+	if mode == "" || mode == "off" {
+		return
+	}
+	var julMode string
+	switch mode {
+	case "on":
+		julMode = "require"
+	case "optional":
+		julMode = "request"
+	case "optional_no_ca":
+		t.report.skipNamed("ssl_verify_client", line, "optional_no_ca accepts a client certificate without validating it against any CA; Jul's client_auth always validates against ca_file once enabled")
+		return
+	default:
+		t.report.skipNamed("ssl_verify_client", line, "ssl_verify_client value is not recognized")
+		return
+	}
+	if caFile == "" {
+		t.report.skipNamed("ssl_verify_client", line, "ssl_verify_client "+mode+" requires a non-empty ssl_client_certificate; Jul's client_auth always requires a ca_file once enabled")
+		return
+	}
+	tls.ClientAuth = &config.ClientAuthConfig{Mode: julMode, CAFile: caFile, CRLFile: crlFile}
 }
 
 // applyReturn maps an nginx `return` directive onto a location.

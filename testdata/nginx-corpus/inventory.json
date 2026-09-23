@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "fixture_schema_version": 1,
-  "fixture_count": 26,
-  "core_fixtures": 24,
+  "fixture_count": 28,
+  "core_fixtures": 26,
   "full_fixtures": 2,
   "categories": [
     {
@@ -11,7 +11,7 @@
     },
     {
       "name": "client-identity",
-      "count": 2
+      "count": 3
     },
     {
       "name": "core-http",
@@ -55,7 +55,7 @@
     },
     {
       "name": "security",
-      "count": 5
+      "count": 7
     },
     {
       "name": "static-files",
@@ -67,7 +67,7 @@
     },
     {
       "name": "tls",
-      "count": 1
+      "count": 2
     },
     {
       "name": "upstreams",
@@ -97,17 +97,17 @@
     },
     {
       "name": "informational",
-      "count": 25
+      "count": 27
     },
     {
       "name": "supported",
-      "count": 249
+      "count": 270
     }
   ],
   "risks": [
     {
       "name": "availability",
-      "count": 53
+      "count": 56
     },
     {
       "name": "observability",
@@ -115,7 +115,7 @@
     },
     {
       "name": "operational",
-      "count": 57
+      "count": 61
     },
     {
       "name": "performance",
@@ -123,11 +123,11 @@
     },
     {
       "name": "routing",
-      "count": 154
+      "count": 163
     },
     {
       "name": "security",
-      "count": 36
+      "count": 43
     }
   ],
   "codes": [
@@ -169,11 +169,11 @@
     },
     {
       "name": "NGX_HTTP_SERVER",
-      "count": 26
+      "count": 28
     },
     {
       "name": "NGX_HTTP_UPSTREAM",
-      "count": 9
+      "count": 10
     },
     {
       "name": "NGX_INCLUDE_RESOLVED",
@@ -217,7 +217,7 @@
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS",
-      "count": 8
+      "count": 9
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS_DYNAMIC",
@@ -237,7 +237,7 @@
     },
     {
       "name": "NGX_LOCATION_RETURN",
-      "count": 19
+      "count": 20
     },
     {
       "name": "NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT",
@@ -253,11 +253,11 @@
     },
     {
       "name": "NGX_MAIN_EVENTS",
-      "count": 24
+      "count": 26
     },
     {
       "name": "NGX_MAIN_HTTP",
-      "count": 26
+      "count": 28
     },
     {
       "name": "NGX_MAIN_MAIL",
@@ -277,7 +277,7 @@
     },
     {
       "name": "NGX_REALIP_HEADER_PROXY_PROTOCOL",
-      "count": 2
+      "count": 3
     },
     {
       "name": "NGX_REALIP_RECURSIVE",
@@ -285,7 +285,7 @@
     },
     {
       "name": "NGX_REALIP_TRUST_SOURCE",
-      "count": 4
+      "count": 5
     },
     {
       "name": "NGX_SERVER_ALLOW",
@@ -300,32 +300,40 @@
       "count": 1
     },
     {
+      "name": "NGX_SERVER_CLIENT_AUTH_CA",
+      "count": 1
+    },
+    {
+      "name": "NGX_SERVER_CLIENT_AUTH_MODE",
+      "count": 1
+    },
+    {
       "name": "NGX_SERVER_DENY",
       "count": 1
     },
     {
       "name": "NGX_SERVER_LISTEN",
-      "count": 26
+      "count": 28
     },
     {
       "name": "NGX_SERVER_LOCATION",
-      "count": 32
+      "count": 34
     },
     {
       "name": "NGX_SERVER_NAME",
-      "count": 20
+      "count": 22
     },
     {
       "name": "NGX_SERVER_TLS_CERT",
-      "count": 1
+      "count": 2
     },
     {
       "name": "NGX_SERVER_TLS_KEY",
-      "count": 1
+      "count": 2
     },
     {
       "name": "NGX_SERVER_TLS_PROTOCOLS",
-      "count": 1
+      "count": 2
     },
     {
       "name": "NGX_STREAM_LISTEN",
@@ -389,7 +397,7 @@
     },
     {
       "name": "NGX_UPSTREAM_SERVER",
-      "count": 14
+      "count": 15
     },
     {
       "name": "NGX_VARIABLE_BLOCK_UNSUPPORTED",
@@ -474,6 +482,8 @@
       "id": "security",
       "status": "represented",
       "fixtures": [
+        "mtls-runtime",
+        "proxy-protocol-runtime",
         "realip-blocking",
         "realip-proxy-protocol-supported",
         "realip-supported",
@@ -481,8 +491,7 @@
         "stream-security-boundaries"
       ],
       "deferred_dimensions": [
-        "WAF/module-specific migration replay",
-        "generated certificate mTLS replay",
+        "WAF/module-specific migration replay (no nginx WAF directive exists to translate from; Jul's [waf] block has nothing on the nginx side to map onto, so this is a boundary to document, not a translation gap)",
         "multi-proxy forwarded-chain runtime comparison"
       ]
     },

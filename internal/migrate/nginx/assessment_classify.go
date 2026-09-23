@@ -38,6 +38,12 @@ type walkFacts struct {
 	// cannot be translated without silently picking one backend's threshold.
 	upstreamMaxFailsConsistent    bool
 	upstreamFailTimeoutConsistent bool
+	// serverClientAuthUsable is true when an HTTP server block declares a
+	// complete mTLS pairing: `ssl_verify_client on|optional;` plus a non-empty
+	// `ssl_client_certificate`. It gates both directives so neither can be
+	// classified supported alone (Jul's client_auth always requires a
+	// ca_file whenever its mode is not "none").
+	serverClientAuthUsable bool
 }
 
 func (w *assessmentWalker) walk(context AssessmentContext, d ngx.IDirective, facts walkFacts) {
@@ -68,6 +74,7 @@ func (w *assessmentWalker) walk(context AssessmentContext, d ngx.IDirective, fac
 		locationFacts.corsConflict = hasStaticCORSConflict(kids)
 	case childContext == ContextServer:
 		locationFacts.httpProxyProtocolUsable = serverHasUsableHTTPProxyProtocolIdentity(kids)
+		locationFacts.serverClientAuthUsable = serverHasUsableClientAuth(kids)
 	case childContext == ContextStream && d.GetName() == "server":
 		locationFacts.streamIsUDP = streamServerListenIsUDP(kids)
 	case childContext == ContextUpstream:
@@ -108,6 +115,10 @@ func classifyDirective(context AssessmentContext, d ngx.IDirective, facts walkFa
 			return classifyStreamSSLPreread(params)
 		case context == ContextServer && name == "ssl_protocols":
 			return classifyTLSProtocols(params)
+		case context == ContextServer && name == "ssl_verify_client":
+			return classifySSLVerifyClient(params, facts.serverClientAuthUsable)
+		case context == ContextServer && name == "ssl_client_certificate":
+			return classifySSLClientCertificate(params, facts.serverClientAuthUsable)
 		case context == ContextLocation && name == "proxy_pass":
 			return classifyProxyPass(params)
 		case context == ContextHTTP && name == "proxy_cache_path":
@@ -539,6 +550,68 @@ func serverHasUsableHTTPProxyProtocolIdentity(kids []ngx.IDirective) bool {
 		}
 	}
 	return listenHasToken && headerIsProxyProtocol && hasValidTrustedSource
+}
+
+// serverHasUsableClientAuth reports whether an HTTP server block declares a
+// complete mTLS pairing: `ssl_verify_client on|optional;` plus a non-empty
+// `ssl_client_certificate`. Jul's client_auth always requires a ca_file
+// whenever its mode is not "none", so ssl_verify_client alone (no CA bundle)
+// or ssl_client_certificate alone (nginx never enables verification without
+// ssl_verify_client either) cannot be translated; both stay blocking unless
+// both are present together.
+func serverHasUsableClientAuth(kids []ngx.IDirective) bool {
+	var mode, caFile string
+	for _, c := range kids {
+		switch c.GetName() {
+		case "ssl_verify_client":
+			if p := paramValues(c); len(p) > 0 {
+				mode = strings.ToLower(strings.TrimSpace(p[0]))
+			}
+		case "ssl_client_certificate":
+			if p := paramValues(c); len(p) > 0 {
+				caFile = strings.TrimSpace(p[0])
+			}
+		}
+	}
+	return (mode == "on" || mode == "optional") && caFile != ""
+}
+
+// classifySSLVerifyClient judges `ssl_verify_client` in isolation plus the
+// cross-directive usable fact. "optional_no_ca" accepts a client certificate
+// without validating it against any CA at all, which Jul's client_auth
+// cannot represent (it always validates against ca_file when enabled), so it
+// stays blocking regardless of sibling directives.
+func classifySSLVerifyClient(params []string, usable bool) capability {
+	if len(params) == 0 {
+		return blocking("NGX_SERVER_CLIENT_AUTH_MODE", RiskSecurity, "ssl_verify_client has no value")
+	}
+	switch strings.ToLower(strings.TrimSpace(params[0])) {
+	case "on", "optional":
+		if !usable {
+			return blocking("NGX_SERVER_CLIENT_AUTH_MODE", RiskSecurity, "ssl_verify_client requires a non-empty ssl_client_certificate in the same server block")
+		}
+		return capabilityRegistry[capabilityKey{ContextServer, "ssl_verify_client"}]
+	case "optional_no_ca":
+		return blocking("NGX_SERVER_CLIENT_AUTH_NO_CA", RiskSecurity, "optional_no_ca accepts a client certificate without validating it against any CA; Jul's client_auth always validates against ca_file once enabled")
+	case "off":
+		return ignored("NGX_SERVER_CLIENT_AUTH_OFF", RiskSecurity, "explicit ssl_verify_client off matches Jul's default of no client-certificate verification")
+	default:
+		return blocking("NGX_SERVER_CLIENT_AUTH_MODE", RiskSecurity, "ssl_verify_client value is not recognized")
+	}
+}
+
+// classifySSLClientCertificate judges `ssl_client_certificate` in isolation
+// plus the cross-directive usable fact: without a matching ssl_verify_client
+// on|optional, nginx never actually enables verification either, so an
+// orphaned ssl_client_certificate is not representable as mTLS.
+func classifySSLClientCertificate(params []string, usable bool) capability {
+	if len(params) == 0 || strings.TrimSpace(params[0]) == "" {
+		return blocking("NGX_SERVER_CLIENT_AUTH_CA", RiskSecurity, "ssl_client_certificate has no path")
+	}
+	if !usable {
+		return blocking("NGX_SERVER_CLIENT_AUTH_CA", RiskSecurity, "ssl_client_certificate requires ssl_verify_client on|optional in the same server block")
+	}
+	return capabilityRegistry[capabilityKey{ContextServer, "ssl_client_certificate"}]
 }
 
 // streamServerListenIsUDP reports whether a stream server block's listen
