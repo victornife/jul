@@ -4,11 +4,11 @@ This page identifies the current audit disposition and preserves earlier audit
 evidence. Issue closure alone is not audit evidence, and a dated audit is not a
 live issue tracker.
 
-## Current authoritative records
+## Latest dated audit record
 
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
-| [2026-09-16 pre-soak readiness audit](audit/2026-09-16-pre-soak-readiness-audit.md) | `b1e2dfc5` plus PR #416 | Current pre-soak readiness audit and reconciled backlog (BL-01..BL-30) | P0 items BL-01..BL-07 and P1 items BL-08..BL-10/BL-13/BL-16/BL-24..BL-26 closed via PR #416 (merged `03fda9f8`); remaining backlog items open, tracked in the doc's own backlog table |
+| [2026-09-16 pre-soak readiness audit](audit/2026-09-16-pre-soak-readiness-audit.md) | `b1e2dfc5` plus PR #416 | Historical readiness evidence at its dated baseline; #421/#425 record the subsequent soak and stable release | P0 items BL-01..BL-07 and P1 items BL-08..BL-10/BL-13/BL-16/BL-24..BL-26 closed via PR #416 (merged `03fda9f8`); its remaining backlog table describes that baseline, not current issue state |
 
 ## Archived records
 
@@ -30,19 +30,23 @@ Superseded or fully closed audits, preserved as historical evidence under
 - ADRs 0016–0019 are accepted. Canonical client identity, backend trust,
   routing/response policy, configuration authority and generated contracts are
   implemented on `main`.
-- Those post-RC capabilities keep their own maturity and delivery rows in
-  [status.md](status.md); implementation does not imply stable publication or GA.
-- Generic resilience is merged; the 2026-09-15 pre-soak correction centralizes
-  cross-protocol failure attribution. Stable release and long-running soak
-  remain explicit later gates.
-- NGINX assessment, provenance, bounded include traversal and the selected
-  compatibility-corpus evidence are merged; later migration expansion is a
-  separate decision.
-- The versioned supported external Admin API and remote CLI are merged Beta
-  surfaces with separate maturity rows; internal Console routes do not inherit
-  that external contract.
-- Selected runtime dynamics, support bundles and `jul doctor` are merged. The
-  bounded AI experiment remains a later portfolio decision.
+- Stable `v2.0.0` was published from the post-#420 exact SHA recorded in
+  [#425](https://github.com/victornife/jul/issues/425), after the #421 final
+  soak. #422 remains non-blocking follow-up evidence.
+- The pre-RC and post-RC additive capabilities included in that stable tag
+  retain separate Beta maturity and now have `released` delivery in
+  [status.md](status.md); release alone does not promote them to GA.
+- Generic resilience includes the cross-protocol failure-attribution
+  correction and is published Beta; feature-specific GA certification remains
+  a separate decision.
+- NGINX assessment, provenance and bounded include traversal are published
+  Beta. #426 and #365 added post-v2.0.0 migration translation/E2E evidence on
+  `main`; #366/#367 remain open and #368 owns follow-through guidance and
+  optional full-corpus work.
+- The versioned external Admin API, remote CLI, selected runtime dynamics,
+  support bundles and `jul doctor` are published Beta with separate maturity
+  rows. Internal Console routes do not inherit the external API contract.
+  The bounded AI experiment remains a later portfolio decision.
 
 Volatile issue-level sequencing is owned by
 [#62](https://github.com/victornife/jul/issues/62). Feature maturity/delivery is
