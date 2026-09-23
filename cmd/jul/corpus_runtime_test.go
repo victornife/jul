@@ -660,23 +660,33 @@ func TestNGINXCorpusCacheRealE2E(t *testing.T) {
 // TestNGINXCorpusProxyProtocolRealE2E proves the imported HTTP
 // PROXY-protocol identity translation (#426, evidenced here per #366's own
 // 2026-09-21 amendment) actually enforces its trust boundary through a real
-// Jul instance: a connection whose own peer address matches the configured
-// trusted_proxies and carries a real PROXY header (both v1 text and v2
-// binary wire formats) is honored as the canonical client (observable in
-// the X-Forwarded-For Jul forwards upstream), while the identical bytes
-// from a peer address outside trusted_proxies are refused outright rather
-// than served on a spoofed or fallback identity - per
-// docs/configuration.md's "a connection from an address outside the set is
-// refused" contract. Both peer identities are simulated locally via
-// net.Dialer.LocalAddr binding to two distinct loopback aliases (127.0.0.1
-// vs 127.0.0.2), which the fixture's trusted_proxies=["127.0.0.2/32"]
-// singles out as the only trusted one.
+// Jul instance: a connection whose own peer address matches trusted_proxies
+// and carries a real PROXY header (both v1 text and v2 binary wire formats)
+// is honored as the canonical client (observable in the X-Forwarded-For Jul
+// forwards upstream), while the identical bytes from a peer address outside
+// trusted_proxies are refused outright rather than served on a spoofed or
+// fallback identity - per docs/configuration.md's "a connection from an
+// address outside the set is refused" contract.
+//
+// Every dial here originates from the ordinary default loopback address
+// (127.0.0.1) - the only loopback address guaranteed present without extra
+// host configuration on every CI platform (unlike Linux, macOS does not
+// auto-alias 127.0.0.0/8 to lo0, so binding to a second loopback alias such
+// as 127.0.0.2 is not portable). The trusted and untrusted positions are
+// instead produced by running two Jul instances with different
+// trusted_proxies values against that same peer address:
+//   - the untrusted/CIDR-mismatch proof runs against the fixture's own
+//     unmodified translated candidate (trusted_proxies=["127.0.0.2/32"],
+//     straight from set_real_ip_from) - evidence about the real translation
+//     output, not a synthetic stand-in;
+//   - the trusted-peer, malformed-header, and spoofed-identity proofs run
+//     against a second instance whose trusted_proxies is overridden to
+//     ["127.0.0.1/32"], purely so the peer check can be satisfied without an
+//     OS-level address alias. It exercises the exact same runtime
+//     enforcement mechanism (proxy_protocol = "in" plus
+//     client_address.trusted_proxies), just against a CIDR value that is
+//     dialable on every platform.
 func TestNGINXCorpusProxyProtocolRealE2E(t *testing.T) {
-	cfg := loadCorpusRuntimeCandidate(t, "proxy-protocol-runtime")
-	if len(cfg.Servers) != 1 || cfg.Servers[0].ProxyProtocol != "in" {
-		t.Fatalf("proxy-protocol-runtime: want 1 server with proxy_protocol=in, got %+v", cfg.Servers)
-	}
-
 	var gotForwardedFor string
 	backendLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -689,49 +699,76 @@ func TestNGINXCorpusProxyProtocolRealE2E(t *testing.T) {
 	go func() { _ = backend.Serve(backendLn) }()
 	defer backend.Close()
 
-	if len(cfg.Upstreams) != 1 || len(cfg.Upstreams[0].Servers) != 1 {
-		t.Fatalf("proxy-protocol-runtime: want 1 upstream with 1 server, got %+v", cfg.Upstreams)
-	}
-	cfg.Upstreams[0].Servers[0].Address = backendLn.Addr().String()
-	cfg.Servers[0].Listen = reserveLoopbackAddress(t)
-
-	if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
-		t.Fatalf("runtime preflight: %v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	reload := make(chan struct{})
-	var logs corpusLogBuffer
-	done := make(chan int, 1)
-	go func() {
-		done <- app.Serve(ctx, reload, memorySource{name: "<nginx-corpus:proxy-protocol-runtime>", cfg: cfg}, cfg, productName, version, app.WithLogOutput(&logs))
-	}()
-
-	defer func() {
-		cancel()
-		select {
-		case code := <-done:
-			if code != 0 {
-				t.Errorf("proxy-protocol-runtime: Jul exit code = %d\nlogs:\n%s", code, logs.String())
-			}
-		case <-time.After(5 * time.Second):
-			t.Errorf("proxy-protocol-runtime: Jul did not shut down\nlogs:\n%s", logs.String())
-		}
-	}()
-
-	julAddr := cfg.Servers[0].Listen
-	const assertedClient = "203.0.113.7"
-	proxyLine := "PROXY TCP4 " + assertedClient + " 127.0.0.2 51234 18108\r\n"
-	request := "GET / HTTP/1.1\r\nHost: proxy-protocol-runtime.test\r\nConnection: close\r\n\r\n"
-	spoofedXFFRequest := "GET / HTTP/1.1\r\nHost: proxy-protocol-runtime.test\r\nConnection: close\r\nX-Forwarded-For: 198.51.100.9\r\n\r\n"
-
-	sendRaw := func(localAddr, payload string) (statusLine string, connErr error) {
+	// startInstance imports a fresh copy of the fixture, points it at the
+	// shared backend, optionally overrides trusted_proxies to a
+	// universally-dialable CIDR, and starts a real Jul instance. Readiness
+	// only needs the OS-level TCP accept to be up (a plain, payload-less
+	// dial), since the PROXY-protocol admission check runs after accept and
+	// would otherwise never succeed for the deliberately-untrusted instance.
+	startInstance := func(name string, trustedProxies []string) string {
 		t.Helper()
-		dialer := &net.Dialer{Timeout: 2 * time.Second}
-		if localAddr != "" {
-			dialer.LocalAddr = &net.TCPAddr{IP: net.ParseIP(localAddr)}
+		cfg := loadCorpusRuntimeCandidate(t, "proxy-protocol-runtime")
+		if len(cfg.Servers) != 1 || cfg.Servers[0].ProxyProtocol != "in" {
+			t.Fatalf("%s: want 1 server with proxy_protocol=in, got %+v", name, cfg.Servers)
 		}
-		conn, err := dialer.Dial("tcp", julAddr)
+		if len(cfg.Upstreams) != 1 || len(cfg.Upstreams[0].Servers) != 1 {
+			t.Fatalf("%s: want 1 upstream with 1 server, got %+v", name, cfg.Upstreams)
+		}
+		cfg.Upstreams[0].Servers[0].Address = backendLn.Addr().String()
+		cfg.Servers[0].Listen = reserveLoopbackAddress(t)
+		if trustedProxies != nil {
+			cfg.Servers[0].ClientAddress.TrustedProxies = trustedProxies
+		}
+		if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
+			t.Fatalf("%s: runtime preflight: %v", name, err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		reload := make(chan struct{})
+		logs := &corpusLogBuffer{}
+		done := make(chan int, 1)
+		go func() {
+			done <- app.Serve(ctx, reload, memorySource{name: "<nginx-corpus:proxy-protocol-runtime:" + name + ">", cfg: cfg}, cfg, productName, version, app.WithLogOutput(logs))
+		}()
+		t.Cleanup(func() {
+			cancel()
+			select {
+			case code := <-done:
+				if code != 0 {
+					t.Errorf("%s: Jul exit code = %d\nlogs:\n%s", name, code, logs.String())
+				}
+			case <-time.After(5 * time.Second):
+				t.Errorf("%s: Jul did not shut down\nlogs:\n%s", name, logs.String())
+			}
+		})
+
+		addr := cfg.Servers[0].Listen
+		deadline := time.Now().Add(5 * time.Second)
+		var lastErr error
+		for time.Now().Before(deadline) {
+			select {
+			case code := <-done:
+				done <- code
+				t.Fatalf("%s: Jul exited during startup with code %d\nlogs:\n%s", name, code, logs.String())
+			default:
+			}
+			probe, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+			if err == nil {
+				probe.Close()
+				lastErr = nil
+				break
+			}
+			lastErr = err
+			time.Sleep(20 * time.Millisecond)
+		}
+		if lastErr != nil {
+			t.Fatalf("%s: Jul did not become reachable before the startup deadline: %v\nlogs:\n%s", name, lastErr, logs.String())
+		}
+		return addr
+	}
+
+	sendRaw := func(addr, payload string) (statusLine string, connErr error) {
+		t.Helper()
+		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 		if err != nil {
 			return "", err
 		}
@@ -748,38 +785,29 @@ func TestNGINXCorpusProxyProtocolRealE2E(t *testing.T) {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return resp.Status, nil
 	}
-	sendAndRead := func(localAddr string) (string, error) {
-		return sendRaw(localAddr, proxyLine+request)
+
+	const assertedClient = "203.0.113.7"
+	proxyLine := "PROXY TCP4 " + assertedClient + " 127.0.0.1 51234 18108\r\n"
+	request := "GET / HTTP/1.1\r\nHost: proxy-protocol-runtime.test\r\nConnection: close\r\n\r\n"
+	spoofedXFFRequest := "GET / HTTP/1.1\r\nHost: proxy-protocol-runtime.test\r\nConnection: close\r\nX-Forwarded-For: 198.51.100.9\r\n\r\n"
+
+	// Untrusted / CIDR-mismatch: the fixture's own unmodified translated
+	// candidate trusts only 127.0.0.2/32 (from set_real_ip_from), so a
+	// connection from the default loopback address must be refused even
+	// though it carries a well-formed PROXY header.
+	untrustedAddr := startInstance("real-candidate", nil)
+	status, err := sendRaw(untrustedAddr, proxyLine+request)
+	if err == nil && strings.HasPrefix(status, "200") {
+		t.Fatalf("untrusted peer: got status 200 (X-Forwarded-For=%q), want the connection refused", gotForwardedFor)
 	}
 
-	// A proxy_protocol=in listener refuses any connection that does not open
-	// with a valid PROXY header from a trusted peer (per the assertions
-	// below), so the shared plain-HTTP waitForCorpusServer readiness probe
-	// cannot be reused here; poll with a real trusted PROXY-prefixed request
-	// instead.
-	deadline := time.Now().Add(5 * time.Second)
-	var readyErr error
-	for time.Now().Before(deadline) {
-		select {
-		case code := <-done:
-			done <- code
-			t.Fatalf("Jul exited during startup with code %d\nlogs:\n%s", code, logs.String())
-		default:
-		}
-		if _, err := sendAndRead("127.0.0.2"); err == nil {
-			readyErr = nil
-			break
-		} else {
-			readyErr = err
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if readyErr != nil {
-		t.Fatalf("Jul did not become reachable before the startup deadline: %v\nlogs:\n%s", readyErr, logs.String())
-	}
+	// Trusted peer: a second instance whose trusted_proxies is overridden to
+	// the one address every platform can dial from without extra host
+	// configuration.
+	trustedAddr := startInstance("trusted-boundary", []string{"127.0.0.1/32"})
 
-	// Trusted: dial from 127.0.0.2, the one address in trusted_proxies.
-	status, err := sendAndRead("127.0.0.2")
+	gotForwardedFor = ""
+	status, err = sendRaw(trustedAddr, proxyLine+request)
 	if err != nil {
 		t.Fatalf("trusted relay: connection/request failed: %v", err)
 	}
@@ -790,20 +818,11 @@ func TestNGINXCorpusProxyProtocolRealE2E(t *testing.T) {
 		t.Fatalf("trusted relay: backend X-Forwarded-For = %q, want %q (the PROXY-asserted client)", gotForwardedFor, assertedClient)
 	}
 
-	// Untrusted: dial from the default loopback address (127.0.0.1), which
-	// is not in trusted_proxies. The connection must be refused rather than
-	// served on 127.0.0.1's own (or the spoofed) identity.
-	gotForwardedFor = ""
-	status, err = sendAndRead("")
-	if err == nil && strings.HasPrefix(status, "200") {
-		t.Fatalf("untrusted peer: got status 200 (X-Forwarded-For=%q), want the connection refused", gotForwardedFor)
-	}
-
 	// Malformed PROXY header from an otherwise-trusted peer must also be
 	// refused - trust in the source address does not extend to trusting
 	// whatever bytes it happens to send.
 	gotForwardedFor = ""
-	status, err = sendRaw("127.0.0.2", "PROXY GARBAGE NOT A REAL HEADER\r\n"+request)
+	status, err = sendRaw(trustedAddr, "PROXY GARBAGE NOT A REAL HEADER\r\n"+request)
 	if err == nil && strings.HasPrefix(status, "200") {
 		t.Fatalf("malformed PROXY header: got status 200 (X-Forwarded-For=%q), want the connection refused", gotForwardedFor)
 	}
@@ -812,7 +831,7 @@ func TestNGINXCorpusProxyProtocolRealE2E(t *testing.T) {
 	// PROXY-derived canonical identity: Jul clears client-supplied
 	// X-Forwarded-* and rebuilds it from its own trusted view.
 	gotForwardedFor = ""
-	status, err = sendRaw("127.0.0.2", proxyLine+spoofedXFFRequest)
+	status, err = sendRaw(trustedAddr, proxyLine+spoofedXFFRequest)
 	if err != nil {
 		t.Fatalf("trusted relay with spoofed X-Forwarded-For: connection/request failed: %v", err)
 	}
@@ -832,11 +851,11 @@ func TestNGINXCorpusProxyProtocolRealE2E(t *testing.T) {
 	var v2Header bytes.Buffer
 	if err := proxyproto.WriteV2(&v2Header,
 		&net.TCPAddr{IP: net.ParseIP(assertedClient), Port: 51235},
-		&net.TCPAddr{IP: net.ParseIP("127.0.0.2"), Port: 18108},
+		&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 18108},
 	); err != nil {
 		t.Fatalf("encode PROXY v2 header: %v", err)
 	}
-	status, err = sendRaw("127.0.0.2", v2Header.String()+request)
+	status, err = sendRaw(trustedAddr, v2Header.String()+request)
 	if err != nil {
 		t.Fatalf("trusted relay with PROXY v2: connection/request failed: %v", err)
 	}
