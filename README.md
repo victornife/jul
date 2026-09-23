@@ -60,11 +60,12 @@ NGINX who want a gentler on-ramp.
 
 ## Current direction
 
-Jul.IA is completing the bounded standalone gateway first: current correctness,
-trusted client/backend identity, generic resilience, safe configuration
-automation, and selected high-value runtime dynamics. Fleet, hosted cloud,
-GraphQL composition and AI remain optional horizons or bounded experiments; none
-is required for the single-node product to remain useful. See the
+Jul.IA has published the bounded standalone gateway as stable v2.0.0.
+The current selected follow-through emphasizes truthful NGINX migration evidence,
+day-2 operability and runtime-resource ownership. Additional features on `main`
+do not inherit the release or GA status of older capabilities. Fleet, hosted
+cloud, GraphQL composition and AI remain optional horizons or bounded
+experiments; none is required for the single-node product to remain useful. See the
 [operating model](docs/operating-model.md),
 [Core Gateway Completeness](docs/specs/core-gateway-completeness.md), and
 [roadmap](docs/roadmap/README.md).
@@ -80,15 +81,16 @@ human view and evidence matrix are in [`docs/status.md`](docs/status.md).
 | Classification | Current examples |
 | --- | --- |
 | **GA · soaked** | Core HTTP, released TLS/ACME and mTLS, authentication, cache, compression, rate limiting, health checks, service discovery, released gRPC/L4/WASM/WAF/observability/importer capabilities, Console, secrets, reload transaction, trusted client address, and backend TLS trust (#409, promoted with stable v2.0.0) |
-| **Beta · merged/candidate** | Auxiliary egress policy, method/header/query routing, response-header policy and CORS, upstream admission/retry/circuit controls, configuration authority/generated contracts, and NGINX assessment/provenance/include traversal |
+| **Beta · released in v2.0.0** | Auxiliary egress policy, method/header/query routing, response-header policy and CORS, upstream admission/retry/circuit controls, configuration authority/generated contracts, NGINX assessment/provenance/include traversal, diagnostics, admin TLS, external API/CLI, selected hot reload and Unix HTTP upstreams |
 | **GA — soak pending** | None at this snapshot |
 
-A capability merged on `main` is not automatically released or GA. In
-particular, the published `v2.0.0-rc.1` checkpoint is an independently verified
-**prerelease**, while current `main` contains substantial later work. See the
-[release-candidate evidence](docs/release-candidates/v2.0.0-rc.1.md) and the
-[current status matrix](docs/status.md) rather than inferring publication from a
-feature guide.
+Stable [`v2.0.0`](https://github.com/victornife/jul/releases/tag/v2.0.0)
+was published from a post-#420 commit. The older
+[`v2.0.0-rc.1` checkpoint](docs/release-candidates/v2.0.0-rc.1.md) remains a
+separate prerelease. A Beta capability in the stable release does not thereby
+become GA; post-release work on `main`, including #426 and #365, is not in
+v2.0.0. Check the [status matrix](docs/status.md) for each capability's
+maturity and delivery.
 
 The response-cache correction programme is complete: #134 recertified the
 feature and the existing released cache record retains GA. Newer additions keep
