@@ -84,6 +84,36 @@ http {
 	}
 }
 
+func TestTranslateListenHTTP2CleartextEnablesH2C(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  server {
+    listen 8080 http2;
+    location / { grpc_pass grpc://backend:9090; }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	if !s.H2C {
+		t.Error("expected H2C to be enabled for a cleartext http2 listener")
+	}
+}
+
+func TestTranslateListenHTTP2OverTLSDoesNotEnableH2C(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  server {
+    listen 443 ssl http2;
+    ssl_certificate /etc/ssl/cert.pem;
+    ssl_certificate_key /etc/ssl/key.pem;
+    location / { return 200; }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	if s.H2C {
+		t.Error("expected H2C to stay disabled for http2 negotiated via TLS ALPN")
+	}
+}
+
 func TestTranslateLocationModifiers(t *testing.T) {
 	cfg, _ := translate(t, `
 http {

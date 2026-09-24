@@ -133,6 +133,15 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 				t.report.skip(c, "unsupported listen address (e.g. a unix socket)")
 			} else if s.Listen == "" {
 				s.Listen = listen
+				// A TLS listener negotiates HTTP/2 automatically via ALPN (no
+				// distinct Jul knob - see the "approximated" disposition for
+				// http2 alongside ssl), but a cleartext listener needs h2c
+				// explicitly enabled to accept HTTP/2 without TLS at all,
+				// which is what grpc_pass's grpc:// (h2c) scheme requires a
+				// client be able to speak to Jul directly.
+				if !ssl && hasListenToken(cp, "http2") {
+					s.H2C = true
+				}
 			} else if listen != s.Listen {
 				t.report.note("server line %d: extra listen %q dropped; one Jul.IA server block binds a single address (kept %q)", c.GetLine(), listen, s.Listen)
 			}

@@ -1,0 +1,9 @@
+# grpc-gateway-runtime
+
+Repository-authored, sanitized NGINX migration fixture for issue #367 ([MIG-06] gRPC/FastCGI/uWSGI/L4 migration E2E lanes). It uses only a synthetic loopback placeholder address; it contains no production configuration, credentials, or external endpoints.
+
+The exact assessment contract, candidate disposition, categories, origin, and license are recorded in `manifest.json`. It proves the `grpc_pass grpc://...;` → `proxy_pass = "http://..."` + `grpc = true` translation: nginx's `grpc://` scheme (cleartext HTTP/2, h2c) maps onto the same `http://` scheme Jul's native gRPC passthrough already dials for h2c, with `grpc = true` turning the location into a native gRPC/HTTP-2 proxy (preserving trailers such as `grpc-status`, no response buffering) instead of an ordinary HTTP reverse proxy.
+
+The real-Jul E2E lives in `cmd/jul/corpus_grpc_runtime_test.go` (`TestNGINXCorpusGRPCPassRealE2E`, build tag `importer,grpc`) rather than the generic manifest `scenarios` array, because it needs a real gRPC client/server exchange (unary call, payload echo, and trailer/`grpc-status` verification) that the generic single HTTP-request/response Scenario/Dimension model does not express. The backend is a real `google.golang.org/grpc` server using a transparent raw-byte codec (the same technique `internal/handler/grpcproxy_test.go`'s own unit tests use), so the test proves genuine HTTP/2 framing and gRPC trailer propagation end to end through a real Jul instance - not a hand-simulated substitute.
+
+This E2E is H1/H2 native gRPC passthrough only; gRPC-JSON transcoding (`grpc_transcode`, a distinct Jul action) and H3 gRPC are out of scope here. No pinned real-NGINX reference lane runs this fixture today (`scripts/nginx-migration-e2e.sh` is HTTP/1.1-only and has no gRPC backend support).

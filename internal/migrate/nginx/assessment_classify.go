@@ -211,7 +211,7 @@ func classifyListen(params []string, extra bool, proxyProtocolUsable bool) capab
 	if extra {
 		return approximated("NGX_SERVER_EXTRA_LISTEN", RiskAvailability, "only the first distinct listen address in a server block is kept")
 	}
-	listen, _ := parseListen(params)
+	listen, ssl := parseListen(params)
 	if listen == "" {
 		return blocking("NGX_SERVER_LISTEN_UNSUPPORTED", RiskAvailability, "listen address is missing or not representable")
 	}
@@ -219,7 +219,12 @@ func classifyListen(params []string, extra bool, proxyProtocolUsable bool) capab
 		switch strings.ToLower(p) {
 		case "ssl":
 			continue
-		case "http2", "default_server":
+		case "http2":
+			if ssl {
+				return approximated("NGX_SERVER_LISTEN_OPTION", RiskAvailability, "listen option is implicit or has different selection semantics in Jul")
+			}
+			return supported("NGX_SERVER_LISTEN_HTTP2_CLEARTEXT", RiskAvailability, "cleartext HTTP/2 (h2c) is translated", []string{"servers[].h2c"})
+		case "default_server":
 			return approximated("NGX_SERVER_LISTEN_OPTION", RiskAvailability, "listen option is implicit or has different selection semantics in Jul")
 		case "proxy_protocol":
 			if !proxyProtocolUsable {

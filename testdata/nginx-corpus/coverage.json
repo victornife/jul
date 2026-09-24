@@ -70,6 +70,7 @@
       "status": "represented",
       "fixtures": [
         "fastcgi-gateway",
+        "grpc-gateway-runtime",
         "protocol-boundaries",
         "stream-named-upstream",
         "stream-security-boundaries",
@@ -80,16 +81,17 @@
       ],
       "evidence": [
         "issue #259 H1/H2/H3 client-identity E2E",
+        "issue #367 real-Jul native gRPC passthrough (h2c, trailers, grpc-status) E2E",
         "issue #367 real-Jul stream TCP/UDP/SNI-routing/weighted-upstream/outbound-PROXY-protocol/backend-failover E2E",
         "issue #426 bounded NGINX stream translation"
       ],
-      "rationale": "FastCGI translation is a strict-valid candidate. NGINX stream has a bounded translated subset (#426): direct/named-upstream TCP and UDP targets, timeouts, outbound PROXY protocol, and server_name+ssl_preread bounded SNI routing merged into one listener. Stream TLS termination, inbound PROXY protocol, udp+proxy_protocol, unrecognized listen options, arbitrary maps, and mail stay blocking. #367 proves the bounded translation end to end through a real Jul instance: TCP/named-upstream proxy_pass with idle_timeout, a UDP echo relay, merged SNI routing dispatching a real ClientHello to three backends, outbound PROXY protocol asserting the real client address, and the shared upstream-wide resilience breaker masking a dead stream backend as it already does for HTTP.",
+      "rationale": "FastCGI translation is strict-valid, now including literal fastcgi_param entries; uwsgi_pass translates the same way (no uwsgi_param equivalent, so it stays blocking). grpc_pass maps grpc://->h2c and grpcs://->HTTP/2+TLS onto Jul's native gRPC passthrough, reusing a cleartext http2 listen token as h2c=true. NGINX stream has a bounded subset (#426): direct/named-upstream TCP/UDP targets, timeouts, outbound PROXY protocol, and server_name+ssl_preread SNI routing merged into one listener. Stream TLS termination, inbound PROXY protocol, udp+proxy_protocol, unrecognized listen options, arbitrary maps, and mail stay blocking. #367 proves the bounded stream translation end to end plus a real gRPC unary call surviving native passthrough with trailers and grpc-status intact.",
       "deferred_dimensions": [
+        "FastCGI/uWSGI protocol-backend runtime replay",
         "H2/H3 migration replay",
-        "WebSocket runtime replay",
-        "gRPC/FastCGI/uWSGI protocol backends"
+        "WebSocket runtime replay"
       ],
-      "revisit_trigger": "Add gRPC/FastCGI/uWSGI local backend E2E under #367; existing product protocol E2E remains authoritative for runtime capability itself."
+      "revisit_trigger": "Add FastCGI/uWSGI local backend E2E under #367; existing product protocol E2E remains authoritative for runtime capability itself."
     },
     {
       "id": "security",
