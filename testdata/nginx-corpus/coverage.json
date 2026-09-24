@@ -73,6 +73,7 @@
         "fastcgi-gateway-runtime",
         "grpc-gateway-runtime",
         "protocol-boundaries",
+        "stream-extensibility-boundaries",
         "stream-named-upstream",
         "stream-security-boundaries",
         "stream-sni-bounded",
@@ -88,7 +89,7 @@
         "issue #367 real-Jul stream TCP/UDP/SNI-routing/weighted-upstream/outbound-PROXY-protocol/backend-failover E2E",
         "issue #426 bounded NGINX stream translation"
       ],
-      "rationale": "FastCGI translation is strict-valid, now including literal fastcgi_param entries; uwsgi_pass translates the same way (no uwsgi_param equivalent, stays blocking). grpc_pass maps grpc://->h2c and grpcs://->HTTP/2+TLS onto native gRPC passthrough, reusing a cleartext http2 listen token as h2c=true. NGINX stream has a bounded subset (#426): direct/named-upstream TCP/UDP targets, timeouts, outbound PROXY protocol, and server_name+ssl_preread SNI routing merged into one listener. Stream TLS termination, inbound PROXY protocol, udp+proxy_protocol, unrecognized listen options, maps, and mail stay blocking. #367 proves the stream translation, a gRPC unary call surviving passthrough with trailers/grpc-status, and real FastCGI/uWSGI backends receiving translated params over the wire.",
+      "rationale": "FastCGI is strict-valid, now with literal fastcgi_param entries; uwsgi_pass translates the same way (no uwsgi_param equivalent, stays blocking). grpc_pass maps grpc://->h2c and grpcs://->HTTP/2+TLS onto native gRPC passthrough, reusing a cleartext http2 listen token as h2c=true. NGINX stream has a bounded subset (#426): direct/named-upstream TCP/UDP targets, timeouts, outbound PROXY protocol, and server_name+ssl_preread SNI routing merged into one listener. Stream TLS termination, inbound PROXY protocol, udp+proxy_protocol, unrecognized listen options, ssl_preread maps, Lua, njs, and mail stay blocking. #367 proves the stream translation, a gRPC unary call surviving passthrough with trailers/grpc-status, and real FastCGI/uWSGI backends receiving translated params over the wire.",
       "deferred_dimensions": [
         "H2/H3 migration replay",
         "WebSocket runtime replay"
