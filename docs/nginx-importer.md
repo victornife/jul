@@ -145,6 +145,7 @@ the Jul request path.
 | `ssl_verify_client` + `ssl_client_certificate` | ✅ (bounded) / ❌ | See [mTLS](#mtls-ssl_verify_client-and-ssl_client_certificate-366) below. |
 | `ssl_crl` | ✅ | Maps to `client_auth.crl_file`, only when the bounded mTLS pairing above resolves. |
 | `ssl_verify_depth`, `ssl_trusted_certificate` | ignored | No corresponding Jul knob (chain-verification depth is not independently configurable; OCSP stapling is ACME-managed). |
+| `listen ... http2` (no `ssl`) | ✅ | Cleartext HTTP/2 (h2c) has no ALPN to negotiate it, so it maps directly to `h2c = true` - required for `grpc_pass`'s `grpc://` scheme to serve real gRPC traffic. Combined with `ssl`, `http2` stays approximated: a TLS listener already negotiates HTTP/2 via ALPN automatically, so there is no distinct Jul knob to set. |
 | `return` | ⚠️ | Synthesizes `/`; NGINX server-level precedence differs. |
 | `set_real_ip_from`, `real_ip_header`, `real_ip_recursive` | ⚠️ | See [realip](#realip-set_real_ip_from--real_ip_header). |
 | `if`, server-level `rewrite` | ❌ | Reported with provenance and guidance. |
@@ -156,6 +157,10 @@ the Jul request path.
 | --- | --- | --- |
 | `proxy_pass` | ✅ (⚠️ with a URI) | Bare hosts gain `http://`; a trailing URI slash is dropped with an approximation finding. Any retained path is not a location-prefix replacement: Jul's proxy (`net/http/httputil.ProxyRequest.SetURL`) always *prepends* it to the client's full incoming request path rather than stripping the matched location prefix first, so the backend-visible path differs from nginx's whenever the location path does not exactly match the request. See `proxy-pass-uri-runtime` in the [migration corpus](nginx-migration-corpus.md) for a real end-to-end proof. |
 | `fastcgi_pass` | ✅ | Maps directly. |
+| `fastcgi_param` | ✅ (literal) / ❌ (variable) | A literal name/value pair accumulates into `fastcgi_params`, a static map. A variable-derived value (`$document_root` etc.) is blocking - Jul's `fastcgi_params` has no per-request substitution engine. |
+| `uwsgi_pass` | ✅ | Maps directly to `uwsgi_pass`, the same bare-address pattern as `fastcgi_pass`. |
+| `uwsgi_param` | ❌ | Jul has no per-parameter uWSGI configuration equivalent; always blocking. See [gRPC, FastCGI, and uWSGI gateways](#grpc-fastcgi-and-uwsgi-gateways-367) below. |
+| `grpc_pass` | ✅ (bounded) / ❌ | See [gRPC, FastCGI, and uWSGI gateways](#grpc-fastcgi-and-uwsgi-gateways-367) below. |
 | `root`, `index`, `try_files` | ✅ | Preserve location overrides. |
 | `alias` | ⚠️ | Maps to `root`; NGINX prefix-stripping semantics differ. |
 | `return` | ✅ | Status and redirect preserved; response body text is not. |
@@ -231,7 +236,7 @@ residual boundary.
 | `proxy_timeout`, `proxy_connect_timeout` | ✅ | Map to `idle_timeout`/`connect_timeout`. Bare digits mean seconds; `ms`/`s`/`m`/`h` suffixes are supported. nginx's `d`/`w`/`M`/`y` units are not. |
 | `server_name` + `ssl_preread on` | ✅ | See SNI below. |
 | `map` (including `$ssl_preread_server_name` routing) | ❌ | Arbitrary variable maps are not representable in the bounded Jul stream model; this is a deliberate non-goal, not an oversight. |
-| Anything else (Lua, third-party stream modules, unrecognized `listen`/directive options) | ❌ | Falls through to an explicit blocking finding by default. |
+| Lua (`ngx_stream_lua_module`), njs (`ngx_stream_js_module`), any other third-party stream module, unrecognized `listen`/directive options | ❌ | Falls through to an explicit blocking finding by default; never silently accepted. See `stream-extensibility-boundaries` in the [migration corpus](nginx-migration-corpus.md). |
 
 **Bounded SNI routing.** nginx can route a stream listener by inspecting the
 TLS ClientHello (`ssl_preread on;`) and dispatching to one of several `server`
@@ -340,6 +345,61 @@ validate) or silently dropped (which would validate nothing nginx asked for
 either — both are behavior changes, not migrations). See `mtls-runtime` in
 the [migration corpus](nginx-migration-corpus.md) for a real end-to-end proof
 of the accept/reject boundary this produces.
+
+### gRPC, FastCGI, and uWSGI gateways (#367)
+
+**gRPC.** nginx's `grpc_pass` proxies native gRPC over HTTP/2, selected by an
+explicit scheme: `grpc://` for cleartext (h2c) or `grpcs://` for HTTP/2 with
+TLS. Jul's native gRPC/HTTP-2 passthrough (`internal/handler/grpcproxy.go`,
+requires a `grpc`-tagged build) reuses the ordinary `proxy_pass` field for its
+target and a separate `grpc = true` flag to turn the location into a
+passthrough that preserves HTTP/2 framing and trailers (`grpc-status` among
+them) end to end, rather than an ordinary buffered HTTP reverse proxy.
+
+```nginx
+listen 8080 http2;
+location / {
+  grpc_pass grpc://grpc_backend;
+}
+```
+
+| NGINX | Jul |
+| --- | --- |
+| `grpc_pass grpc://target;` | `proxy_pass = "http://target"` + `grpc = true` (h2c) |
+| `grpc_pass grpcs://target;` | `proxy_pass = "https://target"` + `grpc = true` (HTTP/2+TLS) |
+| `grpc_pass name;` (bare, no scheme) | Kept as-is, matching nginx's own `grpc://` default; resolves as a named `[[upstreams]]` pool exactly like a schemeless `proxy_pass`. |
+| `grpc_pass grpc://unix:...;` (direct Unix target) | blocking — create a named `[[upstreams]]` entry with a `unix:` server instead, exactly as a direct-Unix `proxy_pass` requires. |
+| `grpc_pass grpc://$backend;` (variable-derived) | blocking |
+| Any other `grpc_pass` scheme | blocking |
+| `listen ... http2;` (no `ssl`) | `servers[].h2c = true` — required for a `grpc://` target to actually be reachable; a TLS listener needs no equivalent flag (ALPN negotiates HTTP/2 automatically). |
+
+A client-supplied gRPC call and its trailers survive Jul's passthrough
+unmodified; see `grpc-gateway-runtime` in the
+[migration corpus](nginx-migration-corpus.md) for a real end-to-end proof
+against an actual `google.golang.org/grpc` client and server.
+
+**FastCGI.** `fastcgi_pass` already mapped directly; `fastcgi_param` now
+accumulates literal name/value pairs into `fastcgi_params`, a static map Jul's
+real FastCGI client (`github.com/yookoala/gofast`) merges into the actual
+FastCGI PARAMS record it sends the backend, overriding anything auto-derived
+(`SCRIPT_NAME`, `DOCUMENT_ROOT`/`SCRIPT_FILENAME` when `root` is set). A
+variable-derived value (`$document_root$fastcgi_script_name`, the common
+real-world form) is not representable — Jul's map has no per-request
+substitution — and stays blocking rather than emitting a static value the
+source config never actually specified. See `fastcgi-gateway-runtime` in the
+[migration corpus](nginx-migration-corpus.md) for a real end-to-end proof
+against Go's own `net/http/fcgi` standard-library responder.
+
+**uWSGI.** `uwsgi_pass` maps directly to Jul's `uwsgi_pass` location field,
+the same bare-address pattern as `fastcgi_pass`. `uwsgi_param` has no Jul
+equivalent at all — there is no per-parameter uWSGI configuration surface to
+target — so it always stays an explicit blocking finding rather than being
+silently dropped. Param-style propagation for a migrated uWSGI backend still
+works through the same client-header path every uWSGI request already
+carries (an inbound `X-Custom-Header` becomes the uwsgi var
+`HTTP_X_CUSTOM_HEADER`, the CGI-standard convention FastCGI also uses); see
+`uwsgi-gateway-runtime` in the [migration corpus](nginx-migration-corpus.md)
+for a real end-to-end proof against a real uWSGI-protocol responder.
 
 ### `proxy_cache` and `proxy_cache_path` (#365)
 
