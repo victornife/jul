@@ -70,25 +70,31 @@
       "status": "represented",
       "fixtures": [
         "fastcgi-gateway",
+        "fastcgi-gateway-runtime",
+        "grpc-gateway-runtime",
         "protocol-boundaries",
+        "stream-extensibility-boundaries",
         "stream-named-upstream",
         "stream-security-boundaries",
         "stream-sni-bounded",
         "stream-tcp-basic",
-        "stream-udp"
+        "stream-udp",
+        "stream-upstream-failover-runtime",
+        "uwsgi-gateway-runtime"
       ],
       "evidence": [
         "issue #259 H1/H2/H3 client-identity E2E",
+        "issue #367 real-Jul FastCGI/uWSGI param-propagation E2E",
+        "issue #367 real-Jul native gRPC passthrough (h2c, trailers, grpc-status) E2E",
+        "issue #367 real-Jul stream TCP/UDP/SNI-routing/weighted-upstream/outbound-PROXY-protocol/backend-failover E2E",
         "issue #426 bounded NGINX stream translation"
       ],
-      "rationale": "FastCGI translation is represented by a strict-valid candidate. NGINX stream now has a bounded translated subset (#426): direct/named-upstream TCP and UDP targets, proxy_timeout/proxy_connect_timeout, outbound PROXY protocol, and server_name+ssl_preread bounded SNI routing merged into one listener. Stream TLS termination, inbound stream PROXY protocol (nginx's stream module has no trusted-source directive for it), udp+proxy_protocol, unrecognized listen options, arbitrary stream maps, and mail remain explicit blocking evidence rather than silently omitted capability claims.",
+      "rationale": "FastCGI is strict-valid, now with literal fastcgi_param entries; uwsgi_pass translates the same way (no uwsgi_param equivalent, stays blocking). grpc_pass maps grpc://->h2c and grpcs://->HTTP/2+TLS onto native gRPC passthrough, reusing a cleartext http2 listen token as h2c=true. NGINX stream has a bounded subset (#426): direct/named-upstream TCP/UDP targets, timeouts, outbound PROXY protocol, and server_name+ssl_preread SNI routing merged into one listener. Stream TLS termination, inbound PROXY protocol, udp+proxy_protocol, unrecognized listen options, ssl_preread maps, Lua, njs, and mail stay blocking. #367 proves the stream translation, a gRPC unary call surviving passthrough with trailers/grpc-status, and real FastCGI/uWSGI backends receiving translated params over the wire.",
       "deferred_dimensions": [
         "H2/H3 migration replay",
-        "L4 runtime replay",
-        "WebSocket runtime replay",
-        "gRPC/uWSGI protocol backends"
+        "WebSocket runtime replay"
       ],
-      "revisit_trigger": "Add protocol-specific local backends (real NGINX-vs-Jul stream/gRPC/FastCGI/uWSGI E2E) under #367, which consumes this bounded stream translation; existing product protocol E2E remains authoritative for runtime capability itself."
+      "revisit_trigger": "Existing product protocol E2E remains authoritative for runtime capability itself; H2/H3 and WebSocket migration replay would need a broader migration-corpus lane, not a #367-specific gap."
     },
     {
       "id": "security",
@@ -121,6 +127,7 @@
       "status": "represented",
       "fixtures": [
         "blocking-dynamic-proxy",
+        "stream-upstream-failover-runtime",
         "timeout-runtime",
         "unix-http-upstream",
         "upstream-failover-runtime",
@@ -130,9 +137,10 @@
       "evidence": [
         "issue #365 real-Jul deterministic weighted-round-robin distribution E2E",
         "issue #365 real-Jul passive-failover/circuit-breaker E2E",
-        "issue #365 real-Jul proxy_connect_timeout/proxy_read_timeout enforcement E2E"
+        "issue #365 real-Jul proxy_connect_timeout/proxy_read_timeout enforcement E2E",
+        "issue #367 real-Jul stream passive-failover/circuit-breaker E2E"
       ],
-      "rationale": "The corpus covers named weighted upstreams, least-connections translation, ignored connection-pool tuning, proxy routing, blocking variable-derived destinations, a real Unix-socket HTTP upstream (#407), a real-Jul weighted-round-robin E2E proving the exact 3:1 distribution (#365), the bounded per-backend max_fails/fail_timeout -> upstream-wide [upstreams.resilience] translation with a real-Jul passive-failover E2E (#365), the proxy_connect_timeout/proxy_read_timeout -> location translation with a real-Jul E2E proving a stalling backend is cut off at the configured bound (504, #365), and the bounded proxy_next_upstream_tries -> retry_attempts translation (an explicit bound of 2+ only; nginx's 0/1 forms collide with Jul's retry_attempts=0 \"inherit\" sentinel and stay blocking).",
+      "rationale": "The corpus covers named weighted upstreams, least-connections translation, ignored pool tuning, blocking variable-derived destinations, a real Unix-socket HTTP upstream (#407), a real-Jul weighted-round-robin E2E proving the exact 3:1 distribution (#365), the bounded max_fails/fail_timeout -> [upstreams.resilience] translation with a real-Jul passive-failover E2E (#365), proxy_connect_timeout/proxy_read_timeout -> location timeouts with a real-Jul 504 E2E (#365), bounded proxy_next_upstream_tries -> retry_attempts (2+ only; 0/1 collide with the 0=\"inherit\" sentinel and stay blocking), and a stream named upstream reusing that same shared resilience translation unmodified, proven over a raw TCP connection rather than an HTTP status (#367).",
       "deferred_dimensions": [
         "WebSocket/gRPC upstream runtime replay",
         "active-health migration replay",

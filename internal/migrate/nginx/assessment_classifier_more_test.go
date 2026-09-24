@@ -236,7 +236,8 @@ func TestClassifyListenAndTLS(t *testing.T) {
 		{"missing", nil, false, false, AssessmentBlocking},
 		{"plain", []string{"8080"}, false, false, AssessmentSupported},
 		{"TLS", []string{"443", "ssl"}, false, false, AssessmentSupported},
-		{"HTTP2", []string{"443", "http2"}, false, false, AssessmentApproximated},
+		{"HTTP2 cleartext", []string{"8080", "http2"}, false, false, AssessmentSupported},
+		{"HTTP2 over TLS", []string{"443", "ssl", "http2"}, false, false, AssessmentApproximated},
 		{"default server", []string{"443", "default_server"}, false, false, AssessmentApproximated},
 		{"unsupported option", []string{"443", "reuseport"}, false, false, AssessmentBlocking},
 		{"proxy_protocol usable", []string{"443", "proxy_protocol"}, false, true, AssessmentSupported},
@@ -286,6 +287,54 @@ func TestClassifyProxyReturnRewriteAndHeader(t *testing.T) {
 	}
 	if proxyPassHasURI("http://backend") || !proxyPassHasURI("https://backend/path") {
 		t.Fatal("proxyPassHasURI classified a URL incorrectly")
+	}
+
+	grpcTests := []struct {
+		name   string
+		params []string
+		want   AssessmentClass
+	}{
+		{"missing", nil, AssessmentBlocking},
+		{"blank", []string{"   "}, AssessmentBlocking},
+		{"dynamic", []string{"grpc://$backend"}, AssessmentBlocking},
+		{"unix", []string{"grpc://unix:/run/grpc.sock"}, AssessmentBlocking},
+		{"unrecognized scheme", []string{"https://backend"}, AssessmentBlocking},
+		{"grpc scheme", []string{"grpc://backend:9090"}, AssessmentSupported},
+		{"grpcs scheme", []string{"grpcs://backend:9443"}, AssessmentSupported},
+		{"bare upstream", []string{"grpc_pool"}, AssessmentSupported},
+	}
+	for _, tt := range grpcTests {
+		t.Run("grpc/"+tt.name, func(t *testing.T) {
+			assertCapabilityClass(t, classifyGRPCPass(tt.params), tt.want)
+		})
+	}
+	if rewritten, ok := normalizeGRPCPassScheme("grpc://pool"); !ok || rewritten != "http://pool" {
+		t.Fatalf("normalizeGRPCPassScheme(grpc://pool) = %q, %v, want http://pool, true", rewritten, ok)
+	}
+	if rewritten, ok := normalizeGRPCPassScheme("grpcs://pool"); !ok || rewritten != "https://pool" {
+		t.Fatalf("normalizeGRPCPassScheme(grpcs://pool) = %q, %v, want https://pool, true", rewritten, ok)
+	}
+	if rewritten, ok := normalizeGRPCPassScheme("pool"); !ok || rewritten != "pool" {
+		t.Fatalf("normalizeGRPCPassScheme(pool) = %q, %v, want pool, true", rewritten, ok)
+	}
+	if _, ok := normalizeGRPCPassScheme("ftp://pool"); ok {
+		t.Fatal("normalizeGRPCPassScheme accepted an unrecognized scheme")
+	}
+
+	fastcgiParamTests := []struct {
+		name   string
+		params []string
+		want   AssessmentClass
+	}{
+		{"missing value", []string{"SCRIPT_FILENAME"}, AssessmentBlocking},
+		{"blank name", []string{"   ", "value"}, AssessmentBlocking},
+		{"dynamic value", []string{"SCRIPT_FILENAME", "$document_root/$fastcgi_script_name"}, AssessmentBlocking},
+		{"literal value", []string{"SCRIPT_NAME", "/index.php"}, AssessmentSupported},
+	}
+	for _, tt := range fastcgiParamTests {
+		t.Run("fastcgi_param/"+tt.name, func(t *testing.T) {
+			assertCapabilityClass(t, classifyFastCGIParam(tt.params), tt.want)
+		})
 	}
 
 	returnTests := []struct {

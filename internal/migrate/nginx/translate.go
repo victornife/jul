@@ -133,6 +133,15 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 				t.report.skip(c, "unsupported listen address (e.g. a unix socket)")
 			} else if s.Listen == "" {
 				s.Listen = listen
+				// A TLS listener negotiates HTTP/2 automatically via ALPN (no
+				// distinct Jul knob - see the "approximated" disposition for
+				// http2 alongside ssl), but a cleartext listener needs h2c
+				// explicitly enabled to accept HTTP/2 without TLS at all,
+				// which is what grpc_pass's grpc:// (h2c) scheme requires a
+				// client be able to speak to Jul directly.
+				if !ssl && hasListenToken(cp, "http2") {
+					s.H2C = true
+				}
 			} else if listen != s.Listen {
 				t.report.note("server line %d: extra listen %q dropped; one Jul.IA server block binds a single address (kept %q)", c.GetLine(), listen, s.Listen)
 			}
@@ -340,6 +349,46 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 			if len(cp) > 0 {
 				loc.FastCGIPass = cp[0]
 			}
+		case "fastcgi_param":
+			if len(cp) < 2 || strings.TrimSpace(cp[0]) == "" {
+				t.report.skip(c, "fastcgi_param requires a name and a value")
+				continue
+			}
+			if strings.Contains(cp[1], "$") {
+				t.report.skip(c, "variable-derived fastcgi_param values are not translated; Jul's fastcgi_params is a static map")
+				continue
+			}
+			if loc.FastCGIParams == nil {
+				loc.FastCGIParams = map[string]string{}
+			}
+			loc.FastCGIParams[cp[0]] = cp[1]
+		case "uwsgi_pass":
+			if len(cp) > 0 {
+				loc.UWSGIPass = cp[0]
+			}
+		case "uwsgi_param":
+			t.report.skip(c, "Jul has no per-parameter uWSGI configuration equivalent")
+		case "grpc_pass":
+			if len(cp) == 0 || strings.TrimSpace(cp[0]) == "" {
+				t.report.skip(c, "grpc_pass target is missing")
+				continue
+			}
+			target := strings.TrimSpace(cp[0])
+			if strings.Contains(target, "$") {
+				t.report.skip(c, "variable-derived grpc_pass targets are not translated")
+				continue
+			}
+			if strings.Contains(strings.ToLower(target), "unix:") {
+				t.report.skip(c, "direct Unix grpc_pass is not representable; create a named [[upstreams]] entry with servers = [\"unix:/path/to/socket.sock\"] and proxy_pass = \"http://<upstream-name>\", grpc = true")
+				continue
+			}
+			rewritten, recognized := normalizeGRPCPassScheme(target)
+			if !recognized {
+				t.report.skip(c, "grpc_pass scheme is not representable; only grpc:// (h2c), grpcs:// (HTTP/2+TLS), or a bare upstream/host name are translated")
+				continue
+			}
+			loc.ProxyPass = translateProxyPass(rewritten, &t.report, c.GetLine())
+			loc.GRPC = true
 		case "root":
 			if len(cp) > 0 {
 				root = cp[0]
@@ -390,7 +439,7 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 	}
 
 	// Inherited root/index apply only to static locations (no other action).
-	if loc.ProxyPass == "" && loc.FastCGIPass == "" && loc.Return == 0 && loc.Redirect == "" {
+	if loc.ProxyPass == "" && loc.FastCGIPass == "" && loc.UWSGIPass == "" && loc.Return == 0 && loc.Redirect == "" {
 		if root != "" {
 			loc.Root = root
 		}
@@ -719,6 +768,28 @@ func matchConfig(mod, path string, rep *Report, line int) (config.MatchConfig, b
 func isDirectUnixProxyPass(v string) bool {
 	v = strings.ToLower(strings.TrimSpace(v))
 	return strings.HasPrefix(v, "http://unix:") || strings.HasPrefix(v, "https://unix:")
+}
+
+// normalizeGRPCPassScheme rewrites an nginx grpc_pass target's scheme onto
+// the http/https vocabulary Jul's native gRPC passthrough (loc.ProxyPass +
+// loc.GRPC=true) actually dials: grpc:// becomes http:// (cleartext HTTP/2,
+// h2c - nginx's own default scheme when grpc_pass omits one), grpcs://
+// becomes https:// (HTTP/2 over TLS). A bare upstream/host name (no scheme)
+// is returned unchanged, matching nginx's own grpc:// default and letting it
+// resolve as a named upstream exactly like a schemeless proxy_pass value. Any
+// other scheme (there are only two in nginx's grpc_pass vocabulary) is not
+// recognized.
+func normalizeGRPCPassScheme(v string) (rewritten string, recognized bool) {
+	switch {
+	case strings.HasPrefix(v, "grpcs://"):
+		return "https://" + strings.TrimPrefix(v, "grpcs://"), true
+	case strings.HasPrefix(v, "grpc://"):
+		return "http://" + strings.TrimPrefix(v, "grpc://"), true
+	case strings.Contains(v, "://"):
+		return "", false
+	default:
+		return v, true
+	}
 }
 
 func translateProxyPass(v string, rep *Report, line int) string {

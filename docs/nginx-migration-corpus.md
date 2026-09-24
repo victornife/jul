@@ -251,6 +251,101 @@ timing are already governed by the dedicated `docs/reload-semantics.md`
 contract and its own test suite, independent of anything the importer
 translates.
 
+## gRPC, FastCGI, uWSGI, and L4 stream migration E2E (#367)
+
+Issue #367 closes the two gaps its own acceptance criteria identified against
+the #154/#426 baseline: the bounded NGINX `stream` translation (#426) had zero
+real-runtime evidence, and native gRPC / uWSGI param propagation were not
+translated at all.
+
+- **Real-Jul E2E for the bounded stream translation (#426).** Four existing
+  translation-only fixtures gained dedicated real-Jul E2E in
+  `cmd/jul/corpus_stream_runtime_test.go` (build tag `importer,stream`):
+  `stream-tcp-basic` (direct TCP `proxy_pass` byte-for-byte relay, plus a real
+  `idle_timeout` connection-close proof), `stream-named-upstream` (exact
+  50:10 smooth-weighted-round-robin dispatch over 60 connections — a stream
+  connection is one balancer selection, unlike HTTP's per-request selection
+  — and outbound PROXY protocol asserting the real client's own address to
+  the backend), `stream-udp` (a UDP datagram relay round trip), and
+  `stream-sni-bounded` (the merged SNI-routing group dispatching a real TLS
+  ClientHello to each of three backends, including the no-`server_name`
+  fallback). A new fixture, `stream-upstream-failover-runtime`, proves a
+  stream named upstream's `max_fails`/`fail_timeout` reuses the exact same
+  shared `[upstreams.resilience]` circuit breaker HTTP already proves
+  (#365), now proven over a raw TCP connection with a permanently dead
+  backend rather than an HTTP status code.
+- **Bounded gRPC translation.** `grpc_pass` maps `grpc://` to Jul's native
+  gRPC/HTTP-2 passthrough (`proxy_pass = "http://..."` + `grpc = true`, h2c)
+  and `grpcs://` to the HTTPS+TLS form; a bare upstream/host name keeps
+  nginx's own `grpc://` default. Direct Unix targets, variable-derived
+  targets, and any other scheme stay blocking, mirroring `proxy_pass`'s own
+  bounds. A related gap surfaced while making this usable end to end: a
+  cleartext `listen ... http2;` (no `ssl`) previously translated to a no-op
+  "approximated" finding; it now maps to `servers[].h2c = true`, since a
+  gRPC client cannot actually reach an h2c-disabled listener at all. `http2`
+  combined with `ssl` keeps its prior approximated disposition (TLS ALPN
+  already negotiates HTTP/2 automatically). `grpc-gateway-runtime` proves it
+  end to end: a real `google.golang.org/grpc` client and server exchange a
+  unary call through a real Jul instance, with the payload echoed unchanged
+  and the backend's trailer (alongside `grpc-status`) surviving native
+  passthrough — not merely an ordinary buffered HTTP proxy relay, which
+  would not preserve gRPC framing.
+- **Bounded FastCGI/uWSGI translation.** `fastcgi_pass` was already
+  supported; `fastcgi_param` now accumulates literal name/value pairs into
+  `fastcgi_params`, a static map with no per-request variable substitution,
+  so a variable-derived value (the common real-world
+  `$document_root$fastcgi_script_name` form) stays blocking rather than
+  emitting a static value the source never specified. `uwsgi_pass` maps
+  directly, the same bare-address pattern as `fastcgi_pass`; `uwsgi_param`
+  has no Jul equivalent at all (no per-parameter uWSGI configuration
+  surface exists) and always stays blocking.
+  `fastcgi-gateway-runtime` proves a literal `fastcgi_param` reaches a real
+  FastCGI backend (Go's own `net/http/fcgi` standard-library responder,
+  not a hand-simulated substitute) as a real FastCGI PARAMS entry, observed
+  via its CGI-standard `HTTP_*` header projection.
+  `uwsgi-gateway-runtime` proves `uwsgi_pass` against a real, minimal
+  uWSGI-protocol responder; since `uwsgi_param` has no translation, param
+  propagation is instead proven through the client-header path every uWSGI
+  request already carries.
+- **Required blocking evidence for extensibility boundaries.**
+  `stream-extensibility-boundaries` proves three forms the #367 amendment
+  explicitly requires stay blocking rather than silently accepted: an
+  arbitrary `map $ssl_preread_server_name ...` variable program (dynamic
+  routing Jul's bounded static SNI-routing model cannot represent), an
+  `ngx_stream_lua_module` directive (`preread_by_lua_file` — Jul deliberately
+  does not embed a Lua/OpenResty scripting engine), and an
+  `ngx_stream_js_module` (njs) directive (`js_preread` — a real
+  third-party-maintained stream module). All three fall through to the
+  existing generic unsupported-stream-directive finding; both stream
+  servers still translate their own `proxy_pass` target normally, so only
+  the unsupported directive itself blocks.
+
+**Protocol-lane disposition, explicit per #367's own acceptance criteria.**
+Every new real-Jul E2E test here is H1 (or, for the stream fixtures, raw
+TCP/UDP) only. gRPC's own H2/H3 parity is a runtime-capability concern
+already owned outside the migration corpus; there is no H3 disposition for
+raw L4 stream forwarding (PROXY protocol and the stream model itself are
+TCP/UDP-preamble concepts with no QUIC equivalent). No pinned real-NGINX
+reference lane runs any of the six new fixtures: `scripts/nginx-migration-e2e.sh`
+is HTTP/1.1-only today and has no stream, gRPC, FastCGI, or uWSGI backend
+support, so real-Jul evidence stands in its place, consistent with
+#365/#366's precedent for fixtures the reference lane cannot yet reach.
+
+**CI lane separation, explicit per #367's own acceptance criteria.** Every
+backend behind these six fixtures' real-Jul E2E is a lightweight, in-process
+Go test double (a real `google.golang.org/grpc` server, Go's own
+`net/http/fcgi` responder, a minimal hand-rolled uWSGI-protocol responder, or
+a raw TCP/UDP echo/identify listener) — none of it needs Docker, an external
+process, or network access, and every test in this set completes in well
+under a second. There is therefore no protocol-heavy evidence here that needs
+a separate scheduled/manual CI lane: all six fixtures already run in the
+existing full-build-tag `test (full)` PR job alongside every other real-Jul
+corpus test, gated only by the `importer`, `stream`, or `grpc` build tags
+already in `FULL_TAGS`. A genuinely heavy lane would only become necessary if
+a *real-NGINX* comparison for these protocols were added (a pinned nginx
+image with actual gRPC/PHP-FPM/uwsgi backends) — deliberately deferred per
+the paragraph above, not something this issue's scope requires today.
+
 ## Corpus admission policy
 
 Core fixtures are repository-authored or generated from repository-owned source.
@@ -377,7 +472,7 @@ disposition, or deferred dimension changes without deliberate review.
 | Upstreams and resiliency | Named weighted pools, least-connections, proxy routing, ignored pool tuning, and variable-derived destination blocking. | Active-health, backend-TLS/private-CA, retry/circuit, and WebSocket/gRPC upstream migration replay. |
 | Security | IPv4/IPv6 trusted proxies, supported and blocking real-IP forms, TLS references/protocols, security headers, blocking auth/ACL/body/rate/cache controls, bounded mTLS translation with a real-Jul certificate-accept/reject E2E, and imported PROXY-protocol identity trust-boundary evidence (#366). | Multi-proxy chain comparison and WAF/module-specific replay (no nginx-side WAF directive exists to translate from). Product-level client-identity spoofing and H1/H2/H3 parity remain owned by #259. |
 | Cache and compression | Direct gzip classification and explicit blocking NGINX cache-policy evidence. | Stateful cache/Vary/range replay, decoded compression-byte comparison, and shared/distributed cache directives. |
-| Protocol/application gateways | Strict-valid FastCGI candidate plus explicit blocking stream and mail fixtures. | Migration-specific H2/H3, WebSocket, gRPC/uWSGI, and L4 runtime replay. |
+| Protocol/application gateways | Strict-valid FastCGI/uWSGI candidates with real-Jul E2E param propagation, bounded native gRPC passthrough (h2c/HTTP2+TLS) with a real gRPC client/server E2E, the bounded NGINX stream translation (#426) with real-Jul TCP/UDP/SNI/weighted/PROXY-protocol/resilience E2E, and required blocking evidence for stream maps/Lua/third-party modules and mail (#367). | H2/H3 and WebSocket migration replay for these gateways specifically; runtime capability itself remains owned by its own product-level issue. |
 | Operations | Include-tree provenance plus ignored/blocking process, event, log, resolver, and variable-map evidence. | Live log-sink, resolver/DNS, and worker/process tuning parity. |
 
 “Represented” means the category has executable migration evidence. It does not
