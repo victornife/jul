@@ -251,6 +251,7 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 					ap.HealthCheckExpectStatus = append([]int(nil), up.HealthCheck.ExpectStatus...)
 				}
 				ap.HealthCheckExpectBody = up.HealthCheck.ExpectBody
+				ap.HealthCheckService = up.HealthCheck.Service
 			}
 		}
 		if up.Discovery != nil {

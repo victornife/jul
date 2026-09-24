@@ -170,6 +170,7 @@ export function HealthCheckEditor({ app, onClose }: AppEditorDrawerProps) {
               >
                 <option value="http">HTTP</option>
                 <option value="tcp">TCP connect</option>
+                <option value="grpc">gRPC (grpc.health.v1.Health)</option>
               </select>
             </label>
 
@@ -181,6 +182,19 @@ export function HealthCheckEditor({ app, onClose }: AppEditorDrawerProps) {
                 mono
                 onChange={(v) => {
                   set("path", v);
+                }}
+              />
+            )}
+
+            {draft.type === "grpc" && (
+              <TextField
+                label="Service name"
+                value={draft.service}
+                placeholder="Optional — empty means whole-server health"
+                mono
+                hint="grpc.health.v1.HealthCheckRequest.service"
+                onChange={(v) => {
+                  set("service", v);
                 }}
               />
             )}

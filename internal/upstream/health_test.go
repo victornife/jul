@@ -4,6 +4,7 @@
 package upstream
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -44,6 +45,23 @@ func testChecker(p *Pool, params healthParams) *healthChecker {
 			Transport:     &http.Transport{DisableKeepAlives: true},
 		},
 		states: make(map[*Backend]*probeState),
+	}
+}
+
+// TestProbeGRPCNilSeamFailsClosed pins the build-tag boundary from the
+// (no-build-tag) core side: whatever this build's grpcHealthProbe seam is
+// (nil in a lean build; wired by health_grpc.go's init in a "grpc"-tagged
+// one), probeGRPC never panics, and a lean build's absent seam fails closed
+// (unhealthy) rather than silently succeeding.
+func TestProbeGRPCNilSeamFailsClosed(t *testing.T) {
+	if grpcHealthProbe != nil {
+		t.Skip("grpc-tagged build: the seam is wired; covered by health_grpc_test.go's status matrix")
+	}
+	p := singlePool(t, "127.0.0.1:1")
+	b := p.Backends()[0]
+	hc := testChecker(p, healthParamsFrom(config.HealthCheckConfig{Enabled: true, Type: "grpc"}))
+	if hc.probeGRPC(context.Background(), b) {
+		t.Error("probeGRPC must fail closed (false) when the grpc build-tag seam is absent")
 	}
 }
 

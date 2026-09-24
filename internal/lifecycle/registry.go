@@ -693,6 +693,7 @@ func upstreamEntries() []Entry {
 		"upstreams.*.health_check.healthy_threshold",
 		"upstreams.*.health_check.interval",
 		"upstreams.*.health_check.path",
+		"upstreams.*.health_check.service",
 		"upstreams.*.health_check.timeout",
 		"upstreams.*.health_check.type",
 		"upstreams.*.health_check.unhealthy_threshold",

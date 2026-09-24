@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 304 configurable leaves.
+Coverage: 305 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -3646,6 +3646,17 @@ Path is the request path for HTTP probes (required for type "http").
 | Subsystem | `health_check` |
 | Why | active probes are restarted with the pool on each successful reload |
 
+## `upstreams.*.health_check.service` {#upstreams-x-health_check-service}
+
+Service is the grpc.health.v1.HealthCheckRequest service name sent by a "grpc" probe.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `health_check` |
+| Why | active probes are restarted with the pool on each successful reload |
+
 ## `upstreams.*.health_check.timeout` {#upstreams-x-health_check-timeout}
 
 Timeout bounds a single probe (default 2s); must be less than Interval.
@@ -3663,7 +3674,7 @@ Timeout bounds a single probe (default 2s); must be less than Interval.
 
 ## `upstreams.*.health_check.type` {#upstreams-x-health_check-type}
 
-Type is the probe protocol: "http" (default) or "tcp".
+Type is the probe protocol: "http" (default), "tcp", or "grpc".
 
 | | |
 | --- | --- |

@@ -1,6 +1,8 @@
 # Active Health Checks
 
-> **Maturity:** GA (see [status.md](status.md)).
+> **Maturity:** GA (see [status.md](status.md)) for `http`/`tcp` probes. The
+> `grpc` probe type is new (merged on `main`, not yet in a tagged release) and
+> is Beta: it has not been through a dedicated soak.
 
 Jul.IA supports **active** health checking for upstream pools: the server periodically probes each backend and ejects unhealthy backends from the balancer rotation. This complements the built-in **passive** health checking (which parks a backend after `max_fails` consecutive request failures).
 
@@ -47,14 +49,15 @@ Active health checks are configured inside an `[[upstreams]]` block under `[upst
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `enabled` | bool | `false` | Enable active health checking for this pool. |
-| `type` | string | `"http"` | Probe protocol: `"http"` or `"tcp"`. |
-| `path` | string | `""` | Request path for HTTP probes (required when `type = "http"`). |
+| `type` | string | `"http"` | Probe protocol: `"http"`, `"tcp"`, or `"grpc"`. |
+| `path` | string | `""` | Request path for HTTP probes (required when `type = "http"`; rejected for `"grpc"`). |
 | `interval` | duration | `"5s"` | Delay between probe rounds. |
 | `timeout` | duration | `"2s"` (or `interval/2`) | Timeout for a single probe. Must be less than `interval`. |
 | `healthy_threshold` | int | `2` | Consecutive successes to mark a backend healthy. |
 | `unhealthy_threshold` | int | `3` | Consecutive failures to eject a backend. |
-| `expect_status` | []int | `[200]` | Acceptable HTTP status codes. Ignored for TCP probes. |
-| `expect_body` | string | `""` | Optional substring the HTTP response body must contain. Ignored for TCP probes. |
+| `expect_status` | []int | `[200]` | Acceptable HTTP status codes. Rejected for `"tcp"`/`"grpc"`. |
+| `expect_body` | string | `""` | Optional substring the HTTP response body must contain. Rejected for `"tcp"`/`"grpc"`. |
+| `service` | string | `""` | `grpc.health.v1.HealthCheckRequest` service name for `type = "grpc"` (empty means whole-server health). Rejected for `"http"`/`"tcp"`. |
 
 ### TCP probes
 
@@ -84,6 +87,45 @@ timeout  = "2s"
 expect_status = [200, 204]
 expect_body   = "ok"
 ```
+
+### gRPC probes
+
+A gRPC probe issues one standard [`grpc.health.v1.Health/Check`](https://github.com/grpc/grpc/blob/master/doc/health-checking.md)
+unary RPC against the backend and requires a build with the `grpc` tag (`jul
+capabilities` reports `grpc: true`). Only `SERVING` is healthy — `NOT_SERVING`,
+`SERVICE_UNKNOWN`, an RPC error, a timeout or a malformed response are all
+unhealthy, with no fallback to a TCP/HTTP probe. The probe uses the pool's
+resolved [`backend_tls`](upstreams.md#backend-tls) policy exactly as live gRPC
+traffic does (public/private CA, SNI, mTLS, minimum TLS version) — never a
+weaker trust than the requests Jul sends the same backend — and a plaintext
+(`http://`) pool is probed over cleartext h2c. Each probe opens a short-lived
+connection, uses it for exactly one RPC, and closes it deterministically; there
+is no persistent per-backend gRPC connection to manage across reloads.
+
+```toml
+[upstreams.health_check]
+enabled  = true
+type     = "grpc"
+service  = ""          # empty means whole-server health
+interval = "5s"
+timeout  = "1s"
+healthy_threshold   = 2
+unhealthy_threshold = 3
+```
+
+A named service checks that specific service's status instead of the whole
+server:
+
+```toml
+[upstreams.health_check]
+enabled = true
+type    = "grpc"
+service = "inventory.v1.InventoryService"
+```
+
+gRPC probes are rejected for a pool containing a Unix-socket member (gRPC needs
+a TCP dial) and, in a build without the `grpc` tag, are rejected clearly at
+reload time rather than silently falling back to another probe type.
 
 ## Defaults and validation
 
@@ -123,33 +165,36 @@ Changing `[upstreams.health_check]` on an existing upstream therefore does **not
 The matrix below enumerates every supported behaviour for each probe type so
 config authors know what is available and what is not.
 
-| Behaviour | `http` probe | `tcp` probe | Notes |
-| --- | :-: | :-: | --- |
-| Periodic probe with configurable interval | ✅ | ✅ | Driven by `interval` |
-| Per-backend timeout | ✅ | ✅ | Driven by `timeout` (must be `< interval`) |
-| Success/failure hysteresis (thresholds) | ✅ | ✅ | `healthy_threshold` / `unhealthy_threshold` |
-| Status-code matching | ✅ | n/a | `expect_status` (default `[200]`) |
-| Response-body substring matching | ✅ | n/a | `expect_body` (optional, up to 64 KiB) |
-| Fresh connection per probe | ✅ | ✅ | HTTP: `DisableKeepAlives`; TCP: dial+close |
-| Redirect following | ☐ | n/a | 3xx is treated as failure unless listed in `expect_status` |
-| Custom HTTP method (`HEAD`, `POST`, …) | ☐ | n/a | Only `GET` is supported |
-| Custom request headers | ☐ | n/a | Not supported |
-| TLS certificate verification | ✅ | n/a | An `https` pool is probed with the pool's resolved [`backend_tls`](upstreams.md#backend-tls) policy — the same trust live traffic uses |
-| gRPC health-check protocol | ☐ | n/a | Not supported (use TCP probe as a coarse substitute) |
-| Prometheus gauge per backend | ☐ | ☐ | Deliberately not exported — a backend address is an unbounded metric label. `jul_upstream_backends_healthy{pool}` gives the count; per-backend detail is in the Admin API |
-| Prometheus probe counter + latency histogram | ✅ | ✅ | `jul_upstream_probes_total`, `jul_upstream_probe_duration_seconds` |
-| Flapping detection (transition history) | ✅ | ✅ | `healthHistoryTracker` — ≥ 4 transitions in 5 min |
-| Console Status integration | ✅ | ✅ | Pool count + per-backend health in Admin API |
-| Zero-downtime reload — adopt new params | ✅ | ✅ | Unchanged pools keep running; changed pools restart checker |
+| Behaviour | `http` probe | `tcp` probe | `grpc` probe | Notes |
+| --- | :-: | :-: | :-: | --- |
+| Periodic probe with configurable interval | ✅ | ✅ | ✅ | Driven by `interval` |
+| Per-backend timeout | ✅ | ✅ | ✅ | Driven by `timeout` (must be `< interval`) |
+| Success/failure hysteresis (thresholds) | ✅ | ✅ | ✅ | `healthy_threshold` / `unhealthy_threshold` |
+| Status-code matching | ✅ | n/a | n/a | `expect_status` (default `[200]`) |
+| Response-body substring matching | ✅ | n/a | n/a | `expect_body` (optional, up to 64 KiB) |
+| Fresh connection per probe | ✅ | ✅ | ✅ | HTTP: `DisableKeepAlives`; TCP: dial+close; gRPC: short-lived `ClientConn` per probe |
+| Redirect following | ☐ | n/a | n/a | 3xx is treated as failure unless listed in `expect_status` |
+| Custom HTTP method (`HEAD`, `POST`, …) | ☐ | n/a | n/a | Only `GET` is supported |
+| Custom request headers | ☐ | n/a | n/a | Not supported |
+| TLS certificate verification | ✅ | n/a | ✅ | An `https`/TLS-gRPC pool is probed with the pool's resolved [`backend_tls`](upstreams.md#backend-tls) policy — the same trust live traffic uses |
+| gRPC health-check protocol (`grpc.health.v1.Health/Check`) | n/a | n/a | ✅ | Requires the `grpc` build tag; rejected clearly (not silently downgraded) in a lean build |
+| Named gRPC service health | n/a | n/a | ✅ | `service` (empty = whole-server health) |
+| Prometheus gauge per backend | ☐ | ☐ | ☐ | Deliberately not exported — a backend address is an unbounded metric label. `jul_upstream_backends_healthy{pool}` gives the count; per-backend detail is in the Admin API |
+| Prometheus probe counter + latency histogram | ✅ | ✅ | ✅ | `jul_upstream_probes_total`, `jul_upstream_probe_duration_seconds` (unchanged label set) |
+| Flapping detection (transition history) | ✅ | ✅ | ✅ | `healthHistoryTracker` — ≥ 4 transitions in 5 min |
+| Console Status integration | ✅ | ✅ | ✅ | Pool count + per-backend health in Admin API |
+| Zero-downtime reload — adopt new params | ✅ | ✅ | ✅ | Unchanged pools keep running; changed pools restart checker |
 
 ## Known limitations
 
 - **No shared state across instances:** Each Jul.IA process probes independently. In a multi-instance deployment, health state is local to each process.
 - **HTTP probes use a fresh connection per probe:** Keep-alive is disabled so that a broken pooled connection cannot mask an unhealthy backend.
-- **Probes use the pool's policy, not a route's:** an HTTP probe verifies with the [`backend_tls`](upstreams.md#backend-tls) block declared on the **upstream**. A route-level override applies to that route's traffic only — a pool may serve several routes with different overrides, so no single one could govern the probe. Put the trust roots a probe needs on the pool.
+- **Probes use the pool's policy, not a route's:** an HTTP or gRPC probe verifies with the [`backend_tls`](upstreams.md#backend-tls) block declared on the **upstream**. A route-level override applies to that route's traffic only — a pool may serve several routes with different overrides, so no single one could govern the probe. Put the trust roots a probe needs on the pool.
 
   *(Earlier revisions of this document stated that probes use `InsecureSkipVerify: true` "by design". That was never true of the shipped code, which set no `TLSClientConfig` at all and verified against the platform trust store; probes now use the resolved policy instead.)*
 - **Only `GET` is supported:** HTTP probes always use `GET`. There is no support for `HEAD`, `POST`, or custom headers.
+- **gRPC probes require the `grpc` build tag:** a lean build rejects `type = "grpc"` at reload time with a clear error rather than silently falling back to another probe type; `jul capabilities` reports whether `grpc` is compiled in.
+- **gRPC probes do not support Unix-socket backends:** gRPC needs a TCP dial; use `type = "tcp"` for a Unix-socket member.
 
 ## Metrics
 

@@ -114,10 +114,14 @@ over cleartext HTTP/2.
 Because the backend is an ordinary `[[upstreams]]` pool, the pool's strategy
 (`round_robin`, `weighted_round_robin`, `least_conn`) and passive health checks
 (`max_fails` / `fail_timeout`) apply, and `least_conn` reflects the full
-lifetime of a streaming call. gRPC streams are **not replayable**, so Jul.IA
-does not retry a call against another backend once it has started; a connection
-failure surfaces to the client as a gateway error and the backend is marked
-failed for subsequent calls.
+lifetime of a streaming call. The pool may also run an active
+[`grpc.health.v1.Health/Check` probe](health.md#grpc-probes)
+(`upstreams.health_check.type = "grpc"`), which ejects a backend reporting
+`NOT_SERVING` from rotation before a client ever reaches it — the same pool
+eligibility both this passthrough and gRPC-JSON transcoding read. gRPC streams
+are **not replayable**, so Jul.IA does not retry a call against another
+backend once it has started; a connection failure surfaces to the client as a
+gateway error and the backend is marked failed for subsequent calls.
 
 ## Routing alongside HTTP
 
@@ -160,7 +164,7 @@ What passthrough supports today, enumerated so the boundary is explicit
 | Passive health | `max_fails` / `fail_timeout` per backend | ✅ |
 | Path routing | mixed gRPC + HTTP on one listener by location prefix | ✅ |
 | Mid-stream retry | a started stream is **not** replayed to another backend | ❌ (by design) |
-| Active health probes | gRPC-level health checks (`grpc.health.v1`) | ❌ (passive only) |
+| Active health probes | gRPC-level health checks (`grpc.health.v1`) | ✅ [`health_check.type = "grpc"`](health.md#grpc-probes) |
 | mTLS to backend | client-certificate origination on the backend dial | ✅ [`backend_tls`](upstreams.md#backend-tls) |
 
 A gRPC stream is not replayable, so a connection failure after a call has begun

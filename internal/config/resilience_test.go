@@ -392,6 +392,29 @@ func TestValidateRejectsHTTPHealthCheckOnUnixBackend(t *testing.T) {
 	}
 }
 
+// TestValidateRejectsGRPCHealthCheckOnUnixBackend mirrors the http case: a
+// unix socket has no TCP address to dial for gRPC either.
+func TestValidateRejectsGRPCHealthCheckOnUnixBackend(t *testing.T) {
+	cfg := validKnownValueConfig()
+	cfg.Upstreams = []UpstreamConfig{{
+		Name:     "php",
+		Strategy: "round_robin",
+		Servers:  []UpstreamServer{{Address: "unix:/run/php-fpm.sock", Weight: 1}},
+		HealthCheck: &HealthCheckConfig{
+			Enabled: true, Type: "grpc", Service: "pkg.Widget",
+			Interval: Duration(2 * time.Second), Timeout: Duration(time.Second),
+			HealthyThreshold: 1, UnhealthyThreshold: 1,
+		},
+	}}
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("Validate accepted a grpc health check against a unix-socket backend")
+	}
+	if !strings.Contains(err.Error(), "unix socket") {
+		t.Fatalf("error = %v, want it to name the unix socket", err)
+	}
+}
+
 // TestValidateRejectsMaxActiveRequestsOnUDPRoute pins the deliberate asymmetry:
 // the UDP cap is per listener with idle eviction, the TCP cap is per pool.
 // Layering a pool-scoped concurrency limit on UDP would be the overlapping

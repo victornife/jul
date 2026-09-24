@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 358,
-    "schema_leaves": 304,
+    "schema_paths": 359,
+    "schema_leaves": 305,
     "resources": 9
   },
   "capability_build_tags": {
@@ -4348,6 +4348,18 @@
       "description": "Path is the request path for HTTP probes (required for type \"http\")",
       "anchor": "upstreams-x-health_check-path"
     },
+    "upstreams.*.health_check.service": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "health_check",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "active probes are restarted with the pool on each successful reload",
+      "description": "Service is the grpc.health.v1.HealthCheckRequest service name sent by a \"grpc\" probe",
+      "anchor": "upstreams-x-health_check-service"
+    },
     "upstreams.*.health_check.timeout": {
       "kind": "scalar",
       "scalar": "duration",
@@ -4383,7 +4395,7 @@
         "tcp"
       ],
       "default": "http",
-      "description": "Type is the probe protocol: \"http\" (default) or \"tcp\"",
+      "description": "Type is the probe protocol: \"http\" (default), \"tcp\", or \"grpc\"",
       "anchor": "upstreams-x-health_check-type"
     },
     "upstreams.*.health_check.unhealthy_threshold": {

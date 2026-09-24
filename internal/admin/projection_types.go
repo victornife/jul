@@ -174,14 +174,17 @@ type AppProjection struct {
 	// the current values without clobbering knobs it does not display. Secret
 	// tokens are never projected — DiscoveryConsul/Kubernetes carry only a
 	// has_token flag so the editor can show "token set" and preserve it.
-	HealthCheckTimeout      string               `json:"health_check_timeout,omitempty"`
-	HealthCheckHealthyThr   int                  `json:"health_check_healthy_threshold,omitempty"`
-	HealthCheckUnhealthyThr int                  `json:"health_check_unhealthy_threshold,omitempty"`
-	HealthCheckExpectStatus []int                `json:"health_check_expect_status,omitempty"`
-	HealthCheckExpectBody   string               `json:"health_check_expect_body,omitempty"`
-	DiscoveryRefresh        string               `json:"discovery_refresh,omitempty"`
-	DiscoveryConsul         *ConsulDiscoveryView `json:"discovery_consul,omitempty"`
-	DiscoveryKubernetes     *K8sDiscoveryView    `json:"discovery_kubernetes,omitempty"`
+	HealthCheckTimeout      string `json:"health_check_timeout,omitempty"`
+	HealthCheckHealthyThr   int    `json:"health_check_healthy_threshold,omitempty"`
+	HealthCheckUnhealthyThr int    `json:"health_check_unhealthy_threshold,omitempty"`
+	HealthCheckExpectStatus []int  `json:"health_check_expect_status,omitempty"`
+	HealthCheckExpectBody   string `json:"health_check_expect_body,omitempty"`
+	// HealthCheckService is the grpc.health.v1 service name for type = "grpc"
+	// (empty means whole-server health). Not a secret; safe to project.
+	HealthCheckService  string               `json:"health_check_service,omitempty"`
+	DiscoveryRefresh    string               `json:"discovery_refresh,omitempty"`
+	DiscoveryConsul     *ConsulDiscoveryView `json:"discovery_consul,omitempty"`
+	DiscoveryKubernetes *K8sDiscoveryView    `json:"discovery_kubernetes,omitempty"`
 }
 
 // ConsulDiscoveryView is the non-secret Consul discovery state the Apps editor

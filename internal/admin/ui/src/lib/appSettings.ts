@@ -11,7 +11,7 @@ import type { AppProjection, DiscoveryPatch, HealthCheckPatch } from "@/api/clie
 // testable, mirroring tracingToml.ts. Secret tokens never appear here — the
 // backend preserves them when the provider type is unchanged.
 
-export type HealthCheckType = "http" | "tcp";
+export type HealthCheckType = "http" | "tcp" | "grpc";
 
 export interface HealthCheckDraft {
   enabled: boolean;
@@ -23,12 +23,13 @@ export interface HealthCheckDraft {
   unhealthyThreshold: string;
   expectStatus: string;
   expectBody: string;
+  service: string;
 }
 
 export function seedHealthCheck(app: AppProjection): HealthCheckDraft {
   return {
     enabled: app.health_check,
-    type: app.health_check_type === "tcp" ? "tcp" : "http",
+    type: app.health_check_type === "tcp" ? "tcp" : app.health_check_type === "grpc" ? "grpc" : "http",
     path: app.health_check_path ?? "",
     interval: app.health_check_interval ?? "",
     timeout: app.health_check_timeout ?? "",
@@ -40,6 +41,7 @@ export function seedHealthCheck(app: AppProjection): HealthCheckDraft {
       : "",
     expectStatus: (app.health_check_expect_status ?? []).join(", "),
     expectBody: app.health_check_expect_body ?? "",
+    service: app.health_check_service ?? "",
   };
 }
 
@@ -58,6 +60,7 @@ export function healthCheckToPatch(d: HealthCheckDraft): HealthCheckPatch {
   const healthy = Number(d.healthyThreshold);
   const unhealthy = Number(d.unhealthyThreshold);
   const http = d.type === "http";
+  const grpc = d.type === "grpc";
   return {
     enabled: true,
     type: d.type,
@@ -72,6 +75,7 @@ export function healthCheckToPatch(d: HealthCheckDraft): HealthCheckPatch {
       : {}),
     ...(http && status.length > 0 ? { expect_status: status } : {}),
     ...(http && d.expectBody.trim() ? { expect_body: d.expectBody.trim() } : {}),
+    ...(grpc && d.service.trim() ? { service: d.service.trim() } : {}),
   };
 }
 

@@ -368,7 +368,7 @@ type serverLimits struct {
 // timeout >= interval, or http with no path).
 type upstreamHealthCheck struct {
 	Enabled            bool   `json:"enabled"`
-	Type               string `json:"type,omitempty"` // "http" (default) or "tcp"
+	Type               string `json:"type,omitempty"` // "http" (default), "tcp", or "grpc"
 	Path               string `json:"path,omitempty"`
 	Interval           string `json:"interval,omitempty"`
 	Timeout            string `json:"timeout,omitempty"`
@@ -376,6 +376,9 @@ type upstreamHealthCheck struct {
 	UnhealthyThreshold int    `json:"unhealthy_threshold,omitempty"`
 	ExpectStatus       []int  `json:"expect_status,omitempty"`
 	ExpectBody         string `json:"expect_body,omitempty"`
+	// Service is the grpc.health.v1 service name for type = "grpc" (empty means
+	// whole-server health). Ignored for http/tcp.
+	Service string `json:"service,omitempty"`
 }
 
 // upstreamDiscovery carries the dynamic-discovery fields the guided Apps editor

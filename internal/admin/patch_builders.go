@@ -208,8 +208,8 @@ func buildHealthCheck(in upstreamHealthCheck) (*config.HealthCheckConfig, string
 	if typ == "" {
 		typ = "http"
 	}
-	if typ != "http" && typ != "tcp" {
-		return nil, "", fmt.Errorf("upstream_set_health_check: type must be %q or %q", "http", "tcp")
+	if typ != "http" && typ != "tcp" && typ != "grpc" {
+		return nil, "", fmt.Errorf("upstream_set_health_check: type must be %q, %q, or %q", "http", "tcp", "grpc")
 	}
 	hc := &config.HealthCheckConfig{
 		Enabled:            true,
@@ -218,6 +218,7 @@ func buildHealthCheck(in upstreamHealthCheck) (*config.HealthCheckConfig, string
 		HealthyThreshold:   in.HealthyThreshold,
 		UnhealthyThreshold: in.UnhealthyThreshold,
 		ExpectBody:         strings.TrimSpace(in.ExpectBody),
+		Service:            strings.TrimSpace(in.Service),
 	}
 	if typ == "http" && hc.Path == "" {
 		return nil, "", fmt.Errorf("upstream_set_health_check: path is required for http probes")
@@ -234,6 +235,9 @@ func buildHealthCheck(in upstreamHealthCheck) (*config.HealthCheckConfig, string
 	note := typ
 	if typ == "http" && hc.Path != "" {
 		note = typ + " " + hc.Path
+	}
+	if typ == "grpc" && hc.Service != "" {
+		note = typ + " " + hc.Service
 	}
 	return hc, "enabled (" + note + ")", nil
 }

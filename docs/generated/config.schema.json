@@ -2225,6 +2225,10 @@
                 "description": "Path is the request path for HTTP probes (required for type \"http\")",
                 "type": "string"
               },
+              "service": {
+                "description": "Service is the grpc.health.v1.HealthCheckRequest service name sent by a \"grpc\" probe",
+                "type": "string"
+              },
               "timeout": {
                 "default": "2s",
                 "description": "Timeout bounds a single probe (default 2s); must be less than Interval",
@@ -2234,7 +2238,7 @@
               },
               "type": {
                 "default": "http",
-                "description": "Type is the probe protocol: \"http\" (default) or \"tcp\"",
+                "description": "Type is the probe protocol: \"http\" (default), \"tcp\", or \"grpc\"",
                 "enum": [
                   "http",
                   "tcp"
