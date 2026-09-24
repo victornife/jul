@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "id": "stream-upstream-failover-runtime",
+  "tier": "core",
+  "description": "Bounded NGINX stream (#426) fixture covering a named stream upstream whose per-backend max_fails/fail_timeout translates to Jul's shared upstream-wide [upstreams.resilience] circuit breaker (#365's HTTP translation, reused verbatim for stream, per #367's amendment requirement to prove backend unavailable/recovery behavior through the normal resilience path).",
+  "origin": {
+    "kind": "repository_authored",
+    "license": "AGPL-3.0-only",
+    "source": "victornife/jul#367"
+  },
+  "categories": [
+    "protocol-gateways",
+    "upstreams-resiliency"
+  ],
+  "build_tags": [
+    "importer",
+    "stream"
+  ],
+  "root": "nginx/nginx.conf",
+  "follow_includes": false,
+  "expected_assessment": {
+    "status": "ready_for_review",
+    "ready": true,
+    "complete": true,
+    "files_read": 1,
+    "sources": [
+      "nginx.conf"
+    ],
+    "results": [
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_EVENTS",
+        "class": "informational",
+        "risk": "operational",
+        "context": "main",
+        "directive": "events"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_HTTP",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "http"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "server",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LOCATION",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "location"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_RETURN",
+        "class": "supported",
+        "risk": "routing",
+        "context": "location",
+        "directive": "return"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_STREAM",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "stream"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_UPSTREAM",
+        "class": "supported",
+        "risk": "routing",
+        "context": "stream",
+        "directive": "upstream"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_UPSTREAM_SERVER",
+        "class": "supported",
+        "risk": "availability",
+        "context": "upstream",
+        "directive": "server",
+        "count": 2
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "stream",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "stream",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_PROXY_PASS",
+        "class": "supported",
+        "risk": "routing",
+        "context": "stream",
+        "directive": "proxy_pass"
+      }
+    ]
+  },
+  "expected_candidate": {
+    "required": true,
+    "contains": [
+      "[[stream]]",
+      "[upstreams.resilience]",
+      "fail_timeout = '2s'",
+      "listen = ':19060'",
+      "max_fails = 1",
+      "proxy_pass = 'stream_failover_runtime_pool'"
+    ]
+  }
+}
