@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "fixture_schema_version": 1,
-  "fixture_count": 30,
-  "core_fixtures": 28,
+  "fixture_count": 32,
+  "core_fixtures": 30,
   "full_fixtures": 2,
   "categories": [
     {
@@ -39,7 +39,7 @@
     },
     {
       "name": "protocol-gateways",
-      "count": 9
+      "count": 11
     },
     {
       "name": "request-policy",
@@ -97,17 +97,17 @@
     },
     {
       "name": "informational",
-      "count": 29
+      "count": 31
     },
     {
       "name": "supported",
-      "count": 287
+      "count": 298
     }
   ],
   "risks": [
     {
       "name": "availability",
-      "count": 61
+      "count": 63
     },
     {
       "name": "observability",
@@ -115,7 +115,7 @@
     },
     {
       "name": "operational",
-      "count": 66
+      "count": 70
     },
     {
       "name": "performance",
@@ -123,7 +123,7 @@
     },
     {
       "name": "routing",
-      "count": 172
+      "count": 179
     },
     {
       "name": "security",
@@ -169,7 +169,7 @@
     },
     {
       "name": "NGX_HTTP_SERVER",
-      "count": 30
+      "count": 32
     },
     {
       "name": "NGX_HTTP_UPSTREAM",
@@ -205,6 +205,10 @@
     },
     {
       "name": "NGX_LOCATION_FASTCGI",
+      "count": 2
+    },
+    {
+      "name": "NGX_LOCATION_FASTCGI_PARAM",
       "count": 1
     },
     {
@@ -248,6 +252,10 @@
       "count": 1
     },
     {
+      "name": "NGX_LOCATION_UWSGI",
+      "count": 1
+    },
+    {
       "name": "NGX_MAIL_UNSUPPORTED",
       "count": 3
     },
@@ -257,11 +265,11 @@
     },
     {
       "name": "NGX_MAIN_EVENTS",
-      "count": 28
+      "count": 30
     },
     {
       "name": "NGX_MAIN_HTTP",
-      "count": 30
+      "count": 32
     },
     {
       "name": "NGX_MAIN_MAIL",
@@ -317,7 +325,7 @@
     },
     {
       "name": "NGX_SERVER_LISTEN",
-      "count": 29
+      "count": 31
     },
     {
       "name": "NGX_SERVER_LISTEN_HTTP2_CLEARTEXT",
@@ -325,7 +333,7 @@
     },
     {
       "name": "NGX_SERVER_LOCATION",
-      "count": 36
+      "count": 38
     },
     {
       "name": "NGX_SERVER_NAME",
@@ -472,6 +480,7 @@
       "status": "represented",
       "fixtures": [
         "fastcgi-gateway",
+        "fastcgi-gateway-runtime",
         "grpc-gateway-runtime",
         "protocol-boundaries",
         "stream-named-upstream",
@@ -479,10 +488,10 @@
         "stream-sni-bounded",
         "stream-tcp-basic",
         "stream-udp",
-        "stream-upstream-failover-runtime"
+        "stream-upstream-failover-runtime",
+        "uwsgi-gateway-runtime"
       ],
       "deferred_dimensions": [
-        "FastCGI/uWSGI protocol-backend runtime replay",
         "H2/H3 migration replay",
         "WebSocket runtime replay"
       ]
