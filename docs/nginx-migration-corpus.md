@@ -331,6 +331,21 @@ is HTTP/1.1-only today and has no stream, gRPC, FastCGI, or uWSGI backend
 support, so real-Jul evidence stands in its place, consistent with
 #365/#366's precedent for fixtures the reference lane cannot yet reach.
 
+**CI lane separation, explicit per #367's own acceptance criteria.** Every
+backend behind these six fixtures' real-Jul E2E is a lightweight, in-process
+Go test double (a real `google.golang.org/grpc` server, Go's own
+`net/http/fcgi` responder, a minimal hand-rolled uWSGI-protocol responder, or
+a raw TCP/UDP echo/identify listener) — none of it needs Docker, an external
+process, or network access, and every test in this set completes in well
+under a second. There is therefore no protocol-heavy evidence here that needs
+a separate scheduled/manual CI lane: all six fixtures already run in the
+existing full-build-tag `test (full)` PR job alongside every other real-Jul
+corpus test, gated only by the `importer`, `stream`, or `grpc` build tags
+already in `FULL_TAGS`. A genuinely heavy lane would only become necessary if
+a *real-NGINX* comparison for these protocols were added (a pinned nginx
+image with actual gRPC/PHP-FPM/uwsgi backends) — deliberately deferred per
+the paragraph above, not something this issue's scope requires today.
+
 ## Corpus admission policy
 
 Core fixtures are repository-authored or generated from repository-owned source.
