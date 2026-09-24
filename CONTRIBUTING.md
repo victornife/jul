@@ -310,9 +310,54 @@ Closes #42.
 
 1. Open a **draft PR** early for feedback.
 2. Ensure CI passes (`make ci-fast`; `make ci-full` if build-tagged features changed).
-3. Request review from at least one maintainer.
-4. Address review comments and mark conversations as resolved.
-5. Maintainers will merge when approved and CI is green.
+3. For any user-visible gateway/runtime capability, complete the
+   [NGINX migration impact](#nginx-migration-impact-definition-of-done) section
+   below.
+4. Request review from at least one maintainer.
+5. Address review comments and mark conversations as resolved.
+6. Maintainers will merge when approved and CI is green.
+
+### NGINX migration impact (Definition of Done)
+
+Jul ships an NGINX configuration importer (`internal/migrate/nginx`, `jul import
+nginx`) and a migration compatibility corpus (`testdata/nginx-corpus`,
+[docs/nginx-migration-corpus.md](docs/nginx-migration-corpus.md)). Without a
+standing rule, product changes silently make that importer/corpus stale — this
+already happened twice in one migration-focused effort (#367): a stale
+`h2c`/`http2` listener mapping that quietly left `grpc_pass` unable to serve
+real traffic, and a PROXY-protocol wire-format gap (v2 support existed in the
+runtime but was never exercised by the corpus).
+
+For every PR that adds or changes a **user-visible gateway/runtime capability**,
+answer this question and include the answer in the PR description:
+
+> Does an NGINX directive, module behavior, configuration pattern, or existing
+> Jul migration assessment correspond meaningfully to this capability?
+
+**If no**, write `NGINX migration impact: not applicable` with a short
+rationale when the answer isn't obvious. Do not invent NGINX scope for
+Jul-specific internals or operability features that have no source analogue.
+
+**If yes**, choose exactly one disposition and do the matching work:
+
+| Disposition | When | Required work |
+| --- | --- | --- |
+| **Supported** | Jul can now represent the NGINX construct faithfully | Importer mapping, assessment code/registry entry, provenance/target mapping, generated candidate, strict validation, a corpus fixture with goldens, real NGINX-vs-Jul E2E where the corpus harness supports it, and migration docs |
+| **Approximated** | Jul represents it with a documented semantic difference | The approximation code, an explanation of the exact difference, operator guidance, and corpus/E2E evidence for the affected dimension |
+| **Blocking** | Jul still cannot represent the source safely | Keep (or add) the blocking finding with a specific reason; improve guidance if useful. Never create runtime work merely for directive-count parity |
+| **Not applicable** | No meaningful source analogue exists | State it explicitly; this is not a way to skip the other three when one does apply |
+
+**Bidirectional regression rule.** If your change modifies behavior the
+importer already maps, re-audit that classification — still equivalent stays
+`supported`; a new semantic difference becomes `approximated`; something now
+unsafe or unrepresentable becomes `blocking`. A report label's backward
+compatibility is never a reason to keep an inaccurate `supported`
+classification.
+
+Include in the PR description: reviewed (yes/no), disposition, assessment
+codes affected, corpus fixtures affected, real migration E2E affected, docs
+affected, and a short rationale. Automation must never infer semantic
+equivalence solely from matching config-field names.
 
 ## Release process
 
