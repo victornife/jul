@@ -239,6 +239,26 @@ http {
 	}
 }
 
+func TestAssessmentGRPCPassAndFastCGIParamThroughFullWalker(t *testing.T) {
+	a, _ := assessString(t, `
+http {
+  server {
+    listen 8080;
+    location /grpc { grpc_pass grpc://backend:9090; }
+    location /fcgi {
+      fastcgi_pass 127.0.0.1:9000;
+      fastcgi_param SCRIPT_NAME /index.php;
+    }
+  }
+}
+`)
+	for _, code := range []string{"NGX_LOCATION_GRPC_PASS", "NGX_LOCATION_FASTCGI", "NGX_LOCATION_FASTCGI_PARAM"} {
+		if !hasAssessmentCode(a, code) || a.HasBlocking() {
+			t.Fatalf("expected %s supported and no blocking findings, got %+v", code, a.Results)
+		}
+	}
+}
+
 func TestAssessmentValidationFailure(t *testing.T) {
 	a := FailureAssessment("fixture.conf", AssessmentInformational, "TEST", "test")
 	a.SetValidation([]error{errors.New("invalid candidate")}, nil)

@@ -997,6 +997,7 @@ http {
     location /a { grpc_pass https://backend; }
     location /b { grpc_pass grpc://unix:/run/grpc.sock; }
     location /c { grpc_pass grpc://$backend; }
+    location /d { grpc_pass; }
   }
 }`)
 	if !hasSkip(rep, "grpc_pass scheme is not representable") {
@@ -1007,6 +1008,9 @@ http {
 	}
 	if !hasSkip(rep, "variable-derived grpc_pass targets are not translated") {
 		t.Errorf("expected variable-derived skip, got %+v", rep.Skipped)
+	}
+	if !hasSkip(rep, "grpc_pass target is missing") {
+		t.Errorf("expected missing-target skip, got %+v", rep.Skipped)
 	}
 }
 
@@ -1059,5 +1063,21 @@ http {
 	}
 	if _, ok := loc.FastCGIParams["PATH_INFO"]; ok {
 		t.Errorf("variable-derived fastcgi_param PATH_INFO should not be translated, got %+v", loc.FastCGIParams)
+	}
+}
+
+func TestTranslateFastCGIParamMissingValueSkipped(t *testing.T) {
+	_, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      fastcgi_pass 127.0.0.1:9000;
+      fastcgi_param SCRIPT_NAME;
+    }
+  }
+}`)
+	if !hasSkip(rep, "fastcgi_param requires a name and a value") {
+		t.Errorf("expected missing-value skip, got %+v", rep.Skipped)
 	}
 }
