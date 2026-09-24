@@ -75,6 +75,10 @@ var capabilityRegistry = map[capabilityKey]capability{
 
 	{ContextLocation, "proxy_pass"}:                supported("NGX_LOCATION_PROXY_PASS", RiskRouting, "proxy target is translated", []string{"servers[].locations[].proxy_pass"}),
 	{ContextLocation, "fastcgi_pass"}:              supported("NGX_LOCATION_FASTCGI", RiskRouting, "FastCGI target is translated", []string{"servers[].locations[].fastcgi_pass"}),
+	{ContextLocation, "fastcgi_param"}:             supported("NGX_LOCATION_FASTCGI_PARAM", RiskRouting, "literal FastCGI parameter is translated", []string{"servers[].locations[].fastcgi_params"}),
+	{ContextLocation, "uwsgi_pass"}:                supported("NGX_LOCATION_UWSGI", RiskRouting, "uWSGI target is translated", []string{"servers[].locations[].uwsgi_pass"}),
+	{ContextLocation, "uwsgi_param"}:               blocking("NGX_LOCATION_UWSGI_PARAM", RiskRouting, "Jul has no per-parameter uWSGI configuration equivalent"),
+	{ContextLocation, "grpc_pass"}:                 supported("NGX_LOCATION_GRPC_PASS", RiskRouting, "native gRPC passthrough target is translated", []string{"servers[].locations[].proxy_pass", "servers[].locations[].grpc"}),
 	{ContextLocation, "root"}:                      supported("NGX_LOCATION_ROOT", RiskRouting, "location root is translated", []string{"servers[].locations[].root"}),
 	{ContextLocation, "alias"}:                     approximated("NGX_LOCATION_ALIAS", RiskRouting, "alias is mapped to root; prefix-stripping semantics differ"),
 	{ContextLocation, "index"}:                     supported("NGX_LOCATION_INDEX", RiskRouting, "location index files are translated", []string{"servers[].locations[].index"}),

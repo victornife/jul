@@ -963,3 +963,101 @@ http {
 		t.Errorf("expected server-return precedence note, notes=%v", rep.Notes)
 	}
 }
+
+func TestTranslateGRPCPassSchemes(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  server {
+    listen 80;
+    location /a { grpc_pass grpc://backend:9090; }
+    location /b { grpc_pass grpcs://backend:9443; }
+    location /c { grpc_pass grpc_pool; }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	if len(s.Locations) != 3 {
+		t.Fatalf("want 3 locations, got %d", len(s.Locations))
+	}
+	if got := s.Locations[0]; got.ProxyPass != "http://backend:9090" || !got.GRPC {
+		t.Errorf("grpc:// location: got proxy_pass=%q grpc=%v", got.ProxyPass, got.GRPC)
+	}
+	if got := s.Locations[1]; got.ProxyPass != "https://backend:9443" || !got.GRPC {
+		t.Errorf("grpcs:// location: got proxy_pass=%q grpc=%v", got.ProxyPass, got.GRPC)
+	}
+	if got := s.Locations[2]; got.ProxyPass != "http://grpc_pool" || !got.GRPC {
+		t.Errorf("bare upstream location: got proxy_pass=%q grpc=%v", got.ProxyPass, got.GRPC)
+	}
+}
+
+func TestTranslateGRPCPassUnrecognizedFormsSkipped(t *testing.T) {
+	_, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location /a { grpc_pass https://backend; }
+    location /b { grpc_pass grpc://unix:/run/grpc.sock; }
+    location /c { grpc_pass grpc://$backend; }
+  }
+}`)
+	if !hasSkip(rep, "grpc_pass scheme is not representable") {
+		t.Errorf("expected unrecognized-scheme skip, got %+v", rep.Skipped)
+	}
+	if !hasSkip(rep, "direct Unix grpc_pass is not representable") {
+		t.Errorf("expected direct-Unix skip, got %+v", rep.Skipped)
+	}
+	if !hasSkip(rep, "variable-derived grpc_pass targets are not translated") {
+		t.Errorf("expected variable-derived skip, got %+v", rep.Skipped)
+	}
+}
+
+func TestTranslateUWSGIPass(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  server {
+    listen 80;
+    location / { uwsgi_pass 127.0.0.1:3031; }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	if got := s.Locations[0].UWSGIPass; got != "127.0.0.1:3031" {
+		t.Errorf("uwsgi_pass: got %q want 127.0.0.1:3031", got)
+	}
+}
+
+func TestTranslateUWSGIParamSkipped(t *testing.T) {
+	_, rep := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      uwsgi_pass 127.0.0.1:3031;
+      uwsgi_param UWSGI_SCRIPT app;
+    }
+  }
+}`)
+	if !hasSkip(rep, "Jul has no per-parameter uWSGI configuration equivalent") {
+		t.Errorf("expected uwsgi_param skip, got %+v", rep.Skipped)
+	}
+}
+
+func TestTranslateFastCGIParamLiteral(t *testing.T) {
+	cfg, _ := translate(t, `
+http {
+  server {
+    listen 80;
+    location / {
+      fastcgi_pass 127.0.0.1:9000;
+      fastcgi_param SCRIPT_NAME /index.php;
+      fastcgi_param PATH_INFO $fastcgi_path_info;
+    }
+  }
+}`)
+	s := onlyServer(t, cfg)
+	loc := s.Locations[0]
+	if got := loc.FastCGIParams["SCRIPT_NAME"]; got != "/index.php" {
+		t.Errorf("fastcgi_params[SCRIPT_NAME]: got %q want /index.php", got)
+	}
+	if _, ok := loc.FastCGIParams["PATH_INFO"]; ok {
+		t.Errorf("variable-derived fastcgi_param PATH_INFO should not be translated, got %+v", loc.FastCGIParams)
+	}
+}

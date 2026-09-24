@@ -288,6 +288,54 @@ func TestClassifyProxyReturnRewriteAndHeader(t *testing.T) {
 		t.Fatal("proxyPassHasURI classified a URL incorrectly")
 	}
 
+	grpcTests := []struct {
+		name   string
+		params []string
+		want   AssessmentClass
+	}{
+		{"missing", nil, AssessmentBlocking},
+		{"blank", []string{"   "}, AssessmentBlocking},
+		{"dynamic", []string{"grpc://$backend"}, AssessmentBlocking},
+		{"unix", []string{"grpc://unix:/run/grpc.sock"}, AssessmentBlocking},
+		{"unrecognized scheme", []string{"https://backend"}, AssessmentBlocking},
+		{"grpc scheme", []string{"grpc://backend:9090"}, AssessmentSupported},
+		{"grpcs scheme", []string{"grpcs://backend:9443"}, AssessmentSupported},
+		{"bare upstream", []string{"grpc_pool"}, AssessmentSupported},
+	}
+	for _, tt := range grpcTests {
+		t.Run("grpc/"+tt.name, func(t *testing.T) {
+			assertCapabilityClass(t, classifyGRPCPass(tt.params), tt.want)
+		})
+	}
+	if rewritten, ok := normalizeGRPCPassScheme("grpc://pool"); !ok || rewritten != "http://pool" {
+		t.Fatalf("normalizeGRPCPassScheme(grpc://pool) = %q, %v, want http://pool, true", rewritten, ok)
+	}
+	if rewritten, ok := normalizeGRPCPassScheme("grpcs://pool"); !ok || rewritten != "https://pool" {
+		t.Fatalf("normalizeGRPCPassScheme(grpcs://pool) = %q, %v, want https://pool, true", rewritten, ok)
+	}
+	if rewritten, ok := normalizeGRPCPassScheme("pool"); !ok || rewritten != "pool" {
+		t.Fatalf("normalizeGRPCPassScheme(pool) = %q, %v, want pool, true", rewritten, ok)
+	}
+	if _, ok := normalizeGRPCPassScheme("ftp://pool"); ok {
+		t.Fatal("normalizeGRPCPassScheme accepted an unrecognized scheme")
+	}
+
+	fastcgiParamTests := []struct {
+		name   string
+		params []string
+		want   AssessmentClass
+	}{
+		{"missing value", []string{"SCRIPT_FILENAME"}, AssessmentBlocking},
+		{"blank name", []string{"   ", "value"}, AssessmentBlocking},
+		{"dynamic value", []string{"SCRIPT_FILENAME", "$document_root/$fastcgi_script_name"}, AssessmentBlocking},
+		{"literal value", []string{"SCRIPT_NAME", "/index.php"}, AssessmentSupported},
+	}
+	for _, tt := range fastcgiParamTests {
+		t.Run("fastcgi_param/"+tt.name, func(t *testing.T) {
+			assertCapabilityClass(t, classifyFastCGIParam(tt.params), tt.want)
+		})
+	}
+
 	returnTests := []struct {
 		name        string
 		params      []string

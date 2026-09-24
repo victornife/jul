@@ -121,6 +121,10 @@ func classifyDirective(context AssessmentContext, d ngx.IDirective, facts walkFa
 			return classifySSLClientCertificate(params, facts.serverClientAuthUsable)
 		case context == ContextLocation && name == "proxy_pass":
 			return classifyProxyPass(params)
+		case context == ContextLocation && name == "grpc_pass":
+			return classifyGRPCPass(params)
+		case context == ContextLocation && name == "fastcgi_param":
+			return classifyFastCGIParam(params)
 		case context == ContextHTTP && name == "proxy_cache_path":
 			return classifyProxyCachePath(params)
 		case context == ContextLocation && name == "proxy_cache":
@@ -285,6 +289,43 @@ func classifyProxyPass(params []string) capability {
 func proxyPassHasURI(v string) bool {
 	trimmed := strings.TrimPrefix(strings.TrimPrefix(v, "http://"), "https://")
 	return strings.Contains(trimmed, "/")
+}
+
+// classifyGRPCPass judges a location's grpc_pass in isolation: Jul's native
+// gRPC passthrough (loc.GRPC=true) reuses the same proxy_pass field ordinary
+// HTTP proxying does, dialing h2c for a grpc:// target or HTTP/2+TLS for
+// grpcs://, so it is bound by the same limits - no variable-derived target,
+// no direct Unix socket (a named [[upstreams]] entry is required, exactly as
+// plain proxy_pass requires) - plus grpc_pass's own scheme vocabulary.
+func classifyGRPCPass(params []string) capability {
+	if len(params) == 0 || strings.TrimSpace(params[0]) == "" {
+		return blocking("NGX_LOCATION_GRPC_PASS", RiskRouting, "grpc_pass target is missing")
+	}
+	v := strings.TrimSpace(params[0])
+	if strings.Contains(v, "$") {
+		return blocking("NGX_LOCATION_GRPC_PASS_DYNAMIC", RiskSecurity, "variable-derived grpc_pass targets are not translated")
+	}
+	if strings.Contains(strings.ToLower(v), "unix:") {
+		return blocking("NGX_LOCATION_GRPC_PASS_UNIX", RiskRouting, "direct Unix grpc_pass is not representable; create a named [[upstreams]] entry with servers = [\"unix:/path/to/socket.sock\"] and proxy_pass = \"http://<upstream-name>\", grpc = true")
+	}
+	if _, recognized := normalizeGRPCPassScheme(v); !recognized {
+		return blocking("NGX_LOCATION_GRPC_PASS_SCHEME", RiskRouting, "grpc_pass scheme is not representable; only grpc:// (h2c), grpcs:// (HTTP/2+TLS), or a bare upstream/host name are translated")
+	}
+	return capabilityRegistry[capabilityKey{ContextLocation, "grpc_pass"}]
+}
+
+// classifyFastCGIParam judges one fastcgi_param name/value pair in isolation.
+// Only a literal value (no nginx variable) is representable: Jul's
+// fastcgi_params is a static map, with no per-request variable substitution
+// engine behind it.
+func classifyFastCGIParam(params []string) capability {
+	if len(params) < 2 || strings.TrimSpace(params[0]) == "" {
+		return blocking("NGX_LOCATION_FASTCGI_PARAM", RiskRouting, "fastcgi_param requires a name and a value")
+	}
+	if strings.Contains(params[1], "$") {
+		return blocking("NGX_LOCATION_FASTCGI_PARAM_DYNAMIC", RiskRouting, "variable-derived fastcgi_param values are not translated; Jul's fastcgi_params is a static map")
+	}
+	return capabilityRegistry[capabilityKey{ContextLocation, "fastcgi_param"}]
 }
 
 // classifyProxyCachePath judges a `proxy_cache_path` declaration in
