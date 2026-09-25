@@ -5654,6 +5654,9 @@
                     "path": {
                       "type": "string"
                     },
+                    "service": {
+                      "type": "string"
+                    },
                     "timeout": {
                       "type": "string"
                     },

@@ -74,6 +74,7 @@ describe("healthCheckToPatch", () => {
       unhealthyThreshold: "",
       expectStatus: "200, 204",
       expectBody: "OK",
+      service: "",
     });
     expect(patch).toEqual({
       enabled: true,
@@ -99,6 +100,7 @@ describe("healthCheckToPatch", () => {
       unhealthyThreshold: "",
       expectStatus: "200, 204",
       expectBody: "ignored",
+      service: "",
     });
     expect(patch).toEqual({ enabled: true, type: "tcp" });
   });
@@ -120,6 +122,7 @@ describe("healthCheckWarnings", () => {
       unhealthyThreshold: "",
       expectStatus: "",
       expectBody: "",
+      service: "",
     });
     expect(w.some((m) => m.includes("request path"))).toBe(true);
   });
@@ -135,6 +138,7 @@ describe("healthCheckWarnings", () => {
       unhealthyThreshold: "",
       expectStatus: "200, 999",
       expectBody: "",
+      service: "",
     });
     expect(w.some((m) => m.includes("999"))).toBe(true);
   });

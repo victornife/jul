@@ -127,6 +127,7 @@ function emptyHealthCheck(): HealthCheckDraft {
     unhealthyThreshold: "3",
     expectStatus: "200",
     expectBody: "",
+    service: "",
   };
 }
 
@@ -244,6 +245,7 @@ function HealthCheckFields({
             >
               <option value="http">HTTP</option>
               <option value="tcp">TCP connect</option>
+              <option value="grpc">gRPC (grpc.health.v1.Health)</option>
             </select>
           </label>
           {value.type === "http" && (
@@ -254,6 +256,18 @@ function HealthCheckFields({
               mono
               onChange={(next) => {
                 set("path", next);
+              }}
+            />
+          )}
+          {value.type === "grpc" && (
+            <TextField
+              label="Service name"
+              value={value.service}
+              placeholder="Optional — empty means whole-server health"
+              mono
+              hint="Sent as the grpc.health.v1.HealthCheckRequest service field; Jul cannot validate it exists until runtime."
+              onChange={(next) => {
+                set("service", next);
               }}
             />
           )}

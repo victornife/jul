@@ -707,6 +707,7 @@ export const AppProjectionSchema = z.object({
   health_check_unhealthy_threshold: z.number().optional(),
   health_check_expect_status: z.array(z.number()).optional(),
   health_check_expect_body: z.string().optional(),
+  health_check_service: z.string().optional(),
   discovery_refresh: z.string().optional(),
   discovery_consul: z
     .object({
@@ -1722,7 +1723,7 @@ export type ConfigPatch =
 // A disabled payload removes the block (passive health only).
 export type HealthCheckPatch = {
   enabled: boolean;
-  type?: "http" | "tcp";
+  type?: "http" | "tcp" | "grpc";
   path?: string;
   interval?: string;
   timeout?: string;
@@ -1730,6 +1731,7 @@ export type HealthCheckPatch = {
   unhealthy_threshold?: number;
   expect_status?: number[];
   expect_body?: string;
+  service?: string;
 };
 
 // DiscoveryPatch is the upstream dynamic-discovery block the guided Apps editor

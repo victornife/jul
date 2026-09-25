@@ -1072,6 +1072,55 @@ func TestValidateHealthCheck(t *testing.T) {
 			t.Error("expected error: expect_status out of range")
 		}
 	})
+	t.Run("valid grpc with empty service (whole-server health)", func(t *testing.T) {
+		h := HealthCheckConfig{Enabled: true, Type: "grpc", Interval: Duration(5 * time.Second), Timeout: Duration(2 * time.Second), HealthyThreshold: 2, UnhealthyThreshold: 3}
+		if err := Validate(withHealth(h)); err != nil {
+			t.Errorf("valid grpc health check with empty service rejected: %v", err)
+		}
+	})
+	t.Run("valid grpc with a named service", func(t *testing.T) {
+		h := HealthCheckConfig{Enabled: true, Type: "grpc", Service: "pkg.Widget", Interval: Duration(5 * time.Second), Timeout: Duration(2 * time.Second), HealthyThreshold: 2, UnhealthyThreshold: 3}
+		if err := Validate(withHealth(h)); err != nil {
+			t.Errorf("valid grpc health check with a named service rejected: %v", err)
+		}
+	})
+	t.Run("grpc rejects path", func(t *testing.T) {
+		h := HealthCheckConfig{Enabled: true, Type: "grpc", Path: "/healthz", Interval: Duration(5 * time.Second), Timeout: Duration(2 * time.Second), HealthyThreshold: 1, UnhealthyThreshold: 1}
+		if err := Validate(withHealth(h)); err == nil {
+			t.Error("expected error: path does not apply to type = grpc")
+		}
+	})
+	t.Run("grpc rejects expect_status", func(t *testing.T) {
+		h := HealthCheckConfig{Enabled: true, Type: "grpc", ExpectStatus: []int{200}, Interval: Duration(5 * time.Second), Timeout: Duration(2 * time.Second), HealthyThreshold: 1, UnhealthyThreshold: 1}
+		if err := Validate(withHealth(h)); err == nil {
+			t.Error("expected error: expect_status does not apply to type = grpc")
+		}
+	})
+	t.Run("grpc rejects expect_body", func(t *testing.T) {
+		h := HealthCheckConfig{Enabled: true, Type: "grpc", ExpectBody: "ok", Interval: Duration(5 * time.Second), Timeout: Duration(2 * time.Second), HealthyThreshold: 1, UnhealthyThreshold: 1}
+		if err := Validate(withHealth(h)); err == nil {
+			t.Error("expected error: expect_body does not apply to type = grpc")
+		}
+	})
+	t.Run("service only applies to grpc", func(t *testing.T) {
+		h := validHTTP()
+		h.Service = "pkg.Widget"
+		if err := Validate(withHealth(h)); err == nil {
+			t.Error("expected error: service only applies to type = grpc")
+		}
+	})
+	t.Run("grpc service too long", func(t *testing.T) {
+		h := HealthCheckConfig{Enabled: true, Type: "grpc", Service: strings.Repeat("a", grpcHealthServiceMaxLen+1), Interval: Duration(5 * time.Second), Timeout: Duration(2 * time.Second), HealthyThreshold: 1, UnhealthyThreshold: 1}
+		if err := Validate(withHealth(h)); err == nil {
+			t.Error("expected error: service exceeds the bounded length")
+		}
+	})
+	t.Run("grpc service rejects control characters", func(t *testing.T) {
+		h := HealthCheckConfig{Enabled: true, Type: "grpc", Service: "pkg.Wid\x00get", Interval: Duration(5 * time.Second), Timeout: Duration(2 * time.Second), HealthyThreshold: 1, UnhealthyThreshold: 1}
+		if err := Validate(withHealth(h)); err == nil {
+			t.Error("expected error: service must not contain control characters")
+		}
+	})
 }
 
 func TestValidateGRPCTranscode(t *testing.T) {

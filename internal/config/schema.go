@@ -962,7 +962,9 @@ type KubernetesDiscovery struct {
 // with passive (live-traffic) health.
 type HealthCheckConfig struct {
 	Enabled bool `toml:"enabled"`
-	// Type is the probe protocol: "http" (default) or "tcp".
+	// Type is the probe protocol: "http" (default), "tcp", or "grpc". "grpc"
+	// issues a standard grpc.health.v1.Health/Check RPC and requires a build
+	// with the "grpc" tag.
 	Type string `toml:"type"`
 	// Path is the request path for HTTP probes (required for type "http").
 	Path string `toml:"path"`
@@ -977,11 +979,15 @@ type HealthCheckConfig struct {
 	// out of rotation (default 3).
 	UnhealthyThreshold int `toml:"unhealthy_threshold"`
 	// ExpectStatus lists acceptable HTTP status codes for a passing probe
-	// (default [200]). Ignored for tcp probes.
+	// (default [200]). Ignored for tcp/grpc probes.
 	ExpectStatus []int `toml:"expect_status"`
 	// ExpectBody, when set, requires the HTTP probe response body to contain this
-	// substring. Ignored for tcp probes.
+	// substring. Ignored for tcp/grpc probes.
 	ExpectBody string `toml:"expect_body"`
+	// Service is the grpc.health.v1.HealthCheckRequest service name sent by a
+	// "grpc" probe. Empty means whole-server health. Required for type "grpc";
+	// ignored for http/tcp probes.
+	Service string `toml:"service"`
 }
 
 // UpstreamServer is one backend in a pool. It accepts either a bare address

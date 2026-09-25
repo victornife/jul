@@ -76,12 +76,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 358
-  schema_leaves: 304
-  registry_entries: 304
+  schema_paths: 359
+  schema_leaves: 305
+  registry_entries: 305
   startup_consumed: 32
   by_class:
-    hot_reload: 258
+    hot_reload: 259
     restart_required: 32
     new_listener_only: 7
     ignored_deprecated: 4
@@ -1290,6 +1290,10 @@ fields:
     subsystem: health_check
     reason: "active probes are restarted with the pool on each successful reload"
   - path: "upstreams.*.health_check.path"
+    class: hot_reload
+    subsystem: health_check
+    reason: "active probes are restarted with the pool on each successful reload"
+  - path: "upstreams.*.health_check.service"
     class: hot_reload
     subsystem: health_check
     reason: "active probes are restarted with the pool on each successful reload"

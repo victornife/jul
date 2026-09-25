@@ -288,6 +288,7 @@ func fullConfig() *config.Config {
 				UnhealthyThreshold: 3,
 				ExpectStatus:       []int{200},
 				ExpectBody:         "ok",
+				Service:            "example.HealthService",
 			},
 			Discovery: &config.DiscoveryConfig{
 				Type:    "dns",

@@ -307,6 +307,16 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 	if err != nil {
 		return nil, err
 	}
+	// grpcHealthProbe is nil unless this binary was built with the "grpc" tag
+	// (see health_grpc.go's init). Reported here, at pool-build/reload time,
+	// rather than silently falling back to TCP/HTTP — the same convention
+	// already used for grpc = true native passthrough (config validation
+	// cannot see build tags without an import cycle through internal/config ->
+	// internal/plugins -> internal/config).
+	if up.HealthCheck != nil && up.HealthCheck.Enabled && up.HealthCheck.Type == "grpc" && grpcHealthProbe == nil {
+		pool.Close()
+		return nil, fmt.Errorf("upstream %q: health_check.type = \"grpc\" requires a build with the \"grpc\" tag", up.Name)
+	}
 	// Wired unconditionally, not only when health_check is enabled: a passive
 	// (dial-triggered) transition deserves the same gauge/history entry as an
 	// active-checker one even on a pool with no active checks configured.

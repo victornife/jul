@@ -51,6 +51,7 @@ function healthCheck(over: Partial<HealthCheckDraft> = {}): HealthCheckDraft {
     unhealthyThreshold: "3",
     expectStatus: "200, 204",
     expectBody: "secret-looking expected body",
+    service: "",
     ...over,
   };
 }

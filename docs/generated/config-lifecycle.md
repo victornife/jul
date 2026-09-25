@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 358 |
-| Schema leaves (configurable values) | 304 |
-| Registry entries | 304 |
+| Schema paths (containers included) | 359 |
+| Schema leaves (configurable values) | 305 |
+| Registry entries | 305 |
 | Startup-consumed entries | 32 |
-| Class `hot_reload` | 258 |
+| Class `hot_reload` | 259 |
 | Class `restart_required` | 32 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -392,6 +392,7 @@ value is compared as a digest so no secret material leaves the process.
 | `upstreams.*.health_check.healthy_threshold` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
 | `upstreams.*.health_check.interval` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
 | `upstreams.*.health_check.path` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
+| `upstreams.*.health_check.service` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
 | `upstreams.*.health_check.timeout` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
 | `upstreams.*.health_check.type` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
 | `upstreams.*.health_check.unhealthy_threshold` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |

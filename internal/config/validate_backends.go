@@ -14,6 +14,11 @@ import (
 	"jul/internal/clientaddr"
 )
 
+// grpcHealthServiceMaxLen bounds the grpc.health.v1.HealthCheckRequest service
+// name. gRPC full service names are short dotted package.Service identifiers in
+// practice; this is a generous safety bound, not a protocol requirement.
+const grpcHealthServiceMaxLen = 256
+
 // This file holds the backend-facing validators — L4 stream listeners, active
 // health checks, and dynamic service discovery — split out of validate.go to
 // keep each validation file focused and under the size bar (Finding CQ-3).
@@ -160,8 +165,16 @@ func validateHealthCheck(h *HealthCheckConfig, where string) []error {
 		}
 	case "tcp":
 		// No path/status semantics for raw TCP connect probes.
+	case "grpc":
+		// Whether the build can actually serve it (the "grpc" tag) is reported
+		// clearly at pool-build time by internal/upstream, the same convention
+		// used for grpc = true native passthrough (see validate_location.go).
+		errs = append(errs, validateGRPCHealthFields(h, where)...)
 	default:
-		errs = append(errs, fmt.Errorf("%s: invalid type %q (want http or tcp)", where, h.Type))
+		errs = append(errs, fmt.Errorf("%s: invalid type %q (want http, tcp, or grpc)", where, h.Type))
+	}
+	if h.Type != "grpc" && h.Service != "" {
+		errs = append(errs, fmt.Errorf("%s: 'service' only applies to type = \"grpc\"; remove it or set type = \"grpc\"", where))
 	}
 	if h.Interval <= 0 {
 		errs = append(errs, fmt.Errorf("%s: interval must be greater than 0", where))
@@ -177,6 +190,36 @@ func validateHealthCheck(h *HealthCheckConfig, where string) []error {
 	}
 	if h.UnhealthyThreshold < 1 {
 		errs = append(errs, fmt.Errorf("%s: unhealthy_threshold must be at least 1", where))
+	}
+	return errs
+}
+
+// validateGRPCHealthFields checks the fields specific to type = "grpc". Service
+// is optional: empty means whole-server health per the standard protocol, and a
+// non-empty value is bounded and free of control characters. The http-only
+// fields (path/expect_status/expect_body) are rejected outright rather than
+// silently ignored: a field that looks meaningful but has no effect is worse
+// than an error (#427 amendment).
+func validateGRPCHealthFields(h *HealthCheckConfig, where string) []error {
+	var errs []error
+	svc := strings.TrimSpace(h.Service)
+	if len(svc) > grpcHealthServiceMaxLen {
+		errs = append(errs, fmt.Errorf("%s: 'service' is %d bytes, want at most %d", where, len(svc), grpcHealthServiceMaxLen))
+	}
+	for _, r := range svc {
+		if r < 0x20 || r == 0x7f {
+			errs = append(errs, fmt.Errorf("%s: 'service' contains control characters", where))
+			break
+		}
+	}
+	if strings.TrimSpace(h.Path) != "" {
+		errs = append(errs, fmt.Errorf("%s: 'path' does not apply to type = \"grpc\"; remove it", where))
+	}
+	if len(h.ExpectStatus) > 0 {
+		errs = append(errs, fmt.Errorf("%s: 'expect_status' does not apply to type = \"grpc\"; remove it", where))
+	}
+	if h.ExpectBody != "" {
+		errs = append(errs, fmt.Errorf("%s: 'expect_body' does not apply to type = \"grpc\"; remove it", where))
 	}
 	return errs
 }
@@ -327,6 +370,9 @@ func validateUnixBackends(up UpstreamConfig, where string) []error {
 		}
 		if up.HealthCheck != nil && up.HealthCheck.Enabled && up.HealthCheck.Type == "http" {
 			errs = append(errs, fmt.Errorf("%s.servers[%d]: health_check.type = \"http\" cannot probe the unix socket %q; use type = \"tcp\"", where, i, s.Address))
+		}
+		if up.HealthCheck != nil && up.HealthCheck.Enabled && up.HealthCheck.Type == "grpc" {
+			errs = append(errs, fmt.Errorf("%s.servers[%d]: health_check.type = \"grpc\" cannot probe the unix socket %q; gRPC health checks require a TCP backend", where, i, s.Address))
 		}
 	}
 	return errs

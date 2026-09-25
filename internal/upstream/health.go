@@ -31,7 +31,7 @@ type ProbeHook func(pool, source string, success bool, latency time.Duration)
 
 // healthParams is the resolved, validated probe configuration for a pool.
 type healthParams struct {
-	typ                string // "http" | "tcp"
+	typ                string // "http" | "tcp" | "grpc"
 	path               string
 	interval           time.Duration
 	timeout            time.Duration
@@ -39,6 +39,9 @@ type healthParams struct {
 	unhealthyThreshold int
 	expectStatus       []int
 	expectBody         string
+	// service is the grpc.health.v1.HealthCheckRequest service name for a
+	// "grpc" probe. Empty means whole-server health. Unused otherwise.
+	service string
 }
 
 // healthParamsFrom resolves a HealthCheckConfig into probe parameters, applying
@@ -54,6 +57,7 @@ func healthParamsFrom(cfg config.HealthCheckConfig) healthParams {
 		unhealthyThreshold: cfg.UnhealthyThreshold,
 		expectStatus:       cfg.ExpectStatus,
 		expectBody:         cfg.ExpectBody,
+		service:            cfg.Service,
 	}
 	if p.typ == "" {
 		p.typ = "http"
@@ -93,7 +97,11 @@ type healthChecker struct {
 	onProbe  ProbeHook
 	client   *http.Client
 	dialer   *net.Dialer
-	states   map[*Backend]*probeState
+	// policy is the pool's resolved backend trust policy, reused by a "grpc"
+	// probe so it verifies a backend exactly as live gRPC traffic does. nil
+	// keeps Go's TLS defaults, as for the HTTP/TCP probes.
+	policy *backendtls.Policy
+	states map[*Backend]*probeState
 }
 
 // StartHealthChecks launches the active health-check goroutine for the pool. It
@@ -123,6 +131,7 @@ func (p *Pool) StartHealthChecksWithTLS(cfg config.HealthCheckConfig, policy *ba
 		onHealth: onHealth,
 		onProbe:  onProbe,
 		dialer:   &net.Dialer{Timeout: params.timeout},
+		policy:   policy,
 		states:   make(map[*Backend]*probeState),
 	}
 	hc.client = &http.Client{
@@ -236,6 +245,8 @@ func (hc *healthChecker) probe(b *Backend) bool {
 	switch hc.params.typ {
 	case "tcp":
 		return hc.probeTCP(ctx, b)
+	case "grpc":
+		return hc.probeGRPC(ctx, b)
 	default:
 		return hc.probeHTTP(ctx, b)
 	}
@@ -287,6 +298,26 @@ func (hc *healthChecker) probeTCP(ctx context.Context, b *Backend) bool {
 	}
 	_ = conn.Close()
 	return true
+}
+
+// grpcHealthProbe issues one standard grpc.health.v1.Health/Check RPC against b
+// for the given service name (empty = whole-server health), using policy as the
+// backend trust config, and reports whether the backend answered SERVING. It is
+// nil in a build without the "grpc" tag; validateHealthCheck rejects type =
+// "grpc" configuration in that build, so probeGRPC below only ever sees a nil
+// seam in a test that constructs a healthChecker directly with typ = "grpc".
+var grpcHealthProbe func(ctx context.Context, b *Backend, service string, policy *backendtls.Policy) bool
+
+// probeGRPC issues a standard gRPC health check. #427: the probe must never be
+// weaker than live traffic, so it reuses the pool's resolved backend trust
+// policy (hc.policy) exactly as the native gRPC proxy and transcoder do, and it
+// never falls back to TCP/HTTP on failure — a nil seam or a failed RPC is
+// simply an unhealthy probe.
+func (hc *healthChecker) probeGRPC(ctx context.Context, b *Backend) bool {
+	if grpcHealthProbe == nil {
+		return false
+	}
+	return grpcHealthProbe(ctx, b, hc.params.service, hc.policy)
 }
 
 // statusAllowed reports whether code is in the expected set. An empty set
