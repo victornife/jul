@@ -4,6 +4,7 @@
 package lifecycle
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -398,6 +399,7 @@ func fullConfig() *config.Config {
 				MaxFetchResponse: config.Size(1 << 20),
 				KVMaxEntries:     1024,
 				KVMaxBytes:       config.Size(1 << 20),
+				SHA256:           strings.Repeat("ab", 32),
 			},
 		},
 		Streams: []config.StreamServer{{

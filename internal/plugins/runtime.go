@@ -7,14 +7,12 @@ package plugins
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
@@ -199,7 +197,9 @@ func (m *Manager) BuildWithEgress(ctx context.Context, cfg map[string]config.Plu
 // instantiating a Go/wasip1 module (which boots the Go runtime) is expensive
 // relative to a single call.
 type plugin struct {
-	name      string
+	name string
+	// identity is the content identity of the exact bytes compiled below.
+	identity  ModuleIdentity
 	runtime   wazero.Runtime
 	compiled  wazero.CompiledModule
 	pool      chan *pooledModule // fixed-capacity; see poolCapacity
@@ -245,11 +245,19 @@ type plugin struct {
 	onPanic  func(string)
 }
 
+// afterModuleRead is a test seam between the single module read and
+// compilation; production leaves it nil.
+var afterModuleRead func(name string)
+
 func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.PluginConfig, egressWrap func(base DialFunc) DialFunc) (*plugin, error) {
-	wasm, err := loadModule(pc)
+	module, err := ReadModule(pc)
 	if err != nil {
 		return nil, err
 	}
+	if afterModuleRead != nil {
+		afterModuleRead(name)
+	}
+	wasm := module.Bytes
 
 	pages := uint32(pc.MemoryLimit.Bytes() / wasmPageSize)
 	if pages == 0 {
@@ -265,6 +273,7 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 
 	p := &plugin{
 		name:         name,
+		identity:     module.Identity,
 		timeout:      pc.Timeout.Std(),
 		isHandler:    pc.Type == "handler",
 		pool:         make(chan *pooledModule, poolCapacity),
@@ -373,18 +382,6 @@ func sizeOr(s config.Size, def int) int {
 		return int(n)
 	}
 	return def
-}
-
-// loadModule reads the plugin's wasm bytes from its path or inline base64.
-func loadModule(pc config.PluginConfig) ([]byte, error) {
-	switch {
-	case pc.Path != "":
-		return os.ReadFile(pc.Path)
-	case pc.Inline != "":
-		return base64.StdEncoding.DecodeString(pc.Inline)
-	default:
-		return nil, errors.New("no module source (set path or inline)")
-	}
 }
 
 // instantiate creates a fresh module instance, running its _initialize reactor

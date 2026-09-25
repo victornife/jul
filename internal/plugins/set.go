@@ -30,6 +30,18 @@ func (s *Set) Close() error {
 	return nil
 }
 
+// Identities returns the content identity of every plugin's compiled module.
+func (s *Set) Identities() map[string]ModuleIdentity {
+	if s == nil {
+		return nil
+	}
+	out := make(map[string]ModuleIdentity, len(s.plugins))
+	for name, p := range s.plugins {
+		out[name] = p.identity
+	}
+	return out
+}
+
 // Has reports whether the set contains a plugin by name.
 func (s *Set) Has(name string) bool {
 	_, ok := s.plugins[name]

@@ -256,12 +256,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 359,
-    "schema_leaves": 305,
-    "registry_entries": 305,
+    "schema_paths": 360,
+    "schema_leaves": 306,
+    "registry_entries": 306,
     "startup_consumed": 32,
     "by_class": {
-      "hot_reload": 259,
+      "hot_reload": 260,
       "ignored_deprecated": 4,
       "new_listener_only": 7,
       "restart_required": 32,
@@ -1390,6 +1390,19 @@
     },
     {
       "path": "plugins.*.path",
+      "class": "hot_reload",
+      "subsystem": "plugins",
+      "reason": "the plugin set is rebuilt and re-instantiated on each successful reload",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "plugins.*.sha256",
       "class": "hot_reload",
       "subsystem": "plugins",
       "reason": "the plugin set is rebuilt and re-instantiated on each successful reload",
