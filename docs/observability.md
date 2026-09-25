@@ -107,6 +107,7 @@ are never reset and previously recorded host-labeled series are not deleted.
 | `jul_client_addr_derivations_total` | Counter | `result`, `source` | Merged, release pending | Canonical client-address derivations. `source` is `peer`/`forwarded`/`xff`, `result` is `accepted`/`untrusted_peer`/`malformed`/`too_many_hops`. A sustained rate of `malformed` or `too_many_hops` from a trusted peer is a forwarding header being padded past its bounds — the condition access logs record per request but cannot be alerted on. At most twelve series. |
 | `jul_http_request_duration_seconds` | Histogram | `host`, `method` | Released `v1.32.0` | HTTP request latency in seconds. |
 | `jul_http_requests_in_flight` | Gauge | — | Released `v1.32.0` | Number of HTTP requests currently being served. |
+| `jul_http_response_bytes_total` | Counter | — | Merged / release pending | HTTP response-body bytes written to clients, after content-encoding/compression and before HTTP/TLS/transport framing. Excludes bytes written after a connection hijack (e.g. WebSocket framing). Node-level bandwidth visibility (#431), not per-route accounting — no dynamic labels. |
 | `jul_http_requests_total` | Counter | `code`, `host`, `method` | Released `v1.32.0` | Total HTTP requests handled, labeled by method, host, and status code. |
 | `jul_http_response_compressed_total` | Counter | `encoding` | Released `v1.32.0` | Responses compressed by the edge, labeled by content coding. |
 | `jul_listener_conns` | Gauge | — | Released `v1.32.0` | Current concurrent connections across all listeners. |
@@ -149,6 +150,71 @@ are never reset and previously recorded host-labeled series are not deleted.
 Metric labels must remain bounded and must never contain request paths, queries,
 client identity, destination URLs, raw errors, or secrets. See the
 [cardinality policy and operator playbook](core-http.md#label-cardinality-policy).
+
+### Runtime resources and capacity (#431)
+
+Jul already registers the standard Prometheus Go/process collectors
+(`process_cpu_seconds_total`, `process_resident_memory_bytes`,
+`process_open_fds`, `process_max_fds`, `go_goroutines`,
+`go_memstats_heap_alloc_bytes`, and friends) — this section documents how they
+are *projected*, not a second telemetry stack.
+
+- **CPU** is reported to the Console/API as cores used
+  (`delta(process_cpu_seconds_total)/delta(wall_time)`, computed server-side
+  between successive `GET /api/stats` polls), never as a percentage: a
+  cross-platform, cross-container-runtime truthful denominator for "percentage
+  of available CPU" does not exist, so Jul does not fabricate one. Read
+  `process_cpu_seconds_total` directly in Prometheus/Grafana if you need a
+  `rate()`-based percentage against a denominator your own environment can
+  justify (e.g. a known, static container CPU quota).
+- **Memory**: `process_resident_memory_bytes` (RSS) is the whole OS-resident
+  process — WASM linear memory, mmap regions, stacks and non-Go allocations are
+  all included. `go_memstats_heap_alloc_bytes` (Go heap) is Go-runtime-managed
+  heap memory only and is not total process memory; do not read one as a proxy
+  for the other.
+- **File descriptors**: `process_open_fds`/`process_max_fds` are reported as-is
+  from the platform. On Windows, `process_max_fds` reflects a Windows-wide
+  handle ceiling rather than a per-process `ulimit`-style value, so the
+  resulting percentage is far less operationally meaningful there than on
+  Linux/macOS — this is a platform truth Jul passes through, not a Jul
+  limitation.
+- **`jul_http_response_bytes_total`** (counter, no labels) counts HTTP
+  response-body bytes actually written to the client, observed at the same
+  point in the middleware chain as `jul_http_requests_total` — which is
+  **inside** compression (compression is the innermost wrapper of the global
+  middleware chain; see `HandlerFactory.globalChain` in `internal/app/factory.go`)
+  — so it reports post-compression, on-the-wire body bytes, not the
+  handler's original uncompressed output. It excludes headers, HTTP/TLS/QUIC
+  framing, retransmission, and any bytes written after a connection is
+  hijacked (a WebSocket upgrade's post-handshake framing is not counted; the
+  handshake response itself is). This is intentionally a *bandwidth* metric,
+  not a per-route accounting metric — it carries no labels by design.
+- **Capacity denominators** are never mixed: Jul's connection admission limiter
+  is per-listener, but `jul_listener_conns` is a single process-wide aggregate,
+  so the Console/API never divide that aggregate by one listener's configured
+  limit. Cache occupancy is shown as a percentage only when a byte cap is
+  actually configured (`jul_cache_max_bytes` > 0). Upstream pool pressure
+  (active/pending) is computed only for pools with a real configured
+  `max_active_requests`/`max_pending_requests`; an unbounded pool never
+  produces a fabricated percentage.
+- All of the above (except the Prometheus counters/gauges themselves) also
+  reach `GET /api/stats` for the Console's **Runtime Resources** and
+  **Capacity** cards (see [console.md](console.md#runtime-resources-and-capacity-431)).
+  A missing field there means unavailable — distinct from a true zero — never a
+  sentinel like `-1`. The Console's sparkline trends are a bounded, ephemeral,
+  browser-local window (~2 minutes); Prometheus remains the long-term,
+  cross-restart, cross-instance source of truth.
+- Cost is measured, not assumed: `BenchmarkSnapshot`
+  (`internal/observability/stats_bench_test.go`) puts one full
+  `Metrics.Snapshot()` call — including `Gather()` over every registered
+  collector plus the resource/capacity projection — at roughly 350µs and
+  ~140KB/1,200 allocations on typical hardware. Against the Console's 2s poll
+  interval this is a negligible duty cycle; resource/capacity reads never
+  parse Jul's own `/metrics` HTTP output internally.
+- Neither resource nor capacity fields ever expose a filesystem path, a raw
+  backend address, client identity, or a secret — the Overview capacity
+  summary names only configured, operator-chosen pool identifiers, exactly
+  like the existing resilience/health projections.
 
 ## OpenTelemetry tracing
 

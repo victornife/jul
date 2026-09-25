@@ -499,6 +499,42 @@ func (r *Registry) Stats() []PoolStats {
 	return out
 }
 
+// AllResilience returns the live resilience state (including configured
+// limits and retry-budget status) of every pool currently serving,
+// deduplicated by name exactly as Stats does. Limits/Budget come from the
+// first pool seen for a name — the two are always built from the same
+// upstream config, so they cannot actually disagree — while the runtime
+// counters (Active/Pending/Connections/Eligible/ByState) are summed. It exists
+// for #431's Overview capacity summary, which needs the configured
+// denominators Stats does not carry.
+func (r *Registry) AllResilience() []PoolResilience {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	byName := make(map[string]PoolResilience, len(r.live))
+	for key, e := range r.live {
+		s := e.pool.Resilience()
+		prev, seen := byName[key.name]
+		if !seen {
+			s.Name = key.name
+			byName[key.name] = s
+			continue
+		}
+		prev.Active += s.Active
+		prev.Pending += s.Pending
+		prev.Connections += s.Connections
+		prev.Eligible += s.Eligible
+		for st, n := range s.ByState {
+			prev.ByState[st] += n
+		}
+		byName[key.name] = prev
+	}
+	out := make([]PoolResilience, 0, len(byName))
+	for _, s := range byName {
+		out = append(out, s)
+	}
+	return out
+}
+
 // probeHook binds this registry's source to the configured probe hook, so the
 // label is bounded by construction rather than by every call site remembering
 // to pass the right value.

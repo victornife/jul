@@ -177,6 +177,8 @@ release does not complete the unchecked GA criteria.
 | Remote automation CLI | AUTO-CLI | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [remote-cli.md](remote-cli.md) |
 | Selected runtime policy hot reload | HR-SELECTED | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [hot-reload-strategy.md](hot-reload-strategy.md) |
 | HTTP proxy over Unix-domain upstreams | HTTP-UNIX | core | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [unix-http-upstreams.md](unix-http-upstreams.md) |
+| Standard gRPC Health Checking Protocol active probes | GRPC-HC | core · `grpc` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
+| Runtime resources, capacity headroom, and HTTP bandwidth | OPS-RESOURCES | core · `console` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [observability.md](observability.md) |
 
 ## Alpha
 

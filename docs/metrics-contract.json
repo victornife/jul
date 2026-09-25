@@ -238,6 +238,13 @@
       "state": "released_v1.32.0"
     },
     {
+      "name": "jul_http_response_bytes_total",
+      "type": "counter",
+      "help": "HTTP response-body bytes written to clients, after content-encoding/compression and before HTTP/TLS/transport framing. Excludes bytes written after a connection hijack (e.g. WebSocket framing).",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_http_response_compressed_total",
       "type": "counter",
       "help": "Responses compressed by the edge, labeled by content coding.",

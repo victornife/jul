@@ -21,6 +21,20 @@ type UpstreamPoolStats struct {
 	Eligible    int
 	// ByState maps a bounded backend-state string to a count of backends.
 	ByState map[string]int
+
+	// MaxActive/MaxPending are the pool's configured admission limits (0 means
+	// unbounded — no meaningful denominator). They are Go-level state read
+	// directly from the pool's resolved policy, not reconstructed from a
+	// Prometheus metric, so #431's Overview pressure summary can compute a
+	// truthful current/limit ratio without a new metric family (#431 §16).
+	MaxActive  int64
+	MaxPending int
+	// BudgetPercent is the configured retry-budget allowance (0 = unbudgeted).
+	// BudgetRemaining is how many more retries the budget would grant right
+	// now; it can be legitimately 0 while BudgetPercent is non-zero, which is
+	// the "retry budget exhausted" condition #431 asks to surface.
+	BudgetPercent   int
+	BudgetRemaining int64
 }
 
 // UpstreamStatsSource returns the live state of every serving pool. It is called
@@ -72,6 +86,25 @@ func newResilienceCollector() *resilienceCollector {
 // correct — there are no pools yet.
 func (m *Metrics) SetUpstreamStatsSource(src UpstreamStatsSource) {
 	m.resilience.source.Store(&src)
+}
+
+// SetUpstreamCapacitySource wires a second, independent live-state reader used
+// only by Snapshot's capacity summary (#431). It is intentionally separate
+// from SetUpstreamStatsSource: Resilience()-based state is materially heavier
+// than the plain counters the Prometheus gauges use, so it must never be read
+// on every scrape (#431 §34) — only when a StatsSnapshot is actually built.
+func (m *Metrics) SetUpstreamCapacitySource(src UpstreamStatsSource) {
+	m.upstreamCapacity.Store(&src)
+}
+
+// upstreamCapacitySnapshot reads the capacity-only source, or nil before one
+// is wired.
+func (m *Metrics) upstreamCapacitySnapshot() []UpstreamPoolStats {
+	src := m.upstreamCapacity.Load()
+	if src == nil {
+		return nil
+	}
+	return (*src)()
 }
 
 func (c *resilienceCollector) Describe(ch chan<- *prometheus.Desc) {

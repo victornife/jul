@@ -39,6 +39,13 @@ type Metrics struct {
 	duration    *prometheus.HistogramVec
 	inflight    prometheus.Gauge
 	cacheEvents *prometheus.CounterVec
+	// httpResponseBytes counts HTTP response-body bytes actually written to the
+	// client, after content-encoding/compression (the Recorder observation point
+	// is innermost of the observers, outermost of compression — see
+	// HandlerFactory.globalChain), before HTTP/TLS/transport framing. It carries
+	// no labels: the purpose is node-level bandwidth visibility, not per-route
+	// accounting (#431).
+	httpResponseBytes prometheus.Counter
 	// cacheRevalidations counts background cache revalidation outcomes. The
 	// label values come from a closed set of cache-package constants.
 	cacheRevalidations *prometheus.CounterVec
@@ -55,17 +62,20 @@ type Metrics struct {
 	transportRetired   *prometheus.CounterVec
 	resilience         *resilienceCollector
 	cache              *cacheCollector
-	discoveryErrors    *prometheus.CounterVec
-	probes             *prometheus.CounterVec
-	probeDuration      *prometheus.HistogramVec
-	grpcTranscode      *prometheus.CounterVec
-	grpcStreamMsgs     *prometheus.CounterVec
-	grpcProxyCalls     prometheus.Counter
-	pluginInvokes      *prometheus.CounterVec
-	pluginDuration     *prometheus.HistogramVec
-	pluginPanics       *prometheus.CounterVec
-	listenerConns      prometheus.Gauge
-	http3Conns         prometheus.Gauge
+	// upstreamCapacity is #431's separate, un-scraped capacity source; see
+	// SetUpstreamCapacitySource.
+	upstreamCapacity atomic.Pointer[UpstreamStatsSource]
+	discoveryErrors  *prometheus.CounterVec
+	probes           *prometheus.CounterVec
+	probeDuration    *prometheus.HistogramVec
+	grpcTranscode    *prometheus.CounterVec
+	grpcStreamMsgs   *prometheus.CounterVec
+	grpcProxyCalls   prometheus.Counter
+	pluginInvokes    *prometheus.CounterVec
+	pluginDuration   *prometheus.HistogramVec
+	pluginPanics     *prometheus.CounterVec
+	listenerConns    prometheus.Gauge
+	http3Conns       prometheus.Gauge
 	// http3AltSvcTransitions counts HTTP/3 Alt-Svc advertisement changes,
 	// labeled by the bounded destination state ("advertise"/"clear"). No
 	// address, port, or max-age value is ever a label (#161).
@@ -163,12 +173,19 @@ type Metrics struct {
 	egressBlocks  *egressBlockTracker
 
 	// statsMu guards the rolling state used by Snapshot to derive
-	// rate-over-time figures (requests/sec and the windowed error rate) from
-	// the monotonic counters between successive polls.
+	// rate-over-time figures (requests/sec, the windowed error rate, and the
+	// #431 CPU-cores rate) from the monotonic counters between successive
+	// polls.
 	statsMu          sync.Mutex
 	statsLast        time.Time
 	statsLastTotal   float64
 	statsLastClasses map[string]float64
+	// statsLastCPU/statsHaveCPU track process_cpu_seconds_total between polls,
+	// separately from statsLast/statsLastTotal above because the first sample
+	// with no CPU baseline must report unavailable (nil) even though the
+	// request-rate baseline is a plain zero on the very first call.
+	statsLastCPU float64
+	statsHaveCPU bool
 }
 
 // MetricsOption customises a Metrics at construction time.
@@ -208,6 +225,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		inflight: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "jul_http_requests_in_flight",
 			Help: "Number of HTTP requests currently being served.",
+		}),
+		httpResponseBytes: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "jul_http_response_bytes_total",
+			Help: "HTTP response-body bytes written to clients, after content-encoding/compression and before HTTP/TLS/transport framing. Excludes bytes written after a connection hijack (e.g. WebSocket framing).",
 		}),
 		cacheEvents: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_cache_events_total",
@@ -441,6 +462,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.requests,
 		m.duration,
 		m.inflight,
+		m.httpResponseBytes,
 		m.cacheEvents,
 		m.cacheRevalidations,
 		m.compressed,
@@ -530,6 +552,7 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		method := methodLabel(r.Method)
 		m.requests.WithLabelValues(method, host, strconv.Itoa(rec.Status())).Inc()
 		m.duration.WithLabelValues(method, host).Observe(time.Since(start).Seconds())
+		m.httpResponseBytes.Add(float64(rec.Bytes()))
 		if state := rec.Header().Get("X-Cache"); state != "" {
 			m.cacheEvents.WithLabelValues(state).Inc()
 		}

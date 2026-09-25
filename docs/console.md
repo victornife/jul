@@ -128,6 +128,39 @@ breakdown. All values are point-in-time from the most recent poll.
 covering the last 60 samples (~2 minutes at 2 s polling). Each card is
 keyboard-reachable and can be expanded.
 
+#### Runtime Resources and Capacity (#431)
+
+Below the traffic cards, two further sections answer "is this instance healthy,
+and which resource will saturate first?" from data Jul already collects (the
+standard Go/process Prometheus collectors, the cache, and the upstream
+resilience projection) — this is not a second telemetry stack, a host-monitoring
+agent, or an alerting system.
+
+**Runtime Resources**: CPU (cores used — deliberately not a percentage, since a
+truthful scheduler-capacity denominator is not available portably), memory RSS
+(the whole OS-resident process, not just Go's heap — WASM linear memory, mmap
+and non-Go allocations can make RSS exceed the Go heap figure), Go heap,
+goroutines, open file descriptors (with the platform's ceiling when available),
+and uptime. A field the platform or collector cannot report renders literally as
+**"unavailable"**, never a bare `0` or a fabricated percentage.
+
+**Capacity**: aggregate listener connections (no percentage — Jul's admission
+limiter is per-listener, and dividing the aggregate by one listener's limit
+would be a lie, so only the truthful aggregate is shown); HTTP outbound
+throughput, derived client-side from consecutive `httpResponseBytesTotal`
+snapshots (bytes/sec, post-compression response-body bytes); cache occupancy
+per configured tier (a percentage only when a byte cap is actually configured);
+and a bounded worst-pool upstream pressure summary (active and pending, each
+only among pools with a real configured limit), a list of pools with no
+eligible backend right now, and a list of pools whose retry budget is currently
+exhausted. Every threshold-driven "Watch" badge is local UI guidance — not an
+alert, an SLO, or a paging condition — and is documented as such.
+
+Both sections reuse the same 60-sample browser-local trend model as **Live
+Traffic** above: history is ephemeral and scoped to this browser tab. Prometheus
+(`/metrics`) remains the long-term, cross-restart, cross-instance source of
+truth; the Console's local window is for at-a-glance operator context only.
+
 #### Expanded chart view
 
 Click or press Enter on any sparkline card to open the expanded chart:

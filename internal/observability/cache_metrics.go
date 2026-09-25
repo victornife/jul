@@ -65,6 +65,19 @@ func (m *Metrics) SetCacheStatsSource(src CacheStatsSource) {
 	m.cache.source.Store(&src)
 }
 
+// cacheTierSnapshot reads the same live-state source the Prometheus collector
+// uses, but directly, for StatsSnapshot's cache-occupancy cards (#431). Cache
+// tier reads are cheap (a mutex-guarded size/max/len/count), unlike upstream
+// Resilience(), so reusing the scrape source here needs no separate capacity
+// source the way upstream pools do.
+func (m *Metrics) cacheTierSnapshot() []CacheTierStats {
+	src := m.cache.source.Load()
+	if src == nil {
+		return nil
+	}
+	return (*src)()
+}
+
 func (c *cacheCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.bytes
 	ch <- c.maxBytes
