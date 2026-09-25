@@ -87,6 +87,8 @@ plugins = ["header-inject"]             # middleware for every location here
 | `fetch` / `allowed_hosts` | Grant guarded outbound HTTP to the allow-listed hosts (SSRF-guarded) |
 | `fetch_timeout` / `max_fetch_response` | Per-call deadline and response-size cap for `fetch` (defaults 5s / 1 MiB) |
 | `max_request_body` / `max_response_body` | Body buffering caps (defaults 1 MiB / 8 MiB); overflow fails the call, never truncates |
+| `max_invocations` | Retire a pooled instance after this many calls (default 1000) |
+| `sha256` | Optional pin: the exact module bytes' SHA-256 (64 hex digits; a `sha256:` prefix is accepted). See [Module content identity](#module-content-identity-and-pinning) |
 
 Validation rules:
 
@@ -94,6 +96,7 @@ Validation rules:
 - `type` must be `middleware` or `handler`;
 - `path`, when set, must exist on disk;
 - `fetch = true` requires a non-empty `allowed_hosts`;
+- `sha256`, when set, must be 64 hexadecimal digits;
 - a server/location `plugins = [...]` entry must name a `middleware` plugin;
 - a location `plugin = "..."` must name a `handler` plugin, and a location may
   use only one terminal action.
@@ -101,6 +104,46 @@ Validation rules:
 Middleware ordering: server-level `plugins` wrap location-level `plugins`, and
 plugin middleware sits outside auth and rate limiting. Within a list, the first
 name is the outermost wrapper.
+
+### Module content identity and pinning
+
+A path is not a content identity: the bytes behind an unchanged `path` can
+change. Every module Jul loads therefore has an **effective digest** —
+`sha256:` plus the SHA-256 of the exact bytes Jul compiles — for `path` and
+`inline` sources alike.
+
+- **One snapshot.** A candidate build reads the module once (bounded at
+  128 MiB), checks the WebAssembly header, digests those bytes, verifies the
+  optional pin, and compiles the *same* bytes. Rewriting the file after the
+  read cannot make Jul compile bytes under a digest they do not have.
+- **Reload.** A byte change at an unchanged path is a real replacement, never
+  a semantic no-op: the next reload (SIGHUP, file watch, or admin apply)
+  compares each module's current digest with the one serving and rebuilds the
+  plugin set if any differs. Byte-identical modules keep the running
+  generation (a true `no_change`). Jul does not watch module files; content
+  identity is evaluated whenever a reload is evaluated.
+- **Pinning.** `sha256 = "<64 hex>"` asserts the expected bytes. A mismatch
+  fails startup, the admin apply preflight and every reload **before
+  Publish**, with an error naming the plugin and both digests (never module
+  bytes); the serving generation is untouched. `jul check` validates the pin's
+  format only, because it does not load modules.
+- **Surfaces.** `GET /api/plugins` reports each serving plugin's `digest`,
+  `digest_short` and whether it is `pinned`; the Console shows the short
+  digest and never computes one itself. A published reload lists module
+  changes as `plugin_modules` (`name`, `before`, `after`) in its reload
+  result; a managed apply also records them in the history metadata sidecar
+  and as `plugin.module_identity_changed` audit events, and every publish logs
+  `plugin module identity changed`. None of these carry module bytes.
+- **Compilation cache.** wazero's process-lifetime compilation cache keys
+  compiled code by the SHA-256 of the exact bytes plus the compile-affecting
+  runtime flags, so changed bytes are always recompiled and unchanged bytes
+  are not. Capabilities, limits and host ABI functions are bound when a
+  plugin's runtime is built and instantiated, never taken from the cache.
+
+A pin protects against accidental or unreviewed module changes — a rebuilt
+artifact, a mistaken copy, a volume that drifted. It does **not** protect
+against anyone who can edit both the configuration and the module; that needs
+signature/provenance verification, which is tracked separately.
 
 ## Writing a plugin
 
