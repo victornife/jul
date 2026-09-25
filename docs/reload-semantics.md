@@ -931,13 +931,19 @@ swapped atomically per listener and take effect on the next connection.
 address, and TCP and UDP occupy independent port spaces, so switching the
 protocol on one numeric address is a transactional remove/add: the candidate
 protocol's socket is bound before any live state is mutated, and only then is
-the previous listener retired. Established TCP connections and tracked UDP
-sessions follow the retired listener's drain boundary — they keep running until
-they close or hit `idle_timeout`, and the reload waits for them — while new
-traffic arrives on the candidate protocol. If the candidate cannot build its
+the previous listener retired. Established TCP connections follow the retired
+listener's drain boundary — they keep relaying until they close or hit
+`idle_timeout` — while new traffic arrives on the candidate protocol; tracked
+UDP sessions of the retired listener are torn down. The reload does **not**
+wait for established connections: the retired listener stops accepting at
+once and drains in the background, so a long-lived session cannot stall later
+reloads or shutdown. Process shutdown bounds that drain (and every live
+listener's) at 30 seconds, then closes the sessions still relaying. If the
+candidate cannot build its
 routes or bind its socket, nothing is mutated and the previous protocol keeps
 serving. This is proven by the real-socket matrix in
-`internal/stream/protocol_switch_test.go`.
+`internal/stream/protocol_switch_test.go` and
+`internal/stream/removed_listener_drain_test.go`.
 
 `listen` keys a different listener, which is bound fresh and drained. See
 [stream-proxy.md](stream-proxy.md#hot-reload).
