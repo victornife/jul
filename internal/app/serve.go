@@ -389,6 +389,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	deps.Ready = readyFlag.Ready
 	deps.LoadConfig = src.Load
 	deps.TrafficSources = metrics.TrafficSnapshot
+	deps.PluginModules = func() map[string]admin.PluginModule {
+		live := f.PluginModules()
+		out := make(map[string]admin.PluginModule, len(live))
+		for name, id := range live {
+			out[name] = admin.PluginModule{Digest: id.Digest}
+		}
+		return out
+	}
 
 	var configPath string
 	if ts, ok := src.(*config.TOMLSource); ok {
@@ -411,6 +419,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		return AdaptCerts(srv.LiveCertSummaries())
 	}
 	srv.ConnStateHook = metrics.ConnState
+	srv.PluginModulesUnchanged = f.PluginModulesUnchanged
+	srv.PluginModuleChanges = f.PluginModuleChanges
 	srv.OnReloadStart = metrics.ReloadStarted
 	srv.OnReloadComplete = metrics.ObserveReload
 	// C1 (N-04): maintain a durable admin-degraded flag that persists until a

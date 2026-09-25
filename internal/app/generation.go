@@ -6,6 +6,8 @@ package app
 import (
 	"io"
 	"sync"
+
+	"jul/internal/plugins"
 )
 
 // PoolStager abstracts the generational staging span of the upstream pool
@@ -64,6 +66,9 @@ type Generation struct {
 	staged    []io.Closer
 	committed bool
 	aborted   bool
+	// pluginModules is the content identity of the plugin set built into
+	// this generation (#429).
+	pluginModules map[string]plugins.ModuleIdentity
 }
 
 // Begin opens a new staging generation, starting the pool registry's staging
