@@ -161,6 +161,19 @@ func (hc *healthChecker) run() {
 	}
 }
 
+// poolRetired reports whether the checker's pool has been closed.
+func (hc *healthChecker) poolRetired() bool {
+	if hc.pool == nil {
+		return false
+	}
+	select {
+	case <-hc.pool.Done():
+		return true
+	default:
+		return false
+	}
+}
+
 // probeAll probes every current backend once and updates its verdict. It reads
 // the live backend set each round so backends added or removed by
 // UpdateBackends are picked up without restarting the checker.
@@ -201,6 +214,12 @@ func (hc *healthChecker) probeOne(b *Backend) {
 
 	start := time.Now()
 	ok := hc.probe(b)
+	// A probe that finishes after its pool retired belongs to a dead resource:
+	// its verdict must not reach the metrics hooks, which are keyed by pool name
+	// and therefore shared with a same-name replacement pool.
+	if hc.poolRetired() {
+		return
+	}
 	if hc.onProbe != nil {
 		hc.onProbe(hc.pool.name, "", ok, time.Since(start))
 	}
@@ -239,9 +258,22 @@ func (hc *healthChecker) probeOne(b *Backend) {
 }
 
 // probe performs one probe of the configured type, returning whether it passed.
+// The probe is cancelled when the pool retires so an in-flight probe never
+// outlives its owner by up to a full probe timeout.
 func (hc *healthChecker) probe(b *Backend) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), hc.params.timeout)
 	defer cancel()
+	if hc.pool != nil {
+		stop := make(chan struct{})
+		defer close(stop)
+		go func() {
+			select {
+			case <-hc.pool.Done():
+				cancel()
+			case <-stop:
+			}
+		}()
+	}
 	switch hc.params.typ {
 	case "tcp":
 		return hc.probeTCP(ctx, b)
