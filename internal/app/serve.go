@@ -211,6 +211,12 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	metrics.SetUpstreamStatsSource(func() []observability.UpstreamPoolStats {
 		return upstreamStats(poolReg)
 	})
+	// Separate, deliberately un-scraped source for #431's Overview capacity
+	// summary (see upstreamCapacityStats for why it is not folded into the
+	// Prometheus-facing source above).
+	metrics.SetUpstreamCapacitySource(func() []observability.UpstreamPoolStats {
+		return upstreamCapacityStats(poolReg)
+	})
 
 	// The WASM plugin manager persists across reloads so the compilation
 	// cache and KV store survive config edits. The handler factory supplies the
@@ -1424,6 +1430,36 @@ func upstreamStats(reg *upstream.Registry) []observability.UpstreamPoolStats {
 			Connections: s.Connections,
 			Eligible:    s.Eligible,
 			ByState:     byState,
+		})
+	}
+	return out
+}
+
+// upstreamCapacityStats adapts the registry's live resilience view (limits and
+// retry-budget included) for #431's Overview capacity summary. It is
+// deliberately NOT wired to the Prometheus collector: Resilience() is
+// materially heavier than Stats() (it walks every backend to build per-backend
+// detail), so it is read only when a StatsSnapshot is actually built — never
+// on every Prometheus scrape (#431 §34).
+func upstreamCapacityStats(reg *upstream.Registry) []observability.UpstreamPoolStats {
+	live := reg.AllResilience()
+	out := make([]observability.UpstreamPoolStats, 0, len(live))
+	for _, s := range live {
+		byState := make(map[string]int, len(s.ByState))
+		for st, n := range s.ByState {
+			byState[string(st)] = n
+		}
+		out = append(out, observability.UpstreamPoolStats{
+			Name:            s.Name,
+			Active:          s.Active,
+			Pending:         s.Pending,
+			Connections:     s.Connections,
+			Eligible:        s.Eligible,
+			ByState:         byState,
+			MaxActive:       s.Limits.MaxActiveRequests,
+			MaxPending:      s.Limits.MaxPendingRequests,
+			BudgetPercent:   s.Budget.Percent,
+			BudgetRemaining: s.Budget.Remaining,
 		})
 	}
 	return out

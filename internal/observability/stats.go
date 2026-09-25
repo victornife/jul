@@ -55,6 +55,81 @@ type StatsSnapshot struct {
 	// keyed by the key kind (ip/header/jwt). It powers the Rate Limit editor's
 	// observability section (Console v2 Milestone 3.3).
 	RateLimited map[string]float64 `json:"rateLimited"`
+
+	// ── Runtime resources and capacity (#431) ──────────────────────────────
+	//
+	// These fields answer "is this instance healthy, and which resource will
+	// saturate first" from data Jul already collects (the standard Go/process
+	// Prometheus collectors, the cache, and the upstream resilience
+	// projection) rather than a second telemetry stack. A nil pointer means
+	// unavailable — a platform/collector could not report the value — which is
+	// distinct from a true zero (#431 §9); it is never a sentinel like -1.
+
+	// CPUCores is the process CPU rate in cores used, computed as
+	// delta(process_cpu_seconds_total)/delta(wall_time) between this call and
+	// the previous one (nil on the first call or if the collector could not
+	// report CPU time). It is deliberately not a percentage: a truthful
+	// scheduler-capacity denominator is not available portably (#431 §10).
+	CPUCores *float64 `json:"cpuCores,omitempty"`
+	// RSSBytes is the OS-resident memory of the whole process (process_resident_memory_bytes) —
+	// not just Go's heap; WASM linear memory, mmap and non-Go allocations can
+	// make this exceed GoHeapAllocBytes.
+	RSSBytes *float64 `json:"rssBytes,omitempty"`
+	// GoHeapAllocBytes is Go-runtime-managed heap memory currently allocated
+	// (go_memstats_heap_alloc_bytes). It is not total process memory.
+	GoHeapAllocBytes *float64 `json:"goHeapAllocBytes,omitempty"`
+	Goroutines       *float64 `json:"goroutines,omitempty"`
+	// OpenFDs/MaxFDs are open file descriptors and the platform's per-process
+	// ceiling. MaxFDs is nil when the platform cannot report a ceiling; the
+	// Console must render "unavailable", never "N / 0" or a fake percentage.
+	OpenFDs *float64 `json:"openFDs,omitempty"`
+	MaxFDs  *float64 `json:"maxFDs,omitempty"`
+
+	// HTTPResponseBytesTotal is the cumulative jul_http_response_bytes_total
+	// counter: HTTP response-body bytes written to clients, after
+	// content-encoding/compression, before HTTP/TLS/transport framing, and
+	// excluding bytes written after a connection hijack (WebSocket framing is
+	// not counted). The Console derives a bytes/sec trend from consecutive
+	// snapshots itself (#431 §25) rather than the server keeping a second
+	// rolling series.
+	HTTPResponseBytesTotal float64 `json:"httpResponseBytesTotal"`
+
+	// CacheTiers is the occupancy of every configured cache tier. Absent
+	// entirely when caching is disabled.
+	CacheTiers []CacheTierOccupancy `json:"cacheTiers,omitempty"`
+
+	// Upstream capacity: a bounded worst-pool summary for Overview, computed
+	// only over pools with a finite (>0) configured limit — an unbounded pool
+	// never contributes a fake percentage (#431 §16).
+	UpstreamWorstActive  *PoolPressure `json:"upstreamWorstActive,omitempty"`
+	UpstreamWorstPending *PoolPressure `json:"upstreamWorstPending,omitempty"`
+	// UpstreamNoEligible lists (sorted) pool names with zero eligible backends
+	// right now — a health condition, not a percentage.
+	UpstreamNoEligible []string `json:"upstreamNoEligible,omitempty"`
+	// UpstreamBudgetExhausted lists (sorted) pool names whose configured retry
+	// budget currently grants zero further retries.
+	UpstreamBudgetExhausted []string `json:"upstreamBudgetExhausted,omitempty"`
+}
+
+// CacheTierOccupancy is one cache tier's occupancy for the Console capacity
+// card. OccupancyRatio is present only when MaxBytes > 0 — an unbounded or
+// disabled tier never gets a fabricated percentage (#431 §17).
+type CacheTierOccupancy struct {
+	Tier           string   `json:"tier"`
+	Bytes          float64  `json:"bytes"`
+	MaxBytes       float64  `json:"maxBytes,omitempty"`
+	Entries        float64  `json:"entries"`
+	Evictions      float64  `json:"evictions"`
+	OccupancyRatio *float64 `json:"occupancyRatio,omitempty"`
+}
+
+// PoolPressure is one bounded pool-pressure reading: a configured operator
+// pool name (not a raw backend address) with a truthful current/max ratio.
+type PoolPressure struct {
+	Pool    string  `json:"pool"`
+	Current float64 `json:"current"`
+	Max     float64 `json:"max"`
+	Ratio   float64 `json:"ratio"`
 }
 
 // Snapshot gathers the private registry and projects it into a StatsSnapshot.
@@ -82,6 +157,8 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 		latencySum   float64
 		latencyCount float64
 		buckets      = map[float64]float64{}
+		haveCPU      bool
+		cpuSeconds   float64
 	)
 
 	for _, mf := range families {
@@ -101,6 +178,10 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 			snap.InFlight = lastGauge(mf)
 		case "jul_listener_conns":
 			snap.Connections = lastGauge(mf)
+		case "jul_http_response_bytes_total":
+			for _, metric := range mf.GetMetric() {
+				snap.HTTPResponseBytesTotal += metric.GetCounter().GetValue()
+			}
 		case "jul_cache_events_total":
 			for _, metric := range mf.GetMetric() {
 				state := labelValue(metric, "state")
@@ -136,8 +217,39 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 					buckets[ub] += float64(b.GetCumulativeCount())
 				}
 			}
+		// The remaining cases project the standard Go/process collectors
+		// already registered in NewMetrics (#431): this is a read of existing
+		// authoritative state, not a second telemetry stack. Each is read from
+		// its own family so a collector error on one (reported as an
+		// InvalidMetric which simply has no matching family) leaves the others
+		// intact rather than losing the whole snapshot.
+		case "process_cpu_seconds_total":
+			for _, metric := range mf.GetMetric() {
+				cpuSeconds += metric.GetCounter().GetValue()
+				haveCPU = true
+			}
+		case "process_resident_memory_bytes":
+			v := lastGauge(mf)
+			snap.RSSBytes = &v
+		case "process_open_fds":
+			v := lastGauge(mf)
+			snap.OpenFDs = &v
+		case "process_max_fds":
+			v := lastGauge(mf)
+			snap.MaxFDs = &v
+		case "go_goroutines":
+			v := lastGauge(mf)
+			snap.Goroutines = &v
+		case "go_memstats_heap_alloc_bytes":
+			v := lastGauge(mf)
+			snap.GoHeapAllocBytes = &v
 		}
 	}
+
+	snap.CPUCores = m.cpuRate(haveCPU, cpuSeconds)
+	snap.CacheTiers = cacheTierOccupancy(m.cacheTierSnapshot())
+	snap.UpstreamWorstActive, snap.UpstreamWorstPending, snap.UpstreamNoEligible, snap.UpstreamBudgetExhausted =
+		upstreamCapacitySummary(m.upstreamCapacitySnapshot())
 
 	if latencyCount > 0 {
 		snap.LatencyAvgMs = (latencySum / latencyCount) * 1000
@@ -187,6 +299,93 @@ func (m *Metrics) rates(total, total5xx float64) (rps, errorRate float64) {
 	m.statsLastTotal = total
 	m.statsLastClasses = map[string]float64{"5xx": total5xx}
 	return rps, errorRate
+}
+
+// cpuRate derives the process CPU rate in cores used —
+// delta(process_cpu_seconds_total)/delta(wall_time) — between this call and
+// the previous one, sharing rates' statsMu/statsLast timestamp so a single
+// wall-clock baseline governs every rate this Snapshot call derives (#431
+// §11). It returns nil rather than a fabricated zero when this call carries no
+// CPU sample (collector unavailable on this platform) or there is no prior
+// baseline yet (the first call).
+func (m *Metrics) cpuRate(haveSample bool, cpuSeconds float64) *float64 {
+	if !haveSample {
+		return nil
+	}
+	m.statsMu.Lock()
+	defer m.statsMu.Unlock()
+
+	var rate *float64
+	if m.statsHaveCPU && !m.statsLast.IsZero() {
+		if dt := time.Since(m.statsLast).Seconds(); dt > 0 {
+			r := (cpuSeconds - m.statsLastCPU) / dt
+			if r < 0 {
+				r = 0 // guard only; process_cpu_seconds_total is monotonic within one process lifetime
+			}
+			rate = &r
+		}
+	}
+	m.statsLastCPU = cpuSeconds
+	m.statsHaveCPU = true
+	return rate
+}
+
+// cacheTierOccupancy projects the cache's live tier state for the Console
+// capacity card. OccupancyRatio is set only when MaxBytes > 0 (#431 §17).
+func cacheTierOccupancy(tiers []CacheTierStats) []CacheTierOccupancy {
+	if len(tiers) == 0 {
+		return nil
+	}
+	out := make([]CacheTierOccupancy, 0, len(tiers))
+	for _, t := range tiers {
+		occ := CacheTierOccupancy{
+			Tier:      t.Tier,
+			Bytes:     float64(t.Bytes),
+			MaxBytes:  float64(t.MaxBytes),
+			Entries:   float64(t.Entries),
+			Evictions: float64(t.Evictions),
+		}
+		if t.MaxBytes > 0 {
+			r := float64(t.Bytes) / float64(t.MaxBytes)
+			occ.OccupancyRatio = &r
+		}
+		out = append(out, occ)
+	}
+	return out
+}
+
+// upstreamCapacitySummary reduces every pool's live resilience state to the
+// bounded Overview summary (#431 §16): the single worst active-pressure pool,
+// the single worst pending-pressure pool (each only among pools with a
+// finite, positive limit — an unbounded pool never produces a fake
+// percentage), every pool with no eligible backend right now, and every pool
+// whose retry budget currently grants zero further retries. Pools are
+// considered in name order so a tie between two pools at the same ratio
+// always resolves to the same (alphabetically first) pool rather than
+// whichever happened to be visited first by map iteration.
+func upstreamCapacitySummary(pools []UpstreamPoolStats) (worstActive, worstPending *PoolPressure, noEligible, budgetExhausted []string) {
+	sort.Slice(pools, func(i, j int) bool { return pools[i].Name < pools[j].Name })
+	for _, p := range pools {
+		if p.MaxActive > 0 {
+			ratio := float64(p.Active) / float64(p.MaxActive)
+			if worstActive == nil || ratio > worstActive.Ratio {
+				worstActive = &PoolPressure{Pool: p.Name, Current: float64(p.Active), Max: float64(p.MaxActive), Ratio: ratio}
+			}
+		}
+		if p.MaxPending > 0 {
+			ratio := float64(p.Pending) / float64(p.MaxPending)
+			if worstPending == nil || ratio > worstPending.Ratio {
+				worstPending = &PoolPressure{Pool: p.Name, Current: float64(p.Pending), Max: float64(p.MaxPending), Ratio: ratio}
+			}
+		}
+		if p.Eligible == 0 {
+			noEligible = append(noEligible, p.Name)
+		}
+		if p.BudgetPercent > 0 && p.BudgetRemaining == 0 {
+			budgetExhausted = append(budgetExhausted, p.Name)
+		}
+	}
+	return worstActive, worstPending, noEligible, budgetExhausted
 }
 
 // labelValue returns the value of the named label on a metric, or "".

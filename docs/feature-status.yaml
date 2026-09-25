@@ -688,3 +688,50 @@ features:
   notes: 'Named plaintext HTTP/1.1 Unix-socket upstreams are merged through #407 with mixed TCP/Unix balancing, retry,
     circuit, health, generation retirement, importer and API/Console projection coverage. TLS, backend_tls, HTTP/2 and
     direct Unix proxy_pass remain explicitly outside the initial contract. Published in stable v2.0.0 as Beta; feature-specific GA certification and soak remain open.'
+- id: GRPC-HC
+  name: Standard gRPC Health Checking Protocol active probes
+  tags:
+  - core
+  - grpc
+  maturity: Beta
+  delivery: merged
+  doc: health.md
+  criteria:
+    1: true
+    2: true
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: null
+    9: true
+  notes: 'health_check.type = "grpc" (#427) issues a standard grpc.health.v1.Health/Check probe reusing the pool''s
+    resolved backend_tls trust policy exactly as live gRPC traffic, feeding the existing active-health threshold state
+    machine (no parallel health registry, no new metric labels). Merged on main (PR #458), not yet in a tagged release;
+    no dedicated soak has been run (not required for this tranche per the programme authority). Requires the "grpc"
+    build tag; a lean build rejects the configuration clearly rather than silently falling back to TCP/HTTP.'
+- id: OPS-RESOURCES
+  name: Runtime resources, capacity headroom, and HTTP bandwidth
+  tags:
+  - core
+  - console
+  maturity: Beta
+  delivery: merged
+  doc: observability.md
+  criteria:
+    1: true
+    2: true
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: null
+    9: true
+  notes: 'Console Overview / GET /api/stats (#431) project Jul''s own process/Go resource state (CPU cores used, RSS
+    distinct from Go heap, goroutines, open/max FDs) from the standard Prometheus collectors already registered, plus
+    a new unlabeled jul_http_response_bytes_total counter (post-compression HTTP response-body bytes) and a bounded
+    upstream/cache capacity-pressure summary. A field the platform cannot report is "unavailable", never a fabricated
+    0 or percentage; aggregate/per-resource denominators are never mixed. Merged on main (PR pending), not yet in a
+    tagged release; no dedicated soak has been run (not required for this tranche per the programme authority).'

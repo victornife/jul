@@ -424,6 +424,7 @@ Labels fall into three classes by what bounds them:
 | `jul_http_requests_total` | `method`, `host`, `code` | method folded to a fixed set · host opt-in · code = status |
 | `jul_http_request_duration_seconds` | `method`, `host` | as above (buckets fixed) |
 | `jul_http_requests_in_flight` | — | single series |
+| `jul_http_response_bytes_total` | — | single series (#431: HTTP response-body bytes, post-compression; excludes bytes after a hijack) |
 | `jul_cache_events_total` | `state` | fixed (`HIT`/`MISS`/`STALE`/`REVALIDATED`/`BYPASS`) |
 | `jul_cache_revalidations_total` | `outcome` | fixed (`stored`/`not_modified`/`uncacheable`/`origin_error`/`canceled`/`panic`/`no_lease`/`deduplicated`) |
 | `jul_cache_bytes`, `jul_cache_max_bytes`, `jul_cache_entries`, `jul_cache_evictions_total` | `tier` | fixed (`memory`/`disk`) |

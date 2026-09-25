@@ -6,8 +6,15 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { fetchOverview, type FeatureStatus, type TrafficSources } from "@/api/client.ts";
+import {
+  fetchOverview,
+  type FeatureStatus,
+  type TrafficSources,
+  type StatsSnapshot,
+} from "@/api/client.ts";
 import { Sparkline } from "@/components/Sparkline";
+import { formatBytes, formatBytesPerSec, formatCores } from "@/lib/formatBytes.ts";
+import type { MetricsHistory } from "@/lib/useMetricsHistory";
 import { ChartDetailPanel } from "@/components/ChartDetailPanel";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading } from "@/components/ui.tsx";
@@ -130,6 +137,227 @@ function MetricCard({
         {unit && <div className="text-sm text-jul-muted">{unit}</div>}
       </div>
       {subtext && <div className="mt-1 text-xs text-jul-muted">{subtext}</div>}
+    </div>
+  );
+}
+
+// ── Runtime resources and capacity (#431) ──────────────────────────────────
+//
+// ResourceCard renders one resource reading with an explicit "unavailable"
+// state distinct from zero (#431 §9): when value is undefined the card shows
+// "unavailable", never a bare 0 or a fabricated percentage. warn applies local
+// UX-only styling — a threshold band, not an SLO or paging condition.
+function ResourceCard({
+  label,
+  value,
+  subtext,
+  warn,
+  trend,
+  trendColor,
+}: {
+  readonly label: string;
+  readonly value: string | undefined;
+  readonly subtext?: string;
+  readonly warn?: boolean;
+  readonly trend?: number[];
+  readonly trendColor?: string;
+}) {
+  const unavailable = value === undefined;
+  return (
+    <div
+      className={`rounded-lg border p-4 ${
+        warn
+          ? "border-jul-warning/50 bg-jul-warning/5"
+          : "border-jul-border bg-jul-surface"
+      }`}
+      title={unavailable ? `${label}: unavailable on this platform` : `${label}: ${value}`}
+    >
+      <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">{label}</div>
+      <div className="mt-2 flex items-baseline gap-2">
+        <div
+          className={`text-2xl font-bold ${unavailable ? "text-jul-muted italic" : "text-jul-text"}`}
+        >
+          {unavailable ? "unavailable" : value}
+        </div>
+        {warn && (
+          <span
+            className="rounded-full bg-jul-warning/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-jul-warning"
+            aria-label="approaching configured guidance threshold"
+          >
+            Watch
+          </span>
+        )}
+      </div>
+      {subtext && <div className="mt-1 text-xs text-jul-muted">{subtext}</div>}
+      {trend && trend.some((v) => Number.isFinite(v)) && (
+        <div className="mt-2 h-8">
+          <Sparkline
+            data={trend.map((v) => (Number.isFinite(v) ? v : 0))}
+            height={32}
+            width={100}
+            color={trendColor ?? "rgb(148, 163, 184)"}
+            className="w-full"
+            ariaLabel={`${label} trend`}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// WarningList renders a bounded list of pool names sharing one condition
+// (e.g. "no eligible backend"). It is local operator guidance, not an alert
+// or an SLO — see #431 §29.
+function WarningList({ title, pools }: { readonly title: string; readonly pools: string[] }) {
+  if (pools.length === 0) return null;
+  return (
+    <div
+      className="rounded-lg border border-jul-warning/50 bg-jul-warning/5 p-4"
+      role="status"
+    >
+      <div className="text-xs font-semibold uppercase tracking-wider text-jul-warning">
+        {title}
+      </div>
+      <ul className="mt-2 space-y-1">
+        {pools.map((pool) => (
+          <li key={pool} className="font-mono text-sm text-jul-text">
+            {pool}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// RuntimeResourcesSection surfaces Jul's own process/Go resources — data
+// already collected by the standard Prometheus process/Go collectors,
+// projected server-side (#431). CPU is deliberately "N cores used", never a
+// percentage with an ambiguous denominator (#431 §10); RSS and Go heap are
+// labelled distinctly because Go heap is not total process memory (#431 §12).
+function RuntimeResourcesSection({
+  stats,
+  history,
+}: {
+  readonly stats: StatsSnapshot;
+  readonly history: MetricsHistory;
+}) {
+  const fdWarn =
+    stats.openFDs !== undefined && stats.maxFDs !== undefined && stats.maxFDs > 0
+      ? stats.openFDs / stats.maxFDs >= 0.8
+      : false;
+  return (
+    <div className="space-y-4">
+      <h2 className="text-sm font-semibold text-jul-muted">Runtime Resources</h2>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <ResourceCard
+          label="CPU"
+          value={stats.cpuCores !== undefined ? formatCores(stats.cpuCores) : undefined}
+          subtext="cores used, not a percentage"
+          trend={history.cpuCores}
+          trendColor="rgb(168, 85, 247)"
+        />
+        <ResourceCard
+          label="Memory (RSS)"
+          value={stats.rssBytes !== undefined ? formatBytes(stats.rssBytes) : undefined}
+          subtext="whole process, resident"
+          trend={history.rssBytes}
+          trendColor="rgb(236, 72, 153)"
+        />
+        <ResourceCard
+          label="Go Heap"
+          value={
+            stats.goHeapAllocBytes !== undefined ? formatBytes(stats.goHeapAllocBytes) : undefined
+          }
+          subtext="Go runtime heap only, not total memory"
+        />
+        <ResourceCard
+          label="Goroutines"
+          value={stats.goroutines !== undefined ? stats.goroutines.toLocaleString() : undefined}
+          trend={history.goroutines}
+          trendColor="rgb(20, 184, 166)"
+        />
+        <ResourceCard
+          label="Open File Descriptors"
+          value={stats.openFDs !== undefined ? stats.openFDs.toLocaleString() : undefined}
+          subtext={
+            stats.maxFDs !== undefined
+              ? `limit ${stats.maxFDs.toLocaleString()}`
+              : "limit unavailable on this platform"
+          }
+          warn={fdWarn}
+        />
+        <ResourceCard label="Uptime" value={`${String(Math.floor(stats.uptimeSeconds))}s`} />
+      </div>
+    </div>
+  );
+}
+
+// CapacitySection surfaces bounded server-owned capacity/pressure — never an
+// aggregate divided by a mismatched per-listener/per-pool limit (#431 §15-16),
+// and never a percentage where the denominator is unbounded or unknown.
+function CapacitySection({
+  stats,
+  history,
+}: {
+  readonly stats: StatsSnapshot;
+  readonly history: MetricsHistory;
+}) {
+  const cacheWarn = (stats.cacheTiers ?? []).some(
+    (t) => t.occupancyRatio !== undefined && t.occupancyRatio >= 0.9,
+  );
+  return (
+    <div className="space-y-4">
+      <h2 className="text-sm font-semibold text-jul-muted">Capacity</h2>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <ResourceCard
+          label="Listener Connections"
+          value={Math.round(stats.connections || 0).toLocaleString()}
+          subtext="aggregate across listeners — no single per-listener limit to divide by"
+        />
+        <ResourceCard
+          label="HTTP Outbound Throughput"
+          value={formatBytesPerSec(history.httpBytesPerSec.at(-1) ?? 0)}
+          subtext="response-body bytes, post-compression"
+          trend={history.httpBytesPerSec}
+          trendColor="rgb(34, 197, 94)"
+        />
+        {(stats.cacheTiers ?? []).map((tier) => (
+          <ResourceCard
+            key={tier.tier}
+            label={`Cache (${tier.tier})`}
+            value={formatBytes(tier.bytes)}
+            subtext={
+              tier.occupancyRatio !== undefined
+                ? `${formatBytes(tier.maxBytes ?? 0)} configured — ${(tier.occupancyRatio * 100).toFixed(0)}% full`
+                : "unbounded/unavailable — no configured cap"
+            }
+            warn={tier.occupancyRatio !== undefined && tier.occupancyRatio >= 0.9}
+          />
+        ))}
+        {stats.upstreamWorstActive && (
+          <ResourceCard
+            label="Worst Upstream Active Pressure"
+            value={`${(stats.upstreamWorstActive.ratio * 100).toFixed(0)}%`}
+            subtext={`pool ${stats.upstreamWorstActive.pool}: ${String(Math.round(stats.upstreamWorstActive.current))} / ${String(Math.round(stats.upstreamWorstActive.max))}`}
+            warn={stats.upstreamWorstActive.ratio >= 0.9}
+          />
+        )}
+        {stats.upstreamWorstPending && (
+          <ResourceCard
+            label="Worst Upstream Pending Pressure"
+            value={`${(stats.upstreamWorstPending.ratio * 100).toFixed(0)}%`}
+            subtext={`pool ${stats.upstreamWorstPending.pool}: ${String(Math.round(stats.upstreamWorstPending.current))} / ${String(Math.round(stats.upstreamWorstPending.max))}`}
+            warn={stats.upstreamWorstPending.ratio >= 0.9}
+          />
+        )}
+      </div>
+      <WarningList title="No eligible backend" pools={stats.upstreamNoEligible ?? []} />
+      <WarningList title="Retry budget exhausted" pools={stats.upstreamBudgetExhausted ?? []} />
+      {cacheWarn && (
+        <p className="text-xs text-jul-warning">
+          A cache tier is near its configured capacity. This is local UX guidance, not an alert.
+        </p>
+      )}
     </div>
   );
 }
@@ -638,6 +866,12 @@ export function OverviewPanel() {
               </div>
             </div>
           )}
+
+          {/* Runtime Resources (#431) */}
+          <RuntimeResourcesSection stats={stats} history={history} />
+
+          {/* Capacity (#431) */}
+          <CapacitySection stats={stats} history={history} />
 
           {/* Sparklines - 2 minute trends */}
           {history.requestsPerSec.length > 0 && (

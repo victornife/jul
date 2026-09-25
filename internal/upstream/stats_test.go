@@ -131,6 +131,52 @@ func TestRegistryStatsSumsSchemesOfOneName(t *testing.T) {
 	}
 }
 
+// TestRegistryAllResilienceCarriesLimits pins the reason #431's Overview
+// capacity summary reads AllResilience rather than Stats: only Resilience()
+// carries the configured limits/retry-budget a truthful pressure ratio needs.
+// It also proves the same (name, scheme) deduplication as Stats.
+func TestRegistryAllResilienceCarriesLimits(t *testing.T) {
+	r := NewRegistry(RegistryOptions{})
+	defer r.CloseAll()
+
+	cfg := upstreamCfg("api", "round_robin", "10.0.0.1:80")
+	cfg.Resilience = &config.ResilienceConfig{
+		MaxActiveRequests:  42,
+		MaxPendingRequests: 7,
+		RetryBudgetPercent: 20,
+	}
+
+	r.Begin()
+	for _, scheme := range []string{"http", "https"} {
+		if _, err := r.For(context.Background(), cfg, scheme); err != nil {
+			t.Fatalf("For %s: %v", scheme, err)
+		}
+	}
+	r.Commit()
+
+	all := r.AllResilience()
+	if len(all) != 1 {
+		t.Fatalf("AllResilience() returned %d entries, want 1 deduplicated by name", len(all))
+	}
+	api := all[0]
+	if api.Name != "api" {
+		t.Fatalf("name = %q, want api", api.Name)
+	}
+	if api.Limits.MaxActiveRequests != 42 {
+		t.Errorf("MaxActiveRequests = %d, want 42", api.Limits.MaxActiveRequests)
+	}
+	if api.Limits.MaxPendingRequests != 7 {
+		t.Errorf("MaxPendingRequests = %d, want 7", api.Limits.MaxPendingRequests)
+	}
+	if api.Budget.Percent != 20 {
+		t.Errorf("Budget.Percent = %d, want 20", api.Budget.Percent)
+	}
+	// One backend per scheme, summed exactly as Stats does.
+	if api.Eligible != 2 {
+		t.Errorf("eligible = %d, want 2 (one per scheme)", api.Eligible)
+	}
+}
+
 // TestCircuitHookReachesBackendsBuiltLater pins the claim that a discovery
 // refresh does not silently stop reporting transitions. The hook is installed
 // once, on a pool whose backend set is then replaced wholesale.

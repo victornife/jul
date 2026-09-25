@@ -321,6 +321,24 @@ export const FeatureStatusSchema = z.object({
 });
 export type FeatureStatus = z.infer<typeof FeatureStatusSchema>;
 
+export const CacheTierOccupancySchema = z.object({
+  tier: z.string(),
+  bytes: z.number(),
+  maxBytes: z.number().optional(),
+  entries: z.number(),
+  evictions: z.number(),
+  occupancyRatio: z.number().optional(),
+});
+export type CacheTierOccupancy = z.infer<typeof CacheTierOccupancySchema>;
+
+export const PoolPressureSchema = z.object({
+  pool: z.string(),
+  current: z.number(),
+  max: z.number(),
+  ratio: z.number(),
+});
+export type PoolPressure = z.infer<typeof PoolPressureSchema>;
+
 export const StatsSnapshotSchema = z.object({
   available: z.boolean().optional(),
   uptimeSeconds: z.number(),
@@ -338,6 +356,22 @@ export const StatsSnapshotSchema = z.object({
   cacheEvents: z.record(z.string(), z.number()).optional(),
   methods: z.record(z.string(), z.number()).optional(),
   rateLimited: z.record(z.string(), z.number()).optional(),
+  // ── Runtime resources and capacity (#431) ──────────────────────────────
+  // A missing/undefined field means unavailable (the platform or collector
+  // could not report it) — distinct from a true zero. Never rendered as 0 or
+  // as a fabricated percentage.
+  cpuCores: z.number().optional(),
+  rssBytes: z.number().optional(),
+  goHeapAllocBytes: z.number().optional(),
+  goroutines: z.number().optional(),
+  openFDs: z.number().optional(),
+  maxFDs: z.number().optional(),
+  httpResponseBytesTotal: z.number().optional().default(0),
+  cacheTiers: z.array(CacheTierOccupancySchema).optional(),
+  upstreamWorstActive: PoolPressureSchema.optional(),
+  upstreamWorstPending: PoolPressureSchema.optional(),
+  upstreamNoEligible: z.array(z.string()).optional(),
+  upstreamBudgetExhausted: z.array(z.string()).optional(),
 });
 export type StatsSnapshot = z.infer<typeof StatsSnapshotSchema>;
 
