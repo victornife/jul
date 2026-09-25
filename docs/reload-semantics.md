@@ -198,6 +198,15 @@ runs preflight, persists atomically, suppresses file-watcher echoes, submits a
 correlated reload, waits for the result, and — when the reload fails before
 `Publish` — restores the exact previous bytes including comments and formatting.
 
+The coordinator is one type split by responsibility across files in
+`internal/app`: `config_apply.go` (types, entry points, preflight and hot
+publication), `config_apply_baseline.go` (version/baseline CAS and managed
+drift), `config_apply_stage.go` (planned-restart staging and discard),
+`config_apply_ledger.go` (apply identity, idempotency and terminal
+finalization) and `config_apply_restore.go` (restoration and terminal-result
+construction). The split is structural only; lock order and transaction truth
+are unchanged.
+
 The restoration guarantee applies only to managed admin writes. SIGHUP and
 file-watch are external sources: they never rewrite the file, so a failed
 external reload leaves the previous runtime serving while the disk may differ.
@@ -662,6 +671,11 @@ reload. This means discovery pools converge in request time, while static pools
 converge on the next reload.
 
 ## HTTP handler-generation retirement (resource teardown)
+
+The full per-resource ownership model — scope, identity, liveness override,
+Prepare/Publish/Abort/Retire, drain and close for every runtime resource — is
+[resource-ownership.md](resource-ownership.md). This section describes the
+handler-generation mechanism it builds on.
 
 The HTTP handler swap is **generational**, and a superseded generation's
 resources are torn down only after the requests that may still be using them
