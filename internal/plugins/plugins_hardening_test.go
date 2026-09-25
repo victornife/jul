@@ -9,11 +9,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -193,7 +196,7 @@ func TestFetchGlobalEgressBlocksDoFetch(t *testing.T) {
 }
 
 func TestKVSetEnforcesBounds(t *testing.T) {
-	p := &plugin{kv: newMemKV(), kvKeys: map[string]int{}, kvMaxEntries: 2, kvMaxBytes: 100}
+	p := &plugin{kv: newMemKV(), kvUsage: newKVLedger(), kvMaxEntries: 2, kvMaxBytes: 100}
 	if !p.kvSet("a", []byte("x")) || !p.kvSet("b", []byte("y")) {
 		t.Fatal("first two keys should fit")
 	}
@@ -206,6 +209,76 @@ func TestKVSetEnforcesBounds(t *testing.T) {
 	big := make([]byte, 200)
 	if p.kvSet("a", big) {
 		t.Fatal("value over kv_max_bytes should be rejected")
+	}
+}
+
+// TestKVQuotaSurvivesReload pins the #428 ownership rule for plugin KV: the
+// store is process-owned, so its quota accounting must be too. Before the fix a
+// rebuilt generation started from zero usage while the store still held every
+// value, so each reload granted a fresh kv_max_entries/kv_max_bytes budget.
+func TestKVQuotaSurvivesReload(t *testing.T) {
+	m := testManager(t)
+	quota := func(pc *config.PluginConfig) {
+		pc.KV = true
+		pc.KVMaxEntries = 2
+		pc.KVMaxBytes = config.Size(64)
+	}
+	cfg := map[string]config.PluginConfig{"kv": pcfg("header-inject", quota)}
+
+	gen1 := buildSet(t, m, cfg)
+	p1 := gen1.plugins["kv"]
+	if !p1.kvSet("kv\x00a", []byte("x")) || !p1.kvSet("kv\x00b", []byte("y")) {
+		t.Fatal("first generation should fit two keys")
+	}
+
+	gen2 := buildSet(t, m, cfg)
+	p2 := gen2.plugins["kv"]
+	if p2.kvUsage != p1.kvUsage {
+		t.Fatal("a rebuilt plugin must share its namespace ledger with the previous generation")
+	}
+	if p2.kvSet("kv\x00c", []byte("z")) {
+		t.Fatal("reload reset kv_max_entries accounting: third key accepted")
+	}
+	if !p2.kvSet("kv\x00a", []byte("updated")) {
+		t.Fatal("updating an existing key must remain allowed after reload")
+	}
+	if p2.kvSet("kv\x00b", make([]byte, 60)) {
+		t.Fatal("reload reset kv_max_bytes accounting: total over quota accepted")
+	}
+
+	other := buildSet(t, m, map[string]config.PluginConfig{"other": pcfg("header-inject", quota)})
+	if other.plugins["other"].kvUsage == p1.kvUsage {
+		t.Fatal("distinct plugin namespaces must not share a ledger")
+	}
+}
+
+// TestKVQuotaConcurrentGenerationsShareBound proves a draining and a new
+// generation writing the same namespace concurrently cannot jointly exceed
+// the quota.
+func TestKVQuotaConcurrentGenerationsShareBound(t *testing.T) {
+	m := testManager(t)
+	cfg := map[string]config.PluginConfig{"kv": pcfg("header-inject", func(pc *config.PluginConfig) {
+		pc.KV = true
+		pc.KVMaxEntries = 8
+	})}
+	gens := []*plugin{buildSet(t, m, cfg).plugins["kv"], buildSet(t, m, cfg).plugins["kv"]}
+
+	var accepted atomic.Int64
+	var wg sync.WaitGroup
+	for g, p := range gens {
+		for i := 0; i < 16; i++ {
+			wg.Add(1)
+			go func(p *plugin, key string) {
+				defer wg.Done()
+				if p.kvSet(key, []byte("v")) {
+					accepted.Add(1)
+				}
+			}(p, fmt.Sprintf("kv\x00g%d-%d", g, i))
+		}
+	}
+	wg.Wait()
+	if got := accepted.Load(); got != 8 {
+		t.Fatalf("accepted %d distinct keys across generations, want exactly kv_max_entries=8", got)
 	}
 }
 

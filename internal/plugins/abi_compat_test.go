@@ -28,7 +28,7 @@ func currentABISurface(t *testing.T) string {
 	ctx := context.Background()
 	r := wazero.NewRuntime(ctx)
 	t.Cleanup(func() { _ = r.Close(ctx) })
-	p := &plugin{name: "golden", kvKeys: map[string]int{}}
+	p := &plugin{name: "golden", kvUsage: newKVLedger()}
 	if err := registerJulHostModule(ctx, r, p); err != nil {
 		t.Fatalf("register host module: %v", err)
 	}
