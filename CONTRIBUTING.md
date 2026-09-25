@@ -197,6 +197,13 @@ The #128-specific CI lane additionally measures `scripts/semantic_drift.py` with
 branch coverage and fails below 90%. Do not weaken an owner check or add a broad
 suppression list to silence a real mismatch.
 
+The per-issue "added Go production statements >= 90%" gates measure only lines
+a change actually adds or edits: `scripts/strip_moved_lines.py` drops added
+lines that are verbatim copies of lines removed in the same diff, so a pure
+file split is not charged for pre-existing code it moved. Keep structural moves
+in their own commits with no edits, so the filter and reviewers see them as
+moves.
+
 ### Adding a new feature
 
 When adding a new feature, include **all** of these in your PR:

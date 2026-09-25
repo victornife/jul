@@ -91,7 +91,7 @@ jobs:
         run: |
           go test -count=1 -covermode=atomic -coverpkg="${COVERPKG}" -coverprofile=/tmp/issue407-lean.cover ./internal/handler ./internal/upstream ./internal/config
           go test -count=1 -tags importer -covermode=atomic -coverpkg="${COVERPKG}" -coverprofile=/tmp/issue407-importer.cover ./internal/migrate/nginx/... ./internal/handler ./internal/upstream ./internal/config
-          git diff --unified=0 "$BASE_SHA"...HEAD -- '*.go' > /tmp/issue407.diff
+          git diff --unified=0 "$BASE_SHA"...HEAD -- '*.go' | python3 scripts/strip_moved_lines.py > /tmp/issue407.diff
           python3 - <<'PY'
           from pathlib import Path
           import re

@@ -88,7 +88,7 @@ jobs:
         run: |
           go test -count=1 -covermode=atomic -coverpkg="${COVERPKG}" -coverprofile=/tmp/hr05-lean.cover ./internal/egress ./internal/auth ./internal/upstream ./internal/app ./internal/server ./internal/lifecycle
           go test -count=1 -tags "${FULL_TAGS}" -covermode=atomic -coverpkg="${COVERPKG}" -coverprofile=/tmp/hr05-full.cover ./internal/egress ./internal/auth ./internal/upstream ./internal/plugins ./internal/app ./internal/server ./internal/lifecycle
-          git diff --unified=0 "$BASE_SHA"...HEAD -- '*.go' > /tmp/hr05.diff
+          git diff --unified=0 "$BASE_SHA"...HEAD -- '*.go' | python3 scripts/strip_moved_lines.py > /tmp/hr05.diff
           python3 - <<'PY'
           from pathlib import Path
           import re

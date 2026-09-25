@@ -515,6 +515,8 @@ jobs:
         run: python scripts/docs-check.py
       - name: run docs-check unit tests
         run: python scripts/test_docs_check.py
+      - name: run coverage-gate move filter unit tests
+        run: python scripts/test_strip_moved_lines.py
 
   config-check:
     name: config-check
