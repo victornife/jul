@@ -16,6 +16,9 @@ kv = true
 [plugins.request-block]
 path = "testdata/plugins/request-block.wasm"
 type = "handler"
+# Optional exact-content pin: the digest GET /api/plugins reports for the
+# serving module. A mismatch rejects the build before Publish.
+# sha256 = "sha256:<64 hex digits>"
 
 [[servers]]
 listen = "127.0.0.1:8083"

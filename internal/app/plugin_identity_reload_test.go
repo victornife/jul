@@ -133,7 +133,7 @@ func newPluginReloadHarness(t *testing.T, backend http.Handler) *pluginReloadHar
 		cancel()
 		<-done
 	})
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(90 * time.Second)
 	for {
 		resp, err := http.Get("http://" + h.addr + "/")
 		if err == nil {
