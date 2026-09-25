@@ -340,6 +340,9 @@ func diffPluginFields(name string, b, a config.PluginConfig, d *ConfigDiff) {
 	if pluginTypeOrDefault(b) != pluginTypeOrDefault(a) {
 		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: pluginTypeOrDefault(b), After: pluginTypeOrDefault(a), Detail: "Change plugin type for " + name}, "plugin "+name+" type")
 	}
+	if bp, ap := pluginPin(b), pluginPin(a); bp != ap {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: orNone(bp), After: orNone(ap), Detail: "Change plugin module sha256 pin for " + name}, "plugin "+name+" sha256")
+	}
 	if b.KV != a.KV {
 		action := "Grant"
 		if !a.KV {
@@ -913,4 +916,17 @@ func diffGlobalMetrics(before, after *config.Config, d *ConfigDiff) {
 		}
 	}
 	d.cover("observability.metrics.host_label")
+}
+
+// pluginPin is a plugin's sha256 pin in canonical "sha256:<hex>" form, or ""
+// when unpinned. A malformed pin is shown as written; validation rejects it.
+func pluginPin(p config.PluginConfig) string {
+	pin, err := config.ParseSHA256Pin(p.SHA256)
+	if err != nil {
+		return strings.TrimSpace(p.SHA256)
+	}
+	if pin == "" {
+		return ""
+	}
+	return "sha256:" + pin
 }

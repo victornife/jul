@@ -29,6 +29,9 @@ type pluginDef struct {
 	KV           bool              `json:"kv,omitempty"`
 	Fetch        bool              `json:"fetch,omitempty"`
 	AllowedHosts []string          `json:"allowed_hosts,omitempty"`
+	// SHA256 sets the module pin; omitted keeps the existing pin so an editor
+	// unaware of pins can never silently drop one, and "" clears it.
+	SHA256 *string `json:"sha256,omitempty"`
 }
 
 func buildPlugin(in pluginDef, existing config.PluginConfig) (config.PluginConfig, string, error) {
@@ -56,6 +59,14 @@ func buildPlugin(in pluginDef, existing config.PluginConfig) (config.PluginConfi
 	}
 	if pc.Fetch && len(pc.AllowedHosts) == 0 {
 		return config.PluginConfig{}, "", fmt.Errorf("plugin_set: fetch is enabled but allowed_hosts is empty (an allowlist is required)")
+	}
+	pc.SHA256 = existing.SHA256
+	if in.SHA256 != nil {
+		pin, err := config.ParseSHA256Pin(*in.SHA256)
+		if err != nil {
+			return config.PluginConfig{}, "", fmt.Errorf("plugin_set: %w", err)
+		}
+		pc.SHA256 = pin
 	}
 	if raw := strings.TrimSpace(in.MemoryLimit); raw != "" {
 		var size config.Size
@@ -170,6 +181,18 @@ type PluginProjection struct {
 	Fetch        bool               `json:"fetch"`
 	AllowedHosts []string           `json:"allowed_hosts,omitempty"`
 	Attachments  []PluginAttachment `json:"attachments,omitempty"`
+	// Pinned reports whether the declaration sets a sha256 pin.
+	Pinned bool `json:"pinned"`
+	// Digest is the sha256 of the module bytes the serving generation
+	// compiled for this plugin name; absent when it is not serving. It is
+	// computed by the runtime, never by the Console.
+	Digest      string `json:"digest,omitempty"`
+	DigestShort string `json:"digest_short,omitempty"`
+}
+
+// PluginModule is the serving content identity of one plugin module.
+type PluginModule struct {
+	Digest string
 }
 
 type PluginAttachment struct {
@@ -192,6 +215,7 @@ func projectPlugins(c *config.Config, compiled bool) PluginsProjection {
 		pp := PluginProjection{
 			Name: name, Source: pluginSourceKind(p), Path: p.Path, Type: pluginTypeOrDefault(p), Config: p.Config,
 			KV: p.KV, Fetch: p.Fetch, AllowedHosts: p.AllowedHosts, Attachments: pluginAttachments(c, name),
+			Pinned: strings.TrimSpace(p.SHA256) != "",
 		}
 		if p.MemoryLimit.Bytes() > 0 {
 			pp.MemoryLimit = sizeStr(p.MemoryLimit)
@@ -202,6 +226,25 @@ func projectPlugins(c *config.Config, compiled bool) PluginsProjection {
 		out.Plugins = append(out.Plugins, pp)
 	}
 	return out
+}
+
+// attachPluginModules adds the serving module digests to a projection.
+func attachPluginModules(out *PluginsProjection, modules map[string]PluginModule) {
+	for i := range out.Plugins {
+		if m, ok := modules[out.Plugins[i].Name]; ok && m.Digest != "" {
+			out.Plugins[i].Digest = m.Digest
+			out.Plugins[i].DigestShort = shortDigest(m.Digest)
+		}
+	}
+}
+
+// shortDigest is the first 12 hex digits of a "sha256:<hex>" digest.
+func shortDigest(digest string) string {
+	h := strings.TrimPrefix(digest, "sha256:")
+	if len(h) > 12 {
+		h = h[:12]
+	}
+	return h
 }
 
 func pluginAttachments(c *config.Config, name string) []PluginAttachment {
@@ -236,6 +279,9 @@ func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 	snap := s.requestAdminSnapshot(r)
 	s.withConfig(func(c *config.Config, w http.ResponseWriter) {
 		out := projectPlugins(c, s.deps.PluginsCompiled)
+		if s.deps.PluginModules != nil {
+			attachPluginModules(&out, s.deps.PluginModules())
+		}
 		out.UploadEnabled = pluginUploadEnabled(snap.cfg) && snap.cfg.PluginUploadMaxSize > 0
 		out.UploadMaxSizeMB = 0
 		if out.UploadEnabled {

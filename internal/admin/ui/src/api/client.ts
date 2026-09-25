@@ -1037,6 +1037,12 @@ export const PluginProjectionSchema = z.object({
   fetch: z.boolean(),
   allowed_hosts: z.array(z.string()).optional(),
   attachments: z.array(PluginAttachmentSchema).optional(),
+  // pinned reports whether the declaration sets a sha256 pin (#429).
+  pinned: z.boolean().optional(),
+  // digest/digest_short identify the module bytes the serving generation
+  // compiled. Computed by the server; the Console never hashes modules.
+  digest: z.string().optional(),
+  digest_short: z.string().optional(),
 });
 export type PluginProjection = z.infer<typeof PluginProjectionSchema>;
 

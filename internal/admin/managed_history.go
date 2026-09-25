@@ -4,6 +4,8 @@
 package admin
 
 import (
+	"time"
+
 	"jul/internal/config"
 	"jul/internal/server"
 )
@@ -29,7 +31,15 @@ import (
 // roll-back-able), and a raw snapshot failure is surfaced as a degraded-history
 // condition rather than failing the already-committed apply.
 func (s *Server) RecordManagedHistory(reqCtx ApplyRequestContext, result ConfigApplyResult, previousRaw []byte) (string, error) {
-	if s == nil || !s.hist.enabled() {
+	if s == nil {
+		return "", nil
+	}
+	var moduleChanges []server.PluginModuleChange
+	if result.OK && result.Reload != nil {
+		moduleChanges = result.Reload.PluginModules
+		s.auditPluginModuleChanges(reqCtx.Actor, moduleChanges)
+	}
+	if !s.hist.enabled() {
 		return "", nil
 	}
 	reason, record := managedHistoryDecision(result)
@@ -45,6 +55,7 @@ func (s *Server) RecordManagedHistory(reqCtx ApplyRequestContext, result ConfigA
 		Reason:           reason,
 		PreviousVersion:  managedCanonicalVersion(previousRaw),
 		CandidateVersion: result.PersistedVersion,
+		PluginModules:    moduleChanges,
 	}
 	id, metaErr, err := s.hist.snapshotWithMeta(previousRaw, meta)
 	if err != nil {
@@ -64,6 +75,32 @@ func (s *Server) RecordManagedHistory(reqCtx ApplyRequestContext, result ConfigA
 		return id, metaErr
 	}
 	return id, nil
+}
+
+// auditPluginModuleChanges records one audit event per WASM plugin whose
+// executable content identity changed in the published generation (#429).
+func (s *Server) auditPluginModuleChanges(actor string, changes []server.PluginModuleChange) {
+	if s.audit == nil {
+		return
+	}
+	for _, c := range changes {
+		before, after := c.Before, c.After
+		if before == "" {
+			before = "(none)"
+		}
+		if after == "" {
+			after = "(none)"
+		}
+		s.audit.record(AuditEvent{
+			Time:       time.Now().UTC(),
+			Actor:      actor,
+			Operation:  "plugin.module_identity_changed",
+			Resource:   "plugin",
+			ResourceID: c.Name,
+			Result:     "success",
+			Detail:     "module content " + before + " -> " + after,
+		})
+	}
 }
 
 // managedHistoryDecision maps a terminal managed-apply result to its history
