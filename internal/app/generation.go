@@ -3,7 +3,10 @@
 
 package app
 
-import "io"
+import (
+	"io"
+	"sync"
+)
 
 // PoolStager abstracts the generational staging span of the upstream pool
 // registry (Begin -> Commit|Abort) so GenerationResources can orchestrate the
@@ -60,6 +63,7 @@ type Generation struct {
 	parent    *GenerationResources
 	staged    []io.Closer
 	committed bool
+	aborted   bool
 }
 
 // Begin opens a new staging generation, starting the pool registry's staging
@@ -95,17 +99,20 @@ func (g *Generation) Stage(c io.Closer) {
 // in-flight request still uses it. Commit must be called at most once; a second
 // call, or an Abort after Commit, is a no-op that returns a no-op callback.
 func (g *Generation) Commit() func() {
-	if g.committed {
+	if g.committed || g.aborted {
 		return func() {}
 	}
 	g.parent.pools.Commit()
 	prev := g.parent.live
 	g.parent.live = g.staged
 	g.committed = true
+	var once sync.Once
 	return func() {
-		for _, c := range prev {
-			_ = c.Close()
-		}
+		once.Do(func() {
+			for _, c := range prev {
+				_ = c.Close()
+			}
+		})
 	}
 }
 
@@ -114,9 +121,10 @@ func (g *Generation) Commit() func() {
 // Commit has promoted the generation, so `defer gen.Abort()` is safe on the
 // success path.
 func (g *Generation) Abort() {
-	if g.committed {
+	if g.committed || g.aborted {
 		return
 	}
+	g.aborted = true
 	g.parent.pools.Abort()
 	for _, c := range g.staged {
 		_ = c.Close()
