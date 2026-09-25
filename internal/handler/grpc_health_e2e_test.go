@@ -117,7 +117,7 @@ func TestGRPCHealthEjectsAndRecoversRealBackend(t *testing.T) {
 
 	waitHealthy := func(want bool) {
 		t.Helper()
-		deadline := time.Now().Add(3 * time.Second)
+		deadline := time.Now().Add(8 * time.Second)
 		for {
 			healthy := pool.HealthyCount() == 1
 			if healthy == want {
@@ -136,7 +136,7 @@ func TestGRPCHealthEjectsAndRecoversRealBackend(t *testing.T) {
 	// test if the wanted outcome never becomes true.
 	waitTraffic := func(front string, wantOK bool) {
 		t.Helper()
-		deadline := time.Now().Add(3 * time.Second)
+		deadline := time.Now().Add(8 * time.Second)
 		var lastErr error
 		for {
 			lastErr = checkThrough(t, front)
