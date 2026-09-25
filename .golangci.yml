@@ -85,7 +85,7 @@ linters:
       # Config apply coordinator: restorePrevious is the public restoration
       # entry-point retained for future callers; restorePreviousLocked is the
       # implementation used internally today.
-      - path: internal/app/config_apply\.go
+      - path: internal/app/config_apply_restore\.go
         text: "restorePrevious is unused"
         linters:
           - unused
