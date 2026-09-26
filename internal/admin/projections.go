@@ -227,6 +227,7 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 		ap := AppProjection{
 			Name:        up.Name,
 			Strategy:    up.Strategy,
+			Hash:        upstreamHashView(up),
 			Backends:    make([]BackendProjection, 0, len(up.Servers)),
 			MaxFails:    up.CircuitMaxFails(),
 			RoutesUsing: routesByUpstream[up.Name],

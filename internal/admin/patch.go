@@ -309,13 +309,13 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 			return "", err
 		}
 		strat := strings.TrimSpace(req.Strategy)
-		switch strat {
-		case "", "round_robin", "weighted_round_robin", "least_conn":
-		default:
-			return "", fmt.Errorf("upstream_set_strategy: invalid strategy %q (want round_robin|weighted_round_robin|least_conn)", strat)
+		hash, err := patchHash("upstream_set_strategy", strat, req.Hash)
+		if err != nil {
+			return "", err
 		}
 		up.Strategy = strat
-		return fmt.Sprintf("upstream %s strategy set to %s", req.Upstream, orDefault(strat, "round_robin")), nil
+		up.Hash = hash
+		return fmt.Sprintf("upstream %s strategy set to %s", req.Upstream, strategySummary(strat, hash)), nil
 
 	case "upstream_set_health_check":
 		up, err := findUpstream(c, req.Upstream)
@@ -721,14 +721,14 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 			weight = 1
 		}
 		strat := strings.TrimSpace(req.Strategy)
-		switch strat {
-		case "", "round_robin", "weighted_round_robin", "least_conn":
-		default:
-			return "", fmt.Errorf("upstream_add: invalid strategy %q (want round_robin|weighted_round_robin|least_conn)", strat)
+		hash, err := patchHash("upstream_add", strat, req.Hash)
+		if err != nil {
+			return "", err
 		}
 		c.Upstreams = append(c.Upstreams, config.UpstreamConfig{
 			Name:     name,
 			Strategy: strat,
+			Hash:     hash,
 			Servers:  []config.UpstreamServer{{Address: addr, Weight: weight}},
 		})
 		return fmt.Sprintf("upstream %s added with backend %s (weight %d)", name, addr, weight), nil
