@@ -1043,6 +1043,19 @@ export const PluginProjectionSchema = z.object({
   // compiled. Computed by the server; the Console never hashes modules.
   digest: z.string().optional(),
   digest_short: z.string().optional(),
+  // limits lists the resource limits the declaration sets explicitly; an absent
+  // key means the runtime default applies (#462).
+  limits: z
+    .object({
+      max_request_body: z.string().optional(),
+      max_response_body: z.string().optional(),
+      fetch_timeout: z.string().optional(),
+      max_fetch_response: z.string().optional(),
+      kv_max_entries: z.number().int().optional(),
+      kv_max_bytes: z.string().optional(),
+      max_invocations: z.number().int().optional(),
+    })
+    .optional(),
 });
 export type PluginProjection = z.infer<typeof PluginProjectionSchema>;
 
@@ -1608,6 +1621,15 @@ export type PluginDefPatch = {
   kv?: boolean;
   fetch?: boolean;
   allowed_hosts?: string[];
+  // Resource limits are omitted-means-keep on the server (#462): the guided
+  // editor never sends them, so an edit cannot reset an operator's limits.
+  max_request_body?: string;
+  max_response_body?: string;
+  fetch_timeout?: string;
+  max_fetch_response?: string;
+  kv_max_entries?: number;
+  kv_max_bytes?: string;
+  max_invocations?: number;
 };
 
 // StreamDefPatch is the stream_add / stream_set payload — the guided editor's

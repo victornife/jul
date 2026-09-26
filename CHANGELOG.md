@@ -41,6 +41,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 - **Active health probes stop with their pool (#428).** A probe in flight when its pool retired ran to its full timeout and then reported through metrics hooks keyed by pool name, which a same-name replacement pool shares. The probe is now cancelled by retirement and its verdict dropped.
 - **WASM KV quota survives reload (#428).** The plugin KV store is process-owned but its `kv_max_entries`/`kv_max_bytes` accounting lived on the per-generation plugin, so every reload granted a fresh quota over data the store still held. The accounting is now process-owned with the store.
 - **Generation teardown is structurally exactly-once (#428).** A repeated `Generation.Abort` no longer re-aborts the pool registry's staging span, and a repeated retire callback no longer closes the previous generation's resources twice.
+- **The guided plugin editor keeps plugin resource limits (#462).** Editing a plugin through the Console rebuilt its declaration from only the fields the editor shows, so `max_invocations`, `kv_max_entries`, `kv_max_bytes`, `max_request_body`, `max_response_body`, `fetch_timeout` and `max_fetch_response` silently fell back to their defaults. `plugin_set` now treats each of them like the `sha256` pin: an omitted field keeps its current value, an explicit value replaces it, and an explicit `""` (or `0` for the counts) restores the default. `GET /api/plugins` reports the configured limits as `limits`, and the Plugins panel shows them.
 
 ## [2.0.0] – 2026-09-21
 

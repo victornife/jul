@@ -92,6 +92,41 @@ describe("plugins lib", () => {
     expect(patch).toEqual({ source: "path", type: "middleware" });
   });
 
+  it("an edit round trip never sends resource limits, so the server keeps them (#462)", () => {
+    const p: PluginProjection = {
+      name: "limited",
+      source: "path",
+      path: "p.wasm",
+      type: "middleware",
+      kv: true,
+      fetch: false,
+      pinned: true,
+      limits: {
+        max_request_body: "2m",
+        max_response_body: "4m",
+        fetch_timeout: "3s",
+        max_fetch_response: "512k",
+        kv_max_entries: 77,
+        kv_max_bytes: "3m",
+        max_invocations: 250,
+      },
+    };
+    const patch = pluginDraftToPatch({ ...seedPluginDraft(p), type: "handler" });
+    for (const key of [
+      "max_request_body",
+      "max_response_body",
+      "fetch_timeout",
+      "max_fetch_response",
+      "kv_max_entries",
+      "kv_max_bytes",
+      "max_invocations",
+      "sha256",
+    ]) {
+      expect(Object.keys(patch)).not.toContain(key);
+    }
+    expect(patch.type).toBe("handler");
+  });
+
   it("pluginDraftToPatch includes path, caps, hosts and config", () => {
     const draft = {
       ...emptyPluginDraft(),

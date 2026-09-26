@@ -29,6 +29,9 @@ export function PluginCard({
   if (plugin.kv) caps.push("kv");
   if (plugin.fetch) caps.push("fetch");
   const fetchHosts = plugin.allowed_hosts ?? [];
+  const limits = Object.entries(plugin.limits ?? {})
+    .filter(([, v]) => v !== undefined && v !== "" && v !== 0)
+    .map(([k, v]) => `${k}=${String(v)}`);
 
   return (
     <div className="space-y-3 rounded-lg border border-jul-border bg-jul-surface p-4">
@@ -65,6 +68,11 @@ export function PluginCard({
             </span>
             {plugin.pinned ? " · pinned" : ""}
           </p>
+          {limits.length > 0 && (
+            <p className="mt-0.5 truncate text-xs text-jul-muted" title={limits.join(", ")}>
+              limits: <span className="font-mono text-jul-text">{limits.join(", ")}</span>
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 gap-2">
           {plugin.type === "middleware" && (
