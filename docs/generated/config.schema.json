@@ -562,6 +562,18 @@
       "additionalProperties": {
         "additionalProperties": false,
         "properties": {
+          "abi": {
+            "description": "ABI selects the host contract the module is built against: \"jul-abi/v1\" (the default when empty) or \"jul-abi/v2\"",
+            "enum": [
+              "jul-abi/v1",
+              "jul-abi/v2"
+            ],
+            "type": "string",
+            "x-jul-capability": [
+              "wasm_plugins"
+            ],
+            "x-jul-constraint": "exact enum; the module must declare the same ABI"
+          },
           "allowed_hosts": {
             "description": "AllowedHosts is the allowlist of hosts the guest may fetch from when Fetch is granted",
             "items": {

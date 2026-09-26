@@ -491,8 +491,12 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 
 ## WASM plugins ([plugins.md](plugins.md))
 
-- **Request phase only.** The v1 ABI has no `handle_response` export; response
-  inspection or mutation after the upstream responds is not possible.
+- **Bounded response phase only (`jul-abi/v2`).** v1 is request-phase only. v2
+  adds a response hook that sees status and headers, and a bounded buffered
+  body (up to `max_response_body`) when the response is eligible; there are no
+  streaming, SSE, WebSocket-frame or gRPC-message hooks (tracked in #444). A
+  body subscription delays delivery until the response completes. See
+  [abi.md](abi.md).
 - **No shared state across plugin names.** Each plugin name has its own wazero
   runtime and KV namespace; two plugins cannot share memory or KV keys even if
   they load the same `.wasm` file.
