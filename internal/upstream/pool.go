@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"jul/internal/affinity"
 	"jul/internal/config"
 	"jul/internal/logthrottle"
 	"jul/internal/resilience"
@@ -37,6 +38,15 @@ type Pool struct {
 	scheme   string
 	strategy string
 	balancer Balancer
+
+	// hash is the consistent_hash key source and fallback; the zero value for
+	// every other strategy. Both are fixed at construction, which is why a
+	// changed [upstreams.hash] block rebuilds the pool (upstreamMeta).
+	hash         affinity.Source
+	hashFallback string
+	// affinityHook, when set, counts each keyed request's extraction outcome
+	// by bounded status. It is set once by the registry.
+	affinityHook func(pool, status string)
 
 	// circuitHook is applied to every backend built after it is set, so a
 	// discovery refresh does not silently stop reporting transitions.
@@ -120,12 +130,16 @@ func NewPool(cfg config.UpstreamConfig, scheme string) (*Pool, error) {
 		name:      cfg.Name,
 		scheme:    scheme,
 		strategy:  cfg.Strategy,
-		balancer:  newBalancer(cfg.Strategy),
 		dynamic:   discoveryEnabled(cfg.Discovery),
 		done:      make(chan struct{}),
 		admission: NewAdmission(policy),
 		budget:    NewBudget(policy.RetryBudgetPercent()),
 	}
+	if cfg.Strategy == "consistent_hash" && cfg.Hash != nil {
+		p.hash = affinity.NewSource(cfg.Hash.Key, cfg.Hash.Name)
+		p.hashFallback = cfg.Hash.Fallback
+	}
+	p.balancer = p.newBalancer()
 	p.circuit.Store(&circuitParams{
 		maxFails:       cfg.CircuitMaxFails(),
 		failTimeout:    cfg.CircuitFailTimeout(),
@@ -168,6 +182,8 @@ func newBackendFor(rawAddress string, weight int, id, scheme string, cp circuitP
 	if network == NetworkTCP {
 		b.URL = &url.URL{Scheme: scheme, Host: address}
 	}
+	b.affinityID = affinity.Identity(network, address)
+	b.affinitySum = affinity.Sum(b.affinityID)
 	b.setWeight(weight)
 	// A backend is healthy until an active checker (if any) proves otherwise.
 	b.activeHealthy.Store(true)

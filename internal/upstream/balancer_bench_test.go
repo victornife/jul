@@ -23,7 +23,7 @@ func benchBackends(n int) []*Backend {
 }
 
 func benchmarkBalancer(b *testing.B, strategy string) {
-	bal := newBalancer(strategy)
+	bal := newBalancer(strategy, "")
 	backends := benchBackends(8)
 	b.ReportAllocs()
 	b.ResetTimer()

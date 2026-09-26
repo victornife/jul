@@ -2205,6 +2205,44 @@
             "type": "string",
             "x-jul-constraint": "non-negative"
           },
+          "hash": {
+            "additionalProperties": false,
+            "properties": {
+              "algorithm": {
+                "description": "Algorithm pins the key-to-backend mapping",
+                "enum": [
+                  "rendezvous_v1"
+                ],
+                "type": "string",
+                "x-jul-constraint": "exact lowercase enum"
+              },
+              "fallback": {
+                "description": "Fallback is the strategy used for a request without a usable key (absent, empty, oversized or unattributed): \"round_robin\" (default), \"weighted_round_robin\" or \"least_conn\"",
+                "enum": [
+                  "round_robin",
+                  "weighted_round_robin",
+                  "least_conn"
+                ],
+                "type": "string",
+                "x-jul-constraint": "exact lowercase enum"
+              },
+              "key": {
+                "description": "Key is the affinity key source: \"client_ip\" (the canonical client address), \"header\" or \"cookie\"",
+                "enum": [
+                  "client_ip",
+                  "header",
+                  "cookie"
+                ],
+                "type": "string",
+                "x-jul-constraint": "exact lowercase enum; required; stream routes accept client_ip only"
+              },
+              "name": {
+                "description": "Name is the request header or cookie name",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
           "health_check": {
             "additionalProperties": false,
             "properties": {
@@ -2409,11 +2447,12 @@
           },
           "strategy": {
             "default": "round_robin",
-            "description": "Strategy is one of \"round_robin\", \"weighted_round_robin\", \"least_conn\"",
+            "description": "Strategy is one of \"round_robin\", \"weighted_round_robin\", \"least_conn\", \"consistent_hash\"",
             "enum": [
               "round_robin",
               "weighted_round_robin",
-              "least_conn"
+              "least_conn",
+              "consistent_hash"
             ],
             "type": "string",
             "x-jul-constraint": "exact lowercase enum"

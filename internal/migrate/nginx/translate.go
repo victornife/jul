@@ -680,7 +680,20 @@ func (t *translator) translateUpstream(d ngx.IDirective, out *config.Config) {
 		switch o.GetName() {
 		case "least_conn":
 			strategy = "least_conn"
-		case "ip_hash", "hash", "random":
+			u.Hash = nil
+		case "ip_hash":
+			strategy = "consistent_hash"
+			u.Hash = &config.HashConfig{Key: config.HashKeyClientIP}
+			t.report.note("upstream %s: ip_hash translated to consistent_hash on client_ip; client placement changes once at cutover (different hash function, full address instead of the IPv4 /24)", name)
+		case "hash":
+			if k := parseNginxHashKey(paramValues(o)); k.reason == "" {
+				strategy = "consistent_hash"
+				u.Hash = &config.HashConfig{Key: k.key, Name: k.name}
+				t.report.note("upstream %s: hash translated to consistent_hash on %s; keys are re-placed once at cutover, keyless requests stay round-robin", name, k.key)
+			} else {
+				t.report.note("upstream %s: %s; using round_robin", name, k.reason)
+			}
+		case "random":
 			t.report.note("upstream %s: %s balancing is not supported; using round_robin", name, o.GetName())
 		case "keepalive", "keepalive_timeout", "keepalive_requests", "zone":
 			// connection-pool tuning; safe to ignore

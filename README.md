@@ -110,7 +110,7 @@ a `full` release artifact to enable all optional capabilities.
 | **Static files** | Document root serving, index files, `try_files`, optional directory listing, hidden-file control, `Cache-Control` headers |
 | **Reverse proxy** | `proxy_pass` to a concrete URL or a named upstream; named upstreams may use `unix:/path.sock` backends for plaintext HTTP; per-location connect/read/send timeouts; custom upstream headers with variable expansion |
 | **WebSocket & SSE** | Transparent passthrough of `Connection: Upgrade` (HTTP `101`) connections — text and binary frames spliced bidirectionally (Apollo GraphQL subscriptions, Socket.IO) — and `text/event-stream` / chunked responses streamed per write, never buffered (Node/Python SSE) |
-| **Load balancing** | `round_robin`, `weighted_round_robin`, and `least_conn` strategies across an upstream pool |
+| **Load balancing** | `round_robin`, `weighted_round_robin`, `least_conn`, and deterministic `consistent_hash` affinity (client IP, header or cookie key) across an upstream pool |
 | **Health & failover** | Released passive/active health checking plus merged Beta resilience controls: bounded admission and pending work, per-backend capacity, retry attempts/deadline/backoff/budget, and an explicit closed/open/half-open circuit model. See [upstreams.md](docs/upstreams.md). |
 | **Service discovery** | Resolve an upstream's backends dynamically and refresh the pool live without a reload (`[upstreams.discovery]`): **DNS** A/AAAA and **DNS SRV** in every build, plus **Consul** and **Kubernetes** EndpointSlices behind the `consul`/`kubernetes` build tags — failed or empty resolves keep the last-good backends |
 | **Backend trust** | One normalized `backend_tls` policy for private/system roots, backend client certificates, SNI/verified names, minimum TLS and peer identities across HTTP, native gRPC, transcoding/reflection and active health probes. GA (#409). |
@@ -456,6 +456,7 @@ summary printed to stderr.
 | `upstream name { server ... }` | `[[upstreams]]` with `servers` |
 | `server h weight=3;` | upstream server `weight` (→ `weighted_round_robin`) |
 | `least_conn;` | upstream `strategy = "least_conn"` |
+| `ip_hash;` / `hash $cookie_sid consistent;` | upstream `strategy = "consistent_hash"` with `[upstreams.hash]` (placement differs from NGINX; approximated) |
 | `ssl_certificate` / `ssl_certificate_key` | `[servers.tls]` `cert` / `key` |
 | `ssl_protocols TLSv1.2 TLSv1.3;` | `[servers.tls]` `min_version` |
 | `gzip on;` | `[compression] enabled = true` |

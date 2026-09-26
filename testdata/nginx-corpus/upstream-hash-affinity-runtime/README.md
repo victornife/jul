@@ -1,0 +1,3 @@
+# Upstream hash affinity runtime fixture
+
+Repository-authored AGPL-3.0-only real NGINX-vs-Jul fixture for #432. NGINX `hash $http_x_tenant consistent` over three Unix-socket members imports as `consistent_hash` on the `X-Tenant` header. Both runtimes keep each tenant on one member and round-robin keyless requests. Per-tenant placement is compared against the pinned NGINX image: tenants placed identically are asserted equivalent, and tenants NGINX's ketama ring places elsewhere are recorded as the expected difference `NGX_UPSTREAM_HASH`. The members identify themselves with `X-Corpus-Backend-Id` (`a`, `b`, `c`).

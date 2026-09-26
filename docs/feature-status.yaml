@@ -758,3 +758,26 @@ features:
     pinned (abi-v2.golden), prebuilt v2 fixtures, v2 SDK and examples built and run in CI. Merged on main, not yet
     in a tagged release; no dedicated soak has been run (focused churn/quiescence and fuzz evidence only). The GA
     WASM plugin system row (Y2-02) covers jul-abi/v1 and does not extend to this entry.'
+- id: LB-AFFINITY
+  name: Deterministic consistent-hash affinity
+  tags:
+  - core
+  - stream
+  maturity: Beta
+  delivery: merged
+  doc: upstreams.md
+  criteria:
+    1: true
+    2: true
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: true
+    9: true
+  notes: 'strategy = "consistent_hash" (#432, ADR 0021): weighted rendezvous hashing (rendezvous_v1, golden-frozen)
+    of a closed key source (client_ip, one header, one cookie) over the health/circuit/capacity-eligible set,
+    explicit hash.fallback for keyless requests, retries walk the rendezvous order, stream routes client_ip only
+    (TCP per connection, UDP per session). NGINX ip_hash/hash map as approximated, arbitrary hash keys blocking;
+    real NGINX-vs-Jul E2E fixture. Merged on main, not yet in a tagged release; no dedicated soak.'

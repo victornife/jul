@@ -142,6 +142,10 @@ func TestStatusAPI(t *testing.T) {
 			Name:        "api",
 			HealthCheck: &config.HealthCheckConfig{Enabled: true},
 			Discovery:   &config.DiscoveryConfig{Type: "dns"},
+		}, {
+			Name:     "sessions",
+			Strategy: "consistent_hash",
+			Hash:     &config.HashConfig{Key: "cookie", Name: "sid"},
 		}},
 		Compression: config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip", "br"}},
 		RateLimit:   config.RateLimitConfig{Enabled: true, Rate: 100},
@@ -171,6 +175,7 @@ func TestStatusAPI(t *testing.T) {
 		"Compression", "Rate limiting", "TLS", "Mutual TLS (client certs)",
 		"Access control (auth)", "Trusted client address", "HTTP/3 (QUIC)",
 		"gRPC transcoding", "Upstream pools", "Active health checks", "Service discovery",
+		"Consistent-hash affinity",
 		"Prometheus metrics", "Access log", "Backend dial-failure accounting",
 		"Admin transport security", "Supported external admin API",
 	}

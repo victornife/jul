@@ -427,6 +427,33 @@ The assessment golden deliberately ignores human prose. Messages may improve
 without changing the stable finding contract, while any added, removed, or
 reclassified result fails the fixture.
 
+## Upstream hash affinity (#432)
+
+Issue #432 adds three core fixtures for the NGINX `ip_hash` / `hash` to Jul
+`consistent_hash` translation described in
+[upstream affinity](nginx-assessment.md#upstream-affinity):
+
+- `upstream-hash-affinity` — `ip_hash` with a weighted and a `down` member,
+  `hash $cookie_session_id consistent`, and a stream upstream on
+  `hash $remote_addr consistent`; all `approximated` (`NGX_UPSTREAM_IP_HASH`,
+  `NGX_UPSTREAM_HASH`) with a validated candidate.
+- `upstream-hash-blocking` — `hash $request_uri consistent`, blocked as
+  `NGX_UPSTREAM_HASH_KEY`; no candidate is generated.
+- `upstream-hash-affinity-runtime` — `hash $http_x_tenant consistent` over
+  three Unix-socket members, run against **both** real Jul and the pinned NGINX
+  reference (the members are bind-mounted sockets, so the internal-network
+  isolation model is unchanged). Reference values were captured from the pinned
+  image. Tenants NGINX's ketama ring and Jul's rendezvous hashing place on the
+  same member are asserted equivalent; the others are the expected difference
+  `NGX_UPSTREAM_HASH`. A keyless request is served by both (NGINX round-robins
+  an empty key, as does Jul's default fallback).
+  `TestNGINXCorpusHashAffinityRealE2E` additionally proves per-tenant
+  stickiness for 60 tenants, spread across every member, keyless round robin,
+  and identical placement after a Jul restart.
+
+Placement parity with NGINX is not claimed and not a goal: every key is
+re-placed once at cutover.
+
 ## Pinned NGINX reference lane
 
 The isolated reference lane uses the Docker Official Image

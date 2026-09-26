@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"jul/internal/affinity"
 	"jul/internal/resilience"
 )
 
@@ -341,6 +342,12 @@ type RetryRequest struct {
 	// Replayable records that this request may be sent again at all.
 	Replayable bool
 
+	// Key is the request's affinity key (Pool.AffinityKey). Every attempt is
+	// placed with it, so a retry lands on the key's next-ranked untried
+	// backend rather than on an arbitrary one. The zero Key selects by the
+	// pool's ordinary strategy.
+	Key affinity.Key
+
 	// OnBackoff reports the interval the driver is about to wait before attempt
 	// next. It exists because the wait is the driver's to compute and the span
 	// to annotate is the caller's, and a backoff nobody records is latency with
@@ -403,7 +410,7 @@ func (p *Pool) Do(ctx context.Context, rr RetryRequest, fn AttemptFunc) (StopRea
 	tried := make(map[BackendIdentity]struct{})
 	var lastErr error
 	for n := 1; ; n++ {
-		b, err := p.PickExcluding(deadline, tried)
+		b, err := p.PickKeyed(deadline, rr.Key, tried)
 		if err != nil {
 			if lastErr != nil {
 				// The reason the request failed is the upstream failure that

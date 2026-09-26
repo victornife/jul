@@ -147,6 +147,7 @@ Active health state feeds directly into the balancer:
 | `round_robin` | Skipped during rotation |
 | `weighted_round_robin` | Skipped; weight is ignored |
 | `least_conn` | Skipped; in-flight count is ignored |
+| `consistent_hash` | Skipped; its keys go to each key's next-ranked backend and return when it recovers |
 
 The `jul_upstream_backends_healthy` gauge (`pool` label) counts the backends the active checks currently consider healthy. Per-backend verdicts are not a metric — a backend address is unbounded under pod churn — and are served by the Admin API instead. `jul_upstream_probes_total` counts probes by `pool` and `result` (`success` / `failure`).
 

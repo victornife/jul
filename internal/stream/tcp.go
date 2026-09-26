@@ -133,7 +133,7 @@ func (l *listener) handleTCP(client net.Conn) {
 	}
 	defer release()
 
-	backend, b, err := l.dialBackend(pool, "tcp", r.connectTimeout)
+	backend, b, err := l.dialBackend(pool, "tcp", r.connectTimeout, pool.AffinityKeyForAddr(clientAddr))
 	if err != nil {
 		// Counted and logged (throttled once known-down) inside dialBackend, so
 		// a broken backend plus ordinary connection volume cannot flood the log.

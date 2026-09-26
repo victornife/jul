@@ -357,7 +357,9 @@ func inferredTargetPaths(result AssessmentResult) []string {
 		return []string{"servers[].locations[].rewrites[]"}
 	case "NGX_LOCATION_LIMIT_EXCEPT":
 		return []string{"servers[].locations[].match.methods"}
-	case "NGX_UPSTREAM_IP_HASH", "NGX_UPSTREAM_HASH", "NGX_UPSTREAM_RANDOM":
+	case "NGX_UPSTREAM_IP_HASH", "NGX_UPSTREAM_HASH", "NGX_UPSTREAM_HASH_KEY":
+		return []string{"upstreams[].strategy", "upstreams[].hash.key"}
+	case "NGX_UPSTREAM_RANDOM":
 		return []string{"upstreams[].strategy"}
 	case "NGX_UPSTREAM_SERVER_DOWN":
 		return []string{"upstreams[].servers[]"}
@@ -379,6 +381,8 @@ func guidanceCodesForResult(result AssessmentResult) []string {
 	code := strings.ToUpper(result.Code)
 	directive := strings.ToLower(result.Directive)
 	switch {
+	case strings.HasPrefix(code, "NGX_UPSTREAM_IP_HASH") || strings.HasPrefix(code, "NGX_UPSTREAM_HASH"):
+		return []string{"GUIDE_UPSTREAM_AFFINITY"}
 	case strings.Contains(code, "PROXY_PROTOCOL"):
 		return []string{"GUIDE_PROXY_PROTOCOL_IDENTITY"}
 	case strings.Contains(code, "REALIP_HEADER") || strings.Contains(code, "REAL_IP_HEADER"):
