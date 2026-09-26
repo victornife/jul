@@ -30,6 +30,7 @@ import (
 
 	"jul/internal/buildcaps"
 	"jul/internal/config"
+	"jul/internal/logthrottle"
 	"jul/internal/observability"
 	"jul/internal/rbac"
 	"jul/internal/server"
@@ -840,6 +841,7 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 		Addr:              cfg.Listen,
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
+		ErrorLog:          logthrottle.ServerErrorLog(),
 	}
 	s.installAuth(cfg, nil)
 	return s

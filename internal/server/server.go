@@ -21,6 +21,7 @@ import (
 	"jul/internal/background"
 	"jul/internal/config"
 	"jul/internal/lifecycle"
+	"jul/internal/logthrottle"
 	"jul/internal/redact"
 	"jul/internal/upstream"
 )
@@ -829,6 +830,7 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		WriteTimeout:      cv.writeTimeout(addr),
 		IdleTimeout:       cv.idleTimeout(addr),
 		MaxHeaderBytes:    cv.maxHeaderBytes(addr),
+		ErrorLog:          logthrottle.ServerErrorLog(),
 	}
 	// On a plaintext listener, optionally accept cleartext HTTP/2 (h2c) so
 	// native gRPC clients can connect without TLS. TLS listeners already
