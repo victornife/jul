@@ -1056,6 +1056,12 @@ export const PluginProjectionSchema = z.object({
       max_invocations: z.number().int().optional(),
     })
     .optional(),
+  // abi is the declaration's effective ABI (#430). response_phase reports that
+  // the serving module can subscribe to the jul-abi/v2 response phase, and
+  // response_body_max is the body bound that phase uses (v2 only).
+  abi: z.string().default("jul-abi/v1"),
+  response_phase: z.boolean().default(false),
+  response_body_max: z.string().optional(),
 });
 export type PluginProjection = z.infer<typeof PluginProjectionSchema>;
 
@@ -1630,7 +1636,12 @@ export type PluginDefPatch = {
   kv_max_entries?: number;
   kv_max_bytes?: string;
   max_invocations?: number;
+  // abi is sent only when the operator explicitly changes it; omitted keeps
+  // the plugin's current ABI (#430).
+  abi?: PluginABI;
 };
+
+export type PluginABI = "jul-abi/v1" | "jul-abi/v2";
 
 // StreamDefPatch is the stream_add / stream_set payload — the guided editor's
 // view of a single [[stream]] L4 listener. Durations are strings (e.g. "10s");

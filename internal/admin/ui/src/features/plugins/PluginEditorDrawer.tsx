@@ -11,6 +11,7 @@ import {
   seedPluginDraft,
   pluginDraftToPatch,
   pluginDraftWarnings,
+  toABI,
   type PluginDraft,
 } from "@/lib/plugins.ts";
 import type { PluginProjection } from "@/api/client.ts";
@@ -222,6 +223,25 @@ export function PluginEditorDrawer({
           <span className="text-xs text-jul-muted">
             Middleware plugins attach to a route&apos;s chain; handler plugins are wired as a
             route&apos;s action in the config editor.
+          </span>
+        </label>
+
+        <label className="block space-y-1">
+          <span className="text-sm font-medium text-jul-text">ABI</span>
+          <select
+            value={draft.abi}
+            onChange={(e) => { set("abi", toABI(e.target.value)); }}
+            className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+          >
+            <option value="jul-abi/v1">jul-abi/v1 (request phase)</option>
+            <option value="jul-abi/v2">jul-abi/v2 (request + response phase)</option>
+          </select>
+          <span className="text-xs text-jul-muted">
+            Must match the SDK the module was built with; a mismatch fails the apply. Choose v2
+            only for a module built against the v2 SDK that needs the upstream response.
+            {draft.seededAbi !== null && draft.abi !== draft.seededAbi
+              ? ` Changing the ABI from ${draft.seededAbi} is shown in the review.`
+              : ""}
           </span>
         </label>
 

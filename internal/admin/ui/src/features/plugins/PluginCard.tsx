@@ -68,6 +68,13 @@ export function PluginCard({
             </span>
             {plugin.pinned ? " · pinned" : ""}
           </p>
+          <p className="mt-0.5 truncate text-xs text-jul-muted">
+            abi: <span className="font-mono text-jul-text">{plugin.abi}</span>
+            {plugin.abi === "jul-abi/v2" &&
+              (plugin.response_phase
+                ? ` · response phase (body ≤ ${plugin.response_body_max ?? "8m"})`
+                : " · request phase only")}
+          </p>
           {limits.length > 0 && (
             <p className="mt-0.5 truncate text-xs text-jul-muted" title={limits.join(", ")}>
               limits: <span className="font-mono text-jul-text">{limits.join(", ")}</span>
