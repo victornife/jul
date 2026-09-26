@@ -86,11 +86,16 @@ type DialFunc = func(ctx context.Context, network, addr string) (net.Conn, error
 // compilation cache (so unchanged modules are recompiled cheaply across
 // reloads) and the key/value store. It is created once and closed at shutdown.
 type Manager struct {
-	log      *slog.Logger
-	cache    wazero.CompilationCache
-	kv       KVStore
-	onInvoke func(string, string, time.Duration)
-	onPanic  func(string)
+	log   *slog.Logger
+	cache wazero.CompilationCache
+	kv    KVStore
+	// kvUsage is keyed by plugin name (the KV namespace). It shares the KV
+	// store's process lifetime so a reload cannot reset quota usage the store
+	// still holds.
+	kvUsageMu sync.Mutex
+	kvUsage   map[string]*kvLedger
+	onInvoke  func(string, string, time.Duration)
+	onPanic   func(string)
 	// egressWrap composes the global egress guard beneath each plugin's fetch
 	// SSRF guard; nil when egress is disabled.
 	egressWrap func(base DialFunc) DialFunc
@@ -118,10 +123,33 @@ func NewManager(opts Options) (*Manager, error) {
 		log:        opts.Logger,
 		cache:      wazero.NewCompilationCache(),
 		kv:         kv,
+		kvUsage:    make(map[string]*kvLedger),
 		onInvoke:   onInvoke,
 		onPanic:    onPanic,
 		egressWrap: opts.EgressWrap,
 	}, nil
+}
+
+// kvLedger is the quota accounting for one plugin KV namespace.
+type kvLedger struct {
+	mu    sync.Mutex
+	keys  map[string]int
+	bytes int
+}
+
+func newKVLedger() *kvLedger { return &kvLedger{keys: make(map[string]int)} }
+
+// kvLedgerFor returns the process-lifetime ledger for a plugin namespace,
+// shared by every generation that declares the plugin.
+func (m *Manager) kvLedgerFor(name string) *kvLedger {
+	m.kvUsageMu.Lock()
+	defer m.kvUsageMu.Unlock()
+	l := m.kvUsage[name]
+	if l == nil {
+		l = newKVLedger()
+		m.kvUsage[name] = l
+	}
+	return l
 }
 
 // Close releases the shared compilation cache.
@@ -203,12 +231,10 @@ type plugin struct {
 	// Created once per plugin to enable connection pooling.
 	client *http.Client
 
-	// KV accounting bounds the per-plugin namespace independent of the shared
-	// store: kvKeys tracks each key's stored size so kv_set can reject an entry
-	// or a total that would exceed the plugin's quota.
-	kvMu    sync.Mutex
-	kvKeys  map[string]int
-	kvBytes int
+	// kvUsage tracks each key's stored size in this plugin's namespace so
+	// kv_set can reject an entry or total over quota. It is Manager-owned, not
+	// generation-owned: the store it accounts for survives reloads.
+	kvUsage *kvLedger
 
 	// maxInstanceInvocations bounds how many calls a pooled instance serves
 	// before release() retires it instead of returning it to the pool.
@@ -253,7 +279,7 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		maxFetchResp: sizeOr(pc.MaxFetchResponse, 1<<20),
 		kvMaxEntries: pc.KVMaxEntries,
 		kvMaxBytes:   sizeOr(pc.KVMaxBytes, 1<<20),
-		kvKeys:       make(map[string]int),
+		kvUsage:      m.kvLedgerFor(name),
 		log:          m.log,
 		onInvoke:     m.onInvoke,
 		onPanic:      m.onPanic,
@@ -409,19 +435,20 @@ func (p *plugin) release(pm *pooledModule) {
 // per-namespace quota: it rejects (returns false) a value that would push the
 // total byte size or the distinct-key count over the configured caps.
 func (p *plugin) kvSet(key string, val []byte) bool {
-	p.kvMu.Lock()
-	defer p.kvMu.Unlock()
-	prev, exists := p.kvKeys[key]
-	newTotal := p.kvBytes - prev + len(val)
+	u := p.kvUsage
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	prev, exists := u.keys[key]
+	newTotal := u.bytes - prev + len(val)
 	if newTotal > p.kvMaxBytes {
 		return false
 	}
-	if !exists && len(p.kvKeys) >= p.kvMaxEntries {
+	if !exists && len(u.keys) >= p.kvMaxEntries {
 		return false
 	}
 	p.kv.Set(key, val)
-	p.kvKeys[key] = len(val)
-	p.kvBytes = newTotal
+	u.keys[key] = len(val)
+	u.bytes = newTotal
 	return true
 }
 

@@ -122,7 +122,7 @@ jobs:
         shell: bash
         run: |
           go test -count=1 -tags "${FULL_TAGS}" -covermode=atomic -coverpkg="${COVERPKG}" -coverprofile=/tmp/issue408.cover ./internal/server ./internal/admin ./internal/adminapi ./internal/adminclient ./internal/app ./internal/config ./internal/observability ./internal/redact
-          git diff --unified=0 "$BASE_SHA"...HEAD -- '*.go' > /tmp/issue408.diff
+          git diff --unified=0 "$BASE_SHA"...HEAD -- '*.go' | python3 scripts/strip_moved_lines.py > /tmp/issue408.diff
           python3 - <<'PY'
           from pathlib import Path
           import re

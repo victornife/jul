@@ -279,7 +279,10 @@ reload Jul.IA:
    listeners — a bad target fails the reload and the old config keeps serving.
 2. Binds any newly added listen addresses, rolling back if any bind fails.
 3. Swaps routes atomically on surviving listeners, starts newly bound ones, and
-   drains then stops removed ones.
+   stops removed ones: a removed listener stops accepting immediately and its
+   established connections drain in the background (until they close or hit
+   `idle_timeout`), so the reload never waits on a long-lived session. Process
+   shutdown bounds every stream drain at 30 seconds.
 
 The HTTP listeners are untouched throughout. Existing connections on a listener
 whose route changed continue on their original backend; new connections use the

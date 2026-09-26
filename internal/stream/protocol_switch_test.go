@@ -284,10 +284,11 @@ func TestStreamProtocolSwitchPreflightProbesCandidateProtocol(t *testing.T) {
 }
 
 // TestStreamProtocolSwitchDrainsEstablishedTCP is case 5: an established TCP
-// relay keeps working while the switch is prepared, and the switch completes
-// once the client closes. This is the retirement boundary documented for the
-// hot_reload classification: existing connections follow the retired listener,
-// new traffic uses the candidate protocol.
+// relay keeps working across the switch, which completes without waiting for
+// it (#428: a long-lived session must not stall the reload coordinator). This
+// is the retirement boundary documented for the hot_reload classification:
+// existing connections follow the retired listener, new traffic uses the
+// candidate protocol.
 func TestStreamProtocolSwitchDrainsEstablishedTCP(t *testing.T) {
 	tcpBackend, stopTCP := tcpEcho(t)
 	defer stopTCP()
@@ -302,6 +303,7 @@ func TestStreamProtocolSwitchDrainsEstablishedTCP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
+	defer client.Close()
 	_ = client.SetDeadline(time.Now().Add(5 * time.Second))
 	if _, err := client.Write([]byte("live")); err != nil {
 		t.Fatalf("write: %v", err)
@@ -311,30 +313,24 @@ func TestStreamProtocolSwitchDrainsEstablishedTCP(t *testing.T) {
 		t.Fatalf("read: %v", err)
 	}
 
-	// The reload retires the old listener, which waits for in-flight relays.
-	// Run it concurrently and prove it is still pending while the connection is
-	// open, then completes as soon as the client goes away.
 	done := make(chan error, 1)
 	go func() { done <- s.Reload([]config.StreamServer{streamBlock(addr, "udp", udpBackend)}, nil) }()
-
-	select {
-	case err := <-done:
-		t.Fatalf("the switch completed while a relay was still established: %v", err)
-	case <-time.After(150 * time.Millisecond):
-	}
-
-	_ = client.Close()
-
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("switch after drain: %v", err)
+			t.Fatalf("switch: %v", err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("the switch did not complete after the established connection closed")
+		t.Fatal("the switch waited for an established relay")
 	}
 
-	dialUDPAndEcho(t, addr, "after-drain")
+	if _, err := client.Write([]byte("more")); err != nil {
+		t.Fatalf("write after switch: %v", err)
+	}
+	if _, err := readFull(client, buf); err != nil || string(buf) != "more" {
+		t.Fatalf("established relay cut by the switch: %q %v", buf, err)
+	}
+	dialUDPAndEcho(t, addr, "after-switch")
 }
 
 // TestStreamProtocolSwitchRetiresUDPSessions is case 6: switching away from UDP

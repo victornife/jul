@@ -198,6 +198,15 @@ runs preflight, persists atomically, suppresses file-watcher echoes, submits a
 correlated reload, waits for the result, and — when the reload fails before
 `Publish` — restores the exact previous bytes including comments and formatting.
 
+The coordinator is one type split by responsibility across files in
+`internal/app`: `config_apply.go` (types, entry points, preflight and hot
+publication), `config_apply_baseline.go` (version/baseline CAS and managed
+drift), `config_apply_stage.go` (planned-restart staging and discard),
+`config_apply_ledger.go` (apply identity, idempotency and terminal
+finalization) and `config_apply_restore.go` (restoration and terminal-result
+construction). The split is structural only; lock order and transaction truth
+are unchanged.
+
 The restoration guarantee applies only to managed admin writes. SIGHUP and
 file-watch are external sources: they never rewrite the file, so a failed
 external reload leaves the previous runtime serving while the disk may differ.
@@ -663,6 +672,11 @@ converge on the next reload.
 
 ## HTTP handler-generation retirement (resource teardown)
 
+The full per-resource ownership model — scope, identity, liveness override,
+Prepare/Publish/Abort/Retire, drain and close for every runtime resource — is
+[resource-ownership.md](resource-ownership.md). This section describes the
+handler-generation mechanism it builds on.
+
 The HTTP handler swap is **generational**, and a superseded generation's
 resources are torn down only after the requests that may still be using them
 have finished. This matters because some handlers own backend resources that
@@ -931,13 +945,19 @@ swapped atomically per listener and take effect on the next connection.
 address, and TCP and UDP occupy independent port spaces, so switching the
 protocol on one numeric address is a transactional remove/add: the candidate
 protocol's socket is bound before any live state is mutated, and only then is
-the previous listener retired. Established TCP connections and tracked UDP
-sessions follow the retired listener's drain boundary — they keep running until
-they close or hit `idle_timeout`, and the reload waits for them — while new
-traffic arrives on the candidate protocol. If the candidate cannot build its
+the previous listener retired. Established TCP connections follow the retired
+listener's drain boundary — they keep relaying until they close or hit
+`idle_timeout` — while new traffic arrives on the candidate protocol; tracked
+UDP sessions of the retired listener are torn down. The reload does **not**
+wait for established connections: the retired listener stops accepting at
+once and drains in the background, so a long-lived session cannot stall later
+reloads or shutdown. Process shutdown bounds that drain (and every live
+listener's) at 30 seconds, then closes the sessions still relaying. If the
+candidate cannot build its
 routes or bind its socket, nothing is mutated and the previous protocol keeps
 serving. This is proven by the real-socket matrix in
-`internal/stream/protocol_switch_test.go`.
+`internal/stream/protocol_switch_test.go` and
+`internal/stream/removed_listener_drain_test.go`.
 
 `listen` keys a different listener, which is bound fresh and drained. See
 [stream-proxy.md](stream-proxy.md#hot-reload).

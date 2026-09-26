@@ -39,8 +39,16 @@ func (l *listener) serveTCP() {
 			continue
 		}
 		l.wg.Add(1)
+		l.udpMu.Lock()
+		l.tcpConns[conn] = struct{}{}
+		l.udpMu.Unlock()
 		go func(c net.Conn) {
 			defer l.wg.Done()
+			defer func() {
+				l.udpMu.Lock()
+				delete(l.tcpConns, c)
+				l.udpMu.Unlock()
+			}()
 			l.handleTCP(c)
 		}(conn)
 	}

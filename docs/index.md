@@ -42,6 +42,9 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 - **[Reload, staging, authority and rollback](reload-semantics.md)** —
   transactional reload, planned restart, managed/file-owned authority and
   generation lifetimes.
+- **[Runtime resource ownership](resource-ownership.md)** — who owns every
+  runtime resource and how it is prepared, published, aborted, retired,
+  drained and closed across generations.
 - **[Hot-reload strategy and selection criteria](hot-reload-strategy.md)** —
   rationale and closure record for selected live-transition investment; it
   never overrides the generated field-level lifecycle truth of the current

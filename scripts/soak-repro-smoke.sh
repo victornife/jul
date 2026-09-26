@@ -34,14 +34,19 @@ trap cleanup EXIT
 echo "== building full-tag jul binary"
 go build -tags "$FULL_TAGS" -o "$WORKDIR/jul" ./cmd/jul
 
+# Build helpers instead of `go run`: killing `go run` does not kill the child
+# it execs, which left backends holding :8081/:8082 after the smoke exited.
+go build -o "$WORKDIR/burn-in-backend" scripts/burn-in-backend.go
+go build -o "$WORKDIR/stream-echo" scripts/stream-echo.go
+
 echo "== starting backend :8081"
-go run scripts/burn-in-backend.go -port 8081 >"$WORKDIR/backend-8081.log" 2>&1 &
+"$WORKDIR/burn-in-backend" -port 8081 >"$WORKDIR/backend-8081.log" 2>&1 &
 PIDS+=("$!")
 echo "== starting backend :8082"
-go run scripts/burn-in-backend.go -port 8082 >"$WORKDIR/backend-8082.log" 2>&1 &
+"$WORKDIR/burn-in-backend" -port 8082 >"$WORKDIR/backend-8082.log" 2>&1 &
 PIDS+=("$!")
 echo "== starting TCP echo :55432"
-go run scripts/stream-echo.go -port 55432 >"$WORKDIR/echo.log" 2>&1 &
+"$WORKDIR/stream-echo" -port 55432 >"$WORKDIR/echo.log" 2>&1 &
 PIDS+=("$!")
 
 sleep 2

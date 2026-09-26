@@ -55,7 +55,21 @@ type Server struct {
 
 	mu        sync.Mutex
 	listeners map[string]*listener // keyed by "proto|addr"
+
+	// retiring tracks drains of listeners removed by Reload. They run off the
+	// reload path so a long-lived session cannot stall the reload coordinator;
+	// Close waits for them.
+	retiring sync.WaitGroup
+	// closing is closed when Close begins; it starts every drain's
+	// shutdownDrainGrace bound.
+	closing   chan struct{}
+	closeOnce sync.Once
 }
+
+// shutdownDrainGrace bounds how long Close lets established TCP sessions keep
+// relaying before closing them, so process shutdown cannot wedge on a
+// long-lived session. It is a variable so tests can shorten it.
+var shutdownDrainGrace = 30 * time.Second
 
 // NewServer builds a stream Server. The returned server holds no listeners
 // until Reload is called.
@@ -72,6 +86,7 @@ func NewServer(opts Options) *Server {
 		cancel:    cancel,
 		reg:       upstream.NewRegistry(upstream.RegistryOptions{Logger: log}),
 		listeners: map[string]*listener{},
+		closing:   make(chan struct{}),
 	}
 }
 
@@ -145,6 +160,10 @@ type listener struct {
 	udpMu       sync.Mutex
 	udpSessions map[string]*udpSession
 	udpPending  map[string]*udpPending
+
+	// tcpConns are the accepted client connections still relaying, so a drain
+	// that exceeds its grace can close them. Guarded by udpMu.
+	tcpConns map[net.Conn]struct{}
 }
 
 // Reload applies the desired stream configuration transactionally: all routes
@@ -229,7 +248,12 @@ func (s *Server) Reload(streams []config.StreamServer, upstreams map[string]conf
 	for key, l := range s.listeners {
 		if _, kept := want[key]; !kept {
 			delete(s.listeners, key)
-			l.shutdown()
+			l.stopAccepting()
+			s.retiring.Add(1)
+			go func(l *listener) {
+				defer s.retiring.Done()
+				l.drain()
+			}(l)
 			s.log.Info("stream: stopped listener", "proto", l.proto, "addr", l.addr)
 		}
 	}
@@ -328,19 +352,26 @@ func (s *Server) BoundKeys() []string {
 	return keys
 }
 
-// Close stops every listener and releases all sockets.
+// Close stops every listener and releases all sockets. Established TCP
+// sessions, including those of listeners already removed by Reload, get
+// shutdownDrainGrace to finish before they are closed.
 func (s *Server) Close() error {
+	s.closeOnce.Do(func() { close(s.closing) })
+	// Wake connections parked on admission so they cannot hold a drain open.
+	s.cancel()
 	s.mu.Lock()
 	ls := s.listeners
 	s.listeners = map[string]*listener{}
 	s.mu.Unlock()
 	for _, l := range ls {
-		l.shutdown()
+		l.stopAccepting()
 	}
-	// After the listeners are down, stop the pools' own workers and wake anything
-	// still parked on admission.
+	for _, l := range ls {
+		l.drain()
+	}
+	s.retiring.Wait()
+	// After the listeners are down, stop the pools' own workers.
 	s.reg.CloseAll()
-	s.cancel()
 	return nil
 }
 
@@ -409,6 +440,7 @@ func (s *Server) bindListener(key string, r *route) (*listener, error) {
 		addr:        addr,
 		udpSessions: map[string]*udpSession{},
 		udpPending:  map[string]*udpPending{},
+		tcpConns:    map[net.Conn]struct{}{},
 	}
 	l.route.Store(r)
 	if proto == "udp" {
@@ -437,8 +469,16 @@ func (l *listener) start() {
 	}
 }
 
-// shutdown closes the socket, tears down sessions, and waits for goroutines.
+// shutdown stops accepting and drains. It is used only for listeners that
+// were bound but never started serving, so the drain is immediate.
 func (l *listener) shutdown() {
+	l.stopAccepting()
+	l.drain()
+}
+
+// stopAccepting closes the socket and tears down UDP sessions so no new work
+// reaches the listener. Established TCP sessions keep relaying.
+func (l *listener) stopAccepting() {
 	if l.tcpLn != nil {
 		_ = l.tcpLn.Close()
 	}
@@ -450,7 +490,33 @@ func (l *listener) shutdown() {
 		_ = sess.backend.Close()
 	}
 	l.udpMu.Unlock()
-	l.wg.Wait()
+}
+
+// drain waits for the listener's sessions to end on their own (close or
+// idle_timeout). Once Close begins it bounds the wait by shutdownDrainGrace
+// and then closes the sessions still relaying.
+func (l *listener) drain() {
+	done := make(chan struct{})
+	go func() {
+		l.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-l.server.closing:
+		t := time.NewTimer(shutdownDrainGrace)
+		select {
+		case <-done:
+		case <-t.C:
+			l.udpMu.Lock()
+			for c := range l.tcpConns {
+				_ = c.Close()
+			}
+			l.udpMu.Unlock()
+			<-done
+		}
+		t.Stop()
+	}
 	if r := l.route.Load(); r != nil {
 		closeRoutes([]*route{r})
 	}
