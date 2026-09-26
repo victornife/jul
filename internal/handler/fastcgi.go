@@ -144,7 +144,9 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		chosen upstream.Attempt
 	)
 	finishRetryContext := context.CancelFunc(func() {})
-	_, err := h.pool.Do(r.Context(), h.pool.RetryRequestFor(h.retryOverride, replayable),
+	rr := h.pool.RetryRequestFor(h.retryOverride, replayable)
+	rr.Key = h.pool.AffinityKey(r)
+	_, err := h.pool.Do(r.Context(), rr,
 		func(ctx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
 			req := r
 			if n > 1 && r.GetBody != nil {
@@ -334,7 +336,9 @@ func (h *uwsgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		chosen upstream.Attempt
 	)
 	finishRetryContext := context.CancelFunc(func() {})
-	_, err := h.pool.Do(r.Context(), h.pool.RetryRequestFor(h.retryOverride, replayable),
+	rr := h.pool.RetryRequestFor(h.retryOverride, replayable)
+	rr.Key = h.pool.AffinityKey(r)
+	_, err := h.pool.Do(r.Context(), rr,
 		func(ctx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
 			body := r.Body
 			if n > 1 {

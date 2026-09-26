@@ -59,6 +59,10 @@ type patchRequest struct {
 	Address   string          `json:"address,omitempty"`    // upstream_add_backend / upstream_remove_backend
 	Weight    int             `json:"weight,omitempty"`     // upstream_add_backend (defaults to 1)
 	Strategy  string          `json:"strategy,omitempty"`   // upstream_set_strategy
+	// Hash is the [upstreams.hash] block for upstream_set_strategy and
+	// upstream_add with strategy consistent_hash. It is required by that
+	// strategy and rejected with any other.
+	Hash *upstreamHash `json:"hash,omitempty"`
 
 	// server_set_limits payload. Each field is an optional string-typed size or
 	// duration (e.g. "10m", "30s"); only non-empty fields are applied, so the
@@ -366,6 +370,15 @@ type serverLimits struct {
 // re-parse defaulting (interval 5s, timeout 2s, thresholds 2/3, expect [200]),
 // and the validated SaveConfig path rejects an inconsistent combination (e.g.
 // timeout >= interval, or http with no path).
+// upstreamHash is the upstream_set_strategy / upstream_add payload for
+// strategy consistent_hash: the whole [upstreams.hash] block. Algorithm is
+// not settable here; the only mapping is the default.
+type upstreamHash struct {
+	Key      string `json:"key"`
+	Name     string `json:"name,omitempty"`
+	Fallback string `json:"fallback,omitempty"`
+}
+
 type upstreamHealthCheck struct {
 	Enabled            bool   `json:"enabled"`
 	Type               string `json:"type,omitempty"` // "http" (default), "tcp", or "grpc"

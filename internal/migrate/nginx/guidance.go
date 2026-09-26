@@ -65,6 +65,14 @@ var guidanceCatalog = map[string]AssessmentGuidance{
 		Docs:        "nginx-assessment#important-blocking-and-approximate-cases",
 		Blocking:    true,
 	},
+	"GUIDE_UPSTREAM_AFFINITY": {
+		Code:        "GUIDE_UPSTREAM_AFFINITY",
+		Title:       "Review upstream affinity at cutover",
+		Action:      "Keep a supported key (client_ip, one header or one cookie) with strategy consistent_hash, choose hash.fallback for keyless requests, and plan for every key to be re-placed once when traffic moves from NGINX to Jul.",
+		Consequence: "Jul does not reproduce NGINX's hash placement, and an unsupported key expression cannot preserve affinity at all.",
+		Docs:        "nginx-assessment#upstream-affinity",
+		Blocking:    false,
+	},
 	"GUIDE_LOCATION_REVIEW": {
 		Code:        "GUIDE_LOCATION_REVIEW",
 		Title:       "Review location and path semantics",

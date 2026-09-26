@@ -202,7 +202,7 @@ panel:
 | Response cache, Rate limiting, Compression | `/traffic` |
 | Access control (auth), Web application firewall | `/security` |
 | TLS, Automatic HTTPS (ACME), Mutual TLS | `/tls` |
-| Upstream pools, Active health checks, Service discovery | `/apps` |
+| Upstream pools, Active health checks, Service discovery, Consistent-hash affinity | `/apps` |
 | WASM plugins | `/plugins` |
 | L4 stream proxy | `/streams` |
 | gRPC transcoding | `/transcode` |

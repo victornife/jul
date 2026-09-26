@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 307 configurable leaves.
+Coverage: 311 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -3599,6 +3599,62 @@ FailTimeout is the deprecated spelling of [upstreams.resilience] fail_timeout: h
 | Zero/empty semantics | omitted/zero defaults to 10s; deprecated in favour of upstreams[].resilience.fail_timeout, and setting both is an error |
 | Active when | always |
 
+## `upstreams.*.hash.algorithm` {#upstreams-x-hash-algorithm}
+
+Algorithm pins the key-to-backend mapping.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `upstream` |
+| Why | the upstream registry stages and swaps pools on each successful reload |
+| Allowed values | `rendezvous_v1` |
+| Constraint | exact lowercase enum |
+| Zero/empty semantics | omitted selects rendezvous_v1, the only mapping; a future mapping is a new value, never a change to this one |
+| Active when | strategy consistent_hash |
+
+## `upstreams.*.hash.fallback` {#upstreams-x-hash-fallback}
+
+Fallback is the strategy used for a request without a usable key (absent, empty, oversized or unattributed): "round_robin" (default), "weighted_round_robin" or "least_conn".
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `upstream` |
+| Why | the upstream registry stages and swaps pools on each successful reload |
+| Allowed values | `round_robin`, `weighted_round_robin`, `least_conn` |
+| Constraint | exact lowercase enum |
+| Zero/empty semantics | omitted selects round_robin for requests without a usable key |
+| Active when | strategy consistent_hash |
+
+## `upstreams.*.hash.key` {#upstreams-x-hash-key}
+
+Key is the affinity key source: "client_ip" (the canonical client address), "header" or "cookie".
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `upstream` |
+| Why | the upstream registry stages and swaps pools on each successful reload |
+| Allowed values | `client_ip`, `header`, `cookie` |
+| Constraint | exact lowercase enum; required; stream routes accept client_ip only |
+| Zero/empty semantics | required when strategy is consistent_hash; there is no default key |
+| Active when | strategy consistent_hash |
+
+## `upstreams.*.hash.name` {#upstreams-x-hash-name}
+
+Name is the request header or cookie name.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `upstream` |
+| Why | the upstream registry stages and swaps pools on each successful reload |
+
 ## `upstreams.*.health_check.enabled` {#upstreams-x-health_check-enabled}
 
 Enabled turns on active health checking for this upstream pool.
@@ -3970,7 +4026,7 @@ Weight biases backend selection under weighted-round-robin; higher values receiv
 
 ## `upstreams.*.strategy` {#upstreams-x-strategy}
 
-Strategy is one of "round_robin", "weighted_round_robin", "least_conn".
+Strategy is one of "round_robin", "weighted_round_robin", "least_conn", "consistent_hash".
 
 | | |
 | --- | --- |
@@ -3979,7 +4035,7 @@ Strategy is one of "round_robin", "weighted_round_robin", "least_conn".
 | Subsystem | `upstream` |
 | Why | the upstream registry stages and swaps pools on each successful reload |
 | Default | round_robin |
-| Allowed values | `round_robin`, `weighted_round_robin`, `least_conn` |
+| Allowed values | `round_robin`, `weighted_round_robin`, `least_conn`, `consistent_hash` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
 | Active when | upstream configured |

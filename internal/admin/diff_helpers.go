@@ -876,6 +876,11 @@ func diffUpstreamFields(name string, b, a *config.UpstreamConfig, d *ConfigDiff)
 	}
 	d.cover("upstreams.*.strategy")
 
+	if bh, ah := hashSummary(b.Hash), hashSummary(a.Hash); bh != ah {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(bh), After: orNone(ah), Detail: "Change affinity key of " + name + "; keys are re-placed from the next reload"}, "upstream "+name+" hash")
+	}
+	d.cover("upstreams.*.hash")
+
 	// Backend set (targets).
 	bb, ab := backendSet(b.Servers), backendSet(a.Servers)
 	for _, addr := range sortedKeys(ab) {

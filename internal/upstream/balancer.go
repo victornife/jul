@@ -6,6 +6,8 @@ package upstream
 import (
 	"sync"
 	"sync/atomic"
+
+	"jul/internal/affinity"
 )
 
 // Balancer selects a backend from a set of currently-available backends.
@@ -17,15 +19,64 @@ type Balancer interface {
 	updateBackends(backends []*Backend)
 }
 
-func newBalancer(strategy string) Balancer {
+// newBalancer builds the balancer for a strategy. fallback is the strategy a
+// consistent_hash balancer uses for a request without a usable key; it is
+// ignored by every other strategy.
+func newBalancer(strategy, fallback string) Balancer {
 	switch strategy {
 	case "least_conn":
 		return &leastConn{}
 	case "weighted_round_robin":
 		return newWeightedRR()
+	case "consistent_hash":
+		return &rendezvous{fallback: newBalancer(fallback, "")}
 	default: // "round_robin" and anything unrecognized
 		return &roundRobin{}
 	}
+}
+
+// pickFor chooses among available for one request. A hashed key is placed by
+// rendezvous ranking when the balancer hashes; everything else — keyless
+// requests and non-hashing strategies — takes the ordinary pick.
+func pickFor(bal Balancer, available []*Backend, key affinity.Key) *Backend {
+	if r, ok := bal.(*rendezvous); ok && key.Hashed() {
+		return r.pickKey(available, key.Sum())
+	}
+	return bal.pick(available)
+}
+
+// rendezvous is strategy = "consistent_hash": weighted rendezvous hashing
+// (rendezvous_v1, ADR 0021) over the eligible set.
+//
+// It holds no per-key or per-client state. The eligible set is computed by the
+// caller from health, circuit and capacity before ranking, so affinity never
+// pins a request to a backend that is out of rotation, and removing a backend
+// from that set moves only the keys it held. A retry excludes the attempted
+// backend and ranks again, which is exactly the next backend in the key's
+// order.
+type rendezvous struct {
+	fallback Balancer
+}
+
+func (r *rendezvous) pick(a []*Backend) *Backend { return r.fallback.pick(a) }
+
+func (r *rendezvous) updateBackends(bs []*Backend) { r.fallback.updateBackends(bs) }
+
+// pickKey returns the highest-ranked backend for key. It is one pass with no
+// allocation; equal weights never compute a logarithm (see affinity.Better).
+func (r *rendezvous) pickKey(a []*Backend, key uint64) *Backend {
+	if len(a) == 0 {
+		return nil
+	}
+	best := a[0]
+	bestC := best.affinityCandidate()
+	for _, b := range a[1:] {
+		c := b.affinityCandidate()
+		if affinity.Better(key, c, bestC) {
+			best, bestC = b, c
+		}
+	}
+	return best
 }
 
 // roundRobin cycles through available backends in order.

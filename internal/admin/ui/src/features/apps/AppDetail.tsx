@@ -11,6 +11,14 @@ import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { Drawer } from "@/components/Drawer.tsx";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { DiscoveryEditor, HealthCheckEditor } from "@/features/apps/AppSettingsEditor.tsx";
+import { HashSettingsFields } from "@/features/apps/HashSettings.tsx";
+import {
+  describeHash,
+  hashDraftFromProjection,
+  hashDraftIssues,
+  hashDraftToPatch,
+  type AppHashDraft,
+} from "@/lib/appHash.ts";
 import { AppPatchValidationError, buildAppRemovalBatch } from "@/lib/appPatch.ts";
 import type { PendingPatchDraft } from "@/lib/configDraftHandoff.ts";
 import { useRunPatch } from "@/lib/useRunPatch.ts";
@@ -20,6 +28,7 @@ const STRATEGIES: ReadonlyArray<{ readonly value: string; readonly label: string
   { value: "round_robin", label: "Round robin" },
   { value: "weighted_round_robin", label: "Weighted round robin" },
   { value: "least_conn", label: "Least connections" },
+  { value: "consistent_hash", label: "Consistent hash (affinity)" },
 ];
 
 function Row({ label, value }: { readonly label: string; readonly value: React.ReactNode }) {
@@ -344,15 +353,27 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
   const [newAddr, setNewAddr] = useState("");
   const [newWeight, setNewWeight] = useState(1);
   const [strategy, setStrategy] = useState(app.strategy || "round_robin");
+  const [hash, setHash] = useState<AppHashDraft>(hashDraftFromProjection(app));
   const [editing, setEditing] = useState<null | "health" | "discovery">(null);
   const isStatic = !app.discovery || app.discovery === "static";
   const routesUsing = app.routes_using ?? [];
   const shownRoutesUsing = routesUsing.slice(0, 8);
   const remainingRoutesUsing = routesUsing.length - shownRoutesUsing.length;
+  const hashDescription = describeHash(app);
+  const hashIssues = strategy === "consistent_hash" ? hashDraftIssues(hash) : [];
+  const currentHash = hashDraftFromProjection(app);
+  const hashChanged =
+    strategy === "consistent_hash" &&
+    (hash.key !== currentHash.key ||
+      hash.fallback !== currentHash.fallback ||
+      (hash.key !== "client_ip" && hash.name.trim() !== currentHash.name));
+  const strategyUnchanged = strategy === (app.strategy || "round_robin") && !hashChanged;
 
   useEffect(() => {
     setStrategy(app.strategy || "round_robin");
-  }, [app.name, app.strategy]);
+    setHash(hashDraftFromProjection(app));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reseed only when the upstream's own policy changes
+  }, [app.name, app.strategy, app.hash?.key, app.hash?.name, app.hash?.fallback]);
 
   return (
     <Drawer
@@ -381,6 +402,15 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
 
         <div className="rounded-md border border-jul-border bg-jul-surface px-4 py-2">
           <Row label="Strategy" value={app.strategy} />
+          {hashDescription !== null && app.hash !== undefined && (
+            <>
+              <Row label="Affinity key" value={hashDescription} />
+              <Row
+                label="Applies to"
+                value={app.hash.applies_to === "http" ? "HTTP routes only" : "HTTP and stream routes"}
+              />
+            </>
+          )}
           <Row label="Backends" value={backendsValue} />
           <Row
             label="Health checks"
@@ -429,12 +459,13 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
             </label>
             <button
               type="button"
-              disabled={patch.busy || !canWrite || strategy === (app.strategy || "round_robin")}
+              disabled={patch.busy || !canWrite || strategyUnchanged || hashIssues.length > 0}
               onClick={() => {
                 patch.run({
                   op: "upstream_set_strategy",
                   upstream: app.name,
                   strategy,
+                  ...(strategy === "consistent_hash" ? { hash: hashDraftToPatch(hash) } : {}),
                 });
               }}
               className="rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
@@ -442,6 +473,14 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
               Review →
             </button>
           </div>
+          {strategy === "consistent_hash" && (
+            <HashSettingsFields value={hash} onChange={setHash} disabled={!canWrite || patch.busy} />
+          )}
+          {hashIssues.map((issue) => (
+            <p key={issue} className="text-xs text-jul-danger">
+              {issue}
+            </p>
+          ))}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

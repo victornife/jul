@@ -5,6 +5,12 @@
 
 import type { AppProjection, ConfigPatch, RouteProjection } from "@/api/client.ts";
 import {
+  hashDraftIssues,
+  hashDraftToPatch,
+  type AppHashDraft,
+  type HashPatch,
+} from "@/lib/appHash.ts";
+import {
   discoveryToPatch,
   discoveryWarnings,
   healthCheckToPatch,
@@ -21,7 +27,7 @@ import {
   type ServerIdentity,
 } from "@/lib/routePatch.ts";
 
-export type AppStrategy = "round_robin" | "weighted_round_robin" | "least_conn";
+export type AppStrategy = "round_robin" | "weighted_round_robin" | "least_conn" | "consistent_hash";
 export type AppProtocol = "http" | "grpc";
 export type AppRouteMatchType = "prefix" | "exact";
 
@@ -60,6 +66,8 @@ export interface AppDiscoveryDraft {
 export interface AppCreateDraft {
   readonly name: string;
   readonly strategy: AppStrategy;
+  /** Required when strategy is consistent_hash; ignored otherwise. */
+  readonly hash?: AppHashDraft | undefined;
   readonly backends: readonly AppBackendDraft[];
   readonly healthCheck?: HealthCheckDraft | undefined;
   readonly discovery?: AppDiscoveryDraft | undefined;
@@ -234,9 +242,23 @@ export function buildAppCreationBatch(
     throw new AppPatchValidationError([`An App/upstream named ${name} already exists.`]);
   }
 
-  const strategies: readonly AppStrategy[] = ["round_robin", "weighted_round_robin", "least_conn"];
+  const strategies: readonly AppStrategy[] = [
+    "round_robin",
+    "weighted_round_robin",
+    "least_conn",
+    "consistent_hash",
+  ];
   if (!strategies.includes(draft.strategy)) {
     throw new AppPatchValidationError([`Unsupported load-balancing strategy: ${draft.strategy}.`]);
+  }
+  let hash: HashPatch | undefined;
+  if (draft.strategy === "consistent_hash") {
+    if (draft.hash === undefined) {
+      throw new AppPatchValidationError(["Consistent hashing needs an affinity key source."]);
+    }
+    const issues = hashDraftIssues(draft.hash);
+    if (issues.length > 0) throw new AppPatchValidationError(issues);
+    hash = hashDraftToPatch(draft.hash);
   }
 
   // Blank placeholder rows are omitted before choosing the first backend. This
@@ -259,6 +281,7 @@ export function buildAppCreationBatch(
       address: first.address,
       weight: first.weight,
       strategy: draft.strategy,
+      ...(hash === undefined ? {} : { hash }),
     },
   ];
   for (const backend of backends.slice(1)) {

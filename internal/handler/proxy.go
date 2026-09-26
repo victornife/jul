@@ -320,6 +320,9 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// single total that explains nothing.
 	var backoff atomic.Int64
 	rr := t.retryRequest(replayable)
+	// Read from the request as forwarded, so the backend a key selects is the
+	// one that receives that value.
+	rr.Key = t.pool.AffinityKey(req)
 	rr.OnBackoff = func(_ int, d time.Duration) { backoff.Store(int64(d / time.Millisecond)) }
 	_, err := t.pool.Do(req.Context(), rr, func(actx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
 		attempts++

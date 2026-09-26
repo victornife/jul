@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 361,
-    "schema_leaves": 307,
+    "schema_paths": 366,
+    "schema_leaves": 311,
     "resources": 9
   },
   "capability_build_tags": {
@@ -4301,6 +4301,79 @@
       "description": "FailTimeout is the deprecated spelling of [upstreams.resilience] fail_timeout: how long a backend stays out of rotation before being probed again",
       "anchor": "upstreams-x-fail_timeout"
     },
+    "upstreams.*.hash.algorithm": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "upstream",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the upstream registry stages and swaps pools on each successful reload",
+      "value_kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects rendezvous_v1, the only mapping; a future mapping is a new value, never a change to this one",
+      "active_when": "strategy consistent_hash",
+      "allowed": [
+        "rendezvous_v1"
+      ],
+      "description": "Algorithm pins the key-to-backend mapping",
+      "anchor": "upstreams-x-hash-algorithm"
+    },
+    "upstreams.*.hash.fallback": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "upstream",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the upstream registry stages and swaps pools on each successful reload",
+      "value_kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects round_robin for requests without a usable key",
+      "active_when": "strategy consistent_hash",
+      "allowed": [
+        "round_robin",
+        "weighted_round_robin",
+        "least_conn"
+      ],
+      "description": "Fallback is the strategy used for a request without a usable key (absent, empty, oversized or unattributed): \"round_robin\" (default), \"weighted_round_robin\" or \"least_conn\"",
+      "anchor": "upstreams-x-hash-fallback"
+    },
+    "upstreams.*.hash.key": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "upstream",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the upstream registry stages and swaps pools on each successful reload",
+      "value_kind": "enum",
+      "constraint": "exact lowercase enum; required; stream routes accept client_ip only",
+      "zero_semantics": "required when strategy is consistent_hash; there is no default key",
+      "active_when": "strategy consistent_hash",
+      "allowed": [
+        "client_ip",
+        "header",
+        "cookie"
+      ],
+      "description": "Key is the affinity key source: \"client_ip\" (the canonical client address), \"header\" or \"cookie\"",
+      "anchor": "upstreams-x-hash-key"
+    },
+    "upstreams.*.hash.name": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "upstream",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the upstream registry stages and swaps pools on each successful reload",
+      "description": "Name is the request header or cookie name",
+      "anchor": "upstreams-x-hash-name"
+    },
     "upstreams.*.health_check.enabled": {
       "kind": "scalar",
       "scalar": "bool",
@@ -4737,10 +4810,11 @@
       "allowed": [
         "round_robin",
         "weighted_round_robin",
-        "least_conn"
+        "least_conn",
+        "consistent_hash"
       ],
       "default": "round_robin",
-      "description": "Strategy is one of \"round_robin\", \"weighted_round_robin\", \"least_conn\"",
+      "description": "Strategy is one of \"round_robin\", \"weighted_round_robin\", \"least_conn\", \"consistent_hash\"",
       "anchor": "upstreams-x-strategy"
     },
     "waf.block_status": {

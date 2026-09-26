@@ -901,7 +901,8 @@ servers = [
 | Key | Type | Description |
 | --- | ---- | ----------- |
 | `name` | string | Pool name |
-| `strategy` | string | `round_robin`, `weighted_round_robin`, or `least_conn` |
+| `strategy` | string | `round_robin`, `weighted_round_robin`, `least_conn`, or `consistent_hash` |
+| `hash` | table | `consistent_hash` key: `key` (`client_ip`/`header`/`cookie`), `name`, `fallback`, `algorithm` — see [upstreams.md](upstreams.md#consistent-hash-affinity) |
 | `servers` | array | Bare addresses (`"127.0.0.1:3000"`) or tables with `address` + `weight` |
 | `max_fails` | int | **Deprecated** — moved to [`resilience`](#resilience). Still valid; setting both is an error |
 | `fail_timeout` | duration | **Deprecated** — moved to [`resilience`](#resilience). Still valid; setting both is an error |

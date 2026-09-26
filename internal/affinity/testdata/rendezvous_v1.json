@@ -1,0 +1,338 @@
+{
+  "algorithm": "rendezvous_v1",
+  "sums": {
+    "0123456789abcdef0123456789abcdef": "26d521498b2056f3",
+    "198.51.100.23": "2e4b5d65619174b7",
+    "2001:db8:85a3::8a2e:370:7334": "ac04fad829aee30d",
+    "2001:db8::1": "85a0a62ee75faf77",
+    "203.0.113.7": "987c7c1923965ade",
+    "Tenant-A": "9984517e39bfedba",
+    "session=abc": "dd6837764d5d4f79",
+    "tenant-a": "a02bfa3261e19aa5",
+    "tenant-b": "1698d316632b3ac1",
+    "tenant-c": "d229f9a1ac75f797",
+    "user:42": "998817bee6718248",
+    "user:43": "f9082fd4d540db82",
+    "x": "6a4f9505be85405",
+    "ümlaut": "f6d7af043fe2cd9a"
+  },
+  "identities": {
+    "tcp 10.0.0.1:08080": "10.0.0.1:8080",
+    "tcp 10.0.0.1:8080": "10.0.0.1:8080",
+    "tcp API.Example.COM.:80": "api.example.com:80",
+    "tcp [2001:DB8:0:0::1]:443": "[2001:db8::1]:443",
+    "tcp [::ffff:10.0.0.1]:8080": "10.0.0.1:8080",
+    "tcp [fe80::1%eth0]:80": "[fe80::1%eth0]:80",
+    "tcp api.example.com:80": "api.example.com:80",
+    "tcp no-port": "no-port",
+    "unix /run//app.sock": "unix:/run//app.sock",
+    "unix /run/app.sock": "unix:/run/app.sock"
+  },
+  "neg_log2": {
+    "0": "4000000000",
+    "1": "4000000000",
+    "100000000": "1fffffffff",
+    "2": "3e6a3fe5c7",
+    "3": "3e6a3fe5c7",
+    "8000000000000000": "100000000",
+    "9e3779b97f4a7c15": "b1b9d806",
+    "ffffffffffffffff": "1"
+  },
+  "sets": [
+    {
+      "name": "equal-4",
+      "backends": [
+        {
+          "network": "tcp",
+          "address": "10.0.0.1:80",
+          "weight": 1
+        },
+        {
+          "network": "tcp",
+          "address": "10.0.0.2:80",
+          "weight": 1
+        },
+        {
+          "network": "tcp",
+          "address": "10.0.0.3:80",
+          "weight": 1
+        },
+        {
+          "network": "tcp",
+          "address": "10.0.0.4:80",
+          "weight": 1
+        }
+      ],
+      "rankings": {
+        "0123456789abcdef0123456789abcdef": [
+          1,
+          2,
+          0,
+          3
+        ],
+        "198.51.100.23": [
+          0,
+          2,
+          1,
+          3
+        ],
+        "2001:db8:85a3::8a2e:370:7334": [
+          0,
+          3,
+          2,
+          1
+        ],
+        "2001:db8::1": [
+          0,
+          2,
+          3,
+          1
+        ],
+        "203.0.113.7": [
+          2,
+          0,
+          1,
+          3
+        ],
+        "Tenant-A": [
+          1,
+          0,
+          2,
+          3
+        ],
+        "session=abc": [
+          2,
+          0,
+          1,
+          3
+        ],
+        "tenant-a": [
+          1,
+          3,
+          2,
+          0
+        ],
+        "tenant-b": [
+          3,
+          2,
+          1,
+          0
+        ],
+        "tenant-c": [
+          0,
+          3,
+          2,
+          1
+        ],
+        "user:42": [
+          1,
+          3,
+          2,
+          0
+        ],
+        "user:43": [
+          2,
+          1,
+          0,
+          3
+        ],
+        "x": [
+          1,
+          0,
+          3,
+          2
+        ],
+        "ümlaut": [
+          2,
+          3,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "weighted-3",
+      "backends": [
+        {
+          "network": "tcp",
+          "address": "app-a.internal:9000",
+          "weight": 1
+        },
+        {
+          "network": "tcp",
+          "address": "app-b.internal:9000",
+          "weight": 3
+        },
+        {
+          "network": "tcp",
+          "address": "app-c.internal:9000",
+          "weight": 6
+        }
+      ],
+      "rankings": {
+        "0123456789abcdef0123456789abcdef": [
+          2,
+          1,
+          0
+        ],
+        "198.51.100.23": [
+          2,
+          1,
+          0
+        ],
+        "2001:db8:85a3::8a2e:370:7334": [
+          2,
+          1,
+          0
+        ],
+        "2001:db8::1": [
+          1,
+          2,
+          0
+        ],
+        "203.0.113.7": [
+          1,
+          2,
+          0
+        ],
+        "Tenant-A": [
+          2,
+          0,
+          1
+        ],
+        "session=abc": [
+          0,
+          2,
+          1
+        ],
+        "tenant-a": [
+          1,
+          0,
+          2
+        ],
+        "tenant-b": [
+          2,
+          1,
+          0
+        ],
+        "tenant-c": [
+          2,
+          1,
+          0
+        ],
+        "user:42": [
+          2,
+          1,
+          0
+        ],
+        "user:43": [
+          2,
+          1,
+          0
+        ],
+        "x": [
+          0,
+          2,
+          1
+        ],
+        "ümlaut": [
+          1,
+          2,
+          0
+        ]
+      }
+    },
+    {
+      "name": "mixed-networks",
+      "backends": [
+        {
+          "network": "tcp",
+          "address": "[2001:db8::10]:8443",
+          "weight": 2
+        },
+        {
+          "network": "unix",
+          "address": "/run/php/fpm.sock",
+          "weight": 2
+        },
+        {
+          "network": "tcp",
+          "address": "192.0.2.10:8443",
+          "weight": 5
+        }
+      ],
+      "rankings": {
+        "0123456789abcdef0123456789abcdef": [
+          2,
+          1,
+          0
+        ],
+        "198.51.100.23": [
+          2,
+          1,
+          0
+        ],
+        "2001:db8:85a3::8a2e:370:7334": [
+          2,
+          0,
+          1
+        ],
+        "2001:db8::1": [
+          2,
+          1,
+          0
+        ],
+        "203.0.113.7": [
+          2,
+          0,
+          1
+        ],
+        "Tenant-A": [
+          2,
+          0,
+          1
+        ],
+        "session=abc": [
+          1,
+          2,
+          0
+        ],
+        "tenant-a": [
+          2,
+          1,
+          0
+        ],
+        "tenant-b": [
+          2,
+          0,
+          1
+        ],
+        "tenant-c": [
+          2,
+          0,
+          1
+        ],
+        "user:42": [
+          0,
+          2,
+          1
+        ],
+        "user:43": [
+          1,
+          0,
+          2
+        ],
+        "x": [
+          2,
+          1,
+          0
+        ],
+        "ümlaut": [
+          1,
+          0,
+          2
+        ]
+      }
+    }
+  ]
+}

@@ -202,6 +202,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		OnBackends:          metrics.ObserveUpstreamBackends,
 		OnBackendsHealthy:   metrics.ObserveBackendsHealthy,
 		OnCircuitTransition: func(pool string, to upstream.BackendState) { metrics.ObserveCircuitTransition(pool, string(to)) },
+		OnAffinityKey:       metrics.ObserveAffinityKey,
 		OnPoolRetired:       metrics.RetirePool,
 		OnDiscoveryError:    metrics.ObserveDiscoveryError,
 	})

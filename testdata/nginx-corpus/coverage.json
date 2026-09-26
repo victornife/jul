@@ -131,6 +131,9 @@
         "timeout-runtime",
         "unix-http-upstream",
         "upstream-failover-runtime",
+        "upstream-hash-affinity",
+        "upstream-hash-affinity-runtime",
+        "upstream-hash-blocking",
         "upstream-weighted",
         "upstream-weighted-runtime"
       ],
@@ -138,9 +141,11 @@
         "issue #365 real-Jul deterministic weighted-round-robin distribution E2E",
         "issue #365 real-Jul passive-failover/circuit-breaker E2E",
         "issue #365 real-Jul proxy_connect_timeout/proxy_read_timeout enforcement E2E",
-        "issue #367 real-Jul stream passive-failover/circuit-breaker E2E"
+        "issue #367 real-Jul stream passive-failover/circuit-breaker E2E",
+        "issue #432 NGX_UPSTREAM_HASH/NGX_UPSTREAM_IP_HASH -> consistent_hash translation and NGX_UPSTREAM_HASH_KEY blocking",
+        "issue #432 real NGINX-vs-Jul hash-affinity E2E (per-tenant stickiness, keyless round robin, placement differences recorded as expected differences)"
       ],
-      "rationale": "The corpus covers named weighted upstreams, least-connections translation, ignored pool tuning, blocking variable-derived destinations, a real Unix-socket HTTP upstream (#407), a real-Jul weighted-round-robin E2E proving the exact 3:1 distribution (#365), the bounded max_fails/fail_timeout -> [upstreams.resilience] translation with a real-Jul passive-failover E2E (#365), proxy_connect_timeout/proxy_read_timeout -> location timeouts with a real-Jul 504 E2E (#365), bounded proxy_next_upstream_tries -> retry_attempts (2+ only; 0/1 collide with the 0=\"inherit\" sentinel and stay blocking), and a stream named upstream reusing that same shared resilience translation unmodified, proven over a raw TCP connection rather than an HTTP status (#367).",
+      "rationale": "The corpus covers named weighted upstreams, least-connections translation, ignored pool tuning, blocking variable-derived destinations, a real Unix-socket HTTP upstream (#407), a real-Jul weighted-round-robin E2E proving the exact 3:1 distribution (#365), max_fails/fail_timeout -> [upstreams.resilience] with a real-Jul failover E2E (#365), proxy connect/read timeouts with a real-Jul 504 E2E (#365), bounded proxy_next_upstream_tries -> retry_attempts (2+ only; 0/1 collide with the 0=\"inherit\" sentinel and stay blocking), and a stream named upstream reusing that same shared resilience translation unmodified, proven over a raw TCP connection rather than an HTTP status (#367). #432: ip_hash/hash -> consistent_hash (unsupported keys block) with a real NGINX-vs-Jul affinity E2E.",
       "deferred_dimensions": [
         "WebSocket/gRPC upstream runtime replay",
         "active-health migration replay",

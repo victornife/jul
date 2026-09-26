@@ -99,8 +99,9 @@ func TestAssessmentV2TargetMappingRelationsAndInference(t *testing.T) {
 		"NGX_LOCATION_RETURN_BODY":  "servers[].locations[].return",
 		"NGX_LOCATION_REWRITE_FLAG": "servers[].locations[].rewrites[]",
 		"NGX_LOCATION_LIMIT_EXCEPT": "servers[].locations[].match.methods",
-		"NGX_UPSTREAM_IP_HASH":      "upstreams[].strategy",
-		"NGX_UPSTREAM_HASH":         "upstreams[].strategy",
+		"NGX_UPSTREAM_IP_HASH":      "upstreams[].strategy,upstreams[].hash.key",
+		"NGX_UPSTREAM_HASH":         "upstreams[].strategy,upstreams[].hash.key",
+		"NGX_UPSTREAM_HASH_KEY":     "upstreams[].strategy,upstreams[].hash.key",
 		"NGX_UPSTREAM_RANDOM":       "upstreams[].strategy",
 		"NGX_UPSTREAM_SERVER_DOWN":  "upstreams[].servers[]",
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"jul/internal/affinity"
 	"jul/internal/config"
 )
 
@@ -427,7 +428,7 @@ func TestPickExcludingReturnsErrorWhenAllAvailableExcluded(t *testing.T) {
 	defer b1.Release()
 
 	tried := map[BackendIdentity]struct{}{b1.Identity(): {}}
-	b2, err := snap.pickExcluding(tried)
+	b2, err := snap.pickKeyed(affinity.Key{}, tried)
 	if err != nil {
 		t.Fatalf("second pick excluding first: %v", err)
 	}
@@ -437,7 +438,7 @@ func TestPickExcludingReturnsErrorWhenAllAvailableExcluded(t *testing.T) {
 	}
 
 	tried[b2.Identity()] = struct{}{}
-	if _, err := snap.pickExcluding(tried); err != ErrNoAvailableBackend {
+	if _, err := snap.pickKeyed(affinity.Key{}, tried); err != ErrNoAvailableBackend {
 		t.Errorf("pickExcluding with all excluded returned %v, want ErrNoAvailableBackend", err)
 	}
 }

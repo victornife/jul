@@ -191,10 +191,15 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		}
 	}
 
-	var healthPools, discoveryPools int
+	var healthPools, discoveryPools, affinityPools int
+	affinityKeys := map[string]bool{}
 	discoveryKinds := map[string]bool{}
 	for i := range c.Upstreams {
 		up := &c.Upstreams[i]
+		if h := upstreamHashView(up); h != nil {
+			affinityPools++
+			affinityKeys[h.Key] = true
+		}
 		if b := up.BackendTLS; b != nil {
 			backendTLSPools++
 			if b.InsecureSkipVerify {
@@ -396,6 +401,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		{Group: "Upstreams", Name: "Active health checks", Active: healthPools > 0, Detail: countDetailIf(healthPools, "pool")},
 		{Group: "Upstreams", Name: "Backend TLS trust", Active: backendTLSPools+backendTLSRoutes > 0, Detail: backendTLSDetail},
 		{Group: "Upstreams", Name: "Service discovery", Active: discoveryPools > 0, Detail: discDetail},
+		{Group: "Upstreams", Name: "Consistent-hash affinity", Active: affinityPools > 0, Detail: affinityDetail(affinityPools, affinityKeys)},
 
 		{Group: "Observability", Name: "Prometheus metrics", Active: s.deps.Metrics != nil, Detail: metricsDetail(s.deps.Metrics != nil)},
 		{Group: "Observability", Name: "Distributed tracing", Active: c.Observability.Tracing.Enabled, Detail: trDetail},

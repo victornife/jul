@@ -440,6 +440,43 @@
       "active_when": "HTTP/3 enabled"
     },
     {
+      "go_field": "HashConfig.Algorithm",
+      "path": "upstreams[].hash.algorithm",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects rendezvous_v1, the only mapping; a future mapping is a new value, never a change to this one",
+      "active_when": "strategy consistent_hash",
+      "allowed": [
+        "rendezvous_v1"
+      ]
+    },
+    {
+      "go_field": "HashConfig.Fallback",
+      "path": "upstreams[].hash.fallback",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted selects round_robin for requests without a usable key",
+      "active_when": "strategy consistent_hash",
+      "allowed": [
+        "round_robin",
+        "weighted_round_robin",
+        "least_conn"
+      ]
+    },
+    {
+      "go_field": "HashConfig.Key",
+      "path": "upstreams[].hash.key",
+      "kind": "enum",
+      "constraint": "exact lowercase enum; required; stream routes accept client_ip only",
+      "zero_semantics": "required when strategy is consistent_hash; there is no default key",
+      "active_when": "strategy consistent_hash",
+      "allowed": [
+        "client_ip",
+        "header",
+        "cookie"
+      ]
+    },
+    {
       "go_field": "HeaderMatch.Name",
       "path": "servers[].locations[].match.headers[].name",
       "kind": "grammar",
@@ -1108,7 +1145,8 @@
       "allowed": [
         "round_robin",
         "weighted_round_robin",
-        "least_conn"
+        "least_conn",
+        "consistent_hash"
       ]
     },
     {

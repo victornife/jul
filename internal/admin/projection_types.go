@@ -3,7 +3,10 @@
 
 package admin
 
-import "jul/internal/server"
+import (
+	"jul/internal/adminapi"
+	"jul/internal/server"
+)
 
 // This file holds all the Go struct types that form the Console v2 JSON API
 // contract (projection types, DTO view structs, and RuntimeOverview). They were
@@ -149,10 +152,13 @@ type LocationCORSState struct {
 
 // AppProjection is a structured upstream/app for the Console v2 Apps panel.
 type AppProjection struct {
-	Name        string              `json:"name"`
-	Strategy    string              `json:"strategy"`
-	Backends    []BackendProjection `json:"backends"`
-	HealthCheck bool                `json:"health_check"`
+	Name     string `json:"name"`
+	Strategy string `json:"strategy"`
+	// Hash is the consistent_hash key policy, so the Console can state the key
+	// source, where it applies and what happens without a key.
+	Hash        *adminapi.UpstreamHash `json:"hash,omitempty"`
+	Backends    []BackendProjection    `json:"backends"`
+	HealthCheck bool                   `json:"health_check"`
 	// Verdict is the pool-level rollup, computed here rather than in the browser
 	// (ADR 0014). One of "healthy", "degraded", "down" or "unknown". If the
 	// Console derived it, the two could disagree during an incident, which is

@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 361 |
-| Schema leaves (configurable values) | 307 |
-| Registry entries | 307 |
+| Schema paths (containers included) | 366 |
+| Schema leaves (configurable values) | 311 |
+| Registry entries | 311 |
 | Startup-consumed entries | 32 |
-| Class `hot_reload` | 261 |
+| Class `hot_reload` | 265 |
 | Class `restart_required` | 32 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -388,6 +388,10 @@ value is compared as a digest so no secret material leaves the process.
 | `upstreams.*.discovery.target` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.discovery.type` | `hot_reload` | `discovery` | — | the per-pool discovery refresher is restarted with the pool on each successful reload |
 | `upstreams.*.fail_timeout` | `hot_reload` | `resilience` | — | the bound is retuned on each backend in place while circuit state, the failure count and any half-open probe already in flight are preserved: rebuilding the breaker would forget which backends are currently out of rotation, and a reload during an incident would put every one of them back under full load at once |
+| `upstreams.*.hash.algorithm` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
+| `upstreams.*.hash.fallback` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
+| `upstreams.*.hash.key` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
+| `upstreams.*.hash.name` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
 | `upstreams.*.health_check.enabled` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
 | `upstreams.*.health_check.expect_body` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |
 | `upstreams.*.health_check.expect_status` | `hot_reload` | `health_check` | — | active probes are restarted with the pool on each successful reload |

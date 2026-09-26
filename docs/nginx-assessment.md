@@ -257,6 +257,35 @@ Include outcomes use:
 Finding and guidance codes are independent: findings describe what happened;
 guidance describes what the operator must do next.
 
+## Upstream affinity
+
+NGINX `ip_hash` and `hash` translate onto Jul's `strategy = "consistent_hash"`
+([upstreams](upstreams.md#consistent-hash-affinity), ADR 0021) only where the
+key is one of Jul's closed key sources. None is `supported`: the key source can
+match, but the placement function never does, so every key is re-placed once at
+cutover.
+
+| NGINX form | Class | Code | Generated Jul |
+| --- | --- | --- | --- |
+| `ip_hash;` | `approximated` | `NGX_UPSTREAM_IP_HASH` | `hash.key = "client_ip"`. NGINX hashes an IPv4 client's first three octets; Jul hashes the full canonical address, so one /24 may span backends. |
+| `hash $remote_addr [consistent];`, `hash $binary_remote_addr [consistent];` | `approximated` | `NGX_UPSTREAM_HASH` | `hash.key = "client_ip"`. |
+| `hash $http_<name> [consistent];` | `approximated` | `NGX_UPSTREAM_HASH` | `hash.key = "header"`, `hash.name = "<name>"` with `_` read as `-`. |
+| `hash $cookie_<name> [consistent];` | `approximated` | `NGX_UPSTREAM_HASH` | `hash.key = "cookie"`, `hash.name = "<name>"`. Jul matches the cookie name exactly. |
+| any other key (`$request_uri`, `$arg_*`, literals, concatenations) | `blocking` | `NGX_UPSTREAM_HASH_KEY` | `round_robin`; affinity is not preserved. |
+
+Behavior differences to review, all reported through `GUIDE_UPSTREAM_AFFINITY`:
+
+- NGINX `hash` without `consistent` is modular and remaps most keys when a
+  server is added or removed; Jul's rendezvous hashing moves only the keys that
+  must move, with or without `consistent`.
+- NGINX round-robins a request whose `hash` key is empty (observed on the
+  pinned `nginx:1.28.3-alpine` reference). Jul's default `hash.fallback` is
+  also `round_robin`, so keyless behavior matches unless the fallback is
+  changed. `ip_hash` always has a key.
+- NGINX `down` servers are omitted; Jul's mapping for the remaining servers is
+  unaffected by the omission.
+- `random` still falls back to round robin (`NGX_UPSTREAM_RANDOM`).
+
 ## Human output
 
 Default human output groups blockers first. `--source-order` emits one sequence

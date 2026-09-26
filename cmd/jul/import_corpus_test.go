@@ -290,7 +290,11 @@ func startCorpusUnixHTTPBackends(t *testing.T, cfg *config.Config) func() {
 			_ = ln.Close()
 			t.Fatalf("chmod Unix corpus backend %q: %v", path, err)
 		}
+		// X-Corpus-Backend-Id names the socket, so a multi-member fixture can
+		// assert which member answered, as the TCP corpus backends do.
+		id := strings.TrimSuffix(filepath.Base(path), ".sock")
 		srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("X-Corpus-Backend-Id", id)
 			_, _ = io.WriteString(w, "unix-backend-ok")
 		})}
 		done := make(chan struct{})

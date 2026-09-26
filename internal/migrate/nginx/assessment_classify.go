@@ -151,6 +151,8 @@ func classifyDirective(context AssessmentContext, d ngx.IDirective, facts walkFa
 			return classifyReturn(params, true)
 		case context == ContextUpstream && name == "server":
 			return classifyUpstreamServer(params, facts.upstreamMaxFailsConsistent, facts.upstreamFailTimeoutConsistent)
+		case context == ContextUpstream && name == "hash":
+			return classifyUpstreamHash(params)
 		case context == ContextServer && name == "location":
 			return classifyLocation(d)
 		default:

@@ -1,0 +1,186 @@
+{
+  "schema_version": 1,
+  "id": "upstream-hash-affinity",
+  "tier": "core",
+  "description": "NGINX ip_hash and hash-on-cookie HTTP upstreams plus a stream upstream hashed on $remote_addr, proving the #432 translation onto consistent_hash with the client_ip and cookie key sources, preserved weights, an omitted down member, and honest approximated classification.",
+  "origin": {
+    "kind": "repository_authored",
+    "license": "AGPL-3.0-only",
+    "source": "victornife/jul#432"
+  },
+  "categories": [
+    "resiliency",
+    "upstreams"
+  ],
+  "build_tags": [
+    "importer"
+  ],
+  "root": "nginx/nginx.conf",
+  "follow_includes": false,
+  "expected_assessment": {
+    "status": "ready_for_review",
+    "ready": true,
+    "complete": true,
+    "files_read": 1,
+    "sources": [
+      "nginx.conf"
+    ],
+    "results": [
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_EVENTS",
+        "class": "informational",
+        "risk": "operational",
+        "context": "main",
+        "directive": "events"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_HTTP",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "http"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_UPSTREAM",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "upstream",
+        "count": 2
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_UPSTREAM_IP_HASH",
+        "class": "approximated",
+        "risk": "availability",
+        "context": "upstream",
+        "directive": "ip_hash"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_UPSTREAM_SERVER",
+        "class": "supported",
+        "risk": "availability",
+        "context": "upstream",
+        "directive": "server",
+        "count": 6
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_UPSTREAM_SERVER_DOWN",
+        "class": "approximated",
+        "risk": "availability",
+        "context": "upstream",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_UPSTREAM_HASH",
+        "class": "approximated",
+        "risk": "availability",
+        "context": "upstream",
+        "directive": "hash",
+        "count": 2
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "server",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_NAME",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "server_name"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LOCATION",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "location",
+        "count": 2
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_PROXY_PASS",
+        "class": "supported",
+        "risk": "routing",
+        "context": "location",
+        "directive": "proxy_pass",
+        "count": 2
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_STREAM",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "stream"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_UPSTREAM",
+        "class": "supported",
+        "risk": "routing",
+        "context": "stream",
+        "directive": "upstream"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "stream",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "stream",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_STREAM_PROXY_PASS",
+        "class": "supported",
+        "risk": "routing",
+        "context": "stream",
+        "directive": "proxy_pass"
+      }
+    ]
+  },
+  "expected_candidate": {
+    "required": true,
+    "contains": [
+      "key = 'client_ip'",
+      "key = 'cookie'",
+      "name = 'mqtt_brokers'",
+      "name = 'session_id'",
+      "name = 'sticky_ip'",
+      "name = 'sticky_session'",
+      "proxy_pass = 'mqtt_brokers'",
+      "servers = ['127.0.0.1:19120 weight=2', '127.0.0.1:19121']",
+      "strategy = 'consistent_hash'"
+    ]
+  }
+}

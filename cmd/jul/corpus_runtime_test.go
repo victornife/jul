@@ -114,9 +114,14 @@ func startRealJulForCorpus(t *testing.T, name string, cfg *config.Config) (baseU
 	}
 	address := reserveLoopbackAddress(t)
 	cfg.Servers[0].Listen = address
+	stopUnixBackends := startCorpusUnixHTTPBackends(t, cfg)
 	stopTCPBackends := startCorpusTCPBackends(t, cfg)
-	if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
+	stopBackends := func() {
 		stopTCPBackends()
+		stopUnixBackends()
+	}
+	if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
+		stopBackends()
 		t.Fatalf("%s: runtime preflight: %v", name, err)
 	}
 
@@ -142,7 +147,7 @@ func startRealJulForCorpus(t *testing.T, name string, cfg *config.Config) (baseU
 		case <-time.After(5 * time.Second):
 			t.Errorf("%s: Jul did not shut down\nlogs:\n%s", name, logs.String())
 		}
-		stopTCPBackends()
+		stopBackends()
 	}
 	return baseURL, cleanup
 }

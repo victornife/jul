@@ -125,8 +125,8 @@ var capabilityRegistry = map[capabilityKey]capability{
 
 	{ContextUpstream, "server"}:             supported("NGX_UPSTREAM_SERVER", RiskAvailability, "upstream backend is translated", []string{"upstreams[].servers[]"}),
 	{ContextUpstream, "least_conn"}:         supported("NGX_UPSTREAM_LEAST_CONN", RiskAvailability, "least-connections balancing is translated", []string{"upstreams[].strategy"}),
-	{ContextUpstream, "ip_hash"}:            approximated("NGX_UPSTREAM_IP_HASH", RiskAvailability, "ip_hash falls back to round-robin"),
-	{ContextUpstream, "hash"}:               approximated("NGX_UPSTREAM_HASH", RiskAvailability, "hash balancing falls back to round-robin"),
+	{ContextUpstream, "ip_hash"}:            approximatedWithTargets("NGX_UPSTREAM_IP_HASH", RiskAvailability, "ip_hash maps to consistent_hash on client_ip; NGINX hashes the first three octets of an IPv4 address with its own function while Jul hashes the full canonical client address by rendezvous hashing, so clients are re-placed once at cutover and one /24 may span backends", []string{"upstreams[].strategy", "upstreams[].hash.key"}),
+	{ContextUpstream, "hash"}:               approximated("NGX_UPSTREAM_HASH", RiskAvailability, "hash maps to consistent_hash when its key is a supported source"),
 	{ContextUpstream, "random"}:             approximated("NGX_UPSTREAM_RANDOM", RiskAvailability, "random balancing falls back to round-robin"),
 	{ContextUpstream, "keepalive"}:          ignored("NGX_UPSTREAM_KEEPALIVE", RiskPerformance, "NGINX upstream connection-pool tuning is runtime-owned"),
 	{ContextUpstream, "keepalive_timeout"}:  ignored("NGX_UPSTREAM_KEEPALIVE_TIMEOUT", RiskPerformance, "NGINX upstream connection-pool tuning is runtime-owned"),

@@ -5628,6 +5628,24 @@
                   },
                   "additionalProperties": false
                 },
+                "hash": {
+                  "type": "object",
+                  "properties": {
+                    "fallback": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key"
+                  ],
+                  "additionalProperties": false
+                },
                 "health_check": {
                   "type": "object",
                   "properties": {
@@ -6966,6 +6984,33 @@
             "items": {
               "$ref": "#/components/schemas/UpstreamBackend"
             }
+          },
+          "hash": {
+            "type": "object",
+            "properties": {
+              "algorithm": {
+                "type": "string"
+              },
+              "applies_to": {
+                "type": "string"
+              },
+              "fallback": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "algorithm",
+              "applies_to",
+              "fallback",
+              "key"
+            ],
+            "additionalProperties": false
           },
           "name": {
             "type": "string"

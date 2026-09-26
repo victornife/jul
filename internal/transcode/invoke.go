@@ -630,7 +630,7 @@ func (t *Transcoder) serveStreamingRoute(w http.ResponseWriter, r *http.Request,
 	}
 	// Prefer the generation-scoped snapshot when present so reloads cannot
 	// shift an in-flight request to a newer backend set.
-	backend, err := t.pool.PickCtx(r.Context())
+	backend, err := t.pool.PickKeyed(r.Context(), t.pool.AffinityKey(r), nil)
 	if err != nil {
 		code := http.StatusServiceUnavailable
 		t.writeError(w, code, "no available gRPC backend: "+err.Error())
@@ -667,7 +667,9 @@ func (t *Transcoder) serveUnary(w http.ResponseWriter, r *http.Request, rt *rout
 	}
 
 	var resp *dynamicpb.Message
-	_, err := t.pool.Do(r.Context(), t.pool.RetryRequestFor(t.retry, retryableRoute(rt)),
+	rr := t.pool.RetryRequestFor(t.retry, retryableRoute(rt))
+	rr.Key = t.pool.AffinityKey(r)
+	_, err := t.pool.Do(r.Context(), rr,
 		func(ctx context.Context, b upstream.Attempt, n int) upstream.AttemptResult {
 			conn, cerr := t.connFor(b.Identity(), b.LogicalID())
 			if cerr != nil {

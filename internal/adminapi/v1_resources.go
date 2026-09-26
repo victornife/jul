@@ -94,9 +94,27 @@ type UpstreamBackend struct {
 
 // Upstream is one configured pool with its live backend state.
 type Upstream struct {
-	Name     string            `json:"name"`
-	Strategy string            `json:"strategy,omitempty"`
+	Name     string `json:"name"`
+	Strategy string `json:"strategy,omitempty"`
+	// Hash is the effective consistent_hash configuration; absent for every
+	// other strategy. It is configuration only — never a key or per-key state.
+	Hash     *UpstreamHash     `json:"hash,omitempty"`
 	Backends []UpstreamBackend `json:"backends"`
+}
+
+// UpstreamHash is an upstream's affinity-key policy (ADR 0021).
+type UpstreamHash struct {
+	// Key is the key source: client_ip, header or cookie.
+	Key string `json:"key"`
+	// Name is the header or cookie name; empty for client_ip.
+	Name string `json:"name,omitempty"`
+	// Fallback is the strategy that places a request without a usable key.
+	Fallback string `json:"fallback"`
+	// Algorithm names the frozen key-to-backend mapping.
+	Algorithm string `json:"algorithm"`
+	// AppliesTo is "http_and_stream" for client_ip and "http" for header and
+	// cookie keys, which raw L4 cannot read.
+	AppliesTo string `json:"applies_to"`
 }
 
 // UpstreamsResponse is GET /api/v1/upstreams, in configuration order.

@@ -183,6 +183,7 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveRetryAttempt("pool-a", "attempts_exhausted")
 	m.ObserveRetryBudgetDenied("pool-a")
 	m.ObserveCircuitTransition("pool-a", "circuit_open")
+	m.ObserveAffinityKey("pool-a", "hashed")
 	m.ObserveTransportRetired("graceful")
 	m.SetUpstreamStatsSource(func() []UpstreamPoolStats {
 		return []UpstreamPoolStats{{

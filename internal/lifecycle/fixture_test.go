@@ -253,7 +253,13 @@ func fullConfig() *config.Config {
 		}},
 		Upstreams: []config.UpstreamConfig{{
 			Name:     "app",
-			Strategy: "round_robin",
+			Strategy: "consistent_hash",
+			Hash: &config.HashConfig{
+				Key:       "header",
+				Name:      "X-Tenant",
+				Fallback:  "least_conn",
+				Algorithm: "rendezvous_v1",
+			},
 			Servers: []config.UpstreamServer{
 				{Address: "127.0.0.1:3000", Weight: 1},
 			},

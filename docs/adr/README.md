@@ -38,6 +38,7 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
 | [0018](0018-bounded-route-matching-and-response-policy.md) | Bounded route matching and response policy | Accepted | 2026-08-21 |
 | [0019](0019-configuration-authority-generated-contracts-and-resource-identity.md) | Configuration authority, generated contracts, resource identity and remote automation | Accepted | 2026-08-24 |
 | [0020](0020-wasm-abi-v2-response-phase.md) | `jul-abi/v2`: a bounded post-upstream response phase | Accepted | 2026-09-26 |
+| [0021](0021-consistent-hash-affinity.md) | Deterministic consistent-hash affinity (`rendezvous_v1`) | Accepted | 2026-09-26 |
 
 ## Reading order
 
@@ -50,7 +51,7 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
   [0015](0015-managed-apply-terminal-ledger.md), [0007](0007-composition-root-monolith.md),
   [0017](0017-upstream-resilience-and-overload-control.md),
   [0018](0018-bounded-route-matching-and-response-policy.md),
-  [0020](0020-wasm-abi-v2-response-phase.md).
+  [0020](0020-wasm-abi-v2-response-phase.md), [0021](0021-consistent-hash-affinity.md).
 - **Security boundaries:** [0016](0016-inbound-identity-and-backend-peer-trust.md),
   [0017](0017-upstream-resilience-and-overload-control.md),
   [0018](0018-bounded-route-matching-and-response-policy.md),

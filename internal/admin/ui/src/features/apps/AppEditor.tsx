@@ -9,6 +9,8 @@ import type { AppProjection, RouteProjection } from "@/api/client.ts";
 import { usePermission } from "@/auth/usePermission.ts";
 import { Drawer } from "@/components/Drawer.tsx";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
+import { HashSettingsFields } from "@/features/apps/HashSettings.tsx";
+import { emptyHashDraft, type AppHashDraft } from "@/lib/appHash.ts";
 import {
   AppPatchValidationError,
   buildAppCreationBatch,
@@ -105,6 +107,7 @@ const STRATEGIES: ReadonlyArray<{ readonly value: AppStrategy; readonly label: s
   { value: "round_robin", label: "Round robin" },
   { value: "weighted_round_robin", label: "Weighted round robin" },
   { value: "least_conn", label: "Least connections" },
+  { value: "consistent_hash", label: "Consistent hash (affinity)" },
 ];
 
 const DISCOVERY_OPTIONS: ReadonlyArray<{ readonly value: DiscoveryKind; readonly label: string }> =
@@ -537,6 +540,7 @@ export function AppEditor({
   const preset = PRESETS.find((candidate) => candidate.id === presetId) ?? DEFAULT_PRESET;
   const [name, setName] = useState(initial?.name ?? "");
   const [strategy, setStrategy] = useState<AppStrategy>(initial?.strategy ?? "round_robin");
+  const [hash, setHash] = useState<AppHashDraft>(emptyHashDraft);
   const [backends, setBackends] = useState<AppBackendDraft[]>(
     initial?.backends?.length ? [...initial.backends] : [{ address: "", weight: 1 }],
   );
@@ -618,6 +622,7 @@ export function AppEditor({
         {
           name,
           strategy,
+          hash,
           backends,
           healthCheck,
           discovery: { settings: discovery, requiresNewToken },
@@ -717,6 +722,7 @@ export function AppEditor({
             ))}
           </select>
         </label>
+        {strategy === "consistent_hash" && <HashSettingsFields value={hash} onChange={setHash} />}
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">

@@ -330,6 +330,7 @@ Configured per upstream via `strategy`:
 | `round_robin` *(default)* | lock-free rotation, ignores weight |
 | `weighted_round_robin` | smooth weighted round-robin (NGINX algorithm), proportional to `weight` |
 | `least_conn` | fewest in-flight requests |
+| `consistent_hash` | weighted rendezvous hashing of a bounded key (`client_ip`, a header or a cookie) over the eligible backends; keyless requests use `hash.fallback` — see [upstreams.md](upstreams.md#consistent-hash-affinity) |
 
 Each backend has a circuit breaker: after `max_fails` (default 3) consecutive
 failures it is taken out of rotation for `fail_timeout` (default 10s), then
@@ -446,6 +447,7 @@ Labels fall into three classes by what bounds them:
 | `jul_upstream_retry_attempts_total` | `outcome`, `pool` | pools × the retry stop-reason enum |
 | `jul_upstream_retry_budget_denied_total` | `pool` | configured pools |
 | `jul_upstream_circuit_transitions_total` | `pool`, `to` | pools × 5 backend states |
+| `jul_upstream_affinity_keys_total` | `pool`, `status` | `consistent_hash` pools × 3 statuses (`hashed`/`missing`/`invalid`) |
 | `jul_transport_retired_total` | `mode` | `graceful`/`forced` |
 | `jul_upstream_backends` | `pool` | configured pools |
 | `jul_discovery_errors_total` | `pool` | configured pools |

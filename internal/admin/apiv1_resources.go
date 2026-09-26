@@ -169,6 +169,7 @@ func (s *Server) v1Upstreams(c *config.Config) []adminapi.Upstream {
 		entry := adminapi.Upstream{
 			Name:     up.Name,
 			Strategy: up.Strategy,
+			Hash:     upstreamHashView(up),
 			Backends: []adminapi.UpstreamBackend{},
 		}
 		if l, ok := live[up.Name]; ok {

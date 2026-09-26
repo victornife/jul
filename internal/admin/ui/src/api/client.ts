@@ -719,6 +719,16 @@ export type BackendProjection = z.infer<typeof BackendProjectionSchema>;
 export const AppProjectionSchema = z.object({
   name: z.string(),
   strategy: z.string(),
+  // consistent_hash key policy; configuration only, never a key value.
+  hash: z
+    .object({
+      key: z.string(),
+      name: z.string().optional(),
+      fallback: z.string(),
+      algorithm: z.string(),
+      applies_to: z.string(),
+    })
+    .optional(),
   backends: z.array(BackendProjectionSchema),
   // The pool-level rollup comes from the server so the Console and the API
   // cannot disagree during an incident (ADR 0014). "unknown" is distinct from
@@ -1731,7 +1741,7 @@ export type ConfigPatch =
   | { op: "route_rename"; listen: string; server_names: string[]; new_server_names: string[] }
   | { op: "upstream_add_backend"; upstream: string; address: string; weight?: number }
   | { op: "upstream_remove_backend"; upstream: string; address: string }
-  | { op: "upstream_set_strategy"; upstream: string; strategy: string }
+  | { op: "upstream_set_strategy"; upstream: string; strategy: string; hash?: HashPatch }
   | { op: "upstream_set_health_check"; upstream: string; health_check: HealthCheckPatch }
   | { op: "upstream_set_discovery"; upstream: string; discovery: DiscoveryPatch }
   | { op: "server_add"; listen: string; server_names?: string[] }
@@ -1765,7 +1775,14 @@ export type ConfigPatch =
       match_type: string;
       path: string;
     }
-  | { op: "upstream_add"; upstream: string; address: string; weight?: number; strategy?: string }
+  | {
+      op: "upstream_add";
+      upstream: string;
+      address: string;
+      weight?: number;
+      strategy?: string;
+      hash?: HashPatch;
+    }
   | { op: "upstream_remove"; upstream: string }
   | { op: "global_set"; global: GlobalPatch }
   | { op: "admin_console_set"; enabled: boolean }
@@ -1789,6 +1806,14 @@ export type ConfigPatch =
   | { op: "compression_set"; compression: CompressionPatch }
   | { op: "rate_limit_global_set"; rate_limit: GlobalRateLimitPatch }
   | ({ op: "location_toggle_require_client_cert"; enabled: boolean } & RouteTarget);
+
+// HashPatch is the [upstreams.hash] block sent with upstream_add and
+// upstream_set_strategy when the strategy is consistent_hash.
+export type HashPatch = {
+  key: "client_ip" | "header" | "cookie";
+  name?: string;
+  fallback?: "round_robin" | "weighted_round_robin" | "least_conn";
+};
 
 // HealthCheckPatch is the upstream active health-check block the guided Apps
 // editor sets. Durations are strings (e.g. "5s"); empty/zero fields fall back to

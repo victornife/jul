@@ -12,6 +12,7 @@ readonly -a FIXTURE_SPECS=(
 	"routing-cors-policy:18084"
 	"unix-http-upstream:18086"
 	"routing-precedence-runtime:18099"
+	"upstream-hash-affinity-runtime:18109"
 )
 
 mkdir -p "${ARTIFACT_DIR}"
@@ -152,6 +153,75 @@ PYUNIX
 		extra_docker_args+=(--volume "${socket_root}:${socket_root}")
 	fi
 
+	if [[ "${fixture_id}" == "upstream-hash-affinity-runtime" ]]; then
+		# Three Unix-socket members that name themselves in X-Corpus-Backend-Id,
+		# so the reference records which member NGINX's hash placed a tenant on.
+		socket_root="/tmp/jul432"
+		rm -rf "${socket_root}"
+		mkdir -p "${socket_root}"
+		chmod 0777 "${socket_root}"
+		python3 - "${socket_root}" <<'PYAFFINITY' &
+import os
+import socket
+import sys
+import threading
+
+root = sys.argv[1]
+
+def serve(name):
+    path = os.path.join(root, name + ".sock")
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(path)
+    os.chmod(path, 0o777)
+    listener.listen(32)
+    body = b"unix-backend-ok"
+    response = (
+        b"HTTP/1.1 200 OK\r\n"
+        + b"Content-Type: text/plain\r\n"
+        + b"X-Corpus-Backend-Id: " + name.encode("ascii") + b"\r\n"
+        + b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+        + b"Connection: close\r\n\r\n"
+        + body
+    )
+    while True:
+        conn, _ = listener.accept()
+        try:
+            data = b""
+            while b"\r\n\r\n" not in data and len(data) < 65536:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+            conn.sendall(response)
+        finally:
+            conn.close()
+
+for member in ("a", "b", "c"):
+    threading.Thread(target=serve, args=(member,), daemon=True).start()
+threading.Event().wait()
+PYAFFINITY
+		backend_pid=$!
+		for _ in $(seq 1 100); do
+			if [[ -S "${socket_root}/a.sock" && -S "${socket_root}/b.sock" && -S "${socket_root}/c.sock" ]]; then
+				break
+			fi
+			if ! kill -0 "${backend_pid}" >/dev/null 2>&1; then
+				echo "affinity fixture backends exited before publishing their sockets" >&2
+				exit 1
+			fi
+			sleep 0.05
+		done
+		if [[ ! -S "${socket_root}/c.sock" ]]; then
+			echo "affinity fixture backends did not publish their sockets" >&2
+			exit 1
+		fi
+		extra_docker_args+=(--volume "${socket_root}:${socket_root}")
+	fi
+
 	docker run --detach \
 		--name "${container_name}" \
 		--network "${network_name}" \
@@ -262,8 +332,12 @@ reference_passed: core-multifile-return
 reference_passed: routing-cors-policy
 reference_passed: unix-http-upstream
 reference_passed: routing-precedence-runtime
+reference_passed: upstream-hash-affinity-runtime
 expected_difference: core-multifile-return/relative-redirect NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT
 expected_difference: routing-cors-policy/limit-except-post NGX_LOCATION_LIMIT_EXCEPT
 expected_difference: routing-precedence-runtime/method-predicate-excluded-falls-through NGX_LOCATION_LIMIT_EXCEPT
+expected_difference: upstream-hash-affinity-runtime/tenant-1-placement-differs NGX_UPSTREAM_HASH
+expected_difference: upstream-hash-affinity-runtime/tenant-1-sticky-repeat NGX_UPSTREAM_HASH
+expected_difference: upstream-hash-affinity-runtime/tenant-8-placement-differs NGX_UPSTREAM_HASH
 EOF_RESULT
 cat "${ARTIFACT_DIR}/result.txt"

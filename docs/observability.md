@@ -145,6 +145,7 @@ are never reset and previously recorded host-labeled series are not deleted.
 | `jul_upstream_retry_attempts_total` | Counter | `outcome`, `pool` | Merged, release pending | Retry attempts, labeled by pool and the bounded outcome that ended the sequence. |
 | `jul_upstream_retry_budget_denied_total` | Counter | `pool` | Merged, release pending | Retries suppressed because the pool's retry budget was spent, labeled by pool. |
 | `jul_upstream_circuit_transitions_total` | Counter | `pool`, `to` | Merged, release pending | Backend circuit transitions, labeled by pool and destination state. |
+| `jul_upstream_affinity_keys_total` | Counter | `pool`, `status` | Merged, release pending | Affinity-key outcomes on `consistent_hash` pools, labeled by pool and bounded status (`hashed`/`missing`/`invalid`). `missing` and `invalid` requests are placed by the pool's `hash.fallback` strategy. The key itself is never a label. |
 | `jul_transport_retired_total` | Counter | `mode` | Merged, release pending | Handler-generation transports retired, labeled by mode (graceful/forced). |
 | `jul_upstream_probe_duration_seconds` | Histogram | `pool` | Released `v1.32.0` | Active health-check probe latency in seconds, labeled by pool. |
 | `jul_upstream_probes_total` | Counter | `pool`, `result` | Released `v1.32.0` | Active health-check probes, labeled by pool and result (success/failure). |

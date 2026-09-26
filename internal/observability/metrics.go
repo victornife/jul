@@ -59,6 +59,7 @@ type Metrics struct {
 	retryAttempts      *prometheus.CounterVec
 	retryBudgetDenied  *prometheus.CounterVec
 	circuitTransitions *prometheus.CounterVec
+	affinityKeys       *prometheus.CounterVec
 	transportRetired   *prometheus.CounterVec
 	resilience         *resilienceCollector
 	cache              *cacheCollector
@@ -292,6 +293,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_upstream_circuit_transitions_total",
 			Help: "Backend circuit transitions, labeled by pool and destination state.",
 		}, []string{"pool", "to"}),
+		affinityKeys: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_upstream_affinity_keys_total",
+			Help: "Affinity-key outcomes on consistent_hash pools, labeled by pool and bounded status (hashed/missing/invalid). missing and invalid requests are placed by the pool's hash.fallback strategy. The key itself is never a label.",
+		}, []string{"pool", "status"}),
 		transportRetired: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_transport_retired_total",
 			Help: "Handler-generation transports retired, labeled by mode (graceful/forced).",
@@ -475,6 +480,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.retryAttempts,
 		m.retryBudgetDenied,
 		m.circuitTransitions,
+		m.affinityKeys,
 		m.transportRetired,
 		m.resilience,
 		m.cache,
@@ -727,6 +733,7 @@ func (m *Metrics) RetirePool(pool string) {
 	m.retryAttempts.DeletePartialMatch(labels)
 	m.retryBudgetDenied.Delete(labels)
 	m.circuitTransitions.DeletePartialMatch(labels)
+	m.affinityKeys.DeletePartialMatch(labels)
 }
 
 // ObserveUpstreamBackends records the current backend count of a pool as a
@@ -762,6 +769,12 @@ func (m *Metrics) ObserveRetryBudgetDenied(pool string) {
 // address is unbounded.
 func (m *Metrics) ObserveCircuitTransition(pool, to string) {
 	m.circuitTransitions.WithLabelValues(pool, to).Inc()
+}
+
+// ObserveAffinityKey counts one keyed request's affinity-key outcome. status
+// is affinity.Status's bounded string; the key never reaches this package.
+func (m *Metrics) ObserveAffinityKey(pool, status string) {
+	m.affinityKeys.WithLabelValues(pool, status).Inc()
 }
 
 // ObserveTransportRetired counts a handler-generation transport retirement.

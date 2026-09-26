@@ -1,0 +1,54 @@
+# Consistent-hash affinity example (#432, ADR 0021). Validate with:
+#   jul -check testdata/affinity.toml
+#
+# Three pools, one per key source. Requests sharing a key stay on one backend
+# while the eligible set is stable; requests without a usable key are placed
+# by hash.fallback. The L4 route accepts only client_ip keys.
+
+[[servers]]
+listen = "127.0.0.1:8080"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/app" }
+  proxy_pass = "http://sessions"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/tenants" }
+  proxy_pass = "http://shards"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/ws" }
+  proxy_pass = "http://sockets"
+
+# Session state kept on one instance, keyed by the application's cookie.
+[[upstreams]]
+name = "sessions"
+strategy = "consistent_hash"
+servers = ["127.0.0.1:3000", "127.0.0.1:3001", "127.0.0.1:3002 weight=2"]
+  [upstreams.hash]
+  key = "cookie"
+  name = "session_id"
+  fallback = "round_robin"
+
+# Tenant-sharded backends keyed by a request header set by an upstream gateway.
+[[upstreams]]
+name = "shards"
+strategy = "consistent_hash"
+servers = ["127.0.0.1:4000", "127.0.0.1:4001", "127.0.0.1:4002", "127.0.0.1:4003"]
+  [upstreams.hash]
+  key = "header"
+  name = "X-Tenant"
+  fallback = "least_conn"
+
+# Reconnect locality by client address; shared with the L4 route below.
+[[upstreams]]
+name = "sockets"
+strategy = "consistent_hash"
+servers = ["127.0.0.1:5000", "127.0.0.1:5001"]
+  [upstreams.hash]
+  key = "client_ip"
+
+[[stream]]
+listen = "127.0.0.1:6000"
+protocol = "tcp"
+proxy_pass = "sockets"

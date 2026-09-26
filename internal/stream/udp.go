@@ -106,7 +106,7 @@ func (l *listener) udpSessionFor(clientAddr *net.UDPAddr) *udpSession {
 		l.server.log.Debug("stream: udp session evicted at cap", "addr", l.addr, "client", victimKey)
 	}
 
-	backend, b, err := l.dialBackend(r.defaultPool, "udp", r.connectTimeout)
+	backend, b, err := l.dialBackend(r.defaultPool, "udp", r.connectTimeout, r.defaultPool.AffinityKeyForAddr(clientAddr))
 
 	l.udpMu.Lock()
 	delete(l.udpPending, key)

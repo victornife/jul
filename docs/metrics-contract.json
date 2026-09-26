@@ -502,6 +502,16 @@
       "state": "merged_release_pending"
     },
     {
+      "name": "jul_upstream_affinity_keys_total",
+      "type": "counter",
+      "help": "Affinity-key outcomes on consistent_hash pools, labeled by pool and bounded status (hashed/missing/invalid). missing and invalid requests are placed by the pool's hash.fallback strategy. The key itself is never a label.",
+      "labels": [
+        "pool",
+        "status"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_upstream_backends",
       "type": "gauge",
       "help": "Current number of backends in a pool, labeled by pool (tracks dynamic service discovery).",

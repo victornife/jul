@@ -190,7 +190,10 @@ max-age, and wildcard-origin-plus-credentials remain blocking.
 | `server` | ✅ | Address and weight preserved; `down` omits the member with a finding. |
 | `server ... max_fails=N fail_timeout=T` | ✅ (consistent) / ⚠️ (disagreeing) | See [passive health (`max_fails`/`fail_timeout`)](#passive-health-max_fails-fail_timeout) below. |
 | `least_conn` | ✅ | Maps to `least_conn`. |
-| `ip_hash`, `hash`, `random` | ⚠️ | Falls back to round robin with review guidance. |
+| `ip_hash` | ⚠️ | Maps to `consistent_hash` on `client_ip`; placement differs from NGINX (see [upstream affinity](nginx-assessment.md#upstream-affinity)). |
+| `hash $remote_addr` / `$http_<name>` / `$cookie_<name>` | ⚠️ | Maps to `consistent_hash` on `client_ip`, a header or a cookie; placement differs, keyless requests are round-robined by both. |
+| `hash <other expression>` | ❌ | `NGX_UPSTREAM_HASH_KEY` blocking: not a Jul key source; affinity is not preserved. |
+| `random` | ⚠️ | Falls back to round robin with review guidance. |
 | `keepalive`, `keepalive_timeout`, `keepalive_requests`, `zone` | ignored | Connection-pool/process tuning. |
 | `include` | ⚠️ | Expanded in upstream context through the bounded resolver. |
 
