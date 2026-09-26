@@ -141,6 +141,9 @@ stop_jul() {
 quiescence() { # after load: compare with the idle baseline snapshot
 	sleep "$(secs 15)"
 	snapshot quiescent
+	# Backend keep-alive connections close after the proxy's 90s idle timeout.
+	sleep 95
+	snapshot quiescent-idle
 }
 
 write_config() { # write_config <extra TOML appended>
@@ -173,7 +176,7 @@ manifest() { # manifest <limits> <workload> <result>
 | --- | --- |
 | Profile | \`${PROFILE#__inner_}\` |
 | Date (UTC) | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
-| Jul SHA | \`${JUL_SHA}\` |
+| Jul SHA | \`${JUL_SHA}\` (tree \`${JUL_TREE}\`) |
 | Harness SHA | \`${HARNESS_SHA}\` |
 | Build | \`go build -tags "${FULL_TAGS}"\`; $(go version) |
 | Host | $(uname -srm); $(nproc) CPUs; $(awk '/MemTotal/ {printf "%d MiB", $2/1024}' /proc/meminfo) |
@@ -203,6 +206,8 @@ prepare_out() {
 	mkdir -p "${OUT}"
 	export OUT
 	JUL_SHA="$(git rev-parse HEAD)$(git diff --quiet HEAD -- . ':!soak-artifacts' || echo ' (dirty)')"
+	JUL_TREE="$(git rev-parse 'HEAD^{tree}')"
+	export JUL_TREE
 	HARNESS_SHA="$(git log -1 --format=%H -- scripts/fault-evidence.sh 2>/dev/null || echo unknown)"
 	export JUL_SHA HARNESS_SHA
 }
@@ -394,7 +399,11 @@ servers = ["127.0.0.1:19181", "127.0.0.1:19182"]
 	sed -i 's#^  proxy_pass = "http://app"#  proxy_pass = "http://app"\n  cache = true#' "${OUT}/jul.toml"
 	"${BIN}/jul" check -config "${OUT}/jul.toml" >>"${OUT}/events.log"
 	SCOPE_UNIT="jul-fault-mem-$$.scope"
+	GOMEMLIMIT_VALUE="${FAULT_GOMEMLIMIT-144MiB}"
+	ev "GOMEMLIMIT=${GOMEMLIMIT_VALUE:-unset}"
+	if [[ -n "${GOMEMLIMIT_VALUE}" ]]; then export GOMEMLIMIT="${GOMEMLIMIT_VALUE}"; fi
 	start_jul systemd-run --user --scope --quiet --unit "${SCOPE_UNIT}" -p MemoryAccounting=yes -p MemoryHigh=176M -p MemoryMax=192M -p MemorySwapMax=0 --
+	unset GOMEMLIMIT
 	start_scrape
 	snapshot idle
 	load fill "$(secs 60)" -url "http://${MAIN}/blob?kb=256" -unique-paths -workers 48
@@ -411,7 +420,7 @@ servers = ["127.0.0.1:19181", "127.0.0.1:19182"]
 	quiescence
 	stop_scrape
 	stop_jul
-	manifest "cgroup v2 memory.max=192M, swap.max=0; memory.high 176M, lowered live to 96M for the throttled phase" "${WORKLOAD}" "See events.log, snapshots (memory.events), load-*.jsonl and metrics-summary.md; analysis in docs/soak-evidence.md."
+	manifest "cgroup v2 memory.max=192M, swap.max=0; memory.high 176M, lowered live to 96M for the throttled phase; GOMEMLIMIT=${GOMEMLIMIT_VALUE:-unset}" "${WORKLOAD}" "See events.log, snapshots (memory.events), load-*.jsonl and metrics-summary.md; analysis in docs/soak-evidence.md."
 }
 
 profile_disk_inner() {
@@ -427,6 +436,8 @@ profile_disk_inner() {
 sinks = [\"file\"]
 file = \"${fs}/logs/access.log\"
 format = \"json\"
+rotate_max_mb = 4
+rotate_keep = 1
 
 [cache]
 enabled = true
@@ -477,7 +488,7 @@ servers = [\"127.0.0.1:19181\", \"127.0.0.1:19182\"]
 		-d "$(jq -c --arg base "$(curl -fsS "${auth[@]}" "http://${ADMIN}/api/v1/config" | jq -r '.serving_version // .persisted_version')" '{observed_digest: .observed_digest, base_version: $base, mode: "hot", confirm: true}' <<<"${preview}")" \
 		"http://${ADMIN}/api/v1/config/adopt-external"
 	ev "adopt the file as the managed baseline: $(head -c 300 "${OUT}/adopt.json")"
-	apply baseline error
+	apply baseline info
 	load fill "$(secs 40)" -url "http://${MAIN}/blob?kb=128" -unique-paths -workers 32
 	snapshot after-fill
 	df_ev after-fill

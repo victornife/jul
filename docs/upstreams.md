@@ -427,6 +427,7 @@ consequence; adapters do not infer ownership after calling `MarkFailure`.
 | --- | --- |
 | Inbound client cancellation, caller deadline or downstream stream termination | Neutral; release in-flight state and return any half-open probe allowance |
 | Jul-owned retry deadline, admission or local replay/policy failure | Neutral; never evidence against a backend |
+| Dial refused locally because Jul or the host is out of file descriptors (`EMFILE`/`ENFILE`, Windows `WSAEMFILE`) | Neutral, reason `proxy_overloaded`; the request still fails, but healthy backends are not ejected for Jul's own exhaustion |
 | Backend connect failure, reset, read/write failure or transport timeout | Failure; increment the passive circuit and open it at `max_fails` |
 | Malformed FastCGI/uWSGI or backend protocol exchange | Failure |
 | Route-level TLS chain/name/SNI/explicit-peer-identity rejection | Neutral for the shared pool, because another route may use a different trust policy; the request still fails closed |

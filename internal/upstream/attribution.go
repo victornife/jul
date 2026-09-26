@@ -172,6 +172,12 @@ func ClassifyAttemptError(err error, inbound, attempt context.Context) AttemptCl
 		}
 	}
 
+	// Jul running out of descriptors is Jul's failure, not the backend's:
+	// counting it ejected every healthy backend under FD pressure (#422).
+	if localResourceExhausted(err) {
+		return JulPolicyFailure(ReasonProxyOverloaded)
+	}
+
 	reason := ReasonUpstreamConnectFailed
 	if errors.Is(err, context.DeadlineExceeded) {
 		reason = ReasonUpstreamTimeout
