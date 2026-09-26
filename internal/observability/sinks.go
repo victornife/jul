@@ -11,8 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"jul/internal/config"
+	"jul/internal/logthrottle"
 	"jul/internal/middleware"
 
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -86,7 +89,7 @@ func BuildAccessSinks(cfg config.AccessLogConfig, base *slog.Logger) (sinks []mi
 				MaxBackups: cfg.RotateKeep,
 				LocalTime:  true,
 			}
-			sinks = append(sinks, middleware.NewSlogSink(slog.New(accessHandler(lj, cfg.Format))))
+			sinks = append(sinks, middleware.NewSlogSink(slog.New(accessHandler(&failureReportingWriter{w: lj, log: base, sink: "file"}, cfg.Format))))
 			closers = append(closers, lj)
 		case "syslog":
 			w, serr := newSyslogWriter()
@@ -102,6 +105,33 @@ func BuildAccessSinks(cfg config.AccessLogConfig, base *slog.Logger) (sinks []mi
 		}
 	}
 	return sinks, closers, nil
+}
+
+// accessWriteFailureLogInterval is the minimum spacing of access-log write
+// failure reports.
+const accessWriteFailureLogInterval = 10 * time.Second
+
+// failureReportingWriter makes a failing access-log sink visible. slog drops a
+// handler's write error, so without it a full disk silently discarded every
+// access line (#422 disk-pressure evidence). A failure is reported on the
+// process log at most once per interval, with the running failure count.
+type failureReportingWriter struct {
+	w        io.Writer
+	log      *slog.Logger
+	sink     string
+	limit    logthrottle.Limiter
+	failures atomic.Int64
+}
+
+func (f *failureReportingWriter) Write(p []byte) (int, error) {
+	n, err := f.w.Write(p)
+	if err != nil {
+		total := f.failures.Add(1)
+		if f.log != nil && f.limit.Allow(accessWriteFailureLogInterval) {
+			f.log.Error("access log write failed; access lines are being dropped", "sink", f.sink, "error", err, "failed_writes", total)
+		}
+	}
+	return n, err
 }
 
 // accessHandler builds an slog handler for a dedicated access-log sink. Access

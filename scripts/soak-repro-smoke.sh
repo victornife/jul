@@ -38,6 +38,7 @@ go build -tags "$FULL_TAGS" -o "$WORKDIR/jul" ./cmd/jul
 # it execs, which left backends holding :8081/:8082 after the smoke exited.
 go build -o "$WORKDIR/burn-in-backend" scripts/burn-in-backend.go
 go build -o "$WORKDIR/stream-echo" scripts/stream-echo.go
+go build -o "$WORKDIR/soak-scrape" scripts/soak-scrape.go
 
 echo "== starting backend :8081"
 "$WORKDIR/burn-in-backend" -port 8081 >"$WORKDIR/backend-8081.log" 2>&1 &
@@ -63,6 +64,12 @@ if ! kill -0 "$JUL_PID" 2>/dev/null; then
 	exit 1
 fi
 
+echo "== retained metrics collector (#422)"
+SOAK_SCRAPE_BEARER=burnintoken "$WORKDIR/soak-scrape" -url http://127.0.0.1:9090/metrics \
+	-out "$WORKDIR/metrics" -interval 1s -label smoke=1 >"$WORKDIR/scrape.log" 2>&1 &
+SCRAPE_PID="$!"
+PIDS+=("$SCRAPE_PID")
+
 echo "== HTTP admission/resilience load (${DURATION})"
 go run scripts/burn-in-load.go -duration "$DURATION" -workers 4 \
 	-health "http://127.0.0.1:8080/bounded/" \
@@ -71,5 +78,15 @@ go run scripts/burn-in-load.go -duration "$DURATION" -workers 4 \
 echo "== L4 TCP stream load (${DURATION})"
 go run scripts/burn-in-stream-load.go -duration "$DURATION" -workers 4 \
 	-target 127.0.0.1:15432
+
+kill -TERM "$SCRAPE_PID"
+wait "$SCRAPE_PID" || true
+python3 - "$WORKDIR/metrics/metrics-manifest.json" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+assert m["ok"] >= 2 and m["series"] > 10 and len(m["sha256"]) == 64, m
+print(f"soak-scrape: {m['ok']} samples, {m['series']} series, sha256 {m['sha256'][:12]}")
+PY
+"$WORKDIR/soak-scrape" -summarize "$WORKDIR/metrics" | grep -q 'process_open_fds'
 
 echo "soak-repro-smoke: the documented #287 resilience-soak reproduction runs end to end"

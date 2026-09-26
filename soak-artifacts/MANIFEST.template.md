@@ -48,9 +48,14 @@ during the run. One line per event.
 
 ## Metric snapshots
 
-List where scrape snapshots / exported CSVs / dashboards for this run are
-stored (attach in this directory, or link to a retained dashboard/TSDB
-snapshot). Note the scrape interval used.
+`scripts/soak-manifest-init.sh` starts `scripts/soak-scrape.go` against
+`JUL_METRICS_URL` (default `http://127.0.0.1:9090/metrics`, 10s interval) and
+retains every sample in `metrics/samples.jsonl.gz`. Stop it with
+`kill -TERM $(cat scrape.pid)` at the end of the run; it then writes
+`metrics/metrics-manifest.json` (SHA-256, scrape/error/gap counts). Attach
+`go run scripts/soak-scrape.go -summarize metrics > metrics-summary.md`.
+Record any explicit scrape gaps and their cause here, plus any additional
+exports or dashboards.
 
 ## pprof captures
 

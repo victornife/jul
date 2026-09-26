@@ -14,8 +14,11 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"jul/internal/atomicfile"
+	"jul/internal/logthrottle"
 )
 
 // diskStore is the overflow tier: a size-bounded, content-addressed file cache.
@@ -33,7 +36,17 @@ type diskStore struct {
 	ll        *list.List // front = most recently used; values are *diskItem
 	items     map[string]*list.Element
 	log       *slog.Logger
+
+	// writeFailLog bounds the write-failure warning: a full filesystem fails
+	// every store, and one line per failure turned ENOSPC into a log flood
+	// (#422 disk-pressure evidence). writeFails counts all of them.
+	writeFailLog logthrottle.Limiter
+	writeFails   atomic.Int64
+	reported     atomic.Int64
 }
+
+// diskWriteFailureLogInterval is the minimum spacing of write-failure warnings.
+const diskWriteFailureLogInterval = 10 * time.Second
 
 type diskItem struct {
 	hash string
@@ -169,7 +182,11 @@ func (d *diskStore) set(key string, e *Entry) {
 	// is fsync'd and renamed over the target, so a reader or a restart never sees
 	// a half-written entry and the file is never world-readable.
 	if err := atomicfile.Write(d.path(hash), buf.Bytes(), 0o600); err != nil {
-		d.log.Warn("cache: disk write failed", "dir", d.dir, "error", err)
+		total := d.writeFails.Add(1)
+		if d.writeFailLog.Allow(diskWriteFailureLogInterval) {
+			suppressed := total - d.reported.Swap(total) - 1
+			d.log.Warn("cache: disk write failed; entry not stored on disk", "dir", d.dir, "error", err, "failed_writes", total, "suppressed", suppressed)
+		}
 		return
 	}
 	size := int64(buf.Len())

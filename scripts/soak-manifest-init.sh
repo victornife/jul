@@ -66,4 +66,22 @@ with open(manifest, "w") as f:
 PYEOF
 
 echo "created ${DIR}/MANIFEST.md"
+
+# Retained metrics (#422): start the repository-owned collector for the whole
+# run unless JUL_SCRAPE=0. It scrapes every 10s into $DIR/metrics and writes a
+# checksummed manifest when stopped with SIGTERM/SIGINT.
+if [ "${JUL_SCRAPE:-1}" != "0" ]; then
+	URL="${JUL_METRICS_URL:-http://127.0.0.1:9090/metrics}"
+	SCRAPE_BIN="${DIR}/.soak-scrape"
+	go build -o "$SCRAPE_BIN" scripts/soak-scrape.go
+	# SOAK_SCRAPE_BEARER (the admin token), if exported, authenticates the
+	# scrape; it is never written to the recording.
+	nohup "$SCRAPE_BIN" -url "$URL" -out "${DIR}/metrics" -interval "${JUL_SCRAPE_INTERVAL:-10s}" \
+		-label "jul_sha=${SHA}${DIRTY}" -label "scope=${SCOPE}" -label "config=${JUL_SOAK_CONFIG:-unrecorded}" \
+		-label "workload=${JUL_SOAK_WORKLOAD:-unrecorded}" >"${DIR}/scrape.log" 2>&1 &
+	echo $! >"${DIR}/scrape.pid"
+	echo "retaining ${URL} every ${JUL_SCRAPE_INTERVAL:-10s} into ${DIR}/metrics (pid $(cat "${DIR}/scrape.pid"))"
+	echo "stop at the end of the run: kill -TERM \$(cat ${DIR}/scrape.pid)"
+	echo "summarize:                  go run scripts/soak-scrape.go -summarize ${DIR}/metrics"
+fi
 echo "fill in the remaining sections as the run proceeds."

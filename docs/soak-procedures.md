@@ -143,8 +143,15 @@ accounting to become statistically meaningful.
 2. Procedure 0 and Procedure A both pass at that SHA.
 3. `soak-artifacts/<date>-final/MANIFEST.md` created
    (`make soak-manifest-init SCOPE=final`).
-4. A metrics scrape (Prometheus or equivalent) configured against `/metrics`
-   at ≤15s interval, retained for the full run — not stdout tailing.
+4. Retained metrics at ≤15s for the full run — not stdout tailing.
+   `make soak-manifest-init SCOPE=final` starts the repository-owned
+   collector ([`scripts/soak-scrape.go`](../scripts/soak-scrape.go)) against
+   `JUL_METRICS_URL` automatically (export `SOAK_SCRAPE_BEARER` with the admin
+   token when `/metrics` is authenticated). It timestamps every sample, records
+   failed scrapes and gaps longer than twice the interval explicitly, flushes
+   after every line, and writes a checksummed `metrics-manifest.json` on
+   SIGTERM. A Prometheus server is an acceptable substitute if its TSDB
+   snapshot is retained with the run.
 5. RBAC, `[egress]`, `client_address`, and `backend_tls` all enabled for the
    run (i.e. run `burn-in-current.toml`, not a single-feature profile alone),
    so the soak's evidence covers capabilities that have never been soaked.
@@ -213,10 +220,10 @@ event log with a UTC timestamp:
 | --- | --- |
 | Backend 5xx storm, mid-body reset, malformed framing, slow response | Automated by `-fault` in the workload above — no manual step |
 | Backend kill/restore | Automated by `-fault`'s scheduled kill/restore cycle (`-killEvery`/`-killFor`) — no manual step; for a true process-level kill instead of the in-process kill-switch, `kill` one `burn-in-backend.go` instance for 1–2 minutes and restart it on the same port |
-| DNS failure | Point `[[upstreams]] discovery.dns` at a name that stops resolving mid-run (edit `/etc/hosts` or firewall off the resolver), confirm the `discovered` pool holds its last-known-good targets rather than emptying |
-| FD-limit reduction | `ulimit -n 512` in the shell that launches `jul` (or `LimitNOFILE=` in a systemd override), confirm admission/backpressure rather than a crash once the limit is approached |
-| Disk pressure | Fill `jul-data/cache-disk` toward its configured cap (e.g. `fallocate -l <size> jul-data/cache-disk/filler`) and confirm eviction, not failure |
-| cgroup CPU/memory constraint | Run `jul` under `systemd-run --scope -p MemoryMax=256M -p CPUQuota=50%` (or an equivalent container limit) and confirm graceful degradation (GC pressure, slower responses) rather than an OOM kill under the expected workload |
+| DNS failure | `scripts/fault-evidence.sh dns` — an isolated resolver on 127.0.0.1:53 inside a private user+network+mount namespace (never the host resolver, never `/etc/hosts`); see [Focused host-fault evidence](#focused-host-fault-evidence-422) |
+| FD-limit reduction | `scripts/fault-evidence.sh fd` — a fresh `jul` under `prlimit --nofile=256:256` |
+| Disk pressure | `scripts/fault-evidence.sh disk` — cache, logs, config and history on a private size-bounded tmpfs; never fill the host filesystem |
+| cgroup CPU/memory constraint | `scripts/fault-evidence.sh cpu` / `mem` — a transient `systemd-run --user --scope` whose `CPUQuota` / `MemoryHigh` are changed live |
 | Admin op during apply | Send a deliberately invalid config via a one-off `curl` with a broken TOML body mid-run; confirm the live config is unaffected |
 
 Do not add fault modes beyond this table "for completeness" — each one must
@@ -234,7 +241,9 @@ noise a reviewer has to explain away.
 
 ### Observability
 
-Scrape `/metrics` at ≤15s. At minimum retain:
+Scrape `/metrics` at ≤15s (entry criterion 4; `scripts/soak-scrape.go`
+retains every `jul_*`, `process_*` and selected `go_*` family by default, with
+histogram buckets dropped unless `-buckets`). At minimum retain:
 `jul_http_requests_total`, `jul_http_request_duration_seconds`,
 `jul_upstream_active_requests`, `jul_upstream_pending_requests`,
 `jul_upstream_admission_rejected_total`, `jul_upstream_circuit_state`,
@@ -303,7 +312,9 @@ done
 
 ### After the run
 
-1. Fill in the remaining sections of `$DIR/MANIFEST.md` (event log, metric
+1. Stop the collector (`kill -TERM $(cat "$DIR/scrape.pid")`), attach
+   `go run scripts/soak-scrape.go -summarize "$DIR/metrics" > "$DIR/metrics-summary.md"`,
+   and fill in the remaining sections of `$DIR/MANIFEST.md` (event log, metric
    snapshot location, exit-criteria table, conclusion).
 2. Append a dated entry to [soak-evidence.md](soak-evidence.md) linking to
    `$DIR/`.
@@ -312,6 +323,30 @@ done
    to make the run "pass" (see ADR 0017 Amendment 4 for the precedent: when an
    acceptance criterion proved unachievable by design, the criterion was
    amended in public with reasoning, not the measurement).
+
+## Focused host-fault evidence (#422)
+
+Host-level faults are exercised in short dedicated runs, each on a fresh Jul
+process with its own evidence directory, rather than folded into the 24-hour
+soak. `scripts/fault-evidence.sh <profile>` builds a full-tag `jul` plus the
+helpers (`scripts/fault-backend.go`, `scripts/fault-load.go`,
+`scripts/fault-dnsd.go`, `scripts/soak-scrape.go`), writes
+`soak-artifacts/<date>-fault-<profile>/` and refuses to overwrite it.
+
+| Profile | Isolation | What it does |
+| --- | --- | --- |
+| `dns` | `unshare --user --map-root-user --net --mount`; `/etc/resolv.conf` bind-mounted inside the namespace only | DNS-discovered pool; membership grow, then SERVFAIL, dropped queries (timeouts) and NXDOMAIN for a phase each, then recovery to a changed answer |
+| `fd` | `prlimit --nofile=256:256` on the Jul process | baseline, then 400 held idle connections plus fresh-connection load, then recovery |
+| `cpu` | transient `systemd-run --user --scope` | unconstrained baseline, `CPUQuota=20%` with SIGHUP reload and health probes, quota lifted live, SIGTERM under quota |
+| `mem` | transient `systemd-run --user --scope`, `MemoryMax=192M`, swap 0 | 64 MB memory cache filled within budget, then `MemoryHigh` lowered live below the working set, then restored |
+| `disk` | `unshare --user --map-root-user --mount`; private 48 MiB tmpfs | disk cache tier, access and audit logs, managed config and history on the tmpfs; fill, near-full, full, managed apply while full, recovery, restart rehydration |
+
+Each directory holds `MANIFEST.md` (Jul SHA, harness SHA, limits, workload,
+isolation), `jul.toml`, `events.log` (UTC-stamped phases and observations),
+per-second client results `load-*.jsonl`, the retained 5-second metrics series
+with its checksummed manifest and summary, `/proc` and cgroup snapshots, and
+`SHA256SUMS`. `FAULT_SCALE` shortens phases for a dry run; recorded evidence
+uses the default. Results are analysed in [soak-evidence.md](soak-evidence.md).
 
 ## Interpreting a failure
 
