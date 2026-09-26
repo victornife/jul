@@ -340,6 +340,12 @@ func diffPluginFields(name string, b, a config.PluginConfig, d *ConfigDiff) {
 	if pluginTypeOrDefault(b) != pluginTypeOrDefault(a) {
 		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: pluginTypeOrDefault(b), After: pluginTypeOrDefault(a), Detail: "Change plugin type for " + name}, "plugin "+name+" type")
 	}
+	if ba, aa := config.EffectivePluginABI(b), config.EffectivePluginABI(a); ba != aa {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: ba, After: aa, Detail: "Change plugin ABI for " + name}, "plugin "+name+" abi")
+		if aa == config.PluginABIV2 {
+			d.warn("Plugin %s moves to jul-abi/v2; its module must be rebuilt against the v2 SDK, and it may subscribe to (and buffer up to max_response_body of) responses.", name)
+		}
+	}
 	if bp, ap := pluginPin(b), pluginPin(a); bp != ap {
 		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: orNone(bp), After: orNone(ap), Detail: "Change plugin module sha256 pin for " + name}, "plugin "+name+" sha256")
 	}
@@ -392,6 +398,9 @@ func diffPluginFields(name string, b, a config.PluginConfig, d *ConfigDiff) {
 	}
 	if b.KVMaxBytes != a.KVMaxBytes {
 		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: sizeStr(b.KVMaxBytes), After: sizeStr(a.KVMaxBytes), Detail: "Change plugin KV max bytes for " + name}, "plugin "+name+" kv_max_bytes")
+	}
+	if b.MaxInvocations != a.MaxInvocations {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: fmt.Sprintf("%d", b.MaxInvocations), After: fmt.Sprintf("%d", a.MaxInvocations), Detail: "Change plugin max invocations for " + name}, "plugin "+name+" max_invocations")
 	}
 }
 

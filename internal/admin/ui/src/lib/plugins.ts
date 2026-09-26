@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import type { PluginProjection, PluginDefPatch } from "@/api/client.ts";
+import type { PluginProjection, PluginDefPatch, PluginABI } from "@/api/client.ts";
 
 // PluginDraft is the editable form state for a [plugins.NAME] declaration. It
 // mirrors PluginDefPatch but keeps the capability lists and config map as the
@@ -13,6 +13,10 @@ export interface PluginDraft {
   source: "path" | "inline";
   path: string;
   type: "middleware" | "handler";
+  // abi is the selected ABI; seededAbi is the plugin's current ABI (null for a
+  // new plugin) so a save sends abi only when the operator changed it.
+  abi: PluginABI;
+  seededAbi: PluginABI | null;
   memoryLimit: string;
   timeout: string;
   kv: boolean;
@@ -29,6 +33,8 @@ export function emptyPluginDraft(): PluginDraft {
     source: "path",
     path: "",
     type: "middleware",
+    abi: "jul-abi/v1",
+    seededAbi: null,
     memoryLimit: "",
     timeout: "",
     kv: false,
@@ -52,6 +58,8 @@ export function seedPluginDraft(p: PluginProjection): PluginDraft {
     source: p.source === "inline" ? "inline" : "path",
     path: p.path ?? "",
     type: p.type === "handler" ? "handler" : "middleware",
+    abi: toABI(p.abi),
+    seededAbi: toABI(p.abi),
     memoryLimit: p.memory_limit ?? "",
     timeout: p.timeout ?? "",
     kv: p.kv,
@@ -59,6 +67,11 @@ export function seedPluginDraft(p: PluginProjection): PluginDraft {
     allowedHosts: (p.allowed_hosts ?? []).join(", "),
     config: configLines,
   };
+}
+
+// toABI narrows a projected ABI to the editor's choices.
+export function toABI(abi: string): PluginABI {
+  return abi === "jul-abi/v2" ? "jul-abi/v2" : "jul-abi/v1";
 }
 
 // parseList splits a comma- or newline-separated field into trimmed, non-empty
@@ -94,6 +107,11 @@ export function parseConfigMap(raw: string): Record<string, string> {
 // absent rather than undefined). The validated apply re-parse enforces the rest.
 export function pluginDraftToPatch(draft: PluginDraft): PluginDefPatch {
   const patch: PluginDefPatch = { source: draft.source, type: draft.type };
+  // The ABI is never sent implicitly: an edit that did not change it keeps the
+  // server's value, and a new plugin sends it only when v2 was chosen.
+  if (draft.seededAbi === null ? draft.abi !== "jul-abi/v1" : draft.abi !== draft.seededAbi) {
+    patch.abi = draft.abi;
+  }
   if (draft.source === "path" && draft.path.trim() !== "") {
     patch.path = draft.path.trim();
   }

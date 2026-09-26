@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 360,
-    "schema_leaves": 306,
+    "schema_paths": 361,
+    "schema_leaves": 307,
     "resources": 9
   },
   "capability_build_tags": {
@@ -1137,6 +1137,29 @@
       "default": "jul",
       "description": "ServiceName sets the OpenTelemetry resource service.name",
       "anchor": "observability-tracing-service_name"
+    },
+    "plugins.*.abi": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "plugins",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the plugin set is rebuilt and re-instantiated on each successful reload",
+      "capabilities": [
+        "wasm_plugins"
+      ],
+      "value_kind": "enum",
+      "constraint": "exact enum; the module must declare the same ABI",
+      "zero_semantics": "omitted selects jul-abi/v1",
+      "active_when": "plugin configured",
+      "allowed": [
+        "jul-abi/v1",
+        "jul-abi/v2"
+      ],
+      "description": "ABI selects the host contract the module is built against: \"jul-abi/v1\" (the default when empty) or \"jul-abi/v2\"",
+      "anchor": "plugins-x-abi"
     },
     "plugins.*.allowed_hosts": {
       "kind": "list",

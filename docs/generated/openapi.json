@@ -5737,6 +5737,9 @@
                 "plugin": {
                   "type": "object",
                   "properties": {
+                    "abi": {
+                      "type": "string"
+                    },
                     "allowed_hosts": {
                       "type": "array",
                       "items": {

@@ -16,6 +16,8 @@ const base: PluginProjection = {
   type: "middleware",
   kv: false,
   fetch: false,
+  abi: "jul-abi/v1",
+  response_phase: false,
 };
 
 function renderCard(plugin: PluginProjection) {
@@ -52,5 +54,23 @@ describe("PluginCard resource limits (#462)", () => {
   it("shows no limits line when every limit is the default", () => {
     renderCard(base);
     expect(screen.queryByText(/limits:/)).toBeNull();
+  });
+});
+
+describe("PluginCard ABI (#430)", () => {
+  it("shows the v1 ABI without any v2 field", () => {
+    renderCard(base);
+    expect(screen.getByText("jul-abi/v1")).toBeTruthy();
+    expect(screen.queryByText(/response phase/)).toBeNull();
+  });
+
+  it("shows a serving v2 module's response phase and body bound", () => {
+    renderCard({ ...base, abi: "jul-abi/v2", response_phase: true, response_body_max: "1m" });
+    expect(screen.getByText(/response phase \(body ≤ 1m\)/)).toBeTruthy();
+  });
+
+  it("says when a v2 module has no response phase", () => {
+    renderCard({ ...base, abi: "jul-abi/v2", response_phase: false, response_body_max: "8m" });
+    expect(screen.getByText(/request phase only/)).toBeTruthy();
   });
 });

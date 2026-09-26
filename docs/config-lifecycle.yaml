@@ -76,12 +76,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 360
-  schema_leaves: 306
-  registry_entries: 306
+  schema_paths: 361
+  schema_leaves: 307
+  registry_entries: 307
   startup_consumed: 32
   by_class:
-    hot_reload: 260
+    hot_reload: 261
     restart_required: 32
     new_listener_only: 7
     ignored_deprecated: 4
@@ -412,6 +412,10 @@ fields:
     subsystem: tracing
     reason: "the tracer provider and exporter are created once at startup"
     startup_consumed: true
+  - path: "plugins.*.abi"
+    class: hot_reload
+    subsystem: plugins
+    reason: "the plugin set is rebuilt and re-instantiated on each successful reload"
   - path: "plugins.*.allowed_hosts"
     class: hot_reload
     subsystem: plugins

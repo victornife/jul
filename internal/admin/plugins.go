@@ -42,6 +42,9 @@ type pluginDef struct {
 	KVMaxEntries     *int    `json:"kv_max_entries,omitempty"`
 	KVMaxBytes       *string `json:"kv_max_bytes,omitempty"`
 	MaxInvocations   *int    `json:"max_invocations,omitempty"`
+	// ABI follows the same rule: an editor that does not send it can never
+	// change a plugin's ABI; "" restores the jul-abi/v1 default.
+	ABI *string `json:"abi,omitempty"`
 }
 
 // keepSize resolves an omitted-means-keep size field.
@@ -52,9 +55,6 @@ func keepSize(in *string, existing config.Size, field string) (config.Size, erro
 	var size config.Size
 	if err := size.UnmarshalText([]byte(*in)); err != nil {
 		return 0, fmt.Errorf("plugin_set: %s: %w", field, err)
-	}
-	if size.Bytes() < 0 {
-		return 0, fmt.Errorf("plugin_set: %s must not be negative", field)
 	}
 	return size, nil
 }
@@ -146,6 +146,17 @@ func buildPlugin(in pluginDef, existing config.PluginConfig) (config.PluginConfi
 	}
 	if err := applyKeptLimits(&pc, in, existing); err != nil {
 		return config.PluginConfig{}, "", err
+	}
+	pc.ABI = existing.ABI
+	if in.ABI != nil {
+		switch abi := strings.TrimSpace(*in.ABI); abi {
+		case "":
+			pc.ABI = ""
+		case config.PluginABIV1, config.PluginABIV2:
+			pc.ABI = abi
+		default:
+			return config.PluginConfig{}, "", fmt.Errorf("plugin_set: abi must be %q or %q", config.PluginABIV1, config.PluginABIV2)
+		}
 	}
 	if raw := strings.TrimSpace(in.MemoryLimit); raw != "" {
 		var size config.Size
@@ -270,6 +281,14 @@ type PluginProjection struct {
 	// Limits holds the resource limits the declaration sets explicitly; an
 	// absent key means the runtime default applies.
 	Limits *PluginLimits `json:"limits,omitempty"`
+	// ABI is the declaration's effective ABI (jul-abi/v1 when unset).
+	ABI string `json:"abi"`
+	// ResponsePhase reports that the serving module can subscribe to the
+	// jul-abi/v2 response phase; it is computed by the runtime.
+	ResponsePhase bool `json:"response_phase"`
+	// ResponseBodyMax is the effective max_response_body bounding a v2
+	// response-phase body; absent for v1 plugins.
+	ResponseBodyMax string `json:"response_body_max,omitempty"`
 }
 
 // PluginLimits is the configured (non-default) resource limits of a plugin.
@@ -308,7 +327,8 @@ func projectLimits(p config.PluginConfig) *PluginLimits {
 
 // PluginModule is the serving content identity of one plugin module.
 type PluginModule struct {
-	Digest string
+	Digest        string
+	ResponsePhase bool
 }
 
 type PluginAttachment struct {
@@ -333,6 +353,13 @@ func projectPlugins(c *config.Config, compiled bool) PluginsProjection {
 			KV: p.KV, Fetch: p.Fetch, AllowedHosts: p.AllowedHosts, Attachments: pluginAttachments(c, name),
 			Pinned: strings.TrimSpace(p.SHA256) != "",
 			Limits: projectLimits(p),
+			ABI:    config.EffectivePluginABI(p),
+		}
+		if pp.ABI == config.PluginABIV2 {
+			pp.ResponseBodyMax = "8m"
+			if p.MaxResponseBody.Bytes() > 0 {
+				pp.ResponseBodyMax = sizeStr(p.MaxResponseBody)
+			}
 		}
 		if p.MemoryLimit.Bytes() > 0 {
 			pp.MemoryLimit = sizeStr(p.MemoryLimit)
@@ -351,6 +378,7 @@ func attachPluginModules(out *PluginsProjection, modules map[string]PluginModule
 		if m, ok := modules[out.Plugins[i].Name]; ok && m.Digest != "" {
 			out.Plugins[i].Digest = m.Digest
 			out.Plugins[i].DigestShort = shortDigest(m.Digest)
+			out.Plugins[i].ResponsePhase = m.ResponsePhase
 		}
 	}
 }

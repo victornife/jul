@@ -415,6 +415,7 @@ func observabilityEntries() []Entry {
 
 func pluginEntries() []Entry {
 	return hotGroup(SubPlugins, reasonPluginRebuild,
+		"plugins.*.abi",
 		"plugins.*.allowed_hosts",
 		"plugins.*.config.*",
 		"plugins.*.fetch",

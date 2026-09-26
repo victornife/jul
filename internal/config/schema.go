@@ -113,6 +113,10 @@ type PluginConfig struct {
 	// Type is "middleware" (wraps a handler, may pass through) or "handler"
 	// (a terminal location action). Defaults to "middleware".
 	Type string `toml:"type"`
+	// ABI selects the host contract the module is built against:
+	// "jul-abi/v1" (the default when empty) or "jul-abi/v2". The module must
+	// declare the same ABI; a mismatch fails the build before Publish.
+	ABI string `toml:"abi"`
 	// Config is an arbitrary string map handed to the guest as a JSON object via
 	// the get_config host function.
 	Config map[string]string `toml:"config"`

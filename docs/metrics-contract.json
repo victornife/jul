@@ -345,6 +345,35 @@
       "state": "released_v1.32.0"
     },
     {
+      "name": "jul_plugin_response_body_unavailable_total",
+      "type": "counter",
+      "help": "jul-abi/v2 body subscriptions presented without a body, labeled by plugin name and closed reason (none/too_large/streaming/encoded/partial/upgraded).",
+      "labels": [
+        "plugin",
+        "reason"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_plugin_response_duration_seconds",
+      "type": "histogram",
+      "help": "jul-abi/v2 handle_response invocation latency in seconds, labeled by plugin name.",
+      "labels": [
+        "plugin"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_plugin_response_invocations_total",
+      "type": "counter",
+      "help": "jul-abi/v2 handle_response invocations, labeled by plugin name and result (continue/reject/error).",
+      "labels": [
+        "plugin",
+        "result"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_reload_duration_seconds",
       "type": "histogram",
       "help": "Configuration reload latency in seconds, labeled by source and outcome.",

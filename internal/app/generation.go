@@ -69,6 +69,9 @@ type Generation struct {
 	// pluginModules is the content identity of the plugin set built into
 	// this generation (#429).
 	pluginModules map[string]plugins.ModuleIdentity
+	// pluginResponse reports, per plugin, whether its serving module can
+	// subscribe to the jul-abi/v2 response phase (ADR 0020).
+	pluginResponse map[string]bool
 }
 
 // Begin opens a new staging generation, starting the pool registry's staging

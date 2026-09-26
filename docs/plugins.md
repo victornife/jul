@@ -16,8 +16,10 @@ startup if it is populated, so misconfiguration fails loudly.
 ## Contents
 
 - [Concepts](#concepts)
+- [Which ABI? v1 or v2](#which-abi-v1-or-v2)
 - [Configuration](#configuration)
 - [Writing a plugin](#writing-a-plugin)
+- [Writing a response-phase plugin (jul-abi/v2)](#writing-a-response-phase-plugin-jul-abiv2)
 - [Building a plugin](#building-a-plugin)
 - [The guest SDK](#the-guest-sdk)
 - [The `jul-abi/v1` ABI](#the-jul-abiv1-abi)
@@ -40,6 +42,21 @@ two shapes, chosen by the `type` field:
 Each plugin runs in its own wazero runtime with a memory cap and a per-invocation
 deadline. A guest that panics or overruns its deadline is contained: the request
 fails with `500` and the server keeps serving every other request.
+
+## Which ABI? v1 or v2
+
+Two ABIs are supported side by side; [abi.md](abi.md) is the full comparison.
+
+- **`jul-abi/v1`** (the default) covers everything that happens *before* the
+  request is forwarded: inspect/rewrite/block the request, answer it yourself,
+  act as a handler, set a response header up front, KV and fetch.
+- **`jul-abi/v2`** adds an opt-in **response phase**: a `handle_response`
+  callback that sees the status and headers the location actually produced and,
+  when eligible, a bounded buffered body it may replace — or reject.
+
+Choose v2 only when the plugin needs the real response (add headers based on the
+upstream status, redact a small JSON body, fail closed on a backend error page).
+v1 is not deprecated, and a v1 guest never needs rebuilding.
 
 ## Configuration
 
@@ -79,6 +96,7 @@ plugins = ["header-inject"]             # middleware for every location here
 | --- | ------- |
 | `path` / `inline` | Module source — supply exactly one |
 | `type` | `middleware` (default) or `handler` |
+| `abi` | `jul-abi/v1` (default) or `jul-abi/v2`; must match the SDK the module was built with, checked before Publish. See [abi.md](abi.md#selecting-an-abi) |
 | `config` | String map handed to the guest as a JSON object via `get_config` |
 | `memory_limit` | Guest linear-memory ceiling (default 16 MiB) |
 | `timeout` | Deadline for a single invocation (default 100ms) |
@@ -86,12 +104,13 @@ plugins = ["header-inject"]             # middleware for every location here
 | `kv_max_entries` / `kv_max_bytes` | Per-plugin KV quota (defaults 1024 keys / 1 MiB); a `kv_set` past either is rejected |
 | `fetch` / `allowed_hosts` | Grant guarded outbound HTTP to the allow-listed hosts (SSRF-guarded) |
 | `fetch_timeout` / `max_fetch_response` | Per-call deadline and response-size cap for `fetch` (defaults 5s / 1 MiB) |
-| `max_request_body` / `max_response_body` | Body buffering caps (defaults 1 MiB / 8 MiB); overflow fails the call, never truncates |
+| `max_request_body` / `max_response_body` | Body buffering caps (defaults 1 MiB / 8 MiB); overflow fails the call, never truncates. For v2, `max_response_body` also bounds the response-phase body and its replacement (at most `1g`) |
 | `max_invocations` | Retire a pooled instance after this many calls (default 1000) |
 | `sha256` | Optional pin: the exact module bytes' SHA-256 (64 hex digits; a `sha256:` prefix is accepted). See [Module content identity](#module-content-identity-and-pinning) |
 
-The Console's guided plugin editor edits the module source, `type`, `config`,
-capabilities, `memory_limit` and `timeout`. Every other field above — the
+The Console's guided plugin editor edits the module source, `type`, `abi`,
+`config`, capabilities, `memory_limit` and `timeout`; it sends `abi` only when
+you change it, and the change is part of the review diff. Every other field above — the
 `sha256` pin and the `max_*`, `kv_max_*` and `fetch_timeout` limits — is
 *omitted-means-keep* in its `plugin_set` payload: an edit that does not send a
 field keeps the configured value, an explicit value replaces it, and an explicit
@@ -102,6 +121,8 @@ Validation rules:
 
 - exactly one of `path` or `inline` must be set;
 - `type` must be `middleware` or `handler`;
+- `abi`, when set, must be `jul-abi/v1` or `jul-abi/v2`, and the module must
+  declare the same ABI (checked when the plugin set is built, before Publish);
 - `path`, when set, must exist on disk;
 - `fetch = true` requires a non-empty `allowed_hosts`;
 - `sha256`, when set, must be 64 hexadecimal digits;
@@ -188,6 +209,60 @@ func init() {
 }
 ```
 
+## Writing a response-phase plugin (jul-abi/v2)
+
+Import the v2 SDK (`juliaplugins/sdk/v2`), subscribe from `HandleRequest`, and
+act in `HandleResponse`:
+
+```go
+package main
+
+import sdk "juliaplugins/sdk/v2"
+
+func init() {
+	sdk.HandleRequest = func(req *sdk.Request) sdk.Action {
+		_ = req.SubscribeResponse(sdk.Body) // or sdk.Headers: no buffering
+		return sdk.Continue
+	}
+	sdk.HandleResponse = func(resp *sdk.Response) sdk.Verdict {
+		body, err := resp.Body()
+		if err != nil { // resp.BodyState() says why
+			return sdk.Deliver
+		}
+		_ = resp.ReplaceBody(redact(body))
+		return sdk.Deliver
+	}
+}
+
+func main() {}
+```
+
+```toml
+[plugins.redact]
+path = "./plugins/v2-redact.wasm"
+abi = "jul-abi/v2"
+memory_limit = "32m"        # a body transform needs ~2x max_response_body
+config = { secrets = "hunter2" }
+```
+
+Rules worth knowing before you start (all detailed in [abi.md](abi.md)):
+
+- The response hook runs inside the location's WAF and outside its cache: on
+  every response including cache hits, before `response_headers`/CORS and
+  compression. Policy denials (auth, rate limit, WAF) are never presented.
+- The two callbacks may run on different instances; use `req.SetState` /
+  `resp.State()` for per-request data, never package variables.
+- A `Body` subscription buffers up to `max_response_body` and delivers the
+  response once it completes; declared streams (SSE, gRPC, …), `HEAD`/`204`/`304`,
+  `206`, encoded and oversized bodies are presented headers-only with a
+  `BodyState` saying why.
+- `sdk.Reject` discards the response (status set with `SetStatus` if 4xx/5xx,
+  else `502`); a trap or timeout discards it with `500`.
+
+Runnable examples: [`v2-status-header`](../examples/plugins/v2-status-header)
+(headers only) and [`v2-redact`](../examples/plugins/v2-redact) (bounded body
+transform).
+
 ## Building a plugin
 
 Plugins are built for the WASI preview-1 target with the standard Go toolchain
@@ -225,6 +300,14 @@ The SDK lives at [`examples/plugins/sdk`](../examples/plugins/sdk) (package
 | `Request.Config() []byte` | The plugin's `config` table as a JSON object |
 | `KVGet(key) ([]byte, bool)` / `KVSet(key, value) bool` | Key/value store (needs `kv`) |
 | `Fetch(method, url string, body []byte) (int, []byte, error)` | Guarded outbound HTTP (needs `fetch`); reads the response body via `last_fetch_len`+`fetch_read`. When the response exceeds `max_fetch_response`, the body is truncated and `LastFetchTruncated()` returns `true`. |
+
+The v2 SDK, [`examples/plugins/sdk/v2`](../examples/plugins/sdk/v2) (import
+`sdk "juliaplugins/sdk/v2"`), keeps the same request API (`sdk.Handle` becomes
+`sdk.HandleRequest`) and adds `Request.SubscribeResponse`, `Request.SetState`,
+`sdk.HandleResponse`, and a `Response` type (`Status`/`SetStatus`,
+`Header`/`HeaderValues`/`HeaderNames`/`SetHeader`/`AddHeader`/`DelHeader`,
+`BodyState`/`Body`/`ReplaceBody`, `State`, and read-only `Method`/`URI`/
+`RequestHeader`), returning `sdk.Deliver` or `sdk.Reject`.
 
 ## The `jul-abi/v1` ABI
 
@@ -297,9 +380,17 @@ the guest grows it and calls again. The SDK helpers (`readInto`, `KVGet`,
 Every invocation updates Prometheus metrics:
 
 - `jul_plugin_invocations_total{plugin,result}` — `result` is `continue`, `stop`,
-  or `error`;
-- `jul_plugin_duration_seconds{plugin}` — invocation latency histogram;
-- `jul_plugin_panics_total{plugin}` — guest panics/timeouts contained as `500`.
+  or `error` (`handle_request` invocations only, in v1 and v2);
+- `jul_plugin_duration_seconds{plugin}` — invocation latency histogram
+  (`handle_request`);
+- `jul_plugin_panics_total{plugin}` — guest panics/timeouts contained, in either
+  phase;
+- `jul_plugin_response_invocations_total{plugin,result}` — v2 `handle_response`
+  invocations, `result` is `continue`, `reject` or `error`;
+- `jul_plugin_response_duration_seconds{plugin}` — `handle_response` latency;
+- `jul_plugin_response_body_unavailable_total{plugin,reason}` — body
+  subscriptions presented without a body (`none`, `too_large`, `streaming`,
+  `encoded`, `partial`, `upgraded`).
 
 Guest `log` output is emitted on the server log with the plugin name attached.
 
@@ -345,11 +436,12 @@ admin listener to loopback or mTLS, rotate the token, and prefer
 
 ## Limits and reserved features
 
-The `jul-abi/v1` ABI is request-phase only in v1:
+The `jul-abi/v1` ABI is request-phase only:
 
-- **No separate response phase.** There is no `handle_response` export in v1.
-  Response headers and status set during `handle_request` apply because they are
-  written before the next handler runs.
+- **No separate response phase in v1.** There is no `handle_response` export in
+  v1. Response headers and status set during `handle_request` apply because they
+  are written before the next handler runs. The response phase is `jul-abi/v2`
+  ([abi.md](abi.md)).
 
 ## Conformance matrix
 
@@ -377,6 +469,17 @@ The `jul-abi/v1` ABI is request-phase only in v1:
 | Fetch not truncated | Response 5 B, `max_fetch_response = 100` | Body完整, `lastFetchTruncated = false` | TestFetchNotTruncated |
 | Build rejects missing module | `path` points to non-existent file | Build error | TestBuildRejectsMissingModule |
 | Set.Has membership | Plugin declared vs missing | `true` / `false` | TestSetHas |
+| v2 ABI negotiation | v1/v2 fixtures and hand-assembled modules under both configured ABIs | Matching loads; every mismatch/malformed declaration rejected before Publish | TestNegotiateABIMatrix |
+| v2 golden contract | Live `jul-abi/v2` host module + constants | Equals `abi-v2.golden`; v1 surface has no v2 function | TestABIV2Golden / TestABIV1HostModuleHasNoV2Surface |
+| v2 metadata hook | Headers subscription, duplicate headers, state | Status/headers/state/request visible; body `NOT_REQUESTED` | TestResponsePhaseEchoMetadata |
+| v2 body read/replace | Body subscription | Replaced body, host-owned `Content-Length`, validators dropped | TestResponsePhaseBodyReadAndReplace |
+| v2 unavailable bodies | HEAD/204/304/206/encoded/SSE/gRPC/trailer/oversized | Closed body state, body passes untouched, metric counted | TestResponsePhaseBodyUnavailableReasons |
+| v2 mutation rules | Forbidden/invalid headers, splitting, header flood, status table | Closed return codes, no injected header | TestResponsePhaseHeaderMutation / TestResponsePhaseStatusMutation |
+| v2 reject | `Reject` with/without status | `502`/guest 4xx, empty body, pre-action headers kept | TestResponsePhaseReject |
+| v2 failures | trap, loop, OOB pointer, wrong-phase call, reserved result | `500 plugin error`, nothing partially mutated | TestResponsePhaseFailuresFailClosed / TestV2ContractViolationsFailInvocation |
+| v2 upgrade | Real hijack and `101` | Hook observes read-only after commit | TestResponsePhaseUpgradeIsObservedReadOnly |
+| v2 ordering | cache, gzip/br/zstd, WAF, `response_headers`/CORS, rate-limit denial, upstream error | See [abi.md](abi.md#pipeline) | TestV2* in `internal/app` |
+| v2 lifecycle | reload under load, pinned generation, v1↔v2 replacement, churn quiescence | No failures, no leak | TestV2ReloadUnderLoadAndChurnQuiesces / TestResponsePhasePinsRequestGeneration / TestResponsePhaseV1V2Replacement |
 
 ## Benchmarks
 
@@ -394,6 +497,25 @@ Run: `go test -tags wasmplugins -bench='BenchmarkPlugin.*' -run='^$' -benchmem .
 | PluginKVCounterWithCapability | 45,710 | 23,019 ns | 16,919 | 63 | ~120× |
 | PluginParallel (16 threads) | 323,972 | 3,423 ns | 14,725 | 43 | ~18× (amortised) |
 
+**The cost of the v2 response phase** (2026-09-26, same machine class,
+`-benchtime 2s`; `guest-calls/op` counts both phases):
+
+| Benchmark | Time/op | B/op | Allocs/op | Guest calls/op |
+| --- | --- | --- | --- | --- |
+| V1RequestOnly (`v1-current-header-inject`) | 17.1 µs | 19,659 | 65 | 1 |
+| V2RequestOnly (no subscription) | 16.2 µs | 23,465 | 68 | 1 |
+| V2ResponseMetadata (`v2-status-header`) | 32.4 µs | 39,354 | 136 | 2 |
+| V2BodyInspect (`v2-redact`, 1 KiB JSON, no match) | 98.2 µs | 66,931 | 178 | 2 |
+| V2BodyReplace (`v2-redact`, 1 KiB JSON, redacted) | 89.9 µs | 82,459 | 197 | 2 |
+
+A v2 plugin that does not subscribe costs what v1 costs. A headers-only
+subscription is a second guest call (~2×). The body examples are dominated by the
+example's own work — it decodes its JSON config and scans the body on every
+call — plus copying the body into and out of guest memory; a body subscription
+also holds up to `max_response_body` of host memory until the response is sent.
+
+Run: `go test -tags wasmplugins -bench='BenchmarkV[12]' -run='^$' -benchmem ./internal/plugins/`
+
 **Interpretation.** A single guest call adds ~16–23 μs of wall-clock latency and
 ~15 KB of transient allocations (mostly wazero runtime state per instance). The
 parallel benchmark shows that under concurrency the effective per-request cost
@@ -404,8 +526,10 @@ paths where every microsecond counts.
 
 ## Known limitations
 
-1. **Request-phase only.** `jul-abi/v1` has no `handle_response` export; response
-   inspection or mutation after the next handler runs is not possible in v1.
+1. **No streaming hooks.** `jul-abi/v1` is request-phase only; `jul-abi/v2` adds a
+   bounded response phase (status, headers, a buffered body up to
+   `max_response_body`) but no chunk, SSE, WebSocket-frame or gRPC-message
+   hooks (research in #444).
 2. **No shared plugin state across names.** Each plugin name gets its own wazero
    runtime and KV namespace. Two plugins cannot share memory or KV keys even if
    they load the same `.wasm` file.
@@ -414,8 +538,9 @@ paths where every microsecond counts.
    body (up to `max_response_body`) before anything is written to the HTTP
    response writer. Large uploads/downloads should bypass the plugin (use a
    handler route without plugins).
-4. **One ABI version in v1.** Only `jul-abi/v1` is implemented; future ABIs
-   (proxy-wasm, http-wasm) require a new ABI id and host-module registrar.
+4. **Two native ABIs.** `jul-abi/v1` and `jul-abi/v2` are implemented; other
+   ABIs (proxy-wasm, http-wasm) would need their own ABI id and host-module
+   registrar.
 5. **Build-tag required.** Binaries compiled without `wasmplugins` reject any
    config that declares plugins at startup. This is intentional (fail loud) but
    means plugin-enabled builds are larger and have a wider dependency surface
@@ -435,6 +560,11 @@ are addressed by design, configuration, or runtime containment:
 | Admin uploads malicious module | Attacker with admin token uploads crafted `.wasm` | Admin endpoint requires bearer token; upload disabled by default; filename hardened; path-traversal defense; module still sandboxed | Compromised admin token (rotate tokens, restrict admin to loopback/mTLS) |
 | Information leak via guest error | Guest panics and leaks stack or data in error message | Panic is contained; the host returns generic "plugin error" `500`; guest log goes to server log, not the HTTP client | Server log exposed to attacker (standard log-hardening hygiene) |
 | ABI compatibility breakage | New host release changes host function signature | ABI surface is golden-pinned (`abi-v1.golden`); additive-only policy within v1; breaking changes require new ABI id | Operator overrides golden check or builds from unreviewed ABI patch |
+| v1/v2 confusion or ABI spoofing | A module built for one ABI configured as the other, or claiming v2 | Explicit `abi` config **and** a static module declaration must agree; separate host modules (`jul` / `jul-abi/v2`); mismatch rejected before Publish | A module can always claim v2 — the check is compatibility, not authenticity (#439) |
+| Response-phase bypass of security policy | Plugin rewrites a denial, removes a security header, widens CORS, or injects content after WAF inspection | Response point sits inside WAF and after Auth/RateLimit; `response_headers`/CORS apply after it; policy denials never presented | Where no policy exists a plugin has the origin's authority over its own response |
+| Redaction bypass via request shaping | Client sends `Range` or `Accept-Encoding` so the body is partial/encoded | Body subscriptions forward the identity representation (those headers removed); an origin that ignores it yields a closed body state the plugin can reject | Origin that force-compresses or force-ranges |
+| Unbounded buffering / framing corruption | Large or streaming response, guest-set framing headers, CR/LF in values | Buffer bounded by `max_response_body`; declared streams never buffered; framing headers forbidden and host-computed; values validated | Undeclared slow streams are delayed until complete or at the cap |
+| Cross-request state leak | Guest keeps request data in globals across phases | Per-phase instance model is documented; host-owned per-request state (≤ 4 KiB) released with the request | Guest code that ignores the rule leaks between its own requests, as in v1 |
 
 ## Fuzz coverage
 
@@ -444,22 +574,23 @@ The following fuzz targets exercise the ABI boundary and guard logic:
 | ------ | ---- | -------------- | ------ |
 | `FuzzPluginInvoke` | `internal/plugins/fuzz_test.go` | Random request shape (method, URI, headers, body) into `header-inject.wasm` | No host panic; status ∈ [100,599]; no cross-invocation state leak |
 | `FuzzHostAllowed` | `internal/plugins/fuzz_test.go` | Adversarial host strings and allow-lists | No panic; deterministic allow/block decision |
+| `FuzzResponsePhase` | `internal/plugins/fuzz_response_test.go` | Random action status, header, body and flush pattern through a v2 body subscription with every guest op | No host panic; final status in range; host-owned `Content-Length` matches the bytes; transforms exact |
 
-Run: `go test -tags wasmplugins -fuzz='FuzzPluginInvoke|FuzzHostAllowed' -fuzztime=30s ./internal/plugins/`
+Run one target at a time: `go test -tags wasmplugins -run='^$' -fuzz='^FuzzResponsePhase$' -fuzztime=30s ./internal/plugins/`
 
 ## GA status
 
 | Criterion | Status | Evidence |
 | --------- | ------ | -------- |
-| ① Behaviour conformance matrix | **Met** | 19-row matrix above +
+| ① Behaviour conformance matrix | **Met** | Conformance matrix above +
 `internal/plugins/plugins_test.go` |
-| ② Benchmarks | **Met** | 5 benchmarks in `internal/plugins/bench_test.go` |
-| ③ Known limitations | **Met** | 5-item list above |
+| ② Benchmarks | **Met** | `internal/plugins/bench_test.go` (v1) and `bench_v2_test.go` (v2 response phase) |
+| ③ Known limitations | **Met** | List above |
 | ④ Compatibility policy | **Met** | Additive-only ABI policy, golden-pinned surface, prebuilt-guest tested; documented in [abi.md](abi.md) |
 | ⑤ Soak test | **Met** | 8h Linux soak 2026-07-16 (21.7M+ requests at ~10K–20K req/s, 0 missing plugin headers, plugin executed correctly on 100% of successful responses) — [evidence](soak-evidence.md#2026-07-16--wasm-plugin-8h-isolated-soak-linux--authoritative-run) |
 | ⑥ Feature documentation | **Met** | This document + [abi.md](abi.md) +
 [configuration.md](configuration.md) |
-| ⑦ Threat model | **Met** | 7-row threat table above |
+| ⑦ Threat model | **Met** | Threat table above |
 | ⑧ Parser/input fuzzing | **Met** | `FuzzPluginInvoke`, `FuzzHostAllowed` in `internal/plugins/fuzz_test.go` |
 | ⑨ Console surface | **Met** | Plugins panel (declare, attach, detach, upload) shipped in Console v2 |
 

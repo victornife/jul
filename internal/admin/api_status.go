@@ -402,7 +402,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		{Group: "Observability", Name: "Access log", Active: accessLogEnabled, Detail: accessLogDetail},
 		{Group: "Observability", Name: "Backend dial-failure accounting", Active: s.deps.Metrics != nil, Detail: "counted and rate-limited per backend pool; see jul_stream_backend_dial_failures_total / jul_http_backend_dial_failures_total"},
 
-		{Group: "Extensibility", Name: "WASM plugins", Active: len(c.Plugins) > 0, Detail: pluginDetail(len(c.Plugins), pluginLocs)},
+		{Group: "Extensibility", Name: "WASM plugins", Active: len(c.Plugins) > 0, Detail: pluginDetail(len(c.Plugins), pluginV2Count(c.Plugins), pluginLocs)},
 	}
 }
 
@@ -455,12 +455,27 @@ func externalAPIDetail(a config.AdminConfig) string {
 		countUnit(externalOperationCount, "operation"), apiVersionNamespace, countUnit(internalRouteCount, "route"))
 }
 
-// pluginDetail summarizes declared plugins and how many locations reference one.
-func pluginDetail(declared, locs int) string {
+// pluginV2Count counts declarations selecting jul-abi/v2.
+func pluginV2Count(plugins map[string]config.PluginConfig) int {
+	n := 0
+	for _, p := range plugins {
+		if config.EffectivePluginABI(p) == config.PluginABIV2 {
+			n++
+		}
+	}
+	return n
+}
+
+// pluginDetail summarizes declared plugins, how many use jul-abi/v2 (the
+// response phase), and how many locations reference one.
+func pluginDetail(declared, v2, locs int) string {
 	if declared == 0 {
 		return ""
 	}
 	d := countUnit(declared, "module")
+	if v2 > 0 {
+		d += fmt.Sprintf(" (%d %s)", v2, config.PluginABIV2)
+	}
 	if locs > 0 {
 		d += "; " + countUnit(locs, "location")
 	}

@@ -17,17 +17,20 @@
 //
 // # ABI seam
 //
-// Guests speak an ABI: a contract of host import functions (the "jul" module)
-// and guest exports (handle_request). v1 ships one ABI, jul-abi/v1, authored for
-// guests compiled with the standard Go toolchain for GOOS=wasip1. Additional
-// ABIs (for example http-wasm or proxy-wasm) can be added behind abiRegistry
-// without touching the manager or the HTTP wiring.
+// Guests speak an ABI: a contract of host import functions and guest exports.
+// jul-abi/v1 (host module "jul", export handle_request) is frozen. jul-abi/v2
+// (host module "jul-abi/v2") keeps the v1 request surface and adds an opt-in,
+// bounded response phase (handle_response); see docs/abi.md and ADR 0020. A
+// plugin's configured abi selects the registrar, and negotiateABI verifies the
+// module declares the same ABI before anything is instantiated.
 package plugins
 
 import (
 	"context"
 
 	"github.com/tetratelabs/wazero"
+
+	"jul/internal/config"
 )
 
 // Compiled reports whether this build includes the WASM plugin runtime. It is
@@ -35,20 +38,27 @@ import (
 // letting callers detect a lean binary.
 const Compiled = true
 
-// ABI identifiers. jul-abi/v1 is the only ABI implemented in v1; the constants
-// document the seam where future ABIs register.
+// ABI identifiers accepted by [plugins.NAME] abi.
 const (
 	// ABIJulV1 is the native Jul.IA ABI for Go/wasip1 guests.
-	ABIJulV1 = "jul-abi/v1"
+	ABIJulV1 = config.PluginABIV1
+	// ABIJulV2 adds the bounded response phase.
+	ABIJulV2 = config.PluginABIV2
+)
+
+// Host import module names. v2 has its own module so the frozen v1 surface
+// can never be bound by a v2 guest, or the reverse.
+const (
+	hostModuleV1 = "jul"
+	hostModuleV2 = ABIJulV2
 )
 
 // hostModuleRegistrar instantiates an ABI's host import module on a runtime,
-// closing over the plugin's capabilities and config. This is the ABI seam:
-// adding http-wasm or proxy-wasm support means registering another entry here
-// (and selecting it per plugin), without changing the manager or HTTP wiring.
+// closing over the plugin's capabilities and config.
 type hostModuleRegistrar func(ctx context.Context, r wazero.Runtime, p *plugin) error
 
 // abiRegistry maps an ABI identifier to its host-module registrar.
 var abiRegistry = map[string]hostModuleRegistrar{
 	ABIJulV1: registerJulHostModule,
+	ABIJulV2: registerJulV2HostModule,
 }

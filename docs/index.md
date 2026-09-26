@@ -83,6 +83,7 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 | HTTP/3 over QUIC | [http3.md](http3.md) | `GA` / `soaked` |
 | gRPC ↔ JSON transcoding | [grpc-transcoding.md](grpc-transcoding.md) | `GA` / `soaked` |
 | WASM plugin system | [plugins.md](plugins.md) | `GA` / `soaked` |
+| WASM plugin response phase (`jul-abi/v2`) | [abi.md](abi.md) | `Beta` / `merged` |
 | L4 stream proxy | [stream.md](stream.md) | `GA` / `soaked` |
 | Native gRPC passthrough + h2c | [grpc-proxy.md](grpc-proxy.md) | `GA` / `soaked` |
 | Service discovery / dynamic upstreams | [service-discovery.md](service-discovery.md) | `GA` / `soaked` |

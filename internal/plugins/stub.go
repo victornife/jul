@@ -27,7 +27,10 @@ import (
 const Compiled = false
 
 // ABIJulV1 is the native Jul.IA ABI identifier (declared for API symmetry).
-const ABIJulV1 = "jul-abi/v1"
+const ABIJulV1 = config.PluginABIV1
+
+// ABIJulV2 is the response-phase ABI identifier (declared for API symmetry).
+const ABIJulV2 = config.PluginABIV2
 
 // DialFunc matches net.Dialer.DialContext (declared for API symmetry).
 type DialFunc = func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -46,6 +49,10 @@ type Options struct {
 	KV           KVStore
 	// EgressWrap mirrors the compiled build's global egress guard hook.
 	EgressWrap func(base DialFunc) DialFunc
+	// OnResponseInvocation and OnResponseBodyUnavailable mirror the compiled
+	// build's response-phase hooks.
+	OnResponseInvocation      func(plugin, result string, d time.Duration)
+	OnResponseBodyUnavailable func(plugin, reason string)
 }
 
 // Manager is a no-op plugin manager in the lean build.
@@ -91,3 +98,9 @@ func (*Set) Middleware(string) middleware.Middleware { return nil }
 // Handler returns nil in the lean build (never reached: Build rejects any
 // configured plugin first).
 func (*Set) Handler(string) http.Handler { return nil }
+
+// ResponsePoint returns nil in the lean build.
+func (*Set) ResponsePoint(...string) middleware.Middleware { return nil }
+
+// ABIs is empty in the lean build.
+func (*Set) ABIs() map[string]string { return nil }

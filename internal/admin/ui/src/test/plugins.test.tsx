@@ -31,6 +31,7 @@ import {
   parseConfigMap,
   pluginDraftToPatch,
   pluginDraftWarnings,
+  toABI,
 } from "@/lib/plugins.ts";
 import { PluginsPanel } from "@/features/plugins/PluginsPanel.tsx";
 
@@ -100,6 +101,8 @@ describe("plugins lib", () => {
       type: "middleware",
       kv: true,
       fetch: false,
+      abi: "jul-abi/v2",
+      response_phase: true,
       pinned: true,
       limits: {
         max_request_body: "2m",
@@ -121,10 +124,31 @@ describe("plugins lib", () => {
       "kv_max_bytes",
       "max_invocations",
       "sha256",
+      "abi",
     ]) {
       expect(Object.keys(patch)).not.toContain(key);
     }
     expect(patch.type).toBe("handler");
+  });
+
+  it("sends the ABI only when the operator changes it (#430)", () => {
+    const v2: PluginProjection = {
+      name: "resp",
+      source: "path",
+      path: "r.wasm",
+      type: "middleware",
+      kv: false,
+      fetch: false,
+      abi: "jul-abi/v2",
+      response_phase: true,
+    };
+    const seeded = seedPluginDraft(v2);
+    expect(seeded.abi).toBe("jul-abi/v2");
+    expect(Object.keys(pluginDraftToPatch(seeded))).not.toContain("abi");
+    expect(pluginDraftToPatch({ ...seeded, abi: "jul-abi/v1" }).abi).toBe("jul-abi/v1");
+    expect(Object.keys(pluginDraftToPatch({ ...emptyPluginDraft(), path: "x.wasm" }))).not.toContain("abi");
+    expect(pluginDraftToPatch({ ...emptyPluginDraft(), path: "x.wasm", abi: "jul-abi/v2" }).abi).toBe("jul-abi/v2");
+    expect(toABI("bogus")).toBe("jul-abi/v1");
   });
 
   it("pluginDraftToPatch includes path, caps, hosts and config", () => {
@@ -149,6 +173,8 @@ describe("plugins lib", () => {
       type: "middleware",
       kv: true,
       fetch: false,
+      abi: "jul-abi/v1",
+      response_phase: false,
       config: { a: "1" },
     };
     const draft = seedPluginDraft(p);

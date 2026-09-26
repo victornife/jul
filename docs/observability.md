@@ -120,6 +120,9 @@ are never reset and previously recorded host-labeled series are not deleted.
 | `jul_plugin_duration_seconds` | Histogram | `plugin` | Released `v1.32.0` | WASM plugin invocation latency in seconds, labeled by plugin name. |
 | `jul_plugin_invocations_total` | Counter | `plugin`, `result` | Released `v1.32.0` | WASM plugin invocations, labeled by plugin name and result (continue/stop/error). |
 | `jul_plugin_panics_total` | Counter | `plugin` | Released `v1.32.0` | WASM plugin traps/panics contained by the host, labeled by plugin name. |
+| `jul_plugin_response_body_unavailable_total` | Counter | `plugin`, `reason` | Merged / release pending | jul-abi/v2 body subscriptions presented without a body, labeled by plugin name and closed reason (none/too_large/streaming/encoded/partial/upgraded). |
+| `jul_plugin_response_duration_seconds` | Histogram | `plugin` | Merged / release pending | jul-abi/v2 handle_response invocation latency in seconds, labeled by plugin name. |
+| `jul_plugin_response_invocations_total` | Counter | `plugin`, `result` | Merged / release pending | jul-abi/v2 handle_response invocations, labeled by plugin name and result (continue/reject/error). |
 | `jul_reload_duration_seconds` | Histogram | `outcome`, `source` | Merged / release pending | Configuration reload latency in seconds, labeled by source and outcome. |
 | `jul_reload_in_progress` | Gauge | — | Merged / release pending | 1 while a configuration reload transaction is in flight; 0 otherwise. |
 | `jul_reload_phase_duration_seconds` | Histogram | `outcome`, `phase` | Merged / release pending | Latency of individual reload phases (resolve/validate/lifecycle/change_assessment/prepare/stage_listeners/publish/activate), labeled by phase and outcome. A proven `no_change` reports only the phases that ran. |

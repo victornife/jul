@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 306 configurable leaves.
+Coverage: 307 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -982,6 +982,22 @@ ServiceName sets the OpenTelemetry resource service.name.
 | Requires | `otel` |
 | Default | jul |
 | Flags | startup-consumed |
+
+## `plugins.*.abi` {#plugins-x-abi}
+
+ABI selects the host contract the module is built against: "jul-abi/v1" (the default when empty) or "jul-abi/v2".
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `plugins` |
+| Why | the plugin set is rebuilt and re-instantiated on each successful reload |
+| Requires | `wasm_plugins` |
+| Allowed values | `jul-abi/v1`, `jul-abi/v2` |
+| Constraint | exact enum; the module must declare the same ABI |
+| Zero/empty semantics | omitted selects jul-abi/v1 |
+| Active when | plugin configured |
 
 ## `plugins.*.allowed_hosts` {#plugins-x-allowed_hosts}
 

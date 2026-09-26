@@ -74,8 +74,14 @@ type Metrics struct {
 	pluginInvokes    *prometheus.CounterVec
 	pluginDuration   *prometheus.HistogramVec
 	pluginPanics     *prometheus.CounterVec
-	listenerConns    prometheus.Gauge
-	http3Conns       prometheus.Gauge
+	// pluginRespInvokes/pluginRespDuration/pluginRespNoBody are the jul-abi/v2
+	// response phase (ADR 0020 §9): new families, so the released plugin
+	// families keep counting handle_request only.
+	pluginRespInvokes  *prometheus.CounterVec
+	pluginRespDuration *prometheus.HistogramVec
+	pluginRespNoBody   *prometheus.CounterVec
+	listenerConns      prometheus.Gauge
+	http3Conns         prometheus.Gauge
 	// http3AltSvcTransitions counts HTTP/3 Alt-Svc advertisement changes,
 	// labeled by the bounded destination state ("advertise"/"clear"). No
 	// address, port, or max-age value is ever a label (#161).
@@ -334,6 +340,19 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_plugin_panics_total",
 			Help: "WASM plugin traps/panics contained by the host, labeled by plugin name.",
 		}, []string{"plugin"}),
+		pluginRespInvokes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_plugin_response_invocations_total",
+			Help: "jul-abi/v2 handle_response invocations, labeled by plugin name and result (continue/reject/error).",
+		}, []string{"plugin", "result"}),
+		pluginRespDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "jul_plugin_response_duration_seconds",
+			Help:    "jul-abi/v2 handle_response invocation latency in seconds, labeled by plugin name.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"plugin"}),
+		pluginRespNoBody: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_plugin_response_body_unavailable_total",
+			Help: "jul-abi/v2 body subscriptions presented without a body, labeled by plugin name and closed reason (none/too_large/streaming/encoded/partial/upgraded).",
+		}, []string{"plugin", "reason"}),
 		listenerConns: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "jul_listener_conns",
 			Help: "Current concurrent connections across all listeners.",
@@ -480,6 +499,9 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.pluginInvokes,
 		m.pluginDuration,
 		m.pluginPanics,
+		m.pluginRespInvokes,
+		m.pluginRespDuration,
+		m.pluginRespNoBody,
 		m.listenerConns,
 		m.http3Conns,
 		m.http3AltSvcTransitions,
@@ -824,6 +846,20 @@ func (m *Metrics) ObservePluginInvocation(plugin, result string, latency time.Du
 // (turning it into a 500 while keeping the server alive).
 func (m *Metrics) ObservePluginPanic(plugin string) {
 	m.pluginPanics.WithLabelValues(plugin).Inc()
+}
+
+// ObservePluginResponseInvocation counts a jul-abi/v2 handle_response
+// invocation by plugin name and result ("continue", "reject" or "error") and
+// records its latency.
+func (m *Metrics) ObservePluginResponseInvocation(plugin, result string, latency time.Duration) {
+	m.pluginRespInvokes.WithLabelValues(plugin, result).Inc()
+	m.pluginRespDuration.WithLabelValues(plugin).Observe(latency.Seconds())
+}
+
+// ObservePluginResponseBodyUnavailable counts a body subscription presented
+// without a body, by plugin name and the closed reason label.
+func (m *Metrics) ObservePluginResponseBodyUnavailable(plugin, reason string) {
+	m.pluginRespNoBody.WithLabelValues(plugin, reason).Inc()
 }
 
 // ObserveCertExpiry records a certificate's leaf expiry for domain and counts a
