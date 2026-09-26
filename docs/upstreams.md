@@ -29,6 +29,7 @@ proxy_pass = "https://inventory"
 ## Contents
 
 - [Pool basics](#pool-basics)
+- [Consistent-hash affinity](#consistent-hash-affinity)
 - [Admission and overload control](#admission-and-overload-control)
 - [Sizing the limits](#sizing-the-limits)
 - [The accounting model in one place](#the-accounting-model-in-one-place)
@@ -49,7 +50,8 @@ proxy_pass = "https://inventory"
 | --- | ---- | ----------- |
 | `name` | string | The pool's name, referenced as `proxy_pass = "https://name"` |
 | `servers` | []string \| []table | Backends, as `"host:port"`, `"unix:/path.sock"`, or `{ address, weight }` |
-| `strategy` | string | `round_robin` (default), `weighted_round_robin`, `least_conn` |
+| `strategy` | string | `round_robin` (default), `weighted_round_robin`, `least_conn`, `consistent_hash` |
+| `hash` | table | Affinity key for `consistent_hash` — see [consistent-hash affinity](#consistent-hash-affinity) |
 | `max_fails` / `fail_timeout` | int / duration | Passive health: park a backend after N consecutive failures |
 | `health_check` | table | Active probes — see [health.md](health.md) |
 | `discovery` | table | Dynamic backends — see [service-discovery.md](service-discovery.md) |
@@ -68,6 +70,73 @@ proxy_pass = "https://inventory"
 > health checking, failure accounting and admission as an HTTP route. A backend address may be a unix
 > socket (`unix:/run/php/php-fpm.sock`); such a backend has no URL, so `health_check.type = "http"`
 > cannot probe it and that combination is a validation error — use `type = "tcp"`.
+
+## Consistent-hash affinity
+
+`strategy = "consistent_hash"` keeps requests that share a key on one backend
+while the eligible backend set is stable — for session state held on one
+instance, WebSocket reconnect locality, caches or shards. It is a generic
+placement primitive: Jul does not parse any application protocol to find a key.
+
+```toml
+[[upstreams]]
+name = "sessions"
+strategy = "consistent_hash"
+servers = ["10.0.0.1:8080", "10.0.0.2:8080", { address = "10.0.0.3:8080", weight = 2 }]
+
+[upstreams.hash]
+key = "cookie"          # client_ip | header | cookie
+name = "session_id"     # the header or cookie name; not set for client_ip
+fallback = "round_robin" # for requests without a usable key (default)
+# algorithm = "rendezvous_v1" # the only mapping, and the default
+```
+
+| Key | Reads | Applies to |
+| --- | --- | --- |
+| `client_ip` | The canonical client address — the same identity access control and rate limiting use, so trusted-proxy policy applies unchanged. IPv4-mapped IPv6 is unmapped; the port never participates. | HTTP and stream (TCP/UDP) |
+| `header` | Exactly one field line of the named header, surrounding whitespace trimmed, case preserved. Read from the request as forwarded, after the location's proxy header rules. | HTTP only |
+| `cookie` | The first cookie with that name across all `Cookie` lines; surrounding double quotes removed. | HTTP only |
+
+**Requests without a usable key** are placed by `hash.fallback`, never by
+hashing an empty string. A key is unusable when it is absent or empty, longer
+than 256 bytes (never truncated), sent on more than one header line, or — for
+`client_ip` — when the forwarding chain from a trusted proxy was unusable and
+the identity fell back to the proxy hop. `jul_upstream_affinity_keys_total{pool,status}`
+counts `hashed`, `missing` and `invalid` requests; the key value itself is never
+a label, log field or trace attribute.
+
+**Placement.** Jul ranks the eligible backends for the key by weighted
+rendezvous hashing (`rendezvous_v1`, [ADR 0021](adr/0021-consistent-hash-affinity.md))
+and sends the request to the first. Nothing is stored per client. The mapping
+depends only on the key, each backend's canonical identity and its weight —
+not on list order, process, restart or platform — and is frozen by golden
+vectors. A backend's identity is its canonical address (lowercased hostname,
+canonical IP text, decimal port, or `unix:` path); a provider logical ID such as
+a pod UID is not part of it.
+
+- **Health, circuit and capacity decide eligibility first.** An ejected, open
+  or saturated (`max_active_per_backend`) backend is skipped and the key goes to
+  its next-ranked backend; when the preferred backend recovers its keys return
+  to it.
+- **Retries** walk the same order: each attempt takes the best untried eligible
+  backend, under the ordinary retry rules.
+- **Membership changes** move only the keys that must move: adding a backend
+  moves about 1/(N+1) of keys onto it, removing one moves only its own keys, a
+  weight change moves keys only to or from that backend, and a reordered or
+  unchanged discovery result moves none. A backend whose address changes is a
+  new identity, so its share of keys is re-placed. A failed or empty discovery
+  resolve keeps the last-good set and therefore the mapping.
+- **Weights** are proportional: a backend receives keys in proportion to its
+  weight.
+- **Stream routes** accept only `client_ip`. TCP places a connection once when
+  it is established; UDP places a session when it is created, and its datagrams
+  keep that backend for the session's life. A dial failure falls through to the
+  next-ranked backend without re-dialling the failed one.
+- **Changing** `hash.key`, `hash.name`, `hash.fallback` or `hash.algorithm`
+  rebuilds the pool on the next successful reload, like a strategy change.
+
+Two backends with the same canonical identity are a validation error in a
+`consistent_hash` pool, because they would tie for every key.
 
 ## Admission and overload control
 

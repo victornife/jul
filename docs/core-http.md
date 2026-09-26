@@ -330,6 +330,7 @@ Configured per upstream via `strategy`:
 | `round_robin` *(default)* | lock-free rotation, ignores weight |
 | `weighted_round_robin` | smooth weighted round-robin (NGINX algorithm), proportional to `weight` |
 | `least_conn` | fewest in-flight requests |
+| `consistent_hash` | weighted rendezvous hashing of a bounded key (`client_ip`, a header or a cookie) over the eligible backends; keyless requests use `hash.fallback` — see [upstreams.md](upstreams.md#consistent-hash-affinity) |
 
 Each backend has a circuit breaker: after `max_fails` (default 3) consecutive
 failures it is taken out of rotation for `fail_timeout` (default 10s), then

@@ -180,6 +180,7 @@ release does not complete the unchecked GA criteria.
 | Standard gRPC Health Checking Protocol active probes | GRPC-HC | core · `grpc` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
 | Runtime resources, capacity headroom, and HTTP bandwidth | OPS-RESOURCES | core · `console` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [observability.md](observability.md) |
 | WASM plugin response phase (jul-abi/v2) | WASM-ABI2 | `wasmplugins` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [abi.md](abi.md) |
+| Deterministic consistent-hash affinity | LB-AFFINITY | core · `stream` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [upstreams.md](upstreams.md) |
 
 ## Alpha
 

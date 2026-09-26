@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "fixture_schema_version": 1,
-  "fixture_count": 33,
-  "core_fixtures": 31,
+  "fixture_count": 36,
+  "core_fixtures": 34,
   "full_fixtures": 2,
   "categories": [
     {
@@ -47,7 +47,7 @@
     },
     {
       "name": "resiliency",
-      "count": 2
+      "count": 4
     },
     {
       "name": "response-headers",
@@ -71,11 +71,11 @@
     },
     {
       "name": "upstreams",
-      "count": 2
+      "count": 4
     },
     {
       "name": "upstreams-resiliency",
-      "count": 5
+      "count": 6
     },
     {
       "name": "variables",
@@ -85,11 +85,11 @@
   "classes": [
     {
       "name": "approximated",
-      "count": 6
+      "count": 11
     },
     {
       "name": "blocking",
-      "count": 31
+      "count": 32
     },
     {
       "name": "ignored",
@@ -97,17 +97,17 @@
     },
     {
       "name": "informational",
-      "count": 32
+      "count": 35
     },
     {
       "name": "supported",
-      "count": 310
+      "count": 350
     }
   ],
   "risks": [
     {
       "name": "availability",
-      "count": 66
+      "count": 87
     },
     {
       "name": "observability",
@@ -115,7 +115,7 @@
     },
     {
       "name": "operational",
-      "count": 73
+      "count": 80
     },
     {
       "name": "performance",
@@ -123,7 +123,7 @@
     },
     {
       "name": "routing",
-      "count": 191
+      "count": 212
     },
     {
       "name": "security",
@@ -169,11 +169,11 @@
     },
     {
       "name": "NGX_HTTP_SERVER",
-      "count": 33
+      "count": 36
     },
     {
       "name": "NGX_HTTP_UPSTREAM",
-      "count": 10
+      "count": 14
     },
     {
       "name": "NGX_INCLUDE_RESOLVED",
@@ -225,7 +225,7 @@
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS",
-      "count": 9
+      "count": 13
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS_DYNAMIC",
@@ -265,11 +265,11 @@
     },
     {
       "name": "NGX_MAIN_EVENTS",
-      "count": 31
+      "count": 34
     },
     {
       "name": "NGX_MAIN_HTTP",
-      "count": 33
+      "count": 36
     },
     {
       "name": "NGX_MAIN_MAIL",
@@ -277,7 +277,7 @@
     },
     {
       "name": "NGX_MAIN_STREAM",
-      "count": 8
+      "count": 9
     },
     {
       "name": "NGX_MAIN_WORKERS",
@@ -325,7 +325,7 @@
     },
     {
       "name": "NGX_SERVER_LISTEN",
-      "count": 32
+      "count": 35
     },
     {
       "name": "NGX_SERVER_LISTEN_HTTP2_CLEARTEXT",
@@ -333,11 +333,11 @@
     },
     {
       "name": "NGX_SERVER_LOCATION",
-      "count": 39
+      "count": 43
     },
     {
       "name": "NGX_SERVER_NAME",
-      "count": 22
+      "count": 25
     },
     {
       "name": "NGX_SERVER_TLS_CERT",
@@ -353,7 +353,7 @@
     },
     {
       "name": "NGX_STREAM_LISTEN",
-      "count": 10
+      "count": 11
     },
     {
       "name": "NGX_STREAM_LISTEN_OPTION",
@@ -373,7 +373,7 @@
     },
     {
       "name": "NGX_STREAM_PROXY_PASS",
-      "count": 14
+      "count": 15
     },
     {
       "name": "NGX_STREAM_PROXY_PROTOCOL_OUT",
@@ -389,7 +389,7 @@
     },
     {
       "name": "NGX_STREAM_SERVER",
-      "count": 14
+      "count": 15
     },
     {
       "name": "NGX_STREAM_SERVER_NAME",
@@ -409,7 +409,19 @@
     },
     {
       "name": "NGX_STREAM_UPSTREAM",
-      "count": 2
+      "count": 3
+    },
+    {
+      "name": "NGX_UPSTREAM_HASH",
+      "count": 3
+    },
+    {
+      "name": "NGX_UPSTREAM_HASH_KEY",
+      "count": 1
+    },
+    {
+      "name": "NGX_UPSTREAM_IP_HASH",
+      "count": 1
     },
     {
       "name": "NGX_UPSTREAM_KEEPALIVE",
@@ -421,7 +433,11 @@
     },
     {
       "name": "NGX_UPSTREAM_SERVER",
-      "count": 17
+      "count": 28
+    },
+    {
+      "name": "NGX_UPSTREAM_SERVER_DOWN",
+      "count": 1
     },
     {
       "name": "NGX_VARIABLE_BLOCK_UNSUPPORTED",
@@ -431,11 +447,11 @@
   "verdicts": [
     {
       "name": "equivalent_for_asserted_dimensions",
-      "count": 8
+      "count": 12
     },
     {
       "name": "expected_difference",
-      "count": 3
+      "count": 6
     }
   ],
   "coverage": [
@@ -531,6 +547,9 @@
         "timeout-runtime",
         "unix-http-upstream",
         "upstream-failover-runtime",
+        "upstream-hash-affinity",
+        "upstream-hash-affinity-runtime",
+        "upstream-hash-blocking",
         "upstream-weighted",
         "upstream-weighted-runtime"
       ],

@@ -1,0 +1,389 @@
+{
+  "schema_version": 1,
+  "id": "upstream-hash-affinity-runtime",
+  "tier": "core",
+  "description": "Real NGINX-vs-Jul migration E2E fixture (#432): NGINX hash $http_x_tenant consistent over three Unix-socket members, imported as consistent_hash on the X-Tenant header. Asserts per-tenant stickiness in both runtimes and records where rendezvous placement differs from NGINX's ketama ring as an expected difference.",
+  "origin": {
+    "kind": "repository_authored",
+    "license": "AGPL-3.0-only",
+    "source": "victornife/jul#432"
+  },
+  "categories": [
+    "upstreams-resiliency"
+  ],
+  "build_tags": [
+    "importer"
+  ],
+  "root": "nginx/nginx.conf",
+  "follow_includes": false,
+  "expected_assessment": {
+    "status": "ready_for_review",
+    "ready": true,
+    "complete": true,
+    "files_read": 1,
+    "sources": [
+      "nginx.conf"
+    ],
+    "results": [
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_EVENTS",
+        "class": "informational",
+        "risk": "operational",
+        "context": "main",
+        "directive": "events"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_HTTP",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "http"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_UPSTREAM",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "upstream"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_UPSTREAM_HASH",
+        "class": "approximated",
+        "risk": "availability",
+        "context": "upstream",
+        "directive": "hash"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_UPSTREAM_SERVER",
+        "class": "supported",
+        "risk": "availability",
+        "context": "upstream",
+        "directive": "server",
+        "count": 3
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "server",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_NAME",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "server_name"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LOCATION",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "location"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_PROXY_PASS",
+        "class": "supported",
+        "risk": "routing",
+        "context": "location",
+        "directive": "proxy_pass"
+      }
+    ]
+  },
+  "expected_candidate": {
+    "required": true,
+    "contains": [
+      "key = 'header'",
+      "name = 'affinity_pool'",
+      "name = 'x-tenant'",
+      "servers = ['unix:/tmp/jul432/a.sock', 'unix:/tmp/jul432/b.sock', 'unix:/tmp/jul432/c.sock']",
+      "strategy = 'consistent_hash'"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "tenant-2-same-placement",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/",
+        "host": "affinity.test",
+        "headers": {
+          "x-tenant": [
+            "tenant-2"
+          ]
+        }
+      },
+      "assert": [
+        "headers",
+        "status"
+      ],
+      "assert_headers": [
+        "x-corpus-backend-id"
+      ],
+      "ignore_headers": [
+        "date",
+        "server",
+        "x-request-id"
+      ],
+      "reference": {
+        "status": 200,
+        "headers": {
+          "x-corpus-backend-id": [
+            "a"
+          ]
+        }
+      },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "tenant-4-same-placement",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/",
+        "host": "affinity.test",
+        "headers": {
+          "x-tenant": [
+            "tenant-4"
+          ]
+        }
+      },
+      "assert": [
+        "headers",
+        "status"
+      ],
+      "assert_headers": [
+        "x-corpus-backend-id"
+      ],
+      "ignore_headers": [
+        "date",
+        "server",
+        "x-request-id"
+      ],
+      "reference": {
+        "status": 200,
+        "headers": {
+          "x-corpus-backend-id": [
+            "a"
+          ]
+        }
+      },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "tenant-6-same-placement",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/",
+        "host": "affinity.test",
+        "headers": {
+          "x-tenant": [
+            "tenant-6"
+          ]
+        }
+      },
+      "assert": [
+        "headers",
+        "status"
+      ],
+      "assert_headers": [
+        "x-corpus-backend-id"
+      ],
+      "ignore_headers": [
+        "date",
+        "server",
+        "x-request-id"
+      ],
+      "reference": {
+        "status": 200,
+        "headers": {
+          "x-corpus-backend-id": [
+            "b"
+          ]
+        }
+      },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "tenant-1-placement-differs",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/",
+        "host": "affinity.test",
+        "headers": {
+          "x-tenant": [
+            "tenant-1"
+          ]
+        }
+      },
+      "assert": [
+        "headers",
+        "status"
+      ],
+      "assert_headers": [
+        "x-corpus-backend-id"
+      ],
+      "ignore_headers": [
+        "date",
+        "server",
+        "x-request-id"
+      ],
+      "reference": {
+        "status": 200,
+        "headers": {
+          "x-corpus-backend-id": [
+            "b"
+          ]
+        }
+      },
+      "jul": {
+        "status": 200,
+        "headers": {
+          "x-corpus-backend-id": [
+            "c"
+          ]
+        }
+      },
+      "expected_verdict": "expected_difference",
+      "expected_difference_code": "NGX_UPSTREAM_HASH"
+    },
+    {
+      "id": "tenant-1-sticky-repeat",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/",
+        "host": "affinity.test",
+        "headers": {
+          "x-tenant": [
+            "tenant-1"
+          ]
+        }
+      },
+      "assert": [
+        "headers",
+        "status"
+      ],
+      "assert_headers": [
+        "x-corpus-backend-id"
+      ],
+      "ignore_headers": [
+        "date",
+        "server",
+        "x-request-id"
+      ],
+      "reference": {
+        "status": 200,
+        "headers": {
+          "x-corpus-backend-id": [
+            "b"
+          ]
+        }
+      },
+      "jul": {
+        "status": 200,
+        "headers": {
+          "x-corpus-backend-id": [
+            "c"
+          ]
+        }
+      },
+      "expected_verdict": "expected_difference",
+      "expected_difference_code": "NGX_UPSTREAM_HASH"
+    },
+    {
+      "id": "tenant-8-placement-differs",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/",
+        "host": "affinity.test",
+        "headers": {
+          "x-tenant": [
+            "tenant-8"
+          ]
+        }
+      },
+      "assert": [
+        "headers",
+        "status"
+      ],
+      "assert_headers": [
+        "x-corpus-backend-id"
+      ],
+      "ignore_headers": [
+        "date",
+        "server",
+        "x-request-id"
+      ],
+      "reference": {
+        "status": 200,
+        "headers": {
+          "x-corpus-backend-id": [
+            "c"
+          ]
+        }
+      },
+      "jul": {
+        "status": 200,
+        "headers": {
+          "x-corpus-backend-id": [
+            "b"
+          ]
+        }
+      },
+      "expected_verdict": "expected_difference",
+      "expected_difference_code": "NGX_UPSTREAM_HASH"
+    },
+    {
+      "id": "keyless-served",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/",
+        "host": "affinity.test"
+      },
+      "assert": [
+        "status"
+      ],
+      "ignore_headers": [
+        "date",
+        "server",
+        "x-corpus-backend-id",
+        "x-request-id"
+      ],
+      "reference": {
+        "status": 200
+      },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    }
+  ]
+}
