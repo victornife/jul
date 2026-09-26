@@ -5752,8 +5752,31 @@
                     "fetch": {
                       "type": "boolean"
                     },
+                    "fetch_timeout": {
+                      "type": "string"
+                    },
                     "kv": {
                       "type": "boolean"
+                    },
+                    "kv_max_bytes": {
+                      "type": "string"
+                    },
+                    "kv_max_entries": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "max_fetch_response": {
+                      "type": "string"
+                    },
+                    "max_invocations": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "max_request_body": {
+                      "type": "string"
+                    },
+                    "max_response_body": {
+                      "type": "string"
                     },
                     "memory_limit": {
                       "type": "string"

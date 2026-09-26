@@ -90,6 +90,14 @@ plugins = ["header-inject"]             # middleware for every location here
 | `max_invocations` | Retire a pooled instance after this many calls (default 1000) |
 | `sha256` | Optional pin: the exact module bytes' SHA-256 (64 hex digits; a `sha256:` prefix is accepted). See [Module content identity](#module-content-identity-and-pinning) |
 
+The Console's guided plugin editor edits the module source, `type`, `config`,
+capabilities, `memory_limit` and `timeout`. Every other field above — the
+`sha256` pin and the `max_*`, `kv_max_*` and `fetch_timeout` limits — is
+*omitted-means-keep* in its `plugin_set` payload: an edit that does not send a
+field keeps the configured value, an explicit value replaces it, and an explicit
+`""` (or `0` for `kv_max_entries`/`max_invocations`) restores the default.
+`GET /api/plugins` reports the explicitly configured limits as `limits`.
+
 Validation rules:
 
 - exactly one of `path` or `inline` must be set;

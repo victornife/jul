@@ -32,6 +32,82 @@ type pluginDef struct {
 	// SHA256 sets the module pin; omitted keeps the existing pin so an editor
 	// unaware of pins can never silently drop one, and "" clears it.
 	SHA256 *string `json:"sha256,omitempty"`
+	// The resource limits below follow the same rule as SHA256: omitted keeps
+	// the existing value, an explicit value replaces it, and "" (or 0 for the
+	// counts) clears it back to the runtime default (#462).
+	MaxRequestBody   *string `json:"max_request_body,omitempty"`
+	MaxResponseBody  *string `json:"max_response_body,omitempty"`
+	FetchTimeout     *string `json:"fetch_timeout,omitempty"`
+	MaxFetchResponse *string `json:"max_fetch_response,omitempty"`
+	KVMaxEntries     *int    `json:"kv_max_entries,omitempty"`
+	KVMaxBytes       *string `json:"kv_max_bytes,omitempty"`
+	MaxInvocations   *int    `json:"max_invocations,omitempty"`
+}
+
+// keepSize resolves an omitted-means-keep size field.
+func keepSize(in *string, existing config.Size, field string) (config.Size, error) {
+	if in == nil {
+		return existing, nil
+	}
+	var size config.Size
+	if err := size.UnmarshalText([]byte(*in)); err != nil {
+		return 0, fmt.Errorf("plugin_set: %s: %w", field, err)
+	}
+	if size.Bytes() < 0 {
+		return 0, fmt.Errorf("plugin_set: %s must not be negative", field)
+	}
+	return size, nil
+}
+
+// keepDuration resolves an omitted-means-keep duration field.
+func keepDuration(in *string, existing config.Duration, field string) (config.Duration, error) {
+	if in == nil {
+		return existing, nil
+	}
+	var d config.Duration
+	if err := d.UnmarshalText([]byte(*in)); err != nil {
+		return 0, fmt.Errorf("plugin_set: %s: %w", field, err)
+	}
+	if d.Std() < 0 {
+		return 0, fmt.Errorf("plugin_set: %s must not be negative", field)
+	}
+	return d, nil
+}
+
+// keepCount resolves an omitted-means-keep count field.
+func keepCount(in *int, existing int, field string) (int, error) {
+	if in == nil {
+		return existing, nil
+	}
+	if *in < 0 {
+		return 0, fmt.Errorf("plugin_set: %s must not be negative", field)
+	}
+	return *in, nil
+}
+
+// applyKeptLimits copies every omitted-means-keep resource limit into pc.
+func applyKeptLimits(pc *config.PluginConfig, in pluginDef, existing config.PluginConfig) error {
+	var err error
+	if pc.MaxRequestBody, err = keepSize(in.MaxRequestBody, existing.MaxRequestBody, "max_request_body"); err != nil {
+		return err
+	}
+	if pc.MaxResponseBody, err = keepSize(in.MaxResponseBody, existing.MaxResponseBody, "max_response_body"); err != nil {
+		return err
+	}
+	if pc.FetchTimeout, err = keepDuration(in.FetchTimeout, existing.FetchTimeout, "fetch_timeout"); err != nil {
+		return err
+	}
+	if pc.MaxFetchResponse, err = keepSize(in.MaxFetchResponse, existing.MaxFetchResponse, "max_fetch_response"); err != nil {
+		return err
+	}
+	if pc.KVMaxEntries, err = keepCount(in.KVMaxEntries, existing.KVMaxEntries, "kv_max_entries"); err != nil {
+		return err
+	}
+	if pc.KVMaxBytes, err = keepSize(in.KVMaxBytes, existing.KVMaxBytes, "kv_max_bytes"); err != nil {
+		return err
+	}
+	pc.MaxInvocations, err = keepCount(in.MaxInvocations, existing.MaxInvocations, "max_invocations")
+	return err
 }
 
 func buildPlugin(in pluginDef, existing config.PluginConfig) (config.PluginConfig, string, error) {
@@ -67,6 +143,9 @@ func buildPlugin(in pluginDef, existing config.PluginConfig) (config.PluginConfi
 			return config.PluginConfig{}, "", fmt.Errorf("plugin_set: %w", err)
 		}
 		pc.SHA256 = pin
+	}
+	if err := applyKeptLimits(&pc, in, existing); err != nil {
+		return config.PluginConfig{}, "", err
 	}
 	if raw := strings.TrimSpace(in.MemoryLimit); raw != "" {
 		var size config.Size
@@ -188,6 +267,43 @@ type PluginProjection struct {
 	// computed by the runtime, never by the Console.
 	Digest      string `json:"digest,omitempty"`
 	DigestShort string `json:"digest_short,omitempty"`
+	// Limits holds the resource limits the declaration sets explicitly; an
+	// absent key means the runtime default applies.
+	Limits *PluginLimits `json:"limits,omitempty"`
+}
+
+// PluginLimits is the configured (non-default) resource limits of a plugin.
+type PluginLimits struct {
+	MaxRequestBody   string `json:"max_request_body,omitempty"`
+	MaxResponseBody  string `json:"max_response_body,omitempty"`
+	FetchTimeout     string `json:"fetch_timeout,omitempty"`
+	MaxFetchResponse string `json:"max_fetch_response,omitempty"`
+	KVMaxEntries     int    `json:"kv_max_entries,omitempty"`
+	KVMaxBytes       string `json:"kv_max_bytes,omitempty"`
+	MaxInvocations   int    `json:"max_invocations,omitempty"`
+}
+
+func projectLimits(p config.PluginConfig) *PluginLimits {
+	l := PluginLimits{KVMaxEntries: p.KVMaxEntries, MaxInvocations: p.MaxInvocations}
+	if p.MaxRequestBody.Bytes() > 0 {
+		l.MaxRequestBody = sizeStr(p.MaxRequestBody)
+	}
+	if p.MaxResponseBody.Bytes() > 0 {
+		l.MaxResponseBody = sizeStr(p.MaxResponseBody)
+	}
+	if p.FetchTimeout.Std() > 0 {
+		l.FetchTimeout = durStr(p.FetchTimeout)
+	}
+	if p.MaxFetchResponse.Bytes() > 0 {
+		l.MaxFetchResponse = sizeStr(p.MaxFetchResponse)
+	}
+	if p.KVMaxBytes.Bytes() > 0 {
+		l.KVMaxBytes = sizeStr(p.KVMaxBytes)
+	}
+	if l == (PluginLimits{}) {
+		return nil
+	}
+	return &l
 }
 
 // PluginModule is the serving content identity of one plugin module.
@@ -216,6 +332,7 @@ func projectPlugins(c *config.Config, compiled bool) PluginsProjection {
 			Name: name, Source: pluginSourceKind(p), Path: p.Path, Type: pluginTypeOrDefault(p), Config: p.Config,
 			KV: p.KV, Fetch: p.Fetch, AllowedHosts: p.AllowedHosts, Attachments: pluginAttachments(c, name),
 			Pinned: strings.TrimSpace(p.SHA256) != "",
+			Limits: projectLimits(p),
 		}
 		if p.MemoryLimit.Bytes() > 0 {
 			pp.MemoryLimit = sizeStr(p.MemoryLimit)

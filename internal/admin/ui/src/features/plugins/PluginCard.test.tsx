@@ -36,3 +36,21 @@ describe("PluginCard module identity (#429)", () => {
     expect(screen.queryByText(/pinned/)).toBeNull();
   });
 });
+
+describe("PluginCard resource limits (#462)", () => {
+  it("shows every explicitly configured limit", () => {
+    renderCard({
+      ...base,
+      limits: { max_invocations: 250, kv_max_entries: 7, max_response_body: "4m", fetch_timeout: "3s" },
+    });
+    const text = screen.getByText(/max_invocations=250/).textContent;
+    expect(text).toContain("kv_max_entries=7");
+    expect(text).toContain("max_response_body=4m");
+    expect(text).toContain("fetch_timeout=3s");
+  });
+
+  it("shows no limits line when every limit is the default", () => {
+    renderCard(base);
+    expect(screen.queryByText(/limits:/)).toBeNull();
+  });
+});
