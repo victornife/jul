@@ -5,6 +5,7 @@ package admin
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"jul/internal/adminapi"
@@ -57,6 +58,20 @@ func hashSummary(h *config.HashConfig) string {
 		key += ":" + h.Name
 	}
 	return fmt.Sprintf("key=%s fallback=%s", key, orDefault(h.Fallback, "round_robin"))
+}
+
+// affinityDetail is the Status row detail: pool count and key kinds, never a
+// header or cookie name's value.
+func affinityDetail(pools int, kinds map[string]bool) string {
+	if pools == 0 {
+		return ""
+	}
+	ks := make([]string, 0, len(kinds))
+	for k := range kinds {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	return countUnit(pools, "pool") + " (key: " + strings.Join(ks, ", ") + ")"
 }
 
 // upstreamHashView projects an upstream's effective hash policy, or nil when

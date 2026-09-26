@@ -84,6 +84,7 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 | gRPC ↔ JSON transcoding | [grpc-transcoding.md](grpc-transcoding.md) | `GA` / `soaked` |
 | WASM plugin system | [plugins.md](plugins.md) | `GA` / `soaked` |
 | WASM plugin response phase (`jul-abi/v2`) | [abi.md](abi.md) | `Beta` / `merged` |
+| Deterministic consistent-hash affinity (`consistent_hash`) | [upstreams.md](upstreams.md#consistent-hash-affinity) | `Beta` / `merged` |
 | L4 stream proxy | [stream.md](stream.md) | `GA` / `soaked` |
 | Native gRPC passthrough + h2c | [grpc-proxy.md](grpc-proxy.md) | `GA` / `soaked` |
 | Service discovery / dynamic upstreams | [service-discovery.md](service-discovery.md) | `GA` / `soaked` |

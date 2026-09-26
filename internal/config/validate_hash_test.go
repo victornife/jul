@@ -4,6 +4,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -110,6 +111,29 @@ func TestValidateStreamHashKeyApplicability(t *testing.T) {
 	cfg.Streams = []StreamServer{{Listen: "127.0.0.1:8443", Protocol: "tcp", SNIRoutes: map[string]string{"a.example": "api"}}}
 	if err := Validate(cfg); err == nil {
 		t.Fatal("header-keyed upstream on an SNI route was accepted")
+	}
+}
+
+func TestAffinityExampleIsValid(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/affinity.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	keys := map[string]bool{}
+	for _, up := range cfg.Upstreams {
+		if up.Strategy == "consistent_hash" && up.Hash != nil {
+			keys[up.Hash.Key] = true
+		}
+	}
+	if len(keys) != 3 {
+		t.Fatalf("example covers key sources %v, want all three", keys)
 	}
 }
 
