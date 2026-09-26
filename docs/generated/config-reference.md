@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 305 configurable leaves.
+Coverage: 306 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -1173,6 +1173,18 @@ MemoryLimit caps the guest's linear memory.
 ## `plugins.*.path` {#plugins-x-path}
 
 Path is the filesystem path to the .wasm module.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `plugins` |
+| Why | the plugin set is rebuilt and re-instantiated on each successful reload |
+| Requires | `wasm_plugins` |
+
+## `plugins.*.sha256` {#plugins-x-sha256}
+
+SHA256 optionally pins the exact module bytes: 64 hexadecimal digits of their SHA-256.
 
 | | |
 | --- | --- |

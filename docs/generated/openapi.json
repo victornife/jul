@@ -5761,6 +5761,9 @@
                     "path": {
                       "type": "string"
                     },
+                    "sha256": {
+                      "type": "string"
+                    },
                     "source": {
                       "type": "string"
                     },

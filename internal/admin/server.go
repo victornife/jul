@@ -346,6 +346,9 @@ type Deps struct {
 	// origins, and referers for the Console Overview Traffic Sources panel
 	// (Milestone 1.4). Nil omits the panel.
 	TrafficSources func() observability.TrafficSources
+	// PluginModules returns the content identity of each serving plugin's
+	// compiled module, keyed by plugin name (#429). Nil omits digests.
+	PluginModules func() map[string]PluginModule
 	// Cache, when non-nil, backs the /cache/purge endpoint.
 	Cache Purger
 	// Reload triggers a configuration reload. It returns an error if the

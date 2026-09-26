@@ -54,7 +54,7 @@ field up in the generated table rather than here.
 |---|---|---|---|---|---|---|
 | HTTP listener | `server.listenerEntry` | listener | listen address | `listenerBindFingerprint` (bind-time properties); a change is `restart_required` | none — a bound socket is live until closed | listeners |
 | HTTP/3 listener | `listenerEntry.h3` | listener | listen address + HTTP/3 enabled | bind-time with the TCP listener | `h3Degraded`: an exited accept loop clears Alt-Svc and is not recovered until restart | listeners |
-| Handler generation | `server.handlerGen` | generation | generation ID | `lifecycle.Classify` + `ReloadPlan.AssessServingChange` (semantic no-op proof) | static-cert content, admin TLS content, admin runtime health (#415), and fail-closed opaque inputs (`hasOpaqueReloadInputs`, which includes path-backed WASM modules) | all hot-reload subsystems |
+| Handler generation | `server.handlerGen` | generation | generation ID | `lifecycle.Classify` + `ReloadPlan.AssessServingChange` (semantic no-op proof) | static-cert content, admin TLS content, admin runtime health (#415), WASM module content digests (#429), and fail-closed opaque inputs (`hasOpaqueReloadInputs`) | all hot-reload subsystems |
 | Generation closer set | `app.GenerationResources` / `app.Generation` | generation | generation span | none — rebuilt with the generation | — | — |
 | Static TLS provider | `server.DynamicCertProvider` | listener | listen address | `tlsIdentityFingerprint` (certificate/key **content**) | content fingerprint: same-path rotation is a change | tls |
 | Admin runtime (auth snapshot, audit sink, upload dir) | `admin.PreparedCommit`, `auditFileOwner` | admin generation | admin listener | `auditSinkConfig` equality; admin TLS content | `AdminRuntimeHealthy` (audit sink writable, upload dir usable) — #415 | admin |
@@ -73,7 +73,7 @@ field up in the generated table rather than here.
 | L4 stream listener | `stream.listener` | listener | `proto\|addr` | route swapped atomically; protocol or address change is a different listener | none | stream |
 | L4 upstream pools | `stream.Server.reg` (its own `upstream.Registry`) | pool | as upstream pools | as upstream pools | as upstream pools | stream, upstreams |
 | WASM plugin manager | `plugins.Manager` (compilation cache, KV store, KV quota ledgers) | process | the process manager | none | none | plugins (process boundary) |
-| WASM plugin set | `plugins.Set` (one wazero runtime + compiled module per plugin) | generation | plugin name | rebuilt with the generation | path-backed modules are opaque to the no-op proof | plugins |
+| WASM plugin set | `plugins.Set` (one wazero runtime + compiled module per plugin) | generation | plugin name | rebuilt with the generation; the no-op proof compares every module's current digest with the serving one | module content identity: SHA-256 of the exact compiled bytes, snapshotted once per build (#429) | plugins |
 | WASM module instance | `plugins.pooledModule` | instance | — | — | retired after `max_invocations`, a trap, or a full pool (#420) | plugins |
 | WAF engine | `waf.Firewall` | generation | location scope | rebuilt with the generation | — | waf |
 | Tracing provider/exporter | `observability` OTel provider | process | the process provider | none (restart boundary) | none | observability |
@@ -106,7 +106,7 @@ field up in the generated table rather than here.
 | FastCGI/uWSGI connections | built per location | adopted | closed by Abort | generation retirement | pooled connections closed | yes | `TestFastCGIHandlerGenerationsDoNotLeak` |
 | L4 stream listener | `stream.Server.Reload` builds routes and binds new sockets before mutating | route `atomic.Store`; new listeners start (post-HTTP-Publish, own transaction) | newly bound sockets closed; registry `Abort` | removed from the desired set | stops accepting at once; established TCP sessions drain **in the background** until close/`idle_timeout`; UDP sessions torn down; process shutdown bounds the drain at 30 s (#428) | yes | `TestReloadRemovingListenerDoesNotWaitForActiveSessions` ([removed_listener_drain_test.go](../internal/stream/removed_listener_drain_test.go)), `TestStreamProtocolSwitchRetiresUDPSessions` |
 | WASM plugin manager | — | — | — | process exit | — | compilation cache closed at shutdown | — |
-| WASM plugin set | `Manager.BuildWithEgress` compiles and pre-instantiates | adopted with the generation | `Set.Close` | generation retirement | in-flight invocations finish on their generation | `Set.Close` (wazero runtime) | `TestKVQuotaSurvivesReload`, [plugins_test.go](../internal/plugins/plugins_test.go) |
+| WASM plugin set | `Manager.BuildWithEgress` compiles and pre-instantiates | adopted with the generation | `Set.Close` | generation retirement | in-flight invocations finish on their generation | `Set.Close` (wazero runtime) | `TestKVQuotaSurvivesReload`, `TestCompileUsesTheHashedSnapshot`, `TestPluginReplacementDrainsInFlightRequests` ([plugin_identity_reload_test.go](../internal/app/plugin_identity_reload_test.go)) |
 | WASM module instance | one eager instance per plugin | — | closed with the runtime | invocation budget, trap, or full pool | — | yes, never dropped silently | `TestPooledInstanceRetiresAfterMaxInvocations` |
 | WAF engine | `waf.New` per location scope | adopted | discarded | generation retirement | stateless | no (documented no-op `Close`) | `TestWAFReloadChurnNoLeak` |
 | Tracing sample ratio | validated | `UpdateTracingSampleRatio` (no-fail) | — | — | — | no | [issue99_tracing_reload_otel_test.go](../internal/server/issue99_tracing_reload_otel_test.go) |
@@ -122,11 +122,13 @@ running object":
 
 | Reuse site | Rule | Why |
 |---|---|---|
-| Semantic no-op reload | config equal **and** every liveness override proves unchanged | certificates, admin TLS and admin runtime health can change without a config edit; anything else not exposed to the coordinator is opaque and forces a normal reload |
+| Semantic no-op reload | config equal **and** every liveness override proves unchanged | certificates, admin TLS, admin runtime health and WASM module bytes can change without a config edit; anything else not exposed to the coordinator is opaque and forces a normal reload |
 | Upstream pool reuse | config (shape) equal | pools are closed only by the registry, never kept closed; resilience state (passive health, circuit, admission) survives reuse on purpose |
 | Discovery worker reuse | config **and** egress generation equal | a worker built under a superseded egress policy must not refresh again |
 | Transcoder connection reuse | dial address **and** logical identity equal, entry not expired | a recycled address is a different workload (#414) |
 | Audit sink reuse | sink config equal **and** sink healthy | the path can become unwritable independently (#415) |
+| WASM plugin set (no-op) | declaration equal **and** every module's fresh digest equals the serving digest | bytes behind a path can change; a path is not a content identity (#429) |
+| WASM compilation cache | exact module bytes + compile-affecting runtime flags | wazero keys compiled code by SHA-256 of the bytes; capabilities and ABI are bound at build/instantiation, not cached |
 | Egress generation reuse | policy equal | generations are immutable values; nothing to go stale |
 | Rate-limit bucket reuse | key equal | buckets are process state; a reload must not reset limits |
 | WASM KV quota | plugin namespace | the ledger is process-owned with the store it accounts for (#428) |

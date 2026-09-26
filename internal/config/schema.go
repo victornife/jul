@@ -146,6 +146,10 @@ type PluginConfig struct {
 	// calls (WASM linear memory only grows, so an indefinitely reused instance
 	// accumulates unbounded heap). Zero applies a 1000 default.
 	MaxInvocations int `toml:"max_invocations"`
+	// SHA256 optionally pins the exact module bytes: 64 hexadecimal digits of
+	// their SHA-256. A mismatch fails the build before Publish. Empty means no
+	// pin; the observed digest is still computed and exposed.
+	SHA256 string `toml:"sha256"`
 }
 
 // WAFConfig configures the Coraza-based web application firewall, either

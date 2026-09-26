@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 359 |
-| Schema leaves (configurable values) | 305 |
-| Registry entries | 305 |
+| Schema paths (containers included) | 360 |
+| Schema leaves (configurable values) | 306 |
+| Registry entries | 306 |
 | Startup-consumed entries | 32 |
-| Class `hot_reload` | 259 |
+| Class `hot_reload` | 260 |
 | Class `restart_required` | 32 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -204,6 +204,7 @@ value is compared as a digest so no secret material leaves the process.
 | `plugins.*.max_response_body` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.memory_limit` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.path` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
+| `plugins.*.sha256` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.timeout` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.type` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `rate_limit.burst` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |

@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 359,
-    "schema_leaves": 305,
+    "schema_paths": 360,
+    "schema_leaves": 306,
     "resources": 9
   },
   "capability_build_tags": {
@@ -1386,6 +1386,21 @@
       ],
       "description": "Path is the filesystem path to the .wasm module",
       "anchor": "plugins-x-path"
+    },
+    "plugins.*.sha256": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "plugins",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the plugin set is rebuilt and re-instantiated on each successful reload",
+      "capabilities": [
+        "wasm_plugins"
+      ],
+      "description": "SHA256 optionally pins the exact module bytes: 64 hexadecimal digits of their SHA-256",
+      "anchor": "plugins-x-sha256"
     },
     "plugins.*.timeout": {
       "kind": "scalar",

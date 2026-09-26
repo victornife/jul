@@ -58,6 +58,13 @@ export function PluginCard({
               </span>
             </p>
           )}
+          <p className="mt-0.5 truncate text-xs text-jul-muted" title={plugin.digest}>
+            module:{" "}
+            <span className="font-mono text-jul-text">
+              {plugin.digest_short ? `sha256:${plugin.digest_short}` : "not serving"}
+            </span>
+            {plugin.pinned ? " · pinned" : ""}
+          </p>
         </div>
         <div className="flex shrink-0 gap-2">
           {plugin.type === "middleware" && (

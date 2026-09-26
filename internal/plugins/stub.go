@@ -78,6 +78,9 @@ type Set struct{}
 // Close is a no-op.
 func (*Set) Close() error { return nil }
 
+// Identities is empty in the lean build.
+func (*Set) Identities() map[string]ModuleIdentity { return nil }
+
 // Has always reports false in the lean build.
 func (*Set) Has(string) bool { return false }
 

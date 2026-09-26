@@ -242,6 +242,14 @@ type Server struct {
 	// when a resource's live state, not its configuration, has changed (e.g. an
 	// unopenable audit-log path became writable again without any config edit).
 	AdminRuntimeHealthy func(config.AdminConfig) bool
+	// PluginModulesUnchanged proves that the candidate's WASM modules resolve to
+	// exactly the bytes the serving generation compiled (#429). It is consulted
+	// only for an otherwise semantic no-op; nil leaves path-backed modules
+	// opaque, which fails closed.
+	PluginModulesUnchanged func(map[string]config.PluginConfig) bool
+	// PluginModuleChanges returns, once, the module content-identity changes
+	// published by generation genID, for the reload result.
+	PluginModuleChanges func(genID uint64) []PluginModuleChange
 
 	// OnReloadStart, when set, is invoked at the beginning of every reload
 	// transaction so the composition root can increment an in-progress gauge.
@@ -1432,6 +1440,9 @@ func (s *Server) doReload(req ReloadRequest) {
 		return
 	}
 	result.Published = true
+	if s.PluginModuleChanges != nil {
+		result.PluginModules = s.PluginModuleChanges(plan.GenID)
+	}
 
 	// Phases 8–10: activation and post-commit side effects. After Publish we
 	// complete the minimum safe work even if the deadline has expired.

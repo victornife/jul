@@ -79,7 +79,19 @@ type ReloadResult struct {
 	HTTP           ReloadSubsystemResult `json:"http"`
 	Stream         ReloadSubsystemResult `json:"stream"`
 	Admin          ReloadSubsystemResult `json:"admin"`
-	Error          string                `json:"error,omitempty"`
+	// PluginModules lists WASM plugins whose executable content identity
+	// changed in the published generation (added, removed, or new bytes —
+	// including at an unchanged path). Digests only, never module bytes.
+	PluginModules []PluginModuleChange `json:"plugin_modules,omitempty"`
+	Error         string               `json:"error,omitempty"`
+}
+
+// PluginModuleChange is one plugin's module content-identity transition. An
+// empty Before means the plugin was added; an empty After means it was removed.
+type PluginModuleChange struct {
+	Name   string `json:"name"`
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
 }
 
 // CanonicalVersion returns a short, stable fingerprint of a configuration

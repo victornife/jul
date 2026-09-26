@@ -689,6 +689,13 @@
               "wasm_plugins"
             ]
           },
+          "sha256": {
+            "description": "SHA256 optionally pins the exact module bytes: 64 hexadecimal digits of their SHA-256",
+            "type": "string",
+            "x-jul-capability": [
+              "wasm_plugins"
+            ]
+          },
           "timeout": {
             "default": "100ms",
             "description": "Timeout bounds a single guest invocation",

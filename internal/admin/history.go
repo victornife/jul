@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"jul/internal/atomicfile"
+	"jul/internal/server"
 )
 
 // historyTimeLayout is the timestamp format used for snapshot filenames. It is
@@ -57,6 +58,11 @@ type HistoryMetadata struct {
 
 	PreviousVersion  string `json:"previous_version,omitempty"`
 	CandidateVersion string `json:"candidate_version,omitempty"`
+
+	// PluginModules records WASM module content-identity changes this apply
+	// published (#429), so a same-path byte change is visible even though the
+	// configuration diff is empty. Digests only.
+	PluginModules []server.PluginModuleChange `json:"plugin_modules,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 }

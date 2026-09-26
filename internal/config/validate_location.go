@@ -208,8 +208,32 @@ func validatePlugins(plugins map[string]PluginConfig) []error {
 		if p.KVMaxBytes.Bytes() < 0 {
 			errs = append(errs, fmt.Errorf("%s: kv_max_bytes must not be negative", where))
 		}
+		if _, err := ParseSHA256Pin(p.SHA256); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", where, err))
+		}
 	}
 	return errs
+}
+
+// ParseSHA256Pin validates a plugins.*.sha256 pin and returns it as 64
+// lowercase hex digits. The "sha256:" prefix Jul uses when it reports a digest
+// is accepted so a reported digest can be pasted back as a pin. An empty pin is
+// valid and means no pin.
+func ParseSHA256Pin(pin string) (string, error) {
+	s := strings.TrimSpace(pin)
+	if s == "" {
+		return "", nil
+	}
+	s = strings.ToLower(strings.TrimPrefix(strings.ToLower(s), "sha256:"))
+	if len(s) != 64 {
+		return "", fmt.Errorf("sha256 must be 64 hexadecimal digits, got %d characters", len(s))
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return "", errors.New("sha256 must contain only hexadecimal digits")
+		}
+	}
+	return s, nil
 }
 
 // validatePluginRef checks that a referenced plugin name exists and has the

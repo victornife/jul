@@ -613,9 +613,6 @@ func startNoopFenceServer(t *testing.T, initial *config.Candidate, src config.So
 
 func TestOpaqueReloadInputsFailClosed(t *testing.T) {
 	cases := map[string]func(*config.Config){
-		"plugin path": func(c *config.Config) {
-			c.Plugins = map[string]config.PluginConfig{"p": {Path: "plugin.wasm"}}
-		},
 		"static root": func(c *config.Config) { c.Servers[0].Locations[0].Root = "/srv/www" },
 		"descriptor": func(c *config.Config) {
 			c.Servers[0].Locations[0].GRPCTranscode = &config.GRPCTranscodeConfig{DescriptorSet: "api.pb"}

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,6 +27,7 @@ import (
 	"jul/internal/observability"
 	"jul/internal/plugins"
 	"jul/internal/router"
+	"jul/internal/server"
 	"jul/internal/upstream"
 	"jul/internal/waf"
 )
@@ -59,6 +61,84 @@ type HandlerFactory struct {
 	// It is used to tag generation-scoped resources (redaction, pool snapshots)
 	// so the server can retire them safely.
 	genCounter atomic.Uint64
+
+	// moduleMu guards the published generation's plugin module identities and
+	// the identity changes of the latest publish (#429). It is separate from mu
+	// so the no-op proof never waits on a build.
+	moduleMu      sync.Mutex
+	liveModules   map[string]plugins.ModuleIdentity
+	moduleChanges moduleChangeRecord
+}
+
+type moduleChangeRecord struct {
+	genID   uint64
+	changes []server.PluginModuleChange
+}
+
+// publishPluginModules records the identities of a generation that just
+// became live, and what changed relative to its predecessor.
+func (f *HandlerFactory) publishPluginModules(genID uint64, next map[string]plugins.ModuleIdentity) {
+	f.moduleMu.Lock()
+	defer f.moduleMu.Unlock()
+	changes := diffPluginModules(f.liveModules, next)
+	f.liveModules = next
+	f.moduleChanges = moduleChangeRecord{genID: genID, changes: changes}
+	for _, c := range changes {
+		if f.Log != nil {
+			f.Log.Info("plugin module identity changed", "plugin", c.Name, "previous", c.Before, "digest", c.After)
+		}
+	}
+}
+
+func diffPluginModules(prev, next map[string]plugins.ModuleIdentity) []server.PluginModuleChange {
+	names := make([]string, 0, len(prev)+len(next))
+	for name := range prev {
+		names = append(names, name)
+	}
+	for name := range next {
+		if _, ok := prev[name]; !ok {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	var changes []server.PluginModuleChange
+	for _, name := range names {
+		before, after := prev[name].Digest, next[name].Digest
+		if before != after {
+			changes = append(changes, server.PluginModuleChange{Name: name, Before: before, After: after})
+		}
+	}
+	return changes
+}
+
+// PluginModuleChanges returns, once, the module identity changes published by
+// generation genID.
+func (f *HandlerFactory) PluginModuleChanges(genID uint64) []server.PluginModuleChange {
+	f.moduleMu.Lock()
+	defer f.moduleMu.Unlock()
+	if f.moduleChanges.genID != genID {
+		return nil
+	}
+	changes := f.moduleChanges.changes
+	f.moduleChanges = moduleChangeRecord{}
+	return changes
+}
+
+// PluginModules returns the content identities of the serving plugin set.
+func (f *HandlerFactory) PluginModules() map[string]plugins.ModuleIdentity {
+	f.moduleMu.Lock()
+	defer f.moduleMu.Unlock()
+	out := make(map[string]plugins.ModuleIdentity, len(f.liveModules))
+	for name, id := range f.liveModules {
+		out[name] = id
+	}
+	return out
+}
+
+// PluginModulesUnchanged proves that cfg's plugin modules resolve to exactly
+// the bytes the serving generation compiled, for the semantic no-op check.
+func (f *HandlerFactory) PluginModulesUnchanged(cfg map[string]config.PluginConfig) bool {
+	return plugins.SameModules(f.PluginModules(), cfg)
 }
 
 // Build rebuilds the per-listen-address handler tree from c. It is used for
@@ -101,6 +181,7 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 		}
 		f.PoolReg.Activate()
 		committed = true
+		f.publishPluginModules(0, gen.pluginModules)
 		retirePrev = combineRetirement(retireHandlers, retiredEgress)
 	}
 	return handlers, retirePrev, nil
@@ -162,6 +243,7 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		// does not trigger discovery/health side effects for a candidate that
 		// never goes live (R9-07).
 		f.PoolReg.Activate()
+		f.publishPluginModules(genID, gen.pluginModules)
 		f.mu.Unlock()
 		return snapshots, combineRetirement(retireHandlers, retiredEgress)
 	}
@@ -262,6 +344,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		return nil, fmt.Errorf("plugins: %w", err)
 	}
 	gen.Stage(pluginSet)
+	gen.pluginModules = pluginSet.Identities()
 
 	// Check context after plugin compilation — the most expensive step.
 	if err := ctx.Err(); err != nil {

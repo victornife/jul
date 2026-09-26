@@ -429,6 +429,7 @@ func pluginEntries() []Entry {
 		"plugins.*.max_response_body",
 		"plugins.*.memory_limit",
 		"plugins.*.path",
+		"plugins.*.sha256",
 		"plugins.*.timeout",
 		"plugins.*.type",
 	)

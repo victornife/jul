@@ -77,6 +77,10 @@ func (p *ReloadPlan) AssessServingChange() error {
 			p.ServingChange = ServingChangeAssessment{Evidence: ServingRuntimeInputChanged}
 			return nil
 		}
+		if evidence, proven := p.s.pluginModulesUnchanged(p.Candidate.Effective.Plugins); !proven {
+			p.ServingChange = ServingChangeAssessment{Evidence: evidence}
+			return nil
+		}
 		if hasOpaqueReloadInputs(p.Candidate.Effective) {
 			p.ServingChange = ServingChangeAssessment{Evidence: ServingUnknownExternalInput}
 			return nil
@@ -152,16 +156,33 @@ func adminRuntimeNeedsHealthProof(cfg config.AdminConfig) bool {
 	return uploadEnabled && cfg.PluginUploadMaxSize > 0
 }
 
+// pluginModulesUnchanged proves that no WASM module's executable bytes changed
+// behind an unchanged declaration (#429): a path is not a content identity.
+// Without the proof hook, inline modules are still proven by configuration
+// equality, but a path-backed module is opaque and fails closed.
+func (s *Server) pluginModulesUnchanged(plugins map[string]config.PluginConfig) (ServingChangeEvidence, bool) {
+	if len(plugins) == 0 {
+		return "", true
+	}
+	if s.PluginModulesUnchanged == nil {
+		for _, plugin := range plugins {
+			if plugin.Path != "" {
+				return ServingUnknownExternalInput, false
+			}
+		}
+		return "", true
+	}
+	if !s.PluginModulesUnchanged(plugins) {
+		return ServingRuntimeInputChanged, false
+	}
+	return "", true
+}
+
 // hasOpaqueReloadInputs identifies resources whose current installed content
 // identity is not exposed to the reload coordinator. Presence is enough to
 // fail closed: their normal reload remains the supported way to pick up an
 // in-place external change.
 func hasOpaqueReloadInputs(c *config.Config) bool {
-	for _, plugin := range c.Plugins {
-		if plugin.Path != "" {
-			return true
-		}
-	}
 	for i := range c.Upstreams {
 		up := &c.Upstreams[i]
 		if backendTLSHasOpaqueInputs(up.BackendTLS) {
