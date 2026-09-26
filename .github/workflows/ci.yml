@@ -79,6 +79,28 @@ jobs:
       - name: go test
         run: go test -tags "${{ matrix.tags }}" ./...
 
+  plugin-examples:
+    name: plugin examples (build + run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Every example and the guest SDKs must compile from source for wasip1,
+      # and the ABI suites must pass against those fresh builds, not only the
+      # committed fixtures (docs/abi.md, "What is pinned").
+      - name: vet the guests
+        working-directory: examples/plugins
+        run: GOOS=wasip1 GOARCH=wasm go vet ./...
+      - name: build every example
+        run: bash examples/plugins/build.sh "$RUNNER_TEMP/plugins" all
+      - name: run the ABI suites against the fresh builds
+        env:
+          JUL_PLUGIN_FIXTURES: ${{ runner.temp }}/plugins
+        run: go test -tags wasmplugins -count=1 -run 'ABI|Negotiate|ResponsePhase|RequestPhaseV2|V2|HandlerType' ./internal/plugins/
+
   test-windows:
     name: test-windows (${{ matrix.profile }})
     runs-on: windows-latest

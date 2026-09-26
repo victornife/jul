@@ -400,6 +400,7 @@ func fullConfig() *config.Config {
 				KVMaxEntries:     1024,
 				KVMaxBytes:       config.Size(1 << 20),
 				SHA256:           strings.Repeat("ab", 32),
+				ABI:              "jul-abi/v2",
 			},
 		},
 		Streams: []config.StreamServer{{

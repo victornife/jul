@@ -222,9 +222,11 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// cache and KV store survive config edits. The handler factory supplies the
 	// candidate generation's egress wrapper to each plugin Set it builds.
 	pluginMgr, err := plugins.NewManager(plugins.Options{
-		Logger:       log,
-		OnInvocation: metrics.ObservePluginInvocation,
-		OnPanic:      metrics.ObservePluginPanic,
+		Logger:                    log,
+		OnInvocation:              metrics.ObservePluginInvocation,
+		OnPanic:                   metrics.ObservePluginPanic,
+		OnResponseInvocation:      metrics.ObservePluginResponseInvocation,
+		OnResponseBodyUnavailable: metrics.ObservePluginResponseBodyUnavailable,
 	})
 	if err != nil {
 		log.Error("failed to initialize plugin manager", "error", err)
@@ -391,9 +393,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	deps.TrafficSources = metrics.TrafficSnapshot
 	deps.PluginModules = func() map[string]admin.PluginModule {
 		live := f.PluginModules()
+		phases := f.PluginResponsePhases()
 		out := make(map[string]admin.PluginModule, len(live))
 		for name, id := range live {
-			out[name] = admin.PluginModule{Digest: id.Digest}
+			out[name] = admin.PluginModule{Digest: id.Digest, ResponsePhase: phases[name]}
 		}
 		return out
 	}

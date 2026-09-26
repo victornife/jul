@@ -67,6 +67,7 @@ type HandlerFactory struct {
 	// so the no-op proof never waits on a build.
 	moduleMu      sync.Mutex
 	liveModules   map[string]plugins.ModuleIdentity
+	liveResponse  map[string]bool
 	moduleChanges moduleChangeRecord
 }
 
@@ -88,6 +89,26 @@ func (f *HandlerFactory) publishPluginModules(genID uint64, next map[string]plug
 			f.Log.Info("plugin module identity changed", "plugin", c.Name, "previous", c.Before, "digest", c.After)
 		}
 	}
+}
+
+// publishPluginPhases records which serving plugins can subscribe to the
+// jul-abi/v2 response phase.
+func (f *HandlerFactory) publishPluginPhases(next map[string]bool) {
+	f.moduleMu.Lock()
+	defer f.moduleMu.Unlock()
+	f.liveResponse = next
+}
+
+// PluginResponsePhases reports, per serving plugin, whether its module can
+// subscribe to the jul-abi/v2 response phase.
+func (f *HandlerFactory) PluginResponsePhases() map[string]bool {
+	f.moduleMu.Lock()
+	defer f.moduleMu.Unlock()
+	out := make(map[string]bool, len(f.liveResponse))
+	for name, ok := range f.liveResponse {
+		out[name] = ok
+	}
+	return out
 }
 
 func diffPluginModules(prev, next map[string]plugins.ModuleIdentity) []server.PluginModuleChange {
@@ -182,6 +203,7 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 		f.PoolReg.Activate()
 		committed = true
 		f.publishPluginModules(0, gen.pluginModules)
+		f.publishPluginPhases(gen.pluginResponse)
 		retirePrev = combineRetirement(retireHandlers, retiredEgress)
 	}
 	return handlers, retirePrev, nil
@@ -244,6 +266,7 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		// never goes live (R9-07).
 		f.PoolReg.Activate()
 		f.publishPluginModules(genID, gen.pluginModules)
+		f.publishPluginPhases(gen.pluginResponse)
 		f.mu.Unlock()
 		return snapshots, combineRetirement(retireHandlers, retiredEgress)
 	}
@@ -345,6 +368,10 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	}
 	gen.Stage(pluginSet)
 	gen.pluginModules = pluginSet.Identities()
+	gen.pluginResponse = make(map[string]bool, len(c.Plugins))
+	for name := range c.Plugins {
+		gen.pluginResponse[name] = pluginSet.ResponsePoint(name) != nil
+	}
 
 	// Check context after plugin compilation — the most expensive step.
 	if err := ctx.Err(); err != nil {
@@ -631,11 +658,20 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 				pluginMW = append(pluginMW, mw)
 			}
 		}
+		// The jul-abi/v2 response point (ADR 0020 §6) is the innermost modifier:
+		// inside the WAF, so WAF response inspection sees the plugin's output and
+		// Jul's own policy denials never reach a response hook; outside BodyLimit
+		// and the cache, so every served response (hit or miss) is presented and
+		// the cache stores the origin representation.
+		respPoint := pluginSet.ResponsePoint(append(append([]string(nil), srv.Plugins...), loc.Plugins...)...)
 		if au == nil && rl == nil && cc == nil && wf == nil && pf == nil && len(pluginMW) == 0 {
 			return nil
 		}
 		return func(next http.Handler) http.Handler {
 			h := next
+			if respPoint != nil {
+				h = respPoint(h)
+			}
 			// The WAF runs just inside authentication and outside rate
 			// limiting: an authenticated identity is available to rules,
 			// while a request blocked by a rule is rejected before the

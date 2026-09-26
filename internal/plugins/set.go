@@ -65,12 +65,39 @@ func (s *Set) Middleware(name string) middleware.Middleware {
 				return
 			}
 			if action == 1 { // Continue
+				if inv.sub >= 0 {
+					r = subscribe(r, p, uint32(inv.sub), inv.state)
+				}
 				next.ServeHTTP(w, r)
 				return
 			}
 			inv.flush() // Stop: the guest produced the response.
 		})
 	}
+}
+
+// ResponsePoint returns the jul-abi/v2 response-point middleware when any of
+// the named middleware plugins can subscribe to responses, else nil. The
+// composition root installs it just inside the location's WAF (ADR 0020 §6).
+func (s *Set) ResponsePoint(names ...string) middleware.Middleware {
+	for _, name := range names {
+		if p := s.plugins[name]; p != nil && p.hasResponse && !p.isHandler {
+			return responsePoint
+		}
+	}
+	return nil
+}
+
+// ABIs returns the configured ABI of every plugin in the set.
+func (s *Set) ABIs() map[string]string {
+	if s == nil {
+		return nil
+	}
+	out := make(map[string]string, len(s.plugins))
+	for name, p := range s.plugins {
+		out[name] = p.abi
+	}
+	return out
 }
 
 // Handler returns the named plugin as a terminal handler (a location action).

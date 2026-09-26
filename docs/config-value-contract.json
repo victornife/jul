@@ -638,6 +638,18 @@
       ]
     },
     {
+      "go_field": "PluginConfig.ABI",
+      "path": "plugins.<name>.abi",
+      "kind": "enum",
+      "constraint": "exact enum; the module must declare the same ABI",
+      "zero_semantics": "omitted selects jul-abi/v1",
+      "active_when": "plugin configured",
+      "allowed": [
+        "jul-abi/v1",
+        "jul-abi/v2"
+      ]
+    },
+    {
       "go_field": "PluginConfig.FetchTimeout",
       "path": "plugins.<name>.fetch_timeout",
       "kind": "duration",

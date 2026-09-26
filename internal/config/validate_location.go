@@ -166,6 +166,16 @@ func validatePlugins(plugins map[string]PluginConfig) []error {
 		default:
 			errs = append(errs, fmt.Errorf("%s: invalid type %q (want middleware|handler)", where, p.Type))
 		}
+		switch p.ABI {
+		case "", PluginABIV1, PluginABIV2:
+		default:
+			errs = append(errs, fmt.Errorf("%s: invalid abi %q (want %s|%s)", where, p.ABI, PluginABIV1, PluginABIV2))
+		}
+		// jul-abi/v2 reports body lengths as i32, and a buffered response is
+		// held in host memory, so the response-phase bound is capped at 1 GiB.
+		if p.ABI == PluginABIV2 && p.MaxResponseBody.Bytes() > MaxPluginV2ResponseBody {
+			errs = append(errs, fmt.Errorf("%s: max_response_body must not exceed 1g for %s", where, PluginABIV2))
+		}
 		hasPath := strings.TrimSpace(p.Path) != ""
 		hasInline := strings.TrimSpace(p.Inline) != ""
 		switch {
@@ -213,6 +223,23 @@ func validatePlugins(plugins map[string]PluginConfig) []error {
 		}
 	}
 	return errs
+}
+
+// Plugin ABI identifiers accepted by plugins.*.abi.
+const (
+	PluginABIV1 = "jul-abi/v1"
+	PluginABIV2 = "jul-abi/v2"
+)
+
+// MaxPluginV2ResponseBody bounds max_response_body for jul-abi/v2 plugins.
+const MaxPluginV2ResponseBody = 1 << 30
+
+// EffectivePluginABI returns the ABI a declaration selects; empty means v1.
+func EffectivePluginABI(p PluginConfig) string {
+	if p.ABI == "" {
+		return PluginABIV1
+	}
+	return p.ABI
 }
 
 // ParseSHA256Pin validates a plugins.*.sha256 pin and returns it as 64

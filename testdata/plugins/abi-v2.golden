@@ -1,0 +1,59 @@
+abi jul-abi/v2
+import jul-abi/v2 fetch(i32,i32,i32,i32,i32,i32,i32,i32)->i32
+import jul-abi/v2 fetch_read(i32,i32)->i32
+import jul-abi/v2 get_config(i32,i32)->i32
+import jul-abi/v2 get_method(i32,i32)->i32
+import jul-abi/v2 get_request_header(i32,i32,i32,i32)->i32
+import jul-abi/v2 get_request_state(i32,i32)->i32
+import jul-abi/v2 get_uri(i32,i32)->i32
+import jul-abi/v2 kv_get(i32,i32,i32,i32)->i32
+import jul-abi/v2 kv_set(i32,i32,i32,i32)->i32
+import jul-abi/v2 last_fetch_len()->i32
+import jul-abi/v2 last_fetch_truncated()->i32
+import jul-abi/v2 log(i32,i32,i32)->
+import jul-abi/v2 read_request_body(i32,i32)->i32
+import jul-abi/v2 resp_add_header(i32,i32,i32,i32)->i32
+import jul-abi/v2 resp_body_read(i32,i32)->i32
+import jul-abi/v2 resp_body_replace(i32,i32)->i32
+import jul-abi/v2 resp_body_state()->i32
+import jul-abi/v2 resp_del_header(i32,i32)->i32
+import jul-abi/v2 resp_get_header(i32,i32,i32,i32,i32)->i32
+import jul-abi/v2 resp_header_names(i32,i32)->i32
+import jul-abi/v2 resp_set_header(i32,i32,i32,i32)->i32
+import jul-abi/v2 resp_set_status(i32)->i32
+import jul-abi/v2 resp_status()->i32
+import jul-abi/v2 set_request_header(i32,i32,i32,i32)->
+import jul-abi/v2 set_request_state(i32,i32)->i32
+import jul-abi/v2 set_response_header(i32,i32,i32,i32)->
+import jul-abi/v2 set_response_status(i32)->
+import jul-abi/v2 set_uri(i32,i32)->
+import jul-abi/v2 subscribe_response(i32)->i32
+import jul-abi/v2 write_response_body(i32,i32)->
+export jul-abi/v2 ()-> required
+export handle_request ()->i32 required
+export handle_response ()->i32 optional
+const handle_request.stop=0
+const handle_request.continue=1
+const handle_response.continue=0
+const handle_response.reject=1
+const subscribe_response.metadata=0
+const subscribe_response.body=1
+const body_state.available=0
+const body_state.not_requested=1
+const body_state.none=2
+const body_state.too_large=3
+const body_state.streaming=4
+const body_state.encoded=5
+const body_state.partial=6
+const body_state.upgraded=7
+const code.ok=0
+const code.not_found=-1
+const code.invalid=-2
+const code.forbidden=-3
+const code.unavailable=-4
+const code.too_large=-5
+const code.committed=-6
+const code.wrong_phase=-7
+const code.unsupported=-8
+const limit.request_state_bytes=4096
+const limit.added_header_bytes=65536

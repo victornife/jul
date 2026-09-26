@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 360 |
-| Schema leaves (configurable values) | 306 |
-| Registry entries | 306 |
+| Schema paths (containers included) | 361 |
+| Schema leaves (configurable values) | 307 |
+| Registry entries | 307 |
 | Startup-consumed entries | 32 |
-| Class `hot_reload` | 260 |
+| Class `hot_reload` | 261 |
 | Class `restart_required` | 32 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -190,6 +190,7 @@ value is compared as a digest so no secret material leaves the process.
 | `observability.tracing.insecure` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |
 | `observability.tracing.sample_ratio` | `hot_reload` | `tracing` | — | the stable ParentBased sampler delegates root decisions to an atomic ratio sampler updated at successful Publish; existing traces and parent decisions remain unchanged (#99) |
 | `observability.tracing.service_name` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |
+| `plugins.*.abi` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.allowed_hosts` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.config.*` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.fetch` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |

@@ -120,7 +120,7 @@ func TestConfigValueContractCoversEveryNumericPublicLeaf(t *testing.T) {
 		"GlobalConfig.WorkerThreads", "GRPCTranscodeConfig.StreamMode",
 		"HeaderMatch.Name", "HeaderMatch.Op", "HeaderMatch.Value",
 		"HealthCheckConfig.Type", "MatchConfig.Methods", "MatchConfig.Type",
-		"PluginConfig.Type", "QueryMatch.Name", "QueryMatch.Op", "QueryMatch.Value",
+		"PluginConfig.ABI", "PluginConfig.Type", "QueryMatch.Name", "QueryMatch.Op", "QueryMatch.Value",
 		"RateLimitConfig.Key", "ResponseHeaderOp.Op", "RewriteConfig.Flag", "StreamServer.Protocol",
 		"StreamServer.ProxyProtocol", "TLSConfig.MinVersion", "TracingConfig.Exporter",
 		"UpstreamConfig.Strategy", "WAFConfig.Mode",

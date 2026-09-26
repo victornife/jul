@@ -70,6 +70,16 @@ type invocation struct {
 	// lastFetchTruncated reports whether the most recent fetch response exceeded
 	// max_fetch_response and was truncated.
 	lastFetchTruncated bool
+
+	// jul-abi/v2 only (ADR 0020). phase selects which host functions are
+	// allowed; sub is the response subscription mode requested by
+	// handle_request (-1 when none); state is the host-owned per-request
+	// state; resp is the response a handle_response invocation operates on.
+	phase            invocationPhase
+	sub              int32
+	state            []byte
+	resp             *responseView
+	addedHeaderBytes int
 }
 
 type invCtxKey struct{}

@@ -207,6 +207,8 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveGRPCProxyStream()
 	m.ObservePluginInvocation("plug", "continue", time.Millisecond)
 	m.ObservePluginPanic("plug")
+	m.ObservePluginResponseInvocation("plug", "reject", time.Millisecond)
+	m.ObservePluginResponseBodyUnavailable("plug", "too_large")
 	m.ConnState(nil, http.StateNew)
 	m.HTTP3ConnDelta(1)
 	m.ObserveAltSvcTransition("advertise")

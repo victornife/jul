@@ -67,6 +67,13 @@ type Options struct {
 	// OnPanic, when set, is called when a guest trap, panic, or timeout is
 	// contained by the host.
 	OnPanic func(plugin string)
+	// OnResponseInvocation, when set, is called after each jul-abi/v2
+	// handle_response invocation with the plugin name, result
+	// ("continue"/"reject"/"error") and wall-clock duration.
+	OnResponseInvocation func(plugin, result string, d time.Duration)
+	// OnResponseBodyUnavailable, when set, is called when a body subscription
+	// is presented without a body, with the closed reason label.
+	OnResponseBodyUnavailable func(plugin, reason string)
 	// KV overrides the key/value backing store. Defaults to an in-memory store.
 	KV KVStore
 	// EgressWrap, when set, wraps a plugin fetch dialer with the global egress
@@ -94,6 +101,8 @@ type Manager struct {
 	kvUsage   map[string]*kvLedger
 	onInvoke  func(string, string, time.Duration)
 	onPanic   func(string)
+	onRespInv func(string, string, time.Duration)
+	onNoBody  func(string, string)
 	// egressWrap composes the global egress guard beneath each plugin's fetch
 	// SSRF guard; nil when egress is disabled.
 	egressWrap func(base DialFunc) DialFunc
@@ -117,6 +126,14 @@ func NewManager(opts Options) (*Manager, error) {
 	if onPanic == nil {
 		onPanic = func(string) {}
 	}
+	onRespInv := opts.OnResponseInvocation
+	if onRespInv == nil {
+		onRespInv = func(string, string, time.Duration) {}
+	}
+	onNoBody := opts.OnResponseBodyUnavailable
+	if onNoBody == nil {
+		onNoBody = func(string, string) {}
+	}
 	return &Manager{
 		log:        opts.Logger,
 		cache:      wazero.NewCompilationCache(),
@@ -124,6 +141,8 @@ func NewManager(opts Options) (*Manager, error) {
 		kvUsage:    make(map[string]*kvLedger),
 		onInvoke:   onInvoke,
 		onPanic:    onPanic,
+		onRespInv:  onRespInv,
+		onNoBody:   onNoBody,
 		egressWrap: opts.EgressWrap,
 	}, nil
 }
@@ -205,6 +224,10 @@ type plugin struct {
 	pool      chan *pooledModule // fixed-capacity; see poolCapacity
 	timeout   time.Duration
 	isHandler bool
+	// abi is the configured (and negotiated) ABI; hasResponse reports that a
+	// jul-abi/v2 module exports handle_response.
+	abi         string
+	hasResponse bool
 
 	capKV        bool
 	capFetch     bool
@@ -240,9 +263,11 @@ type plugin struct {
 	// before release() retires it instead of returning it to the pool.
 	maxInstanceInvocations int
 
-	log      *slog.Logger
-	onInvoke func(string, string, time.Duration)
-	onPanic  func(string)
+	log       *slog.Logger
+	onInvoke  func(string, string, time.Duration)
+	onPanic   func(string)
+	onRespInv func(string, string, time.Duration)
+	onNoBody  func(string, string)
 }
 
 // afterModuleRead is a test seam between the single module read and
@@ -276,6 +301,7 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		identity:     module.Identity,
 		timeout:      pc.Timeout.Std(),
 		isHandler:    pc.Type == "handler",
+		abi:          config.EffectivePluginABI(pc),
 		pool:         make(chan *pooledModule, poolCapacity),
 		capKV:        pc.KV,
 		capFetch:     pc.Fetch,
@@ -292,6 +318,8 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		log:          m.log,
 		onInvoke:     m.onInvoke,
 		onPanic:      m.onPanic,
+		onRespInv:    m.onRespInv,
+		onNoBody:     m.onNoBody,
 		egressWrap:   egressWrap,
 	}
 	if p.fetchTimeout <= 0 {
@@ -345,9 +373,9 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		return closeOnErr(fmt.Errorf("instantiate wasi: %w", err))
 	}
 
-	registrar, ok := abiRegistry[ABIJulV1]
+	registrar, ok := abiRegistry[p.abi]
 	if !ok {
-		return closeOnErr(fmt.Errorf("unknown ABI %q", ABIJulV1))
+		return closeOnErr(fmt.Errorf("unknown ABI %q", p.abi))
 	}
 	if err := registrar(ctx, r, p); err != nil {
 		return closeOnErr(fmt.Errorf("register host module: %w", err))
@@ -357,10 +385,12 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 	if err != nil {
 		return closeOnErr(fmt.Errorf("compile module: %w", err))
 	}
-	if _, ok := compiled.ExportedFunctions()["handle_request"]; !ok {
+	decl, err := negotiateABI(p.abi, compiled)
+	if err != nil {
 		_ = compiled.Close(ctx)
-		return closeOnErr(errors.New("module does not export handle_request (build it against the Jul.IA plugin SDK)"))
+		return closeOnErr(err)
 	}
+	p.hasResponse = decl.hasResponse
 
 	p.runtime = r
 	p.compiled = compiled
@@ -449,42 +479,49 @@ func (p *plugin) kvSet(key string, val []byte) bool {
 	return true
 }
 
-// invoke runs the guest's handle_request for one HTTP request. It returns the
-// guest's action (Continue/Stop), the invocation holding any response the guest
-// produced, and an error if the guest trapped, panicked, or timed out (which the
-// caller turns into a 500). On error the instance is discarded, not pooled,
-// because a trapped module may be in an undefined state.
-func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.Request) (action uint32, inv *invocation, err error) {
+// callOutcome classifies how a guest call ended.
+type callOutcome uint8
+
+const (
+	callOK callOutcome = iota
+	// callAcquireFailed: no instance could be acquired or instantiated.
+	callAcquireFailed
+	// callTrapped: the guest trapped, panicked or timed out.
+	callTrapped
+	// callHostError: a host function failed the invocation, or the guest
+	// returned a value its ABI reserves.
+	callHostError
+)
+
+// call runs one guest export on a pooled instance. On any outcome but callOK
+// the instance is discarded, not pooled, because a failed module may be in an
+// undefined state. valid, when non-nil, rejects reserved result values.
+func (p *plugin) call(parent context.Context, export string, inv *invocation, valid func(uint32) bool) (res uint32, dur time.Duration, outcome callOutcome, err error) {
 	pm, err := p.acquire()
 	if err != nil {
-		p.onPanic(p.name)
-		return 0, nil, err
+		return 0, 0, callAcquireFailed, err
 	}
 	mod := pm.mod
 
-	inv = &invocation{r: r, w: w, log: p.log, maxReqBody: p.maxReqBody, maxRespBody: p.maxRespBody}
 	ctx, cancel := context.WithTimeout(withInvocation(parent, inv), p.timeout)
 	defer cancel()
 
 	start := time.Now()
-	fn := mod.ExportedFunction("handle_request")
+	fn := mod.ExportedFunction(export)
 
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("plugin %q panicked: %v", p.name, rec)
 			_ = mod.Close(context.Background())
-			p.onPanic(p.name)
-			p.onInvoke(p.name, "error", time.Since(start))
+			res, dur, outcome = 0, time.Since(start), callTrapped
 		}
 	}()
 
 	results, callErr := fn.Call(ctx)
-	dur := time.Since(start)
+	dur = time.Since(start)
 	if callErr != nil {
 		_ = mod.Close(context.Background())
-		p.onPanic(p.name)
-		p.onInvoke(p.name, "error", dur)
-		return 0, inv, callErr
+		return 0, dur, callTrapped, callErr
 	}
 
 	// A host function may have rejected the request (oversize body, response
@@ -492,18 +529,80 @@ func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.R
 	// instead of serving a truncated request/response.
 	if inv.err != nil {
 		_ = mod.Close(context.Background())
-		p.onInvoke(p.name, "error", dur)
-		return 0, inv, inv.err
+		return 0, dur, callHostError, inv.err
+	}
+	res = uint32(results[0])
+	if valid != nil && !valid(res) {
+		_ = mod.Close(context.Background())
+		return 0, dur, callHostError, errBadResult
 	}
 
 	p.release(pm)
-	action = uint32(results[0])
+	return res, dur, callOK, nil
+}
+
+// invoke runs the guest's handle_request for one HTTP request. It returns the
+// guest's action (Continue/Stop), the invocation holding any response the guest
+// produced, and an error if the guest trapped, panicked, or timed out (which the
+// caller turns into a 500). On error the instance is discarded, not pooled,
+// because a trapped module may be in an undefined state.
+func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.Request) (action uint32, inv *invocation, err error) {
+	inv = &invocation{r: r, w: w, log: p.log, maxReqBody: p.maxReqBody, maxRespBody: p.maxRespBody, sub: -1}
+	var valid func(uint32) bool
+	if p.abi == ABIJulV2 {
+		valid = func(v uint32) bool { return v == actionStop || v == actionContinue }
+	}
+	action, dur, outcome, err := p.call(parent, exportHandleRequest, inv, valid)
+	switch outcome {
+	case callAcquireFailed:
+		p.onPanic(p.name)
+		return 0, nil, err
+	case callTrapped:
+		p.onPanic(p.name)
+		p.onInvoke(p.name, "error", dur)
+		return 0, inv, err
+	case callHostError:
+		p.onInvoke(p.name, "error", dur)
+		return 0, inv, err
+	}
 	result := "stop"
 	if action == 1 {
 		result = "continue"
 	}
 	p.onInvoke(p.name, result, dur)
 	return action, inv, nil
+}
+
+// invokeResponse runs a jul-abi/v2 guest's handle_response on view. A
+// committed view (a protocol switch) only accepts CONTINUE and runs detached
+// from the request's cancellation, since the request is already over.
+func (p *plugin) invokeResponse(parent context.Context, r *http.Request, view *responseView, state []byte) (uint32, error) {
+	inv := &invocation{r: r, log: p.log, maxReqBody: p.maxReqBody, maxRespBody: p.maxRespBody,
+		phase: phaseResponse, sub: -1, state: state, resp: view}
+	valid := func(v uint32) bool { return v == responseContinue || (v == responseReject && !view.committed) }
+	if view.committed {
+		parent = context.WithoutCancel(parent)
+	}
+	res, dur, outcome, err := p.call(parent, exportHandleResponse, inv, valid)
+	switch outcome {
+	case callAcquireFailed:
+		p.onPanic(p.name)
+		p.onRespInv(p.name, "error", 0)
+		return 0, err
+	case callTrapped:
+		p.onPanic(p.name)
+		p.onRespInv(p.name, "error", dur)
+		return 0, err
+	case callHostError:
+		p.onRespInv(p.name, "error", dur)
+		return 0, err
+	}
+	result := "continue"
+	if res == responseReject {
+		result = "reject"
+	}
+	p.onRespInv(p.name, result, dur)
+	return res, nil
 }
 
 // close tears down the plugin's runtime, which closes every instance (pooled or
