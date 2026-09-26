@@ -124,7 +124,7 @@ type grpcRoundTripper interface {
 }
 
 func (t *grpcBalancingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	b, err := t.pool.PickCtx(req.Context())
+	b, err := t.pool.PickKeyed(req.Context(), t.pool.AffinityKey(req), nil)
 	if err != nil {
 		return nil, err
 	}

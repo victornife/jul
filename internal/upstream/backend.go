@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"jul/internal/affinity"
 )
 
 // Backend networks. A backend is reached over TCP or over a unix domain socket;
@@ -94,6 +96,17 @@ type Backend struct {
 	// consecutive failed probes. Backends without active checks stay true for
 	// their whole lifetime. It composes with the passive cooldown in available.
 	activeHealthy atomic.Bool
+
+	// affinityID and affinitySum are the backend's rendezvous_v1 identity and
+	// its hash, fixed at construction because network and address are.
+	affinityID  string
+	affinitySum uint64
+}
+
+// affinityCandidate is this backend as rendezvous ranking sees it. Weight is
+// read live because a discovery weight change is applied in place.
+func (b *Backend) affinityCandidate() affinity.Candidate {
+	return affinity.Candidate{Identity: b.affinityID, Sum: b.affinitySum, Weight: b.Weight()}
 }
 
 // Scheme returns the backend's scheme: "http", "https", or empty for a non-HTTP

@@ -7,6 +7,7 @@ import (
 	"context"
 	"time"
 
+	"jul/internal/affinity"
 	"jul/internal/config"
 )
 
@@ -36,27 +37,27 @@ type PoolSnapshot struct {
 
 // Pick selects an available backend from the snapshot, mirroring Pool.Pick.
 func (s *PoolSnapshot) Pick() (Attempt, error) {
-	return s.pickExcluding(nil)
+	return s.pickKeyed(affinity.Key{}, nil)
 }
 
 // pick selects an available backend from the snapshot, mirroring Pool.Pick.
 func (s *PoolSnapshot) pick() (Attempt, error) {
-	return s.pickExcluding(nil)
+	return s.pickKeyed(affinity.Key{}, nil)
 }
 
-// pickExcluding selects an available backend from the snapshot, skipping any
-// backend whose stable identity is in excluded. It returns
+// pickKeyed selects an available backend from the snapshot for key, skipping
+// any backend whose stable identity is in excluded. It returns
 // ErrNoAvailableBackend when every available backend is excluded. For dynamic
 // pools it delegates to the live pool so discovery convergence is visible to
 // each request.
-func (s *PoolSnapshot) pickExcluding(excluded map[BackendIdentity]struct{}) (Attempt, error) {
+func (s *PoolSnapshot) pickKeyed(key affinity.Key, excluded map[BackendIdentity]struct{}) (Attempt, error) {
 	if s.dynamic {
-		return s.pool.pickExcluding(excluded)
+		return s.pool.pickKeyed(key, excluded)
 	}
 	// The live pool owns the policy even for a frozen snapshot: a resilience
 	// reload swaps a pointer without rebuilding the pool, so a per-backend limit
 	// takes effect on in-flight generations too.
-	return selectBackend(s.backends, s.balancer, s.pool.Policy().MaxActivePerBackend(), excluded)
+	return selectBackend(s.backends, s.balancer, s.pool.Policy().MaxActivePerBackend(), excluded, key)
 }
 
 // Backends returns the snapshot's backend set. The returned slice must not be
@@ -81,7 +82,7 @@ func (p *Pool) Snapshot() *PoolSnapshot {
 		key:      PoolSnapshotKey{Name: p.name, Scheme: p.scheme},
 		strategy: p.strategy,
 		backends: p.Backends(),
-		balancer: newBalancer(p.strategy),
+		balancer: p.newBalancer(),
 		pool:     p,
 		dynamic:  p.dynamic,
 	}
@@ -95,7 +96,7 @@ func (p *Pool) staticSnapshot(servers []config.UpstreamServer) *PoolSnapshot {
 		key:      PoolSnapshotKey{Name: p.name, Scheme: p.scheme},
 		strategy: p.strategy,
 		backends: buildBackends(servers, p.scheme, p.circuitParams()),
-		balancer: newBalancer(p.strategy),
+		balancer: p.newBalancer(),
 		pool:     p,
 		dynamic:  false,
 	}
@@ -112,16 +113,28 @@ func (p *Pool) PickCtx(ctx context.Context) (Attempt, error) {
 // by the proxy retry loop so a failed backend does not consume an attempt while
 // an untried backend remains.
 func (p *Pool) PickExcluding(ctx context.Context, excluded map[BackendIdentity]struct{}) (Attempt, error) {
+	return p.PickKeyed(ctx, affinity.Key{}, excluded)
+}
+
+// PickKeyed is PickExcluding for a request carrying an affinity key (see
+// AffinityKey). A consistent_hash pool places a hashed key by rendezvous
+// ranking over the eligible, non-excluded backends; any other key, and any
+// other strategy, selects exactly as PickExcluding does.
+func (p *Pool) PickKeyed(ctx context.Context, key affinity.Key, excluded map[BackendIdentity]struct{}) (Attempt, error) {
 	if snap := snapshotFrom(ctx, p.name, p.scheme); snap != nil {
-		return snap.pickExcluding(excluded)
+		return snap.pickKeyed(key, excluded)
 	}
-	return p.pickExcluding(excluded)
+	return p.pickKeyed(key, excluded)
 }
 
 // pickExcluding selects an available backend from the live pool, skipping any
 // backend whose stable identity is in excluded.
 func (p *Pool) pickExcluding(excluded map[BackendIdentity]struct{}) (Attempt, error) {
-	return selectBackend(*p.backends.Load(), p.balancer, p.Policy().MaxActivePerBackend(), excluded)
+	return p.pickKeyed(affinity.Key{}, excluded)
+}
+
+func (p *Pool) pickKeyed(key affinity.Key, excluded map[BackendIdentity]struct{}) (Attempt, error) {
+	return selectBackend(*p.backends.Load(), p.balancer, p.Policy().MaxActivePerBackend(), excluded, key)
 }
 
 // candidates returns the backend set the next selection would draw from, taking
@@ -158,8 +171,9 @@ func (p *Pool) candidates(ctx context.Context) []*Backend {
 // can lose a race — another goroutine may take the last probe slot in between —
 // so a lost claim retries with that backend removed rather than failing the
 // request. That is what keeps "exactly N probes" true under contention instead
-// of merely likely.
-func selectBackend(backends []*Backend, bal Balancer, perBackend int64, excluded map[BackendIdentity]struct{}) (Attempt, error) {
+// of merely likely. For a hashed key the same removal makes the retry land on
+// the key's next-ranked backend.
+func selectBackend(backends []*Backend, bal Balancer, perBackend int64, excluded map[BackendIdentity]struct{}, key affinity.Key) (Attempt, error) {
 	now := time.Now().UnixNano()
 	avail := make([]*Backend, 0, len(backends))
 	saturated := false
@@ -178,7 +192,7 @@ func selectBackend(backends []*Backend, bal Balancer, perBackend int64, excluded
 	}
 
 	for len(avail) > 0 {
-		b := bal.pick(avail)
+		b := pickFor(bal, avail, key)
 		if b == nil {
 			break
 		}

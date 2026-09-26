@@ -86,6 +86,10 @@ type RegistryOptions struct {
 	OnBackends func(pool string, n int)
 	// OnDiscoveryError reports a failed or empty discovery resolve -> counter.
 	OnDiscoveryError func(pool string)
+	// OnAffinityKey reports each keyed request's affinity-key outcome on a
+	// consistent_hash pool by bounded status (hashed/missing/invalid). The key
+	// itself is never an argument.
+	OnAffinityKey func(pool, status string)
 	// DialContext, when non-nil, guards the outbound connections made by the
 	// Consul and Kubernetes discoverers against the [egress] allow-list. DNS
 	// discovery uses the system resolver and is unaffected.
@@ -150,6 +154,9 @@ type upstreamMeta struct {
 	// configured paths — rebuilds the pool and with it the probe client. That
 	// is what makes the whole field hot-reloadable rather than restart-bound.
 	backendTLSSig string
+	// hash is the consistent_hash block. A different key source, fallback or
+	// algorithm is a different balancer, fixed at construction like strategy.
+	hash config.HashConfig
 }
 
 // equal reports whether two metas describe the same pool shape. It cannot use
@@ -157,6 +164,7 @@ type upstreamMeta struct {
 func (m upstreamMeta) equal(o upstreamMeta) bool {
 	return m.scheme == o.scheme &&
 		m.strategy == o.strategy &&
+		m.hash == o.hash &&
 		m.discoverySig == o.discoverySig &&
 		m.backendTLSSig == o.backendTLSSig &&
 		healthConfigEqual(m.health, o.health)
@@ -322,6 +330,7 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 	// active-checker one even on a pool with no active checks configured.
 	pool.SetHealthHook(r.healthHookFor(up.Name, pool))
 	pool.SetCircuitHook(r.opts.OnCircuitTransition)
+	pool.SetAffinityHook(r.opts.OnAffinityKey)
 	var d Discoverer
 	if disco {
 		newDisco := r.opts.NewDiscoverer
@@ -716,6 +725,9 @@ type PoolStatus struct {
 	Name     string
 	Scheme   string
 	Strategy string
+	// Hash is the effective consistent_hash configuration, nil for any other
+	// strategy.
+	Hash     *HashStatus
 	Backends []BackendStatus
 }
 
@@ -740,7 +752,7 @@ func (r *Registry) Snapshot() []PoolStatus {
 	defer r.mu.Unlock()
 	out := make([]PoolStatus, 0, len(r.live))
 	for key, e := range r.live {
-		ps := PoolStatus{Name: key.name, Scheme: key.scheme, Strategy: e.meta.strategy}
+		ps := PoolStatus{Name: key.name, Scheme: key.scheme, Strategy: e.meta.strategy, Hash: e.pool.HashStatus()}
 		perBackend := e.pool.Policy().MaxActivePerBackend()
 		for _, b := range e.pool.Backends() {
 			ps.Backends = append(ps.Backends, BackendStatus{
@@ -795,6 +807,9 @@ func metaOf(up config.UpstreamConfig, scheme string) upstreamMeta {
 	}
 	if up.HealthCheck != nil {
 		m.health = *up.HealthCheck
+	}
+	if up.Hash != nil {
+		m.hash = *up.Hash
 	}
 	return m
 }

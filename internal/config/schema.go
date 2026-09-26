@@ -614,9 +614,15 @@ type RewriteConfig struct {
 // UpstreamConfig is a named pool of backend servers.
 type UpstreamConfig struct {
 	Name string `toml:"name"`
-	// Strategy is one of "round_robin", "weighted_round_robin", "least_conn".
+	// Strategy is one of "round_robin", "weighted_round_robin", "least_conn",
+	// "consistent_hash".
 	Strategy string           `toml:"strategy"`
 	Servers  []UpstreamServer `toml:"servers"`
+
+	// Hash configures strategy = "consistent_hash": which request attribute is
+	// the affinity key and what happens to a request that has none. It is
+	// required by that strategy and rejected with any other.
+	Hash *HashConfig `toml:"hash"`
 
 	// MaxFails and FailTimeout are the circuit breaker's failure threshold and
 	// open duration.
@@ -652,6 +658,36 @@ type UpstreamConfig struct {
 	// fields in a location that targets a named upstream is a validation error
 	// rather than a silent ignore.
 	Resilience *ResilienceConfig `toml:"resilience"`
+}
+
+// Affinity key sources, fallbacks and algorithms for strategy = "consistent_hash"
+// (ADR 0021). The sets are closed on purpose: an expression language would make
+// the key unbounded and its privacy properties unknowable.
+const (
+	HashKeyClientIP = "client_ip"
+	HashKeyHeader   = "header"
+	HashKeyCookie   = "cookie"
+
+	HashAlgorithmRendezvousV1 = "rendezvous_v1"
+)
+
+// HashConfig is the public [upstreams.hash] block.
+type HashConfig struct {
+	// Key is the affinity key source: "client_ip" (the canonical client
+	// address), "header" or "cookie". Only "client_ip" applies to stream
+	// routes.
+	Key string `toml:"key"`
+	// Name is the request header or cookie name. It is required for "header"
+	// and "cookie" and rejected for "client_ip".
+	Name string `toml:"name"`
+	// Fallback is the strategy used for a request without a usable key
+	// (absent, empty, oversized or unattributed): "round_robin" (default),
+	// "weighted_round_robin" or "least_conn".
+	Fallback string `toml:"fallback"`
+	// Algorithm pins the key-to-backend mapping. "rendezvous_v1" (weighted
+	// rendezvous hashing) is the only value and the default; a future mapping
+	// would be a new value, never a silent change to this one.
+	Algorithm string `toml:"algorithm"`
 }
 
 // ResilienceConfig is the public [upstreams.resilience] block: admission and

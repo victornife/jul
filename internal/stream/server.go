@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"jul/internal/affinity"
 	"jul/internal/clientaddr"
 	"jul/internal/config"
 	"jul/internal/logthrottle"
@@ -84,7 +85,7 @@ func NewServer(opts Options) *Server {
 		hooks:     opts.Hooks,
 		ctx:       ctx,
 		cancel:    cancel,
-		reg:       upstream.NewRegistry(upstream.RegistryOptions{Logger: log}),
+		reg:       upstream.NewRegistry(upstream.RegistryOptions{Logger: log, OnAffinityKey: opts.Hooks.OnAffinityKey}),
 		listeners: map[string]*listener{},
 		closing:   make(chan struct{}),
 	}
@@ -530,20 +531,37 @@ func (l *listener) drain() {
 // regardless of connection volume while still being visible on the counter.
 // The returned backend must be released to the pool when the
 // connection/session ends.
-func (l *listener) dialBackend(pool *upstream.Pool, network string, timeout time.Duration) (net.Conn, upstream.Attempt, error) {
+//
+// key is the connection's affinity key (the zero Key for a non-hashing pool).
+// It is evaluated once, when the connection or UDP session is established;
+// datagrams of an established session never re-select. A backend that failed
+// to dial is excluded from the rest of this connection's attempts, so a keyed
+// connection falls through its rendezvous order instead of retrying the
+// preferred backend.
+func (l *listener) dialBackend(pool *upstream.Pool, network string, timeout time.Duration, key affinity.Key) (net.Conn, upstream.Attempt, error) {
 	attempts := len(pool.Backends())
 	if attempts < 1 {
 		attempts = 1
 	}
 	var lastErr error
+	var tried map[upstream.BackendIdentity]struct{}
 	for i := 0; i < attempts; i++ {
-		b, err := pool.Pick()
+		b, err := pool.PickKeyed(context.Background(), key, tried)
 		if err != nil {
+			if lastErr != nil {
+				// Every remaining backend was already tried; the failure worth
+				// reporting is the dial error, which is already counted.
+				break
+			}
 			l.server.dialFailure(network, upstream.ClassifyDialError(err))
 			return nil, upstream.Attempt{}, err
 		}
 		conn, derr := net.DialTimeout(network, b.Address, timeout)
 		if derr != nil {
+			if tried == nil {
+				tried = make(map[upstream.BackendIdentity]struct{}, attempts)
+			}
+			tried[b.Identity()] = struct{}{}
 			reason := upstream.ClassifyDialError(derr)
 			tripped := pool.RecordAttempt(b, upstream.ClassifyAttemptError(derr, nil, nil))
 			pool.Release(b.Backend)

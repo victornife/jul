@@ -667,6 +667,15 @@ func upstreamEntries() []Entry {
 		"upstreams.*.servers.*.weight",
 		"upstreams.*.strategy",
 	)
+	// The hash block is part of the pool's construction-time shape, like
+	// strategy: a changed key, fallback or algorithm rebuilds the pool on the
+	// next successful reload, and keys are re-placed from that moment.
+	out = append(out, hotGroup(SubUpstream, reasonUpstreamStaged,
+		"upstreams.*.hash.algorithm",
+		"upstreams.*.hash.fallback",
+		"upstreams.*.hash.key",
+		"upstreams.*.hash.name",
+	)...)
 	out = append(out, hotGroup(SubResilience, reasonResilienceCircuit,
 		"upstreams.*.fail_timeout",
 		"upstreams.*.max_fails",

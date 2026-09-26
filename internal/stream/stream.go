@@ -46,6 +46,9 @@ type Hooks struct {
 	// the pool's dial-failure heartbeat throttle, so the counter never
 	// undercounts relative to what actually happened.
 	OnDialFailure func(proto, reason string)
+	// OnAffinityKey is invoked once per new connection or UDP session on a
+	// consistent_hash pool with the pool name and bounded key status.
+	OnAffinityKey func(pool, status string)
 }
 
 // Options configures a stream Server.

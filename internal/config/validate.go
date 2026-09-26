@@ -50,10 +50,11 @@ func Validate(c *Config) error {
 			}
 		}
 		switch up.Strategy {
-		case "", "round_robin", "weighted_round_robin", "least_conn":
+		case "", "round_robin", "weighted_round_robin", "least_conn", "consistent_hash":
 		default:
-			errs = append(errs, fmt.Errorf("%s: invalid strategy %q (want round_robin|weighted_round_robin|least_conn)", where, up.Strategy))
+			errs = append(errs, fmt.Errorf("%s: invalid strategy %q (want round_robin|weighted_round_robin|least_conn|consistent_hash)", where, up.Strategy))
 		}
+		errs = append(errs, validateHash(up, where)...)
 		if len(up.Servers) == 0 && !discoveryEnabled(up.Discovery) {
 			errs = append(errs, fmt.Errorf("%s: upstream %q has no servers", where, up.Name))
 		}
@@ -213,6 +214,7 @@ func Validate(c *Config) error {
 	errs = append(errs, validateAccessLog(c.Observability.AccessLog)...)
 	errs = append(errs, validateStreams(c.Streams, upstreamNames)...)
 	errs = append(errs, validateStreamResilience(c)...)
+	errs = append(errs, validateStreamHash(c)...)
 
 	return errors.Join(errs...)
 }

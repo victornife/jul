@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"jul/internal/affinity"
 	"jul/internal/config"
 	"jul/internal/upstream"
 )
@@ -421,7 +422,7 @@ func TestTCPCircuitBoundsProbesOnRecovery(t *testing.T) {
 
 	// One dial: it fails against the dead backend, which opens its circuit, and
 	// falls through to the live one.
-	conn, at, derr := l.dialBackend(pool, "tcp", time.Second)
+	conn, at, derr := l.dialBackend(pool, "tcp", time.Second, affinity.Key{})
 	if derr != nil {
 		t.Fatalf("dialBackend: %v", derr)
 	}
@@ -434,7 +435,7 @@ func TestTCPCircuitBoundsProbesOnRecovery(t *testing.T) {
 
 	// The cooldown is an hour, so nothing may reach it until it elapses.
 	for i := 0; i < 20; i++ {
-		conn, at, derr := l.dialBackend(pool, "tcp", time.Second)
+		conn, at, derr := l.dialBackend(pool, "tcp", time.Second, affinity.Key{})
 		if derr != nil {
 			t.Fatalf("dial %d: %v", i, derr)
 		}
