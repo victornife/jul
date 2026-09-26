@@ -406,7 +406,13 @@ func (*Response) State() []byte {
 func (*Response) Status() int { return int(hostRespStatus()) }
 
 // SetStatus changes the status (200-599 except 204, 205, 304).
-func (*Response) SetStatus(code int) error { return codeErr(hostRespSetStatus(uint32(code))) }
+func (*Response) SetStatus(code int) error {
+	// Reject before narrowing so an out-of-range int cannot wrap to a valid code.
+	if code < 0 || code > 999 {
+		return ErrInvalid
+	}
+	return codeErr(hostRespSetStatus(uint32(code)))
+}
 
 // HeaderValues returns every value of a response header.
 func (*Response) HeaderValues(name string) []string {
