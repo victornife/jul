@@ -1,0 +1,22 @@
+{
+  "bytes": 6618,
+  "end_reason": "signal",
+  "ended": "2026-09-26T18:22:29.578542742Z",
+  "errors": 1,
+  "file": "samples.jsonl.gz",
+  "gap_seconds": 10.004884931,
+  "gaps": 1,
+  "interval_s": 5,
+  "labels": {
+    "config": "jul.toml",
+    "jul_sha": "a2e07d76c06b7c0389709af3d3fb164b8ced2610",
+    "profile": "mem",
+    "workload": "memory cache 64 MB cap; 48 workers filling unique 256 KiB cacheable objects under MemoryHigh=176M, then cache-hit re-reads under MemoryHigh lowered live to 96M (below the working set), then MemoryHigh restored; MemoryMax=192M throughout, swap 0"
+  },
+  "ok": 50,
+  "scrapes": 51,
+  "series": 48,
+  "sha256": "88c2f55d2d12321a435ad0ac80d624515dfef29f404ddadcfd1dc3289ff762d1",
+  "started": "2026-09-26T18:18:19.135668974Z",
+  "url": "http://127.0.0.1:19901/metrics"
+}

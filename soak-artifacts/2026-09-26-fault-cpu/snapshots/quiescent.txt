@@ -1,0 +1,23 @@
+# quiescent 2026-09-26T18:16:42Z
+pid 238991 alive
+VmHWM:	   51432 kB
+VmRSS:	   49368 kB
+Threads:	30
+fds 33
+Max open files            1048576              1048576              files     
+cgroup cpu.stat: usage_usec 134368264 user_usec 61107271 system_usec 73260993 nice_usec 0 
+cgroup memory.max: max 
+cgroup memory.high: max 
+cgroup memory.current: 26406912 
+cgroup memory.peak: 30298112 
+cgroup memory.events: low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0 
+go_goroutines 66
+go_memstats_heap_inuse_bytes 1.4860288e+07
+jul_listener_conns 0
+jul_reload_total{outcome="no_change",source="sighup"} 1
+jul_upstream_active_requests{pool="app"} 0
+jul_upstream_backends{pool="app"} 2
+jul_upstream_connections{pool="app"} 22
+process_max_fds 1.048576e+06
+process_open_fds 34
+process_resident_memory_bytes 4.9430528e+07

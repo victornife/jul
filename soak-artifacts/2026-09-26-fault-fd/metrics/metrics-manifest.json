@@ -1,0 +1,22 @@
+{
+  "bytes": 4619,
+  "end_reason": "signal",
+  "ended": "2026-09-26T18:14:26.518187173Z",
+  "errors": 0,
+  "file": "samples.jsonl.gz",
+  "gap_seconds": 0,
+  "gaps": 0,
+  "interval_s": 5,
+  "labels": {
+    "config": "jul.toml",
+    "jul_sha": "a2e07d76c06b7c0389709af3d3fb164b8ced2610",
+    "profile": "fd",
+    "workload": "baseline 16 workers; pressure: 400 held idle TCP connections + 64 workers with fresh connections per request; recovery 16 workers"
+  },
+  "ok": 39,
+  "scrapes": 39,
+  "series": 43,
+  "sha256": "ed1598edbd2fbc6fb38b5c2cb1733058937bfa870fb598276f7a71c14023bd48",
+  "started": "2026-09-26T18:11:16.158580698Z",
+  "url": "http://127.0.0.1:19901/metrics"
+}

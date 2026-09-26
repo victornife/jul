@@ -1,0 +1,23 @@
+# idle 2026-09-26T18:11:16Z
+pid 237900 alive
+VmHWM:	   32388 kB
+VmRSS:	   32388 kB
+Threads:	13
+fds 12
+Max open files            256                  256                  files     
+cgroup cpu.max: max 100000 
+cgroup cpu.stat: usage_usec 33727845538 user_usec 22985842436 system_usec 10742003102 nice_usec 0 nr_periods 0 nr_throttled 0 throttled_usec 0 nr_bursts 0 burst_usec 0 
+cgroup memory.max: max 
+cgroup memory.high: max 
+cgroup memory.current: 4118417408 
+cgroup memory.peak: 11701276672 
+cgroup memory.events: low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0 
+go_goroutines 21
+go_memstats_heap_inuse_bytes 8.003584e+06
+jul_listener_conns 0
+jul_upstream_active_requests{pool="app"} 0
+jul_upstream_backends{pool="app"} 2
+jul_upstream_connections{pool="app"} 0
+process_max_fds 256
+process_open_fds 13
+process_resident_memory_bytes 3.248128e+07

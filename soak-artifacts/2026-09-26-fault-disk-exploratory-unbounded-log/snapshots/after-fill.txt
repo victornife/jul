@@ -1,0 +1,33 @@
+# after-fill 2026-09-26T17:44:42Z
+pid 222099 alive
+VmHWM:	   97208 kB
+VmRSS:	   64636 kB
+Threads:	35
+fds 29
+Max open files            1048576              1048576              files     
+cgroup cpu.max: max 100000 
+cgroup cpu.stat: usage_usec 29863987491 user_usec 21381135729 system_usec 8482851762 nice_usec 0 nr_periods 0 nr_throttled 0 throttled_usec 0 nr_bursts 0 burst_usec 0 
+cgroup memory.max: max 
+cgroup memory.high: max 
+cgroup memory.current: 3202629632 
+cgroup memory.peak: 11701276672 
+cgroup memory.events: low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0 
+go_goroutines 50
+go_memstats_heap_inuse_bytes 1.9398656e+07
+jul_cache_bytes{tier="disk"} 2.514897e+07
+jul_cache_bytes{tier="memory"} 1.972095e+06
+jul_cache_entries{tier="disk"} 191
+jul_cache_entries{tier="memory"} 15
+jul_cache_evictions_total{tier="disk"} 80862
+jul_cache_evictions_total{tier="memory"} 199660
+jul_cache_max_bytes{tier="disk"} 2.5165824e+07
+jul_cache_max_bytes{tier="memory"} 2.097152e+06
+jul_listener_conns 0
+jul_reload_total{outcome="applied_live",source="admin"} 1
+jul_reload_total{outcome="no_change",source="admin"} 1
+jul_upstream_active_requests{pool="app"} 0
+jul_upstream_backends{pool="app"} 2
+jul_upstream_connections{pool="app"} 14
+process_max_fds 1.048576e+06
+process_open_fds 30
+process_resident_memory_bytes 6.5339392e+07

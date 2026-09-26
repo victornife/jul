@@ -1,0 +1,22 @@
+{
+  "bytes": 5104,
+  "end_reason": "signal",
+  "ended": "2026-09-26T17:46:08.047266455Z",
+  "errors": 0,
+  "file": "samples.jsonl.gz",
+  "gap_seconds": 0,
+  "gaps": 0,
+  "interval_s": 5,
+  "labels": {
+    "config": "jul.toml",
+    "jul_sha": "99934938a04666345aac3a807d284ff67c109411",
+    "profile": "disk",
+    "workload": "disk cache tier 24 MiB cap behind a 2 MiB memory tier; 32 workers filling unique 128 KiB cacheable objects; access+audit log on the same tmpfs; filler file to ~1 MiB free; managed config apply under pressure and after; filler removed"
+  },
+  "ok": 26,
+  "scrapes": 26,
+  "series": 90,
+  "sha256": "96e82bc4e73e703cb7b1b3926ff4b9929e3c05a8f7d4f4d5c6aca6bb4aa8aa51",
+  "started": "2026-09-26T17:44:02.341844884Z",
+  "url": "http://127.0.0.1:19901/metrics"
+}
