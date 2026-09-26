@@ -27,7 +27,7 @@ try {
     }
     foreach ($b in $builds) {
         Write-Host "building $($b.Pkg) -> $($b.Name).wasm"
-        go build -buildmode=c-shared -o (Join-Path $Out "$($b.Name).wasm") "./$($b.Pkg)"
+        go build -trimpath -buildvcs=false -buildmode=c-shared -o (Join-Path $Out "$($b.Name).wasm") "./$($b.Pkg)"
         if ($LASTEXITCODE -ne 0) { throw "build failed: $($b.Pkg)" }
     }
     Write-Host "done -> $Out"

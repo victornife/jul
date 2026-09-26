@@ -133,7 +133,7 @@ var HandleRequest func(*Request) Action
 // A nil HandleResponse delivers the response unchanged.
 var HandleResponse func(*Response) Verdict
 
-// ---- host ABI imports (module "jul_v2") ------------------------------------
+// ---- host ABI imports (module "jul-abi/v2") ------------------------------------
 
 //go:wasmimport jul-abi/v2 log
 func hostLog(level, ptr, n uint32)

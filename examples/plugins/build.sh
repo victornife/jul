@@ -20,7 +20,7 @@ mkdir -p "$out"
 
 build() { # build <package> <output name>
 	echo "building $1 -> $2.wasm"
-	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o "$out/$2.wasm" "./$1"
+	GOOS=wasip1 GOARCH=wasm go build -trimpath -buildvcs=false -buildmode=c-shared -o "$out/$2.wasm" "./$1"
 }
 
 v2=(v2-status-header v2-redact testguest-v2)

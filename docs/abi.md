@@ -432,8 +432,9 @@ the plugin tests on every CI run: the historical v1 guests (`header-inject`,
 `request-block`, `kv-counter`, `testguest-*`, built 2026-06 and never rebuilt),
 a current-toolchain v1 guest (`v1-current-header-inject`), and the v2 guests
 (`v2-status-header`, `v2-redact`, `testguest-v2`). `examples/plugins/build.sh`
-refreshes only the current and v2 fixtures. Keep old fixtures across releases so
-backward compatibility stays covered.
+refreshes only the current and v2 fixtures, built with `-trimpath -buildvcs=false`
+so CI can prove they equal a fresh build of their sources. Keep old fixtures
+across releases so backward compatibility stays covered.
 
 ## CI
 
