@@ -72,3 +72,13 @@ func TestDiffPluginABIAndInvocations(t *testing.T) {
 		t.Fatalf("unset and explicit v1 are the same ABI: %+v", same)
 	}
 }
+
+func TestStatusPluginDetailCountsV2(t *testing.T) {
+	plugins := map[string]config.PluginConfig{"a": {}, "b": {ABI: config.PluginABIV2}, "c": {ABI: config.PluginABIV1}}
+	if got := pluginDetail(len(plugins), pluginV2Count(plugins), 2); got != "3 modules (1 jul-abi/v2); 2 locations" {
+		t.Fatalf("detail = %q", got)
+	}
+	if got := pluginDetail(1, 0, 0); got != "1 module" {
+		t.Fatalf("v1-only detail = %q", got)
+	}
+}

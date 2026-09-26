@@ -735,3 +735,26 @@ features:
     upstream/cache capacity-pressure summary. A field the platform cannot report is "unavailable", never a fabricated
     0 or percentage; aggregate/per-resource denominators are never mixed. Merged on main (PR pending), not yet in a
     tagged release; no dedicated soak has been run (not required for this tranche per the programme authority).'
+- id: WASM-ABI2
+  name: WASM plugin response phase (jul-abi/v2)
+  tags:
+  - wasmplugins
+  maturity: Beta
+  delivery: merged
+  doc: abi.md
+  criteria:
+    1: true
+    2: true
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: true
+    9: true
+  notes: 'jul-abi/v2 (#430, ADR 0020) adds an opt-in, per-request subscribed response phase next to the unchanged
+    jul-abi/v1: status/header access and mutation, a bounded buffered body (max_response_body) with a closed
+    body-state enum, bounded replacement and reject, placed inside the location WAF and outside the cache. Golden-
+    pinned (abi-v2.golden), prebuilt v2 fixtures, v2 SDK and examples built and run in CI. Merged on main, not yet
+    in a tagged release; no dedicated soak has been run (focused churn/quiescence and fuzz evidence only). The GA
+    WASM plugin system row (Y2-02) covers jul-abi/v1 and does not extend to this entry.'
