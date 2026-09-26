@@ -96,6 +96,15 @@ jobs:
         run: GOOS=wasip1 GOARCH=wasm go vet ./...
       - name: build every example
         run: bash examples/plugins/build.sh "$RUNNER_TEMP/plugins" all
+      # Fixtures are built with -trimpath -buildvcs=false, so the committed v2
+      # and current-v1 guests must equal a fresh build of their sources. A Go
+      # toolchain bump legitimately changes them: rerun examples/plugins/build.sh.
+      - name: committed fixtures match their sources
+        run: |
+          bash examples/plugins/build.sh "$RUNNER_TEMP/fixtures"
+          for f in "$RUNNER_TEMP"/fixtures/*.wasm; do
+            cmp "$f" "testdata/plugins/$(basename "$f")" || { echo "::error::$(basename "$f") is stale; run examples/plugins/build.sh"; exit 1; }
+          done
       - name: run the ABI suites against the fresh builds
         env:
           JUL_PLUGIN_FIXTURES: ${{ runner.temp }}/plugins
