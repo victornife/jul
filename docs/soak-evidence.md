@@ -585,25 +585,27 @@ soak/udp: goroutines stable, heap bounded
 
 - No goroutine leak; session cap held; every reaped session tore down fully.
 
-> The authoritative GA-soak artifact is the Linux release-gate `soak-results`
-> produced by the `v1.28.0` tag-triggered workflow. The local run above
-> demonstrates the harness is healthy and the stream (udp-churn) data path
-> is leak-free under sustained load. Link the artifact below when the CI run
-> completes.
+> **2026-09-27 evidence correction:** the `v1.28.0` release-gate artifact
+> ran five minutes and is a smoke under ADR 0005, not a qualifying GA soak.
+> The local run above demonstrates the harness and stream data path during
+> that brief window; consult later feature-specific runs for the long-run gate.
 >
 > Artifact: pending -- add the GitHub Actions run URL once the release-gate workflow completes.
 
 ### 2026-07-03 — release soak queued (v1.29.0 tag)
 
 Tag `v1.29.0` pushed at 2026-07-03; the release workflow triggered the full
-**5-minute ADR-0005 soak gate** (`SOAK_DURATION=5m`, `SOAK_WORKERS=32`) over
+**5-minute release smoke gate** (`SOAK_DURATION=5m`, `SOAK_WORKERS=32`) over
 both the **proxy** and **udp-churn** scenarios. This run exercises all features
 including the three newly queued ones: **HTTP/3 over QUIC (Y1-11)**, **WASM
 plugins (Y2-02)**, and **L4 stream proxy (Y2-03)** (UDP-churn scenario directly
 covers the L4 stream data path). They were later completed during the 2026-07-11
 through 2026-07-13 Linux evidence pass for the 1.32 release-track documentation,
 so the historical queue entry should be read as "queued initially, completed
-later" rather than "still pending".
+later" rather than "still pending". The following historical table used
+"soaked" for the release smoke; those labels do not by themselves establish
+the long-running ADR 0005 gate. The current [per-feature tracking](status.md#soak-tracking-post-ga-gate)
+distinguishes qualifying runs from still-pending evidence.
 
 **Local Windows runs** (2026-07-03, 2026-07-04): proxy soak fails at 32 workers
 and 16 workers — Windows ephemeral port exhaustion is a persistent client-side
@@ -1002,8 +1004,9 @@ or timeout errors.
 >
 > **OTel schema-URL conflict:** `internal/observability/tracing.go` imported `semconv/v1.39.0` while the build pulled `otel v1.44.0` (which uses `semconv/v1.41.0`). `resource.Merge()` failed with mismatched schema URLs, preventing tracer initialization. Fixed by updating the import to `semconv/v1.41.0`.
 
-> The authoritative GA-soak artifact is the Linux release-gate `soak-results`
-> produced by the `v1.30.0` tag-triggered workflow.
+> **2026-09-27 evidence correction:** the five-minute `v1.30.0` release
+> artifact is a smoke; the separate eight-hour Phase 2A run below is the
+> qualifying consolidated evidence for the features it actually exercises.
 
 ### 2026-07-05 — Phase 2A consolidated burn-in COMPLETED (local, 8 hours, 50 workers, ALL features)
 

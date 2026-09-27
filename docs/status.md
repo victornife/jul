@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.13 · Updated 2026-09-27
+> Version 2.14 · Updated 2026-09-27
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -63,6 +63,10 @@ not inherit an older GA row merely because it lives in the same package or guide
 - **Dated audit disposition:** lives in the
   [audit register](audit-register.md). Historical audits remain evidence rather
   than a second current-status source.
+- **Zero-config/lint and base importer:** both are published in v2.0.0 and
+  retain the GA product bar, but their cited five-minute validations are
+  smoke tests under ADR 0005. They are GA — soak pending until qualifying
+  feature evidence or a documented criterion decision exists.
 
 ### Current notices
 
@@ -137,8 +141,6 @@ Released and soaked capabilities that satisfy all applicable GA criteria.
 | Authentication (CIDR / Basic / JWT / forward-auth) | Y1-04 | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [auth.md](auth.md) |
 | Active health checks (HTTP / TCP probes) | Y1-05 | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
 | Console (operations cockpit) | Y1-07 | `console` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
-| Zero-config + jul lint | Y1-08 | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [zeroconf.md](zeroconf.md) |
-| NGINX config importer | Y1-09 | `importer` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [nginx-importer.md](nginx-importer.md) |
 | OTel tracing + access-log sinks | Y1-10 | `otel` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | n/a | [otel.md](otel.md) |
 | HTTP/3 over QUIC | Y1-11 | `http3` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [http3.md](http3.md) |
 | gRPC ↔ JSON transcoding | Y2-01 | `grpc` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [grpc-transcoding.md](grpc-transcoding.md) |
@@ -162,7 +164,8 @@ long-running post-GA soak gate.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| *(none)* | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| Zero-config + jul lint | Y1-08 | core | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [zeroconf.md](zeroconf.md) |
+| NGINX config importer | Y1-09 | `importer` | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [nginx-importer.md](nginx-importer.md) |
 
 ## Beta
 
@@ -226,10 +229,10 @@ the [soak evidence log](soak-evidence.md).
 | Service discovery / dynamic upstreams (Y2-05) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-06 (`/discovery/` traffic via `dns-backend`, resolved successfully) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-h-50-workers) |
 | Secrets references + log redaction (SEC-1) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-06 (admin token `${env:JUL_ADMIN_TOKEN}` expanded; API reachable) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-h-50-workers) |
 | Rate + connection limiting (Y1-03) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (12.5M req, 0% err, token-bucket allow/reject verified) — [evidence](soak-evidence.md#2026-07-04--rate-limit-soak-local-windows-1-hour-50-workers) |
-| Zero-config + `jul lint` (Y1-08) | 2026-07-03 | ✅ validated via `test-zero-config.ps1` 2026-07-06: zero-config serve returns 200, lint passes with secret refs, strict lint correctly flags literal secrets — [evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) |
+| Zero-config + `jul lint` (Y1-08) | 2026-07-03 | ☐ Long-running soak evidence open; the [2026-07-06 validation](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) is a smoke only. |
 | Compression (Y1-02) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (11.6M req, 0% err, zstd/br/gzip verified) — [evidence](soak-evidence.md#2026-07-04--compression-soak-local-windows-1-hour-50-workers) |
 | **Phase 2A consolidated** (proxy+cache+rate-limit+WAF+auth+compression+TLS+mTLS+health+OTel+discovery+secrets+WASM) | 2026-07-05 | ✅ **soaked ~8h** windows 2026-07-06 (5.05M req, 0% err, 100% success, 13 features simultaneously) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-h-50-workers) |
-| NGINX config importer (Y1-09) | 2026-07-03 | ✅ validated via `test-nginx-importer.ps1` 2026-07-06: import produces valid TOML, HTTP `:80`, HTTPS `:443`, `least_conn`, proxy verified — [evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) |
+| NGINX config importer (Y1-09) | 2026-07-03 | ☐ Feature-appropriate long-running evidence or an explicit ADR 0005 criterion decision open; the [2026-07-06 validation](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) is a smoke only. |
 | OTel tracing + access-log sinks (Y1-10) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err, W3C traceparent observed in telemetry) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | Response cache (memory + disk) | 2026-07-03; recertified 2026-08-07 | ✅ historical 1h soak (1.5M req, 0% err) plus post-correction focused correctness soak (422,042 req, 0 errors; HIT/MISS/STALE/REVALIDATED/BYPASS; stable resources) — [evidence](soak-evidence.md#2026-08-07--cache-recertification-correctness-soak-linux-30-seconds-16-workers) |
 | HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ✅ **soaked 8h Linux** 2026-07-13 (55,302,486 requests, 0 errors, 100% success, isolated QUIC+TLS on `:8443`) — [evidence](soak-evidence.md#2026-07-13--http3-over-quic-8h-isolated-soak-linux-completed) |
@@ -240,6 +243,7 @@ the [soak evidence log](soak-evidence.md).
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-09-27 | 2.14 | Corrected two unsupported `soaked` classifications: Y1-08 and Y1-09 are stable-released GA — soak pending while their five-minute smoke evidence is distinguished from ADR 0005's long-running criterion. Stable v2.0.0 availability is unchanged. | [feature-status.yaml](feature-status.yaml); [soak-evidence.md](soak-evidence.md); [ADR 0005](adr/0005-soak-post-ga-gate.md) |
 | 2026-09-27 | 2.13 | Reconciled completed migration and host-fault work on post-release `main`; corrected the OPS-RESOURCES merged-PR note and preserved separate Beta / `merged` statuses for new capabilities. | [feature-status.yaml](feature-status.yaml); [roadmap/README.md](roadmap/README.md); [#62](https://github.com/victornife/jul/issues/62) |
 | 2026-09-23 | 2.12 | Reconciled stable v2.0.0 delivery for twelve separately tracked Beta capabilities without changing maturity or unmet GA criteria; recorded #426/#365 as post-release completed migration work and #366/#367 as open. | [feature-status.yaml](feature-status.yaml); [roadmap/README.md](roadmap/README.md); [#62](https://github.com/victornife/jul/issues/62) |
 | 2026-09-21 | 2.11 | **Stable v2.0.0 cut; trusted client identity and backend TLS trust promoted Beta → GA (#409).** Certification evidence (protocol/spoof matrix, backend TLS/mTLS/discovery-identity-stability/health-parity matrix, race, fuzz, security/cardinality review, and the existing #421 ~25h soak) all passed; no new soak was required. Delivery moves `merged` → `soaked` for both, consistent with every other GA row in this manifest. | Issue #409; [feature-status.yaml](feature-status.yaml); [known-limitations.md](known-limitations.md); [README.md](../README.md) |

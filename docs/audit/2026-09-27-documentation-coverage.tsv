@@ -15,7 +15,7 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/issue94-security-matrix.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/labels.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/nginx-migration-e2e.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
-.github/workflows/release.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/release.yml	reviewed	five-minute release smoke job compared to ADR 0005 and evidence log; rest of release workflow not revalidated
 .github/workflows/security-gates.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/semantic-drift-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 CHANGELOG.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
@@ -97,7 +97,7 @@ docs/deployment.md	reviewed	targeted release/status, navigation or source claims
 docs/diagnostics.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/egress.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/feature-status.yaml	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/ga-push.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
+docs/ga-push.md	historical/context only	dated July GA-push execution log preserved; 2026-09-27 amendment corrects the historical release-smoke/criterion-five description, current status in feature manifest
 docs/generated/config-lifecycle.json	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
 docs/generated/config-lifecycle.md	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
 docs/generated/config-metadata.json	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
@@ -146,7 +146,7 @@ docs/secrets.md	not reviewed	structural link/TOML checks where applicable; behav
 docs/security-posture.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/security-testing.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/service-discovery.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/soak-evidence.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/soak-evidence.md	reviewed	duration rules, historical five-minute artifact labels and qualifying per-feature references traced; other dated runs not line-by-line revalidated
 docs/soak-procedures.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
 docs/specs/README.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/specs/console-rbac.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
@@ -173,8 +173,8 @@ docs/waf.md	reviewed	targeted release/status, navigation or source claims checke
 docs/zeroconf.md	reviewed	lint output, severity, exit, command examples and current source categories traced to cmd/jul and internal/config; focused CLI tests passed; remaining unrelated prose not certified
 examples/auto-https/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/auto-https/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
-examples/go-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
-examples/go-proxy/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/go-proxy/README.md	reviewed	documented Linux Go backend plus Jul HTTP 200 journey exercised; other platforms not run
+examples/go-proxy/jul.toml	reviewed	full-tag config-check plus Linux backend/Jul HTTP 200 exercise; failure modes not run
 examples/grpc-gateway/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/grpc-gateway/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 examples/grpc-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
@@ -186,13 +186,13 @@ examples/l4/jul.toml	not reviewed	parsed by make config-check if root/example; r
 examples/migrate/README.md	reviewed	importer assessment/conversion executed on fixture; exit 3/report/candidate checked; cross-platform conversion not certified
 examples/migrate/imported.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 examples/migrate/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
-examples/node-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
-examples/node-proxy/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/node-proxy/README.md	reviewed	documented Linux Node backend plus Jul HTTP 200 journey exercised; other platforms not run
+examples/node-proxy/jul.toml	reviewed	full-tag config-check plus Linux backend/Jul HTTP 200 exercise; failure modes not run
 examples/plugins/README.md	reviewed	CLI command and TOML validated with wasmplugins build; Linux plugin HTTP 200/403 smoke; guest compilation/Windows not certified
 examples/plugins/build.ps1	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/plugins/build.sh	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
-examples/python-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
-examples/python-proxy/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/python-proxy/README.md	reviewed	documented Linux Python backend plus Jul HTTP 200 journey exercised; other platforms not run
+examples/python-proxy/jul.toml	reviewed	full-tag config-check plus Linux backend/Jul HTTP 200 exercise; failure modes not run
 examples/python-uwsgi/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/python-uwsgi/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 examples/rust-proxy/.cargo/config.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value

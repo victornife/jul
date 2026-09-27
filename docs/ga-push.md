@@ -14,6 +14,11 @@
 > [docs/feature-status.yaml](feature-status.yaml), and open soak/promotion
 > items in [docs/known-limitations.md](known-limitations.md). Do not read this
 > page's closing summary as a present-tense claim about `main`.
+> **2026-09-27 evidence amendment:** this log called the five-minute release
+> gate an enforcement of criterion 5. ADR 0005 requires at least one hour per
+> feature or four hours consolidated; the release gate is a smoke test. The
+> current status/evidence pages distinguish qualifying runs from the still-open
+> Y1-08/Y1-09 long-running evidence.
 
 A focused, tracked effort to move the **existing** feature set from **Beta** to
 **GA** before starting new features. Per [ADR 0005](adr/0005-soak-post-ga-gate.md)
@@ -58,7 +63,7 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | Freeze v1 config/API + semver policy ([docs/compatibility.md](compatibility.md)) | **4** for every feature | M | ✅ |
 | Perf-gate benchmark harness ([scripts/bench.sh](../scripts/bench.sh)) + [CI job](../.github/workflows/ci.yml) | hosts **2** | M | ✅ |
 | Fuzz corpus + CI fuzz job ([scripts/fuzz.sh](../scripts/fuzz.sh)) | hosts **8** | S–M | ✅ |
-| Soak harness + release gate ([scripts/soak.sh](../scripts/soak.sh)) + [CI smoke](../.github/workflows/ci.yml) + [release gate](../.github/workflows/release.yml) | enforces **5** (post-GA) | S–M | ✅ |
+| Soak harness + release smoke ([scripts/soak.sh](../scripts/soak.sh)) + [CI smoke](../.github/workflows/ci.yml) + [release gate](../.github/workflows/release.yml) | Smoke regression gate; criterion **5** needs a separate qualifying long run | S–M | ✅ harness; feature evidence tracked separately |
 | [`SECURITY.md`](../SECURITY.md) umbrella threat model | anchors **7** | S | ✅ |
 
 ## Wave 1 — P0 (foundation + quick wins)

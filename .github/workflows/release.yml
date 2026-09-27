@@ -69,8 +69,9 @@ jobs:
           SOAK_DURATION: 5m
           SOAK_WORKERS: 32
         run: scripts/soak.sh | tee soak-results.txt
-      # Publish the release-gate soak output as the authoritative, dated GA-soak
-      # evidence artifact (see docs/soak-evidence.md).
+      # Publish this five-minute release smoke artifact. ADR 0005 requires at
+      # least one hour per feature or four hours consolidated for post-GA soak;
+      # see docs/soak-evidence.md for qualifying runs.
       - name: upload soak results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7

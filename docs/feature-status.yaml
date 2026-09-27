@@ -128,36 +128,36 @@ features:
   name: Zero-config + jul lint
   tags:
   - core
-  maturity: GA
+  maturity: GA-soak-pending
   doc: zeroconf.md
   criteria:
     1: true
     2: true
     3: true
     4: true
-    5: true
+    5: false
     6: true
     7: true
     8: true
     9: true
-  delivery: soaked
+  delivery: released
 - id: Y1-09
   name: NGINX config importer
   tags:
   - importer
-  maturity: GA
+  maturity: GA-soak-pending
   doc: nginx-importer.md
   criteria:
     1: true
     2: true
     3: true
     4: true
-    5: true
+    5: false
     6: true
     7: true
     8: null
     9: true
-  delivery: soaked
+  delivery: released
 - id: Y1-10
   name: OTel tracing + access-log sinks
   tags:

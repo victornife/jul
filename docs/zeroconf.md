@@ -6,7 +6,7 @@ before they reach production.
 
 This is **Y1-08**, in **core** — no build tag.
 
-> **Maturity:** **GA** (see [ADR 0003](adr/0003-maturity-and-ga.md)).
+> **Maturity:** **GA — soak pending**, released in v2.0.0. The cited five-minute validation is a smoke, not long-running soak evidence under [ADR 0005](adr/0005-soak-post-ga-gate.md).
 
 ## Contents
 
@@ -135,25 +135,28 @@ A typical config lints in **< 1 ms**, including parse + validate + lint.
 | Threat | Risk | Mitigation |
 | --- | --- | --- |
 | **Literal secrets in VCS** | Admin, RBAC, Consul, or K8s tokens committed to repo | Lint flags literals in these fields without printing their values; run `jul lint -strict` in CI if warnings should fail the gate |
-| **Admin API exposed to internet** | `0.0.0.0:9090` with no token = remote code execution | Check L6 warns when admin binds non-loopback without authentication |
-| **Weak TLS default** | Missing `min_version` may negotiate an obsolete protocol | Check L5 encourages explicit `1.3` or `1.2` |
-| **Information disclosure** | `directory_listing` leaks directory contents | Check L4 flags it |
-| **Unreachable config** | Duplicate location blocks shadow later rules | Check L3 surfaces the collision |
+| **Admin API exposed to internet** | An off-loopback admin listener without a token grants unauthenticated control | The admin listener checks warn on missing authentication and TLS; use loopback or authenticated TLS |
+| **Unspecified TLS minimum** | Operators may assume a stronger protocol floor than the runtime default | The TLS minimum-version check suggests explicitly choosing `1.3` or `1.2` |
+| **Information disclosure** | `directory_listing` exposes directory contents | The route check warns when it is enabled |
+| **Unreachable route** | An earlier location provably subsumes a later one | The route matcher lint warns on provable shadowing, including predicates |
 | **Lint bypass via `-strict` confusion** | Operator treats a zero exit without `-strict` as proof that no warnings exist | Use `-strict` in a warning-sensitive gate; error-severity trust findings fail either way |
 | **False sense of security** | Clean lint does not mean secure deployment | Lint is advisory; pair with `Validate`, `jul check`, and the [hardening guide](../SECURITY.md#hardening-defaults--recommendations) |
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), zero-config + `jul lint` is **GA**:
-the soak test (criterion 5) was validated on 2026-07-06.
+Per [ADR 0003](adr/0003-maturity-and-ga.md) as amended by
+[ADR 0005](adr/0005-soak-post-ga-gate.md), zero-config + `jul lint` is
+**GA — soak pending**. The 2026-07-06 validation is a five-minute smoke;
+no qualifying per-feature or consolidated run covering both shortcuts and
+lint has been linked in the evidence log.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
 | 1 | Behaviour matrix published | ✅ [Lint checks matrix](#lint-checks-matrix) + [Synthesizers table](#synthesizers) |
 | 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) |
-| 3 | Documented known-limitations | ✅ Conservative rules, advisory-only, does not replace hardening |
+| 3 | Documented known-limitations | ✅ Conservative warnings plus error-severity trust findings; does not replace hardening |
 | 4 | Stable config/API contract (semver-guarded) | ✅ `Diagnostic` schema and `Lint` API frozen under [compatibility policy](compatibility.md) |
-| 5 | Long-running soak test passed | ✅ validated via test-zero-config.ps1 2026-07-06 — [evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) |
+| 5 | Long-running soak test (post-GA gate) | ☐ [Five-minute validation](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) is smoke evidence only; qualifying evidence remains open |
 | 6 | Runnable example + docs | ✅ `jul run --serve` / `jul run --proxy` CLI examples |
 | 7 | Security / threat note | ✅ [Security / threat note](#security--threat-note) |
 | 8 | Fuzzing where parsing is involved | ✅ `FuzzParse` in `internal/config/fuzz_test.go` (TOML → Config round-trip) |
