@@ -100,6 +100,12 @@ func TestStaticBackslashSeparatorRefused(t *testing.T) {
 	}
 }
 
+func TestHasOSSeparator(t *testing.T) {
+	if !hasOSSeparator(`assets\..\sub`, '\\') || hasOSSeparator("assets/sub", '\\') || hasOSSeparator(`a\b`, '/') {
+		t.Fatal("hasOSSeparator misclassified a path")
+	}
+}
+
 func TestStaticHiddenRejected(t *testing.T) {
 	dir := setupTree(t)
 	h := newStatic(t, config.LocationConfig{Root: dir})

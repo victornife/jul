@@ -117,16 +117,13 @@ func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // written, false if the candidate did not resolve to something servable.
 func (h *staticHandler) tryServe(w http.ResponseWriter, r *http.Request, candidate string) bool {
 	clean := path.Clean("/" + candidate)
-	// On Windows os.Root also splits on '\', which would reintroduce dot
-	// segments the router never saw (as http.Dir refuses them).
-	if filepath.Separator != '/' && strings.ContainsRune(clean, filepath.Separator) {
-		return false
-	}
 	rel := strings.TrimPrefix(clean, "/")
 	if rel == "" {
 		rel = "."
 	}
-	if h.isHidden(rel) {
+	// On Windows os.Root also splits on '\', which would reintroduce dot
+	// segments the router never saw (as http.Dir refuses them).
+	if h.isHidden(rel) || hasOSSeparator(rel, filepath.Separator) {
 		return false
 	}
 
@@ -335,4 +332,8 @@ func expandURI(tmpl, uri string) string {
 	tmpl = strings.ReplaceAll(tmpl, "$uri/", uri+"/")
 	tmpl = strings.ReplaceAll(tmpl, "$uri", uri)
 	return tmpl
+}
+
+func hasOSSeparator(rel string, sep rune) bool {
+	return sep != '/' && strings.ContainsRune(rel, sep)
 }
