@@ -5,8 +5,11 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 
 ## Start with product truth
 
-- **[Feature status and evidence](status.md)** — canonical human view of maturity
-  and delivery; generated from/checkable against
+The capability table below distinguishes stable v2.0.0 from post-release
+`main`: `released`/`soaked` are in the stable tag, while `merged` is not.
+
+- **[Feature status and evidence](status.md)** — maintained human view of maturity
+  and delivery, checked against
   [`feature-status.yaml`](feature-status.yaml).
 - **[Programme tracker #62](https://github.com/victornife/jul/issues/62)** —
   current issue-level execution state.
@@ -83,8 +86,8 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 | HTTP/3 over QUIC | [http3.md](http3.md) | `GA` / `soaked` |
 | gRPC ↔ JSON transcoding | [grpc-transcoding.md](grpc-transcoding.md) | `GA` / `soaked` |
 | WASM plugin system | [plugins.md](plugins.md) | `GA` / `soaked` |
-| WASM plugin response phase (`jul-abi/v2`) | [abi.md](abi.md) | `Beta` / `merged` |
-| Deterministic consistent-hash affinity (`consistent_hash`) | [upstreams.md](upstreams.md#consistent-hash-affinity) | `Beta` / `merged` |
+| WASM plugin response phase (jul-abi/v2) | [abi.md](abi.md) | `Beta` / `merged` |
+| Deterministic consistent-hash affinity | [upstreams.md](upstreams.md#consistent-hash-affinity) | `Beta` / `merged` |
 | L4 stream proxy | [stream.md](stream.md) | `GA` / `soaked` |
 | Native gRPC passthrough + h2c | [grpc-proxy.md](grpc-proxy.md) | `GA` / `soaked` |
 | Service discovery / dynamic upstreams | [service-discovery.md](service-discovery.md) | `GA` / `soaked` |
@@ -94,20 +97,24 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 | Response cache (memory + disk) | [cache.md](cache.md) | `GA` / `soaked` |
 | Core HTTP (static / proxy / FastCGI / vhosts / routing) | [core-http.md](core-http.md) | `GA` / `soaked` |
 | Configuration reload transaction | [reload-semantics.md](reload-semantics.md) | `GA` / `soaked` |
-| Trusted client address (client_address) | [configuration.md](configuration.md) | `Beta` / `merged` |
-| Backend TLS trust (backend_tls) | [upstreams.md](upstreams.md) | `Beta` / `merged` |
-| Auxiliary egress allow-list | [egress.md](egress.md) | `Beta` / `candidate` |
-| Request predicates, response headers, and CORS | [core-http.md](core-http.md) | `Beta` / `merged` |
-| Upstream resilience (admission, retry, circuit) | [upstreams.md](upstreams.md) | `Beta` / `merged` |
-| Configuration authority and managed drift | [reload-semantics.md](reload-semantics.md) | `Beta` / `merged` |
-| Generated configuration contracts and route identity | [generated/config-reference.md](generated/config-reference.md) | `Beta` / `merged` |
-| NGINX migration assessment, provenance, and includes | [nginx-assessment.md](nginx-assessment.md) | `Beta` / `merged` |
-| Local diagnostics and support bundles | [diagnostics.md](diagnostics.md) | `Beta` / `merged` |
-| Admin listener TLS and client authentication | [deployment.md](deployment.md) | `Beta` / `merged` |
-| Versioned external admin API | [admin-api.md](admin-api.md) | `Beta` / `merged` |
-| Remote automation CLI | [remote-cli.md](remote-cli.md) | `Beta` / `merged` |
-| Selected runtime policy hot reload | [hot-reload-strategy.md](hot-reload-strategy.md) | `Beta` / `merged` |
-| HTTP proxy over Unix-domain upstreams | [unix-http-upstreams.md](unix-http-upstreams.md) | `Beta` / `merged` |
+| Trusted client address (client_address) | [configuration.md](configuration.md) | `GA` / `soaked` |
+| Backend TLS trust (backend_tls) | [upstreams.md](upstreams.md) | `GA` / `soaked` |
+| Auxiliary egress allow-list | [egress.md](egress.md) | `Beta` / `released` |
+| Request predicates, response headers, and CORS | [core-http.md](core-http.md) | `Beta` / `released` |
+| Upstream resilience (admission, retry, circuit) | [upstreams.md](upstreams.md) | `Beta` / `released` |
+| Configuration authority and managed drift | [reload-semantics.md](reload-semantics.md) | `Beta` / `released` |
+| Generated configuration contracts and route identity | [generated/config-reference.md](generated/config-reference.md) | `Beta` / `released` |
+| NGINX migration assessment, provenance, and includes | [nginx-assessment.md](nginx-assessment.md) | `Beta` / `released` |
+| Local diagnostics and support bundles | [diagnostics.md](diagnostics.md) | `Beta` / `released` |
+| Admin listener TLS and client authentication | [deployment.md](deployment.md) | `Beta` / `released` |
+| Versioned external admin API | [admin-api.md](admin-api.md) | `Beta` / `released` |
+| Remote automation CLI | [remote-cli.md](remote-cli.md) | `Beta` / `released` |
+| Selected runtime policy hot reload | [hot-reload-strategy.md](hot-reload-strategy.md) | `Beta` / `released` |
+| HTTP proxy over Unix-domain upstreams | [unix-http-upstreams.md](unix-http-upstreams.md) | `Beta` / `released` |
+| Standard gRPC Health Checking Protocol active probes | [health.md](health.md) | `Beta` / `merged` |
+| Runtime resources, capacity headroom, and HTTP bandwidth | [observability.md](observability.md) | `Beta` / `merged` |
+| Serving WAF policy and provenance visibility | [waf.md](waf.md) | `Beta` / `merged` |
+| Resource-pressure diagnostics guidance in Console | [diagnostics.md](diagnostics.md) | `Beta` / `merged` |
 
 Some capabilities share a canonical guide because they compose one subsystem.
 The status manifest still gives each additive capability its own maturity and

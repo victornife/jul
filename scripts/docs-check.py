@@ -272,6 +272,16 @@ def check_feature_status_manifest():
     seen_ids = set()
     index_path = DOCS / "index.md"
     index_text = index_path.read_text(encoding="utf-8") if index_path.exists() else ""
+    # The index is a second, frequently visited status projection. Its old
+    # guide-link-only check allowed release and maturity drift in every row.
+    index_rows = {}
+    for line_no, line in enumerate(index_text.splitlines(), 1):
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if line.startswith("| ") and len(cells) == 3 and re.fullmatch(
+            r"`(?:GA|GA-soak-pending|Beta|Alpha|Deprecated)` / "
+            r"`(?:implemented|merged|candidate|released|soaked)`", cells[2]
+        ):
+            index_rows.setdefault(cells[0], []).append((line_no, cells[1], cells[2]))
 
     for entry in features:
         feat_id = str(entry.get("id", "")).strip()
@@ -304,6 +314,17 @@ def check_feature_status_manifest():
                 ok(f"feature-status.yaml: doc {doc} exists")
             if f"]({doc})" not in index_text and f"]({doc}#" not in index_text:
                 error(index_path, 0, f"feature {feat_id} canonical guide '{doc}' is not linked from docs/index.md")
+
+        rows = index_rows.get(name, [])
+        if len(rows) != 1:
+            error(index_path, 0, f"feature {feat_id} ({name}) needs exactly one index status row; found {len(rows)}")
+        else:
+            line_no, link, actual = rows[0]
+            expected = f"`{maturity}` / `{delivery}`"
+            if actual != expected:
+                error(index_path, line_no, f"feature {feat_id} status mismatch: index={actual}, manifest={expected}")
+            if doc and not re.search(r"\]\(" + re.escape(doc) + r"(?:#[^)]+)?\)", link):
+                error(index_path, line_no, f"feature {feat_id} index row does not link canonical guide {doc}")
 
     readme_path = ROOT / "README.md"
     readme = readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""

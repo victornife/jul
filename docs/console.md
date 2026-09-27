@@ -165,6 +165,9 @@ truth; the Console's local window is for at-a-glance operator context only.
 
 #### Storage (#437)
 
+This section is Beta/merged on post-v2.0.0 `main` and requires the `console`
+build tag; it is not present in the stable v2.0.0 Console.
+
 A **Storage** section follows Capacity when Jul is configured to write at least
 one location of its own. It is not a host disk view: only the bounded Jul-owned
 categories appear — disk cache, access log file, durable audit log,

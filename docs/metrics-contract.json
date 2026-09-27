@@ -29,7 +29,7 @@
       "labels": [
         "tier"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_cache_entries",
@@ -38,7 +38,7 @@
       "labels": [
         "tier"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_cache_events_total",
@@ -56,7 +56,7 @@
       "labels": [
         "tier"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_cache_max_bytes",
@@ -65,7 +65,7 @@
       "labels": [
         "tier"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_cache_revalidations_total",
@@ -74,7 +74,7 @@
       "labels": [
         "outcome"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_client_addr_derivations_total",
@@ -84,7 +84,7 @@
         "result",
         "source"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_config_authority_denied_total",
@@ -93,21 +93,21 @@
       "labels": [
         "reason"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_config_authority_drift",
       "type": "gauge",
       "help": "1 when managed configuration authority has detected an unresolved external edit to the configuration file; 0 otherwise.",
       "labels": [],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_config_pending_restart",
       "type": "gauge",
       "help": "1 when a managed staged-restart candidate is pending (waiting for process restart); 0 otherwise.",
       "labels": [],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_config_stage_restart_total",
@@ -116,7 +116,7 @@
       "labels": [
         "result"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_discovery_errors_total",
@@ -136,7 +136,7 @@
         "result",
         "subsystem"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_egress_dns_answers_total",
@@ -146,7 +146,7 @@
         "result",
         "subsystem"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_grpc_proxy_streams_total",
@@ -182,7 +182,7 @@
       "labels": [
         "to"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_http3_connections",
@@ -198,7 +198,7 @@
       "labels": [
         "reason"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_http_ratelimited_total",
@@ -267,7 +267,7 @@
       "labels": [
         "component"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_managed_apply_finalized_total",
@@ -279,7 +279,7 @@
         "outcome",
         "restored"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_managed_apply_history_total",
@@ -289,7 +289,7 @@
         "operation",
         "result"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_managed_apply_terminal_lookup_total",
@@ -298,14 +298,14 @@
       "labels": [
         "result"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_managed_apply_terminal_registry_entries",
       "type": "gauge",
       "help": "Number of terminal managed-apply records currently retained in the bounded ledger.",
       "labels": [],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_mtls_handshakes_total",
@@ -381,14 +381,14 @@
         "outcome",
         "source"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_reload_in_progress",
       "type": "gauge",
       "help": "1 while a configuration reload transaction is in flight; 0 otherwise.",
       "labels": [],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_reload_phase_duration_seconds",
@@ -398,7 +398,7 @@
         "outcome",
         "phase"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_reload_timeout_total",
@@ -407,7 +407,7 @@
       "labels": [
         "phase"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_reload_total",
@@ -417,7 +417,7 @@
         "outcome",
         "source"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_storage_bytes",
@@ -446,7 +446,7 @@
         "proto",
         "reason"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_stream_bytes_total",
@@ -490,7 +490,7 @@
       "labels": [
         "mode"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_upstream_active_requests",
@@ -499,7 +499,7 @@
       "labels": [
         "pool"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_upstream_admission_rejected_total",
@@ -509,7 +509,7 @@
         "pool",
         "reason"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_upstream_affinity_keys_total",
@@ -537,7 +537,7 @@
       "labels": [
         "pool"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_upstream_backends_healthy",
@@ -546,7 +546,7 @@
       "labels": [
         "pool"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_upstream_circuit_state",
@@ -556,7 +556,7 @@
         "pool",
         "state"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_upstream_circuit_transitions_total",
@@ -566,7 +566,7 @@
         "pool",
         "to"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_upstream_connections",
@@ -575,7 +575,7 @@
       "labels": [
         "pool"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_upstream_pending_requests",
@@ -584,7 +584,7 @@
       "labels": [
         "pool"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_upstream_probe_duration_seconds",
@@ -594,7 +594,7 @@
         "pool",
         "source"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_upstream_probes_total",
@@ -605,7 +605,7 @@
         "result",
         "source"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_upstream_retry_attempts_total",
@@ -615,7 +615,7 @@
         "outcome",
         "pool"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_upstream_retry_budget_denied_total",
@@ -624,7 +624,7 @@
       "labels": [
         "pool"
       ],
-      "state": "merged_release_pending"
+      "state": "released_v2.0.0"
     },
     {
       "name": "jul_waf_events_total",

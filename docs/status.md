@@ -83,9 +83,11 @@ not inherit an older GA row merely because it lives in the same package or guide
   #368 established the permanent migration-impact rule. The optional public/full
   corpus is #456 CANDIDATE/LATER. None of this is included in v2.0.0.
 - **Post-release additions:** standard gRPC health (#427), runtime resources
-  and HTTP bandwidth (#431), WASM response ABI v2 (#430), and consistent-hash
-  affinity (#432) have separate Beta / `merged` rows below. Their maturity
-  and delivery do not alter existing GA rows or the v2.0.0 tag.
+  and HTTP bandwidth (#431), storage headroom (#437) within OPS-RESOURCES,
+  serving WAF policy visibility (#440), Console diagnostics guidance (#445),
+  WASM response ABI v2 (#430), and consistent-hash affinity (#432) have
+  separate Beta / `merged` rows below. Their maturity and delivery do not
+  alter existing GA rows or the v2.0.0 tag.
 - **WASM plugin-pool memory fix (#420) and final soak (#421):** the final
   pre-stable soak found a real unbounded memory-growth defect in the pooled
   WASM instance runtime; [#420](https://github.com/victornife/jul/pull/420)
@@ -165,8 +167,9 @@ long-running post-GA soak gate.
 ## Beta
 
 Usable capabilities whose contract, release, soak, or integrated evidence is
-not yet at the GA bar. The rows below are published as Beta in stable v2.0.0;
-release does not complete the unchecked GA criteria.
+not yet at the GA bar. Rows marked `released` shipped as Beta in stable
+v2.0.0; rows marked `merged` are available only on post-release `main`.
+Publication does not complete the unchecked GA criteria.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |

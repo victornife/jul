@@ -1,0 +1,214 @@
+path_or_surface	disposition	reason_and_limit
+.github/dependabot.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/labels.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/pull_request_template.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/admin-admission-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/auto04-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/ci.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/diagnostics-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/discovery-k8s-kind.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/discovery-live.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/issue160-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/issue407-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/issue408-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/issue94-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/issue94-security-matrix.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/labels.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/nginx-migration-e2e.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/release.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/security-gates.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/semantic-drift-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+CHANGELOG.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+CONTRIBUTING.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+Dockerfile	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+Makefile	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+README.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+SECURITY.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+burn-in-auth.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+burn-in-cache.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+burn-in-compression.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+burn-in-current.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+burn-in-full.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+burn-in-grpc.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+burn-in-http3.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+burn-in-phase2a.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+burn-in-ratelimit.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+burn-in-resilience.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+burn-in-stream.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+burn-in-waf.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+burn-in.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+cmd/jul/* (other CLI and help source files)	not reviewed	CLI help and representative commands sampled; remaining source comments/branches not exhaustively traced
+cmd/jul/cli.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+cmd/jul/main.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+cmd/jul/remote_cli.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+deploy/docker/server.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+deploy/windows/install-service.ps1	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+dev-server.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+docs/abi.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/accessibility.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/admin-api.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/admin-runtime-hot-reload.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0001-language-strategy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0002-protocol-adaptation.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0003-maturity-and-ga.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0004-console-ui-invariants.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0005-soak-post-ga-gate.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0006-console-v2-stack.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0007-composition-root-monolith.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0008-gofast-x-tools-technical-debt.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0009-two-tier-editing.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0010-console-rbac.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0011-reload-plan.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0012-oss-open-core-boundary.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0013-project-operating-model-and-completeness.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0014-operability-surfaces.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0015-managed-apply-terminal-ledger.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0016-inbound-identity-and-backend-peer-trust.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0017-upstream-resilience-and-overload-control.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0018-bounded-route-matching-and-response-policy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0019-configuration-authority-generated-contracts-and-resource-identity.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0020-wasm-abi-v2-response-phase.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/0021-consistent-hash-affinity.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/adr/README.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/architecture.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/assets/logo.png	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/audit-register.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/audit-sink-hot-reload.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/audit/2026-09-16-pre-soak-readiness-audit.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/audit/old/2026-07-25-configuration-audit-closure.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/audit/old/2026-07-31-full-repository-audit.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/audit/old/2026-08-05-stage-0-1-programme-closure.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/audit/old/2026-08-07-cache-recertification.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/audit/old/2026-08-31-nginx-migration-corpus-closure.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/audit/old/AI-IMPLEMENTATION-JOURNAL.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/audit/old/HANDOFF-session-3.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/audit/old/combined-audit-2026-08-03.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/auth.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/benchmarks.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/cache.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/compatibility.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/compression.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/config-lifecycle.yaml	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
+docs/config-value-contract.json	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/configuration.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/console.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/core-http.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/deployment.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/diagnostics.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/egress.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/feature-status.yaml	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/ga-push.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/generated/config-lifecycle.json	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
+docs/generated/config-lifecycle.md	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
+docs/generated/config-metadata.json	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
+docs/generated/config-reference.md	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
+docs/generated/config.schema.json	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
+docs/generated/openapi.json	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
+docs/getting-started.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/grpc-proxy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/grpc-transcoding.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/health.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/hot-reload-strategy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/http3.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/index.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/known-limitations.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/metrics-contract.json	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/mtls.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/nginx-assessment.example.json	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/nginx-assessment.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/nginx-assessment.schema.json	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/nginx-importer.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/nginx-migration-corpus.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/observability.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/operating-model.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/otel.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/plugins.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/ratelimit.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/release-candidates/v1.32.1-rc.1.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/release-candidates/v2.0.0-rc.1.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/release.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/reload-semantics.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/remote-cli.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/resource-ownership.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/reviews/README.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/reviews/jul_phases_1_7_implementation_handoff_plan_v2.1_2026-07-19.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/reviews/previous_reviews/jul_console_tech_stack_recommendation.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/reviews/previous_reviews/jul_console_v2_recovery_action_plan.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/reviews/previous_reviews/jul_console_v2_spike.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/reviews/previous_reviews/jul_full_repository_audit_2026-07-09.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/reviews/previous_reviews/jul_full_repository_audit_2026-07.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/reviews/previous_reviews/jul_immediate_action_plan_2026-07.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/reviews/previous_reviews/jul_protocol_adapters_product_strategy.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/reviews/previous_reviews/jul_roadmap_vision_specs_critical_review.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/reviews/previous_reviews/jul_round5_remediation_2026-07-17.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
+docs/roadmap/README.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/secrets.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/security-posture.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/security-testing.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/service-discovery.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/soak-evidence.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/soak-procedures.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/specs/README.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/specs/console-rbac.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/specs/console-v2.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/specs/core-gateway-completeness.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/specs/hardening-platform.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/specs/reload-plan.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/specs/reload-tasks.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/specs/year-1.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/specs/year-2.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/specs/year-3.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/specs/year-4.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/specs/year-5.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/status.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/stream-proxy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/stream.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/tls-acme.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/troubleshooting.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/unix-http-upstreams.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/upstreams.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/vision/README.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/vision/appendix.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/waf.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/zeroconf.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+examples/auto-https/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/auto-https/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/go-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/go-proxy/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/grpc-gateway/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/grpc-gateway/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/grpc-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/grpc-proxy/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/jwt-auth/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/jwt-auth/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/l4/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/l4/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/migrate/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/migrate/imported.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/migrate/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/node-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/node-proxy/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/plugins/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/plugins/build.ps1	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/plugins/build.sh	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/python-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/python-proxy/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/python-uwsgi/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/python-uwsgi/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/rust-proxy/.cargo/config.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/rust-proxy/Cargo.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+examples/rust-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/rust-proxy/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+internal/admin/**; internal/adminapi/**; internal/apicontract/**	not reviewed	generated OpenAPI and route classification sampled; full authorization matrix and Console UI not exercised
+internal/admin/route_classification.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+internal/config/**; internal/lifecycle/**	not reviewed	generated contract checked; all field behavior and lifecycle paths not independently exercised
+internal/migrate/**; internal/upstream/**; internal/plugins/**; internal/waf/**	not reviewed	key release boundaries sampled; full protocol and failure matrices not independently replayed
+internal/observability/**; internal/storagefs/**	not reviewed	metric contract test and post-release classifications checked; platform telemetry/failure paths not exhaustively exercised
+internal/observability/metric_contract_test.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+scripts/docs-check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+scripts/semantic_drift.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+scripts/test_docs_check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+server.everything.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+server.full.apps.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+server.full.local.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+server.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value

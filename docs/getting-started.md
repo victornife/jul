@@ -6,7 +6,8 @@ console.
 
 ## Prerequisites
 
-- A downloaded Jul.IA binary or Go 1.26+ to build from source.
+- A downloaded Jul.IA binary in your working directory, or Go 1.26+ to
+  build it from source (`go build -o jul ./cmd/jul` from the repository root).
 - A terminal (PowerShell on Windows, bash/zsh on Linux/macOS).
 - Ports 8080 and 9090 free on your machine.
 
@@ -18,10 +19,16 @@ development.
 ### Serve a directory
 
 ```bash
-# From the repo root or extracted archive
+# Create a page first (bash/zsh on Linux/macOS).
+mkdir -p public
+printf '<h1>Hello from Jul.IA</h1>\n' > public/index.html
 ./jul run --serve ./public --listen :8080
 ```
 
+In PowerShell, create the same page with
+`New-Item -ItemType Directory -Force public` and
+`Set-Content public/index.html '<h1>Hello from Jul.IA</h1>'`, then run
+`./jul.exe run --serve ./public --listen :8080`.
 Open http://localhost:8080 in your browser. Files in `./public` are served
 with index and `try_files` defaults. Compression and sensible timeouts are
 enabled automatically.
@@ -32,7 +39,9 @@ enabled automatically.
 ./jul run --proxy 127.0.0.1:3000 --listen :8080
 ```
 
-Every request to `:8080` is forwarded to `127.0.0.1:3000`.
+Start an HTTP backend listening on `127.0.0.1:3000` before running this
+command. Every request to `:8080` is then forwarded to that backend. Without
+it, Jul returns a backend error; the proxy command does not start an app.
 
 Zero-config mode never writes a config file; use `jul lint` or write a TOML
 config when you need more control.
@@ -79,7 +88,8 @@ Run it:
 ./jul --config server.toml
 ```
 
-Place an `index.html` in `./public` and reload `http://localhost:8080`.
+Reuse the `./public/index.html` created above, or create that directory and
+file before starting the server. Open `http://localhost:8080` to verify it.
 
 ---
 
@@ -140,7 +150,12 @@ ACME (see [Configuration reference](configuration.md#automatic-https-acme)).
 
 ## Enable the admin console
 
-Add the `[admin]` block and rebuild with the `console` build tag:
+In the existing `[global]` block of your writable, non-symlinked
+`server.toml`, add `config_authority = "managed"`. Append the `[admin]` block
+below and rebuild with the `console` build tag. Managed authority is required
+for Console configuration apply, history and rollback; the default
+`file_owned` authority allows read-only Console operation but rejects those
+mutations.
 
 ```bash
 go build -tags console -o jul ./cmd/jul
@@ -150,18 +165,21 @@ go build -tags console -o jul ./cmd/jul
 [admin]
 enabled = true
 listen = "127.0.0.1:9090"
-token = "a-strong-random-token"
+token = "${env:JUL_ADMIN_TOKEN}"
 console = true
 ```
 
-Now open http://localhost:9090 and log in with your token. The console shows:
+Set `JUL_ADMIN_TOKEN` in the server process environment to a unique strong
+secret (for example, generate one with `openssl rand -hex 32`) and restart Jul
+with the updated config. Now open http://localhost:9090 and log in with that
+token. The console shows:
 
 - Live request metrics and cache hit rates.
 - Upstream health graphs.
 - Certificate inventory and expiry.
 - Config history with one-click rollback.
 
-Keep the admin listener on loopback and use a strong token in production.
+Keep the admin listener on loopback and protect the token in production.
 
 ---
 

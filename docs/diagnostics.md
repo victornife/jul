@@ -195,6 +195,10 @@ Redaction is risk reduction, not a mathematical proof that every business-sensit
 
 ## Console diagnostics guidance (#445)
 
+This guidance is Beta/merged on post-v2.0.0 `main`, requires the `console`
+build tag and is absent from the stable v2.0.0 Console. Local `jul doctor` and
+`jul support-bundle` themselves shipped as Beta in v2.0.0.
+
 The Console Overview's **Diagnostics guidance** section connects the Runtime
 Resources, Capacity and Storage readings to these existing primitives. It is
 guidance, not diagnosis: each card states what the reading shows and which
@@ -235,7 +239,13 @@ background or threshold-triggered capture.
 
 ## Remote diagnostics
 
-This implementation is local. A future authenticated support-bundle or doctor operation must be added deliberately to the versioned external admin API, with dedicated RBAC, transport security, rate/concurrency limits, audit metadata, cache-prevention headers, and deterministic cleanup. The remote CLI must consume that supported API rather than private Console routes or a second diagnostic engine.
+`jul doctor` and `jul support-bundle` run locally. The existing remote
+`jul diagnostics` command uses only the supported status and capabilities API;
+it does not run the doctor or create a support bundle. A future remote
+support-bundle or doctor operation would require a deliberate versioned API
+contract with dedicated RBAC, transport security, rate/concurrency limits,
+audit metadata, cache-prevention headers and deterministic cleanup. The remote
+CLI must use that contract, not private Console routes or a second engine.
 
 ## Quality gate
 

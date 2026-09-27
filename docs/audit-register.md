@@ -8,6 +8,7 @@ live issue tracker.
 
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
+| [2026-09-27 documentation review](audit/2026-09-27-documentation-review.md) | `36e0411a` at clean `main`; remediation on isolated branch | Current **partial** documentation review and findings/coverage ledger; no exhaustive certification or 10/10 claim | Verified release/status, migration and onboarding corrections made; semantic and platform coverage gaps remain explicit in its ledger |
 | [2026-09-16 pre-soak readiness audit](audit/2026-09-16-pre-soak-readiness-audit.md) | `b1e2dfc5` plus PR #416 | Historical readiness evidence at its dated baseline; #421/#425 record the subsequent soak and stable release | P0 items BL-01..BL-07 and P1 items BL-08..BL-10/BL-13/BL-16/BL-24..BL-26 closed via PR #416 (merged `03fda9f8`); its remaining backlog table describes that baseline, not current issue state |
 
 ## Archived records
@@ -32,7 +33,8 @@ Superseded or fully closed audits, preserved as historical evidence under
   implemented on `main`.
 - Stable `v2.0.0` was published from the post-#420 exact SHA recorded in
   [#425](https://github.com/victornife/jul/issues/425), after the #421 final
-  soak. #422 remains non-blocking follow-up evidence.
+  soak. #422 completed focused host-fault evidence on post-release `main`;
+  it does not change the tagged release's certification.
 - The pre-RC and post-RC additive capabilities included in that stable tag
   retain separate Beta maturity and now have `released` delivery in
   [status.md](status.md); release alone does not promote them to GA.
@@ -40,13 +42,16 @@ Superseded or fully closed audits, preserved as historical evidence under
   correction and is published Beta; feature-specific GA certification remains
   a separate decision.
 - NGINX assessment, provenance and bounded include traversal are published
-  Beta. #426 and #365 added post-v2.0.0 migration translation/E2E evidence on
-  `main`; #366/#367 remain open and #368 owns follow-through guidance and
-  optional full-corpus work.
+  Beta. #426/#365/#366/#367 added post-v2.0.0 migration translation/E2E
+  evidence on `main`; #368 established the permanent migration-impact rule.
+  Optional full-corpus work remains #456 CANDIDATE/LATER.
 - The versioned external Admin API, remote CLI, selected runtime dynamics,
   support bundles and `jul doctor` are published Beta with separate maturity
   rows. Internal Console routes do not inherit the external API contract.
   The bounded AI experiment remains a later portfolio decision.
+- Wave 6 (#437 storage headroom, #440 WAF policy visibility and #445
+  diagnostics guidance) completed on post-release `main`. These Beta/merged
+  additions do not inherit the stable v2.0.0 release or base-feature GA.
 
 Volatile issue-level sequencing is owned by
 [#62](https://github.com/victornife/jul/issues/62). Feature maturity/delivery is

@@ -1,6 +1,6 @@
 # NGINX config importer
 
-> Base importer: **Y1-09, GA/soaked** · Assessment/provenance/includes: **MIG-ASSESS, Beta/merged** · Build tag: `importer`
+> Base importer: **Y1-09, GA/soaked** · Assessment/provenance/includes: **MIG-ASSESS, Beta/released in v2.0.0** · Build tag: `importer`. Later bounded translations and E2E evidence on `main` are not in that tag.
 
 A best-effort migration aid that converts NGINX configuration into Jul.IA TOML.
 Common HTTP, server, location, upstream, TLS, compression, static-file, proxy,
@@ -582,12 +582,12 @@ the released GA contract.
 | Fuzzing | `FuzzTranslate` covers parse, translate, and marshal round trip. |
 | Operable surface | `jul import nginx -o <file> <nginx.conf>`. |
 
-### Assessment, provenance, and includes — MIG-ASSESS (`Beta` / `merged`)
+### Assessment, provenance, and includes — MIG-ASSESS (`Beta` / `released`)
 
 Schema-v2 human/JSON assessment, stable findings and guidance, source spans,
-target mappings, and bounded root-confined include traversal are merged on
-current `main`. They are not contained in the older released GA record and
-have not completed a separate stable-release and long-running-soak promotion.
+target mappings, and bounded root-confined include traversal shipped in
+v2.0.0 with separate Beta maturity. They do not inherit the older base
+importer's GA evidence; feature-specific GA/soak evidence remains open.
 Their machine contract and operating boundary are documented in
 [nginx-assessment.md](nginx-assessment.md) and tracked explicitly in
 [status.md](status.md).

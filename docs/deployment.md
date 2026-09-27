@@ -38,7 +38,7 @@ consult (ADR 0019). The two line up directly:
 
 | Filesystem shape | `config_authority` | Result |
 | --- | --- | --- |
-| Editable | `managed` | Console/API writes are validated, persisted, and reloaded; an external edit to the mounted file becomes drift, resolved only through an explicit `POST /api/config/adopt-external`. |
+| Editable | `managed` | Console/API writes are validated, persisted, and reloaded; an external edit to the mounted file becomes drift, resolved only through explicit adoption (supported external `POST /api/v1/config/adopt-external`, or the Console workflow). |
 | Read-only | `file_owned` (the default) | Every mutating admin endpoint is refused with `409 config_authority_read_only` before any side effect. SIGHUP and the file watcher behave exactly as before: an external edit — from your provisioning pipeline re-rendering the mount — is validated and adopted live or staged, same as today. |
 
 **`config_authority` defaults to `file_owned` when omitted.** This is a fixed

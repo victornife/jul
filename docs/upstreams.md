@@ -1,6 +1,6 @@
 # Upstreams and backend trust
 
-> **Maturity and delivery:** the released pool/balancing/health foundation is GA. `backend_tls` and the newer admission/retry/circuit surface are separate merged Beta capabilities on current `main`; #287/#144 retain integrated resilience closure. See [status.md](status.md) and [Reload behaviour](#reload-behaviour).
+> **Maturity and delivery:** the pool/balancing/health foundation and `backend_tls` are GA/soaked in stable v2.0.0. Admission/retry/circuit controls are separately tracked Beta/released capabilities. Consistent-hash affinity is Beta/merged on post-release `main`. See [status.md](status.md) and [Reload behaviour](#reload-behaviour).
 
 An `[[upstreams]]` block is a named pool of backends with a balancing strategy,
 passive and optional active health checking, optional dynamic discovery, and —
@@ -62,8 +62,8 @@ proxy_pass = "https://inventory"
 > open the backend for the cooldown, after which the next request probes it and the next failure
 > re-trips it. [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) makes that model
 > explicit and decides the concurrency, pending, connection, retry-budget and half-open controls that
-> extend it. Admission, retry budget and half-open controls are implemented on current `main`; their
-> generic resilience surface remains merged Beta pending the dedicated long-running soak.
+> extend it. Admission, retry budget and half-open controls shipped in v2.0.0
+> as Beta; feature-specific GA/soak evidence remains open.
 
 > **Who can use a pool.** `proxy_pass`, `grpc_transcode.target`, `fastcgi_pass` and `uwsgi_pass` all
 > accept a named upstream, so FastCGI and uWSGI routes are pool members with the same load balancing,
@@ -72,6 +72,9 @@ proxy_pass = "https://inventory"
 > cannot probe it and that combination is a validation error — use `type = "tcp"`.
 
 ## Consistent-hash affinity
+
+This affinity strategy is Beta/merged on post-v2.0.0 `main`; stable v2.0.0
+does not accept it. L4 use additionally requires the `stream` build tag.
 
 `strategy = "consistent_hash"` keeps requests that share a key on one backend
 while the eligible backend set is stable — for session state held on one
