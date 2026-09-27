@@ -1,0 +1,41 @@
+# restarted 2026-09-27T20:43:32Z
+pid 404220 alive
+VmHWM:	   34336 kB
+VmRSS:	   34336 kB
+Threads:	10
+fds 15
+Max open files            1048576              1048576              files     
+cgroup cpu.max: max 100000 
+cgroup cpu.stat: usage_usec 25788285457 user_usec 17437483368 system_usec 8350802089 nice_usec 0 nr_periods 0 nr_throttled 0 throttled_usec 0 nr_bursts 0 burst_usec 0 
+cgroup memory.max: max 
+cgroup memory.high: max 
+cgroup memory.current: 5289955328 
+cgroup memory.peak: 14271000576 
+cgroup memory.events: low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0 
+go_goroutines 20
+go_memstats_heap_inuse_bytes 8.257536e+06
+jul_cache_bytes{tier="disk"} 1.672209e+07
+jul_cache_bytes{tier="memory"} 0
+jul_cache_entries{tier="disk"} 127
+jul_cache_entries{tier="memory"} 0
+jul_cache_evictions_total{tier="disk"} 0
+jul_cache_evictions_total{tier="memory"} 0
+jul_cache_max_bytes{tier="disk"} 1.6777216e+07
+jul_cache_max_bytes{tier="memory"} 2.097152e+06
+jul_listener_conns 0
+jul_storage_bytes{category="access_log",kind="available"} 3.282944e+07
+jul_storage_bytes{category="access_log",kind="total"} 5.0331648e+07
+jul_storage_bytes{category="audit_log",kind="available"} 3.282944e+07
+jul_storage_bytes{category="audit_log",kind="total"} 5.0331648e+07
+jul_storage_bytes{category="cache",kind="available"} 3.282944e+07
+jul_storage_bytes{category="cache",kind="total"} 5.0331648e+07
+jul_storage_bytes{category="config",kind="available"} 3.282944e+07
+jul_storage_bytes{category="config",kind="total"} 5.0331648e+07
+jul_storage_bytes{category="config_history",kind="available"} 3.282944e+07
+jul_storage_bytes{category="config_history",kind="total"} 5.0331648e+07
+jul_upstream_active_requests{pool="app"} 0
+jul_upstream_backends{pool="app"} 2
+jul_upstream_connections{pool="app"} 0
+process_max_fds 1.048576e+06
+process_open_fds 16
+process_resident_memory_bytes 3.4525184e+07

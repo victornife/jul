@@ -1,0 +1,22 @@
+{
+  "bytes": 2294,
+  "end_reason": "signal",
+  "ended": "2026-09-27T20:43:30.337418386Z",
+  "errors": 0,
+  "file": "samples.jsonl.gz",
+  "gap_seconds": 0,
+  "gaps": 0,
+  "interval_s": 5,
+  "labels": {
+    "config": "jul.toml",
+    "jul_sha": "015e5f4036a571e4cca3c95248748fa3cb90713b",
+    "profile": "storage",
+    "workload": "access log on the default 100 MB rotation (larger than the filesystem); 8 workers filling unique 128 KiB cacheable objects into a 16 MiB disk tier plus 48 keep-alive workers on small responses; /api/stats sampled every 0.5s; pressure cleared by truncating the access log, then a restart"
+  },
+  "ok": 6,
+  "scrapes": 6,
+  "series": 62,
+  "sha256": "b937aac30c56238bf1a02d0ee5a364ea216f1fae5a4c59d4f1d9b9474066e5fa",
+  "started": "2026-09-27T20:43:02.099896389Z",
+  "url": "http://127.0.0.1:19901/metrics"
+}
