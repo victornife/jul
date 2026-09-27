@@ -64,6 +64,20 @@ whether the duration meets the ADR-0005 minimum for that scope.
 
 ## Run log
 
+### 2026-09-27 — Documentation first-run Windows CI smoke (not a GA soak)
+
+The [PR #482 CI run](https://github.com/victornife/jul/actions/runs/36355994434)
+at commit `da5288853dadc853c4a37c6d095e2f97c7a03f24` completed the
+`docs first run (Windows PowerShell)` job. The lean binary served a temporary
+static page over HTTP 200, env-secret lint passed, a structurally valid
+literal-token fixture reported the exact `[admin].token` warning, and
+`-strict -quiet` returned 2. The importer-tagged binary assessed and converted
+the NGINX fixture with `manual_action_required` (exit 3), wrote both JSON
+reports and a candidate, and linted that candidate successfully. This is a
+first-run regression smoke, **not** the long-running evidence still needed for
+Y1-08/Y1-09 under ADR 0005. Windows service installation and Console rollback
+were not exercised.
+
 ### 2026-09-27 — Storage headroom under the Wave-5 disk-exhaustion scenario (#437) — **executed on real Linux; advance signal present, write behavior unchanged, no path leak**
 
 A focused bounded run, not a soak, closing the #422 evidence loop that
@@ -1148,7 +1162,8 @@ Script: `scripts/test-zero-config.ps1`
 > repository-relative paths and only stops its own child process. The original
 > contained a machine-specific path and force-stopped any owner of port 18080.
 > The current strict-warning exit is 2, not the historical exit 1 stated below.
-> The dated outcome has not been replayed on Windows by this amendment.
+> The July outcome is historical; the separate 2026-09-27 Windows CI smoke above
+> exercises the corrected script without retroactively changing that record.
 
 - `jul run --serve testdata/www --listen 127.0.0.1:18080` → returns 200 for `/`
 - `jul lint -config burn-in-phase2a.toml` → 0 errors, 0 warnings (admin token uses `${env:JUL_ADMIN_TOKEN}`)

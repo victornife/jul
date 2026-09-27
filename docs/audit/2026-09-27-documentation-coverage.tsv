@@ -4,7 +4,7 @@ path_or_surface	disposition	reason_and_limit
 .github/pull_request_template.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/admin-admission-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/auto04-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
-.github/workflows/ci.yml	reviewed	Windows lean/full jobs and new first-run PowerShell lane inspected; rest of CI workflow not semantically certified; final lane result pending
+.github/workflows/ci.yml	reviewed	Windows lean/full jobs and new first-run PowerShell lane inspected; PR CI Windows documentation job succeeded at da528885; rest of CI not semantically certified
 .github/workflows/diagnostics-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/discovery-k8s-kind.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/discovery-live.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
@@ -146,7 +146,7 @@ docs/secrets.md	not reviewed	structural link/TOML checks where applicable; behav
 docs/security-posture.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/security-testing.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/service-discovery.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/soak-evidence.md	reviewed	duration rules, historical five-minute artifact labels and qualifying per-feature references traced; other dated runs not line-by-line revalidated
+docs/soak-evidence.md	reviewed	duration rules, historical five-minute labels and 2026-09-27 Windows CI smoke traced; other dated runs not line-by-line revalidated
 docs/soak-procedures.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
 docs/specs/README.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/specs/console-rbac.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
@@ -208,8 +208,8 @@ internal/observability/metric_contract_test.go	reviewed	targeted release/status,
 scripts/docs-check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/semantic_drift.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/test-discovery-k8s-live.ps1	reviewed	unsafe port-owner kill replaced with a conflict error; live Kubernetes/PowerShell execution not available
-scripts/test-nginx-importer.ps1	reviewed	fixed expected exit 3, JSON status and candidate assertions traced to Linux importer fixture; Windows execution pending CI
-scripts/test-zero-config.ps1	reviewed	removed private workstation path and unrelated process kill; zero-config/lint assertions traced to CLI; Windows execution pending CI
+scripts/test-nginx-importer.ps1	reviewed	exit 3, JSON status and candidate assertions passed in PR #482 Windows CI at da528885; full migration compatibility not implied
+scripts/test-zero-config.ps1	reviewed	repo-relative temp site, own-process cleanup, exact lint assertion passed in PR #482 Windows CI at da528885
 scripts/test_docs_check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/* (other operational and test scripts)	not reviewed	inventory aggregate for other scripts listed by rg --files scripts; comments and operational side effects need script-by-script review
 server.everything.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
