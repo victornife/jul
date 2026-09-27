@@ -109,6 +109,12 @@ type StatsSnapshot struct {
 	// UpstreamBudgetExhausted lists (sorted) pool names whose configured retry
 	// budget currently grants zero further retries.
 	UpstreamBudgetExhausted []string `json:"upstreamBudgetExhausted,omitempty"`
+
+	// Storage is the advisory headroom of every configured Jul-owned storage
+	// category (#437); absent when none is configured. StorageHints are the
+	// generic thresholds its low/critical states were computed against.
+	Storage      []StorageHeadroom `json:"storage,omitempty"`
+	StorageHints *StorageHints     `json:"storageHints,omitempty"`
 }
 
 // CacheTierOccupancy is one cache tier's occupancy for the Console capacity
@@ -248,6 +254,7 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 
 	snap.CPUCores = m.cpuRate(haveCPU, cpuSeconds)
 	snap.CacheTiers = cacheTierOccupancy(m.cacheTierSnapshot())
+	snap.Storage, snap.StorageHints = m.storageSnapshot()
 	snap.UpstreamWorstActive, snap.UpstreamWorstPending, snap.UpstreamNoEligible, snap.UpstreamBudgetExhausted =
 		upstreamCapacitySummary(m.upstreamCapacitySnapshot())
 

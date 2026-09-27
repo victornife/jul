@@ -21,6 +21,8 @@ import { Loading } from "@/components/ui.tsx";
 import { useMetricsHistory } from "@/lib/useMetricsHistory";
 import { METRIC_META_LIST, type MetricKey } from "@/lib/metricMeta";
 import { resolveFeatureRoute } from "@/lib/featureRoutes";
+import { StorageSection } from "./StorageSection.tsx";
+import { storageSummary } from "@/lib/storage.ts";
 
 // Compact a large number into human-readable SI form (e.g., 1,234,567 → 1.2 M).
 function compactNumber(n: number): string {
@@ -166,9 +168,7 @@ function ResourceCard({
   return (
     <div
       className={`rounded-lg border p-4 ${
-        warn
-          ? "border-jul-warning/50 bg-jul-warning/5"
-          : "border-jul-border bg-jul-surface"
+        warn ? "border-jul-warning/50 bg-jul-warning/5" : "border-jul-border bg-jul-surface"
       }`}
       title={unavailable ? `${label}: unavailable on this platform` : `${label}: ${value}`}
     >
@@ -211,13 +211,8 @@ function ResourceCard({
 function WarningList({ title, pools }: { readonly title: string; readonly pools: string[] }) {
   if (pools.length === 0) return null;
   return (
-    <div
-      className="rounded-lg border border-jul-warning/50 bg-jul-warning/5 p-4"
-      role="status"
-    >
-      <div className="text-xs font-semibold uppercase tracking-wider text-jul-warning">
-        {title}
-      </div>
+    <div className="rounded-lg border border-jul-warning/50 bg-jul-warning/5 p-4" role="status">
+      <div className="text-xs font-semibold uppercase tracking-wider text-jul-warning">{title}</div>
       <ul className="mt-2 space-y-1">
         {pools.map((pool) => (
           <li key={pool} className="font-mono text-sm text-jul-text">
@@ -536,6 +531,15 @@ export function OverviewPanel() {
       tone: p95 >= 1000 ? "down" : p95 >= 250 ? "warn" : "ok",
       tooltip: "Latency thresholds: < 250 ms = OK, 250–999 ms = Warn, ≥ 1000 ms = Down",
     });
+    if (stats.storage && stats.storage.length > 0) {
+      summary.push({
+        label: "Storage",
+        ...storageSummary(stats.storage),
+        onClick: () => {
+          document.getElementById("storage-heading")?.scrollIntoView({ behavior: "smooth" });
+        },
+      });
+    }
   }
   // Backend health from the Upstreams status group (counts only; coarse tone).
   const upstreamRows = data.status.filter((r) => r.group === "Upstreams");
@@ -872,6 +876,9 @@ export function OverviewPanel() {
 
           {/* Capacity (#431) */}
           <CapacitySection stats={stats} history={history} />
+
+          {/* Jul-owned storage headroom (#437) */}
+          <StorageSection storage={stats.storage} hints={stats.storageHints} />
 
           {/* Sparklines - 2 minute trends */}
           {history.requestsPerSec.length > 0 && (

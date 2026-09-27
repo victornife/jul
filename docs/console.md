@@ -113,9 +113,11 @@ tone (green / yellow / red):
 | **Latency p95** | < 250 ms | 250–999 ms | ≥ 1 000 ms |
 | **Backends** | all healthy | any unhealthy | — |
 | **Certificates** | all valid | any expiring ≤ 7 d | any expired |
+| **Storage** (#437) | headroom ok | any category low | any critical, or any subsystem's writes failing |
 
 The **Backends** and **Certificates** chips are clickable and navigate to the
-Apps and TLS panels respectively.
+Apps and TLS panels respectively; **Storage** (shown only when Jul owns at
+least one storage location) scrolls to the Storage section.
 
 #### Live Traffic
 
@@ -160,6 +162,36 @@ Both sections reuse the same 60-sample browser-local trend model as **Live
 Traffic** above: history is ephemeral and scoped to this browser tab. Prometheus
 (`/metrics`) remains the long-term, cross-restart, cross-instance source of
 truth; the Console's local window is for at-a-glance operator context only.
+
+#### Storage (#437)
+
+A **Storage** section follows Capacity when Jul is configured to write at least
+one location of its own. It is not a host disk view: only the bounded Jul-owned
+categories appear — disk cache, access log file, durable audit log,
+configuration file (managed authority only), configuration history (managed
+authority only), plugin uploads (when enabled), and ACME certificate caches —
+and no path, mount point, volume or device name is ever sent to the browser.
+Each card shows free space, filesystem size and the available percentage (only
+when the platform reports a real, non-zero size), which other categories share
+the same filesystem, and the configuration key plus Console panel that places
+it. A location that does not exist yet is labelled as measured on the
+filesystem it will be created in.
+
+Two different conditions are kept apart, each with a text badge:
+
+- **Low headroom / Critical headroom** — advisory hints against generic
+  thresholds the server reports (below 10% / 5% available). They are not SLOs
+  and never affect readiness.
+- **Writes failing** — the owning subsystem's own signal (cache disk tier,
+  access-log file sink, durable audit sink): its most recent write failed, so
+  data is already being lost. Earlier failures that have since recovered are
+  shown as a count, not as failing.
+
+A location whose capacity cannot be read renders **unavailable** (platform
+cannot report it, or a dangling link) or **error** (permission denied, stat
+failed) with the bounded reason — never `0 B` or a fabricated percentage. See
+[observability.md](observability.md#jul-owned-storage-headroom-437) for the
+path-resolution rules.
 
 #### Expanded chart view
 

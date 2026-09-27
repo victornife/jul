@@ -198,6 +198,16 @@ func (c *Cache) Purge() {
 	}
 }
 
+// DiskWriteHealth reports the disk tier's cumulative write failures and
+// whether its most recent write failed. ok is false when there is no disk
+// tier (or c is nil).
+func (c *Cache) DiskWriteHealth() (failures int64, failing, ok bool) {
+	if c == nil || c.disk == nil {
+		return 0, false, false
+	}
+	return c.disk.writeFails.Load(), c.disk.failing.Load(), true
+}
+
 // key derives the primary cache key from method, host, and request URI.
 //
 // It never includes a credential, a cookie or any other request header: the key

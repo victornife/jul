@@ -340,6 +340,7 @@ helpers (`scripts/fault-backend.go`, `scripts/fault-load.go`,
 | `cpu` | transient `systemd-run --user --scope` | unconstrained baseline, `CPUQuota=20%` with SIGHUP reload and health probes, quota lifted live, SIGTERM under quota |
 | `mem` | transient `systemd-run --user --scope`, `MemoryMax=192M`, swap 0 | 64 MB memory cache filled within budget, then `MemoryHigh` lowered live below the working set, then restored |
 | `disk` | `unshare --user --map-root-user --mount`; private 48 MiB tmpfs | disk cache tier, access and audit logs, managed config and history on the tmpfs; fill, near-full, full, managed apply while full, recovery, restart rehydration |
+| `storage` (#437) | `unshare --user --map-root-user --mount`; private 48 MiB tmpfs | the #422 exploratory exhaustion (access log on its default 100 MB rotation) with `GET /api/stats` sampled every 0.5 s into `storage-headroom.jsonl`; records each category's state transitions (`storage-transitions.txt`), clears pressure by truncating the access log, restarts, and checks that the tmpfs path never appears in the API, `jul_storage_bytes` or any sample |
 
 Each directory holds `MANIFEST.md` (Jul SHA, harness SHA, limits, workload,
 isolation), `jul.toml`, `events.log.gz` (UTC-stamped phases and observations;

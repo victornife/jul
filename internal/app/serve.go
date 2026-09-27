@@ -31,6 +31,7 @@ import (
 	"jul/internal/rbac"
 	"jul/internal/redact"
 	"jul/internal/server"
+	"jul/internal/storagefs"
 	"jul/internal/stream"
 	"jul/internal/upstream"
 	"jul/internal/waf"
@@ -903,6 +904,20 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// generation is ready. adminSrv is hoisted out of the if-block so the
 	// reload hook can call UpdatePolicy after each successful hot reload.
 	adminSrv := admin.New(cfg.Admin, log, deps)
+	// Jul-owned storage headroom (#437) is read on demand by /api/stats and
+	// scrapes; nothing polls in the background. A nil adminSrv (admin
+	// disabled) contributes no admin-owned category.
+	storage := &storageProbe{
+		startup: startupStorageTargets(cfg, configPath, authority == AuthorityManaged),
+		live:    func() *config.Config { return srv.LiveSnapshot().EffectiveConfig },
+		cache:   responseCache,
+		hints:   storagefs.DefaultHints,
+	}
+	if adminSrv != nil {
+		storage.admin = adminSrv.StorageTargets
+		storage.audit = adminSrv.AuditWriteHealth
+	}
+	metrics.SetStorageSource(storage.headroom, storageHintsView(storage.hints))
 	if adminSrv != nil {
 		// Install the initial RBAC policy from the startup candidate.
 		// H-01: Fail-closed when RBAC is enabled but policy build fails.

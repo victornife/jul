@@ -63,6 +63,7 @@ type Metrics struct {
 	transportRetired   *prometheus.CounterVec
 	resilience         *resilienceCollector
 	cache              *cacheCollector
+	storage            *storageCollector
 	// upstreamCapacity is #431's separate, un-scraped capacity source; see
 	// SetUpstreamCapacitySource.
 	upstreamCapacity atomic.Pointer[UpstreamStatsSource]
@@ -303,6 +304,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		}, []string{"mode"}),
 		resilience: newResilienceCollector(),
 		cache:      newCacheCollector(),
+		storage:    newStorageCollector(),
 		upstreamBackends: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "jul_upstream_backends",
 			Help: "Current number of backends in a pool, labeled by pool (tracks dynamic service discovery).",
@@ -484,6 +486,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.transportRetired,
 		m.resilience,
 		m.cache,
+		m.storage,
 		m.requests,
 		m.duration,
 		m.inflight,

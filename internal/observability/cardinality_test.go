@@ -203,6 +203,10 @@ func exerciseAllMetrics(m *Metrics) {
 			{Tier: "disk", Bytes: 2048, MaxBytes: 16384, Entries: 2, Evictions: 0},
 		}
 	})
+	avail, total := 1024.0, 4096.0
+	m.SetStorageSource(func() []StorageHeadroom {
+		return []StorageHeadroom{{Category: "cache", State: "ok", AvailableBytes: &avail, TotalBytes: &total}}
+	}, StorageHints{LowRatio: 0.1, CriticalRatio: 0.05})
 	m.ObserveGRPCTranscode("pkg.Svc/Method", "200")
 	m.ObserveGRPCTranscodeStreamMsg("pkg.Svc/Method", "sent")
 	m.ObserveGRPCProxyStream()
