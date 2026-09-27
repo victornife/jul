@@ -116,9 +116,9 @@ request-derived may ever appear here.
 > The `jul_cache_events_total` **help string** still reads
 > `(HIT/MISS/STALE/BYPASS)`. That text is frozen by the v1.32.0 released metric
 > contract and is intentionally preserved; `REVALIDATED` is an additive label
-> value, which the released contract does not freeze. The separate release-pending
-> `jul_cache_revalidations_total` description covers both synchronous validation
-> and background revalidation.
+> value, which the released contract does not freeze. The separate
+> `jul_cache_revalidations_total` family shipped in v2.0.0; its description
+> covers synchronous validation and background revalidation.
 
 ## Shared-cache contract
 

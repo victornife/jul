@@ -47,7 +47,7 @@ dev-server.toml	not reviewed	parsed by make config-check if root/example; runtim
 docs/abi.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/accessibility.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/admin-api.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/admin-runtime-hot-reload.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/admin-runtime-hot-reload.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
 docs/adr/0001-language-strategy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/adr/0002-protocol-adaptation.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/adr/0003-maturity-and-ga.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
@@ -85,8 +85,8 @@ docs/audit/old/HANDOFF-session-3.md	historical/context only	dated baseline prese
 docs/audit/old/combined-audit-2026-08-03.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/auth.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/benchmarks.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/cache.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/compatibility.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/cache.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
+docs/compatibility.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
 docs/compression.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/config-lifecycle.yaml	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
 docs/config-value-contract.json	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
@@ -97,7 +97,7 @@ docs/deployment.md	reviewed	targeted release/status, navigation or source claims
 docs/diagnostics.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/egress.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/feature-status.yaml	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/ga-push.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/ga-push.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
 docs/generated/config-lifecycle.json	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
 docs/generated/config-lifecycle.md	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
 docs/generated/config-metadata.json	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
@@ -127,7 +127,7 @@ docs/ratelimit.md	not reviewed	structural link/TOML checks where applicable; beh
 docs/release-candidates/v1.32.1-rc.1.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/release-candidates/v2.0.0-rc.1.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/release.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/reload-semantics.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/reload-semantics.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
 docs/remote-cli.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/resource-ownership.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/reviews/README.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
@@ -147,7 +147,7 @@ docs/security-posture.md	not reviewed	structural link/TOML checks where applicab
 docs/security-testing.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/service-discovery.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/soak-evidence.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/soak-procedures.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/soak-procedures.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
 docs/specs/README.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/specs/console-rbac.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/specs/console-v2.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review

@@ -8,7 +8,8 @@
 > merged after this page's date (trusted client identity, backend TLS trust,
 > RBAC, routing/response policy, generic resilience, configuration authority,
 > admin TLS, the external API/remote CLI, HTTP-over-Unix upstreams, and more)
-> are **not** covered here and are **not** GA — see the current maturity
+> were **not** covered at this historical baseline. Some have since reached GA
+> (#409); others remain Beta. See the current maturity
 > matrix in [docs/status.md](status.md) and
 > [docs/feature-status.yaml](feature-status.yaml), and open soak/promotion
 > items in [docs/known-limitations.md](known-limitations.md). Do not read this
@@ -20,9 +21,8 @@ the long-running **soak test** is a *post-GA* gate, so GA here is declared again
 the **other eight** criteria of the [ADR 0003](adr/0003-maturity-and-ga.md) bar;
 soak is tracked openly per feature and completed after the label lands.
 
-This is the execution log for that push. **Keep it current:** tick a feature's
-criteria as they land, flip its row to ✅ when it reaches GA, and add a changelog
-row.
+This is the closed execution log for that push. New maturity decisions belong
+in [feature-status.yaml](feature-status.yaml), not this dated record.
 
 > - At a glance: [docs/status.md](status.md) is the canonical maturity +
 > - GA-criteria matrix across **all** features (it consolidates the waves and soak

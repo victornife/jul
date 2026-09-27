@@ -1,6 +1,6 @@
 # Jul.IA — Soak Procedures (Linux)
 
-> Version 2.0 · Updated 2026-09-17
+> Version 2.1 · Updated 2026-09-27
 >
 > Rewritten from scratch (JUL-AUD-006): the previous version documented only
 > the in-tree `go test -tags soak` scenarios on Windows/PowerShell, but every
@@ -46,7 +46,7 @@ apply/reload path.
 
 | Component | Role |
 | --- | --- |
-| `burn-in-*.toml` | Real server configs, one per scenario. `burn-in-current.toml` is the consolidated profile covering every merged-Beta capability (JUL-AUD-004); the others are single-feature or historical-regression profiles. |
+| `burn-in-*.toml` | Real server configs, one per scenario. `burn-in-current.toml` is the consolidated v2.0.0-era profile that covered the then-selected Beta surface (JUL-AUD-004); it does not automatically cover post-release additions. The others are single-feature or historical-regression profiles. |
 | `scripts/burn-in-backend.go` | HTTP backend. `-port N` (TCP), `-unix /path.sock` (HTTP-over-Unix, #407), `-tls` (HTTPS, for `backend_tls`). Also serves `/…/slow?ms=N` (deliberately slow response), `/…/flaky?rate=N` (intermittent 500s), `/…/reset` (mid-body TCP RST via `SO_LINGER 0`), `/…/malformed[?kind=bad-chunk]` (declared-but-unfulfilled `Content-Length`, or an invalid chunk-size line), and `POST /control/kill?duration=Ns` (refuses every path for the window, then auto-restores — a scheduled kill/restore cycle without actually stopping the process) for fault-injection load patterns (JUL-AUD-019). |
 | `scripts/stream-echo.go` | TCP echo backend for `[[stream]]` L4 profiles. |
 | `scripts/burn-in-load.go` | HTTP/HTTPS load generator. Mode flags select the traffic pattern (see below); `-duration`/`-workers` control load. |
@@ -61,7 +61,7 @@ apply/reload path.
 | --- | --- |
 | `-full` | The July Phase 2A feature set (cache, rate limit, WAF, auth, compression, TLS/mTLS) — use with `burn-in-full.toml`. |
 | `-phase2a` | Transcoding, passthrough, discovery, secrets, zero-config, WASM — use with `burn-in-phase2a.toml`. |
-| `-current` | The merged-Beta surface: resilience pools, Unix upstream, DNS discovery, `backend_tls`, routing predicates/response headers/CORS, WASM plugin — use with `burn-in-current.toml` (JUL-AUD-004). |
+| `-current` | The historically named v2.0.0-era consolidated profile: resilience pools, Unix upstream, DNS discovery, `backend_tls`, routing predicates/response headers/CORS, WASM plugin — use with `burn-in-current.toml` (JUL-AUD-004). It does not imply every feature currently on `main` is exercised. |
 | `-cache`, `-ratelimit`, `-waf`, `-compress`, `-http3` | Single-feature patterns for the matching `burn-in-<feature>.toml`. |
 | `-slow-client` | Paces a POST body over ~3.2s, exercising slow-client/read-timeout handling. |
 | `-slow-upstream` | Requests `/bounded/slow?ms=N`, exercising pending-timeout/circuit accounting against a genuinely slow backend. |
@@ -179,7 +179,7 @@ sleep 2
 # Server
 ./jul -config burn-in-current.toml > "$DIR/jul.log" 2>&1 &
 
-# Load: the merged-Beta surface, sustained
+# Load: the v2.0.0-era consolidated profile, sustained
 go run scripts/burn-in-load.go -duration 24h -workers 64 -current \
   -health "http://127.0.0.1:8080/bounded/" | tee "$DIR/load-current.log" &
 
