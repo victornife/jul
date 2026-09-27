@@ -271,3 +271,31 @@ func TestRuleCounterClassification(t *testing.T) {
 		t.Fatalf("counts = %+v", c.counts)
 	}
 }
+
+// FuzzSourceRecorderServesHashedBytes: whatever the bytes, the parser is served
+// exactly the bytes that were hashed, and the identity is the digest chain of
+// those bytes (#440).
+func FuzzSourceRecorderServesHashedBytes(f *testing.F) {
+	f.Add([]byte("SecRule ARGS \"@streq x\" \"id:1,deny\"\n"), []byte("evil\n"))
+	f.Add([]byte{}, []byte{0, 0xff})
+	f.Fuzz(func(t *testing.T, a, b []byte) {
+		rec := newSourceRecorder(fstest.MapFS{"a": {Data: a}, "b": {Data: b}})
+		fa, err := rec.Open("a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := io.ReadAll(fa)
+		if string(got) != string(a) {
+			t.Fatalf("served %q, want %q", got, a)
+		}
+		gb, err := rec.ReadFile("b")
+		if err != nil || string(gb) != string(b) {
+			t.Fatalf("ReadFile = %q, %v", gb, err)
+		}
+		n, digest := rec.identity()
+		chain := fmt.Sprintf("sha256:%s\nsha256:%s\n", hexSum(string(a)), hexSum(string(b)))
+		if n != 2 || digest != "sha256:"+hexSum(chain) {
+			t.Fatalf("identity = %d %q", n, digest)
+		}
+	})
+}
