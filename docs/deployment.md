@@ -113,9 +113,12 @@ Two units ship in [deploy/systemd](../deploy/systemd/):
 
 ### Editable — `jul.service`
 
-Uses `DynamicUser=yes` plus systemd's managed directories, so the four writable
-paths above are created, owned by the service user, and survive restarts while
-`ProtectSystem=strict` keeps everything else read-only:
+Uses a dedicated unprivileged `jul` service user. systemd creates and owns the
+state, cache and log directories for that user; seed `/etc/jul` with ownership
+of `jul:jul` because `ConfigurationDirectory=` does **not** change ownership
+to the service user. A root-owned `0700` directory or root-owned `0600`
+`server.toml` prevents this editable service from reading or rewriting it.
+`ProtectSystem=strict` keeps everything outside these paths read-only:
 
 ```ini
 ConfigurationDirectory=jul       # /etc/jul        (0700)
@@ -137,9 +140,15 @@ Apply. `jul check` does not verify the existence of a static root.
 After preparing that config and its content or backends, seed and start:
 
 ```sh
-sudo install -D -m600 server.toml /etc/jul/server.toml
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin jul
+sudo install -d -o jul -g jul -m0700 /etc/jul
+sudo install -o jul -g jul -m0600 server.toml /etc/jul/server.toml
 sudo systemctl enable --now jul.service
 ```
+
+If the `jul` service user already exists, skip `useradd`. Check the effective
+owner and mode of `/etc/jul` and `server.toml` after provisioning; an upgrade
+from a root-owned tree also needs its existing files transferred deliberately.
 
 Console Apply and history rollback are available only when admin access is
 enabled, the config declares `managed` authority, and the unit can write the
@@ -149,8 +158,8 @@ before treating the deployment as editable.
 ### Read-only — `jul-readonly.service`
 
 Pins the config: `/etc/jul` is mounted `ReadOnlyPaths`, so an admin "Apply" is
-rejected. It uses a **static** service user (a dynamic UID changes between boots,
-which is awkward for an operator-owned config file). Set
+rejected. It uses the same dedicated service user with a root-owned,
+group-readable config. Set
 `[global].config_authority = "file_owned"` explicitly in your deployment
 config (the omitted default has the same effect), provision its static content
 and backends as above, then create the user and seed the immutable config:

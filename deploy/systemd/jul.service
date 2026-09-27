@@ -16,8 +16,10 @@ ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=2s
 
-# Run as an unprivileged, dynamically-allocated system user.
-DynamicUser=yes
+# Run as a dedicated unprivileged service user. ConfigurationDirectory= does
+# not change ownership to the service user; provision /etc/jul as jul:jul.
+User=jul
+Group=jul
 # Allow binding to privileged ports (80/443) without full root.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
@@ -37,9 +39,10 @@ MemoryDenyWriteExecute=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 
-# Editable deployment. systemd creates and owns these directories for the
-# (dynamic) service user and keeps them across restarts. ProtectSystem=strict
-# keeps the rest of the host read-only, but these four stay writable, so the
+# Editable deployment. systemd owns state/cache/logs for the service user and
+# keeps them across restarts. /etc/jul must be pre-owned by jul (see above).
+# ProtectSystem=strict keeps the rest of the host read-only; these four stay
+# writable, so the
 # admin console can apply config changes and roll back from history while
 # everything else remains immutable:
 #
@@ -52,7 +55,8 @@ RestrictSUIDSGID=yes
 # service user only (0700). Point acme.cache_dir and the disk cache at
 # /var/cache/jul, the access-log file sink at /var/log/jul, and history at
 # /var/lib/jul. Seed the initial config before the first start with, e.g.:
-#   install -D -m600 server.toml /etc/jul/server.toml
+#   install -d -o jul -g jul -m0700 /etc/jul
+#   install -o jul -g jul -m0600 server.toml /etc/jul/server.toml
 ConfigurationDirectory=jul
 ConfigurationDirectoryMode=0700
 StateDirectory=jul

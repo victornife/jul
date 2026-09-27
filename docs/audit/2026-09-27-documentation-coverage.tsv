@@ -8,7 +8,7 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/diagnostics-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/discovery-k8s-kind.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/discovery-live.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
-.github/workflows/issue160-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/issue160-quality.yml	reviewed	HR-07C Go statement coverage gate inspected for comment-only false failure and corrected; other jobs not semantically certified
 .github/workflows/issue407-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/issue408-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/issue94-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
@@ -42,6 +42,9 @@ cmd/jul/cli.go	reviewed	lint exit and check stateless-preflight/help claims trac
 cmd/jul/main.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 cmd/jul/remote_cli.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 deploy/docker/server.toml	reviewed	managed authority and access-log comment compared to parser/admin tests; checked with console-tagged CLI; container operation unverified
+deploy/docker/index.html	reviewed	placeholder page presence checked against Dockerfile copy and static-root config; image runtime unverified
+deploy/systemd/jul-readonly.service	reviewed	file-owned static-user and root-owned group-readable config path compared with deployment guide; live service unverified
+deploy/systemd/jul.service	reviewed	editable static-user/config ownership and unit path claims checked against systemd manual and guide; live service unverified
 deploy/windows/install-service.ps1	reviewed	native command failure handling and ACL grants inspected and corrected; inherited ACL restriction and elevated service execution not platform-verified
 dev-server.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 docs/abi.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
