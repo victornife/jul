@@ -204,6 +204,26 @@ func TestCmdLintStrictWarnings(t *testing.T) {
 	}
 }
 
+func TestCmdLintQuietPreservesStrictExitStatus(t *testing.T) {
+	path := writeTemp(t, warnConfig)
+	code, out, errOut := capture(t, func() int { return cmdLint([]string{"-config", path, "-strict", "-quiet"}) })
+	if code != 2 || out != "" || errOut != "" {
+		t.Errorf("strict quiet lint: exit %d, stdout %q, stderr %q; want exit 2 and no output", code, out, errOut)
+	}
+	code, out, errOut = capture(t, func() int { return cmdLint([]string{"-config", path, "-quiet"}) })
+	if code != 0 || out != "" || errOut != "" {
+		t.Errorf("non-strict quiet lint: exit %d, stdout %q, stderr %q; want exit 0 and no output", code, out, errOut)
+	}
+}
+
+func TestCmdLintInfoDoesNotFailStrict(t *testing.T) {
+	path := writeTemp(t, strings.Replace(validConfig, "[compression]", "[global]\nconfig_authority = \"managed\"\n\n[compression]", 1))
+	code, out, errOut := capture(t, func() int { return cmdLint([]string{"-config", path, "-strict"}) })
+	if code != 0 || errOut != "" || !strings.Contains(out, "info: servers[0].locations[0]: route has no durable route_id") || !strings.Contains(out, "0 warning(s), 1 info") {
+		t.Errorf("info-only strict lint: exit %d, stdout %q, stderr %q; want exit 0 with informational suggestion", code, out, errOut)
+	}
+}
+
 func TestCmdLintParseError(t *testing.T) {
 	path := writeTemp(t, "servers = [\n")
 	code, _, errOut := capture(t, func() int { return cmdLint([]string{"-config", path}) })

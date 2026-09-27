@@ -146,16 +146,24 @@ func cmdLint(args []string) int {
 	authority, _ := app.ResolveConfigAuthority(cfg.Global.ConfigAuthority, hasConfigPath)
 	diags = append(diags, app.CheckManagedFilesystem(*configPath, authority)...)
 	diags = append(diags, app.CheckFileOwnedArtifacts(*configPath, authority)...)
-	var lintErrs, warns []config.Diagnostic
+	var lintErrs, warns, infos []config.Diagnostic
 	for _, d := range diags {
-		if d.Severity == config.SeverityError {
+		switch d.Severity {
+		case config.SeverityError:
 			lintErrs = append(lintErrs, d)
-			continue
+		case config.SeverityInfo:
+			infos = append(infos, d)
+		default:
+			warns = append(warns, d)
 		}
-		warns = append(warns, d)
 	}
+	// Quiet controls rendering only. In particular, -strict -quiet must still
+	// fail when advisory findings are present.
+	visibleWarns := warns
+	visibleInfos := infos
 	if *quiet {
-		warns = nil
+		visibleWarns = nil
+		visibleInfos = nil
 	}
 
 	if *jsonOut {
@@ -166,7 +174,7 @@ func cmdLint(args []string) int {
 		// Lint findings stay in warnings whatever their severity, so the JSON
 		// shape is unchanged; each carries its own "severity" field, and the
 		// exit code reflects the highest one.
-		out.Warnings = append(append([]config.Diagnostic(nil), lintErrs...), warns...)
+		out.Warnings = append(append(append([]config.Diagnostic(nil), lintErrs...), visibleWarns...), visibleInfos...)
 		_ = json.NewEncoder(stdout).Encode(out)
 	} else {
 		color := wantColor(stdout)
@@ -176,10 +184,15 @@ func cmdLint(args []string) int {
 		for _, d := range lintErrs {
 			printDiagnostic(stdout, d, color)
 		}
-		for _, d := range warns {
+		for _, d := range visibleWarns {
 			printDiagnostic(stdout, d, color)
 		}
-		fmt.Fprintf(stdout, "\n%s: %d error(s), %d warning(s)\n", src.Name(), len(verrs)+len(lintErrs), len(warns))
+		for _, d := range visibleInfos {
+			printDiagnostic(stdout, d, color)
+		}
+		if !*quiet {
+			fmt.Fprintf(stdout, "\n%s: %d error(s), %d warning(s), %d info\n", src.Name(), len(verrs)+len(lintErrs), len(warns), len(infos))
+		}
 	}
 
 	switch {
@@ -188,7 +201,7 @@ func cmdLint(args []string) int {
 	case *strict && len(warns) > 0:
 		return 2
 	default:
-		if !*jsonOut {
+		if !*jsonOut && !*quiet {
 			fmt.Fprintf(stdout, "%s is valid\n", src.Name())
 		}
 		return 0

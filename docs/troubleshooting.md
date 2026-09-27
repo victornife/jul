@@ -19,7 +19,7 @@ There is no config file where `jul` looked (default `./server.toml`). Either:
 - Start without a file using zero-config mode:
   ```bash
   jul run --serve .              # serve the current directory over HTTP
-  jul run --proxy http://:3000   # reverse-proxy a local app
+  jul run --proxy 127.0.0.1:3000  # reverse-proxy a local app
   ```
 - Or create a `server.toml` (see [getting-started.md](getting-started.md)) and
   run `jul`, or point at a file with `jul -config /path/to/server.toml`.
@@ -79,9 +79,12 @@ Some settings are **bound at startup** and a hot reload keeps the running value
 (it logs a warning rather than silently misapplying): the ACME issued-domain set
 and issuer, listener bind-time settings (max-connections, listener timeouts, max
 header bytes, HTTP/3 or h2c toggles), TLS handshake parameters (`min_version`,
-mutual-TLS `client_auth`), tracing, and access-log enablement/sinks. These require a
-**restart** to take effect. See [reload-semantics.md](reload-semantics.md) for
-the exact *applied vs. serving* model and the full restart-required list.
+mutual-TLS `client_auth`), and tracing provider/exporter settings. These require a
+**restart** to take effect. `observability.tracing.sample_ratio` and
+`observability.access_log` enablement/sinks are hot-reloadable; do not restart
+solely for those edits. See the [generated lifecycle reference](generated/config-lifecycle.md)
+for each field and [reload-semantics.md](reload-semantics.md) for the exact
+*applied vs. serving* model.
 
 ### An apply is rejected with `restart_required` (nothing was saved)
 

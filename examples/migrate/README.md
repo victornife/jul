@@ -6,11 +6,13 @@ configuration into Jul.IA TOML.
 > **Maturity: beta (best-effort).** The importer covers common reverse-proxy and
 > static-file setups, never fails silently (every unmapped directive is
 > reported), and always re-validates its own output — but it is not a complete
-> NGINX emulator. Review the report and the `# TODO`/notes in the output before
-> serving the result.
+> NGINX emulator. Review the structured assessment and the `# TODO`/notes in
+> the output before serving the result. A candidate with blocking findings is
+> generated for review, but the command exits 3 (`manual_action_required`).
 
 - [`nginx.conf`](nginx.conf) — the source NGINX configuration.
-- [`jul.toml`](jul.toml) — the configuration produced by the importer.
+- [`jul.toml`](jul.toml) — an illustrative snapshot of importer output. The
+  current serializer may include additional explicit zero-valued fields.
 
 ## Build with the importer tag
 
@@ -23,15 +25,22 @@ go build -tags importer -o jul ./cmd/jul
 
 ## Run the import
 
+From the repository root, first assess, then convert into a separate candidate
+file so the committed example remains available for comparison:
+
 ```bash
-jul import nginx -o jul.toml examples/migrate/nginx.conf
+./jul import nginx --assess --report /tmp/jul-nginx-assessment.json examples/migrate/nginx.conf
+./jul import nginx -o /tmp/jul-nginx-candidate.toml --report /tmp/jul-nginx-conversion.json examples/migrate/nginx.conf
 ```
 
-This regenerates [`jul.toml`](jul.toml). Omit `-o` to print the result to stdout.
-The report is always written to stderr:
+Both commands exit 3 for this fixture because `proxy_set_header` needs manual
+mapping; that is an expected blocked result, not a ready-to-serve config.
+The conversion still writes the candidate. The human summary goes to stderr;
+the JSON reports name the source, class, risk and location of every assessed
+directive. Omit `-o` to print the generated TOML to stdout. A typical summary:
 
 ```text
-imported examples/migrate/nginx.conf: 2 server(s), 1 upstream(s), 5 location(s)
+imported examples/migrate/nginx.conf: 2 server(s), 1 upstream(s), 5 location(s), 0 stream(s)
 
 1 directive(s) not translated (port manually):
   line 52: proxy_set_header - unsupported location-level directive
@@ -63,15 +72,18 @@ The importer already re-parses and validates its own output, but you can confirm
 with the bundled linter:
 
 ```bash
-jul lint -config examples/migrate/jul.toml
+./jul lint -config /tmp/jul-nginx-candidate.toml
 ```
 
 ## After importing
 
-Review the `# TODO` comments and port anything the importer could not map
-(custom headers, `client_max_body_size`, `map`/`if` blocks, `include`d files,
-and so on). Then run `jul fmt -w examples/migrate/jul.toml` if you want to drop
-the default zero-valued fields and tidy the file.
+Review the JSON assessment and `# TODO` comments, then port the blocking
+directive and any approximations relevant to your setup. Some forms of custom
+headers, body-size directives and includes are supported on current `main`;
+consult the [directive table](../../docs/nginx-importer.md) and
+[assessment guide](../../docs/nginx-assessment.md) for exact boundaries.
+`jul fmt -w` canonicalizes a config; it does not promise to omit zero-valued
+fields. Validate the edited candidate again and test its behavior before use.
 
 ## Best-effort caveats
 

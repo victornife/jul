@@ -164,13 +164,13 @@ docs/status.md	reviewed	targeted release/status, navigation or source claims che
 docs/stream-proxy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/stream.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/tls-acme.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/troubleshooting.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/troubleshooting.md	reviewed	startup and reload claims checked against CLI help and generated lifecycle for corrected paths; remaining incident scenarios not replayed
 docs/unix-http-upstreams.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/upstreams.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/vision/README.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/vision/appendix.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/waf.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/zeroconf.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/zeroconf.md	reviewed	lint output, severity, exit, command examples and current source categories traced to cmd/jul and internal/config; focused CLI tests passed; remaining unrelated prose not certified
 examples/auto-https/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/auto-https/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 examples/go-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
@@ -183,12 +183,12 @@ examples/jwt-auth/README.md	not reviewed	inventoried; full platform/operational 
 examples/jwt-auth/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 examples/l4/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/l4/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
-examples/migrate/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/migrate/README.md	reviewed	importer assessment/conversion executed on fixture; exit 3/report/candidate checked; cross-platform conversion not certified
 examples/migrate/imported.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 examples/migrate/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 examples/node-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/node-proxy/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
-examples/plugins/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/plugins/README.md	reviewed	CLI command and TOML validated with wasmplugins build; Linux plugin HTTP 200/403 smoke; guest compilation/Windows not certified
 examples/plugins/build.ps1	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/plugins/build.sh	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/python-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
