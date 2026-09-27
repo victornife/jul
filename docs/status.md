@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.12 · Updated 2026-09-23
+> Version 2.13 · Updated 2026-09-27
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -78,10 +78,14 @@ not inherit an older GA row merely because it lives in the same package or guide
   reload, HTTP-over-Unix upstreams, local diagnostics and support bundles:**
   published in v2.0.0 with separate Beta maturity. The reduced remote
   diagnostics projection is tracked with the API/CLI rows.
-- **Post-release migration work:** #426 bounded stream/PROXY-protocol translation
-  and #365 HTTP migration evidence completed on `main` after the stable tag;
-  they are not retroactively included in v2.0.0. #366/#367 remain open, and
-  #368 tracks future migration guidance and an optional full corpus.
+- **Post-release migration work:** #426/#365/#366/#367 completed bounded
+  translation and focused NGINX-vs-Jul evidence on `main` after the stable tag;
+  #368 established the permanent migration-impact rule. The optional public/full
+  corpus is #456 CANDIDATE/LATER. None of this is included in v2.0.0.
+- **Post-release additions:** standard gRPC health (#427), runtime resources
+  and HTTP bandwidth (#431), WASM response ABI v2 (#430), and consistent-hash
+  affinity (#432) have separate Beta / `merged` rows below. Their maturity
+  and delivery do not alter existing GA rows or the v2.0.0 tag.
 - **WASM plugin-pool memory fix (#420) and final soak (#421):** the final
   pre-stable soak found a real unbounded memory-growth defect in the pooled
   WASM instance runtime; [#420](https://github.com/victornife/jul/pull/420)
@@ -90,8 +94,9 @@ not inherit an older GA row merely because it lives in the same package or guide
   ([evidence](soak-evidence.md#2026-09-19--final-soak-adr-0005-procedure-c-burn-in-currenttoml-25h-linux))
   with memory bounded across 5.02M plugin invocations. `v2.0.0-rc.1` is
   immutable and predates this fix; stable `v2.0.0` was cut separately from a
-  post-#420 commit. #422 tracks non-blocking deferred follow-up evidence
-  (manual host-level fault injection, continuous metrics scraping).
+  post-#420 commit. #422 subsequently completed focused real-host fault
+  evidence and retained metrics scraping on post-release `main`; it does not
+  retroactively change the v2.0.0 certification.
 
 ## GA criteria legend
 
@@ -230,6 +235,7 @@ the [soak evidence log](soak-evidence.md).
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-09-27 | 2.13 | Reconciled completed migration and host-fault work on post-release `main`; corrected the OPS-RESOURCES merged-PR note and preserved separate Beta / `merged` statuses for new capabilities. | [feature-status.yaml](feature-status.yaml); [roadmap/README.md](roadmap/README.md); [#62](https://github.com/victornife/jul/issues/62) |
 | 2026-09-23 | 2.12 | Reconciled stable v2.0.0 delivery for twelve separately tracked Beta capabilities without changing maturity or unmet GA criteria; recorded #426/#365 as post-release completed migration work and #366/#367 as open. | [feature-status.yaml](feature-status.yaml); [roadmap/README.md](roadmap/README.md); [#62](https://github.com/victornife/jul/issues/62) |
 | 2026-09-21 | 2.11 | **Stable v2.0.0 cut; trusted client identity and backend TLS trust promoted Beta → GA (#409).** Certification evidence (protocol/spoof matrix, backend TLS/mTLS/discovery-identity-stability/health-parity matrix, race, fuzz, security/cardinality review, and the existing #421 ~25h soak) all passed; no new soak was required. Delivery moves `merged` → `soaked` for both, consistent with every other GA row in this manifest. | Issue #409; [feature-status.yaml](feature-status.yaml); [known-limitations.md](known-limitations.md); [README.md](../README.md) |
 | 2026-09-21 | 2.10 | Wave 0 post-soak product-truth reconciliation (#353): recorded the #420 WASM plugin-pool fix and #421 final ~25h soak (previously missing from this page); corrected the stale "UDP has no load balancing" claim (UDP sessions do select across the route's backend pool, one dial per new client, pinned for the session's life); corrected the stale "HTTP/3 static certificate replacement is restart-bound" claim (it hot-applies via the shared `dynamicCertProvider`, same as TCP); added an explicit MQTT/generic-UDP transport non-goal boundary. | Issue #353; [known-limitations.md](known-limitations.md); [http3.md](http3.md); [soak-evidence.md](soak-evidence.md) |

@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.12 · Updated 2026-09-23
+> Version 2.13 · Updated 2026-09-27
 >
 > This roadmap owns the **durable portfolio sequence**. It deliberately does
 > not duplicate volatile READY/NEXT/blocked issue state. The current issue-level
@@ -49,7 +49,7 @@ The durable current sequence is summarized in the active operating roadmap below
 | **5 — Generic resilience** | Admission, queue/connection bounds, retry budget/deadline/backoff, circuit state and bounded operations evidence | #287/#144 closed; published in v2.0.0 as Beta. Further feature-specific GA evidence remains a separate decision |
 | **6 — Configuration authority and automation** | Managed/file-owned authority, generated contracts, supported external API, thin remote CLI | #150/#151 closed; authority, versioned external API and remote CLI published in v2.0.0 as separately tracked Beta capabilities |
 | **7 — Selected runtime dynamics** | Value-ranked runtime changes and truthful restart boundaries | Bounded tranche complete (#88); selected changes published as Beta. Further hot reload requires an explicit value trigger |
-| **8 — Migration and diagnostics** | NGINX assessment, evidence, support bundle and `jul doctor` | Base assessment/diagnostics published in v2.0.0 as Beta; #426/#365 completed on post-release `main`. Focused #366/#367 remain open; #368 owns follow-through guidance and optional full corpus |
+| **8 — Migration and diagnostics** | NGINX assessment, evidence, support bundle and `jul doctor` | Base assessment/diagnostics published in v2.0.0 as Beta. #426/#365/#366/#367 and the permanent #368 migration-impact rule are complete on post-release `main`; optional full corpus is #456 CANDIDATE/LATER. #422 host-fault follow-up is complete. Wave 6 selects #437/#440/#445 for operational truth and diagnostics before the next release checkpoint |
 | **9 — One bounded experiment** | AI Gateway or another explicitly approved category | #162 remains deferred under #113; no experiment activated by the v2.0.0 release |
 | **10 — Integrated closure** | Exact-SHA verification, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Completed for stable v2.0.0 (#425/#421); new unreleased features require their own evidence and publication decision |
 
@@ -80,12 +80,15 @@ outcome changes.
 - The versioned external Admin API and remote CLI are published Beta surfaces;
   Console-only routes remain outside the external contract unless explicitly
   classified and generated into OpenAPI.
-- #426 and #365 added bounded NGINX import translations and HTTP migration E2E
-  on post-v2.0.0 `main`; #366/#367 remain focused migration evidence work.
-  #368 owns the migration-impact rule in development guidance and an optional
-  heavier public corpus. These do not retroactively change the tagged importer.
-- #422 holds non-blocking host-fault/continuous-scrape soak follow-up; no new
-  v2.0.0 release gate is implied.
+- #426/#365/#366/#367 completed bounded NGINX translations and focused
+  migration E2E on post-v2.0.0 `main`. #368 embedded the permanent migration-impact
+  review rule into development guidance; the optional public/full corpus is
+  #456 CANDIDATE/LATER. None of this retroactively changes the tagged importer.
+- #422 completed focused host-fault runs and retained metrics evidence, finding
+  and fixing four defects. This does not retroactively change the v2.0.0 gate.
+- Wave 6 selects #437 Jul-owned storage headroom and #440 bounded effective-WAF
+  visibility independently, followed by #445 guidance toward existing diagnostic
+  tools. Exact implementation status and sequencing remain in #62.
 
 ## Published stable checkpoint
 
@@ -139,7 +142,7 @@ The migration lane is evidence-oriented:
 - deterministic per-directive assessment rather than a compatibility score;
 - source provenance and bounded root-confined include traversal;
 - a bounded reviewed corpus with selected-dimension comparison; an optional
-  public-derived full tier requires #368 provenance and admission review;
+  public-derived full tier remains #456 CANDIDATE/LATER and requires explicit provenance and admission review;
 - no automatic production cutover or unsafe traffic replay;
 - support bundles and diagnostics that are explicit, bounded and secret-safe;
 - no phone-home or automatic upload.
@@ -155,9 +158,9 @@ observability must be reused rather than duplicated inside the experiment.
 
 The stable v2.0.0 closure recorded an exact SHA, cross-platform lean/full
 artifacts, CI and release gates, the post-#420 soak and residual risk in #425.
-#422 remains a non-blocking follow-up. This evidence is specific to the tagged
-release; #426/#365 and other post-release work require their own verification
-and publication decision before a later release.
+#422 is now complete with focused real-host fault evidence. The v2.0.0
+evidence is specific to that tagged release; all post-release work requires
+its own exact-SHA verification and publication decision before a later release.
 
 Future selected work must preserve consistent maturity/delivery records,
 protocol and failure-boundary evidence, race/leak and privacy review, and
