@@ -280,7 +280,16 @@ conflated.
 `total`; both labels are closed sets, and a value the platform cannot report is
 absent rather than `0`. It is never labeled by path, mount, device, hostname or
 filesystem UUID. Alert on `available / total` per category with a threshold
-suited to the volume, not on the Console's generic hints.
+suited to the volume, not on the Console's generic hints. On a small or
+fast-filling volume a fill-rate rule gives more lead time than any fixed
+percentage (the #437 evidence run exhausted 48 MiB in ~11 s, with only ~2 s
+between the 10% hint and exhaustion):
+
+```promql
+# Storage for a Jul category will run out within 30 minutes at the last
+# 10 minutes' fill rate.
+predict_linear(jul_storage_bytes{kind="available"}[10m], 1800) < 0
+```
 
 **Cost.** Nothing polls in the background: capacity is read when `/api/stats`
 or `/metrics` is served. Per location that is one `stat` for an existing path
