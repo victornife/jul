@@ -193,6 +193,42 @@ Redaction is risk reduction, not a mathematical proof that every business-sensit
 
 **Review every bundle before sharing it. Do not publish support bundles as public issue attachments by default.**
 
+## Console diagnostics guidance (#445)
+
+The Console Overview's **Diagnostics guidance** section connects the Runtime
+Resources, Capacity and Storage readings to these existing primitives. It is
+guidance, not diagnosis: each card states what the reading shows and which
+bounded diagnostic to collect next, never a root cause, and nothing is
+collected automatically.
+
+| Reading | Guidance |
+| --- | --- |
+| CPU near the Go scheduler limit (`cpuCores` ≥ 80% of `goMaxProcs`) | compare with request/upstream load; a 30 s CPU profile |
+| Memory: Go heap is most of RSS | a heap profile, two minutes apart before concluding growth |
+| Memory: most of RSS is outside the Go heap | explicitly *not* a Go heap leak; WASM linear memory, goroutine stacks, mmap and native/runtime state; a goroutine profile and a support bundle |
+| Goroutines rising over the ~2 min window, or ≥ 10 000 | a goroutine profile; long-lived connections under Capacity |
+| Open FDs ≥ 80% of the limit | listener/upstream connections under Capacity, `LimitNOFILE` ([deployment.md](deployment.md#resource-limits)), `jul doctor` |
+| Storage low/critical or writes failing (#437) | the affected category and its configuration key; rotation/cap settings; a support bundle before cleanup |
+| Any problem | `jul doctor`, `jul support-bundle`, Operations |
+
+Thresholds are local UX hints, not SLOs. `goMaxProcs` (in `/api/stats`) is Go's
+`GOMAXPROCS`, which follows a cgroup CPU limit; it bounds Go code only, so it is
+context for this hint rather than a CPU percentage.
+
+**Profiling actions.** A card shows a copyable `curl` command for the existing
+`/debug/pprof/` endpoint only when the server reports `admin_runtime.pprof_enabled`
+(`[admin] pprof`) and the current identity holds `admin:manage`; otherwise it
+says profiling is turned off, that the role lacks the permission, or that
+availability is not yet known. The command uses a `$JUL_ADMIN_TOKEN`
+placeholder — the Console never inserts its own credential — and a fixed
+30-second CPU window. The operator runs it; the Console starts no capture. The
+server's gates are unchanged and authoritative: `admin.pprof`, `admin:manage`,
+and the TLS-or-loopback transport gate apply to every profile request. Profiles
+can contain sensitive process and request data; review them before sharing.
+
+There is no profiling-job API, profile storage, download or TTL service, and no
+background or threshold-triggered capture.
+
 ## No automatic repair or upload
 
 `jul doctor` does not implement `--fix`. `jul support-bundle` does not upload to a vendor, support service, object store, or telemetry endpoint. Generating a bundle never changes configuration authority and works in both `managed` and `file_owned` operation because it is read-only.

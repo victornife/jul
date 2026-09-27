@@ -302,7 +302,7 @@ describe("OverviewPanel storage integration", () => {
     const chip = await screen.findByRole("button", { name: /Storage: low/ });
     chip.click();
     expect(scroll).toHaveBeenCalled();
-    expect(await screen.findByRole("heading", { name: "Storage" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Storage", level: 2 })).toBeInTheDocument();
   });
 
   it("omits the Storage chip when nothing is configured", async () => {

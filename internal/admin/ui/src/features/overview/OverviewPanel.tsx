@@ -22,6 +22,7 @@ import { useMetricsHistory } from "@/lib/useMetricsHistory";
 import { METRIC_META_LIST, type MetricKey } from "@/lib/metricMeta";
 import { resolveFeatureRoute } from "@/lib/featureRoutes";
 import { StorageSection } from "./StorageSection.tsx";
+import { DiagnosticsGuidanceSection } from "./DiagnosticsGuidanceSection.tsx";
 import { storageSummary } from "@/lib/storage.ts";
 
 // Compact a large number into human-readable SI form (e.g., 1,234,567 → 1.2 M).
@@ -879,6 +880,13 @@ export function OverviewPanel() {
 
           {/* Jul-owned storage headroom (#437) */}
           <StorageSection storage={stats.storage} hints={stats.storageHints} />
+
+          {/* Resource/storage pressure → existing bounded diagnostics (#445) */}
+          <DiagnosticsGuidanceSection
+            stats={stats}
+            history={history}
+            pprofEnabled={data.admin_runtime?.pprof_enabled}
+          />
 
           {/* Sparklines - 2 minute trends */}
           {history.requestsPerSec.length > 0 && (

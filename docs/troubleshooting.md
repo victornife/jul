@@ -388,7 +388,7 @@ soak: goroutines 42 -> 44, heap 1600000 -> 1900000 bytes
 | --- | --- | --- |
 | `errors=` | exactly `0` | any non-zero means a request failed under load |
 | Goroutine growth | ≤ `4*workers+32` | unbounded growth is a goroutine leak |
-| Heap growth | ≤ 64 MiB | a steady climb is a heap leak (take a pprof profile) |
+| Heap growth | ≤ 64 MiB | a steady climb across the whole run warrants two heap profiles taken minutes apart |
 
 ### "Heap grew but it is not a leak"
 
