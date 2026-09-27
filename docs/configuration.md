@@ -34,7 +34,14 @@ preflight rather than silently ignored.
 > (`jul check`) remains authoritative**, and a document may satisfy the schema
 > while `jul lint` still reports an error-severity finding.
 
-A minimal, working example:
+An illustrative combined configuration follows. To run it, provide
+`JUL_ADMIN_TOKEN` in the Jul process environment, create
+`/srv/www/example/index.html`, start HTTP backends on `127.0.0.1:3000` and
+`127.0.0.1:3001`, and use a binary with the `console` build tag if you want
+the web Console. Paths in this example are host paths, not bundled assets;
+see [Getting started](getting-started.md) for a minimal runnable first run.
+With the token set, `jul check -config <path>` validates this configuration;
+without it, runtime preflight fails rather than starting with an empty token.
 
 ```toml
 [global]
@@ -1838,13 +1845,15 @@ parse findings instead of scraping text. Field names are lowercase and stable.
 | `source` | string | Config source name (path or `stdin`) |
 | `errors` | string[] | Validation errors; omitted when empty. Any entry ⇒ exit code `1` |
 | `warnings` | object[] | Lint findings; omitted when empty |
-| `warnings[].severity` | string | `"warning"` or `"error"` — always a string, never a number |
+| `warnings[].severity` | string | `"info"`, `"warning"`, or `"error"` — always a string, never a number. The legacy `warnings` key also carries informational suggestions. |
 | `warnings[].field` | string | Config path the finding applies to; omitted when empty |
 | `warnings[].message` | string | Human-readable description of the finding |
 | `warnings[].hint` | string | Suggested fix; omitted when empty |
 
-Exit codes: `0` = no errors, `1` = validation error(s), `2` = warnings present
-under `-strict`.
+Exit codes: `0` = no errors (ordinary warnings without `-strict` and `info`
+suggestions do not fail), `1` = validation or error-severity lint finding,
+`2` = ordinary warnings under `-strict` or invalid flags. `-quiet` suppresses
+advisory rendering without changing the exit status.
 
 ### `jul check -json`
 

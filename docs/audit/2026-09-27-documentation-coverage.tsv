@@ -90,7 +90,7 @@ docs/compatibility.md	not reviewed	Targeted current/release claim corrected; ful
 docs/compression.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/config-lifecycle.yaml	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
 docs/config-value-contract.json	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/configuration.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/configuration.md	reviewed	combined example preflight/token and CLI JSON severity/exit table traced to cmd/jul/cli.go and real checks; remaining field sections need semantic review
 docs/console.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/core-http.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/deployment.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
