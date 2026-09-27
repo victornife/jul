@@ -250,7 +250,9 @@ A dangling symlink on that walk is reported `unavailable` / `path_unresolved`
 rather than guessing its target's filesystem; a permission error is `error` /
 `permission_denied` and any other stat failure `error` / `stat_failed` — a
 location Jul cannot stat is one it cannot write, so a parent's capacity is
-never substituted.
+never substituted. A fuzz target holds these rules against arbitrary paths
+(never panics, never creates anything, never reports capacity without a real
+total): `go test -run='^$' -fuzz='^FuzzProbeNeverCreatesOrLeaks$' -fuzztime=30s ./internal/storagefs`.
 
 **Semantics.** `availableBytes` is the space an unprivileged writer can still
 allocate (on Unix `f_bavail × f_frsize`, which excludes root-reserved blocks,
