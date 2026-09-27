@@ -184,7 +184,14 @@ docker run --rm \
   [Health checks](#health-checks)) and serves a placeholder page from `/var/www`
   so the server starts cleanly with no host mounts.
 - **Named volumes** are seeded from the image on first use, so the baked
-  `/etc/jul/server.toml` survives; edit it through the console (editable shape).
+  `/etc/jul/server.toml` survives. It declares `config_authority = "managed"`
+  for the editable shape. The default admin listener stays on container
+  loopback for its health probe: publishing `-p 9090:9090` alone does **not**
+  make the Console reachable from the host. Provision a strong token and
+  [`[admin.tls]`](configuration.md#admintls) certificate/key, bind the admin
+  listener to a reachable interface, and only then publish that port (or use
+  another authenticated, TLS-protected administrative path). The config file
+  and key must be readable by the nonroot container user.
 - For a **read-only** config, bind-mount your config file read-only:
   `-v /host/server.toml:/etc/jul/server.toml:ro` and skip the `jul-config`
   volume. Your file must enable `[admin]` for the `HEALTHCHECK` to pass, or
@@ -193,9 +200,10 @@ docker run --rm \
   `-v /host/site:/var/www:ro`, or edit the route to `proxy_pass` to a backend.
 - The ACME cache lives under `/var/cache/jul`; keep that volume to avoid
   re-issuing certificates (and hitting CA rate limits) on every restart.
-- Set an `[admin] token` (and only then map `-p 9090:9090`) before exposing the
-  admin API beyond the container; by default it binds to `127.0.0.1` and is
-  reachable only by the container's own health probe.
+- To expose the admin API beyond the container, set an `[admin] token`, enable
+  `[admin.tls]`, and bind the listener on a reachable interface before mapping
+  `-p 9090:9090`. By default it binds to `127.0.0.1` inside the container and
+  is reachable only from inside the container (including its health probe).
 - **Access logs at high throughput.** The default config writes access logs to
   `stdout` (Docker's log driver). At ≥10,000 req/s this generates several MB/s
   of log output; if Docker's log driver buffers to disk it can fill container

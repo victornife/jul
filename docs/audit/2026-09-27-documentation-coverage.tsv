@@ -20,7 +20,7 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/semantic-drift-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 CHANGELOG.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 CONTRIBUTING.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-Dockerfile	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+Dockerfile	reviewed	Docker runtime stage, default config, healthcheck and volume comments traced to deployment guide; image build not run (Docker unavailable)
 Makefile	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 README.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 SECURITY.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
@@ -41,7 +41,7 @@ cmd/jul/* (other CLI and help source files)	not reviewed	CLI help and representa
 cmd/jul/cli.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 cmd/jul/main.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 cmd/jul/remote_cli.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-deploy/docker/server.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+deploy/docker/server.toml	reviewed	managed authority and access-log comment compared to parser/admin tests; checked with console-tagged CLI; container operation unverified
 deploy/windows/install-service.ps1	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 dev-server.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 docs/abi.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified

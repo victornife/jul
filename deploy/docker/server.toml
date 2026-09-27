@@ -7,7 +7,7 @@
 # it self-consistent *inside the container*:
 #   * the admin listener is ENABLED on loopback so the image HEALTHCHECK works
 #     out of the box (`jul healthcheck` -> GET /healthz). 127.0.0.1:9090 is
-#     reachable only from the container's own probe, never exposed externally —
+#     reachable only inside the container (including its probe), never exposed externally —
 #     set a token below before you map that port out;
 #   * the static root points at /var/www, which the image seeds with a
 #     placeholder index.html, so the server starts cleanly with no host mounts;
@@ -17,6 +17,7 @@
 # docs/configuration.md for every option.
 
 [global]
+config_authority = "managed" # named /etc/jul volume is writable by Jul
 worker_threads = "auto"
 log_level = "info"
 log_format = "text"
@@ -59,7 +60,7 @@ history_keep = 50
 # sinks = ["file"]
 # file  = "/var/log/jul/access.log"
 #
-# To suppress access logs entirely (e.g. during a soak or benchmark run):
+# To suppress request access records entirely (e.g. during a benchmark run):
 #
 # [observability.access_log]
-# sinks = []
+# enabled = false

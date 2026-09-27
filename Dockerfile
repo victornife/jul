@@ -53,7 +53,8 @@ COPY --from=build /out/jul /usr/local/bin/jul
 # so each created directory is owned by nonroot.
 COPY --from=build --chown=nonroot:nonroot /seed/ /
 # Container-tailored default config (admin enabled on loopback for the
-# HEALTHCHECK; static root at /var/www) plus the placeholder site it serves, so
+# HEALTHCHECK, managed authority for the writable config volume, static root at
+# /var/www) plus the placeholder site it serves, so
 # the image starts cleanly and its health probe passes with no host mounts.
 COPY --chown=nonroot:nonroot deploy/docker/server.toml /etc/jul/server.toml
 COPY --chown=nonroot:nonroot deploy/docker/index.html /var/www/index.html
