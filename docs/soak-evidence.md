@@ -74,7 +74,7 @@ failure — an access log on its **default 100 MB rotation** exhausting a privat
 filesystem, and samples `GET /api/stats` every 0.5 s into
 `storage-headroom.jsonl`. Evidence:
 [2026-09-27-fault-storage](../soak-artifacts/2026-09-27-fault-storage/)
-built from `d493da1b` (`MANIFEST.md`, `storage-transitions.txt`, `storage-headroom.jsonl`, events,
+built from the pre-merge #437 branch head `d493da1b` (`MANIFEST.md`, `storage-transitions.txt`, `storage-headroom.jsonl`, events,
 snapshots, retained 5 s metrics, `SHA256SUMS`). Same host as the #422 runs.
 
 | Question | Result |
@@ -86,6 +86,17 @@ snapshots, retained 5 s metrics, `SHA256SUMS`). Same host as the #422 runs.
 | "Low headroom" vs "writes failing" distinct? | Yes. The audit, config and history categories were `critical` without `writesFailing` (nothing wrote to them); cache and access log were `critical` **and** `writesFailing` with their own counts (5 591 cache and 88 976 access-log write failures by the end). |
 | Path/device leak? | None: 0 occurrences of the tmpfs path in `/api/stats`, the `jul_storage_bytes` series and all 52 samples. |
 | Recovery | Truncating the access log (an operator action; Jul keeps its `O_APPEND` handle) returned every category to `ok` (65.8% available) at the next sample (65.0% after the recovery load); a 3 s light load cleared both `writesFailing` flags while keeping the cumulative counts. After a restart every category was `ok` with counts reset to 0. |
+
+**Exact-main rerun (Wave 6 certification).** The same profile was rerun on
+exact `main` `015e5f40` (after #437, #440 and #445 merged):
+[2026-09-27-fault-storage-exact-main](../soak-artifacts/2026-09-27-fault-storage-exact-main/).
+It reproduced every result: available fell below 50% / 25% / 10% / 5% at
+10.3 s / 5.8 s / 2.3 s / 1.2 s before `df` reached 0; transitions
+`ok → low → critical → writes failing` in order for all categories on the
+shared filesystem; 211 250 requests with 0 client errors; the disk tier held
+its cap (127 files, 16 764 KiB, 0 temp leftovers); 0 path occurrences in the
+API, `jul_storage_bytes` and all 55 samples; truncation and restart returned
+every category to `ok`.
 
 ### 2026-09-26 — Focused host-fault evidence (#422): DNS, FD limit, cgroup CPU, cgroup memory, disk pressure — **executed on real Linux; four defects found and fixed, one OOM recorded**
 
