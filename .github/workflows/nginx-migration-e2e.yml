@@ -59,6 +59,8 @@ jobs:
           REQUIRE_NGINX_E2E: '1'
           NGINX_CORPUS_ARTIFACT_DIR: ${{ runner.temp }}/nginx-migration-e2e
         run: scripts/nginx-migration-e2e.sh
+      - name: Run real-Jul importer corpus
+        run: make nginx-corpus-check
       - name: Upload bounded reference evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

@@ -14,7 +14,7 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/issue94-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/issue94-security-matrix.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/labels.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
-.github/workflows/nginx-migration-e2e.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/nginx-migration-e2e.yml	reviewed	pinned reference and real-Jul corpus command scope traced to Makefile/scripts; exact-SHA CI result pending
 .github/workflows/release.yml	reviewed	five-minute release smoke job compared to ADR 0005 and evidence log; rest of release workflow not revalidated
 .github/workflows/security-gates.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/semantic-drift-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
