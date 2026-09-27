@@ -653,7 +653,9 @@ servers = [\"127.0.0.1:19181\", \"127.0.0.1:19182\"]
 	ev "phase clear: truncating the access log (operator action; Jul keeps its O_APPEND handle)"
 	truncate -s 0 "${fs}/logs/access.log"
 	df_ev cleared
-	load recover "$(secs 10)" -url "http://${MAIN}/" -workers 8
+	# A short, light load: enough new cache entries and access lines to prove
+	# both writers recover, without refilling the filesystem.
+	load recover "$(secs 3)" -url "http://${MAIN}/blob?kb=128" -unique-paths -workers 2
 	sleep 1
 	storage_ev cleared
 	snapshot cleared
