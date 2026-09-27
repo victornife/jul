@@ -1126,6 +1126,11 @@ Feature: L4 stream proxy (#9)
 
 Script: `scripts/test-nginx-importer.ps1`
 
+> **2026-09-27 harness correction:** this dated result is preserved as recorded.
+> The current script checks the importer's `manual_action_required` exit 3 and
+> JSON report for this fixture; the original script expected exit 0 and could
+> no longer serve as a regression check. See the current audit D19.
+
 - `jul import nginx examples/migrate/nginx.conf` → `tmp/nginx-imported.toml`
 - Lint passes (0 errors, 0 warnings)
 - Verified: HTTP listener `:80`, HTTPS listener `:443`, `proxy_pass = "http://app"`, `least_conn` strategy
@@ -1138,6 +1143,11 @@ Script: `scripts/test-nginx-importer.ps1`
 #### Validation 2 — Zero-config + secrets lint (#5)
 
 Script: `scripts/test-zero-config.ps1`
+
+> **2026-09-27 harness correction:** the current script uses a temporary site,
+> repository-relative paths and only stops its own child process. The original
+> contained a machine-specific path and force-stopped any owner of port 18080.
+> The dated outcome below has not been replayed on Windows by this amendment.
 
 - `jul run --serve testdata/www --listen 127.0.0.1:18080` → returns 200 for `/`
 - `jul lint -config burn-in-phase2a.toml` → 0 errors, 0 warnings (admin token uses `${env:JUL_ADMIN_TOKEN}`)

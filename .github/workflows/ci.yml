@@ -165,6 +165,29 @@ jobs:
       - name: go test
         run: go test -tags "${{ matrix.tags }}" ./...
 
+  docs-first-run-windows:
+    name: docs first run (Windows PowerShell)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build lean and importer binaries
+        shell: pwsh
+        run: |
+          go build -o "$env:RUNNER_TEMP\jul.exe" ./cmd/jul
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go build -tags importer -o "$env:RUNNER_TEMP\jul-importer.exe" ./cmd/jul
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: zero-config and lint journey
+        shell: pwsh
+        run: .\scripts\test-zero-config.ps1 -BinaryPath "$env:RUNNER_TEMP\jul.exe"
+      - name: NGINX assessment and candidate journey
+        shell: pwsh
+        run: .\scripts\test-nginx-importer.ps1 -BinaryPath "$env:RUNNER_TEMP\jul-importer.exe"
+
   race:
     name: test -race
     runs-on: ubuntu-latest
