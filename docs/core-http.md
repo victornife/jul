@@ -98,6 +98,15 @@ Four properties are guaranteed.
   location.
 - **Rewrites run after selection**, on the selected location only. A rewritten
   path does not trigger a second location search.
+- **Selection uses the canonical path.** Before selection the decoded request
+  path has its dot segments removed (RFC 3986 §5.2.4, `..` never climbs above
+  `/`) and repeated slashes merged; a trailing slash is kept. The selected
+  handler — static root, FastCGI, proxy — receives that same canonical path,
+  so `/public/../admin`, `/public/%2e%2e/admin` and `//admin` are all handled
+  by the location that matches `/admin`, never by `/` or `/public/`. When
+  canonicalization changes the path, the forwarded request target is the
+  re-escaped canonical path (an original `%2F` in such a request is forwarded
+  as `/`); an already-canonical target is forwarded byte-for-byte.
 
 If no candidate is selected the request is unhandled and the router returns
 **404**. There is no 405 and no `Allow` header — see

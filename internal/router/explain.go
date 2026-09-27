@@ -81,7 +81,7 @@ func (r *Router) Explain(host string, req *http.Request) Explanation {
 	out.ServerIndex = srv.index
 
 	q := requestQuery{raw: req.URL.RawQuery}
-	srv.eachCandidate(req.URL.Path, func(tier int, loc *locationRoute) bool {
+	srv.eachCandidate(canonicalPath(req.URL.Path), func(tier int, loc *locationRoute) bool {
 		candidate := RouteCandidate{
 			ServerIndex:   srv.index,
 			LocationIndex: loc.index,

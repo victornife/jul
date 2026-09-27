@@ -89,6 +89,17 @@ func TestStaticTraversalBlocked(t *testing.T) {
 	}
 }
 
+// TestStaticBackslashSeparatorRefused: the router canonicalizes '/' segments
+// only, so a path whose '\' os.Root would split on Windows must not resolve.
+func TestStaticBackslashSeparatorRefused(t *testing.T) {
+	dir := setupTree(t)
+	h := newStatic(t, config.LocationConfig{Root: dir})
+	rec := get(h, "http://h/assets%5C..%5Csub%5Cindex.html", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("backslash path = %d, want 404", rec.Code)
+	}
+}
+
 func TestStaticHiddenRejected(t *testing.T) {
 	dir := setupTree(t)
 	h := newStatic(t, config.LocationConfig{Root: dir})

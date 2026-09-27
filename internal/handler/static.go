@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -116,6 +117,11 @@ func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // written, false if the candidate did not resolve to something servable.
 func (h *staticHandler) tryServe(w http.ResponseWriter, r *http.Request, candidate string) bool {
 	clean := path.Clean("/" + candidate)
+	// On Windows os.Root also splits on '\', which would reintroduce dot
+	// segments the router never saw (as http.Dir refuses them).
+	if filepath.Separator != '/' && strings.ContainsRune(clean, filepath.Separator) {
+		return false
+	}
 	rel := strings.TrimPrefix(clean, "/")
 	if rel == "" {
 		rel = "."
