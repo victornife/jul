@@ -1,0 +1,23 @@
+# under-quota 2026-09-26T18:15:17Z
+pid 238991 alive
+VmHWM:	   51084 kB
+VmRSS:	   51084 kB
+Threads:	24
+fds 141
+Max open files            1048576              1048576              files     
+cgroup cpu.max: 20000 100000 
+cgroup cpu.stat: usage_usec 64369668 user_usec 29965263 system_usec 34404404 nice_usec 0 nr_periods 201 nr_throttled 200 throttled_usec 99786806 nr_bursts 0 burst_usec 0 
+cgroup memory.max: max 
+cgroup memory.high: max 
+cgroup memory.current: 29069312 
+cgroup memory.peak: 29536256 
+cgroup memory.events: low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0 
+go_goroutines 260
+go_memstats_heap_inuse_bytes 1.7219584e+07
+jul_listener_conns 64
+jul_upstream_active_requests{pool="app"} 35
+jul_upstream_backends{pool="app"} 2
+jul_upstream_connections{pool="app"} 66
+process_max_fds 1.048576e+06
+process_open_fds 142
+process_resident_memory_bytes 5.1331072e+07

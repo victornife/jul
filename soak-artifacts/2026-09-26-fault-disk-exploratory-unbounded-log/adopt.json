@@ -1,0 +1,1 @@
+{"api_version":"v1","apply_id":"rl_ffb804c72143_1","state":"terminal","terminal":true,"ok":true,"mode":"hot","outcome":"no_change","persisted_version":"21c3bb6267401c04","desired_version":"21c3bb6267401c04","serving_version":"21c3bb6267401c04","config_state":"managed_clean","origin":"no_baseline","restored":false,"degraded":[],"boot_id":"ffb804c72143"}

@@ -64,6 +64,72 @@ whether the duration meets the ADR-0005 minimum for that scope.
 
 ## Run log
 
+### 2026-09-26 — Focused host-fault evidence (#422): DNS, FD limit, cgroup CPU, cgroup memory, disk pressure — **executed on real Linux; four defects found and fixed, one OOM recorded**
+
+Short dedicated runs, not a 24 h soak (#422 explicitly does not require one).
+Each profile ran on a fresh Jul process built from `a2e07d76` (tree `894f99d9`)
+with `scripts/fault-evidence.sh <profile>` (see
+[soak-procedures.md](soak-procedures.md#focused-host-fault-evidence-422)); every
+directory carries `MANIFEST.md`, config, `events.log.gz`, per-second client
+results, a retained 5 s metrics series with `metrics-manifest.json` (SHA-256)
+and `SHA256SUMS`. The logs were gzip-compressed (`gzip -n9`, lossless) after
+recording and `SHA256SUMS` regenerated; the harness now does this itself. Host: aarch64, 12 CPUs, 15 GiB, Linux 6.18 (WSL2), cgroup v2.
+
+| Profile | Evidence | Fault | Outcome |
+| --- | --- | --- | --- |
+| DNS | [2026-09-26-fault-dns](../soak-artifacts/2026-09-26-fault-dns/) | resolver in a private user+net+mount namespace: grow 2→3 members, then SERVFAIL, dropped queries and NXDOMAIN for 30 s each, then recovery to 1 member | 3 612 263 requests, **0 errors**; last-good membership (3) held through all 90 s of failure; growth seen after 4 s and recovery after 5 s with `refresh = "5s"`; error taxonomy distinct in logs (`server misbehaving` ×12, `no such host` ×12, `i/o timeout` ×10) and counted by `jul_discovery_errors_total` (17); 122 queries in 300 s (A+AAAA per refresh, no retry storm during failure) |
+| FD limit | [2026-09-26-fault-fd](../soak-artifacts/2026-09-26-fault-fd/) | fresh Jul under `prlimit --nofile=256:256`; 400 held idle connections + 64 fresh-connection workers for 40 s | process alive; FDs peaked at the limit (226 sampled); 381 374 × 200, 25 × 502, 128 client timeouts; **no backend ejected**; recovery 415 046 × 200; 2 throttled accept-error lines |
+| CPU | [2026-09-26-fault-cpu](../soak-artifacts/2026-09-26-fault-cpu/) | transient scope, `CPUQuota=20%` applied and lifted live | throughput 9 825 → 497 req/s, p50 6.3 → 100.8 ms, max p99 852 ms, **0 errors**; SIGHUP reload observed in 202 ms; health probes kept passing (2/2 healthy); quota lifted → 9 569 req/s; SIGTERM under quota exits in 7 ms |
+| Memory | [2026-09-26-fault-mem](../soak-artifacts/2026-09-26-fault-mem/) | transient scope `MemoryMax=192M`, swap 0, `GOMEMLIMIT=144MiB`; 64 MB memory cache filled, then `MemoryHigh` lowered live to 96M, then restored | **no OOM** (`memory.events` oom 0, peak 170.6 MB); fill 336 159 × 200; throttled phase 32 req/s, p50 2.0 s, 21 client timeouts and one missed scrape (10 s gap, recorded); restored → 34 181 req/s |
+| Disk | [2026-09-26-fault-disk](../soak-artifacts/2026-09-26-fault-disk/) | private 48 MiB tmpfs holding the disk cache (24 MB cap), access log (`rotate_max_mb = 4`, keep 1), audit log, managed config and history; filled to ~1 MiB, then 0 | cache held its cap (25 148 970 B ≤ 24 MiB) and evicted continuously; requests kept succeeding from origin (0 errors); managed apply while full → `503 storage_unavailable`, "nothing was changed", config byte-identical and valid; after freeing space apply succeeded; 4 throttled cache-write and 4 access-log failure reports; 0 torn access-log lines, 0 temp leftovers; restart rehydrated all 191 disk entries |
+
+**Quiescence** (idle baseline → after load plus the proxy's 90 s idle-connection
+timeout): FDs 12→12, 12→12, 11→11, 11→11, 14→15; goroutines 21→23, 21→21,
+22→22, 21→21, 21→22; `jul_listener_conns` and `jul_upstream_active_requests`
+0 in every profile. RSS settles at 46–56 MB (156 MB in the memory profile, which
+still holds its 64 MB cache under a 144 MiB Go limit).
+
+**Exploratory runs kept as evidence** (on `main` `99934938`):
+
+- [2026-09-26-fault-mem-exploratory-oom](../soak-artifacts/2026-09-26-fault-mem-exploratory-oom/) —
+  without `GOMEMLIMIT` the same profile was **OOM-killed by the kernel ~3 s into
+  the fill** (193.5 MB peak against `MemoryMax=192M`). The Go runtime does not
+  derive a heap limit from the cgroup; this is documented OS semantics, not
+  graceful degradation, and is why [deployment.md](deployment.md#resource-limits)
+  now tells operators to set `GOMEMLIMIT`.
+- [2026-09-26-fault-disk-exploratory-unbounded-log](../soak-artifacts/2026-09-26-fault-disk-exploratory-unbounded-log/) —
+  with the default access-log rotation (100 MB, larger than the filesystem) the
+  access log alone filled the 48 MiB filesystem in ~20 s at ~5 000 req/s. Nothing warned before storage ran out; the first signal
+  was the failure itself.
+
+**Defects found by these runs and fixed before the recorded runs**
+
+1. Descriptor exhaustion was attributed to backends: `EMFILE` on upstream dial
+   opened the circuit of both healthy backends and produced 191 020 × 503 in the
+   40 s pressure phase. Now Jul-owned and health-neutral (`proxy_overloaded`), as
+   the passive-health contract already stated.
+2. Access-log file write failures were silent (slog drops handler write errors).
+   Now reported, throttled, with a count.
+3. Disk-cache write failures logged once per store (38 247 lines in ~16 s). Now
+   once per 10 s with a count.
+4. net/http logged an Accept error every few ms under FD pressure (~160 lines/s).
+   Now once per 10 s with a count, net/http's format otherwise unchanged.
+
+**Retained metrics.** Every run's `/metrics` was scraped every 5 s by
+`scripts/soak-scrape.go` (39–60 samples per run, 43–90 series, ~5–7 KB
+compressed); the one scrape failure (memory throttling) is recorded as an
+explicit error and gap. `scripts/soak-manifest-init.sh` now starts the same
+collector for every long soak.
+
+**Candidate activation review.** #437 (storage headroom): **activate** — the
+unbounded-log exploratory run filled storage in seconds with no advance signal,
+and the bounded run's only signals are post-failure errors. #438 (TTL-aware
+DNS): **retain candidate** — fixed refresh gave last-good continuity, recovery
+within one refresh interval and ~2 queries per refresh with no failure storm;
+staleness is bounded by `refresh`, which ordinary configuration already tunes.
+#456 (public corpus): **retain candidate** — no external request for public
+NGINX estates and no evidence gap in the PR-gated corpus.
+
 ### 2026-09-19 — Final soak (ADR 0005 Procedure C), `burn-in-current.toml`, ~25h Linux — **plugin-pool fix certified; two deviations recorded, not papered over**
 
 Ahead of `v2.0.0-rc.1`'s ≥24h final soak, Procedure A (5-minute validation)

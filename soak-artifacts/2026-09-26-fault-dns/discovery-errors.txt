@@ -1,0 +1,4 @@
+     12 error="lookup jul-decoy.test on <addr>: server misbehaving"
+     12 error="lookup jul-decoy.test on <addr>: no such host"
+     10 error="lookup jul-decoy.test on <addr>: read udp <addr>-><addr>: i/o timeout"
+      3 error="context canceled"

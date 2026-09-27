@@ -141,6 +141,9 @@ stop_jul() {
 quiescence() { # after load: compare with the idle baseline snapshot
 	sleep "$(secs 15)"
 	snapshot quiescent
+	# Backend keep-alive connections close after the proxy's 90s idle timeout.
+	sleep 95
+	snapshot quiescent-idle
 }
 
 write_config() { # write_config <extra TOML appended>
@@ -173,7 +176,7 @@ manifest() { # manifest <limits> <workload> <result>
 | --- | --- |
 | Profile | \`${PROFILE#__inner_}\` |
 | Date (UTC) | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
-| Jul SHA | \`${JUL_SHA}\` |
+| Jul SHA | \`${JUL_SHA}\` (tree \`${JUL_TREE}\`) |
 | Harness SHA | \`${HARNESS_SHA}\` |
 | Build | \`go build -tags "${FULL_TAGS}"\`; $(go version) |
 | Host | $(uname -srm); $(nproc) CPUs; $(awk '/MemTotal/ {printf "%d MiB", $2/1024}' /proc/meminfo) |
@@ -183,7 +186,7 @@ manifest() { # manifest <limits> <workload> <result>
 | Config | [jul.toml](jul.toml) |
 | Metrics | [metrics/samples.jsonl.gz](metrics/samples.jsonl.gz) (5s interval), [metrics/metrics-manifest.json](metrics/metrics-manifest.json), [summary](metrics-summary.md) |
 | Client results | \`load-*.jsonl\` (one line per second) |
-| Events | [events.log](events.log) |
+| Events | [events.log.gz](events.log.gz) |
 | Snapshots | [snapshots/](snapshots/) |
 | Reproduce | \`scripts/fault-evidence.sh ${PROFILE#__inner_}\` |
 
@@ -191,7 +194,15 @@ manifest() { # manifest <limits> <workload> <result>
 
 ${3}
 EOF
-	(cd "${OUT}" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS)
+}
+
+# seal stops every helper, compresses the logs (*.log is gitignored; retained
+# soak logs are .log.gz) and checksums the directory.
+seal() {
+	cleanup
+	wait 2>/dev/null || true
+	(cd "${OUT}" && find . -type f -name '*.log' -exec gzip -n9 {} + &&
+		find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS)
 }
 
 prepare_out() {
@@ -203,6 +214,8 @@ prepare_out() {
 	mkdir -p "${OUT}"
 	export OUT
 	JUL_SHA="$(git rev-parse HEAD)$(git diff --quiet HEAD -- . ':!soak-artifacts' || echo ' (dirty)')"
+	JUL_TREE="$(git rev-parse 'HEAD^{tree}')"
+	export JUL_TREE
 	HARNESS_SHA="$(git log -1 --format=%H -- scripts/fault-evidence.sh 2>/dev/null || echo unknown)"
 	export JUL_SHA HARNESS_SHA
 }
@@ -289,7 +302,7 @@ strategy = "round_robin"
 	ev "last-good log lines $(grep -c 'keeping last-good backends' "${OUT}/jul.log" || true)"
 	grep -oE 'error="[^"]*"' "${OUT}/jul.log" | sed -E 's/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/<addr>/g' | sort | uniq -c | sort -rn >"${OUT}/discovery-errors.txt" || true
 	manifest "none on Jul; resolver failure injected by fault-dnsd modes servfail/drop/nxdomain for $(secs 30)s each" \
-		"${WORKLOAD}" "See events.log, discovery-errors.txt, dns-queries.log and metrics-summary.md; analysis in docs/soak-evidence.md."
+		"${WORKLOAD}" "See events.log.gz, discovery-errors.txt, dns-queries.log.gz and metrics-summary.md; analysis in docs/soak-evidence.md."
 }
 
 profile_fd() {
@@ -322,7 +335,7 @@ servers = ["127.0.0.1:19181", "127.0.0.1:19182"]
 	ev "jul log lines mentioning EMFILE: $(grep -ciE 'too many open files' "${OUT}/jul.log" || true)"
 	grep -iE 'too many open files' "${OUT}/jul.log" | sed -E 's/[0-9]{4}-[0-9-]+T[^ ]+//; s/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/<addr>/g' | cut -c1-160 | sort | uniq -c | sort -rn | head -20 >"${OUT}/emfile-log-kinds.txt" || true
 	stop_jul
-	manifest "RLIMIT_NOFILE 256 (soft and hard) on the Jul process only" "${WORKLOAD}" "See events.log, emfile-log-kinds.txt, load-*.jsonl and metrics-summary.md; analysis in docs/soak-evidence.md."
+	manifest "RLIMIT_NOFILE 256 (soft and hard) on the Jul process only" "${WORKLOAD}" "See events.log.gz, emfile-log-kinds.txt, load-*.jsonl and metrics-summary.md; analysis in docs/soak-evidence.md."
 }
 
 scope_prop() { systemctl --user show "${SCOPE_UNIT}" -p "$1" --value 2>/dev/null; }
@@ -373,7 +386,7 @@ servers = ["127.0.0.1:19181", "127.0.0.1:19182"]
 	ev "re-applied CPUQuota=20% for a shutdown-under-quota measurement"
 	stop_scrape
 	stop_jul
-	manifest "cgroup v2 cpu.max 20000/100000 (CPUQuota=20%) during the pressure phase and at shutdown" "${WORKLOAD}" "See events.log, load-*.jsonl and metrics-summary.md; analysis in docs/soak-evidence.md."
+	manifest "cgroup v2 cpu.max 20000/100000 (CPUQuota=20%) during the pressure phase and at shutdown" "${WORKLOAD}" "See events.log.gz, load-*.jsonl and metrics-summary.md; analysis in docs/soak-evidence.md."
 }
 
 profile_mem() {
@@ -394,7 +407,11 @@ servers = ["127.0.0.1:19181", "127.0.0.1:19182"]
 	sed -i 's#^  proxy_pass = "http://app"#  proxy_pass = "http://app"\n  cache = true#' "${OUT}/jul.toml"
 	"${BIN}/jul" check -config "${OUT}/jul.toml" >>"${OUT}/events.log"
 	SCOPE_UNIT="jul-fault-mem-$$.scope"
+	GOMEMLIMIT_VALUE="${FAULT_GOMEMLIMIT-144MiB}"
+	ev "GOMEMLIMIT=${GOMEMLIMIT_VALUE:-unset}"
+	if [[ -n "${GOMEMLIMIT_VALUE}" ]]; then export GOMEMLIMIT="${GOMEMLIMIT_VALUE}"; fi
 	start_jul systemd-run --user --scope --quiet --unit "${SCOPE_UNIT}" -p MemoryAccounting=yes -p MemoryHigh=176M -p MemoryMax=192M -p MemorySwapMax=0 --
+	unset GOMEMLIMIT
 	start_scrape
 	snapshot idle
 	load fill "$(secs 60)" -url "http://${MAIN}/blob?kb=256" -unique-paths -workers 48
@@ -411,7 +428,7 @@ servers = ["127.0.0.1:19181", "127.0.0.1:19182"]
 	quiescence
 	stop_scrape
 	stop_jul
-	manifest "cgroup v2 memory.max=192M, swap.max=0; memory.high 176M, lowered live to 96M for the throttled phase" "${WORKLOAD}" "See events.log, snapshots (memory.events), load-*.jsonl and metrics-summary.md; analysis in docs/soak-evidence.md."
+	manifest "cgroup v2 memory.max=192M, swap.max=0; memory.high 176M, lowered live to 96M for the throttled phase; GOMEMLIMIT=${GOMEMLIMIT_VALUE:-unset}" "${WORKLOAD}" "See events.log.gz, snapshots (memory.events), load-*.jsonl and metrics-summary.md; analysis in docs/soak-evidence.md."
 }
 
 profile_disk_inner() {
@@ -427,6 +444,8 @@ profile_disk_inner() {
 sinks = [\"file\"]
 file = \"${fs}/logs/access.log\"
 format = \"json\"
+rotate_max_mb = 4
+rotate_keep = 1
 
 [cache]
 enabled = true
@@ -477,7 +496,7 @@ servers = [\"127.0.0.1:19181\", \"127.0.0.1:19182\"]
 		-d "$(jq -c --arg base "$(curl -fsS "${auth[@]}" "http://${ADMIN}/api/v1/config" | jq -r '.serving_version // .persisted_version')" '{observed_digest: .observed_digest, base_version: $base, mode: "hot", confirm: true}' <<<"${preview}")" \
 		"http://${ADMIN}/api/v1/config/adopt-external"
 	ev "adopt the file as the managed baseline: $(head -c 300 "${OUT}/adopt.json")"
-	apply baseline error
+	apply baseline info
 	load fill "$(secs 40)" -url "http://${MAIN}/blob?kb=128" -unique-paths -workers 32
 	snapshot after-fill
 	df_ev after-fill
@@ -527,7 +546,7 @@ print(bad)' "${fs}/logs/access.log" 2>/dev/null || echo "n/a")
 	cp "${fs}/data/jul.toml" "${OUT}/config-final.toml"
 	umount "${fs}"
 	rmdir "${fs}"
-	manifest "private tmpfs size=48m for cache/log/config/history; cache disk_max_size 24 MiB, memory 2 MiB" "${WORKLOAD}" "See events.log, disk-error-kinds.txt, apply-*.json, snapshots, load-*.jsonl and metrics-summary.md; analysis in docs/soak-evidence.md."
+	manifest "private tmpfs size=48m for cache/log/config/history; cache disk_max_size 24 MiB, memory 2 MiB" "${WORKLOAD}" "See events.log.gz, disk-error-kinds.txt, apply-*.json, snapshots, load-*.jsonl and metrics-summary.md; analysis in docs/soak-evidence.md."
 }
 
 # ---- dispatch ------------------------------------------------------------------
@@ -564,4 +583,5 @@ mem)
 	profile_mem
 	;;
 esac
+[[ "${PROFILE}" == __inner_* ]] || seal
 echo "evidence: ${OUT}"

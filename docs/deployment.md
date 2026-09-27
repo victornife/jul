@@ -17,6 +17,7 @@
 - [Health checks](#health-checks)
 - [Behind a reverse proxy or load balancer](#behind-a-reverse-proxy-or-load-balancer)
 - [What writes where](#what-writes-where)
+- [Resource limits](#resource-limits)
 
 ## The two shapes
 
@@ -354,3 +355,24 @@ readinessProbe:
 See [reload-semantics.md](reload-semantics.md) for what an "Apply" guarantees
 and which changes need a restart, and the [status matrix](status.md) for feature
 maturity.
+
+## Resource limits
+
+Measured in the #422 host-fault runs ([soak-evidence.md](soak-evidence.md)):
+
+- **Memory (cgroup `MemoryMax`, container `--memory`).** The Go runtime does
+  not derive a heap limit from the cgroup. Set `GOMEMLIMIT` to roughly 75% of
+  the memory limit (for example `Environment=GOMEMLIMIT=750MiB` with
+  `MemoryMax=1G`); without it a memory cache near its cap plus concurrent large
+  responses was OOM-killed by the kernel within seconds under a 192 MiB limit.
+  Size `[cache] memory_max_size` well inside that budget.
+- **File descriptors (`LimitNOFILE`, `ulimit -n`).** At the limit Jul keeps
+  serving what it can: accepts back off, upstream dials fail with
+  `proxy_overloaded` and are **not** counted against backend health, and
+  service returns as soon as descriptors free. Allow for two descriptors per
+  proxied connection plus idle upstream keep-alives.
+- **Storage.** Bound the access log (`rotate_max_mb` × (`rotate_keep` + 1))
+  and the disk cache (`disk_max_size`) so together they fit the filesystem
+  with headroom. When storage is exhausted, access-log and disk-cache write
+  failures are logged (throttled), and a managed apply fails with
+  `storage_unavailable` without changing the configuration.

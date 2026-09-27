@@ -342,7 +342,8 @@ helpers (`scripts/fault-backend.go`, `scripts/fault-load.go`,
 | `disk` | `unshare --user --map-root-user --mount`; private 48 MiB tmpfs | disk cache tier, access and audit logs, managed config and history on the tmpfs; fill, near-full, full, managed apply while full, recovery, restart rehydration |
 
 Each directory holds `MANIFEST.md` (Jul SHA, harness SHA, limits, workload,
-isolation), `jul.toml`, `events.log` (UTC-stamped phases and observations),
+isolation), `jul.toml`, `events.log.gz` (UTC-stamped phases and observations;
+every `*.log` is gzip-compressed once the run's helpers have stopped),
 per-second client results `load-*.jsonl`, the retained 5-second metrics series
 with its checksummed manifest and summary, `/proc` and cgroup snapshots, and
 `SHA256SUMS`. `FAULT_SCALE` shortens phases for a dry run; recorded evidence

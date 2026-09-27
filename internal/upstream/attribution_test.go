@@ -8,11 +8,24 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
+	"os"
+	"runtime"
+	"syscall"
 	"testing"
 	"time"
 
 	"jul/internal/config"
 )
+
+// descriptorsExhausted is the errno a dial returns when the process has no
+// descriptors left.
+func descriptorsExhausted() syscall.Errno {
+	if runtime.GOOS == "windows" {
+		return syscall.Errno(10024) // WSAEMFILE
+	}
+	return syscall.EMFILE
+}
 
 type deadlineOnlyContext struct {
 	context.Context
@@ -47,6 +60,7 @@ func TestAttemptFailureAttributionMatrix(t *testing.T) {
 		{"backend identity", x509.HostnameError{Host: "wrong.internal"}, context.Background(), context.Background(), OriginBackendIdentity, ReasonUpstreamTLSIdentity, HealthNeutral},
 		{"backend timeout", context.DeadlineExceeded, context.Background(), context.Background(), OriginBackendTransport, ReasonUpstreamTimeout, HealthFailure},
 		{"backend transport", errors.New("connection reset"), context.Background(), context.Background(), OriginBackendTransport, ReasonUpstreamConnectFailed, HealthFailure},
+		{"Jul out of descriptors", &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("socket", descriptorsExhausted())}, context.Background(), context.Background(), OriginJulPolicy, ReasonProxyOverloaded, HealthNeutral},
 	}
 
 	for _, tt := range tests {

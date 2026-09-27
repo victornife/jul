@@ -1,0 +1,3 @@
+fault-load: 409585 requests, status map[200:409585], errors map[]
+fault-load: 381527 requests, status map[200:381374 502:25], errors map[timeout:128]
+fault-load: 415046 requests, status map[200:415046], errors map[]

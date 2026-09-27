@@ -1,0 +1,22 @@
+{
+  "bytes": 6456,
+  "end_reason": "signal",
+  "ended": "2026-09-26T18:18:18.041713338Z",
+  "errors": 0,
+  "file": "samples.jsonl.gz",
+  "gap_seconds": 0,
+  "gaps": 0,
+  "interval_s": 5,
+  "labels": {
+    "config": "jul.toml",
+    "jul_sha": "a2e07d76c06b7c0389709af3d3fb164b8ced2610",
+    "profile": "cpu",
+    "workload": "64 workers keep-alive GET /slow?ms=5 (unconstrained baseline, then CPUQuota=20%, then quota lifted live); SIGHUP reload under quota; SIGTERM shutdown timed"
+  },
+  "ok": 47,
+  "scrapes": 47,
+  "series": 56,
+  "sha256": "617c6a43a539ee4fc6a54db12e9381c9e09fdf5d11facc9ca70e8266da270ac6",
+  "started": "2026-09-26T18:14:27.610010132Z",
+  "url": "http://127.0.0.1:19901/metrics"
+}

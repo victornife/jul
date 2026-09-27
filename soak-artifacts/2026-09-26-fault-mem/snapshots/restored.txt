@@ -1,0 +1,26 @@
+# restored 2026-09-26T18:20:39Z
+pid 240250 alive
+VmHWM:	  181504 kB
+VmRSS:	  160928 kB
+Threads:	65
+fds 59
+Max open files            1048576              1048576              files     
+cgroup cpu.stat: usage_usec 417726729 user_usec 138872936 system_usec 278853793 nice_usec 0 
+cgroup memory.max: 201326592 
+cgroup memory.high: 184549376 
+cgroup memory.current: 141434880 
+cgroup memory.peak: 170582016 
+cgroup memory.events: low 0 high 14848 max 0 oom 0 oom_kill 0 oom_group_kill 0 
+go_goroutines 117
+go_memstats_heap_inuse_bytes 8.0412672e+07
+jul_cache_bytes{tier="memory"} 6.6948975e+07
+jul_cache_entries{tier="memory"} 255
+jul_cache_evictions_total{tier="memory"} 335898
+jul_cache_max_bytes{tier="memory"} 6.7108864e+07
+jul_listener_conns 0
+jul_upstream_active_requests{pool="app"} 0
+jul_upstream_backends{pool="app"} 2
+jul_upstream_connections{pool="app"} 48
+process_max_fds 1.048576e+06
+process_open_fds 60
+process_resident_memory_bytes 1.63647488e+08

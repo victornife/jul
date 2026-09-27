@@ -22,3 +22,13 @@ func isPlatformConnRefused(err error) bool {
 	var errno syscall.Errno
 	return errors.As(err, &errno) && errno == wsaeconnrefused
 }
+
+// wsaemfile is Winsock's WSAEMFILE: no more socket descriptors.
+const wsaemfile = syscall.Errno(10024)
+
+// localResourceExhausted reports a dial that failed because this process ran
+// out of socket descriptors.
+func localResourceExhausted(err error) bool {
+	var errno syscall.Errno
+	return errors.As(err, &errno) && errno == wsaemfile
+}

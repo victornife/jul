@@ -1,0 +1,24 @@
+# failure-drop 2026-09-26T18:08:19Z
+pid 236300 alive
+VmHWM:	   50744 kB
+VmRSS:	   45652 kB
+Threads:	27
+fds 54
+Max open files            1048576              1048576              files     
+cgroup cpu.max: max 100000 
+cgroup cpu.stat: usage_usec 33287143178 user_usec 22810077991 system_usec 10477065186 nice_usec 0 nr_periods 0 nr_throttled 0 throttled_usec 0 nr_bursts 0 burst_usec 0 
+cgroup memory.max: max 
+cgroup memory.high: max 
+cgroup memory.current: 4396351488 
+cgroup memory.peak: 11701276672 
+cgroup memory.events: low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0 
+go_goroutines 103
+go_memstats_heap_inuse_bytes 1.4204928e+07
+jul_discovery_errors_total{pool="app"} 11
+jul_listener_conns 16
+jul_upstream_active_requests{pool="app"} 13
+jul_upstream_backends{pool="app"} 3
+jul_upstream_connections{pool="app"} 26
+process_max_fds 1.048576e+06
+process_open_fds 55
+process_resident_memory_bytes 4.4740608e+07

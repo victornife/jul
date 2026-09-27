@@ -1,0 +1,31 @@
+# restart-rehydrated 2026-09-26T18:26:11Z
+pid 242852 alive
+VmHWM:	   31920 kB
+VmRSS:	   31920 kB
+Threads:	12
+fds 13
+Max open files            1048576              1048576              files     
+cgroup cpu.max: max 100000 
+cgroup cpu.stat: usage_usec 35483022048 user_usec 23609628722 system_usec 11873393325 nice_usec 0 nr_periods 0 nr_throttled 0 throttled_usec 0 nr_bursts 0 burst_usec 0 
+cgroup memory.max: max 
+cgroup memory.high: max 
+cgroup memory.current: 4163428352 
+cgroup memory.peak: 11701276672 
+cgroup memory.events: low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0 
+go_goroutines 20
+go_memstats_heap_inuse_bytes 6.930432e+06
+jul_cache_bytes{tier="disk"} 2.514897e+07
+jul_cache_bytes{tier="memory"} 0
+jul_cache_entries{tier="disk"} 191
+jul_cache_entries{tier="memory"} 0
+jul_cache_evictions_total{tier="disk"} 0
+jul_cache_evictions_total{tier="memory"} 0
+jul_cache_max_bytes{tier="disk"} 2.5165824e+07
+jul_cache_max_bytes{tier="memory"} 2.097152e+06
+jul_listener_conns 0
+jul_upstream_active_requests{pool="app"} 0
+jul_upstream_backends{pool="app"} 2
+jul_upstream_connections{pool="app"} 0
+process_max_fds 1.048576e+06
+process_open_fds 14
+process_resident_memory_bytes 3.21536e+07
