@@ -38,7 +38,7 @@ A reference is `${scheme:body}` embedded anywhere in a string value:
 | Reference | Resolves to |
 | --------- | ----------- |
 | `${env:NAME}` | The value of environment variable `NAME` |
-| `${file:/path}` | The contents of the file at `/path` (one trailing newline trimmed) |
+| `${file:/path}` | The contents of the file at `/path` (all trailing CR/LF characters trimmed) |
 | `${secret:/path}` | Same as `${file:}` today — the forward-compatible spelling for a future secret-manager backend |
 
 A value may combine literal text with one or more references
@@ -67,17 +67,19 @@ built — and again on **every reload**:
 
 1. Each reference is replaced with its resolved value in place.
 2. Each resolved value is registered for [log redaction](#log-redaction).
-3. If any reference cannot be resolved, startup (or the reload) fails with an
-   error that **joins every problem**, so one run surfaces them all — e.g. a
-   missing environment variable or an unreadable file.
+3. If any reference cannot be resolved, startup (or the reload) fails. Errors
+   are joined across configuration fields, but only the first failed reference
+   within a single string is reported in one attempt. Fix it and retry to
+   surface any later failure in that same string.
 
 Crucially, the **on-disk file and the admin/Console representations keep the
 unresolved references**: the config loader (`TOMLSource`) returns the raw text,
 and only the serving path calls `ExpandSecrets`. Secrets are therefore never
 written back to disk or surfaced through the Console — only counted (below).
 
-`${file:}`/`${secret:}` trims a single trailing newline (and surrounding
-`\r`/`\n`) so a secret stored one-per-file does not pick up the editor's newline.
+`${file:}`/`${secret:}` trims **all trailing CR/LF characters** so a secret
+stored one-per-file does not pick up an editor's newline. If trailing newlines
+are part of a secret's bytes, this source cannot preserve them.
 
 ## Log redaction
 
@@ -94,7 +96,7 @@ Notes on the redactor:
   rewriting a reference as the same effective literal cannot expose a value
   still held by live resources.
 - Values shorter than the **redaction floor** (default **4 characters**) are
-  deliberately **not** masked, to avoid corrupting unrelated log text with a
+  deliberately **not registered for masking**, to avoid corrupting unrelated log text with a
   too-common substring (a secret that short is not meaningfully secret). Lower
   the floor with `[global] redact_min_secret_length` (down to `1`) when your
   secrets are shorter than the default, accepting that short values may also mask
@@ -112,7 +114,7 @@ Notes on the redactor:
 | `${file:/path}` with missing file | Hard error at startup/reload | ✅ `TestExpandSecretsErrors` |
 | `${secret:/path}` | Same as `${file:}` today | ✅ `TestExpandSecretsEnvAndFile` |
 | Unknown scheme (e.g. `${vault:…}`) | Hard error at startup/reload | ✅ `TestExpandSecretsErrors` |
-| Value shorter than redaction floor | Registered but not masked from logs | ✅ `TestExpandSecretsAppliesRedactFloor` |
+| Value shorter than redaction floor | Resolved but not registered for masking | ✅ `TestExpandSecretsAppliesRedactFloor` |
 | No references in config | No-op, zero-cost path | ✅ `TestExpandSecretsNoRefIsNoop` |
 | Multiple references in one string | Each resolved independently | ✅ `TestExpandSecretsEnvAndFile` |
 | Config reload | Old secrets replaced atomically; new secrets registered | ✅ `TestReplacePrunesDeletedSecrets` |
@@ -144,6 +146,7 @@ of a reference. It flags (only when the value is non-empty and is **not** alread
 a `${…}` reference):
 
 - `[admin].token`
+- each `[admin.rbac.principals]` token
 - each upstream `discovery.consul.token`
 - each upstream Kubernetes discovery token
 
@@ -175,9 +178,13 @@ Externalize the admin token and a JWT signing key with environment variables:
 ```toml
 [admin]
 enabled = true
-listen = "0.0.0.0:9000"
+listen = "127.0.0.1:9000"
 token = "${env:JUL_ADMIN_TOKEN}"
 ```
+
+This admin example stays on loopback. Before exposing the listener to a remote
+client, configure [admin TLS](configuration.md#admintls) and an appropriate
+network boundary in addition to the token.
 
 Read a Consul ACL token from a mounted secret file:
 
@@ -212,12 +219,17 @@ jul serve -config jul.toml
 
 ## Operational notes
 
-- **Resolved on serve and reload.** Editing the file and reloading re-resolves
-  references, so rotating a secret is: update the env var / file, then reload (or
-  restart). The new value is masked from logs automatically.
+- **Resolved on serve and reload.** A reload re-reads a `${file:}` source, so
+  replace the file and reload to rotate it. A running process normally keeps
+  the environment it started with: changing a systemd environment file, shell,
+  or container setting does **not** change that process's `${env:}` value on
+  reload. Restart Jul with the new environment to rotate an env reference.
+  Newly accepted values at startup or reload are masked according to the
+  redaction floor.
 - **Fail loud.** A missing env var, an unreadable file, or an unknown scheme
-  fails startup/reload with a joined error listing every unresolved reference —
-  there is no silent fallback to an empty or literal value.
+  fails startup/reload; errors are joined across fields, with the first failed
+  reference per string reported on each attempt. There is no silent fallback
+  to an empty or literal value.
 - **Secrets stay out of the surfaces.** Disk, admin API, and Console all keep the
   unexpanded references; only the in-memory serving config holds plaintext, and
   logs mask it.
@@ -240,8 +252,8 @@ jul serve -config jul.toml
   default < 4 chars; tunable via `redact_min_secret_length`), so it
   is defense-in-depth, not a guarantee; keep secrets in references rather than
   relying on masking.
-- **Lint covers the highest-risk fields** (`admin.token`, Consul/Kubernetes
-  tokens). Other credential fields accept references but are not yet
+- **Lint covers the highest-risk fields** (`admin.token`, admin RBAC principal
+  tokens, Consul/Kubernetes discovery tokens). Other credential fields accept references but are not yet
   lint-flagged when literal.
 
 ## Security / threat note

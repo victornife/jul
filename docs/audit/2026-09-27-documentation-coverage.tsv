@@ -145,7 +145,7 @@ docs/reviews/previous_reviews/jul_protocol_adapters_product_strategy.md	historic
 docs/reviews/previous_reviews/jul_roadmap_vision_specs_critical_review.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/reviews/previous_reviews/jul_round5_remediation_2026-07-17.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/roadmap/README.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/secrets.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/secrets.md	reviewed	secret resolution/redaction/lint and rotation claims traced to config resolver and tests; benchmarks/Console E2E not independently replayed
 docs/security-posture.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/security-testing.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/service-discovery.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
