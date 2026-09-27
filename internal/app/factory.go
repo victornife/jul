@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"jul/internal/admin"
 	"jul/internal/auth"
 	"jul/internal/cache"
 	"jul/internal/clientaddr"
@@ -31,6 +32,9 @@ import (
 	"jul/internal/upstream"
 	"jul/internal/waf"
 )
+
+// newFirewall is waf.New, indirected so tests can count compilations.
+var newFirewall = waf.New
 
 // HandlerFactory holds the process-lifetime dependencies for the per-reload
 // handler-tree builder. All fields are set once at startup and read on every
@@ -69,6 +73,9 @@ type HandlerFactory struct {
 	liveModules   map[string]plugins.ModuleIdentity
 	liveResponse  map[string]bool
 	moduleChanges moduleChangeRecord
+	// liveWAF is the serving generation's compiled WAF policy (#440), also
+	// guarded by moduleMu.
+	liveWAF *admin.WAFEffectivePolicy
 }
 
 type moduleChangeRecord struct {
@@ -204,6 +211,7 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 		committed = true
 		f.publishPluginModules(0, gen.pluginModules)
 		f.publishPluginPhases(gen.pluginResponse)
+		f.publishWAF(0, gen.wafPolicy)
 		retirePrev = combineRetirement(retireHandlers, retiredEgress)
 	}
 	return handlers, retirePrev, nil
@@ -267,6 +275,7 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		f.PoolReg.Activate()
 		f.publishPluginModules(genID, gen.pluginModules)
 		f.publishPluginPhases(gen.pluginResponse)
+		f.publishWAF(genID, gen.wafPolicy)
 		f.mu.Unlock()
 		return snapshots, combineRetirement(retireHandlers, retiredEgress)
 	}
@@ -556,31 +565,44 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		return nil
 	}
 
-	// Firewalls are built once per reload, keyed by location scope. The
-	// effective policy for a location is its own [waf] override when set,
-	// otherwise the global [waf] policy. Building here means a rule-compile
-	// error (a bad SecLang file or CRS asset) fails the reload with a clear
-	// message instead of surfacing per request. In a lean build (no "waf"
-	// tag) waf.New is never reached because waf.Check already rejected the
-	// configuration at startup.
+	// Firewalls are built once per reload. The effective policy for a location
+	// is its own [waf] override when set, otherwise the global [waf] policy;
+	// every inheriting location shares one compiled global engine, so the
+	// generation enforces exactly one global rule set (#440). Building here
+	// means a rule-compile error (a bad SecLang file or CRS asset) fails the
+	// reload with a clear message instead of surfacing per request. In a lean
+	// build (no "waf" tag) waf.New is never reached because waf.Check already
+	// rejected the configuration at startup.
 	wafByScope := make(map[string]*waf.Firewall)
+	wafReport := newWAFReport(c)
+	var globalFW *waf.Firewall
 	for i := range c.Servers {
 		for j := range c.Servers[i].Locations {
 			loc := c.Servers[i].Locations[j]
 			wcfg, ok := EffectiveWAF(c, loc)
 			if !ok {
+				wafReport.unprotected(c.Servers[i], loc)
 				continue
 			}
-			fw, err := waf.New(ctx, wcfg, waf.Options{
-				Logger: f.Log,
-				Hooks:  waf.Hooks{OnEvent: f.Metrics.ObserveWAFEvent},
-			})
-			if err != nil {
-				return nil, fmt.Errorf("location %s: %w", WAFScope(c.Servers[i], loc), err)
+			fw := globalFW
+			if loc.WAF != nil || fw == nil {
+				var err error
+				fw, err = newFirewall(ctx, wcfg, waf.Options{
+					Logger: f.Log,
+					Hooks:  waf.Hooks{OnEvent: f.Metrics.ObserveWAFEvent},
+				})
+				if err != nil {
+					return nil, fmt.Errorf("location %s: %w", WAFScope(c.Servers[i], loc), err)
+				}
+				if loc.WAF == nil {
+					globalFW = fw
+				}
 			}
+			wafReport.protected(c.Servers[i], loc, fw.Info())
 			wafByScope[WAFScope(c.Servers[i], loc)] = fw
 		}
 	}
+	gen.wafPolicy = wafReport.finish(time.Now())
 	locWAF := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
 		fw := wafByScope[WAFScope(srv, loc)]
 		if fw == nil {

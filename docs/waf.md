@@ -35,6 +35,7 @@ engine or rule-set weight.
 - [Metrics](#metrics)
 - [Middleware ordering](#middleware-ordering)
 - [Operational notes](#operational-notes)
+- [Effective policy and provenance](#effective-policy-and-provenance)
 - [Limits](#limits)
 - [GA status](#ga-status)
 
@@ -311,6 +312,12 @@ the original, uncompressed request and response bodies.
 
 - **Reload-safe.** The WAF policy is compiled on startup and on every reload
   that reaches `Prepare`; a proven semantic no-op retains the current engine. A
+  policy with `directives_files`, or whose `inline_rules` include or load a file
+  (`Include`, `@pmFromFile`/`@pmf`, `@ipMatchFromFile`/`@ipMatchF`,
+  `@validateSchema`), is never treated as a no-op, so a reload always recompiles
+  it and picks up an in-place file edit. Every route that inherits the global
+  policy shares one compiled engine per generation.
+  A
   rule that fails to compile fails the reload with an error, so a bad rule never
   silently disables protection — the previous good configuration keeps serving.
   Each prepared reload compiles a fresh Coraza engine and drops the previous one; that
@@ -320,7 +327,9 @@ the original, uncompressed request and response bodies.
   and rerun locally with `make waf-churn`.
 - **Embedded CRS, no external assets.** With `crs_enabled` the rule set is
   compiled into the binary; there is nothing to ship or mount alongside it. The
-  CRS version is whatever the build pinned (see `go.mod`).
+  CRS version is whatever the build pinned (see `go.mod`) and is reported by
+  the Console from the embedded rule set itself (see below). Jul never updates
+  the rule set online: a CRS upgrade is a Jul release.
 - **Detect first.** Roll a new ruleset (or a paranoia bump) out in `detect` mode,
   watch `jul_waf_events_total` and the `waf rule matched` logs for false
   positives, tune with `SecRuleRemoveById`/allow-list rules, then switch to
@@ -330,6 +339,60 @@ the original, uncompressed request and response bodies.
 - **Console.** The Console **Status** and **Security** panels report *Web
   application firewall (WAF)* with the active mode and how many locations it
   covers, so you can confirm enforcement at a glance.
+
+## Effective policy and provenance
+
+`GET /api/security` (`status:read`) carries `waf_effective`, and the Security
+panel renders it as **Serving WAF policy** (#440). It answers "what is this
+serving generation actually enforcing?" from the compiled engines, recorded
+when the generation was prepared and published with it — it is never
+reconstructed from the on-disk configuration, so a staged, failed, aborted or
+not-yet-reloaded candidate never appears active.
+
+| Field | Source |
+| --- | --- |
+| `generation`, `compiled_at` | the serving handler generation and when its policies were compiled |
+| `compiled`, `engine_version` | whether the binary links Coraza (the `waf` tag), and its module version from build info when present |
+| `embedded_crs_version` | read from the embedded rule set's own `SecComponentSignature "OWASP_CRS/…"`, i.e. what the binary actually embeds; `""` without the `waf` tag |
+| route coverage | routes inheriting the global policy, with their own override, turned off by an override, and not inspected at all |
+| `global`, `overrides[].policy` | one summary per compiled policy: mode, block status, CRS version, paranoia (flagged when it is the CRS default), request-body limit, response-body inspection, rule-file and rule counts, content identity |
+
+**Resolved server-side.** Inheritance is resolved before the Console sees it:
+an override replaces the global policy for its route, a disabled override is
+reported as such, and `request_body_limit_bytes` is authoritative because Jul
+applies it after the rule directives. The response-body limit is left to the
+engine and to any `SecResponseBodyLimit` in your rules (Coraza and the CRS
+recommended config both default it to 512 KiB), so it is reported as "not
+reported" rather than guessed. A paranoia level is what Jul set; a post-CRS
+rule file can still change the CRS variables.
+
+**Source classes.** Compiled rules (`SecRule`, `SecAction`, `SecMarker`) are
+counted by where the parser read them: `embedded` (the CRS and Coraza
+configuration shipped in the binary), `external` (files on disk), `inline`
+(`inline_rules`), and `generated` (Jul's own paranoia `SecAction`).
+
+**Content identity.** Rule files, the files they include and operator data
+files (`@pmFromFile`, `@ipMatchFromFile`, …) are read through a recording
+filesystem: each file is read once, hashed, and the parser is served exactly
+the hashed bytes, so there is no hash-then-reread window. `external_files` is
+the number of distinct files read and `external_digest` an aggregate
+`sha256:` digest over the per-file digests in read order. The same path with
+changed bytes therefore yields a new digest after the next reload; a file that
+no longer compiles fails the reload before Publish and the serving projection
+keeps the previous generation. The recorder property is fuzzed:
+`go test -tags waf -run='^$' -fuzz='^FuzzSourceRecorderServesHashedBytes$' -fuzztime=30s ./internal/waf`.
+
+On Windows, reference a data file from a rule file by a path relative to that
+rule file (`@pmFromFile bad-words.data`): Coraza treats only `/`-rooted paths
+as absolute, so a drive-letter path such as `C:/rules/bad-words.data` is joined
+onto the rule file's directory and fails to load.
+
+**Bounded and secret-safe.** No rule file path, rule text, rule message or
+matched data appears in `waf_effective`, and no new metric is added —
+`jul_waf_events_total` keeps its existing labels. The configuration projection
+(`waf_directives_files`, `waf_inline_rules`, `location_wafs`) is unchanged and
+remains the editor's seed. This is visibility only: there is no rule feed,
+online CRS update, marketplace or rule editor.
 
 ## Behaviour matrix
 

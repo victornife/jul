@@ -15,6 +15,7 @@ import (
 
 	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
 	"github.com/corazawaf/coraza/v3"
+	"github.com/corazawaf/coraza/v3/experimental"
 	corazahttp "github.com/corazawaf/coraza/v3/http"
 	"github.com/corazawaf/coraza/v3/types"
 	"github.com/jcchavezs/mergefs"
@@ -33,7 +34,8 @@ const Compiled = true
 
 // Firewall wraps a configured Coraza engine and exposes it as a middleware.
 type Firewall struct {
-	waf coraza.WAF
+	waf  coraza.WAF
+	info PolicyInfo
 }
 
 // New builds a Firewall from a WAF policy. It assembles the SecLang directive
@@ -52,11 +54,14 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 		return nil, err
 	}
 
+	rec := newSourceRecorder(mergefsio.OSFS)
+	var counter ruleCounter
 	wcfg := coraza.NewWAFConfig().
-		WithRootFS(rootFS(cfg)).
+		WithRootFS(rootFS(cfg, rec)).
 		WithDirectives(directives).
 		WithRequestBodyAccess().
 		WithErrorCallback(errorCallback(cfg, opts))
+	wcfg = experimental.WAFConfigWithRuleObserver(wcfg, func(r types.RuleMetadata) { counter.observe(r.File()) })
 	if limit := cfg.RequestBodyLimit.Bytes(); limit > 0 {
 		wcfg = wcfg.WithRequestBodyLimit(int(limit))
 	}
@@ -70,7 +75,46 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	}
 	// Wrap the engine so rules see Jul's canonical client address rather than
 	// Coraza's own parse of RemoteAddr (see clientaddr.go).
-	return &Firewall{waf: &clientAddrWAF{WAF: w}}, nil
+	return &Firewall{waf: &clientAddrWAF{WAF: w}, info: policyInfo(cfg, counter.counts, rec)}, nil
+}
+
+// Info describes the compiled policy this Firewall enforces.
+func (f *Firewall) Info() PolicyInfo { return f.info }
+
+func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder) PolicyInfo {
+	info := PolicyInfo{
+		Mode:                   "block",
+		BlockStatus:            cfg.BlockStatus,
+		CRSEnabled:             cfg.CRSEnabled,
+		RequestBodyLimitBytes:  cfg.RequestBodyLimit.Bytes(),
+		ResponseBodyInspection: cfg.ResponseBodyCheck,
+		InlineRules:            strings.TrimSpace(cfg.InlineRules) != "",
+		Rules:                  counts,
+	}
+	if cfg.Mode == "detect" {
+		info.Mode = "detect"
+	}
+	if info.BlockStatus == 0 {
+		info.BlockStatus = 403
+	}
+	for _, p := range cfg.DirectivesFiles {
+		if strings.TrimSpace(p) != "" {
+			info.RuleFilesConfigured++
+		}
+	}
+	if cfg.CRSEnabled {
+		info.CRSVersion = EmbeddedCRSVersion()
+		info.Paranoia = cfg.Paranoia
+		if cfg.Paranoia <= 0 {
+			info.Paranoia, info.ParanoiaDefault = 1, true
+		} else if info.Rules.Inline > 0 {
+			// buildDirectives emitted the paranoia SecAction (id 900000).
+			info.Rules.Inline--
+			info.Rules.Generated++
+		}
+	}
+	info.ExternalFiles, info.ExternalDigest = rec.identity()
+	return info
 }
 
 // Middleware returns the per-location middleware that runs each request (and,
@@ -91,13 +135,14 @@ func (f *Firewall) Close() error { return nil }
 // rootFS selects the filesystem the SecLang parser resolves Include directives
 // against. With the embedded CRS it merges the rule-set assets with the OS
 // filesystem so both "@owasp_crs/..." includes and user files on disk resolve;
-// otherwise it is the OS filesystem alone.
-func rootFS(cfg config.WAFConfig) fs.FS {
+// otherwise it is the OS filesystem alone. OS reads go through rec so the
+// exact compiled bytes are identified.
+func rootFS(cfg config.WAFConfig, rec *sourceRecorder) fs.FS {
 	var root fs.FS
 	if cfg.CRSEnabled {
-		root = mergefs.Merge(coreruleset.FS, mergefsio.OSFS)
+		root = mergefs.Merge(coreruleset.FS, rec)
 	} else {
-		root = mergefsio.OSFS
+		root = rec
 	}
 	return &normalizeFS{inner: root}
 }

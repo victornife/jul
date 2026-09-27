@@ -18,6 +18,7 @@ import { ClientAddressEditor } from "@/features/security/ClientAddressEditor.tsx
 import { WAFEditor } from "@/features/security/WAFEditor.tsx";
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { SecretHelper } from "@/features/security/SecretHelper.tsx";
+import { WAFEffectiveCard } from "@/features/security/WAFEffectiveCard.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading, MaturityBadge } from "@/components/ui.tsx";
 
@@ -106,8 +107,8 @@ function RBACStatusCell({ posture }: { readonly posture: RBACPosture | undefined
           <span className="flex items-start gap-2 text-jul-muted text-xs">
             <MaturityBadge level="preview" />
             <span>
-              Interactive token management — creating and revoking scoped tokens from the
-              Console — is planned. Principals, roles, and tokens are defined in{" "}
+              Interactive token management — creating and revoking scoped tokens from the Console —
+              is planned. Principals, roles, and tokens are defined in{" "}
               <span className="font-mono">[admin.rbac]</span> in the configuration today.
             </span>
           </span>
@@ -293,11 +294,7 @@ export function SecurityPanel() {
               }}
               className="ml-auto rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
             >
-              {locationWafs.length > 0
-                ? "Edit global"
-                : data.waf_enabled
-                  ? "Edit"
-                  : "Configure"}
+              {locationWafs.length > 0 ? "Edit global" : data.waf_enabled ? "Edit" : "Configure"}
             </button>
           </span>
         </Row>
@@ -395,6 +392,8 @@ export function SecurityPanel() {
           <EgressCell egress={data.egress} />
         </Row>
       </div>
+
+      <WAFEffectiveCard data={data} effective={data.waf_effective} />
 
       {editingWAF && (
         <WAFEditor

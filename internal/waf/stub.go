@@ -33,3 +33,13 @@ func (f *Firewall) Middleware() middleware.Middleware { return nil }
 
 // Close is a no-op for the stub.
 func (f *Firewall) Close() error { return nil }
+
+// Info is empty in the stub: there is no compiled policy to describe.
+func (f *Firewall) Info() PolicyInfo { return PolicyInfo{} }
+
+// EmbeddedCRSVersion is "" in a build without the "waf" tag: no rule set is
+// embedded.
+func EmbeddedCRSVersion() string { return "" }
+
+// EngineVersion is "" in a build without the "waf" tag: no engine is linked.
+func EngineVersion() string { return "" }
