@@ -29,7 +29,7 @@ bench-compare:
 	scripts/bench-compare.sh $(ARGS)
 
 fuzz:
-	scripts/fuzz.sh
+	FUZZ_TAGS="$(FULL_TAGS)" scripts/fuzz.sh
 
 # Core NGINX migration corpus: contract, importer assessment/candidate, and
 # real-Jul loopback replay. Does not require Docker.
