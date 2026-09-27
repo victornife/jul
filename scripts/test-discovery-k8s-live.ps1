@@ -30,11 +30,9 @@ Invoke-Step "Preflight checks" {
     kubectl get nodes -o wide | Out-File -Encoding ascii -FilePath (Join-Path $artifacts "k8s-nodes.txt")
 }
 
-Invoke-Step "Freeing Jul test listener port (:29080)" {
+Invoke-Step "Checking Jul test listener port (:29080)" {
   $conns = Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort 29080 -State Listen -ErrorAction SilentlyContinue
-  foreach ($conn in $conns) {
-    Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
-  }
+  if ($conns) { throw "Port 29080 is in use; stop its owner yourself or choose another test host" }
 }
 
   $script:hostIP = $null

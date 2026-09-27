@@ -134,11 +134,24 @@ Replace `<file>` with the archive you downloaded.
 
 **Checksum:**
 
+Each per-archive `.sha256` asset contains only the hash; `SHA256SUMS` has the
+usual hash-plus-filename lines. Replace `<file>` with the downloaded archive:
+
 ```bash
-# Linux / macOS
-sha256sum -c <file>.sha256          # or verify against SHA256SUMS
-# Windows (PowerShell)
-(Get-FileHash <file> -Algorithm SHA256).Hash -eq (Get-Content <file>.sha256)
+# Linux
+test "$(sha256sum "<file>" | awk '{print $1}')" = "$(cat "<file>.sha256")"
+# macOS
+test "$(shasum -a 256 "<file>" | awk '{print $1}')" = "$(cat "<file>.sha256")"
+```
+
+The `test` command exits nonzero on a mismatch. On Windows (PowerShell), use:
+
+```powershell
+$archive = '<file>'
+$expected = (Get-Content "$archive.sha256" -Raw).Trim()
+if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $expected) {
+    throw 'Archive checksum mismatch'
+}
 ```
 
 **Build provenance + SBOM** (needs the [GitHub CLI](https://cli.github.com/)):

@@ -1147,7 +1147,8 @@ Script: `scripts/test-zero-config.ps1`
 > **2026-09-27 harness correction:** the current script uses a temporary site,
 > repository-relative paths and only stops its own child process. The original
 > contained a machine-specific path and force-stopped any owner of port 18080.
-> The dated outcome below has not been replayed on Windows by this amendment.
+> The current strict-warning exit is 2, not the historical exit 1 stated below.
+> The dated outcome has not been replayed on Windows by this amendment.
 
 - `jul run --serve testdata/www --listen 127.0.0.1:18080` → returns 200 for `/`
 - `jul lint -config burn-in-phase2a.toml` → 0 errors, 0 warnings (admin token uses `${env:JUL_ADMIN_TOKEN}`)

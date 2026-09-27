@@ -207,6 +207,7 @@ internal/observability/**; internal/storagefs/**	not reviewed	metric contract te
 internal/observability/metric_contract_test.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/docs-check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/semantic_drift.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+scripts/test-discovery-k8s-live.ps1	reviewed	unsafe port-owner kill replaced with a conflict error; live Kubernetes/PowerShell execution not available
 scripts/test-nginx-importer.ps1	reviewed	fixed expected exit 3, JSON status and candidate assertions traced to Linux importer fixture; Windows execution pending CI
 scripts/test-zero-config.ps1	reviewed	removed private workstation path and unrelated process kill; zero-config/lint assertions traced to CLI; Windows execution pending CI
 scripts/test_docs_check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified

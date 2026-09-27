@@ -50,9 +50,23 @@ log_level = "info"
 enabled = true
 listen = "127.0.0.1:9090"
 token = "literal-test-only-secret"
+
+[[servers]]
+listen = "127.0.0.1:18081"
+[[servers.locations]]
+match = { type = "prefix", path = "/" }
+root = "."
 '@ | Set-Content -Path $badPath
+    & $jul check -config $badPath
+    Assert-ExitCode 0 'literal-secret fixture preflight'
+    $diagnostics = & $jul lint -json -config $badPath | ConvertFrom-Json
+    Assert-ExitCode 0 'literal-secret advisory lint'
+    if (-not ($diagnostics.warnings | Where-Object { $_.field -eq '[admin].token' -and $_.severity -eq 'warning' })) {
+        throw 'literal admin token warning was not reported'
+    }
     & $jul lint -strict -quiet -config $badPath
-    Assert-ExitCode 1 'strict quiet lint with literal test secret'
+    Assert-ExitCode 2 'strict quiet lint with literal test secret'
+    $global:LASTEXITCODE = 0 # expected nonzero native result must not fail this PowerShell step
     Write-Host 'Windows zero-config and lint journey passed'
 } finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
