@@ -14,13 +14,13 @@
 | Config | [jul.toml](jul.toml) |
 | Metrics | [metrics/samples.jsonl.gz](metrics/samples.jsonl.gz) (5s interval), [metrics/metrics-manifest.json](metrics/metrics-manifest.json), [summary](metrics-summary.md) |
 | Client results | `load-*.jsonl` (one line per second) |
-| Events | [events.log](events.log) |
+| Events | [events.log.gz](events.log.gz) |
 | Snapshots | [snapshots/](snapshots/) |
 | Reproduce | `scripts/fault-evidence.sh mem` |
 
 ## Result
 
-See events.log, snapshots (memory.events), load-*.jsonl and metrics-summary.md; analysis in docs/soak-evidence.md.
+See events.log.gz, snapshots (memory.events), load-*.jsonl and metrics-summary.md; analysis in docs/soak-evidence.md.
 
 ## Exploratory run — kernel OOM kill (recorded, not graceful degradation)
 

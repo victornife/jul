@@ -70,9 +70,10 @@ Short dedicated runs, not a 24 h soak (#422 explicitly does not require one).
 Each profile ran on a fresh Jul process built from `a2e07d76` (tree `894f99d9`)
 with `scripts/fault-evidence.sh <profile>` (see
 [soak-procedures.md](soak-procedures.md#focused-host-fault-evidence-422)); every
-directory carries `MANIFEST.md`, config, `events.log`, per-second client
+directory carries `MANIFEST.md`, config, `events.log.gz`, per-second client
 results, a retained 5 s metrics series with `metrics-manifest.json` (SHA-256)
-and `SHA256SUMS`. Host: aarch64, 12 CPUs, 15 GiB, Linux 6.18 (WSL2), cgroup v2.
+and `SHA256SUMS`. The logs were gzip-compressed (`gzip -n9`, lossless) after
+recording and `SHA256SUMS` regenerated; the harness now does this itself. Host: aarch64, 12 CPUs, 15 GiB, Linux 6.18 (WSL2), cgroup v2.
 
 | Profile | Evidence | Fault | Outcome |
 | --- | --- | --- | --- |
