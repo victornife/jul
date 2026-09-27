@@ -124,21 +124,36 @@ CacheDirectory=jul               # /var/cache/jul
 LogsDirectory=jul                # /var/log/jul
 ```
 
-Seed the initial config, then start:
+Before seeding the config, choose an actual static root or running backends.
+The repository's `server.toml` is a multi-service example that expects
+`/srv/www/example` and two local backends; copying it alone does not create
+those dependencies. For a minimal static route, use the
+[getting-started example](getting-started.md) and point its root at a readable
+directory outside the unit's protected home paths. Set
+`[global].config_authority = "managed"` to make this the editable shape, and
+enable `[admin]` with a properly provisioned token before relying on Console
+Apply. `jul check` does not verify the existence of a static root.
+
+After preparing that config and its content or backends, seed and start:
 
 ```sh
 sudo install -D -m600 server.toml /etc/jul/server.toml
 sudo systemctl enable --now jul.service
 ```
 
-The admin console can now apply changes and roll back from history.
+Console Apply and history rollback are available only when admin access is
+enabled, the config declares `managed` authority, and the unit can write the
+config and history directories. Verify those operations in the running service
+before treating the deployment as editable.
 
 ### Read-only — `jul-readonly.service`
 
 Pins the config: `/etc/jul` is mounted `ReadOnlyPaths`, so an admin "Apply" is
 rejected. It uses a **static** service user (a dynamic UID changes between boots,
-which is awkward for an operator-owned config file). Create the user and seed the
-immutable config:
+which is awkward for an operator-owned config file). Set
+`[global].config_authority = "file_owned"` explicitly in your deployment
+config (the omitted default has the same effect), provision its static content
+and backends as above, then create the user and seed the immutable config:
 
 ```sh
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin jul
@@ -237,7 +252,13 @@ Start-Service jul
 ```
 
 It creates `C:\ProgramData\jul\{history,cache,logs}` and grants the service
-account **modify** there and **read** on the config; ordinary users get neither.
+account **modify** there and **read** on the config. The installer does not
+remove inherited or pre-existing access for other users; review the final ACLs
+on the data directory and any secret-bearing config before starting a service
+that depends on their confidentiality. The supplied `server.toml` also needs
+real static content/backends, and editable Console use requires
+`[global].config_authority = "managed"`, an enabled admin listener and a
+provisioned token.
 Point `servers.tls.acme.cache_dir`, the disk cache, the access-log file sink, and
 `history_dir` at the matching subdirectories.
 

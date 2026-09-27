@@ -42,7 +42,7 @@ cmd/jul/cli.go	reviewed	lint exit and check stateless-preflight/help claims trac
 cmd/jul/main.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 cmd/jul/remote_cli.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 deploy/docker/server.toml	reviewed	managed authority and access-log comment compared to parser/admin tests; checked with console-tagged CLI; container operation unverified
-deploy/windows/install-service.ps1	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+deploy/windows/install-service.ps1	reviewed	native command failure handling and ACL grants inspected and corrected; inherited ACL restriction and elevated service execution not platform-verified
 dev-server.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 docs/abi.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/accessibility.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
@@ -93,7 +93,7 @@ docs/config-value-contract.json	not reviewed	structural link/TOML checks where a
 docs/configuration.md	reviewed	combined example prerequisites, check/startup boundary and CLI JSON severity/exit table traced to source and real checks; remaining field sections need semantic review
 docs/console.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/core-http.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/deployment.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/deployment.md	reviewed	Docker authority/health and systemd/Windows provisioning claims compared to shipped config and units; platform service startup/ACLs not executed
 docs/diagnostics.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/egress.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/feature-status.yaml	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
