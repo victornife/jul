@@ -193,6 +193,24 @@ failed) with the bounded reason — never `0 B` or a fabricated percentage. See
 [observability.md](observability.md#jul-owned-storage-headroom-437) for the
 path-resolution rules.
 
+#### Diagnostics guidance (#445)
+
+The last resource section, **Diagnostics guidance**, turns the readings above
+into "what to collect next" using Jul's existing primitives only — gated
+`/debug/pprof/`, `jul doctor`, `jul support-bundle` and Operations. Each card
+(CPU, memory, goroutines, file descriptors, storage) carries a text badge
+(**Elevated now** / **Within hints** / **Not judged**), the observation in
+numbers, and bounded next steps; elevated cards sort first. Memory guidance
+keeps RSS and Go heap apart and says explicitly when most memory is outside
+the heap (not a Go heap leak). The section states that it is guidance, not a
+diagnosis, and collects nothing.
+
+A profile card shows a copyable `curl` command (with a `$JUL_ADMIN_TOKEN`
+placeholder, never the Console's own credential) only when the server reports
+`pprof_enabled` and the identity holds `admin:manage`; otherwise it says why
+not. The server's `admin.pprof`, permission and transport gates remain the
+authority. See [diagnostics.md](diagnostics.md#console-diagnostics-guidance-445).
+
 #### Expanded chart view
 
 Click or press Enter on any sparkline card to open the expanded chart:

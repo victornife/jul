@@ -4,6 +4,7 @@
 package observability
 
 import (
+	"runtime"
 	"testing"
 	"time"
 )
@@ -233,5 +234,12 @@ func TestSnapshotConcurrentPollersNeverNegative(t *testing.T) {
 	}
 	for i := 0; i < 20; i++ {
 		<-done
+	}
+}
+
+// GoMaxProcs is reported as scheduler context for CPU guidance (#445).
+func TestSnapshotReportsGoMaxProcs(t *testing.T) {
+	if got := NewMetrics().Snapshot().GoMaxProcs; got != float64(runtime.GOMAXPROCS(0)) || got < 1 {
+		t.Fatalf("GoMaxProcs = %v, want %d", got, runtime.GOMAXPROCS(0))
 	}
 }

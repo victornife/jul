@@ -331,9 +331,13 @@ of a new dependency is visible before it is merged.
 ## Interpreting results for capacity planning
 
 1. **Find your bottleneck benchmark.** If `BenchmarkJWTValidate` dominates, JWT verification is your ceiling. If `BenchmarkPoolPick` dominates, backend selection or health-check frequency is the limit.
-2. **Profile in production.** Build with `pprof` and collect CPU/memory profiles under load:
+2. **Profile in production.** The admin listener serves the Go profiler at
+   `/debug/pprof/` (on by default, `[admin] pprof`), behind the `admin:manage`
+   permission and the TLS-or-loopback transport gate. Collect CPU/memory
+   profiles under load with an admin credential:
    ```bash
-   curl http://127.0.0.1:9090/debug/pprof/profile?seconds=30 > cpu.prof
+   curl -fsS -H "Authorization: Bearer $JUL_ADMIN_TOKEN" -o cpu.prof \
+     "http://127.0.0.1:9090/debug/pprof/profile?seconds=30"
    ```
 3. **Correlate with metrics.** `jul_http_request_duration_seconds` and `jul_upstream_probe_duration_seconds` show real-world latency. Benchmarks show ideal-world overhead; the gap is usually I/O wait, lock contention, or GC.
 

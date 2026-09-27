@@ -391,6 +391,9 @@ export const StatsSnapshotSchema = z.object({
   goroutines: z.number().optional(),
   openFDs: z.number().optional(),
   maxFDs: z.number().optional(),
+  // goMaxProcs is the Go scheduler parallelism limit — context for CPU
+  // guidance (#445), not a percentage denominator. 0/absent = not reported.
+  goMaxProcs: z.number().optional(),
   httpResponseBytesTotal: z.number().optional().default(0),
   cacheTiers: z.array(CacheTierOccupancySchema).optional(),
   upstreamWorstActive: PoolPressureSchema.optional(),
@@ -463,6 +466,9 @@ export const AdminRuntimeStatusSchema = z.object({
   last_upload_rejection: z.string().optional(),
   history_keep: z.number().int().nonnegative().optional().default(0),
   history_retention_health: z.string().optional().default("unknown"),
+  // pprof_enabled is the admin generation's admin.pprof (#445); absent from
+  // older servers, which the Console treats as "not known" (no action shown).
+  pprof_enabled: z.boolean().optional(),
   rate_limit_read_per_min: z.number().int(),
   rate_limit_write_per_min: z.number().int(),
   rate_limit_apply_per_min: z.number().int(),

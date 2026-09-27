@@ -39,6 +39,9 @@ type AdminRuntimeStatus struct {
 	LastUploadRejection    string `json:"last_upload_rejection,omitempty"`
 	HistoryKeep            int    `json:"history_keep"`
 	HistoryRetentionHealth string `json:"history_retention_health"`
+	// PprofEnabled is this generation's admin.pprof. The profiler still
+	// requires admin:manage and secure transport on every request (#445).
+	PprofEnabled bool `json:"pprof_enabled"`
 
 	RateLimitReadPerMin   int    `json:"rate_limit_read_per_min"`
 	RateLimitWritePerMin  int    `json:"rate_limit_write_per_min"`
@@ -109,6 +112,7 @@ func (s *Server) adminRuntimeStatus(r *http.Request) *AdminRuntimeStatus {
 		UploadDirectoryHealth:  health,
 		HistoryKeep:            snap.cfg.HistoryKeep,
 		HistoryRetentionHealth: historyHealth,
+		PprofEnabled:           pprofEnabled(snap.cfg),
 		RateLimitReadPerMin:    policy.readPerMin,
 		RateLimitWritePerMin:   policy.writePerMin,
 		RateLimitApplyPerMin:   policy.applyPerMin,

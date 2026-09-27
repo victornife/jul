@@ -5,6 +5,7 @@ package observability
 
 import (
 	"math"
+	"runtime"
 	"sort"
 	"time"
 
@@ -84,6 +85,11 @@ type StatsSnapshot struct {
 	// Console must render "unavailable", never "N / 0" or a fake percentage.
 	OpenFDs *float64 `json:"openFDs,omitempty"`
 	MaxFDs  *float64 `json:"maxFDs,omitempty"`
+	// GoMaxProcs is the Go scheduler's parallelism limit (GOMAXPROCS, which
+	// honours a cgroup CPU limit). It bounds Go code, not the process — cgo and
+	// syscalls can exceed it — so it is guidance context, not a percentage
+	// denominator (#445).
+	GoMaxProcs float64 `json:"goMaxProcs"`
 
 	// HTTPResponseBytesTotal is the cumulative jul_http_response_bytes_total
 	// counter: HTTP response-body bytes written to clients, after
@@ -253,6 +259,7 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 	}
 
 	snap.CPUCores = m.cpuRate(haveCPU, cpuSeconds)
+	snap.GoMaxProcs = float64(runtime.GOMAXPROCS(0))
 	snap.CacheTiers = cacheTierOccupancy(m.cacheTierSnapshot())
 	snap.Storage, snap.StorageHints = m.storageSnapshot()
 	snap.UpstreamWorstActive, snap.UpstreamWorstPending, snap.UpstreamNoEligible, snap.UpstreamBudgetExhausted =
