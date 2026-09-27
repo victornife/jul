@@ -89,7 +89,7 @@ func BuildAccessSinks(cfg config.AccessLogConfig, base *slog.Logger) (sinks []mi
 				MaxBackups: cfg.RotateKeep,
 				LocalTime:  true,
 			}
-			sinks = append(sinks, middleware.NewSlogSink(slog.New(accessHandler(&failureReportingWriter{w: lj, log: base, sink: "file"}, cfg.Format))))
+			sinks = append(sinks, middleware.NewSlogSink(slog.New(accessHandler(&failureReportingWriter{w: lj, log: base, sink: "file", health: &AccessLogFileWriteHealth}, cfg.Format))))
 			closers = append(closers, lj)
 		case "syslog":
 			w, serr := newSyslogWriter()
@@ -121,10 +121,20 @@ type failureReportingWriter struct {
 	sink     string
 	limit    logthrottle.Limiter
 	failures atomic.Int64
+	// health, when set, is the process-lifetime write health surfaced in the
+	// storage headroom view (#437).
+	health *WriteHealth
 }
 
 func (f *failureReportingWriter) Write(p []byte) (int, error) {
 	n, err := f.w.Write(p)
+	if f.health != nil {
+		if err != nil {
+			f.health.Fail()
+		} else {
+			f.health.OK()
+		}
+	}
 	if err != nil {
 		total := f.failures.Add(1)
 		if f.log != nil && f.limit.Allow(accessWriteFailureLogInterval) {

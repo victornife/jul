@@ -420,6 +420,16 @@
       "state": "merged_release_pending"
     },
     {
+      "name": "jul_storage_bytes",
+      "type": "gauge",
+      "help": "Capacity of the filesystem holding a Jul-owned storage category, labeled by category (cache/access_log/audit_log/config/config_history/plugin_upload/acme) and kind (available/total). Absent when the platform cannot report it.",
+      "labels": [
+        "category",
+        "kind"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_stream_active_conns",
       "type": "gauge",
       "help": "Current active L4 stream connections/sessions, labeled by protocol (tcp/udp).",

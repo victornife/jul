@@ -339,6 +339,31 @@ export const PoolPressureSchema = z.object({
 });
 export type PoolPressure = z.infer<typeof PoolPressureSchema>;
 
+// StorageHeadroomSchema mirrors observability.StorageHeadroom (#437): the
+// advisory headroom of one Jul-owned storage category. It never carries a
+// path, mount, or device. A missing byte/ratio field means unavailable.
+export const StorageHeadroomSchema = z.object({
+  category: z.string(),
+  // ok | low | critical | unavailable | error; an unknown value renders as
+  // unavailable rather than failing the whole Overview parse.
+  state: z.string(),
+  reason: z.string().optional(),
+  availableBytes: z.number().optional(),
+  totalBytes: z.number().optional(),
+  availableRatio: z.number().optional(),
+  pendingCreation: z.boolean().optional(),
+  sharedWith: z.array(z.string()).optional(),
+  writeFailures: z.number().optional(),
+  writesFailing: z.boolean().optional(),
+});
+export type StorageHeadroom = z.infer<typeof StorageHeadroomSchema>;
+
+export const StorageHintsSchema = z.object({
+  lowRatio: z.number(),
+  criticalRatio: z.number(),
+});
+export type StorageHints = z.infer<typeof StorageHintsSchema>;
+
 export const StatsSnapshotSchema = z.object({
   available: z.boolean().optional(),
   uptimeSeconds: z.number(),
@@ -372,6 +397,8 @@ export const StatsSnapshotSchema = z.object({
   upstreamWorstPending: PoolPressureSchema.optional(),
   upstreamNoEligible: z.array(z.string()).optional(),
   upstreamBudgetExhausted: z.array(z.string()).optional(),
+  storage: z.array(StorageHeadroomSchema).optional(),
+  storageHints: StorageHintsSchema.optional(),
 });
 export type StatsSnapshot = z.infer<typeof StatsSnapshotSchema>;
 

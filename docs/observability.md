@@ -128,6 +128,7 @@ are never reset and previously recorded host-labeled series are not deleted.
 | `jul_reload_phase_duration_seconds` | Histogram | `outcome`, `phase` | Merged / release pending | Latency of individual reload phases (resolve/validate/lifecycle/change_assessment/prepare/stage_listeners/publish/activate), labeled by phase and outcome. A proven `no_change` reports only the phases that ran. |
 | `jul_reload_timeout_total` | Counter | `phase` | Merged / release pending | Configuration reloads that exceeded their deadline, labeled by the phase that timed out. |
 | `jul_reload_total` | Counter | `outcome`, `source` | Merged / release pending | Configuration reloads, labeled by source (admin/sighup/watch) and outcome (applied_live/applied_degraded/no_change/not_applied/saved_not_live). |
+| `jul_storage_bytes` | Gauge | `category`, `kind` | Merged / release pending | Capacity of the filesystem holding a Jul-owned storage category, labeled by category (`cache`/`access_log`/`audit_log`/`config`/`config_history`/`plugin_upload`/`acme`) and kind (`available`/`total`). Absent when the platform cannot report it. Never labeled by path, mount or device (#437). |
 | `jul_stream_active_conns` | Gauge | `proto` | Released `v1.32.0` | Current active L4 stream connections/sessions, labeled by protocol (tcp/udp). |
 | `jul_stream_backend_dial_failures_total` | Counter | `proto`, `reason` | Merged / release pending | L4 stream backend dial/connect failures, labeled by protocol (tcp/udp) and a bounded reason (timeout/refused/no_backend/other). The accompanying log line is throttled once a backend is already known to be down; this counter is not. |
 | `jul_stream_bytes_total` | Counter | `direction`, `proto` | Released `v1.32.0` | Bytes relayed by the L4 stream proxy, labeled by protocol (tcp/udp) and direction (up to backend / down to client). |
@@ -219,6 +220,75 @@ are *projected*, not a second telemetry stack.
   backend address, client identity, or a secret — the Overview capacity
   summary names only configured, operator-chosen pool identifiers, exactly
   like the existing resilience/health projections.
+
+### Jul-owned storage headroom (#437)
+
+`GET /api/stats` (`status:read`) carries a `storage` array and
+`storageHints`, and `/metrics` exports `jul_storage_bytes{category,kind}`, for
+the filesystems holding storage Jul itself is configured to write. This is
+deliberately not host disk monitoring: Jul never enumerates mounts, never
+crawls directory sizes, and inspects only these bounded categories:
+
+| Category | Measured location | Present when | Reload behavior |
+| --- | --- | --- | --- |
+| `cache` | `cache.disk_path` | cache enabled with a disk tier | restart-bound (startup value) |
+| `access_log` | `observability.access_log.file` | access log enabled with the `file` sink | follows the serving generation |
+| `audit_log` | `admin.audit_log_file` | durable audit sink configured | follows the admin runtime generation |
+| `config` | the `--config` file (and its managed-baseline marker beside it) | `config_authority = "managed"` | restart-bound |
+| `config_history` | `admin.history_dir` | admin enabled and managed authority | restart-bound |
+| `plugin_upload` | `admin.plugin_upload_dir` | uploads enabled | follows the admin runtime generation |
+| `acme` | every distinct `servers.*.tls.acme.cache_dir` | ACME enabled; the worst one is reported | restart-bound |
+
+**Path resolution.** A relative path is resolved against the process working
+directory, exactly as the owning subsystem opens it. The path is followed with
+`stat`, so symlinks are followed the way a write follows them. An existing file
+or directory is measured directly. A path that does not exist yet (for example
+a log directory created on first write) is measured at its nearest existing
+ancestor — the filesystem `MkdirAll`/create would land on — and flagged
+`pendingCreation`. Jul never creates a file or directory to discover capacity.
+A dangling symlink on that walk is reported `unavailable` / `path_unresolved`
+rather than guessing its target's filesystem; a permission error is `error` /
+`permission_denied` and any other stat failure `error` / `stat_failed` — a
+location Jul cannot stat is one it cannot write, so a parent's capacity is
+never substituted.
+
+**Semantics.** `availableBytes` is the space an unprivileged writer can still
+allocate (on Unix `f_bavail × f_frsize`, which excludes root-reserved blocks,
+so it can reach zero while `df` still shows a little free space; on Windows
+`GetDiskFreeSpaceEx`'s quota-aware free-to-caller bytes). `totalBytes` is the
+filesystem size. `availableRatio` is present only when both are real and the
+total is non-zero. Linux, macOS and FreeBSD use `statfs`; Windows uses
+`GetDiskFreeSpaceEx`, measuring the containing directory when the location is a
+file; any other platform reports `unavailable` / `unsupported_platform`, never
+zero. Categories on the same filesystem are measured with one capacity call
+(internally deduplicated by device number, or volume mount path on Windows) and
+list each other in `sharedWith`; the device/volume identity itself is never
+exposed.
+
+**States.** `ok`, `low` (below `storageHints.lowRatio`, 10% available),
+`critical` (below `storageHints.criticalRatio`, 5% available), `unavailable`
+and `error`. The thresholds are generic local guidance — 10% of a 4 TB volume
+is a lot of room, 10% of a 64 MB tmpfs is seconds of access logging — not
+SLOs. Low headroom never makes `/readyz` fail; a subsystem's actual write
+failures keep their existing failure semantics. For the cache disk tier, the
+access-log file sink and the durable audit sink, `writeFailures` (cumulative
+since start) and `writesFailing` (the most recent write failed) carry the
+subsystem's own signal so "low headroom" and "writes already failing" are never
+conflated.
+
+**Metric.** `jul_storage_bytes{category,kind}` has `kind` `available` or
+`total`; both labels are closed sets, and a value the platform cannot report is
+absent rather than `0`. It is never labeled by path, mount, device, hostname or
+filesystem UUID. Alert on `available / total` per category with a threshold
+suited to the volume, not on the Console's generic hints.
+
+**Cost.** Nothing polls in the background: capacity is read when `/api/stats`
+or `/metrics` is served. Per location that is one `stat` for an existing path
+(plus a `stat` and `lstat` per missing ancestor level), and one `statfs` per
+distinct filesystem. `BenchmarkProbe` (`internal/storagefs`) measures all seven
+categories on one filesystem at roughly 30µs per read on typical hardware —
+against a ~370µs `Snapshot()` and a 2s Console poll, so no caching layer was
+added (a cache would only serve stale headroom).
 
 ## OpenTelemetry tracing
 

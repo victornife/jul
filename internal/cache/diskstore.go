@@ -43,6 +43,8 @@ type diskStore struct {
 	writeFailLog logthrottle.Limiter
 	writeFails   atomic.Int64
 	reported     atomic.Int64
+	// failing is true while the most recent store failed (#437).
+	failing atomic.Bool
 }
 
 // diskWriteFailureLogInterval is the minimum spacing of write-failure warnings.
@@ -182,12 +184,16 @@ func (d *diskStore) set(key string, e *Entry) {
 	// is fsync'd and renamed over the target, so a reader or a restart never sees
 	// a half-written entry and the file is never world-readable.
 	if err := atomicfile.Write(d.path(hash), buf.Bytes(), 0o600); err != nil {
+		d.failing.Store(true)
 		total := d.writeFails.Add(1)
 		if d.writeFailLog.Allow(diskWriteFailureLogInterval) {
 			suppressed := total - d.reported.Swap(total) - 1
 			d.log.Warn("cache: disk write failed; entry not stored on disk", "dir", d.dir, "error", err, "failed_writes", total, "suppressed", suppressed)
 		}
 		return
+	}
+	if d.failing.Load() {
+		d.failing.Store(false)
 	}
 	size := int64(buf.Len())
 
