@@ -64,6 +64,29 @@ whether the duration meets the ADR-0005 minimum for that scope.
 
 ## Run log
 
+### 2026-09-27 — Storage headroom under the Wave-5 disk-exhaustion scenario (#437) — **executed on real Linux; advance signal present, write behavior unchanged, no path leak**
+
+A focused bounded run, not a soak, closing the #422 evidence loop that
+activated #437. `scripts/fault-evidence.sh storage` replays the exploratory
+failure — an access log on its **default 100 MB rotation** exhausting a private
+**48 MiB tmpfs** at thousands of requests per second — with the disk cache
+(16 MiB cap), durable audit log, managed config file and history on the same
+filesystem, and samples `GET /api/stats` every 0.5 s into
+`storage-headroom.jsonl`. Evidence:
+[2026-09-27-fault-storage](../soak-artifacts/2026-09-27-fault-storage/)
+built from `d493da1b` (`MANIFEST.md`, `storage-transitions.txt`, `storage-headroom.jsonl`, events,
+snapshots, retained 5 s metrics, `SHA256SUMS`). Same host as the #422 runs.
+
+| Question | Result |
+| --- | --- |
+| Headroom reported before exhaustion? | Yes. Every category showed real free/total bytes from the first sample (48.0 MiB free, `pendingCreation` for the not-yet-created access-log directory) and a monotone decline for ~11 s: available fell below 75% 11.2 s, 50% 9.0 s and 25% 4.5 s before `df` reached 0. Before #437 the first signal was the failure itself. |
+| Warning/critical transitions predictable? | Yes: `ok → low` at 8.8% available (1.7 s before exhaustion), `low → critical` at 2.4% (0.6 s before), then `writesFailing` on the cache and access-log categories at 0 bytes — in that order, for all five categories at once because they share one filesystem (each listed the other four in `sharedWith`). |
+| Is the generic hint early enough? | Not on a 48 MiB filesystem filling at ~3.5 MB/s: 10%/5% of 48 MiB is ~2 s of this workload. That is exactly why the hints are documented as generic and the bytes are exported: alert on `jul_storage_bytes` with a volume-appropriate threshold or a fill-rate prediction (see [observability.md](observability.md#jul-owned-storage-headroom-437)). |
+| Cache/write behavior unchanged? | Yes. 211 283 requests across the fill, flood and recovery loads, **0 client errors** (writes failing never failed a request); the disk tier stayed at its cap (127 files, 16 764 KiB); 2 throttled cache-write and 2 access-log failure reports (the #422 throttling); 0 temp leftovers. |
+| "Low headroom" vs "writes failing" distinct? | Yes. The audit, config and history categories were `critical` without `writesFailing` (nothing wrote to them); cache and access log were `critical` **and** `writesFailing` with their own counts (5 591 cache and 88 976 access-log write failures by the end). |
+| Path/device leak? | None: 0 occurrences of the tmpfs path in `/api/stats`, the `jul_storage_bytes` series and all 52 samples. |
+| Recovery | Truncating the access log (an operator action; Jul keeps its `O_APPEND` handle) returned every category to `ok` (65.8% available) at the next sample (65.0% after the recovery load); a 3 s light load cleared both `writesFailing` flags while keeping the cumulative counts. After a restart every category was `ok` with counts reset to 0. |
+
 ### 2026-09-26 — Focused host-fault evidence (#422): DNS, FD limit, cgroup CPU, cgroup memory, disk pressure — **executed on real Linux; four defects found and fixed, one OOM recorded**
 
 Short dedicated runs, not a 24 h soak (#422 explicitly does not require one).
