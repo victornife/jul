@@ -303,6 +303,9 @@ type SecurityProjection struct {
 	// per-location — the Security panel must not present the single global "Edit"
 	// as if it governed every route. Empty when only the global policy applies.
 	LocationWAFs []LocationWAFProjection `json:"location_wafs,omitempty"`
+	// WAFEffective is the serving generation's compiled WAF policy (#440),
+	// overlaid by the HTTP handler; the fields above describe configuration.
+	WAFEffective *WAFEffectivePolicy `json:"waf_effective,omitempty"`
 	// SecretRefs is the number of ${env:}/${file:} secret references in the
 	// configuration. The values themselves are never projected.
 	SecretRefs int `json:"secret_refs"`

@@ -627,6 +627,19 @@ func TestOpaqueReloadInputsFailClosed(t *testing.T) {
 		"location waf directives": func(c *config.Config) {
 			c.Servers[0].Locations[0].WAF = &config.WAFConfig{DirectivesFiles: []string{"location-rules.conf"}}
 		},
+		"waf inline include": func(c *config.Config) { c.WAF.InlineRules = "Include /etc/jul/extra.conf" },
+		"waf inline data file": func(c *config.Config) {
+			c.WAF.InlineRules = `SecRule ARGS "@pmFromFile /etc/jul/words.data" "id:1,deny"`
+		},
+		"waf inline pmf alias": func(c *config.Config) {
+			c.Servers[0].Locations[0].WAF = &config.WAFConfig{InlineRules: `SecRule ARGS "@pmf words.data" "id:1,deny"`}
+		},
+		"waf inline ip file": func(c *config.Config) {
+			c.WAF.InlineRules = `SecRule REMOTE_ADDR "@ipMatchF /etc/jul/ips.txt" "id:1,deny"`
+		},
+		"waf inline schema": func(c *config.Config) {
+			c.WAF.InlineRules = `SecRule REQUEST_BODY "@validateSchema /etc/jul/s.json" "id:1,deny"`
+		},
 		"backend CA": func(c *config.Config) {
 			c.Upstreams = []config.UpstreamConfig{{BackendTLS: &config.BackendTLSConfig{CAFile: "ca.pem"}}}
 		},
@@ -775,4 +788,15 @@ func TestServingChangeAssessmentFailsClosed(t *testing.T) {
 			t.Fatalf("assessment = %+v, want unknown_external_input", plan.ServingChange)
 		}
 	})
+}
+
+// Self-contained inline rules stay provable, so the no-op optimisation keeps
+// working for them (#440).
+func TestSelfContainedInlineWAFIsNotOpaque(t *testing.T) {
+	cfg := cfgWithReturn("127.0.0.1:1", http.StatusOK)
+	cfg.WAF.InlineRules = `SecRule ARGS:x "@streq y" "id:1,phase:1,deny"`
+	cfg.Servers[0].Locations[0].WAF = &config.WAFConfig{Enabled: true, CRSEnabled: true, InlineRules: `SecAction "id:2,pass"`}
+	if hasOpaqueReloadInputs(cfg) {
+		t.Fatal("inline rules without file references were treated as opaque")
+	}
 }

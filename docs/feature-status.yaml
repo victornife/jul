@@ -738,6 +738,30 @@ features:
     #437 extends the same view with advisory headroom for Jul-owned storage only (cache, access/audit log,
     managed config/history, plugin uploads, ACME cache) and the closed-label jul_storage_bytes gauge; no mount
     enumeration and no path/mount/device in any API or label. Focused bounded disk-pressure evidence, no soak.'
+- id: WAF-PROVENANCE
+  name: Serving WAF policy and provenance visibility
+  tags:
+  - waf
+  - console
+  maturity: Beta
+  delivery: merged
+  doc: waf.md
+  criteria:
+    1: true
+    2: true
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: null
+    9: true
+  notes: 'Additive visibility over the GA WAF (Y2-06, whose maturity it does not change): GET /api/security
+    waf_effective and the Console Serving WAF policy card (#440) report the serving generation''s compiled policies
+    (mode, embedded CRS version from the rule set signature, paranoia, body settings, rule counts by source class,
+    route coverage) and a sha256 content digest of the exact rule/data-file bytes compiled. Recorded at Prepare and
+    published with the generation. No paths, rule text or new metrics; no feed/updater/editor. Merged on main, not
+    yet in a tagged release; no dedicated soak (visibility only).'
 - id: WASM-ABI2
   name: WASM plugin response phase (jul-abi/v2)
   tags:

@@ -217,12 +217,31 @@ func hasOpaqueReloadInputs(c *config.Config) bool {
 			if loc.Auth != nil && loc.Auth.Basic != nil && loc.Auth.Basic.File != "" {
 				return true
 			}
-			if loc.WAF != nil && len(loc.WAF.DirectivesFiles) > 0 {
+			if loc.WAF != nil && wafHasOpaqueInputs(*loc.WAF) {
 				return true
 			}
 		}
 	}
-	return len(c.WAF.DirectivesFiles) > 0
+	return wafHasOpaqueInputs(c.WAF)
+}
+
+// wafFileTokens are the SecLang constructs that make the parser read a file:
+// Include, @pmFromFile/@pmf, @ipMatchFromFile/@ipMatchF and @validateSchema.
+var wafFileTokens = []string{"include", "fromfile", "@pmf", "@ipmatchf", "validateschema"}
+
+// wafHasOpaqueInputs reports a WAF policy whose compiled rules depend on files
+// on disk: rule files, or inline rules that include or load one (#440).
+func wafHasOpaqueInputs(w config.WAFConfig) bool {
+	if len(w.DirectivesFiles) > 0 {
+		return true
+	}
+	inline := strings.ToLower(w.InlineRules)
+	for _, tok := range wafFileTokens {
+		if strings.Contains(inline, tok) {
+			return true
+		}
+	}
+	return false
 }
 
 func backendTLSHasOpaqueInputs(tls *config.BackendTLSConfig) bool {
