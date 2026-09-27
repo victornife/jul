@@ -196,6 +196,24 @@ jobs:
             (Resolve-Path .\deploy\windows\install-service.ps1).Path,
             [ref]$tokens, [ref]$parseErrors) | Out-Null
           if ($parseErrors.Count -gt 0) { throw ($parseErrors -join [Environment]::NewLine) }
+      - name: package lean and full Windows profiles
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          foreach ($profile in @('lean', 'full')) {
+            .\scripts\build-release.ps1 -Version ci-smoke -Targets @('windows/amd64') -Profile $profile
+            $name = "jul-ci-smoke-windows-amd64-$profile"
+            $archive = Join-Path dist "$name.zip"
+            if (-not (Test-Path $archive)) { throw "Missing $archive" }
+            $extracted = Join-Path $env:RUNNER_TEMP "jul-release-$profile"
+            Expand-Archive -Path $archive -DestinationPath $extracted -Force
+            $package = Join-Path $extracted $name
+            foreach ($file in @('jul.exe', 'server.toml', 'install-service.ps1')) {
+              if (-not (Test-Path (Join-Path $package $file))) { throw "Missing $file in $name" }
+            }
+            & (Join-Path $package 'jul.exe') --version
+            if ($LASTEXITCODE -ne 0) { throw "$name binary failed to start" }
+          }
 
   race:
     name: test -race

@@ -208,13 +208,14 @@ internal/config/**; internal/lifecycle/**	not reviewed	generated contract checke
 internal/migrate/**; internal/upstream/**; internal/plugins/**; internal/waf/**	not reviewed	key release boundaries sampled; full protocol and failure matrices not independently replayed
 internal/observability/**; internal/storagefs/**	not reviewed	metric contract test and post-release classifications checked; platform telemetry/failure paths not exhaustively exercised
 internal/observability/metric_contract_test.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+scripts/build-release.ps1	reviewed	PowerShell Go tag argument and archive shape traced to CI package exercise; Windows lean/full result pending
 scripts/docs-check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/semantic_drift.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/test-discovery-k8s-live.ps1	reviewed	unsafe port-owner kill replaced with a conflict error; live Kubernetes/PowerShell execution not available
 scripts/test-nginx-importer.ps1	reviewed	exit 3, JSON status and candidate assertions passed in PR #482 Windows CI at da528885; full migration compatibility not implied
 scripts/test-zero-config.ps1	reviewed	repo-relative temp site, own-process cleanup, exact lint assertion passed in PR #482 Windows CI at da528885
 scripts/test_docs_check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-scripts/* (other operational and test scripts)	not reviewed	inventory aggregate for other scripts listed by rg --files scripts; comments and operational side effects need script-by-script review
+scripts/* (other operational and test scripts)	not reviewed	inventory aggregate excluding individually listed scripts; comments and operational side effects need script-by-script review
 server.everything.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 server.full.apps.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 server.full.local.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
