@@ -49,6 +49,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Fixed
 
+- **NGINX importer: an over-long `hash $cookie_…`/`$http_…` name is blocking, not a candidate that fails validation.** A name longer than Jul's 128-byte `upstreams.hash.name` limit was translated into a `consistent_hash` block that `jul check` then rejected; it is now reported as `NGX_UPSTREAM_HASH_KEY` blocking. Found by `FuzzParseNginxHashKey`; the input is kept as a regression seed.
+
 - **In-place edits to files referenced by inline WAF rules are no longer skipped as a no-op reload (#440).** A policy whose `inline_rules` `Include` a file or load one (`@pmFromFile`/`@pmf`, `@ipMatchFromFile`/`@ipMatchF`, `@validateSchema`) was treated as provably unchanged when the configuration was, so an edited data or rule file was not recompiled on reload. Such policies are now opaque reload inputs, like `directives_files`.
 - **Routes inheriting the global WAF policy share one compiled engine (#440).** The global policy was compiled once per inheriting location on every reload; it is now compiled once per generation, so every inheriting route enforces the identical rule set (and reloads with the CRS are proportionally cheaper).
 - **Profiling documentation matched the gated endpoint (#445).** `docs/benchmarks.md` showed an unauthenticated `curl` to `/debug/pprof/` that the `admin:manage` and transport gates refuse, and `docs/troubleshooting.md` equated a steady heap climb with a leak; both now describe the authenticated command and a two-profile comparison.
