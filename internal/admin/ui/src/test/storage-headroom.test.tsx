@@ -159,7 +159,7 @@ describe("StorageSection (#437)", () => {
     ).toBeInTheDocument();
     // An available count without a trustworthy state is not shown as free space.
     expect(within(card("Disk cache")).getByText("unavailable")).toBeInTheDocument();
-    const text = document.body.textContent ?? "";
+    const text = document.body.textContent;
     expect(text).not.toMatch(/NaN|undefined|0 B free|0\.0% available/);
     expect(screen.queryByText(/Low below/)).not.toBeInTheDocument();
   });
