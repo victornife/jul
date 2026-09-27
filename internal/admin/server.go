@@ -436,6 +436,10 @@ type Deps struct {
 	// preflight rejects an enabled WAF on a non-waf build.
 	WAFCompiled bool
 
+	// WAFEffective returns the WAF policy the serving handler generation
+	// enforces (#440). Nil omits waf_effective from /api/security.
+	WAFEffective func() *WAFEffectivePolicy
+
 	// EgressBlocked returns the bounded per-subsystem/reason tally of egress
 	// allow-list blocks for the Console Security panel (P4-01). Nil omits the
 	// recent-blocked breakdown (e.g. on a build/test without a live metrics

@@ -850,6 +850,59 @@ export const EgressProjectionSchema = z.object({
 });
 export type EgressProjection = z.infer<typeof EgressProjectionSchema>;
 
+// WAF effective policy (#440): what the serving handler generation enforces,
+// from the compiled engines — never the on-disk configuration. No rule file
+// path, rule text or rule message is carried.
+export const WAFPolicySummarySchema = z.object({
+  mode: z.string(),
+  block_status: z.number(),
+  crs_enabled: z.boolean(),
+  crs_version: z.string().optional(),
+  paranoia: z.number().optional(),
+  paranoia_default: z.boolean().optional(),
+  request_body_limit_bytes: z.number().optional(),
+  response_body_inspection: z.boolean(),
+  rule_files_configured: z.number(),
+  external_files: z.number(),
+  external_digest: z.string().optional(),
+  inline_rules: z.boolean(),
+  rules: z.object({
+    total: z.number(),
+    embedded: z.number(),
+    external: z.number(),
+    inline: z.number(),
+    generated: z.number(),
+  }),
+});
+export type WAFPolicySummary = z.infer<typeof WAFPolicySummarySchema>;
+
+export const WAFEffectivePolicySchema = z.object({
+  compiled: z.boolean(),
+  embedded_crs_version: z.string().optional(),
+  engine_version: z.string().optional(),
+  generation: z.number(),
+  compiled_at: z.string().optional(),
+  inheriting_routes: z.number(),
+  override_routes: z.number(),
+  disabled_override_routes: z.number(),
+  unprotected_routes: z.number(),
+  global_enabled: z.boolean(),
+  global: WAFPolicySummarySchema.optional(),
+  overrides: z
+    .array(
+      z.object({
+        listen: z.string(),
+        server_names: z.array(z.string()).optional(),
+        match_type: z.string().optional(),
+        path: z.string().optional(),
+        enabled: z.boolean(),
+        policy: WAFPolicySummarySchema.optional(),
+      }),
+    )
+    .optional(),
+});
+export type WAFEffectivePolicy = z.infer<typeof WAFEffectivePolicySchema>;
+
 export const SecurityProjectionSchema = z.object({
   auth_enabled: z.boolean(),
   client_auth: z.string().optional(),
@@ -890,6 +943,9 @@ export const SecurityProjectionSchema = z.object({
   // egress is the outbound egress allow-list posture (P4-01). Optional for
   // forward compatibility with servers that predate it.
   egress: EgressProjectionSchema.optional(),
+  // waf_effective is the serving generation's compiled WAF policy (#440),
+  // absent from servers that predate it.
+  waf_effective: WAFEffectivePolicySchema.optional(),
 });
 export type SecurityProjection = z.infer<typeof SecurityProjectionSchema>;
 

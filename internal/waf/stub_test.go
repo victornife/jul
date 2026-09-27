@@ -39,3 +39,12 @@ func TestLeanFirewallSurfaceIsNoOp(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 }
+
+func TestStubReportsNoPolicyOrEmbeddedRuleSet(t *testing.T) {
+	if (&Firewall{}).Info() != (PolicyInfo{}) {
+		t.Fatal("stub Info must be empty")
+	}
+	if EmbeddedCRSVersion() != "" || EngineVersion() != "" {
+		t.Fatal("a build without the waf tag embeds no CRS and links no engine")
+	}
+}

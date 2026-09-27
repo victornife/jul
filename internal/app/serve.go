@@ -402,6 +402,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		return out
 	}
 
+	// The serving generation's compiled WAF policy (#440), never the on-disk
+	// candidate.
+	deps.WAFEffective = f.WAFEffective
+
 	var configPath string
 	if ts, ok := src.(*config.TOMLSource); ok {
 		configPath = ts.Path

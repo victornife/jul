@@ -832,6 +832,17 @@ single uniform policy:
   detect-first), while a route that already overrides offers **Edit WAF
   override**. Both use the same structured patch ops and diff review, so an
   override can be added, tuned, or removed without leaving the route surface.
+- The read-only **Serving WAF policy** card (#440) shows what the serving
+  generation actually enforces, from the compiled engines: generation and
+  compile time, the linked Coraza version and the embedded CRS version read
+  from the rule set itself, route coverage (inheriting / own policy / turned
+  off / not inspected), and per policy the mode ("detect only — not blocking"
+  is spelled out), CRS paranoia (marked when it is the CRS default), request
+  body limit, response inspection, compiled-rule counts by source class and a
+  content digest of the rule files read from disk. It never shows a rule file
+  path or rule text, and it warns when the saved global configuration differs
+  from what is serving (a reload pending or not applied). See
+  [waf.md](waf.md#effective-policy-and-provenance).
 
 In a build without the `waf` tag the editors still work, but the apply preflight
 rejects a config that enables the WAF (globally or per location), so the Security

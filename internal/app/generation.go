@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync"
 
+	"jul/internal/admin"
 	"jul/internal/plugins"
 )
 
@@ -72,6 +73,8 @@ type Generation struct {
 	// pluginResponse reports, per plugin, whether its serving module can
 	// subscribe to the jul-abi/v2 response phase (ADR 0020).
 	pluginResponse map[string]bool
+	// wafPolicy is the compiled WAF policy of this generation (#440).
+	wafPolicy *admin.WAFEffectivePolicy
 }
 
 // Begin opens a new staging generation, starting the pool registry's staging
