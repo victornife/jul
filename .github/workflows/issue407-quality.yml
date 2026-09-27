@@ -172,8 +172,28 @@ jobs:
             base="origin/main"
           fi
           git worktree add --detach /tmp/jul407-base "$base"
-          (cd /tmp/jul407-base && go test ./internal/handler -run '^$' -bench '^BenchmarkProxyRoundTrip$' -benchmem -count=7 -benchtime=500ms) | tee /tmp/base.bench
-          go test ./internal/handler -run '^$' -bench '^BenchmarkProxyRoundTrip$' -benchmem -count=7 -benchtime=500ms | tee /tmp/head.bench
+          # Identical code cannot regress; measuring it only measures runner noise.
+          mapfile -t pkgs < <(go list -deps ./internal/handler | sed -n 's#^jul/##p')
+          if git diff --quiet "$base" HEAD -- "${pkgs[@]}" go.mod go.sum; then
+            echo "no change in ./internal/handler or its jul dependencies since ${base}; benchmark comparison skipped"
+            exit 0
+          fi
+          (cd /tmp/jul407-base && go test -c -o /tmp/base.test ./internal/handler)
+          go test -c -o /tmp/head.test ./internal/handler
+          : >/tmp/base.bench
+          : >/tmp/head.bench
+          # Interleave base and head (alternating which goes first) so runner
+          # frequency/neighbour drift during the job affects both equally.
+          bench() { (cd "$1/internal/handler" && "$2" -test.run '^$' -test.bench '^BenchmarkProxyRoundTrip$' -test.benchmem -test.benchtime=500ms) | tee -a "$3"; }
+          for i in 1 2 3 4 5 6 7; do
+            if [ $((i % 2)) -eq 1 ]; then
+              bench /tmp/jul407-base /tmp/base.test /tmp/base.bench
+              bench "$PWD" /tmp/head.test /tmp/head.bench
+            else
+              bench "$PWD" /tmp/head.test /tmp/head.bench
+              bench /tmp/jul407-base /tmp/base.test /tmp/base.bench
+            fi
+          done
           python3 - <<'PY'
           import re, statistics
           def samples(path):
