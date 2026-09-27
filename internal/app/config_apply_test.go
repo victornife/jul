@@ -1391,10 +1391,13 @@ func TestApplyTimeoutFinalizerDoesNotOverwriteLaterApply(t *testing.T) {
 		},
 		LiveSnapshot: func() server.LiveSnapshot {
 			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
-			cfg.Global.ReloadTimeout = config.Duration(50 * time.Millisecond * raceTimeScale)
+			// reload_timeout also bounds preflight, which must finish on a slow
+			// runner; A still times out because its finalizer blocks until released.
+			cfg.Global.ReloadTimeout = config.Duration(time.Second * raceTimeScale)
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
 		PlannedRestart: &PlannedRestartStore{},
+		waitMargin:     10 * time.Millisecond,
 	}
 
 	// Apply A times out. Its SubmitReload goroutine has entered the finalizer
@@ -1407,10 +1410,14 @@ func TestApplyTimeoutFinalizerDoesNotOverwriteLaterApply(t *testing.T) {
 		res, _ := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
 		resACh <- res
 	}()
-	<-finalizerEntered
-
-	// Wait for A to time out and release applyMu.
-	resA := <-resACh
+	var resA ApplyResult
+	select {
+	case <-finalizerEntered:
+		// Wait for A to time out and release applyMu.
+		resA = <-resACh
+	case resA = <-resACh:
+		t.Fatalf("apply A returned before submitting its reload: %+v", resA)
+	}
 	if !resA.OK {
 		t.Fatalf("apply A should have timed out with ok=true, got: %s", resA.Message)
 	}

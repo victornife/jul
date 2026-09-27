@@ -492,16 +492,17 @@ func TestScenarioMidBodyFailureIsNotRetried(t *testing.T) {
 
 // waitFor polls until cond holds or the test times out. Resilience state is
 // updated by other goroutines, so a bare read races the thing it is checking.
+// The bound only matters on failure; loaded Windows runners need the margin.
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatal("condition not reached within 3s")
+	t.Fatal("condition not reached within 10s")
 }
 
 // TLS identity failure, the fifth fault mode.
