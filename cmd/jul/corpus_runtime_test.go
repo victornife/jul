@@ -17,6 +17,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -707,9 +708,9 @@ func TestNGINXCorpusProxyProtocolRealE2E(t *testing.T) {
 	// startInstance imports a fresh copy of the fixture, points it at the
 	// shared backend, optionally overrides trusted_proxies to a
 	// universally-dialable CIDR, and starts a real Jul instance. Readiness
-	// only needs the OS-level TCP accept to be up (a plain, payload-less
-	// dial), since the PROXY-protocol admission check runs after accept and
-	// would otherwise never succeed for the deliberately-untrusted instance.
+	// is the server's own "listening" log for the address rather than a
+	// request, since the PROXY-protocol admission check would never admit one
+	// for the deliberately-untrusted instance.
 	startInstance := func(name string, trustedProxies []string) string {
 		t.Helper()
 		cfg := loadCorpusRuntimeCandidate(t, "proxy-protocol-runtime")
@@ -756,13 +757,13 @@ func TestNGINXCorpusProxyProtocolRealE2E(t *testing.T) {
 				t.Fatalf("%s: Jul exited during startup with code %d\nlogs:\n%s", name, code, logs.String())
 			default:
 			}
-			probe, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
-			if err == nil {
-				probe.Close()
+			// A bare dial is not proof: startup's PreflightListeners briefly
+			// listens on addr too, and a request queued there is reset.
+			if strings.Contains(logs.String(), "msg=listening addr="+addr+" ") {
 				lastErr = nil
 				break
 			}
-			lastErr = err
+			lastErr = fmt.Errorf("no listening log for %s yet", addr)
 			time.Sleep(20 * time.Millisecond)
 		}
 		if lastErr != nil {
