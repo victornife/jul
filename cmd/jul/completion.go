@@ -109,7 +109,7 @@ compdef _jul jul
 const fishCompletion = `# jul fish completion. Load with:  jul completion fish | source
 complete -c jul -f
 complete -c jul -n __fish_use_subcommand -a serve -d 'Run the server (explicit form)'
-complete -c jul -n __fish_use_subcommand -a check -d 'Full runtime preflight check'
+complete -c jul -n __fish_use_subcommand -a check -d 'Structural and stateless runtime preflight'
 complete -c jul -n __fish_use_subcommand -a doctor -d 'Run deterministic read-only diagnostics'
 complete -c jul -n __fish_use_subcommand -a support-bundle -d 'Write a bounded secret-safe local archive'
 complete -c jul -n __fish_use_subcommand -a lint -d 'Validate and report best-practice warnings'

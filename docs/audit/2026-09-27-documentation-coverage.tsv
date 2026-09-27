@@ -38,7 +38,7 @@ burn-in-stream.toml	not reviewed	parsed by make config-check if root/example; ru
 burn-in-waf.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 burn-in.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 cmd/jul/* (other CLI and help source files)	not reviewed	CLI help and representative commands sampled; remaining source comments/branches not exhaustively traced
-cmd/jul/cli.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+cmd/jul/cli.go	reviewed	lint exit and check stateless-preflight/help claims traced to implementation and runtime fixture; other CLI branches remain unreviewed
 cmd/jul/main.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 cmd/jul/remote_cli.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 deploy/docker/server.toml	reviewed	managed authority and access-log comment compared to parser/admin tests; checked with console-tagged CLI; container operation unverified
@@ -90,7 +90,7 @@ docs/compatibility.md	not reviewed	Targeted current/release claim corrected; ful
 docs/compression.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/config-lifecycle.yaml	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
 docs/config-value-contract.json	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/configuration.md	reviewed	combined example preflight/token and CLI JSON severity/exit table traced to cmd/jul/cli.go and real checks; remaining field sections need semantic review
+docs/configuration.md	reviewed	combined example prerequisites, check/startup boundary and CLI JSON severity/exit table traced to source and real checks; remaining field sections need semantic review
 docs/console.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/core-http.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/deployment.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
@@ -126,7 +126,7 @@ docs/plugins.md	reviewed	targeted release/status, navigation or source claims ch
 docs/ratelimit.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/release-candidates/v1.32.1-rc.1.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/release-candidates/v2.0.0-rc.1.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
-docs/release.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/release.md	reviewed	checksum format compared to release workflow; Linux zero-config install commands exercised against local binary, not packaged platform artifacts
 docs/reload-semantics.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
 docs/remote-cli.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/resource-ownership.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
@@ -164,7 +164,7 @@ docs/status.md	reviewed	targeted release/status, navigation or source claims che
 docs/stream-proxy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/stream.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/tls-acme.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/troubleshooting.md	reviewed	startup and reload claims checked against CLI help and generated lifecycle for corrected paths; remaining incident scenarios not replayed
+docs/troubleshooting.md	reviewed	startup/check claims compared to actual missing-root failure and CLI; reload claims sampled; remaining incident scenarios not replayed
 docs/unix-http-upstreams.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/upstreams.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/vision/README.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
@@ -215,4 +215,4 @@ scripts/* (other operational and test scripts)	not reviewed	inventory aggregate 
 server.everything.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 server.full.apps.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 server.full.local.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
-server.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+server.toml	reviewed	core sample comments on identity, egress scope and lifecycle checked against current guides/generated registry; parsed by config-check; commented optional examples not all executed

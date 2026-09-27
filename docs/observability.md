@@ -359,8 +359,12 @@ request all appear in the first and never in the second.
 
 ### Tracing limitations
 
-- Tracing settings are fixed at startup; changing them requires a restart.
-- A hot reload that changes tracing emits a warning and keeps the running tracer.
+- Tracing provider/exporter identity settings (`enabled`, `exporter`,
+  `endpoint`, `service_name`, `insecure`) require a restart. A hot reload that
+  changes them emits a warning and keeps the running tracer.
+- `observability.tracing.sample_ratio` hot-applies at successful Publish for
+  new root spans; in-flight traces and parent sampling decisions stay intact.
+  See the [generated lifecycle reference](generated/config-lifecycle.md).
 - The `insecure` flag disables TLS to the collector; use only in local/dev
   environments.
 

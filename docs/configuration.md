@@ -32,7 +32,10 @@ preflight rather than silently ignored.
 > and are authoritative over the field-level facts. **Schema validity is
 > necessary and not sufficient: Jul's runtime configuration validation
 > (`jul check`) remains authoritative**, and a document may satisfy the schema
-> while `jul lint` still reports an error-severity finding.
+> while `jul lint` still reports an error-severity finding. `jul check` validates
+> the configuration and stateless runtime prerequisites; it does not confirm
+> that external files and backends will exist when the server starts. Start the
+> server and exercise its routes before treating a deployment as verified.
 
 An illustrative combined configuration follows. To run it, provide
 `JUL_ADMIN_TOKEN` in the Jul process environment, create

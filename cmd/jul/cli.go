@@ -74,7 +74,7 @@ Usage:
   jul [flags]                          run the server (default)
   jul serve [-config f]                run the server (explicit form)
   jul check [-config f] [-json] [-quiet]
-                                       full runtime preflight check
+                                       structural and stateless runtime preflight
   jul healthcheck [-config f] [-addr host:port | -url u] [-ready] [-timeout d]
                                        probe the admin health endpoint (exit 0 healthy, 1 unhealthy)
   jul lint [-config f] [-strict] [-json] [-quiet]
@@ -485,10 +485,10 @@ func cmdServe(args []string) int {
 	return app.Serve(ctx, reloadSig, src, cfg, productName, version)
 }
 
-// cmdCheck performs a full runtime preflight of the configuration. It validates
-// structurally *and* dry-runs every component that could fail during serve/reload
-// (WAF compilation, auth initialisation, compression encoder availability, etc.).
-// Exit codes: 0 = ok, 1 = validation/runtime error.
+// cmdCheck validates structure and stateless runtime prerequisites, including
+// WAF, auth and compression build requirements. It does not prepare handlers,
+// open static roots, probe listeners or check live backends; startup can still
+// fail after a successful check. Exit codes: 0 = ok, 1 = validation error.
 func cmdCheck(args []string) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(stderr)

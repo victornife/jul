@@ -413,7 +413,9 @@ Windows. See [soak-procedures.md](soak-procedures.md).
 
 - `jul --version` — print the build version (from-source builds report
   `0.1.0-dev`; the real version is injected only by the release pipeline).
-- `jul check -config server.toml` — full runtime preflight (validates paths,
-  auth files, certs) without starting listeners.
+- `jul check -config server.toml` — structural and stateless runtime preflight
+  without starting listeners. It does not open static roots or probe live
+  backends; use `jul doctor -config server.toml` for configured-path and
+  certificate diagnostics, then start Jul and exercise the routes.
 - Metrics, tracing, and health endpoints: see
   [observability.md](observability.md).

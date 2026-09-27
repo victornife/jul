@@ -172,8 +172,14 @@ source, with no local signing keys involved.
 
 ## Installing
 
-Extract the archive, then run the binary against a config. The archive expands
-into a `jul_<ver>_<os>_<arch>_<profile>/` folder.
+Extract the archive. It expands into a
+`jul_<ver>_<os>_<arch>_<profile>/` folder. Create a page for a first run with
+zero-config mode; the bundled `server.toml` is a multi-service example, not a
+standalone site. It expects `/srv/www/example` and two backends at
+`127.0.0.1:3000` and `127.0.0.1:3001`, so adapt those dependencies before
+starting it.
+`jul check` validates configuration but does not prove that its static root
+exists at server startup.
 
 **Linux / macOS:**
 
@@ -181,8 +187,9 @@ into a `jul_<ver>_<os>_<arch>_<profile>/` folder.
 tar -xzf jul_<ver>_<os>_<arch>_<profile>.tar.gz
 cd jul_<ver>_<os>_<arch>_<profile>
 chmod +x ./jul
-./jul --config ./server.toml --check   # validate
-./jul --config ./server.toml           # run
+mkdir -p public
+printf '<h1>Hello from Jul.IA</h1>\n' > public/index.html
+./jul run --serve ./public --listen 127.0.0.1:8080
 ```
 
 **Windows (PowerShell):**
@@ -190,9 +197,15 @@ chmod +x ./jul
 ```powershell
 Expand-Archive jul_<ver>_windows_<arch>_<profile>.zip -DestinationPath jul
 Set-Location jul\jul_<ver>_windows_<arch>_<profile>
-.\jul.exe --config .\server.toml --check
-.\jul.exe --config .\server.toml
+New-Item -ItemType Directory -Force public | Out-Null
+Set-Content public\index.html '<h1>Hello from Jul.IA</h1>'
+.\jul.exe run --serve .\public --listen 127.0.0.1:8080
 ```
+
+Open `http://127.0.0.1:8080/` to confirm the page. For a real config, edit the
+sample's paths, backend addresses and feature prerequisites, run
+`jul check -config server.toml`, then start it and exercise its routes. See
+[Getting started](getting-started.md) for the step-by-step path.
 
 To run Jul.IA as a managed, hardened service (systemd, Docker, or a Windows
 service) with the right writable directories, follow
