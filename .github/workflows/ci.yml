@@ -76,6 +76,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # Retry transient module-proxy failures (seen: TLS handshake timeout on macOS).
+      - name: go mod download
+        shell: bash
+        run: for i in 1 2 3; do go mod download && exit 0; echo "go mod download failed (attempt $i)"; sleep $((i * 15)); done; exit 1
       - name: go test
         run: go test -tags "${{ matrix.tags }}" ./...
 
@@ -127,6 +131,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # Retry transient module-proxy failures (seen: TLS handshake timeout on macOS).
+      - name: go mod download
+        shell: bash
+        run: for i in 1 2 3; do go mod download && exit 0; echo "go mod download failed (attempt $i)"; sleep $((i * 15)); done; exit 1
       # A Windows lane catches platform-specific lifecycle bugs the Linux runners
       # miss: SO_REUSEADDR handling (internal/stream/reuseaddr_windows.go),
       # service integration (cmd/jul/service_windows.go), the Windows syslog stub,
@@ -155,6 +163,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # Retry transient module-proxy failures (seen: TLS handshake timeout on macOS).
+      - name: go mod download
+        shell: bash
+        run: for i in 1 2 3; do go mod download && exit 0; echo "go mod download failed (attempt $i)"; sleep $((i * 15)); done; exit 1
       # A macOS lane catches Darwin-specific socket and process lifecycle bugs:
       # kqueue vs epoll differences, file-descriptor limits, and any path logic
       # that diverges on macOS. Race is not run here; it is covered on the Linux
