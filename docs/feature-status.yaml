@@ -734,7 +734,10 @@ features:
     a new unlabeled jul_http_response_bytes_total counter (post-compression HTTP response-body bytes) and a bounded
     upstream/cache capacity-pressure summary. A field the platform cannot report is "unavailable", never a fabricated
     0 or percentage; aggregate/per-resource denominators are never mixed. Merged on main (PR #459), not yet in a
-    tagged release; no dedicated soak has been run (not required for this tranche per the programme authority).'
+    tagged release; no dedicated soak has been run (not required for this tranche per the programme authority).
+    #437 extends the same view with advisory headroom for Jul-owned storage only (cache, access/audit log,
+    managed config/history, plugin uploads, ACME cache) and the closed-label jul_storage_bytes gauge; no mount
+    enumeration and no path/mount/device in any API or label. Focused bounded disk-pressure evidence, no soak.'
 - id: WASM-ABI2
   name: WASM plugin response phase (jul-abi/v2)
   tags:
