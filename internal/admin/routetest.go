@@ -5,7 +5,6 @@ package admin
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -110,7 +109,11 @@ func (s *Server) handleRouteTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in routeTestRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&in); err != nil {
+	body, err := readBoundedBody(r, 1<<16)
+	if err == nil {
+		err = json.Unmarshal(body, &in)
+	}
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
