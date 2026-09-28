@@ -198,6 +198,9 @@ func Validate(c *Config) error {
 		if strings.TrimSpace(c.Admin.Listen) == "" {
 			errs = append(errs, errors.New("[admin] enabled but 'listen' is empty"))
 		}
+		if c.Admin.Token != "" && strings.TrimSpace(c.Admin.Token) == "" {
+			errs = append(errs, errors.New("[admin] token must not be whitespace only"))
+		}
 		if !isLoopbackListen(c.Admin.Listen) && c.Admin.Token == "" && !c.Admin.RBAC.Enabled {
 			errs = append(errs, errors.New("[admin] off-loopback listener requires a token or enabled RBAC; TLS alone does not authenticate API callers"))
 		}

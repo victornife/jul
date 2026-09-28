@@ -548,6 +548,9 @@ func TestValidateRequiresAuthenticationForExposedAdmin(t *testing.T) {
 	if err := Validate(base("0.0.0.0:9090", "secret")); err != nil {
 		t.Errorf("authenticated exposed admin rejected: %v", err)
 	}
+	if err := Validate(base("0.0.0.0:9090", "   ")); err == nil || !strings.Contains(err.Error(), "token must not be whitespace only") {
+		t.Errorf("whitespace admin token: got %v, want rejection", err)
+	}
 }
 
 func TestValidateMatch(t *testing.T) {
