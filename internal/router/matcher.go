@@ -56,7 +56,10 @@ func localRedirectTarget(target string) string {
 	if !strings.HasPrefix(target, "/") {
 		return target
 	}
-	return "/" + strings.TrimLeft(target, "/\\")
+	for len(target) > 1 && (target[1] == '/' || target[1] == '\\') {
+		target = "/" + target[2:]
+	}
+	return target
 }
 
 // selectLocation resolves a request to a location within a server, implementing
