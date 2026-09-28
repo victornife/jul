@@ -34,14 +34,18 @@ Authentication is a **core feature** — no build tag is required.
    identity provider — Auth0, Keycloak, Okta, AWS Cognito, Google, etc. all
    publish a JWKS document, usually at `/.well-known/jwks.json`.
 
-2. Validate the config:
+2. From this example directory, create the static root required by the public
+   route, then validate the config. `jul -check` opens configured static roots
+   and fails if `./public` does not exist:
 
    ```bash
+   mkdir -p public
+   printf '%s\n' 'JWT gateway ready' > public/index.html
    ../../jul -check -config jul.toml
    ```
 
-3. Start an upstream on `127.0.0.1:3000` (any app), create a `public/` folder
-   with an `index.html`, then start Jul:
+3. Start an upstream on `127.0.0.1:3000` (any app), then start Jul from this
+   directory:
 
    ```bash
    ../../jul -config jul.toml

@@ -242,6 +242,22 @@ jobs:
             $name = "jul-ci-smoke-windows-amd64-$profile"
             $archive = Join-Path dist "$name.zip"
             if (-not (Test-Path $archive)) { throw "Missing $archive" }
+            # The release workflow writes a bare SHA-256 hash per archive.
+            # Exercise the documented PowerShell verification on the actual ZIP
+            # and prove a changed archive is refused before extraction.
+            $checksum = "$archive.sha256"
+            (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() |
+              Set-Content -Path $checksum -NoNewline
+            $expected = (Get-Content $checksum -Raw).Trim()
+            if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $expected) {
+              throw 'Archive checksum mismatch'
+            }
+            $tampered = Join-Path $env:RUNNER_TEMP "$name-tampered.zip"
+            Copy-Item $archive $tampered
+            [System.IO.File]::AppendAllText($tampered, 'tampered')
+            if ((Get-FileHash $tampered -Algorithm SHA256).Hash -eq $expected) {
+              throw 'Modified archive was accepted by the checksum comparison'
+            }
             $extracted = Join-Path $env:RUNNER_TEMP "jul-release-$profile"
             Expand-Archive -Path $archive -DestinationPath $extracted -Force
             $package = Join-Path $extracted $name

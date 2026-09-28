@@ -4,7 +4,7 @@ path_or_surface	disposition	reason_and_limit
 .github/pull_request_template.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/admin-admission-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/auto04-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
-.github/workflows/ci.yml	reviewed	Windows first-run and native macOS package lane scoped; macOS archive verification pending CI; rest of CI not semantically certified
+.github/workflows/ci.yml	reviewed	Windows first-run, PowerShell checksum positive/negative and native macOS package lanes scoped; new checksum step pending CI; rest of CI not semantically certified
 .github/workflows/diagnostics-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/docker-deployment-e2e.yml	reviewed	shipped-image/default and managed loopback adoption/apply/rollback/restart passed in Docker CI at 357c371d
 .github/workflows/feature-soak.yml	not reviewed	new 20-second preflight and 3600-second feature jobs are defined; real execution and artifact review pending
@@ -187,7 +187,7 @@ examples/grpc-gateway/README.md	not reviewed	inventoried; full platform/operatio
 examples/grpc-gateway/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 examples/grpc-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/grpc-proxy/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
-examples/jwt-auth/README.md	reviewed	per-user limit fallback to canonical client address traced to RateKeyFunc; live issuer journey not exercised
+examples/jwt-auth/README.md	reviewed	per-user limit fallback traced to RateKeyFunc and static-root check prerequisite corrected against CLI preflight; live issuer journey not exercised
 examples/jwt-auth/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 examples/l4/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/l4/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value

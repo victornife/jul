@@ -37,6 +37,14 @@ workloads and dated qualifying runs. The historical v1.28.0 table below used
 | Local | `scripts/soak.sh` | configurable | stdout (see runs below) | ✅ Yes, if duration meets the minimum for the scope exercised |
 | Feature-specific Y1-08/Y1-09 candidate | PR change to `scripts/feature-soak.py` or its workflow, or manual workflow dispatch after it is on the default branch | 20s preflight, then 3600s per feature | `summary.json` plus server logs in the [feature soak workflow](../.github/workflows/feature-soak.yml) artifacts | ☐ Pending execution and evidence review; a green smoke is not qualifying |
 
+The [2026-09-28 PR preflight](https://github.com/victornife/jul/actions/runs/36438405287)
+passed at `3650e506054a829c8390256777baa1d35913dbd1`. Its retained
+`feature-soak-preflight` artifact reports 20.64 seconds, 394 static and 391
+proxy requests, four lint cycles, and 20 clean/blocking importer cycles in
+20.001 seconds. Both summaries identify the same built binary hash. This is
+**smoke evidence only**; the one-hour jobs and their artifacts need review
+before either post-GA criterion can be considered satisfied.
+
 All three scenarios are driven by the in-tree soak tests behind the `soak` build tag:
 
 - **proxy** — `TestSoak` ([internal/handler/soak_test.go](../internal/handler/soak_test.go)):
