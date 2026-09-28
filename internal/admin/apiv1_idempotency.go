@@ -158,9 +158,6 @@ func (s *Server) v1IdempotencyMetadata(r *http.Request, body []byte) (*v1Idempot
 		return nil, nil
 	}
 	key := strings.TrimSpace(values[0])
-	if key == "" {
-		return nil, nil
-	}
 	if !validV1IdempotencyKey(key) {
 		return nil, adminapi.Errorf(adminapi.CodeInvalidRequest,
 			"Idempotency-Key must be 8-128 ASCII characters from [A-Za-z0-9_-]").

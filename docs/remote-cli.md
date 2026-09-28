@@ -128,6 +128,8 @@ that need safe retry across process restarts should provide a stable job/deploy
 identity with `--idempotency-key`.
 The server rejects repeated `Idempotency-Key` fields before a mutation, so an
 intermediary cannot select a different key from the one bound by the ledger.
+An explicitly empty key is invalid; omit the header to request a mutation
+without replay binding.
 
 A prepared mutation freezes its method, path, query, content type, key and exact
 request body bytes before the first send. A contractually safe retry reuses
