@@ -168,8 +168,8 @@ docs/specs/year-3.md	not reviewed	structural link/TOML checks where applicable; 
 docs/specs/year-4.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/specs/year-5.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/status.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/stream-proxy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/stream.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/stream-proxy.md	reviewed	scoped authority-dependent SIGHUP/file-watch and L4 upstream-pool reuse/state claims traced to app/stream registry and tests; remaining stream protocol and platform behavior unreviewed
+docs/stream.md	reviewed	scoped SNI-only target validation and full UDP session-cap behavior traced to config validator and stream admission tests; remaining protocol, soak and platform assertions unreviewed
 docs/tls-acme.md	reviewed	HTTP-01 quick-start listener and redirect traced to ACME handler/example; CA versus OCSP egress and current mTLS lifecycle checked against runtime/manifest; public issuance and remaining guide claims not certified
 docs/troubleshooting.md	reviewed	startup/check claims compared to actual missing-root failure and CLI; reload claims sampled; remaining incident scenarios not replayed
 docs/unix-http-upstreams.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review

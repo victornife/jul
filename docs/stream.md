@@ -42,7 +42,7 @@ max_udp_sessions = 1024
 |-------|---------|---------|
 | `listen` | required | Bind address (`host:port`) |
 | `protocol` | `tcp` | `tcp` or `udp` |
-| `proxy_pass` | required | Backend: upstream name or literal `host:port` |
+| `proxy_pass` | — | Default backend: upstream name or literal `host:port`; optional when `sni_routes` has at least one target |
 | `connect_timeout` | `10s` | TCP backend dial deadline |
 | `idle_timeout` | `5m` | TCP connection idle timeout; UDP session idle reap |
 | `proxy_protocol` | `""` | `"in"`, `"out"`, `"both"` — HAProxy PROXY protocol |
@@ -58,7 +58,7 @@ deliberate rather than an oversight.
 | | Control | Scope | Over the limit |
 | --- | --- | --- | --- |
 | TCP | `[upstreams.resilience] max_active_requests` | **per pool** | The connection is closed |
-| UDP | `max_udp_sessions` on the `[[stream]]` block | **per listener** | The least recently used idle session is evicted |
+| UDP | `max_udp_sessions` on the `[[stream]]` block | **per listener** | Reclaim the least recently used **idle** session if one exists; otherwise drop the new datagram |
 
 At layer 4 a TCP connection is the unit of work, so `max_active_requests` counts
 **concurrent connections** and behaves exactly as it does for a request on any
