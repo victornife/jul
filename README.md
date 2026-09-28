@@ -200,28 +200,40 @@ Not sure which architecture you need?
 
 ## Quick start
 
-From the extracted folder (or the repo root if running from source):
+From the extracted folder (or the repo root if running from source), create a
+page and serve it on loopback:
 
 **Windows (PowerShell):**
 
 ```powershell
-.\jul.exe --config .\server.toml
+New-Item -ItemType Directory -Force public | Out-Null
+Set-Content public/index.html '<h1>Hello from Jul.IA</h1>'
+.\jul.exe run --serve .\public --listen 127.0.0.1:8080
 ```
 
 **Linux / macOS:**
 
 ```bash
-chmod +x ./jul
-./jul --config ./server.toml
+mkdir -p public
+printf '<h1>Hello from Jul.IA</h1>\n' > public/index.html
+./jul run --serve ./public --listen 127.0.0.1:8080
 ```
 
 **From source (Go installed):**
 
 ```bash
-go run ./cmd/jul --config server.toml
+mkdir -p public
+printf '<h1>Hello from Jul.IA</h1>\n' > public/index.html
+go run ./cmd/jul run --serve ./public --listen 127.0.0.1:8080
 ```
 
-Validate a configuration without starting the server:
+Open <http://127.0.0.1:8080/>. The bundled `server.toml` is a configuration
+template: its `/srv/www/example` static root and backend addresses must be
+adapted to your machine before starting it. See [Getting started](docs/getting-started.md)
+for a complete first config.
+
+After adapting the template and creating its static directory, validate it
+without starting the server:
 
 ```bash
 jul check -config server.toml

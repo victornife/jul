@@ -177,6 +177,27 @@ jobs:
       - name: go test
         run: go test -tags "${{ matrix.tags }}" ./...
 
+      # Exercise an archive from a clean extraction on the native macOS runner.
+      # The release job cross-compiles Darwin binaries on Linux; source tests
+      # alone do not prove the packaged binary starts and serves on Darwin.
+      - name: packaged macOS first run
+        shell: bash
+        run: |
+          set -euo pipefail
+          arch="$(go env GOARCH)"
+          name="jul_ci-smoke_darwin_${arch}_${{ matrix.profile }}"
+          mkdir -p "stage/$name" dist
+          CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" go build -trimpath \
+            -ldflags "-s -w -X main.version=ci-smoke" \
+            -tags "${{ matrix.tags }}" -o "stage/$name/jul" ./cmd/jul
+          cp README.md SECURITY.md server.toml "stage/$name/"
+          archive="dist/$name.tar.gz"
+          tar -C stage -czf "$archive" "$name"
+          shasum -a 256 "$archive" | awk '{print $1}' > "$archive.sha256"
+          unpack="$(mktemp -d)"
+          tar -xzf "$archive" -C "$unpack"
+          python3 scripts/macos-package-first-run.py "$unpack/$name" "$archive" "$archive.sha256"
+
   docs-first-run-windows:
     name: docs first run (Windows PowerShell)
     runs-on: windows-latest

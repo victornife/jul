@@ -4,7 +4,7 @@ path_or_surface	disposition	reason_and_limit
 .github/pull_request_template.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/admin-admission-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/auto04-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
-.github/workflows/ci.yml	reviewed	Windows lean/full jobs and new first-run PowerShell lane inspected; PR CI Windows documentation job succeeded at da528885; rest of CI not semantically certified
+.github/workflows/ci.yml	reviewed	Windows first-run and native macOS package lane scoped; macOS archive verification pending CI; rest of CI not semantically certified
 .github/workflows/diagnostics-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/docker-deployment-e2e.yml	reviewed	shipped-image/default and managed loopback adoption/apply/rollback/restart passed in Docker CI at 357c371d
 .github/workflows/discovery-k8s-kind.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
@@ -25,7 +25,7 @@ CHANGELOG.md	reviewed	targeted release/status, navigation or source claims check
 CONTRIBUTING.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 Dockerfile	reviewed	Docker CI exposed and verified fix for local gofast build-order error; default and managed journey passed at 357c371d
 Makefile	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-README.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+README.md	reviewed	targeted release/status and first-run commands checked against bundled template and zero-config CLI; remaining prose not certified
 SECURITY.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 burn-in-auth.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 burn-in-cache.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
@@ -148,7 +148,7 @@ docs/reviews/previous_reviews/jul_immediate_action_plan_2026-07.md	historical/co
 docs/reviews/previous_reviews/jul_protocol_adapters_product_strategy.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/reviews/previous_reviews/jul_roadmap_vision_specs_critical_review.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/reviews/previous_reviews/jul_round5_remediation_2026-07-17.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
-docs/roadmap/README.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/roadmap/README.md	reviewed	targeted release/status and first-run commands checked against bundled template and zero-config CLI; remaining prose not certified
 docs/secrets.md	reviewed	secret resolution/redaction/lint and rotation claims traced to config resolver and tests; benchmarks/Console E2E not independently replayed
 docs/security-posture.md	reviewed	secret-redaction floor, shared-token attribution, POSIX versus Windows ACL and editable write paths traced against code/guide; rest of threat matrix unreviewed
 docs/security-testing.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
@@ -212,7 +212,7 @@ internal/config/**; internal/lifecycle/**	not reviewed	generated contract checke
 internal/migrate/**; internal/upstream/**; internal/plugins/**; internal/waf/**	not reviewed	key release boundaries sampled; full protocol and failure matrices not independently replayed
 internal/observability/**; internal/storagefs/**	not reviewed	metric contract test and post-release classifications checked; platform telemetry/failure paths not exhaustively exercised
 internal/observability/metric_contract_test.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-scripts/build-release.ps1	reviewed	Windows lean/full archive exercise passed at 8249b732; secure helper staging and full-service archive passed at 2892f45b
+scripts/build-release.ps1	reviewed	Windows lean/full helper archive and installed service passed; Linux/macOS platform asset parity corrected, native helper packaging not exercised
 scripts/docs-check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/docker-deployment-e2e.py	reviewed	Docker default site/health and managed adoption/apply/rollback/restart passed at 357c371d; remote TLS untested
 scripts/systemd-deployment-e2e.py	reviewed	editable/read-only recovery passed at e450113d; stage/drift passed at 05a540be; non-loopback admin TLS extension pending CI

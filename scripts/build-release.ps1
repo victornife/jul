@@ -79,8 +79,9 @@ try {
         if ($os -eq "windows") {
             Copy-Item (Join-Path $root "deploy/windows/install-service.ps1") $stage
             Copy-Item (Join-Path $root "deploy/windows/new-secure-data-dir.ps1") $stage
-        } else {
+        } elseif ($os -eq "linux") {
             Copy-Item (Join-Path $root "deploy/systemd/jul.service") $stage
+            Copy-Item (Join-Path $root "deploy/systemd/jul-readonly.service") $stage
         }
 
         # Create an archive: .zip for Windows, .tar.gz for Linux.
