@@ -139,7 +139,7 @@ func (s *Server) writeInsecureTransport(w http.ResponseWriter, r *http.Request) 
 	_ = json.NewEncoder(w).Encode(adminapi.Envelope{Error: adminapi.Body{
 		Code: adminapi.CodeInsecureTransport,
 		Message: "This admin listener is neither TLS-terminated nor bound to loopback, so it will not authenticate or act on this request. " +
-			"Terminate TLS in front of the listener, or bind it to loopback and reach it through a tunnel.",
+			"Use TLS on the connection to Jul, or bind Jul to loopback and reach it through a local TLS proxy or tunnel.",
 		Details:   adminapi.Details{Required: requiredTransport},
 		RequestID: id,
 	}})
