@@ -7,7 +7,6 @@ package upstream
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -131,7 +130,7 @@ func (d *consulDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
 		return nil, fmt.Errorf("consul: unexpected status %s", resp.Status)
 	}
 	var entries []consulServiceEntry
-	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+	if err := decodeDiscoveryResponse(resp.Body, &entries); err != nil {
 		return nil, fmt.Errorf("consul: decode response: %w", err)
 	}
 	out := make([]Target, 0, len(entries))

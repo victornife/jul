@@ -9,7 +9,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -226,7 +225,7 @@ func (d *k8sDiscoverer) resolvePage(ctx context.Context, endpoint string) (k8sEn
 	if resp.StatusCode != http.StatusOK {
 		return list, fmt.Errorf("kubernetes: unexpected status %s", resp.Status)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+	if err := decodeDiscoveryResponse(resp.Body, &list); err != nil {
 		return list, fmt.Errorf("kubernetes: decode response: %w", err)
 	}
 	return list, nil
