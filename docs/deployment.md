@@ -188,8 +188,10 @@ unit's ownership, initial adoption, Apply, rollback and restart, then checks
 that the read-only unit serves traffic and refuses Apply without changing the
 file. It also stages a restart-bound admin history path, verifies activation
 after process restart, and checks that an external edit blocks managed Apply
-until explicit adoption. The test uses loopback admin HTTP and a temporary
-token; remote admin TLS and production certificates require separate verification.
+until explicit adoption. A final staged restart binds the admin listener to
+the runner's non-loopback address with a trusted temporary TLS certificate and
+checks that tokenless requests are denied. This is a disposable single-host
+TLS exercise; production certificates and network policy require separate verification.
 
 ### Verify the units
 

@@ -10,6 +10,7 @@ from pathlib import Path
 import secrets
 import shutil
 import socket
+import ssl
 import subprocess
 import tempfile
 import time
@@ -32,14 +33,18 @@ def port():
         return sock.getsockname()[1]
 
 
-def request(url, token=None, body=None, content_type=None):
+def request(url, token=None, body=None, content_type=None, ssl_context=None):
     headers = {}
     if token:
         headers["Authorization"] = "Bearer " + token
     if content_type:
         headers["Content-Type"] = content_type
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, data=body, headers=headers), timeout=5) as response:
+        # The runner may set an HTTP proxy for external traffic; its own
+        # non-loopback address must be contacted directly for the TLS check.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                             urllib.request.HTTPSHandler(context=ssl_context))
+        with opener.open(urllib.request.Request(url, data=body, headers=headers), timeout=5) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as error:
         return error.code, error.read()
@@ -49,7 +54,7 @@ def expect(status, actual, body):
     assert actual == status, f"HTTP {actual}, expected {status}: {body[:500]!r}"
 
 
-def wait_ready(unit, traffic, admin):
+def wait_ready(unit, traffic, admin, ssl_context=None):
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         state = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True).stdout.strip()
@@ -58,7 +63,7 @@ def wait_ready(unit, traffic, admin):
         try:
             status, body = request(traffic)
             expect(200, status, body)
-            expect(200, *request(admin + "/readyz"))
+            expect(200, *request(admin + "/readyz", ssl_context=ssl_context))
             if state == "active":
                 return body
         except (OSError, AssertionError):
@@ -67,8 +72,8 @@ def wait_ready(unit, traffic, admin):
     raise AssertionError(f"{unit} not ready: {run('sudo', 'journalctl', '-u', unit, '-n', '30', '--no-pager')[-3000:]}")
 
 
-def get_config(admin, token):
-    status, body = request(admin + "/api/config", token)
+def get_config(admin, token, ssl_context=None):
+    status, body = request(admin + "/api/config", token, ssl_context=ssl_context)
     expect(200, status, body)
     return json.loads(body)
 
@@ -212,6 +217,38 @@ def main():
         expect(200, status, body)
         assert not json.loads(body)["drift"], body
         print("PASS: external edit blocked managed Apply until confirmed adoption")
+
+        # Exercise the non-loopback admin transport gate with a real TLS
+        # listener, trusted self-signed certificate and token on this VM's
+        # non-loopback address. It remains isolated to this disposable runner.
+        host_ips = {item[4][0] for item in socket.getaddrinfo(socket.gethostname(), None,
+                    family=socket.AF_INET) if not item[4][0].startswith("127.")}
+        assert host_ips, "runner has no non-loopback IPv4 address for admin TLS"
+        host_ip = sorted(host_ips)[0]
+        cert, key = tmp / "admin-cert.pem", tmp / "admin-key.pem"
+        run("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256", "-days", "1",
+            "-subj", "/CN=Jul service E2E", "-addext", f"subjectAltName=IP:{host_ip}",
+            "-keyout", str(key), "-out", str(cert))
+        run("sudo", "install", "-o", "jul", "-g", "jul", "-m0600", str(cert), "/etc/jul/admin-cert.pem")
+        run("sudo", "install", "-o", "jul", "-g", "jul", "-m0600", str(key), "/etc/jul/admin-key.pem")
+        before = get_config(admin, token)
+        old_listen = f'listen = "127.0.0.1:{admin_port}"'
+        assert before["raw"].count(old_listen) == 1
+        tls_raw = before["raw"].replace(old_listen, f'listen = "0.0.0.0:{admin_port}"', 1)
+        tls_raw += '\n[admin.tls]\nenabled = true\ncert = "/etc/jul/admin-cert.pem"\nkey = "/etc/jul/admin-key.pem"\n'
+        endpoint = (admin + "/api/config/apply?mode=stage_restart&confirm_admin=true&base_version="
+                    + urllib.parse.quote(before["base_version"]))
+        status, body = request(endpoint, token, tls_raw.encode(), "application/toml")
+        expect(200, status, body)
+        assert json.loads(body)["ok"], body
+        run("sudo", "systemctl", "restart", "jul.service")
+        tls_admin = f"https://{host_ip}:{admin_port}"
+        trusted = ssl.create_default_context(cafile=str(cert))
+        wait_ready("jul.service", traffic, tls_admin, trusted)
+        expect(401, *request(tls_admin + "/api/config", ssl_context=trusted))
+        secured = get_config(tls_admin, token, trusted)
+        assert '[admin.tls]' in secured["raw"] and 'listen = "0.0.0.0:' in secured["raw"]
+        print("PASS: non-loopback admin TLS certificate and token on the shipped systemd unit")
 
         run("sudo", "systemctl", "stop", "jul.service")
         readonly = raw.replace('config_authority = "managed"', 'config_authority = "file_owned"', 1)

@@ -16,11 +16,11 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/issue94-security-matrix.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/labels.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/nginx-migration-e2e.yml	reviewed	pinned reference and real-Jul corpus command scope traced to Makefile/scripts; exact-SHA CI result pending
-.github/workflows/release.yml	reviewed	five-minute release smoke claim corrected; archive staging reviewed for Windows service helpers and Linux units; tagged release job unexecuted
+.github/workflows/release.yml	reviewed	five-minute release smoke claim corrected; archive staging reviewed for Windows service helpers and Linux units; helper full ZIP service passed at 2892f45b, tagged release job unexecuted
 .github/workflows/security-gates.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/semantic-drift-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/systemd-deployment-e2e.yml	reviewed	shipped editable/read-only units, authority, permissions and rollback passed on Ubuntu at e450113d
-.github/workflows/windows-service-e2e.yml	reviewed	virtual-account recovery and fresh-directory ordinary-user ACL denial passed at c0da5eb5; packaged full archive pending
+.github/workflows/windows-service-e2e.yml	reviewed	virtual-account recovery and fresh-directory ordinary-user ACL denial passed at c0da5eb5; packaged full archive passed at 2892f45b
 CHANGELOG.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 CONTRIBUTING.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 Dockerfile	reviewed	Docker CI exposed and verified fix for local gofast build-order error; default and managed journey passed at 357c371d
@@ -97,7 +97,7 @@ docs/compatibility.md	not reviewed	Targeted current/release claim corrected; ful
 docs/compression.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/config-lifecycle.yaml	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
 docs/config-value-contract.json	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/configuration.md	reviewed	combined example prerequisites, check/startup boundary and CLI JSON severity/exit table traced to source and real checks; remaining field sections need semantic review
+docs/configuration.md	reviewed	combined example and CLI checks plus admin-versus-data-plane mTLS lifecycle traced; remaining field sections need semantic review
 docs/console.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/core-http.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/deployment.md	reviewed	Docker and Linux systemd bounded startup/recovery passed; Windows service ACLs and remote admin TLS not executed
@@ -116,7 +116,7 @@ docs/grpc-proxy.md	not reviewed	structural link/TOML checks where applicable; be
 docs/grpc-transcoding.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/health.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/hot-reload-strategy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/http3.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/http3.md	reviewed	HTTP/3 client-auth policy and CA/CRL hot reload boundary traced to #486 runtime/tests and generated lifecycle; other protocol limits not replayed
 docs/index.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/known-limitations.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/metrics-contract.json	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
@@ -212,15 +212,15 @@ internal/config/**; internal/lifecycle/**	not reviewed	generated contract checke
 internal/migrate/**; internal/upstream/**; internal/plugins/**; internal/waf/**	not reviewed	key release boundaries sampled; full protocol and failure matrices not independently replayed
 internal/observability/**; internal/storagefs/**	not reviewed	metric contract test and post-release classifications checked; platform telemetry/failure paths not exhaustively exercised
 internal/observability/metric_contract_test.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-scripts/build-release.ps1	reviewed	Windows lean/full archive exercise passed at 8249b732; new secure helper staging and full-service archive pending
+scripts/build-release.ps1	reviewed	Windows lean/full archive exercise passed at 8249b732; secure helper staging and full-service archive passed at 2892f45b
 scripts/docs-check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/docker-deployment-e2e.py	reviewed	Docker default site/health and managed adoption/apply/rollback/restart passed at 357c371d; remote TLS untested
-scripts/systemd-deployment-e2e.py	reviewed	editable/read-only recovery passed at e450113d; staged restart and drift/adoption passed at 05a540be; remote TLS untested
+scripts/systemd-deployment-e2e.py	reviewed	editable/read-only recovery passed at e450113d; stage/drift passed at 05a540be; non-loopback admin TLS extension pending CI
 scripts/semantic_drift.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/test-discovery-k8s-live.ps1	reviewed	unsafe port-owner kill replaced with a conflict error; live Kubernetes/PowerShell execution not available
 scripts/test-nginx-importer.ps1	reviewed	exit 3, JSON status and candidate assertions passed in PR #482 Windows CI at da528885; full migration compatibility not implied
 scripts/test-zero-config.ps1	reviewed	repo-relative temp site, own-process cleanup, exact lint assertion passed in PR #482 Windows CI at da528885
-scripts/test-windows-service.ps1	reviewed	virtual-account recovery passed at 6e96dffd; fresh protected root and ordinary-user denial passed at c0da5eb5; packaged full archive pending
+scripts/test-windows-service.ps1	reviewed	virtual-account recovery passed at 6e96dffd; fresh protected root and ordinary-user denial passed at c0da5eb5; packaged full archive passed at 2892f45b
 scripts/test_docs_check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/* (other operational and test scripts)	not reviewed	inventory aggregate excluding individually listed scripts; comments and operational side effects need script-by-script review
 server.everything.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value

@@ -1447,8 +1447,10 @@ with — does not replace —** the bearer-token/RBAC layer: the handshake itsel
 gates the connection, and every request that reaches the handler still goes
 through the normal auth chokepoint, so a valid client certificate never
 bypasses the token or RBAC check and a valid token never bypasses the
-certificate requirement. The whole block is restart-required, like the data
-plane's mutual TLS — there is no hot path for handshake policy.
+certificate requirement. The admin listener's client-auth block remains
+restart-required. Data-plane `servers.*.tls.client_auth` policy and CA/CRL
+content are hot-reloadable on retained TLS listeners on post-v2.0.0 `main`
+(#486; Beta); see [mTLS](mtls.md#operational-notes).
 
 ```toml
 [admin.tls.client_auth]
