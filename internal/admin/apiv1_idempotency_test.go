@@ -30,6 +30,21 @@ func TestV1IdempotencyKeyGrammar(t *testing.T) {
 	}
 }
 
+func TestV1IdempotencyRejectsDuplicateKeyBeforeMutation(t *testing.T) {
+	s := &Server{}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/config/apply", nil)
+	r.Header.Add("Idempotency-Key", "first-key")
+	r.Header.Add("Idempotency-Key", "second-key")
+	called := false
+	w := httptest.NewRecorder()
+	s.runIdempotentCanonicalV1(w, r, "v1", nil, func(http.ResponseWriter, *http.Request) {
+		called = true
+	})
+	if called || w.Code != http.StatusBadRequest {
+		t.Fatalf("mutation called=%v status=%d, want local 400", called, w.Code)
+	}
+}
+
 func TestCanonicalV1QueryIsSortedDecodedAndInjective(t *testing.T) {
 	a, err := canonicalV1Query("z=2&a=3&a=1")
 	if err != nil {

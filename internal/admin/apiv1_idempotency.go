@@ -149,7 +149,15 @@ func v1OperationTemplate(r *http.Request) string {
 }
 
 func (s *Server) v1IdempotencyMetadata(r *http.Request, body []byte) (*v1IdempotencyMetadata, *adminapi.Error) {
-	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	values := r.Header.Values("Idempotency-Key")
+	if len(values) > 1 {
+		return nil, adminapi.Errorf(adminapi.CodeInvalidRequest,
+			"Idempotency-Key must appear exactly once").WithDetails(adminapi.Details{Field: "Idempotency-Key"})
+	}
+	if len(values) == 0 {
+		return nil, nil
+	}
+	key := strings.TrimSpace(values[0])
 	if key == "" {
 		return nil, nil
 	}

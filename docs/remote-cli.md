@@ -126,6 +126,8 @@ Every applicable mutation sends `Idempotency-Key`. When it is omitted, the CLI
 generates a unique valid key for that logical invocation. CI/deployment systems
 that need safe retry across process restarts should provide a stable job/deploy
 identity with `--idempotency-key`.
+The server rejects repeated `Idempotency-Key` fields before a mutation, so an
+intermediary cannot select a different key from the one bound by the ledger.
 
 A prepared mutation freezes its method, path, query, content type, key and exact
 request body bytes before the first send. A contractually safe retry reuses
