@@ -181,3 +181,24 @@ func TestCanonicalPredicatesIsOrderIndependent(t *testing.T) {
 		t.Error("a value containing the separator must not impersonate another predicate set")
 	}
 }
+
+// A path the router's canonicalization can never produce is a dead location.
+func TestNonCanonicalLocationPathIsReported(t *testing.T) {
+	cfg := shadowConfig(
+		MatchConfig{Path: "/api//v1/"},
+		MatchConfig{Type: "exact", Path: "/a/./b"},
+		MatchConfig{Path: "/x/.."},
+		MatchConfig{Type: "regex", Path: "^/r//"},
+		MatchConfig{Path: "/.well-known/"},
+		MatchConfig{Path: "/a..b/"},
+	)
+	diags := Lint(cfg)
+	for _, f := range []string{"servers[0].locations[0]", "servers[0].locations[1]", "servers[0].locations[2]"} {
+		requireDiagnostic(t, diags, SeverityWarning, f, "never matches")
+	}
+	for _, d := range diags {
+		if strings.Contains(d.Message, "canonicalization") && d.Field >= "servers[0].locations[3]" {
+			t.Fatalf("canonical or regex path reported: %s %s", d.Field, d.Message)
+		}
+	}
+}
