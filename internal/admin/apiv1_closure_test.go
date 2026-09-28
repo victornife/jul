@@ -135,6 +135,16 @@ func TestV1RequestAdmissionExhaustive(t *testing.T) {
 		if apiErr != nil || base != "abc" {
 			t.Fatalf("base=%q err=%v", base, apiErr)
 		}
+		for _, query := range []string{
+			"base_version=first&base_version=second",
+			"base_version=first&broken=%zz",
+		} {
+			req = httptest.NewRequest(http.MethodPost, "/api/v1/config/apply", nil)
+			req.URL.RawQuery = query
+			if _, apiErr := requiredBaseVersion(req); apiErr == nil || apiErr.Code != adminapi.CodeInvalidRequest {
+				t.Fatalf("query %q error = %#v", query, apiErr)
+			}
+		}
 	})
 }
 

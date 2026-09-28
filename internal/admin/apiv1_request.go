@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"jul/internal/adminapi"
@@ -92,7 +93,20 @@ func restoreRequestBody(r *http.Request, body []byte) {
 }
 
 func requiredBaseVersion(r *http.Request) (string, *adminapi.Error) {
-	base := strings.TrimSpace(r.URL.Query().Get("base_version"))
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return "", adminapi.Errorf(adminapi.CodeInvalidRequest, "query parameters are malformed").
+			WithDetails(adminapi.Details{Field: "query"})
+	}
+	values := query["base_version"]
+	if len(values) > 1 {
+		return "", adminapi.Errorf(adminapi.CodeInvalidRequest, "base_version must appear exactly once").
+			WithDetails(adminapi.Details{Field: "base_version"})
+	}
+	base := ""
+	if len(values) == 1 {
+		base = strings.TrimSpace(values[0])
+	}
 	if base == "" {
 		return "", adminapi.Errorf(adminapi.CodeInvalidRequest,
 			"base_version is required for this mutation").WithDetails(adminapi.Details{Field: "base_version"})
