@@ -153,7 +153,7 @@ docs/roadmap/README.md	reviewed	targeted release/status and first-run commands c
 docs/secrets.md	reviewed	secret resolution/redaction/lint, four-character floor and rotation claims traced to config resolver and tests; benchmarks/Console E2E not independently replayed
 docs/security-posture.md	reviewed	secret-redaction floor, shared-token attribution, POSIX versus Windows ACL, editable write paths and scoped SSRF destination boundaries traced against code/guide; rest of threat matrix unreviewed
 docs/security-testing.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/service-discovery.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/service-discovery.md	reviewed	targeted DNS SRV, backend identity, Consul and Kubernetes trust, pagination, token and RBAC claims traced to discoverers; remaining guide and integrations not fully reviewed
 docs/soak-evidence.md	reviewed	duration rules, historical five-minute labels and 2026-09-27 Windows CI smoke traced; other dated runs not line-by-line revalidated
 docs/soak-procedures.md	reviewed	phase2a workload scope and ADR 0005 minimum corrected against load generator/config; other procedures/platform evidence unreviewed
 docs/specs/README.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
