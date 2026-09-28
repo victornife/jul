@@ -49,7 +49,8 @@ adds no third-party dependency.
   goroutine resolves the source immediately, then re-resolves every `refresh`
   interval (with a little jitter) until the pool is closed.
 - **State-preserving updates.** Each resolve is applied through the pool's
-  `UpdateBackends`, which merges by address+weight: surviving backends keep their
+  `UpdateTargets`, which reuses a backend when its provider identity, network,
+  and address match; a weight change alone does not reset it. Surviving backends keep their
   runtime state (in-flight count, passive-failure cooldown), new ones are added,
   removed ones drop out. Active health checks automatically begin probing
   newly-discovered backends.
@@ -239,8 +240,8 @@ Discovery pools take part in the normal atomic reload:
 
 ## Backend identity
 
-A backend's per-request state — in-flight count, failure history, health verdict — follows the
-**workload**, not the address it happens to hold.
+A backend's per-request state — in-flight count, failure history, health verdict —
+is reused only when both its provider identity and network address match.
 
 | Provider | Identity | Source |
 | --- | --- | --- |
@@ -252,7 +253,8 @@ This matters because an address is not an identity. Kubernetes recycles pod IPs 
 without it a replacement pod inherits the failure history of the one it replaced and arrives partway
 to being taken out of rotation — for failures it never caused. With it, a refresh that reports the
 same address under a **new** identity produces a **fresh backend with clean state**, and a refresh
-that reports the same identity keeps everything it had.
+that reports the same identity **at the same address** keeps its runtime state.
+Moving an identity to a new address creates a fresh backend.
 
 A provider that offers no identity is unchanged: the address remains the reuse key, which is correct
 for a DNS record or a static server list, where there is nothing else to go on.
