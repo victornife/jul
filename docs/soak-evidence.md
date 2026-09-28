@@ -22,6 +22,11 @@ wall-clock minimums to count toward the post-GA gate:
 Runs below the minimum (e.g., the 20-second CI smoke or the 5-minute release gate)
 are **smoke tests only** — they validate that the harness compiles and the feature
 does not immediately crash, but they do **not** satisfy the post-GA soak criterion.
+The `-phase2a` burn-in profile uses an explicit TOML file and sends HTTP
+requests to configured routes. Its duration cannot establish zero-config/lint
+(Y1-08) or NGINX importer (Y1-09) soak evidence; those features need their own
+workloads and dated qualifying runs. The historical v1.28.0 table below used
+“soaked” for a short release smoke and does not override this requirement.
 
 ## Where soak evidence is produced
 

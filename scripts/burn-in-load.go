@@ -59,7 +59,7 @@ func main() {
 		full         = flag.Bool("full", false, "Phase 2A: exercise ALL features simultaneously (cache+ratelimit+waf+auth+compress)")
 		clientCert   = flag.String("clientCert", "testdata/tls/client.crt", "Client certificate for mTLS")
 		clientKey    = flag.String("clientKey", "testdata/tls/client.key", "Client key for mTLS")
-		phase2a      = flag.Bool("phase2a", false, "Phase 2A: exercise transcoding + passthrough + discovery + secrets + zero-config + WASM plugins")
+		phase2a      = flag.Bool("phase2a", false, "Phase 2A HTTP route mix: proxy, static, discovery, WASM, and TLS paths (not zero-config, importer, or gRPC)")
 		http3        = flag.Bool("http3", false, "HTTP/3 isolated soak: exercise / and /health on HTTPS (no backend)")
 		current      = flag.Bool("current", false, "burn-in-current.toml: exercise bounded/unlimited/unix/discovered/secure/predicates/plugin routes (JUL-AUD-004)")
 		slowClient   = flag.Bool("slow-client", false, "Send a byte-paced (slow) POST body to /bounded/, exercising slow-client handling")
@@ -139,7 +139,7 @@ func main() {
 		fmt.Println("WAF mode       : enabled (benign + malicious traffic mix)")
 	}
 	if *phase2a {
-		fmt.Println("Phase 2A mode  : enabled (transcode + passthrough + discovery + secrets + zero-config + WASM)")
+		fmt.Println("Phase 2A mode  : HTTP route mix (proxy/static/discovery/WASM/TLS; no zero-config, importer or gRPC traffic)")
 	}
 
 	endTime := time.Now().Add(*duration)

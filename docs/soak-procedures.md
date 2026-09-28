@@ -60,7 +60,7 @@ apply/reload path.
 | Flag | Exercises |
 | --- | --- |
 | `-full` | The July Phase 2A feature set (cache, rate limit, WAF, auth, compression, TLS/mTLS) — use with `burn-in-full.toml`. |
-| `-phase2a` | Transcoding, passthrough, discovery, secrets, zero-config, WASM — use with `burn-in-phase2a.toml`. |
+| `-phase2a` | HTTP proxy/static, DNS discovery, WASM and TLS/mTLS routes in `burn-in-phase2a.toml`. gRPC listeners and secret references are configured, but this request mix does not exercise gRPC, secret rotation, zero-config synthesis, `jul lint`, or the NGINX importer. Do not count it as Y1-08/Y1-09 soak evidence. |
 | `-current` | The historically named v2.0.0-era consolidated profile: resilience pools, Unix upstream, DNS discovery, `backend_tls`, routing predicates/response headers/CORS, WASM plugin — use with `burn-in-current.toml` (JUL-AUD-004). It does not imply every feature currently on `main` is exercised. |
 | `-cache`, `-ratelimit`, `-waf`, `-compress`, `-http3` | Single-feature patterns for the matching `burn-in-<feature>.toml`. |
 | `-slow-client` | Paces a POST body over ~3.2s, exercising slow-client/read-timeout handling. |

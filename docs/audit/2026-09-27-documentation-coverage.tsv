@@ -34,7 +34,7 @@ burn-in-current.toml	not reviewed	parsed by make config-check if root/example; r
 burn-in-full.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 burn-in-grpc.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 burn-in-http3.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
-burn-in-phase2a.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
+burn-in-phase2a.toml	reviewed	phase2a route/config coverage claims traced to load generator; gRPC/secret rotation/zero-config/importer not exercised by mode; full profile not certified
 burn-in-ratelimit.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 burn-in-resilience.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 burn-in-stream.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
@@ -154,7 +154,7 @@ docs/security-posture.md	reviewed	secret-redaction floor, shared-token attributi
 docs/security-testing.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/service-discovery.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/soak-evidence.md	reviewed	duration rules, historical five-minute labels and 2026-09-27 Windows CI smoke traced; other dated runs not line-by-line revalidated
-docs/soak-procedures.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
+docs/soak-procedures.md	reviewed	phase2a workload scope and ADR 0005 minimum corrected against load generator/config; other procedures/platform evidence unreviewed
 docs/specs/README.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/specs/console-rbac.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/specs/console-v2.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
