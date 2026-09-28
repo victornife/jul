@@ -126,9 +126,9 @@ a `full` release artifact to enable all optional capabilities.
 | **Compression** | On-the-fly `gzip` (every build) plus `br`/`zstd` codings (via the `brotli`/`zstd` build tags); `Accept-Encoding` negotiation, `Cache-Control: no-transform`, MIME allow-list, size threshold, and precompressed `.br`/`.gz` sidecars |
 | **Rate limiting** | Token-bucket request limiting keyed by client IP, a request header, or a JWT claim, with burst, global or per-location policy, and `429` + `Retry-After`; plus a per-listener concurrent-connection cap |
 | **Trusted client identity** | Per-listener `trusted_proxies` and bounded Forwarded/X-Forwarded-For derivation produce one canonical client address used by CIDR auth, rate limiting, WAF, logs, forwarding and FastCGI. Untrusted assertions are ignored. GA (#409). |
-| **Access control** | Per-location CIDR allow/deny lists plus one credential method — HTTP Basic (bcrypt `htpasswd`), JWT bearer tokens validated against a JWKS endpoint (asymmetric algorithms only, `none` rejected), or forward-auth to an external service |
+| **Access control** | Per-location CIDR allow/deny lists and at most one credential method — HTTP Basic (bcrypt `htpasswd`), JWT bearer tokens validated against a JWKS endpoint (asymmetric algorithms only, `none` rejected), or forward-auth to an external service; a CIDR-only gate is valid |
 | **WAF** | ModSecurity-compatible web application firewall ([Coraza](https://github.com/corazawaf/coraza)) with the **OWASP Core Rule Set embedded** in the binary (`[waf]`, global or per-location): `block`/`detect` modes, paranoia levels, your own SecLang files or inline rules, request/response body inspection, and a `jul_waf_events_total` metric — opt-in `waf` build tag ([docs/waf.md](docs/waf.md)) |
-| **Secrets references** | Keep credentials out of the config file: any string field accepts `${env:NAME}`, `${file:/path}`, or `${secret:/path}` references resolved at serve time, resolved values are **masked from logs**, and `jul lint` flags literal admin/Consul/Kubernetes tokens — core, no build tag ([docs/secrets.md](docs/secrets.md)) |
+| **Secrets references** | Keep credentials out of the config file: any string field accepts `${env:NAME}`, `${file:/path}`, or `${secret:/path}` references resolved at serve time, eligible resolved values receive best-effort log redaction (default minimum length: four characters), and `jul lint` flags literal admin/Consul/Kubernetes tokens — core, no build tag ([docs/secrets.md](docs/secrets.md)) |
 | **Egress allow-list** | Optional hardening (`[egress]`) that constrains the server's own config-driven fetches — JWKS, forward-auth, Consul/Kubernetes discovery, ACME/OCSP, and the WASM plugin `fetch` intersection — to an approved set of hosts/CIDRs, refused at connect time; bounds the SSRF blast radius of a misconfigured or compromised config, disabled by default — core, no build tag ([docs/egress.md](docs/egress.md)) |
 | **TLS** | TLS 1.2/1.3 termination per server block, configurable minimum version, optional HTTP→HTTPS redirect |
 | **Automatic HTTPS** | ACME certificate issuance and auto-renewal using the configured exclusive HTTP-01 or TLS-ALPN-01 challenge, with on-disk account/certificate cache — opt-in `acme` build tag |
@@ -475,7 +475,9 @@ assessing a specific deployment. A sample input and walkthrough live under
 Jul.IA is configured by a single TOML document. The top-level tables are
 `[global]`, `[[servers]]`, `[[upstreams]]`, `[cache]`, and `[admin]`.
 
-A minimal, working example:
+An illustrative config template (create `/srv/www/example`, start backends on
+ports 3000 and 3001, and set `JUL_ADMIN_TOKEN` in the server process environment
+before running it; adapt paths, hosts and credentials to your deployment):
 
 ```toml
 [global]
@@ -517,7 +519,7 @@ stale_if_error = "300s"
 [admin]
 enabled = true
 listen = "127.0.0.1:9090"
-token = "change-me"
+token = "${env:JUL_ADMIN_TOKEN}"
 console = true
 ```
 

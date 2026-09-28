@@ -5,9 +5,10 @@ Consul/Kubernetes tokens, upstream credentials — should not be literals in you
 `jul.toml`, where they get committed, copied, and logged. Jul.IA lets any string
 field carry a **reference** instead: `${env:NAME}` pulls a value from an
 environment variable and `${file:/path}` reads it from a file. References are
-resolved at serve time, and the resolved values are automatically **masked from
-logs**. `jul lint` flags the most sensitive fields when they still hold a
-literal.
+resolved at serve time. Eligible resolved values enter the best-effort
+log-redaction registry; by default values shorter than four characters are not
+masked, and redaction does not cover every output or backup. `jul lint` flags
+the most sensitive fields when they still hold a literal.
 
 This is **SEC-1**, in **core** — no build tag — and uses only the standard
 library.

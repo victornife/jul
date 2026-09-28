@@ -25,7 +25,7 @@ CHANGELOG.md	reviewed	targeted release/status, navigation or source claims check
 CONTRIBUTING.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 Dockerfile	reviewed	Docker CI exposed and verified fix for local gofast build-order error; default and managed journey passed at 357c371d
 Makefile	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-README.md	reviewed	targeted release/status and first-run commands checked against bundled template and zero-config CLI; remaining prose not certified
+README.md	reviewed	targeted release/status, copyable config prerequisites, admin secret, CIDR-only auth and redaction boundary checked against source/docs; remaining prose not certified
 SECURITY.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 burn-in-auth.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 burn-in-cache.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
@@ -44,7 +44,7 @@ cmd/jul/* (other CLI and help source files)	not reviewed	CLI help and representa
 cmd/jul/cli.go	reviewed	lint/check and healthcheck TLS target/trust/redirect paths traced to implementation and focused tests; other CLI branches remain unreviewed
 cmd/jul/main.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 cmd/jul/remote_cli.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-deploy/docker/server.toml	reviewed	managed authority and access-log comment compared to parser/admin tests; checked with console-tagged CLI; container operation unverified
+deploy/docker/server.toml	reviewed	managed authority, access-log and optional admin secret-reference comment compared to parser/admin tests; checked with console-tagged CLI; container operation unverified
 deploy/docker/index.html	reviewed	placeholder page presence checked against Dockerfile copy and static-root config; image runtime unverified
 deploy/systemd/jul-readonly.service	reviewed	root:jul 0640 config and rejected Apply with unchanged file passed in real systemd CI at e450113d
 deploy/systemd/jul.service	reviewed	jul:jul config/state ownership, start, adoption, Apply, rollback and restart passed in real systemd CI at e450113d
@@ -149,7 +149,7 @@ docs/reviews/previous_reviews/jul_protocol_adapters_product_strategy.md	historic
 docs/reviews/previous_reviews/jul_roadmap_vision_specs_critical_review.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/reviews/previous_reviews/jul_round5_remediation_2026-07-17.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/roadmap/README.md	reviewed	targeted release/status and first-run commands checked against bundled template and zero-config CLI; remaining prose not certified
-docs/secrets.md	reviewed	secret resolution/redaction/lint and rotation claims traced to config resolver and tests; benchmarks/Console E2E not independently replayed
+docs/secrets.md	reviewed	secret resolution/redaction/lint, four-character floor and rotation claims traced to config resolver and tests; benchmarks/Console E2E not independently replayed
 docs/security-posture.md	reviewed	secret-redaction floor, shared-token attribution, POSIX versus Windows ACL and editable write paths traced against code/guide; rest of threat matrix unreviewed
 docs/security-testing.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/service-discovery.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review

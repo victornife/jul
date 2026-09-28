@@ -46,8 +46,8 @@ idle_timeout = "60s"
 # present in the default image (built with -tags console).
 enabled = true
 listen = "127.0.0.1:9090"
-# token = "change-me"            # require `Authorization: Bearer <token>` before
-                                 # exposing the admin port beyond the container.
+# token = "${env:JUL_ADMIN_TOKEN}"  # set a strong process-environment secret
+                                    # before exposing the admin port beyond the container.
 history_dir = "/var/lib/jul/config-history"
 history_keep = 50
 
