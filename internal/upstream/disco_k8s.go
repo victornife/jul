@@ -107,6 +107,11 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 		client: &http.Client{
 			Timeout:   10 * time.Second,
 			Transport: transport,
+			// A discovery redirect can change the API server trust boundary.
+			// Preserve last-good backends instead of following it with a bearer token.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
 		url:      endpoint,
 		token:    token,

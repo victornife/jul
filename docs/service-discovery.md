@@ -225,6 +225,8 @@ When the mounted service-account token is used, the resolver rereads it for
 each API request so projected token rotation takes effect without a restart.
 An unreadable or empty previously mounted token fails that refresh and retains
 the last-good backends. An explicit `token` follows config secret reload rules.
+API redirects fail discovery rather than forwarding the bearer token to a
+different destination.
 
 An explicitly configured `ca_file` must exist and contain PEM certificates;
 discovery refuses to start with an unreadable or malformed bundle. Without an

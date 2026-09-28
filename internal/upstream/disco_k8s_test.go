@@ -179,6 +179,31 @@ func TestK8sDiscovererReloadsMountedToken(t *testing.T) {
 	}
 }
 
+func TestK8sDiscovererRejectsAPIRedirect(t *testing.T) {
+	var forwarded bool
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		forwarded = true
+	}))
+	defer destination.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", destination.URL)
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer redirect.Close()
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+		Namespace: "default", Service: "web", APIServer: redirect.URL, Token: "secret",
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Resolve(context.Background()); err == nil {
+		t.Fatal("redirected discovery response must fail")
+	}
+	if forwarded {
+		t.Fatal("redirect target received a discovery request")
+	}
+}
+
 func TestK8sSelectPort(t *testing.T) {
 	d := &k8sDiscoverer{}
 	ports := []k8sPort{{Name: "http", Port: 8080}, {Name: "grpc", Port: 9090}}
