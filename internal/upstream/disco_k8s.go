@@ -134,6 +134,9 @@ type k8sEndpoint struct {
 
 // k8sEndpointSliceList is the subset of the EndpointSlice list response read.
 type k8sEndpointSliceList struct {
+	Metadata struct {
+		Continue string `json:"continue"`
+	} `json:"metadata"`
 	Items []struct {
 		Ports     []k8sPort     `json:"ports"`
 		Endpoints []k8sEndpoint `json:"endpoints"`
@@ -141,12 +144,44 @@ type k8sEndpointSliceList struct {
 }
 
 func (d *k8sDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
-	if d.log != nil {
-		d.log.Warn("kubernetes resolve request", "url", d.url)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.url, nil)
+	endpoint, err := url.Parse(d.url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("kubernetes: parse API URL: %w", err)
+	}
+	seen := make(map[string]bool)
+	var out []Target
+	for {
+		list, err := d.resolvePage(ctx, endpoint.String())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d.targetsFromList(list)...)
+		next := list.Metadata.Continue
+		if next == "" {
+			break
+		}
+		if seen[next] {
+			return nil, fmt.Errorf("kubernetes: repeated EndpointSlice continue token")
+		}
+		seen[next] = true
+		query := endpoint.Query()
+		query.Set("continue", next)
+		endpoint.RawQuery = query.Encode()
+	}
+	if d.log != nil {
+		d.log.Warn("kubernetes resolve result", "url", d.url, "targets", len(out))
+	}
+	return out, nil
+}
+
+func (d *k8sDiscoverer) resolvePage(ctx context.Context, endpoint string) (k8sEndpointSliceList, error) {
+	var list k8sEndpointSliceList
+	if d.log != nil {
+		d.log.Warn("kubernetes resolve request", "url", endpoint)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return list, err
 	}
 	req.Header.Set("Accept", "application/json")
 	if d.token != "" {
@@ -157,20 +192,22 @@ func (d *k8sDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
 		if d.log != nil {
 			d.log.Warn("kubernetes resolve request failed", "url", d.url, "error", err)
 		}
-		return nil, err
+		return list, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if d.log != nil {
 		d.log.Warn("kubernetes resolve response", "url", d.url, "status", resp.Status)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("kubernetes: unexpected status %s", resp.Status)
+		return list, fmt.Errorf("kubernetes: unexpected status %s", resp.Status)
 	}
-	var list k8sEndpointSliceList
 	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return nil, fmt.Errorf("kubernetes: decode response: %w", err)
+		return list, fmt.Errorf("kubernetes: decode response: %w", err)
 	}
+	return list, nil
+}
 
+func (d *k8sDiscoverer) targetsFromList(list k8sEndpointSliceList) []Target {
 	var out []Target
 	for i, slice := range list.Items {
 		port := d.selectPort(slice.Ports)
@@ -198,10 +235,7 @@ func (d *k8sDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
 			}
 		}
 	}
-	if d.log != nil {
-		d.log.Warn("kubernetes resolve result", "url", d.url, "targets", len(out))
-	}
-	return out, nil
+	return out
 }
 
 // selectPort picks the configured port (by name or number) from a slice's port

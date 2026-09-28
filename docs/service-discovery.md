@@ -192,6 +192,10 @@ port. Requires the `kubernetes` build tag. In-cluster, the API server URL and
 service-account token/CA are read from the standard pod locations; the fields
 below override them when running outside a cluster.
 
+The resolver follows the list response's `metadata.continue` token through
+every page. A failed later page keeps the prior backend set instead of
+publishing a partial list.
+
 ```toml
   [upstreams.discovery]
   type = "kubernetes"

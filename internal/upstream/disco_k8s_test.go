@@ -89,6 +89,58 @@ func TestK8sDiscovererResolve(t *testing.T) {
 	}
 }
 
+func TestK8sDiscovererFollowsAllEndpointSlicePages(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Query().Get("labelSelector") != "kubernetes.io/service-name=web" || r.Header.Get("Authorization") != "Bearer tok" {
+			t.Errorf("page %d lost service selector or authorization", requests)
+		}
+		switch r.URL.Query().Get("continue") {
+		case "":
+			_, _ = w.Write([]byte(`{"metadata":{"continue":"next/page"},"items":[{"ports":[{"port":8080}],"endpoints":[{"addresses":["10.1.0.1"]}]}]}`))
+		case "next/page":
+			_, _ = w.Write([]byte(`{"items":[{"ports":[{"port":8080}],"endpoints":[{"addresses":["10.1.0.2"]}]}]}`))
+		default:
+			t.Errorf("unexpected continue token %q", r.URL.Query().Get("continue"))
+		}
+	}))
+	defer srv.Close()
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+		Namespace: "default", Service: "web", APIServer: srv.URL, Token: "tok",
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets, err := d.Resolve(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || len(targets) != 2 || targets[0].Address != "10.1.0.1:8080" || targets[1].Address != "10.1.0.2:8080" {
+		t.Fatalf("requests=%d targets=%+v, want both pages", requests, targets)
+	}
+}
+
+func TestK8sDiscovererDiscardsIncompleteList(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("continue") == "" {
+			_, _ = w.Write([]byte(`{"metadata":{"continue":"next"},"items":[{"ports":[{"port":8080}],"endpoints":[{"addresses":["10.1.0.1"]}]}]}`))
+			return
+		}
+		http.Error(w, "expired", http.StatusGone)
+	}))
+	defer srv.Close()
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+		Namespace: "default", Service: "web", APIServer: srv.URL,
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targets, err := d.Resolve(context.Background()); err == nil || len(targets) != 0 {
+		t.Fatalf("incomplete list targets=%+v err=%v, want error without partial targets", targets, err)
+	}
+}
+
 func TestK8sSelectPort(t *testing.T) {
 	d := &k8sDiscoverer{}
 	ports := []k8sPort{{Name: "http", Port: 8080}, {Name: "grpc", Port: 9090}}
