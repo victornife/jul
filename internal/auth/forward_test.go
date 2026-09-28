@@ -177,3 +177,46 @@ func TestForwardAuthDropsConnectionNominatedHeaders(t *testing.T) {
 		t.Fatalf("denial headers: %v", w.Header())
 	}
 }
+
+func TestForwardAuthDenialRedirectRequiresLocation(t *testing.T) {
+	for _, tc := range []struct {
+		status   int
+		location string
+		want     int
+	}{
+		{http.StatusFound, "/login", http.StatusFound},
+		{http.StatusTemporaryRedirect, "/login", http.StatusTemporaryRedirect},
+		{http.StatusFound, "", http.StatusForbidden},
+		{http.StatusNotModified, "/login", http.StatusForbidden},
+		{http.StatusNoContent, "", http.StatusForbidden},
+	} {
+		headers := make(http.Header)
+		if tc.location != "" {
+			headers.Set("Location", tc.location)
+		}
+		w := httptest.NewRecorder()
+		writeForwardDenied(w, forwardResult{statusCode: tc.status, header: headers})
+		if w.Code != tc.want {
+			t.Errorf("status %d, location %q: got %d, want %d", tc.status, tc.location, w.Code, tc.want)
+		}
+	}
+}
+
+func TestForwardAuthLoginRedirectReachesBrowserWithoutBackendAccess(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "/login")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer authServer.Close()
+	a := &Authenticator{forward: newForwardAuth(authServer.URL, nil, forwardHTTPClient(nil, 0), nil)}
+	backendCalled := false
+	handler := a.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		backendCalled = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://app.example/private", nil))
+	if w.Code != http.StatusFound || w.Header().Get("Location") != "/login" || backendCalled {
+		t.Fatalf("status=%d location=%q backendCalled=%t", w.Code, w.Header().Get("Location"), backendCalled)
+	}
+}

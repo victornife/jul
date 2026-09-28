@@ -206,11 +206,26 @@ func writeForwardDenied(w http.ResponseWriter, res forwardResult) {
 		w.Header()[http.CanonicalHeaderKey(name)] = vals
 	}
 	status := res.statusCode
-	if status < 400 {
+	if status < 400 && !forwardLoginRedirect(status, res.header.Get("Location")) {
 		status = http.StatusForbidden
 	}
 	w.WriteHeader(status)
 	_, _ = w.Write(res.body)
+}
+
+// Preserve an auth service's explicit browser redirect without treating a
+// non-error response with no destination as an authorization decision.
+func forwardLoginRedirect(status int, location string) bool {
+	if location == "" {
+		return false
+	}
+	switch status {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
+		http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		return true
+	default:
+		return false
+	}
 }
 
 // readLimited reads at most max bytes from r, guarding against an unbounded

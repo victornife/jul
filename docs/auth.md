@@ -95,7 +95,7 @@ Within the middleware chain, auth runs **before rate limiting**, so a
 | CIDR | canonical client address | in `allow`, not in `deny` | **403** | — (gate only) |
 | Basic | `Authorization: Basic` | user in htpasswd + bcrypt match | **401** + `WWW-Authenticate: Basic realm="…"` | — |
 | JWT | `Authorization: Bearer` | valid signature + claims | **401** + `WWW-Authenticate: Bearer error="invalid_token"` | claims → request context (`ClaimsFrom`) |
-| Forward-auth | subrequest to `url` | endpoint returns **2xx** | endpoint's status relayed (non-error → 403); **503** if unreachable | `auth_response_headers` → upstream request |
+| Forward-auth | subrequest to `url` | endpoint returns **2xx** | endpoint's denial relayed; redirects with `Location` retain 301/302/303/307/308, other non-error statuses become **403**; **503** if unreachable | `auth_response_headers` → upstream request |
 
 ## Schemes
 
@@ -146,9 +146,9 @@ actual request method, URI and host, so the auth service receives one value for
 each. Treat other forwarded request headers as client input in the auth service.
 A **2xx** authorizes the request; the listed `auth_response_headers` are copied
 onto the upstream request (client-supplied copies are stripped first). Any other
-status is relayed to the client (non-error statuses normalized to 403; body
-capped at 64 KiB, hop-by-hop response headers stripped); redirects from the
-auth service are passed through. One
+status is relayed to the client (301/302/303/307/308 with `Location` remain
+redirects; other non-error statuses become 403; body capped at 64 KiB and
+hop-by-hop response headers stripped). One
 subrequest is bounded by `timeout` (default **10s**).
 
 ### Dependency resilience
