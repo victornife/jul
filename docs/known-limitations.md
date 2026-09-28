@@ -515,9 +515,11 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 
 ## Egress allow-list ([egress.md](egress.md))
 
-- **Startup-bound.** The `[egress]` policy is built once from the startup config;
-  changing `enabled`/`allow` takes effect only after a **restart** (it is
-  restart-required, staged through `stage_restart`).
+- **Hot policy applies by consumer generation.** Changes to `egress.enabled`
+  and `egress.allow` are prepared and published on hot reload. Newly selected
+  auth, plugin, discovery, ACME and OCSP clients use the published policy;
+  in-flight work in a retired generation may finish under its prior policy.
+  See [egress reload](egress.md#reload-behaviour).
 - **Auxiliary fetches only.** It guards the server's own config-driven fetches
   (JWKS, forward-auth, discovery, ACME/OCSP, plugin `fetch`). The **data-plane
   reverse proxy** — upstream proxying and active health checks — is out of scope.
