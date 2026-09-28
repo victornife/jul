@@ -178,8 +178,11 @@ zero-config mode; the bundled `server.toml` is a multi-service example, not a
 standalone site. It expects `/srv/www/example` and two backends at
 `127.0.0.1:3000` and `127.0.0.1:3001`, so adapt those dependencies before
 starting it.
-`jul check` validates configuration but does not prove that its static root
-exists at server startup.
+The published v2.0.0 `jul check` does **not** inspect static roots; create the
+content directory before starting this package. Development builds with the
+post-v2.0.0 root-check change open and immediately close each configured static
+root, but cannot prove it will remain readable at startup or that the example
+backends respond.
 
 **Linux / macOS:**
 

@@ -135,7 +135,11 @@ those dependencies. For a minimal static route, use the
 directory outside the unit's protected home paths. Set
 `[global].config_authority = "managed"` to make this the editable shape, and
 enable `[admin]` with a properly provisioned token before relying on Console
-Apply. `jul check` does not verify the existence of a static root.
+Apply. `jul check` opens configured static roots at check time; run it under
+the service account or an equivalent filesystem identity. It cannot prove
+that content and backends remain available when the service starts.
+The published v2.0.0 `jul check` does not open static roots; verify those
+paths separately when deploying that binary.
 
 After preparing that config and its content or backends, seed and start:
 

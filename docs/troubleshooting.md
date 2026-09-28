@@ -414,8 +414,12 @@ Windows. See [soak-procedures.md](soak-procedures.md).
 - `jul --version` — print the build version (from-source builds report
   `0.1.0-dev`; the real version is injected only by the release pipeline).
 - `jul check -config server.toml` — structural and stateless runtime preflight
-  without starting listeners. It does not open static roots or probe live
-  backends; use `jul doctor -config server.toml` for configured-path and
-  certificate diagnostics, then start Jul and exercise the routes.
+  plus an immediate-close open of configured static roots, without starting
+  listeners. It does not probe live backends; use `jul doctor -config
+  server.toml` for broader configured-path and certificate diagnostics, then
+  start Jul and exercise the routes. The repository's `make config-check`
+  validates unprovisioned sample templates with `-skip-static-roots`.
+  This root check and option are post-v2.0.0 development behavior; the
+  published v2.0.0 `jul check` does not open static roots.
 - Metrics, tracing, and health endpoints: see
   [observability.md](observability.md).

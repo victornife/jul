@@ -73,7 +73,7 @@ func usage() {
 Usage:
   jul [flags]                          run the server (default)
   jul serve [-config f]                run the server (explicit form)
-  jul check [-config f] [-json] [-quiet]
+  jul check [-config f] [-json] [-quiet] [-skip-static-roots]
                                        structural and stateless runtime preflight
   jul healthcheck [-config f] [-addr host:port | -url u] [-ready] [-timeout d]
                                        probe the admin health endpoint (exit 0 healthy, 1 unhealthy)
@@ -485,9 +485,9 @@ func cmdServe(args []string) int {
 	return app.Serve(ctx, reloadSig, src, cfg, productName, version)
 }
 
-// cmdCheck validates structure and stateless runtime prerequisites, including
-// WAF, auth and compression build requirements. It does not prepare handlers,
-// open static roots, probe listeners or check live backends; startup can still
+// cmdCheck validates structure, stateless runtime prerequisites, and the
+// configured static roots with immediate-close directory handles. It does not
+// prepare handlers, probe listeners or check live backends; startup can still
 // fail after a successful check. Exit codes: 0 = ok, 1 = validation error.
 func cmdCheck(args []string) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
@@ -495,6 +495,7 @@ func cmdCheck(args []string) int {
 	configPath := fs.String("config", "server.toml", "path to the TOML configuration file")
 	jsonOut := fs.Bool("json", false, "emit result as JSON")
 	quiet := fs.Bool("quiet", false, "suppress non-error output")
+	skipStaticRoots := fs.Bool("skip-static-roots", false, "validate template configuration without opening static content directories")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -533,6 +534,14 @@ func cmdCheck(args []string) int {
 			}
 			return 1
 		}
+		if err := checkStaticRoots(cfg, *skipStaticRoots); err != nil {
+			if *jsonOut {
+				_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "error": err.Error()})
+			} else {
+				fmt.Fprintf(stderr, "resource check: %v\n", err)
+			}
+			return 1
+		}
 		if *jsonOut {
 			_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": true})
 		} else if !*quiet {
@@ -540,6 +549,30 @@ func cmdCheck(args []string) int {
 		}
 	}
 	return 0
+}
+
+// checkStaticRoots mirrors the startup open for static locations without
+// retaining a handle or making filesystem changes. A later removal or
+// permission change can still make startup fail.
+func checkStaticRoots(cfg *config.Config, skip bool) error {
+	if skip {
+		return nil
+	}
+	for i, srv := range cfg.Servers {
+		for j, loc := range srv.Locations {
+			if loc.Root == "" {
+				continue
+			}
+			root, err := os.OpenRoot(loc.Root)
+			if err != nil {
+				return fmt.Errorf("server %d location %d static root %q: %w", i+1, j+1, loc.Root, err)
+			}
+			if err := root.Close(); err != nil {
+				return fmt.Errorf("server %d location %d static root %q: close: %w", i+1, j+1, loc.Root, err)
+			}
+		}
+	}
+	return nil
 }
 
 // healthcheckOutput is the shape written by cmdHealthcheck when -json is used.

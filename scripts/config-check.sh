@@ -6,7 +6,9 @@
 # the final soak runs against. Nothing previously loaded any of them in CI, so
 # a schema change could silently break one (this is exactly how burn-in-full.toml
 # stopped parsing: see docs/audit/2026-09-16-pre-soak-readiness-audit.md
-# JUL-AUD-001). This script runs `jul check` over all of them.
+# JUL-AUD-001). This script runs `jul check -skip-static-roots` over all of
+# them: bundled sample content directories are deployment inputs, not part of
+# the repository checkout. An operator's default `jul check` opens static roots.
 #
 # Scope:
 #   - every *.toml at the repository root (burn-in-*.toml, server*.toml,
@@ -59,7 +61,7 @@ fail=0
 check() {
 	local cfg="$1" workdir="${2:-.}"
 	echo "-- ${workdir}/${cfg}"
-	if ! ( cd "$workdir" && "$BIN" check -config "$(basename "$cfg")" -quiet ); then
+	if ! ( cd "$workdir" && "$BIN" check -config "$(basename "$cfg")" -quiet -skip-static-roots ); then
 		echo "   FAILED: ${workdir}/${cfg}" >&2
 		fail=1
 	fi

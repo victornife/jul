@@ -161,11 +161,19 @@ Durations use Go syntax: `30s`, `5m`, `1h`. Sizes use `512k`, `1m`,
 runtime; parsing rejects overflow before unit multiplication. Zero is accepted
 only with the meaning documented for the specific field.
 
-Run `jul check -config server.toml` before deployment for structural validation
-plus runtime preflight. `jul lint` adds advisory best-practice findings; it never
+Run `jul check -config server.toml` before deployment for structural validation,
+stateless runtime preflight, and an immediate-close check of configured static
+roots. The `-skip-static-roots` option is for validating templates whose content
+directories have not been provisioned; it weakens the deployment check. Neither
+form binds listeners or probes live backends. `jul lint` adds advisory
+best-practice findings; it never
 downgrades a runtime-invalid value to a warning. `jul fmt` validates before
 printing or writing canonical TOML, so formatting cannot persist an invalid
 candidate.
+
+The static-root check is a post-v2.0.0 development change. The published
+v2.0.0 binary does not open static roots during `jul check`; verify their
+presence and access separately before starting that package.
 
 ### Structured sparse global operations
 

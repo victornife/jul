@@ -95,6 +95,10 @@ func run() int {
 	if checkOnly {
 		// Legacy flag: prefer `jul check` (see usage).
 		fmt.Fprintln(os.Stderr, "Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.")
+		if err := checkStaticRoots(cfg, false); err != nil {
+			fmt.Fprintf(os.Stderr, "resource check: %v\n", err)
+			return 1
+		}
 		fmt.Printf("configuration %s is valid\n", src.Name())
 		return 0
 	}
