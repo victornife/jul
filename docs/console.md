@@ -577,10 +577,11 @@ ACME, adding or removing domains, or changing the issuer cannot be hot-applied.
 The same applies to other startup-bound settings:
 
 - **Listener bind-time settings** on an address the server already holds — the
-  global max-connections limit, the listener read/read-header/write/idle
-  timeouts, the max header bytes, and toggling HTTP/3 or h2c. These come from
+  listener read/read-header/write/idle timeouts, the max header bytes, and
+  toggling HTTP/3 or h2c. These come from
   the first server block on each `listen` address and are fixed when the socket
-  is bound; adding a *new* listen address is still hot-applied.
+  is bound; adding a *new* listen address is still hot-applied. The global
+  `rate_limit.max_conns` admission cap is hot on retained listeners (#106).
 - **TLS minimum version** on an existing listener; admin listener client-auth
   policy also stays restart-bound. Data-plane client-auth policy (mode, CA,
   CRL, SANs) hot-applies to new handshakes on post-tag `main` (#486, Beta),

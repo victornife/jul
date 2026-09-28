@@ -157,15 +157,21 @@ func TestCmdHealthcheckTLSConfigDiscoveryAndTrust(t *testing.T) {
 }
 
 func TestCmdHealthcheckTLSOptionsAndRedirect(t *testing.T) {
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer destination.Close()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Location", "https://example.invalid/healthz")
+		w.Header().Set("Location", destination.URL + "/healthz")
 		w.WriteHeader(http.StatusFound)
 	}))
 	defer srv.Close()
 	if code, _, _ := capture(t, func() int { return cmdHealthcheck([]string{"-url", srv.URL, "-client-cert", "cert.pem"}) }); code != 2 {
 		t.Fatalf("unpaired client certificate exit = %d, want 2", code)
 	}
-	if code, _, _ := capture(t, func() int { return cmdHealthcheck([]string{"-url", srv.URL, "-ca-file", filepath.Join(t.TempDir(), "missing.pem")}) }); code != 2 {
+	if code, _, _ := capture(t, func() int {
+		return cmdHealthcheck([]string{"-url", srv.URL, "-ca-file", filepath.Join(t.TempDir(), "missing.pem")})
+	}); code != 2 {
 		t.Fatalf("missing CA file exit = %d, want 2", code)
 	}
 	if code, _, _ := capture(t, func() int { return cmdHealthcheck([]string{"-url", srv.URL}) }); code != 1 {

@@ -879,7 +879,7 @@ return = 200
 | `rewrites` | array | Regex rewrite rules (`pattern`, `replacement`, `flag`) |
 | `cache` | bool | Enable response caching for this location (requires `[cache].enabled`) |
 | `client_max_body_size` | size | Override the server default for this location |
-| `rate_limit` | table | Override the global `[rate_limit]` for this location (`enabled`, `key`, `rate`, `burst`; `max_conns` is ignored) |
+| `rate_limit` | table | Override the global `[rate_limit]` for this location (`enabled`, `key`, `rate`, `burst`; per-location `max_conns` is rejected by validation) |
 
 ---
 
@@ -1284,7 +1284,7 @@ max_conns = 1000
 | `key` | string | Bucket identity: `ip` (client address, default), `header:<Name>`, or `jwt:<claim>` |
 | `rate` | int | Sustained requests/second allowed per key |
 | `burst` | int | Maximum momentary burst above `rate` (defaults to `rate`) |
-| `max_conns` | int | Concurrent connections per listener; `0` = unlimited. Active only when the block is `enabled`; listener-global, so it is ignored on per-location overrides |
+| `max_conns` | int | Concurrent connections per listener; `0` = unlimited. Active only when the block is `enabled`; per-location use is rejected by validation. Hot-reloadable (#106). |
 
 ---
 
