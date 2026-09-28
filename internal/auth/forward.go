@@ -76,6 +76,12 @@ func (f *forwardAuth) decide(ctx context.Context, r *http.Request) (forwardResul
 		return forwardResult{}, err
 	}
 	copyForwardHeaders(req.Header, r.Header)
+	// These fields claim a TLS client certificate, but the request header is
+	// never proof that the listener verified one. Do not pass a forged claim to
+	// an authorization service.
+	for _, name := range []string{"Client-Cert", "Client-Cert-Chain", "X-Forwarded-Client-Cert"} {
+		req.Header.Del(name)
+	}
 	// The inbound forwarding fields are client-controlled unless the listener's
 	// address policy has attributed them. Send only the resolved identity.
 	req.Header.Del("Forwarded")

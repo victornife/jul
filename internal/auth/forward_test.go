@@ -238,6 +238,28 @@ func TestForwardAuthRejectsUnattributedProxyHopLocally(t *testing.T) {
 	}
 }
 
+func TestForwardAuthDropsClientCertificateAssertions(t *testing.T) {
+	var got http.Header
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+	fa := newForwardAuth(authServer.URL, nil, authServer.Client(), nil)
+	r := httptest.NewRequest(http.MethodGet, "http://app.example/private", nil)
+	for _, name := range []string{"Client-Cert", "Client-Cert-Chain", "X-Forwarded-Client-Cert"} {
+		r.Header.Set(name, "forged")
+	}
+	if _, err := fa.decide(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Client-Cert", "Client-Cert-Chain", "X-Forwarded-Client-Cert"} {
+		if got.Get(name) != "" {
+			t.Fatalf("forward auth received forged %s", name)
+		}
+	}
+}
+
 func TestForwardAuthSuccessDoesNotCopyConnectionScopedIdentity(t *testing.T) {
 	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Connection", "X-Auth-User")
