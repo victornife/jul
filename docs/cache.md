@@ -79,8 +79,9 @@ header is ever part of a key; reuse restrictions are enforced by the stored
 entry's recorded policy instead, because a credential-derived key would silently
 turn a leak into an unbounded cache.
 
-When an upstream response carries a `Vary` header, each combination of the varied
-request-header values is stored as a **distinct variant** under its own key, so
+When an upstream response carries `Vary` on one or more header lines, each
+combination of the varied request-header values (including every repeated
+request field line) is stored as a **distinct variant** under its own key, so
 (for example) `Vary: Accept` keeps the JSON and XML representations of one URL
 cached at the same time instead of overwriting each other. A pointer entry under
 the base key records both the varied field names and the **membership list** of
@@ -98,6 +99,13 @@ A request whose varied values match no stored variant is a miss; `Vary: *`
 responses are never reused. Membership is capped at 64 variants per base
 resource; past the cap the oldest variant is deleted with its membership entry,
 so a pathological `Vary` cannot grow one record without bound.
+
+The 2026-09-28 correction to repeated-field handling uses a new variant-value
+encoding. Existing disk entries written with the old first-value encoding
+cannot match a new lookup, even when a legacy pointer still claims them; the
+first request after upgrade fetches and stores a fresh variant. This is a
+deliberate miss rather than reuse of a representation whose full request-header
+combination was not recorded.
 
 ## Cache result values
 
@@ -349,7 +357,7 @@ the complete audit record is [the 2026-08-07 cache recertification](audit/old/20
 | SWR/SIE | Bounded stale reuse; explicit response values replace global defaults; canceled work never extends SIE | `TestExplicitStaleIfErrorReplacesTheGlobalSetting`, `TestStaleOnErrorWindowContract`, `TestRevalidationCanceledByLeaseCancel`, `TestCacheRecertificationSoak` |
 | `Authorization` | Shared reuse only when explicitly permitted; identities and credentials never leak through keys or variants | `TestSharedReusePermissionMatrix`, `TestNoCrossIdentityLeakage`, `TestUnauthenticatedEntryIsNotReusableByAnAuthenticatedRequest`, `TestVaryAuthorizationStillEnforcesTheSharedReuseRule`, `TestRealAuthenticatedIdentityIsolation` |
 | `Set-Cookie` | Never stored | `TestResponseDirectiveStorage`, `TestSharedReusePermissionMatrix` |
-| `Vary` and membership | Distinct variants coexist; 64-entry membership cap; invalidation removes every owned memory/disk variant | `TestHandlerVaryVariantsCoexist`, `TestUnsafeMethodRemovesEveryVaryVariant`, `TestDeletedVariantCannotBeResurrectedByANewStub`, `TestChangedVaryReplacesTheVariantSet` |
+| `Vary` and membership | Distinct variants coexist across repeated request/response field lines; 64-entry membership cap; old first-value entries miss after upgrade; invalidation removes every owned memory/disk variant | `TestHandlerVaryVariantsCoexist`, `TestVaryDistinguishesRepeatedRequestHeaderValues`, `TestVaryHonorsEveryResponseFieldLine`, `TestFirstValueVaryEntriesFailClosedAfterUpgrade`, `TestUnsafeMethodRemovesEveryVaryVariant`, `TestDeletedVariantCannotBeResurrectedByANewStub`, `TestChangedVaryReplacesTheVariantSet` |
 | ETag / Last-Modified / 304 | ETag precedence; immutable metadata merge; changed/unsafe metadata discards | `TestValidatorPrecedence`, `TestMerge304UpdatesMetadata`, `TestMerge304Discards`, `TestMerge304NeverMutatesThePublishedEntry`, `TestMerge304AcrossBothTiers` |
 | Range / If-Range | Bypass before lookup/store; 206 is never stored | `TestRangeRequestBypassesLookup`, `TestIfRangeBypassesLookup`, `TestRangeResponsesAreNeverStored`, `TestRealRangePassThrough` |
 | WebSocket / 101 | Upgrade requests bypass with the original writer; 101 is never stored | `TestWebSocketThroughCachedProxy`, `TestWebSocketThroughFullMiddlewareChain`, `TestUpgradeRequestBypassesCache`, `TestProtocolSwitchResponseNeverStored`, `TestRepeatedUpgradesThroughCachedProxy` |

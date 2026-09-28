@@ -299,6 +299,12 @@ func parseList(v string) []string {
 	return out
 }
 
+// Vary is a list field and may arrive on several response header lines. Each
+// line contributes a field name to the cache key, including after a 304 merge.
+func varyFields(h http.Header) []string {
+	return parseList(strings.Join(h.Values("Vary"), ","))
+}
+
 func cloneHeader(h http.Header) http.Header {
 	out := make(http.Header, len(h))
 	for k, vs := range h {

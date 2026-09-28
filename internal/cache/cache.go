@@ -329,8 +329,8 @@ func normalizeFields(f []string) []string {
 // variantKey derives a per-variant storage key from the base key and the
 // request's values for the response's Vary header fields. Field names are
 // lowercased and sorted so the key is independent of header order or case, and
-// values are separated by control bytes that cannot appear in header values, so
-// distinct variants never collide.
+// values are length-framed, so repeated field lines and their order cannot
+// collapse into the first value or collide with another combination.
 func variantKey(base string, vary []string, r *http.Request) string {
 	fields := normalizeFields(vary)
 	var b strings.Builder
@@ -339,7 +339,27 @@ func variantKey(base string, vary []string, r *http.Request) string {
 		b.WriteByte(0x00)
 		b.WriteString(f)
 		b.WriteByte(0x1f)
-		b.WriteString(r.Header.Get(f))
+		b.WriteString(varyRequestValue(r.Header, f))
+	}
+	return b.String()
+}
+
+// varyRequestValue encodes every line of a varied request header. The leading
+// control byte and version make persisted entries from the old first-value
+// encoding miss after upgrade, including entries for a single-valued request:
+// an old entry may have been generated from additional values it did not key.
+// Length framing distinguishes absent, empty, repeated and comma-containing
+// values without relying on a separator inside an arbitrary field value.
+func varyRequestValue(header http.Header, name string) string {
+	values := header.Values(name)
+	var b strings.Builder
+	b.WriteString("\x00v2:")
+	b.WriteString(strconv.Itoa(len(values)))
+	for _, value := range values {
+		b.WriteByte(':')
+		b.WriteString(strconv.Itoa(len(value)))
+		b.WriteByte(':')
+		b.WriteString(value)
 	}
 	return b.String()
 }
@@ -712,7 +732,7 @@ func (c *Cache) buildEntry(r *http.Request, status int, h http.Header, body []by
 		StaleIfError:       p.SIE,
 		HasStaleIfError:    p.HasSIE,
 	}
-	if vary := parseList(h.Get("Vary")); len(vary) > 0 {
+	if vary := varyFields(h); len(vary) > 0 {
 		for _, name := range vary {
 			if name == "*" {
 				// Vary: * means the response is not reusable for any other
@@ -723,7 +743,7 @@ func (c *Cache) buildEntry(r *http.Request, status int, h http.Header, body []by
 		e.Vary = vary
 		e.VaryValues = make(map[string]string, len(vary))
 		for _, name := range vary {
-			e.VaryValues[name] = r.Header.Get(name)
+			e.VaryValues[name] = varyRequestValue(r.Header, name)
 		}
 	}
 	return e

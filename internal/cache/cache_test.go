@@ -495,6 +495,97 @@ func TestHandlerVaryVariantsCoexist(t *testing.T) {
 	}
 }
 
+// A real HTTP request can carry repeated lines for a Vary-selected field.
+// The origin sees every line; the cache must not reuse a variant solely because
+// the first value matches a prior request.
+func TestVaryDistinguishesRepeatedRequestHeaderValues(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
+	var calls atomic.Int32
+	srv := httptest.NewServer(c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		w.Header().Set("Vary", "X-Tenant")
+		_, _ = w.Write([]byte(strings.Join(r.Header.Values("X-Tenant"), "/")))
+	})))
+	defer srv.Close()
+	request := func(values ...string) (string, string) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, srv.URL+"/resource", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, value := range values {
+			req.Header.Add("X-Tenant", value)
+		}
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp.Header.Get("X-Cache"), string(body)
+	}
+	if state, body := request("tenant-a", "role-a"); state != stateMiss || body != "tenant-a/role-a" {
+		t.Fatalf("first variant = %q %q", state, body)
+	}
+	if state, body := request("tenant-a", "role-b"); state != stateMiss || body != "tenant-a/role-b" {
+		t.Fatalf("different second value = %q %q, want isolated miss", state, body)
+	}
+	if state, body := request("tenant-a", "role-a"); state != stateHit || body != "tenant-a/role-a" {
+		t.Fatalf("original variant = %q %q, want own hit", state, body)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("origin calls = %d, want 2", got)
+	}
+}
+
+func TestVaryHonorsEveryResponseFieldLine(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
+	var calls atomic.Int32
+	srv := httptest.NewServer(c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		w.Header().Add("Vary", "Accept")
+		w.Header().Add("Vary", "X-Tenant")
+		_, _ = w.Write([]byte(r.Header.Get("X-Tenant")))
+	})))
+	defer srv.Close()
+	request := func(tenant string) (string, string) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, srv.URL+"/resource", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Accept", "text/plain")
+		req.Header.Set("X-Tenant", tenant)
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp.Header.Get("X-Cache"), string(body)
+	}
+	if state, body := request("tenant-a"); state != stateMiss || body != "tenant-a" {
+		t.Fatalf("first tenant = %q %q", state, body)
+	}
+	if state, body := request("tenant-b"); state != stateMiss || body != "tenant-b" {
+		t.Fatalf("second tenant = %q %q, want isolated miss", state, body)
+	}
+	if state, body := request("tenant-a"); state != stateHit || body != "tenant-a" {
+		t.Fatalf("first tenant again = %q %q, want own hit", state, body)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("origin calls = %d, want 2", got)
+	}
+}
+
 // TestHandlerStaleRevalidateSingleflight proves a burst of concurrent stale hits
 // triggers exactly one background revalidation, not one per request.
 func TestHandlerStaleRevalidateSingleflight(t *testing.T) {
