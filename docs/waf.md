@@ -122,7 +122,7 @@ override):
 | `paranoia` | int | `1` | CRS paranoia level `1`–`4` (only with `crs_enabled`). Higher catches more, with more false positives |
 | `directives_files` | string list | — | SecLang rule files to `Include`, in order, before the inline rules |
 | `inline_rules` | string | — | A SecLang snippet appended last — handy for small tuning/allow-list rules |
-| `request_body_limit` | size | `128kb` | How many request-body bytes to buffer for inspection (e.g. `1mb`) |
+| `request_body_limit` | size | `128kb` | How many request-body bytes to buffer for inspection (e.g. `1mb`); a larger body is rejected with `413` |
 | `response_body_check` | bool | `false` | Also inspect response bodies (CRS phase 4). Adds latency + memory |
 
 At least one rule source — `crs_enabled`, a `directives_files` entry, or
@@ -273,8 +273,18 @@ comes last, `mode` always wins.
 ## Request and response bodies
 
 - **Request bodies** are buffered up to `request_body_limit` (128 KiB by
-  default) so body-based rules can inspect them. Size your limit to the largest
-  payload you need inspected, balancing memory use.
+  default) so body-based rules can inspect them, and the whole body is read
+  before the request is forwarded. A body **larger** than the limit is
+  **rejected with `413`**; it is never forwarded uninspected. Set the limit to
+  the largest body the route must accept (uploads included), balancing memory
+  use; `jul lint` warns when it is below the route's `client_max_body_size`.
+- **Native gRPC does not fit behind the WAF.** Because the request body is read
+  completely first, client and bidirectional gRPC streams never reach the
+  backend, and the Core Rule Set rejects the `application/grpc` content type
+  (rule 920420). Turn the WAF off for `grpc = true` routes
+  (`[servers.locations.waf] enabled = false`) or expose the service through
+  `grpc_transcode`, whose JSON the WAF can inspect; `jul lint` warns otherwise.
+  WebSocket upgrades and streamed (e.g. SSE) responses pass through normally.
 - **Response bodies** are inspected only when `response_body_check = true`. This
   enables CRS phase-4 outbound rules (e.g. data-leakage detection) but buffers
   responses and adds latency and memory — leave it off unless you need it.
@@ -480,10 +490,11 @@ especially at higher paranoia levels (`paranoia ≥ 2`). Recommended mitigation:
   client address to the rule engine. Keep the trusted set to the proxies you
   operate; `jul lint` warns when an entry covers everything. With no policy
   configured — the default — rules always see the transport peer.
-- **Request-size evasion:** A body larger than `request_body_limit` is not
-  inspected for body-based rules. Attackers might pad payloads to exceed the
-  limit. Size the limit to the largest payload you need inspected, or front the
-  server with a CDN that enforces its own size cap.
+- **Request-size evasion is closed, at a cost:** a body larger than
+  `request_body_limit` is rejected with `413` rather than passed on partially
+  inspected, so padding a payload past the limit does not evade body rules. The
+  cost is that legitimate bodies over the limit are refused too; size the
+  limit accordingly.
 - **Response-body evasion:** When `response_body_check = false`, outbound data
   leakage evades phase-4 inspection. Enable only when your threat model requires
   it (adds latency/memory).
