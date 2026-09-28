@@ -8,7 +8,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
+
+	"jul/internal/clientaddr"
 )
 
 func TestForwardAuthDecide(t *testing.T) {
@@ -215,6 +218,23 @@ func TestForwardAuthReplacesClientForwardingClaims(t *testing.T) {
 	if got.Get("Forwarded") != "" || got.Get("X-Forwarded-For") != "203.0.113.7" ||
 		got.Get("X-Real-Ip") != "203.0.113.7" || got.Get("X-Forwarded-Proto") != "http" {
 		t.Fatalf("forward auth saw client claims: %v", got)
+	}
+}
+
+func TestForwardAuthRejectsUnattributedProxyHopLocally(t *testing.T) {
+	called := false
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+	fa := newForwardAuth(authServer.URL, nil, authServer.Client(), nil)
+	r := httptest.NewRequest(http.MethodGet, "http://app.example/private", nil)
+	id := clientaddr.Identity{Client: netip.MustParseAddr("10.0.0.1"), Result: clientaddr.ResultMalformed}
+	r = r.WithContext(clientaddr.NewContext(r.Context(), id))
+	res, err := fa.decide(context.Background(), r)
+	if err != nil || res.ok || res.statusCode != http.StatusForbidden || called {
+		t.Fatalf("result=%+v err=%v called=%v, want local 403", res, err, called)
 	}
 }
 
