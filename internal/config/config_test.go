@@ -529,6 +529,27 @@ func TestValidateRequiresServerAndListen(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresAuthenticationForExposedAdmin(t *testing.T) {
+	base := func(listen, token string) *Config {
+		return &Config{
+			Servers: []ServerConfig{{Listen: "127.0.0.1:8080", Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}}}},
+			Admin: AdminConfig{Enabled: true, Listen: listen, Token: token, PluginUploadMaxSize: 1},
+		}
+	}
+	for _, listen := range []string{"0.0.0.0:9090", ":9090", "192.0.2.10:9090"} {
+		err := Validate(base(listen, ""))
+		if err == nil || !strings.Contains(err.Error(), "requires a token or enabled RBAC") {
+			t.Errorf("unauthenticated admin on %q: got %v, want rejection", listen, err)
+		}
+	}
+	if err := Validate(base("127.0.0.1:9090", "")); err != nil {
+		t.Errorf("tokenless loopback admin rejected: %v", err)
+	}
+	if err := Validate(base("0.0.0.0:9090", "secret")); err != nil {
+		t.Errorf("authenticated exposed admin rejected: %v", err)
+	}
+}
+
 func TestValidateMatch(t *testing.T) {
 	cfg := &Config{Servers: []ServerConfig{{
 		Listen: "127.0.0.1:80",

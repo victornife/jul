@@ -1437,6 +1437,8 @@ A malformed or missing certificate/key pair is rejected before the candidate
 configuration is persisted or applied. Binding off-loopback without `[admin.tls]`
 enabled produces a `jul lint` warning (L7); binding off-loopback with TLS
 configured is a supported configuration.
+An off-loopback admin listener also requires a token or enabled RBAC;
+`jul check` rejects TLS-only remote administration without API credentials.
 
 #### `[admin.tls.client_auth]`
 

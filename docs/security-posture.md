@@ -60,7 +60,10 @@ When running with the legacy shared token (RBAC disabled):
   people using that token. Enable `[admin.rbac]` for named attribution.
 - Do not expose the admin listener to untrusted networks under any circumstances.
 - If remote access is required, configure [`[admin.tls]`](configuration.md#admintls) with an
-  operator-supplied certificate (#336) — never bind off-loopback in cleartext.
+  operator-supplied certificate (#336) and a token or enabled RBAC — never bind
+  off-loopback in cleartext. Configuration validation rejects an off-loopback
+  admin listener without either authentication mode; TLS alone authenticates
+  the server, not the API caller.
   This is enforced, not merely advised: a request that consumes an admin
   credential over a non-loopback, non-TLS connection is refused with
   `403 insecure_transport` before authentication (ADR 0019 §28.1); only
