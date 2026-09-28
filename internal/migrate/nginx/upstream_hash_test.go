@@ -33,6 +33,9 @@ func TestParseNginxHashKey(t *testing.T) {
 		{params: []string{"$cookie_"}, blocked: "not a single"},
 		{params: []string{"static-key"}, blocked: "not a single"},
 		{params: []string{"$arg_session"}, blocked: "not a single"},
+		{params: []string{"$cookie_" + strings.Repeat("0", config.HashNameMaxLen+1)}, blocked: "longer than Jul's 128-byte limit"},
+		{params: []string{"$http_" + strings.Repeat("x", config.HashNameMaxLen+1)}, blocked: "longer than"},
+		{params: []string{"$cookie_" + strings.Repeat("0", config.HashNameMaxLen)}, key: "cookie", name: strings.Repeat("0", config.HashNameMaxLen)},
 	}
 	for _, c := range cases {
 		got := parseNginxHashKey(c.params)
