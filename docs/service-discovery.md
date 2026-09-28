@@ -214,6 +214,11 @@ below override them when running outside a cluster.
 | `ca_file` | string | mounted SA CA | API server CA bundle |
 | `insecure_skip_tls_verify` | bool | `false` | Skip API server TLS verification (testing) |
 
+An explicitly configured `ca_file` must exist and contain PEM certificates;
+discovery refuses to start with an unreadable or malformed bundle. Without an
+explicit path, the mounted service-account CA is used when available; otherwise
+the transport uses platform roots.
+
 Endpoints explicitly marked not-ready are skipped; an endpoint with no readiness
 condition is treated as ready (matching Kubernetes semantics). The pod needs RBAC
 to `list`/`watch` `endpointslices` in the namespace.

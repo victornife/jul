@@ -76,6 +76,7 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 		tlsConf.InsecureSkipVerify = true
 	} else {
 		caFile := strings.TrimSpace(k.CAFile)
+		explicitCA := caFile != ""
 		if caFile == "" {
 			caFile = k8sCAFile
 		}
@@ -83,7 +84,11 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 			pool := x509.NewCertPool()
 			if pool.AppendCertsFromPEM(b) {
 				tlsConf.RootCAs = pool
+			} else if explicitCA {
+				return nil, fmt.Errorf("kubernetes discovery: ca_file %q contains no PEM certificates", caFile)
 			}
+		} else if explicitCA {
+			return nil, fmt.Errorf("kubernetes discovery: read ca_file %q: %w", caFile, err)
 		}
 	}
 

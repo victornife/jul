@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -112,6 +114,26 @@ func TestK8sSelectPort(t *testing.T) {
 func TestK8sRequiresNamespaceAndService(t *testing.T) {
 	if _, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{Service: "web", APIServer: "https://x"}}, nil); err == nil {
 		t.Fatal("expected error: kubernetes without namespace")
+	}
+}
+
+func TestK8sExplicitCAFailsClosed(t *testing.T) {
+	malformed := filepath.Join(t.TempDir(), "malformed.pem")
+	if err := os.WriteFile(malformed, []byte("not a PEM certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, caFile := range []string{filepath.Join(t.TempDir(), "missing.pem"), malformed} {
+		t.Run(filepath.Base(caFile), func(t *testing.T) {
+			_, err := newKubernetesDiscoverer(config.DiscoveryConfig{
+				Type: "kubernetes",
+				Kubernetes: &config.KubernetesDiscovery{
+					Namespace: "default", Service: "web", APIServer: "https://api.example.test", CAFile: caFile,
+				},
+			}, nil)
+			if err == nil || !strings.Contains(err.Error(), "ca_file") {
+				t.Fatalf("explicit CA %q: got %v, want a ca_file error", caFile, err)
+			}
+		})
 	}
 }
 
