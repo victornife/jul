@@ -345,5 +345,12 @@ func TestProxyUnixHTTPRepeatedGenerationSwitchRetiresConnections(t *testing.T) {
 			t.Fatalf("generation %d Close: %v", i, err)
 		}
 	}
-	waitFor(t, func() bool { return closed.Load() == opened.Load() })
+	// The backend observes each client close asynchronously; on a loaded
+	// Windows runner AF_UNIX teardown has exceeded 10s, so allow 30s and
+	// report the counts if they still differ.
+	for deadline := time.Now().Add(30 * time.Second); closed.Load() != opened.Load(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("backend connections opened=%d closed=%d after retiring every generation", opened.Load(), closed.Load())
+		}
+	}
 }
