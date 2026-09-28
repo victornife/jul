@@ -198,8 +198,9 @@ func (a *Authenticator) logError(msg string, err error) {
 // that flows such as redirect-to-login work transparently. Hop-by-hop headers
 // are stripped and a non-error status is normalized to 403.
 func writeForwardDenied(w http.ResponseWriter, res forwardResult) {
+	hop := connectionScopedHeaders(res.header)
 	for name, vals := range res.header {
-		if hopByHopHeaders[http.CanonicalHeaderKey(name)] {
+		if hop[http.CanonicalHeaderKey(name)] {
 			continue
 		}
 		w.Header()[http.CanonicalHeaderKey(name)] = vals

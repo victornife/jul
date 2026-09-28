@@ -6,9 +6,10 @@ package auth
 import (
 	"context"
 	"net/http"
+	"strings"
+	"time"
 
 	"jul/internal/upstream"
-	"time"
 )
 
 // forwardAuth delegates the authentication decision to an external service. The
@@ -109,14 +110,32 @@ func (f *forwardAuth) decide(ctx context.Context, r *http.Request) (forwardResul
 // copyForwardHeaders copies identity-relevant request headers to the subrequest
 // while dropping hop-by-hop headers that must not be forwarded.
 func copyForwardHeaders(dst, src http.Header) {
+	hop := connectionScopedHeaders(src)
 	for name, vals := range src {
-		if hopByHopHeaders[http.CanonicalHeaderKey(name)] {
+		if hop[http.CanonicalHeaderKey(name)] {
 			continue
 		}
 		for _, v := range vals {
 			dst.Add(name, v)
 		}
 	}
+}
+
+// Connection can nominate additional hop-by-hop fields. Dropping only the
+// fixed names would let a client pass a connection-scoped field to auth.
+func connectionScopedHeaders(header http.Header) map[string]bool {
+	hop := make(map[string]bool, len(hopByHopHeaders))
+	for name := range hopByHopHeaders {
+		hop[name] = true
+	}
+	for _, line := range header.Values("Connection") {
+		for _, token := range strings.Split(line, ",") {
+			if name := http.CanonicalHeaderKey(strings.TrimSpace(token)); name != "" {
+				hop[name] = true
+			}
+		}
+	}
+	return hop
 }
 
 // hopByHopHeaders are connection-scoped headers that must not be forwarded to

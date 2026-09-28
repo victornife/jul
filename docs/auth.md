@@ -138,15 +138,17 @@ changes for a directly exposed server.
 
 ### Forward-auth
 
-A `GET` subrequest is sent to `url` carrying the original headers (hop-by-hop
-stripped) plus `X-Forwarded-Method`, `X-Forwarded-Uri`, and `X-Forwarded-Host`.
+A `GET` subrequest is sent to `url` carrying the original headers (fixed and
+`Connection`-nominated hop-by-hop fields stripped) plus `X-Forwarded-Method`,
+`X-Forwarded-Uri`, and `X-Forwarded-Host`.
 Client-supplied copies of these three context headers are replaced with the
 actual request method, URI and host, so the auth service receives one value for
 each. Treat other forwarded request headers as client input in the auth service.
 A **2xx** authorizes the request; the listed `auth_response_headers` are copied
 onto the upstream request (client-supplied copies are stripped first). Any other
 status is relayed to the client (non-error statuses normalized to 403; body
-capped at 64 KiB); redirects from the auth service are passed through. One
+capped at 64 KiB, hop-by-hop response headers stripped); redirects from the
+auth service are passed through. One
 subrequest is bounded by `timeout` (default **10s**).
 
 ### Dependency resilience

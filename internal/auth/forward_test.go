@@ -144,3 +144,37 @@ func TestForwardAuthBodyReadError(t *testing.T) {
 		t.Errorf("body should be nil on read error, got %q", res.body)
 	}
 }
+
+func TestForwardAuthDropsConnectionNominatedHeaders(t *testing.T) {
+	var received http.Header
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = r.Header.Clone()
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer auth.Close()
+	fa := newForwardAuth(auth.URL, nil, auth.Client(), nil)
+	req := httptest.NewRequest(http.MethodGet, "http://app.example/private", nil)
+	req.Header.Add("Connection", "X-Internal-Identity, keep-alive")
+	req.Header.Add("Connection", "X-Other-Hop")
+	req.Header.Set("X-Internal-Identity", "admin")
+	req.Header.Set("X-Other-Hop", "spoofed")
+	req.Header.Set("X-End-To-End", "retained")
+	if _, err := fa.decide(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if received.Get("X-Internal-Identity") != "" || received.Get("X-Other-Hop") != "" ||
+		received.Get("X-End-To-End") != "retained" {
+		t.Fatalf("forward-auth headers: %v", received)
+	}
+
+	w := httptest.NewRecorder()
+	writeForwardDenied(w, forwardResult{statusCode: http.StatusForbidden,
+		header: http.Header{
+			"Connection": []string{"X-Internal-Identity"},
+			"X-Internal-Identity": []string{"admin"},
+			"Location": []string{"/login"},
+		}})
+	if w.Header().Get("X-Internal-Identity") != "" || w.Header().Get("Location") != "/login" {
+		t.Fatalf("denial headers: %v", w.Header())
+	}
+}

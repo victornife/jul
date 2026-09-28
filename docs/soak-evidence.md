@@ -70,9 +70,17 @@ each job. The revised harness now writes `manifest.json` before the workload,
 records the binary/harness/fixture hashes, build and compiled capability reports
 and runner details, and rejects an unexpected binary commit or missing importer
 capability. That change did **not** retroactively enrich this run. Y1-08/Y1-09
-remain `GA-soak-pending` / `released` until the revised preflight and a
-self-contained exact-head run are reviewed. This candidate supports a bounded
+remain `GA-soak-pending` / `released` until a self-contained exact-head one-hour
+run is reviewed. This candidate supports a bounded
 stability finding, not a broader GA-soak closure or next-release sign-off.
+
+The [revised preflight on `ea0fc6b`](https://github.com/victornife/jul/actions/runs/36454794362)
+passed both 20-second workloads. Its [artifact](https://github.com/victornife/jul/actions/runs/36454794362/artifacts/10984193591)
+contains a `manifest.json` for each mode: both match the binary's embedded
+commit to `ea0fc6bac651b1ffa2a6e7f6b09d367cbf511ad8`, report an unmodified
+build and `importer: true`, identify the same binary/harness hashes and runner
+image, and match the summary's manifest hash. The longer jobs on that head
+still need completion and inspection; this preflight is smoke evidence.
 
 All three scenarios are driven by the in-tree soak tests behind the `soak` build tag:
 

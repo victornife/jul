@@ -91,7 +91,7 @@ docs/audit/old/2026-08-31-nginx-migration-corpus-closure.md	historical/context o
 docs/audit/old/AI-IMPLEMENTATION-JOURNAL.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/audit/old/HANDOFF-session-3.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/audit/old/combined-audit-2026-08-03.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
-docs/auth.md	reviewed	forward-auth context/header precedence, canonical CIDR identity, empty-auth validation, JWKS request-path behavior and optional egress SSRF boundary traced to implementation and focused tests; other auth claims and benchmarks remain unverified
+docs/auth.md	reviewed	forward-auth context/header precedence and Connection-nominated hop fields, canonical CIDR identity, empty-auth validation, JWKS request-path behavior and optional egress SSRF boundary traced to implementation and focused tests; other auth claims and benchmarks remain unverified
 docs/benchmarks.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/cache.md	reviewed	scoped reload/in-flight refresh, disk persistence and restart-bound cache enablement claims traced to cache and lifecycle source; full shared-cache matrix and platforms not certified
 docs/compatibility.md	reviewed	admin TLS transport migration remedy traced to gate; other compatibility/platform assertions remain unreviewed
