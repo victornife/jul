@@ -1,0 +1,55 @@
+name: Windows service E2E
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-service-e2e.yml'
+      - 'deploy/windows/install-service.ps1'
+      - 'docs/deployment.md'
+      - 'scripts/test-windows-service.ps1'
+      - 'cmd/jul/**'
+      - 'internal/admin/**'
+      - 'internal/app/**'
+      - 'internal/config/**'
+      - 'internal/handler/**'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/windows-service-e2e.yml'
+      - 'deploy/windows/install-service.ps1'
+      - 'docs/deployment.md'
+      - 'scripts/test-windows-service.ps1'
+      - 'cmd/jul/**'
+      - 'internal/admin/**'
+      - 'internal/app/**'
+      - 'internal/config/**'
+      - 'internal/handler/**'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-service-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  virtual-account-recovery:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Exercise installed Windows service
+        run: .\scripts\test-windows-service.ps1

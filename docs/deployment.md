@@ -295,6 +295,13 @@ provisioned token.
 Point `servers.tls.acme.cache_dir`, the disk cache, the access-log file sink, and
 `history_dir` at the matching subdirectories.
 
+The [Windows service CI journey](../scripts/test-windows-service.ps1) installs
+the default `jul` service on an elevated disposable runner, checks the virtual
+account, then exercises initial managed adoption, Apply, history rollback and
+restart with a loopback admin token. It does not establish that a production
+directory's inherited ACLs protect the config and history from ordinary users;
+inspect those ACLs for each installation.
+
 ## Behind a reverse proxy or load balancer
 
 When another proxy, a CDN or a cloud load balancer sits in front of Jul, every
