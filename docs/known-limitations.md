@@ -467,9 +467,12 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   `jul_discovery_errors_total`.
 - **DNS TTL is not respected.** Jul.IA polls on a fixed `refresh` interval
   regardless of TTL; fast DNS changes propagate only when the poll fires.
-- **Kubernetes discovery requires a token.** The `kubernetes` tag needs a
-  service-account token with EndpointSlice read permission; misconfigured RBAC
-  returns an empty pool without an obvious error.
+- **Kubernetes discovery depends on API read access.** In-cluster service
+  accounts normally need the `list` verb on EndpointSlices in the target
+  namespace. A 403 fails that refresh, increments
+  `jul_discovery_errors_total`, and retains the last-good backend set; on a
+  first failed resolution there is no previously discovered backend to keep.
+  Check the discovery error log and RBAC when the pool remains empty.
 
 ---
 
