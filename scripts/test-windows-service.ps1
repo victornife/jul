@@ -70,8 +70,11 @@ $siteDir = Join-Path $root 'site'
 $binary = Join-Path $root 'jul.exe'
 $serviceCreated = $false
 $rootCreated = $false
+$probeUser = 'julprobe' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+$probeCreated = $false
+$probePath = Join-Path $env:PUBLIC ($probeUser + '.ps1')
 try {
-    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    & (Join-Path $PSScriptRoot '..\deploy\windows\new-secure-data-dir.ps1') -Path $root
     $rootCreated = $true
     New-Item -ItemType Directory -Path $configDir, $siteDir -Force | Out-Null
     Set-Content -Path (Join-Path $siteDir 'index.html') -Value 'Jul Windows service E2E' -Encoding utf8NoBOM
@@ -121,6 +124,32 @@ history_dir = "$history"
         throw "Unexpected service account: $($installed.StartName)"
     }
 
+    # This CI fixture keeps its executable and static site under the protected
+    # root. The service needs read/traverse there in addition to its installer
+    # grants on config and writable data; ordinary users must still be denied.
+    & icacls.exe $root /grant 'NT SERVICE\jul:(OI)(CI)(RX)' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Granting service read access to fixture root failed (exit $LASTEXITCODE)." }
+
+    $password = ConvertTo-SecureString ('J!7' + [guid]::NewGuid().ToString('N')) -AsPlainText -Force
+    New-LocalUser -Name $probeUser -Password $password -PasswordNeverExpires | Out-Null
+    $probeCreated = $true
+    $probe = @'
+param([string] $ConfigPath, [string] $HistoryDir)
+try { [IO.File]::ReadAllText($ConfigPath) | Out-Null; exit 21 }
+catch [UnauthorizedAccessException] { }
+try { [IO.File]::WriteAllText((Join-Path $HistoryDir 'ordinary-user-write'), 'x'); exit 22 }
+catch [UnauthorizedAccessException] { }
+exit 0
+'@
+    Set-Content -Path $probePath -Value $probe -Encoding utf8NoBOM
+    $credential = [PSCredential]::new("$env:COMPUTERNAME\$probeUser", $password)
+    $probeArgs = "-NoProfile -NonInteractive -File `"$probePath`" `"$configPath`" `"$(Join-Path $dataDir 'history')`""
+    $ordinary = Start-Process -FilePath (Get-Command pwsh).Source -ArgumentList $probeArgs `
+        -Credential $credential -Wait -PassThru
+    if ($ordinary.ExitCode -ne 0) {
+        throw "Ordinary-user ACL probe exited $($ordinary.ExitCode) (21=config readable, 22=history writable)."
+    }
+
     Start-Service -Name 'jul'
     Wait-Jul
     $unauthorized = Invoke-WebRequest -Uri "$script:adminURL/api/config" -SkipHttpErrorCheck -TimeoutSec 5
@@ -168,7 +197,7 @@ history_dir = "$history"
     Restart-Service -Name 'jul'
     Wait-Jul
     if (-not (Get-Config).raw.Contains('log_level = "info"')) { throw 'Rollback was lost on restart.' }
-    Write-Host 'PASS: Windows service install, virtual account, adoption, Apply, rollback and restart'
+    Write-Host 'PASS: protected Windows service, ordinary-user denial, adoption, Apply, rollback and restart'
 } finally {
     if ($serviceCreated -or (Get-Service -Name 'jul' -ErrorAction SilentlyContinue)) {
         Stop-Service -Name 'jul' -Force -ErrorAction SilentlyContinue
@@ -179,6 +208,8 @@ history_dir = "$history"
             Start-Sleep -Seconds 1
         }
     }
+    if ($probeCreated) { Remove-LocalUser -Name $probeUser -ErrorAction SilentlyContinue }
+    if (Test-Path $probePath) { Remove-Item -Path $probePath -Force }
     if ($rootCreated -and (Test-Path $root)) {
         Remove-Item -Path $root -Recurse -Force
     }

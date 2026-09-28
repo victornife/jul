@@ -55,8 +55,9 @@ patch surface cannot be used to route around it.
 - Migration: the numbered enable → migrate → revoke procedure in [docs/console.md](console.md)
 
 When running with the legacy shared token (RBAC disabled):
-- Treat the admin token as a root credential with no audit trail — or enable
-  `[admin.rbac]` to get named principals and attribution.
+- Treat the admin token as a root credential. Operations can be audited under
+  the shared legacy identity, but the record cannot distinguish individual
+  people using that token. Enable `[admin.rbac]` for named attribution.
 - Do not expose the admin listener to untrusted networks under any circumstances.
 - If remote access is required, configure [`[admin.tls]`](configuration.md#admintls) with an
   operator-supplied certificate (#336) — never bind off-loopback in cleartext.
@@ -168,10 +169,12 @@ token = "${env:JUL_ADMIN_TOKEN}"   # env var resolved at startup
 token = "${file:/run/secrets/admin_token}"   # file contents resolved at startup
 ```
 
-- Resolved values are **masked from all log output** by the redact writer.
-- The on-disk config file and history snapshots retain the **unresolved
-  reference** (not the plaintext value), so a config backup does not leak
-  credentials.
+- Resolved reference values at or above the configured redaction floor are
+  masked by Jul's log writer. Shorter values and literal secrets are not
+  registered for that masking; redaction is defense in depth.
+- The on-disk config file and history snapshots retain reference expressions
+  rather than their expanded values. They can still contain other literal
+  credentials, so protect config backups and snapshots as secrets.
 - `jul lint` (with `--strict`) flags literal admin, Consul, and Kubernetes
   tokens that should be secret references.
 
@@ -191,18 +194,24 @@ These controls reduce disclosure risk but cannot prove that every business-sensi
 
 ## File permissions and atomic writes
 
-All writes that may contain credentials (config file, history snapshots, plugin
-upload) use:
+On POSIX systems, new config files, history snapshots and plugin uploads that
+may contain credentials use:
 
 - Mode `0o600` — owner-readable only on new files.
 - Atomic write — a same-directory temp file is written, fsync'd, and renamed.
   A crash mid-write leaves the previous complete file, never a truncated one.
 - History snapshots are stored in `history_dir` with the same `0o600` mode.
 
+On Windows, POSIX modes do not establish effective access. The installer grants
+the virtual service account but retains inherited ACLs; verify access to the
+config, history and data directories for ordinary users. See
+[deployment.md](deployment.md#windows-service).
+
 **Recommendation:** run Jul.IA as a dedicated service user with a restricted
-`umask`, and grant write access only to `cache_dir`, `history_dir`, and the
-ACME `cache_dir`. See [docs/deployment.md](deployment.md) for the systemd unit
-with `NoNewPrivileges`, `PrivateTmp`, and related hardening.
+`umask` on POSIX, and grant write access only where the chosen deployment
+needs it: an editable config directory, history, cache, ACME cache and file
+logs. See [deployment.md](deployment.md) for the systemd unit with
+`NoNewPrivileges`, `PrivateTmp`, and related hardening.
 
 ---
 

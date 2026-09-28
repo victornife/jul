@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/windows-service-e2e.yml'
       - 'deploy/windows/install-service.ps1'
+      - 'deploy/windows/new-secure-data-dir.ps1'
       - 'docs/deployment.md'
       - 'scripts/test-windows-service.ps1'
       - 'cmd/jul/**'
@@ -20,6 +21,7 @@ on:
     paths:
       - '.github/workflows/windows-service-e2e.yml'
       - 'deploy/windows/install-service.ps1'
+      - 'deploy/windows/new-secure-data-dir.ps1'
       - 'docs/deployment.md'
       - 'scripts/test-windows-service.ps1'
       - 'cmd/jul/**'

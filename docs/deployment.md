@@ -274,12 +274,15 @@ docker run --rm \
 
 [deploy/windows/install-service.ps1](../deploy/windows/install-service.ps1)
 registers the service under the per-service virtual account `NT SERVICE\jul`
-(the Windows analogue of the unprivileged systemd user) and creates an ACL'd
-data directory:
+(the Windows analogue of the unprivileged systemd user). For a fresh dedicated
+data/config root, create a protected empty directory **before** writing a
+secret-bearing config, then run the installer:
 
 ```powershell
-# Elevated PowerShell
-.\install-service.ps1 `
+# Elevated PowerShell from the repository root, after preparing your config
+.\deploy\windows\new-secure-data-dir.ps1 -Path 'C:\ProgramData\jul'
+Copy-Item 'C:\path\to\prepared\server.toml' 'C:\ProgramData\jul\server.toml'
+.\deploy\windows\install-service.ps1 `
   -BinaryPath 'C:\Program Files\jul\jul.exe' `
   -ConfigPath 'C:\ProgramData\jul\server.toml' `
   -DataDir    'C:\ProgramData\jul'
@@ -287,10 +290,13 @@ Start-Service jul
 ```
 
 It creates `C:\ProgramData\jul\{history,cache,logs}` and grants the service
-account **modify** there and **read** on the config. The installer does not
-remove inherited or pre-existing access for other users; review the final ACLs
-on the data directory and any secret-bearing config before starting a service
-that depends on their confidentiality. The supplied `server.toml` also needs
+account **modify** there and **read** on the config. The fresh-directory helper
+refuses an existing path, removes inherited access from the empty directory and
+grants SYSTEM/Administrators; descendants inherit that protected ACL. The
+installer only adds service grants and does not remove inherited or pre-existing
+access for other users. For existing directories or a config stored elsewhere,
+review the effective ACLs before storing secrets or relying on confidentiality.
+The supplied `server.toml` also needs
 real static content/backends, and editable Console use requires
 `[global].config_authority = "managed"`, an enabled admin listener and a
 provisioned token.
@@ -300,9 +306,9 @@ Point `servers.tls.acme.cache_dir`, the disk cache, the access-log file sink, an
 The [Windows service CI journey](../scripts/test-windows-service.ps1) installs
 the default `jul` service on an elevated disposable runner, checks the virtual
 account, then exercises initial managed adoption, Apply, history rollback and
-restart with a loopback admin token. It does not establish that a production
-directory's inherited ACLs protect the config and history from ordinary users;
-inspect those ACLs for each installation.
+restart with a loopback admin token. It provisions the fresh protected directory
+and runs a separate ordinary local user to deny config reads and history writes.
+Existing production directories still require their own ACL review.
 
 ## Behind a reverse proxy or load balancer
 

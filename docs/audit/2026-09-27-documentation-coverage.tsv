@@ -20,7 +20,7 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/security-gates.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/semantic-drift-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/systemd-deployment-e2e.yml	reviewed	shipped editable/read-only units, authority, permissions and rollback passed on Ubuntu at e450113d
-.github/workflows/windows-service-e2e.yml	reviewed	elevated disposable service journey added; remote CI result pending; ordinary-user ACL denial not asserted
+.github/workflows/windows-service-e2e.yml	reviewed	elevated virtual-account and managed recovery passed at 6e96dffd; fresh-directory ACL denial lane pending
 CHANGELOG.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 CONTRIBUTING.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 Dockerfile	reviewed	Docker CI exposed and verified fix for local gofast build-order error; default and managed journey passed at 357c371d
@@ -48,7 +48,8 @@ deploy/docker/server.toml	reviewed	managed authority and access-log comment comp
 deploy/docker/index.html	reviewed	placeholder page presence checked against Dockerfile copy and static-root config; image runtime unverified
 deploy/systemd/jul-readonly.service	reviewed	root:jul 0640 config and rejected Apply with unchanged file passed in real systemd CI at e450113d
 deploy/systemd/jul.service	reviewed	jul:jul config/state ownership, start, adoption, Apply, rollback and restart passed in real systemd CI at e450113d
-deploy/windows/install-service.ps1	reviewed	native exit checks and grant-only ACL behavior traced; false ordinary-user denial header corrected; effective ACL/elevated service unverified
+deploy/windows/install-service.ps1	reviewed	virtual account and managed recovery passed on Windows at 6e96dffd; native exit 1057 repaired; inherited ACLs require dedicated-root provisioning
+deploy/windows/new-secure-data-dir.ps1	reviewed	fresh-only ACL helper creates protected empty directory; ordinary-user denial CI pending
 dev-server.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 docs/abi.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/accessibility.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
@@ -149,7 +150,7 @@ docs/reviews/previous_reviews/jul_roadmap_vision_specs_critical_review.md	histor
 docs/reviews/previous_reviews/jul_round5_remediation_2026-07-17.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/roadmap/README.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/secrets.md	reviewed	secret resolution/redaction/lint and rotation claims traced to config resolver and tests; benchmarks/Console E2E not independently replayed
-docs/security-posture.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/security-posture.md	reviewed	secret-redaction floor, shared-token attribution, POSIX versus Windows ACL and editable write paths traced against code/guide; rest of threat matrix unreviewed
 docs/security-testing.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/service-discovery.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/soak-evidence.md	reviewed	duration rules, historical five-minute labels and 2026-09-27 Windows CI smoke traced; other dated runs not line-by-line revalidated
@@ -219,7 +220,7 @@ scripts/semantic_drift.py	reviewed	targeted release/status, navigation or source
 scripts/test-discovery-k8s-live.ps1	reviewed	unsafe port-owner kill replaced with a conflict error; live Kubernetes/PowerShell execution not available
 scripts/test-nginx-importer.ps1	reviewed	exit 3, JSON status and candidate assertions passed in PR #482 Windows CI at da528885; full migration compatibility not implied
 scripts/test-zero-config.ps1	reviewed	repo-relative temp site, own-process cleanup, exact lint assertion passed in PR #482 Windows CI at da528885
-scripts/test-windows-service.ps1	reviewed	default-service virtual account and managed recovery journey authored; elevated CI result pending and effective ACL denial unverified
+scripts/test-windows-service.ps1	reviewed	default-service virtual account and managed recovery passed at 6e96dffd; fresh protected root and ordinary-user ACL probe pending CI
 scripts/test_docs_check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/* (other operational and test scripts)	not reviewed	inventory aggregate excluding individually listed scripts; comments and operational side effects need script-by-script review
 server.everything.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
