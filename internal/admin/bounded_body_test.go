@@ -13,3 +13,11 @@ func TestReadBoundedBodyRejectsValidPrefixWithOversizedSuffix(t *testing.T) {
 		t.Fatal("oversized valid JSON prefix accepted")
 	}
 }
+
+func TestBoundedPatchJSONRejectsOversizedValidPrefix(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/config/patch/apply", strings.NewReader(`{"ops":[]}`+strings.Repeat(" ", 1<<16)))
+	_, err := decodePatchBatch(r)
+	if err == nil {
+		t.Fatal("oversized patch accepted")
+	}
+}
