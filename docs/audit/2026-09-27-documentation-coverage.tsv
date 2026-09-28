@@ -114,7 +114,7 @@ docs/generated/openapi.json	generated/verified against source	make generated-che
 docs/getting-started.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/grpc-proxy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/grpc-transcoding.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/health.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/health.md	reviewed	HTTP/TCP GA versus post-release gRPC Beta criterion boundary traced to feature manifest; other health behavior and platform claims not certified
 docs/hot-reload-strategy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/http3.md	reviewed	HTTP/3 client-auth policy and CA/CRL hot reload boundary traced to #486 runtime/tests and generated lifecycle; other protocol limits not replayed
 docs/index.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified

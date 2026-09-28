@@ -237,7 +237,10 @@ Validate with `jul check` before starting.
 
 ## GA status
 
-Active health checks have reached **GA** against the [ADR 0003](adr/0003-maturity-and-ga.md) bar.
+The released HTTP/TCP active health checks have reached **GA** against the
+[ADR 0003](adr/0003-maturity-and-ga.md) bar. This table is their historical
+evidence; the post-release gRPC probe is separately **Beta / merged** with its
+criterion 5 open in the [feature manifest](feature-status.yaml).
 
 | Criterion | Status | Evidence |
 | --- | :-: | --- |
