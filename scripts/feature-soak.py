@@ -22,6 +22,55 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import urlopen
 
+PAYLOAD = b"jul-feature-soak-ok\n"
+CLEAN_NGINX = 'http { server { listen 8080; location / { return 200; } } }\n'
+BLOCKING_NGINX = 'http { server { listen 8080; location / { if ($x) { return 403; } } } }\n'
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def write_json(path, value):
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+
+
+def pre_run_manifest(args):
+    """Retain the exact binary, harness and fixture identity before exercising them."""
+    binary = args.jul.resolve()
+    build = json.loads(command([str(binary), "version", "-json"], 0).stdout)
+    capabilities = json.loads(command([str(binary), "capabilities", "-json"], 0).stdout)
+    if args.mode == "importer" and capabilities.get("features", {}).get("importer") is not True:
+        raise RuntimeError("binary lacks importer capability")
+    expected_sha = os.getenv("JUL_SOAK_SHA", "local")
+    if expected_sha != "local" and build.get("commit") != expected_sha:
+        raise RuntimeError(f"binary commit {build.get('commit')} differs from requested {expected_sha}")
+    manifest = {
+        "mode": args.mode,
+        "requested_seconds": args.seconds,
+        "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "source_sha": expected_sha,
+        "harness_sha256": sha256(Path(__file__).read_bytes()),
+        "binary_sha256": sha256(binary.read_bytes()),
+        "build": build,
+        "capabilities": capabilities,
+        "environment": {
+            "platform": platform.platform(), "python": sys.version.split()[0],
+            "runner_os": os.getenv("RUNNER_OS"),
+            "runner_arch": os.getenv("RUNNER_ARCH"),
+            "runner_image": os.getenv("ImageOS"),
+            "runner_image_version": os.getenv("ImageVersion"),
+        },
+        "fixtures": {
+            "response_sha256": sha256(PAYLOAD),
+            "nginx_clean_sha256": sha256(CLEAN_NGINX.encode()),
+            "nginx_blocking_sha256": sha256(BLOCKING_NGINX.encode()),
+            "lint": "env-backed admin token; literal-token warning and strict exit 2",
+        },
+    }
+    write_json(args.out / "manifest.json", manifest)
+    return manifest
+
 
 def command(args, expected, *, env=None):
     result = subprocess.run(args, text=True, capture_output=True, timeout=30, env=env, check=False)
@@ -77,7 +126,7 @@ def stop(proc):
 
 
 def zero_config(binary, seconds, outdir, summary):
-    payload = b"jul-feature-soak-ok\n"
+    payload = PAYLOAD
     class Backend(BaseHTTPRequestHandler):
         def do_GET(self):
             self.send_response(200)
@@ -192,9 +241,9 @@ def importer(binary, seconds, outdir, summary):
     with tempfile.TemporaryDirectory(prefix="jul-import-soak-") as tmp:
         root = Path(tmp)
         clean = root / "clean.conf"
-        clean.write_text('http { server { listen 8080; location / { return 200; } } }\n')
+        clean.write_text(CLEAN_NGINX)
         blocking = root / "blocking.conf"
-        blocking.write_text('http { server { listen 8080; location / { if ($x) { return 403; } } } }\n')
+        blocking.write_text(BLOCKING_NGINX)
         hashes = {}
         cycles = 0
         start = time.monotonic()
@@ -237,13 +286,16 @@ def main():
     if args.seconds < 1 or not args.jul.is_file():
         parser.error("--seconds must be positive and --jul must name a binary")
     args.out.mkdir(parents=True, exist_ok=True)
-    summary = {"mode": args.mode, "requested_seconds": args.seconds,
-               "sha": os.getenv("JUL_SOAK_SHA", "local"),
-               "binary_sha256": hashlib.sha256(args.jul.read_bytes()).hexdigest(),
-               "platform": platform.platform(), "python": sys.version.split()[0],
-               "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     start = time.monotonic()
+    summary = {"mode": args.mode, "requested_seconds": args.seconds,
+               "sha": os.getenv("JUL_SOAK_SHA", "local")}
     try:
+        manifest = pre_run_manifest(args)
+        summary.update(binary_sha256=manifest["binary_sha256"],
+                       platform=manifest["environment"]["platform"],
+                       python=manifest["environment"]["python"],
+                       started_utc=manifest["started_utc"],
+                       manifest_sha256=sha256((args.out / "manifest.json").read_bytes()))
         if args.mode == "zero-config":
             zero_config(args.jul.resolve(), args.seconds, args.out, summary)
         else:
@@ -259,7 +311,7 @@ def main():
         raise
     finally:
         summary["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        (args.out / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        write_json(args.out / "summary.json", summary)
         print(json.dumps({k: v for k, v in summary.items() if k != "samples"}, sort_keys=True), flush=True)
 
 

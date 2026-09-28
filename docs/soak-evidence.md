@@ -35,7 +35,7 @@ workloads and dated qualifying runs. The historical v1.28.0 table below used
 | CI smoke (`soak (smoke)` job) | every push / PR | 20s × 3 scenarios | `soak-results` artifact on the [CI workflow](../.github/workflows/ci.yml) run | ❌ No (smoke only) |
 | Release gate (`soak gate (ADR 0005)` job) | version tag `v*` | 5m × 3 scenarios | `soak-results` artifact on the [release workflow](../.github/workflows/release.yml) run; a red run blocks the release | ❌ No (smoke only) |
 | Local | `scripts/soak.sh` | configurable | stdout (see runs below) | ✅ Yes, if duration meets the minimum for the scope exercised |
-| Feature-specific Y1-08/Y1-09 candidate | PR change to `scripts/feature-soak.py` or its workflow, or manual workflow dispatch after it is on the default branch | 20s preflight, then 3600s per feature | `summary.json` plus server logs in the [feature soak workflow](../.github/workflows/feature-soak.yml) artifacts | ☐ Pending execution and evidence review; a green smoke is not qualifying |
+| Feature-specific Y1-08/Y1-09 candidate | PR change to `scripts/feature-soak.py` or its workflow, or manual workflow dispatch after it is on the default branch | 20s preflight, then 3600s per feature | `summary.json` plus server logs in the [feature soak workflow](../.github/workflows/feature-soak.yml) artifacts; subsequent runs also retain a pre-run `manifest.json` | ☐ Duration floor met on 2026-09-28; see evidence limit below |
 
 The [2026-09-28 PR preflight](https://github.com/victornife/jul/actions/runs/36438405287)
 passed at `3650e506054a829c8390256777baa1d35913dbd1`. Its retained
@@ -44,6 +44,35 @@ proxy requests, four lint cycles, and 20 clean/blocking importer cycles in
 20.001 seconds. Both summaries identify the same built binary hash. This is
 **smoke evidence only**; the one-hour jobs and their artifacts need review
 before either post-GA criterion can be considered satisfied.
+
+### 2026-09-28 — Feature-specific one-hour candidate, PR #482 head `13508dbc` — **bounded pass; gate pending**
+
+The [feature soak run](https://github.com/victornife/jul/actions/runs/36439579989)
+completed its preflight and two independent one-hour jobs on
+`13508dbc6ae48902d4fd16a084da6e1b74ea656e`. Its retained
+[`feature-soak-zero-config`](https://github.com/victornife/jul/actions/runs/36439579989/artifacts/10981410717)
+and [`feature-soak-importer`](https://github.com/victornife/jul/actions/runs/36439579989/artifacts/10982550045)
+artifacts identify the same binary SHA-256,
+`0e76456a3246badfde2ee85bc947d134f12debe076b635b70da07c214e9f6ed6`.
+Both report Linux x86_64, Python 3.12.3 and success:
+
+| Candidate | Elapsed | Exercised and measured | Boundary |
+| --- | ---: | --- | --- |
+| Y1-08 zero-config + lint | 3600.612s | 70,817 static and 70,161 proxy HTTP 200 responses with exact body; 717 lint cycles (env secret, literal-token warning, strict exit 2); 120 resource samples. Serve RSS 23,508 → 26,596 KiB, proxy 22,764 → 29,616 KiB; final FDs 8/7, equal to baseline. Both processes drained cleanly; no panic/error lines in their logs. | Single loopback site and backend, sequential low-rate client per mode; not public ingress, broad concurrency or all lint configurations. |
+| Y1-09 importer | 3600.008s | 3,600 cycles, each converting clean and blocking single-file NGINX fixtures, checking the blocking report's `manual_action_required`, valid candidates, lint and identical output within the run; child peak RSS 45,932 KiB. | Fresh CLI process on every conversion; two tiny fixtures, not an extended corpus, long-lived parser or cross-run byte identity. |
+
+Each exceeds ADR 0005's **one-hour per-feature duration floor**. The original
+artifact has a result summary and static/proxy logs, but **no pre-run manifest,
+build metadata, capability report or fixture/environment fingerprint**. The
+candidate hashes differ between the 20-second and one-hour importer jobs because
+the outputs contain temporary paths; the harness checked determinism only within
+each job. The revised harness now writes `manifest.json` before the workload,
+records the binary/harness/fixture hashes, build and compiled capability reports
+and runner details, and rejects an unexpected binary commit or missing importer
+capability. That change did **not** retroactively enrich this run. Y1-08/Y1-09
+remain `GA-soak-pending` / `released` until the revised preflight and a
+self-contained exact-head run are reviewed. This candidate supports a bounded
+stability finding, not a broader GA-soak closure or next-release sign-off.
 
 All three scenarios are driven by the in-tree soak tests behind the `soak` build tag:
 
