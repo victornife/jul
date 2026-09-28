@@ -49,6 +49,10 @@ func parseNginxHashKey(params []string) nginxHashKey {
 	default:
 		out.reason = fmt.Sprintf("hash key %q is not a single client-address, request-header or cookie variable", expr)
 	}
+	if len(out.name) > config.HashNameMaxLen {
+		out.reason = fmt.Sprintf("hash key %q names a %s longer than Jul's %d-byte limit", expr, out.key, config.HashNameMaxLen)
+		out.key, out.name = "", ""
+	}
 	return out
 }
 

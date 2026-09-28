@@ -12,9 +12,9 @@ import (
 	"jul/internal/affinity"
 )
 
-// hashNameMaxLen bounds a configured header or cookie name. Real names are
+// HashNameMaxLen bounds a configured header or cookie name. Real names are
 // short tokens; the bound keeps a pasted value from masquerading as a name.
-const hashNameMaxLen = 128
+const HashNameMaxLen = 128
 
 // validateHash checks strategy = "consistent_hash" against its [upstreams.hash]
 // block. The key source must be explicit: a default key would be a silent
@@ -41,8 +41,8 @@ func validateHash(up UpstreamConfig, where string) []error {
 		switch {
 		case h.Name == "":
 			errs = append(errs, fmt.Errorf("%s.name: required for key %q", where, h.Key))
-		case len(h.Name) > hashNameMaxLen:
-			errs = append(errs, fmt.Errorf("%s.name: longer than %d bytes", where, hashNameMaxLen))
+		case len(h.Name) > HashNameMaxLen:
+			errs = append(errs, fmt.Errorf("%s.name: longer than %d bytes", where, HashNameMaxLen))
 		case !httpguts.ValidHeaderFieldName(h.Name):
 			errs = append(errs, fmt.Errorf("%s.name: %q is not a valid %s name (an RFC 9110 token)", where, h.Name, h.Key))
 		case h.Key == HashKeyHeader && strings.EqualFold(h.Name, "Cookie"):
