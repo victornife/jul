@@ -62,6 +62,11 @@ type forwardResult struct {
 
 // decide performs the forward-auth subrequest for r.
 func (f *forwardAuth) decide(ctx context.Context, r *http.Request) (forwardResult, error) {
+	if len(r.Header.Values("Authorization")) > 1 {
+		// The auth service and the eventual backend may choose different values.
+		// Refuse the request before either dependency sees ambiguous credentials.
+		return forwardResult{statusCode: http.StatusUnauthorized}, nil
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url, nil)
 	if err != nil {
 		return forwardResult{}, err

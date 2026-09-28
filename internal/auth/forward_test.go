@@ -178,6 +178,23 @@ func TestForwardAuthDropsConnectionNominatedHeaders(t *testing.T) {
 	}
 }
 
+func TestForwardAuthRejectsDuplicateAuthorizationBeforeSubrequest(t *testing.T) {
+	called := false
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+	fa := newForwardAuth(authServer.URL, nil, authServer.Client(), nil)
+	r := httptest.NewRequest(http.MethodGet, "http://app.example/private", nil)
+	r.Header.Add("Authorization", "Bearer first")
+	r.Header.Add("Authorization", "Bearer second")
+	res, err := fa.decide(context.Background(), r)
+	if err != nil || res.ok || res.statusCode != http.StatusUnauthorized || called {
+		t.Fatalf("result=%+v err=%v authCalled=%v, want local 401", res, err, called)
+	}
+}
+
 func TestForwardAuthSuccessDoesNotCopyConnectionScopedIdentity(t *testing.T) {
 	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Connection", "X-Auth-User")
