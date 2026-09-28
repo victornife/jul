@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -120,7 +121,9 @@ func (h *staticHandler) tryServe(w http.ResponseWriter, r *http.Request, candida
 	if rel == "" {
 		rel = "."
 	}
-	if h.isHidden(rel) {
+	// On Windows os.Root also splits on '\', which would reintroduce dot
+	// segments the router never saw (as http.Dir refuses them).
+	if h.isHidden(rel) || hasOSSeparator(rel, filepath.Separator) {
 		return false
 	}
 
@@ -329,4 +332,8 @@ func expandURI(tmpl, uri string) string {
 	tmpl = strings.ReplaceAll(tmpl, "$uri/", uri+"/")
 	tmpl = strings.ReplaceAll(tmpl, "$uri", uri)
 	return tmpl
+}
+
+func hasOSSeparator(rel string, sep rune) bool {
+	return sep != '/' && strings.ContainsRune(rel, sep)
 }

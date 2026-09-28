@@ -265,6 +265,7 @@ func (r *Router) For(addr string) http.Handler {
 			redirectToHTTPS(w, req, srv.redirectHTTPS)
 			return
 		}
+		canonicalizeRequest(req)
 		loc := srv.selectLocation(req)
 		if loc == nil {
 			http.NotFound(w, req)
