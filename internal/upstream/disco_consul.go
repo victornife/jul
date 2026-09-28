@@ -60,7 +60,11 @@ func newConsulDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discoverer,
 	}
 	base.RawQuery = q.Encode()
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	// A redirect could forward X-Consul-Token to another origin. Treat a
+	// redirected discovery response as an error and retain last-good targets.
+	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	if dial != nil {
 		// The guarded dial must see the configured Consul host, not an

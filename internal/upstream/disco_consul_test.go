@@ -90,6 +90,31 @@ func TestConsulDiscovererRequiresService(t *testing.T) {
 	}
 }
 
+func TestConsulDiscovererDoesNotForwardTokenOnRedirect(t *testing.T) {
+	var forwarded bool
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		forwarded = true
+	}))
+	defer destination.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", destination.URL)
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer redirect.Close()
+	d, err := newConsulDiscoverer(config.DiscoveryConfig{Type: "consul", Consul: &config.ConsulDiscovery{
+		Address: redirect.URL, Service: "web", Token: "secret",
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Resolve(context.Background()); err == nil {
+		t.Fatal("redirected discovery response must fail")
+	}
+	if forwarded {
+		t.Fatal("redirect target received a request carrying the discovery token")
+	}
+}
+
 // TestConsulDiscovererEgressBlocked proves the discovery client honours the
 // egress guard: a dial that refuses the destination fails the resolve rather
 // than reaching an unapproved Consul endpoint.

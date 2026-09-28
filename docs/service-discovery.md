@@ -183,6 +183,8 @@ An `https` address without a `tls` block still verifies, against the platform
 roots. **An ACL token over a plaintext `http://` address is readable and
 replayable by anything on the network path**, so `jul lint` warns about it, and
 `insecure_skip_verify` here is a lint **error** exactly as it is for a backend.
+Discovery rejects API redirects so the `X-Consul-Token` header cannot be
+forwarded to a different destination.
 
 ## Kubernetes
 
