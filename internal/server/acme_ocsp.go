@@ -198,6 +198,13 @@ func ocspFetchWith(client *http.Client) func(ctx context.Context, reqDER []byte,
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("ocsp: responder returned %s", resp.Status)
 		}
-		return io.ReadAll(io.LimitReader(resp.Body, ocspMaxResponseBytes))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, ocspMaxResponseBytes+1))
+		if err != nil {
+			return nil, err
+		}
+		if len(body) > ocspMaxResponseBytes {
+			return nil, fmt.Errorf("ocsp: responder reply exceeds %d bytes", ocspMaxResponseBytes)
+		}
+		return body, nil
 	}
 }
