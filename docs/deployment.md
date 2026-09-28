@@ -166,7 +166,8 @@ before treating the deployment as editable.
 
 Pins the config: `/etc/jul` is mounted `ReadOnlyPaths`, so an admin "Apply" is
 rejected. It uses the same dedicated service user with a root-owned,
-group-readable config. Set
+group-readable config. The service cannot change that file; a privileged
+provisioning process can replace it and reload or restart the unit. Set
 `[global].config_authority = "file_owned"` explicitly in your deployment
 config (the omitted default has the same effect), provision its static content
 and backends as above, then create the user and seed the immutable config:

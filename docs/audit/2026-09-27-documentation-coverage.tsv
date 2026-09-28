@@ -19,7 +19,7 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/release.yml	reviewed	five-minute release smoke job compared to ADR 0005 and evidence log; rest of release workflow not revalidated
 .github/workflows/security-gates.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/semantic-drift-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
-.github/workflows/systemd-deployment-e2e.yml	reviewed	Ubuntu CI journey for shipped editable/read-only units, authority and permissions; exact-SHA runner pending
+.github/workflows/systemd-deployment-e2e.yml	reviewed	shipped editable/read-only units, authority, permissions and rollback passed on Ubuntu at e450113d
 CHANGELOG.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 CONTRIBUTING.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 Dockerfile	reviewed	Docker CI exposed and verified fix for local gofast build-order error; default and managed journey passed at 357c371d
@@ -45,8 +45,8 @@ cmd/jul/main.go	reviewed	targeted release/status, navigation or source claims ch
 cmd/jul/remote_cli.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 deploy/docker/server.toml	reviewed	managed authority and access-log comment compared to parser/admin tests; checked with console-tagged CLI; container operation unverified
 deploy/docker/index.html	reviewed	placeholder page presence checked against Dockerfile copy and static-root config; image runtime unverified
-deploy/systemd/jul-readonly.service	reviewed	file-owned static-user and root-owned group-readable config path compared with deployment guide; live service unverified
-deploy/systemd/jul.service	reviewed	editable static-user/config ownership and unit path claims checked against systemd manual and guide; live service unverified
+deploy/systemd/jul-readonly.service	reviewed	root:jul 0640 config and rejected Apply with unchanged file passed in real systemd CI at e450113d
+deploy/systemd/jul.service	reviewed	jul:jul config/state ownership, start, adoption, Apply, rollback and restart passed in real systemd CI at e450113d
 deploy/windows/install-service.ps1	reviewed	native command failure handling and ACL grants inspected and corrected; inherited ACL restriction and elevated service execution not platform-verified
 dev-server.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 docs/abi.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
@@ -98,7 +98,7 @@ docs/config-value-contract.json	not reviewed	structural link/TOML checks where a
 docs/configuration.md	reviewed	combined example prerequisites, check/startup boundary and CLI JSON severity/exit table traced to source and real checks; remaining field sections need semantic review
 docs/console.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/core-http.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/deployment.md	reviewed	Docker authority/health and systemd/Windows provisioning claims compared to shipped config and units; platform service startup/ACLs not executed
+docs/deployment.md	reviewed	Docker and Linux systemd bounded startup/recovery passed; Windows service ACLs and remote admin TLS not executed
 docs/diagnostics.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/egress.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/feature-status.yaml	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
@@ -213,7 +213,7 @@ internal/observability/metric_contract_test.go	reviewed	targeted release/status,
 scripts/build-release.ps1	reviewed	PowerShell Go tag argument and archive shape traced to CI package exercise; Windows lean/full result pending
 scripts/docs-check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/docker-deployment-e2e.py	reviewed	Docker default site/health and managed adoption/apply/rollback/restart passed at 357c371d; remote TLS untested
-scripts/systemd-deployment-e2e.py	reviewed	bounded service user/config/units setup and cleanup, editable recovery and read-only denial; runner execution pending
+scripts/systemd-deployment-e2e.py	reviewed	bounded setup/cleanup and editable recovery/read-only denial passed at e450113d; stage/drift/remote TLS untested
 scripts/semantic_drift.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/test-discovery-k8s-live.ps1	reviewed	unsafe port-owner kill replaced with a conflict error; live Kubernetes/PowerShell execution not available
 scripts/test-nginx-importer.ps1	reviewed	exit 3, JSON status and candidate assertions passed in PR #482 Windows CI at da528885; full migration compatibility not implied
