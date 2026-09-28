@@ -55,17 +55,23 @@ function Wait-Jul {
         if ($service.Status -eq 'Stopped') {
             throw 'jul service stopped before the HTTP listener became ready.'
         }
+        # A transient connection error or per-attempt timeout can use several
+        # PowerShell exception types. Only the HTTP calls are retried; an
+        # unexpected successful response below remains a hard failure.
         try {
             $traffic = Invoke-WebRequest -Uri $script:trafficURL -SkipHttpErrorCheck -TimeoutSec 2
             $ready = Invoke-WebRequest -Uri "$script:adminURL/readyz" -SkipHttpErrorCheck -TimeoutSec 2
-            if ([int]$traffic.StatusCode -eq 200 -and [int]$ready.StatusCode -eq 200) {
-                if ($traffic.Content -notmatch 'Jul Windows service E2E') { throw 'Unexpected static site content.' }
-                return
-            }
-        } catch [System.Net.Http.HttpRequestException] { }
+        } catch {
+            Start-Sleep -Seconds 1
+            continue
+        }
+        if ([int]$traffic.StatusCode -eq 200 -and [int]$ready.StatusCode -eq 200) {
+            if ($traffic.Content -notmatch 'Jul Windows service E2E') { throw 'Unexpected static site content.' }
+            return
+        }
         Start-Sleep -Seconds 1
     }
-    throw 'jul service did not serve the static site and readiness probe within 60 seconds.'
+    throw 'jul service did not serve the static site and readiness probe after 60 attempts.'
 }
 
 $root = Join-Path $env:ProgramData ('jul-service-e2e-' + [guid]::NewGuid().ToString('N'))
