@@ -149,7 +149,12 @@ A `GET` subrequest is sent to `url` carrying the original headers (fixed and
 `X-Forwarded-Uri`, and `X-Forwarded-Host`.
 Client-supplied copies of these three context headers are replaced with the
 actual request method, URI and host, so the auth service receives one value for
-each. Treat other forwarded request headers as client input in the auth service.
+each. Jul also replaces `X-Forwarded-For`, `X-Real-Ip` and
+`X-Forwarded-Proto` with its resolved client address and connection scheme,
+and drops unverified `Forwarded`, `Client-Cert`, `Client-Cert-Chain` and
+`X-Forwarded-Client-Cert` claims. An unattributable trusted-proxy chain is
+denied before the auth service is called. Treat other request headers as
+client input in the auth service.
 A **2xx** authorizes the request; listed end-to-end `auth_response_headers` are
 copied onto the upstream request (client-supplied copies are stripped first).
 Fixed and `Connection`-nominated hop-by-hop response fields are never copied,
