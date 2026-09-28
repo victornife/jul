@@ -127,8 +127,8 @@ weight directly — so no port is configured. `target` is the full SRV name.
   target = "_grpc._tcp.svc.cluster.local"
 ```
 
-SRV weights map to backend weights, so a weighted strategy (`strategy =
-"weighted"`) honours the priorities published in DNS.
+SRV weights map to backend weights for `strategy = "weighted"`. SRV priorities
+are ignored; this strategy does not provide priority-based failover.
 
 ## Consul
 
