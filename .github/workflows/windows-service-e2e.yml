@@ -6,6 +6,7 @@ on:
       - '.github/workflows/windows-service-e2e.yml'
       - 'deploy/windows/install-service.ps1'
       - 'deploy/windows/new-secure-data-dir.ps1'
+      - 'scripts/build-release.ps1'
       - 'docs/deployment.md'
       - 'scripts/test-windows-service.ps1'
       - 'cmd/jul/**'
@@ -22,6 +23,7 @@ on:
       - '.github/workflows/windows-service-e2e.yml'
       - 'deploy/windows/install-service.ps1'
       - 'deploy/windows/new-secure-data-dir.ps1'
+      - 'scripts/build-release.ps1'
       - 'docs/deployment.md'
       - 'scripts/test-windows-service.ps1'
       - 'cmd/jul/**'
@@ -43,7 +45,7 @@ concurrency:
 jobs:
   virtual-account-recovery:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     defaults:
       run:
         shell: pwsh
@@ -53,5 +55,21 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Exercise installed Windows service
-        run: .\scripts\test-windows-service.ps1
+      - name: Build and expand full Windows package
+        run: |
+          .\scripts\build-release.ps1 -Version ci-service -Targets @('windows/amd64') -Profile full
+          $name = 'jul-ci-service-windows-amd64-full'
+          $archive = Join-Path dist "$name.zip"
+          $expanded = Join-Path $env:RUNNER_TEMP 'jul-service-package'
+          Expand-Archive -Path $archive -DestinationPath $expanded -Force
+          $package = Join-Path $expanded $name
+          foreach ($file in @('jul.exe', 'install-service.ps1', 'new-secure-data-dir.ps1')) {
+            if (-not (Test-Path (Join-Path $package $file))) { throw "Package missing $file" }
+          }
+          "JUL_SERVICE_PACKAGE=$package" >> $env:GITHUB_ENV
+      - name: Exercise packaged Windows service
+        run: |
+          .\scripts\test-windows-service.ps1 `
+            -BinaryPath (Join-Path $env:JUL_SERVICE_PACKAGE 'jul.exe') `
+            -InstallerPath (Join-Path $env:JUL_SERVICE_PACKAGE 'install-service.ps1') `
+            -ProvisionPath (Join-Path $env:JUL_SERVICE_PACKAGE 'new-secure-data-dir.ps1')

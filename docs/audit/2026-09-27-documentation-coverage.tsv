@@ -16,11 +16,11 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/issue94-security-matrix.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/labels.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/nginx-migration-e2e.yml	reviewed	pinned reference and real-Jul corpus command scope traced to Makefile/scripts; exact-SHA CI result pending
-.github/workflows/release.yml	reviewed	five-minute release smoke job compared to ADR 0005 and evidence log; rest of release workflow not revalidated
+.github/workflows/release.yml	reviewed	five-minute release smoke claim corrected; archive staging reviewed for Windows service helpers and Linux units; tagged release job unexecuted
 .github/workflows/security-gates.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/semantic-drift-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/systemd-deployment-e2e.yml	reviewed	shipped editable/read-only units, authority, permissions and rollback passed on Ubuntu at e450113d
-.github/workflows/windows-service-e2e.yml	reviewed	elevated virtual-account and managed recovery passed at 6e96dffd; fresh-directory ACL denial lane pending
+.github/workflows/windows-service-e2e.yml	reviewed	virtual-account recovery and fresh-directory ordinary-user ACL denial passed at c0da5eb5; packaged full archive pending
 CHANGELOG.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 CONTRIBUTING.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 Dockerfile	reviewed	Docker CI exposed and verified fix for local gofast build-order error; default and managed journey passed at 357c371d
@@ -49,7 +49,7 @@ deploy/docker/index.html	reviewed	placeholder page presence checked against Dock
 deploy/systemd/jul-readonly.service	reviewed	root:jul 0640 config and rejected Apply with unchanged file passed in real systemd CI at e450113d
 deploy/systemd/jul.service	reviewed	jul:jul config/state ownership, start, adoption, Apply, rollback and restart passed in real systemd CI at e450113d
 deploy/windows/install-service.ps1	reviewed	virtual account and managed recovery passed on Windows at 6e96dffd; native exit 1057 repaired; inherited ACLs require dedicated-root provisioning
-deploy/windows/new-secure-data-dir.ps1	reviewed	fresh-only ACL helper creates protected empty directory; ordinary-user denial CI pending
+deploy/windows/new-secure-data-dir.ps1	reviewed	fresh-only protected root and separate ordinary-user config-read/history-write denial passed on Windows at c0da5eb5
 dev-server.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 docs/abi.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/accessibility.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
@@ -212,7 +212,7 @@ internal/config/**; internal/lifecycle/**	not reviewed	generated contract checke
 internal/migrate/**; internal/upstream/**; internal/plugins/**; internal/waf/**	not reviewed	key release boundaries sampled; full protocol and failure matrices not independently replayed
 internal/observability/**; internal/storagefs/**	not reviewed	metric contract test and post-release classifications checked; platform telemetry/failure paths not exhaustively exercised
 internal/observability/metric_contract_test.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-scripts/build-release.ps1	reviewed	PowerShell Go tag argument and archive shape traced to CI package exercise; Windows lean/full result pending
+scripts/build-release.ps1	reviewed	Windows lean/full archive exercise passed at 8249b732; new secure helper staging and full-service archive pending
 scripts/docs-check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/docker-deployment-e2e.py	reviewed	Docker default site/health and managed adoption/apply/rollback/restart passed at 357c371d; remote TLS untested
 scripts/systemd-deployment-e2e.py	reviewed	editable/read-only recovery passed at e450113d; staged restart and drift/adoption passed at 05a540be; remote TLS untested
@@ -220,7 +220,7 @@ scripts/semantic_drift.py	reviewed	targeted release/status, navigation or source
 scripts/test-discovery-k8s-live.ps1	reviewed	unsafe port-owner kill replaced with a conflict error; live Kubernetes/PowerShell execution not available
 scripts/test-nginx-importer.ps1	reviewed	exit 3, JSON status and candidate assertions passed in PR #482 Windows CI at da528885; full migration compatibility not implied
 scripts/test-zero-config.ps1	reviewed	repo-relative temp site, own-process cleanup, exact lint assertion passed in PR #482 Windows CI at da528885
-scripts/test-windows-service.ps1	reviewed	default-service virtual account and managed recovery passed at 6e96dffd; fresh protected root and ordinary-user ACL probe pending CI
+scripts/test-windows-service.ps1	reviewed	virtual-account recovery passed at 6e96dffd; fresh protected root and ordinary-user denial passed at c0da5eb5; packaged full archive pending
 scripts/test_docs_check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/* (other operational and test scripts)	not reviewed	inventory aggregate excluding individually listed scripts; comments and operational side effects need script-by-script review
 server.everything.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value

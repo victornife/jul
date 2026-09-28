@@ -208,6 +208,10 @@ jobs:
             (Resolve-Path .\deploy\windows\install-service.ps1).Path,
             [ref]$tokens, [ref]$parseErrors) | Out-Null
           if ($parseErrors.Count -gt 0) { throw ($parseErrors -join [Environment]::NewLine) }
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path .\deploy\windows\new-secure-data-dir.ps1).Path,
+            [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -gt 0) { throw ($parseErrors -join [Environment]::NewLine) }
       - name: package lean and full Windows profiles
         shell: pwsh
         timeout-minutes: 10
@@ -220,7 +224,7 @@ jobs:
             $extracted = Join-Path $env:RUNNER_TEMP "jul-release-$profile"
             Expand-Archive -Path $archive -DestinationPath $extracted -Force
             $package = Join-Path $extracted $name
-            foreach ($file in @('jul.exe', 'server.toml', 'install-service.ps1')) {
+            foreach ($file in @('jul.exe', 'server.toml', 'install-service.ps1', 'new-secure-data-dir.ps1')) {
               if (-not (Test-Path (Join-Path $package $file))) { throw "Missing $file in $name" }
             }
             & (Join-Path $package 'jul.exe') --version

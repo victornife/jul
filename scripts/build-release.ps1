@@ -78,6 +78,7 @@ try {
         Copy-Item (Join-Path $root "server.toml") (Join-Path $stage "server.toml")
         if ($os -eq "windows") {
             Copy-Item (Join-Path $root "deploy/windows/install-service.ps1") $stage
+            Copy-Item (Join-Path $root "deploy/windows/new-secure-data-dir.ps1") $stage
         } else {
             Copy-Item (Join-Path $root "deploy/systemd/jul.service") $stage
         }

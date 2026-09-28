@@ -1,8 +1,14 @@
 # Exercise the shipped Windows service installer and managed recovery on an
 # elevated, disposable CI VM. Refuse to modify a pre-existing `jul` service.
-param()
+param(
+    [string] $BinaryPath = '',
+    [string] $InstallerPath = '',
+    [string] $ProvisionPath = ''
+)
 
 $ErrorActionPreference = 'Stop'
+if (-not $InstallerPath) { $InstallerPath = Join-Path $PSScriptRoot '..\deploy\windows\install-service.ps1' }
+if (-not $ProvisionPath) { $ProvisionPath = Join-Path $PSScriptRoot '..\deploy\windows\new-secure-data-dir.ps1' }
 $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Windows service E2E requires an elevated runner.'
@@ -74,12 +80,17 @@ $probeUser = 'julprobe' + [guid]::NewGuid().ToString('N').Substring(0, 8)
 $probeCreated = $false
 $probePath = Join-Path $env:PUBLIC ($probeUser + '.ps1')
 try {
-    & (Join-Path $PSScriptRoot '..\deploy\windows\new-secure-data-dir.ps1') -Path $root
+    & $ProvisionPath -Path $root
     $rootCreated = $true
     New-Item -ItemType Directory -Path $configDir, $siteDir -Force | Out-Null
     Set-Content -Path (Join-Path $siteDir 'index.html') -Value 'Jul Windows service E2E' -Encoding utf8NoBOM
-    & go build -tags console -o $binary ./cmd/jul
-    if ($LASTEXITCODE -ne 0) { throw "Go build failed (exit $LASTEXITCODE)." }
+    if ($BinaryPath) {
+        if (-not (Test-Path -LiteralPath $BinaryPath -PathType Leaf)) { throw "Packaged binary missing: $BinaryPath" }
+        Copy-Item -LiteralPath $BinaryPath -Destination $binary
+    } else {
+        & go build -tags console -o $binary ./cmd/jul
+        if ($LASTEXITCODE -ne 0) { throw "Go build failed (exit $LASTEXITCODE)." }
+    }
 
     $trafficPort = Get-FreePort
     $adminPort = Get-FreePort
@@ -113,7 +124,7 @@ history_dir = "$history"
     & $binary check --config $configPath
     if ($LASTEXITCODE -ne 0) { throw "Config check failed (exit $LASTEXITCODE)." }
 
-    & (Join-Path $PSScriptRoot '..\deploy\windows\install-service.ps1') `
+    & $InstallerPath `
         -BinaryPath $binary -ConfigPath $configPath -DataDir $dataDir
     if (-not (Get-Service -Name 'jul' -ErrorAction SilentlyContinue)) {
         throw 'Installer returned without registering jul service.'

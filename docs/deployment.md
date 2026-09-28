@@ -303,8 +303,9 @@ provisioned token.
 Point `servers.tls.acme.cache_dir`, the disk cache, the access-log file sink, and
 `history_dir` at the matching subdirectories.
 
-The [Windows service CI journey](../scripts/test-windows-service.ps1) installs
-the default `jul` service on an elevated disposable runner, checks the virtual
+The [Windows service CI journey](../scripts/test-windows-service.ps1) builds and
+expands the full Windows ZIP, installs its default `jul` service and bundled
+scripts on an elevated disposable runner, checks the virtual
 account, then exercises initial managed adoption, Apply, history rollback and
 restart with a loopback admin token. It provisions the fresh protected directory
 and runs a separate ordinary local user to deny config reads and history writes.
