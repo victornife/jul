@@ -53,6 +53,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Fixed
 
+- **Security hardening: FastCGI and uWSGI no longer pass a client `Proxy` header as `HTTP_PROXY` (httpoxy).** Request headers become `HTTP_*` CGI parameters, so a client could set the `HTTP_PROXY` an application or library might use for its own outbound requests (the CVE-2016-5385 class). The parameter is now dropped; an explicit `fastcgi_params.HTTP_PROXY` still applies. Affects v2.0.0 and earlier.
+
 - **Security: the admin listener refuses cross-site and DNS-rebinding browser requests.** In open mode (no token, RBAC disabled, loopback), a web page could previously drive the admin API from the operator's browser: a cross-origin `text/plain` `POST` to `/api/config/apply` (or `/reload`, `/cache/purge`, plugin upload) was accepted, and a page whose domain was rebound to `127.0.0.1` could read `/api/config` and adopt/apply a configuration. Unsafe-method cross-origin requests are now refused on every admin route (`Sec-Fetch-Site`, else `Origin` vs `Host`), and open mode refuses a cleartext request whose `Host` is not loopback. Token/RBAC deployments were not exploitable this way. A local proxy fronting an open-mode listener must forward a loopback `Host` or configure a token ([admin-api.md](docs/admin-api.md#browser-origin-no-cross-site-requests-no-rebinding)). Affects v2.0.0 and earlier.
 
 - **NGINX importer: an over-long `hash $cookie_…`/`$http_…` name is blocking, not a candidate that fails validation.** A name longer than Jul's 128-byte `upstreams.hash.name` limit was translated into a `consistent_hash` block that `jul check` then rejected; it is now reported as `NGX_UPSTREAM_HASH_KEY` blocking. Found by `FuzzParseNginxHashKey`; the input is kept as a regression seed.

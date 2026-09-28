@@ -219,3 +219,40 @@ func TestReloadEnablesClientAuthWithoutRestart(t *testing.T) {
 		t.Fatal("anonymous client accepted after require was enabled")
 	}
 }
+
+// TestReloadRotatesClientCAWithoutRestart follows the documented CA rotation
+// with in-place rewrites of ca_file (and the CRL the new CA signs): bundle old
+// and new CA, then drop the old one, each applied by an ordinary reload.
+func TestReloadRotatesClientCAWithoutRestart(t *testing.T) {
+	f := newMTLSReloadFixture(t)
+	caFile := f.cfg.Servers[0].TLS.ClientAuth.CAFile
+	next := newNamedCA(t, "Next CA")
+	_, oldClient := f.ca.clientCert(t, "old", 7, nil, nil)
+	_, newClient := next.clientCert(t, "new", 8, nil, nil)
+
+	if _, err := f.get(newClient, nil); err == nil {
+		t.Fatal("a certificate from a CA that is not configured yet was accepted")
+	}
+
+	writePEM(t, "", caFile, append(append([]byte(nil), f.ca.pem...), next.pem...))
+	if r := f.doReload("bundle"); r.Outcome != ReloadAppliedLive {
+		t.Fatalf("bundling reload = %+v, want applied_live", r)
+	}
+	for name, cert := range map[string]tls.Certificate{"old": oldClient, "new": newClient} {
+		if _, err := f.get(cert, nil); err != nil {
+			t.Fatalf("%s-CA client rejected while both CAs are bundled: %v", name, err)
+		}
+	}
+
+	writePEM(t, "", caFile, next.pem)
+	next.writeCRL(t, "", f.crlPath)
+	if r := f.doReload("drop-old"); r.Outcome != ReloadAppliedLive {
+		t.Fatalf("dropping reload = %+v, want applied_live", r)
+	}
+	if _, err := f.get(oldClient, nil); err == nil {
+		t.Fatal("old-CA client still accepted after the old CA was removed")
+	}
+	if _, err := f.get(newClient, nil); err != nil {
+		t.Fatalf("new-CA client rejected after rotation: %v", err)
+	}
+}

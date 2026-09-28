@@ -281,6 +281,7 @@ func fcgiScriptParams(loc config.LocationConfig) gofast.Middleware {
 				req.Params["SCRIPT_FILENAME"] = filepath.Join(loc.Root, filepath.FromSlash(scriptName))
 			}
 			req.Params["SCRIPT_NAME"] = scriptName
+			delete(req.Params, "HTTP_PROXY") // httpoxy: a client "Proxy" header must not become HTTP_PROXY
 			for k, v := range loc.FastCGIParams {
 				req.Params[k] = v
 			}
@@ -549,6 +550,7 @@ func buildCGIParams(loc config.LocationConfig, r *http.Request) map[string]strin
 	// The inbound chain is attacker input unless it came from a trusted proxy,
 	// and the application cannot tell the difference. Overwrite it with Jul's
 	// own trusted chain rather than laundering what arrived.
+	delete(p, "HTTP_PROXY") // httpoxy: a client "Proxy" header must not become HTTP_PROXY
 	p["HTTP_X_FORWARDED_FOR"] = forwardedChain(client, peer)
 	if p["HTTP_X_FORWARDED_FOR"] == "" {
 		delete(p, "HTTP_X_FORWARDED_FOR")
