@@ -41,7 +41,7 @@ burn-in-stream.toml	not reviewed	parsed by make config-check if root/example; ru
 burn-in-waf.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 burn-in.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 cmd/jul/* (other CLI and help source files)	not reviewed	CLI help and representative commands sampled; remaining source comments/branches not exhaustively traced
-cmd/jul/cli.go	reviewed	lint exit and check stateless-preflight/help claims traced to implementation and runtime fixture; other CLI branches remain unreviewed
+cmd/jul/cli.go	reviewed	lint/check and healthcheck TLS target/trust/redirect paths traced to implementation and focused tests; other CLI branches remain unreviewed
 cmd/jul/main.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 cmd/jul/remote_cli.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 deploy/docker/server.toml	reviewed	managed authority and access-log comment compared to parser/admin tests; checked with console-tagged CLI; container operation unverified
@@ -100,7 +100,7 @@ docs/config-value-contract.json	not reviewed	structural link/TOML checks where a
 docs/configuration.md	reviewed	combined example and CLI checks plus admin-versus-data-plane mTLS lifecycle traced; remaining field sections need semantic review
 docs/console.md	reviewed	targeted admin TLS, stage outcomes, tracing sample ratio and post-tag client-auth claims traced to lifecycle/Console code; broader panel behavior not certified
 docs/core-http.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/deployment.md	reviewed	Docker and Linux systemd bounded startup/recovery passed; Windows service ACLs and remote admin TLS not executed
+docs/deployment.md	reviewed	Docker, systemd, packaged Windows service and disposable non-loopback admin TLS journeys passed; healthcheck TLS trust/hostname guidance traced to CLI; production ACL/network and release-tag variants remain unverified
 docs/diagnostics.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/egress.md	reviewed	ACME issuance versus independent OCSP stapling failure traced to runtime; broader auxiliary egress generation matrix remains unexecuted
 docs/feature-status.yaml	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified

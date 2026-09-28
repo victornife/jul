@@ -387,8 +387,17 @@ shell or `curl`** (the distroless image ships neither):
 | `1` | unhealthy — non-`2xx`, unreachable, or the timeout elapsed |
 | `2` | usage/config error — bad flags, unreadable config, or admin disabled |
 
-By default it discovers the address from `[admin] listen` in the config; `-addr`
-or `-url` override it, and `-ready` probes `/readyz` instead of `/healthz`.
+By default it discovers the address and HTTP/HTTPS scheme from `[admin]` in the
+config; `-addr` overrides the host/port for plaintext HTTP, while `-url` selects
+the full endpoint including scheme and path. For discovered or `-addr` targets,
+`-ready` probes `/readyz` instead of `/healthz`; an explicit `-url` supplies its
+own path. HTTPS verifies the certificate and hostname. For a private CA, pass
+`-ca-file`; when admin TLS requires a client certificate, pass `-client-cert`
+and `-client-key` together. A redirect is unhealthy, not proof that the admin
+endpoint is responding. With a wildcard listener or a certificate lacking a
+loopback IP SAN, use `-url https://<certificate-name>:<port>/readyz` with a name
+that resolves to the listener from the probe environment. Do not bypass TLS
+verification to make a probe pass.
 
 **Docker** — the image already declares this `HEALTHCHECK` (exec form, no shell),
 and its baked config enables the admin listener on loopback so the probe passes
@@ -402,12 +411,18 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 `docker inspect --format '{{.State.Health.Status}}' <container>` then reports
 `healthy` once the server is up. If you bind-mount your own config, keep `[admin]`
 enabled (or override the healthcheck) so the probe can reach a health endpoint.
+When your mounted config enables admin TLS, override the image healthcheck with
+an HTTPS `-url` and the required CA/client-certificate options; the baked probe
+is intended for its loopback plaintext default.
 
 **systemd** — confirm the admin endpoint is live after start:
 
 ```ini
 ExecStartPost=/usr/local/bin/jul healthcheck --config /etc/jul/server.toml --ready --quiet
 ```
+
+For admin TLS, include `-ca-file` and, if required, the client certificate/key;
+use a full `-url` when the certificate name differs from the listener address.
 
 **Kubernetes** — use it as an exec probe (no `curl` needed in the image):
 

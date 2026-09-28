@@ -6,6 +6,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -76,6 +78,7 @@ Usage:
   jul check [-config f] [-json] [-quiet] [-skip-static-roots]
                                        structural and stateless runtime preflight
   jul healthcheck [-config f] [-addr host:port | -url u] [-ready] [-timeout d]
+                  [-ca-file f] [-client-cert f -client-key f]
                                        probe the admin health endpoint (exit 0 healthy, 1 unhealthy)
   jul lint [-config f] [-strict] [-json] [-quiet]
                                        validate and report best-practice warnings
@@ -607,6 +610,9 @@ func cmdHealthcheck(args []string) int {
 	configPath := fs.String("config", "server.toml", "config file used to discover the admin listen address")
 	urlFlag := fs.String("url", "", "probe this full URL instead of discovering it from the config")
 	addr := fs.String("addr", "", "override the admin host:port to probe (keeps the endpoint path)")
+	caFile := fs.String("ca-file", "", "additional PEM CA bundle for an HTTPS probe")
+	clientCert := fs.String("client-cert", "", "mTLS client certificate for an HTTPS probe")
+	clientKey := fs.String("client-key", "", "mTLS client private key for an HTTPS probe")
 	ready := fs.Bool("ready", false, "probe readiness (/readyz) instead of liveness (/healthz)")
 	timeout := fs.Duration("timeout", 3*time.Second, "overall request timeout")
 	jsonOut := fs.Bool("json", false, "emit the result as JSON")
@@ -619,12 +625,17 @@ func cmdHealthcheck(args []string) int {
 	if err != nil {
 		return healthcheckFail(2, *jsonOut, *quiet, "", 0, err)
 	}
+	client, closeIdle, err := healthcheckClient(*timeout, *caFile, *clientCert, *clientKey)
+	if err != nil {
+		return healthcheckFail(2, *jsonOut, *quiet, target, 0, err)
+	}
+	defer closeIdle()
 
 	req, err := http.NewRequest(http.MethodGet, target, nil)
 	if err != nil {
 		return healthcheckFail(2, *jsonOut, *quiet, target, 0, err)
 	}
-	resp, err := (&http.Client{Timeout: *timeout}).Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return healthcheckFail(1, *jsonOut, *quiet, target, 0, fmt.Errorf("unreachable: %w", err))
 	}
@@ -641,6 +652,47 @@ func cmdHealthcheck(args []string) int {
 		fmt.Fprintf(stdout, "healthy: %s %d\n", target, resp.StatusCode)
 	}
 	return 0
+}
+
+// healthcheckClient keeps normal certificate and hostname verification. A
+// redirected probe is not health evidence for the configured admin endpoint;
+// refusing redirects also prevents forwarding a client certificate to another
+// origin. TLS options are explicit so a local operator can trust a private CA
+// and authenticate to an mTLS-protected admin listener without disabling TLS.
+func healthcheckClient(timeout time.Duration, caFile, clientCert, clientKey string) (*http.Client, func(), error) {
+	if (clientCert == "") != (clientKey == "") {
+		return nil, nil, fmt.Errorf("client certificate and key must be supplied together")
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil // probe the named admin endpoint directly, not through an environment proxy
+	if caFile != "" || clientCert != "" {
+		tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+		if caFile != "" {
+			pem, err := os.ReadFile(caFile)
+			if err != nil {
+				return nil, nil, fmt.Errorf("read CA file: %w", err)
+			}
+			roots, err := x509.SystemCertPool()
+			if err != nil || roots == nil {
+				roots = x509.NewCertPool()
+			}
+			if !roots.AppendCertsFromPEM(pem) {
+				return nil, nil, fmt.Errorf("CA file contains no usable certificates")
+			}
+			tlsConfig.RootCAs = roots
+		}
+		if clientCert != "" {
+			cert, err := tls.LoadX509KeyPair(clientCert, clientKey)
+			if err != nil {
+				return nil, nil, fmt.Errorf("load client certificate: %w", err)
+			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
+		}
+		transport.TLSClientConfig = tlsConfig
+	}
+	return &http.Client{Timeout: timeout, Transport: transport, CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}, transport.CloseIdleConnections, nil
 }
 
 // healthcheckFail reports a failed probe on the requested output channel and
@@ -662,6 +714,7 @@ func healthcheckTarget(urlFlag, addr string, ready bool, configPath string) (str
 		return urlFlag, nil
 	}
 	hostPort := addr
+	scheme := "http"
 	if hostPort == "" {
 		cfg, err := config.NewTOMLSource(configPath).Load()
 		if err != nil {
@@ -671,12 +724,15 @@ func healthcheckTarget(urlFlag, addr string, ready bool, configPath string) (str
 			return "", fmt.Errorf("admin listener is not enabled in %s; pass -addr host:port or -url to probe a specific endpoint", configPath)
 		}
 		hostPort = cfg.Admin.Listen
+		if cfg.Admin.TLS != nil && cfg.Admin.TLS.Enabled {
+			scheme = "https"
+		}
 	}
 	path := "/healthz"
 	if ready {
 		path = "/readyz"
 	}
-	return "http://" + probeHostPort(hostPort) + path, nil
+	return scheme + "://" + probeHostPort(hostPort) + path, nil
 }
 
 // probeHostPort rewrites an unspecified bind host (empty, 0.0.0.0, or ::) to a

@@ -245,6 +245,8 @@ def main():
         tls_admin = f"https://{host_ip}:{admin_port}"
         trusted = ssl.create_default_context(cafile=str(cert))
         wait_ready("jul.service", traffic, tls_admin, trusted)
+        run("sudo", "-u", "jul", "/usr/local/bin/jul", "healthcheck", "-url",
+            tls_admin + "/readyz", "-ca-file", "/etc/jul/admin-cert.pem", "-quiet")
         expect(401, *request(tls_admin + "/api/config", ssl_context=trusted))
         secured = get_config(tls_admin, token, trusted)
         assert '[admin.tls]' in secured["raw"] and 'listen = "0.0.0.0:' in secured["raw"]

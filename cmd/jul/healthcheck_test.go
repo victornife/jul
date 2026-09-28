@@ -4,9 +4,13 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -126,6 +130,77 @@ func TestCmdHealthcheckConfigDiscovery(t *testing.T) {
 	}
 	if got := probe.path(); got != "/readyz" {
 		t.Errorf("probed path = %q, want /readyz", got)
+	}
+}
+
+func TestCmdHealthcheckTLSConfigDiscoveryAndTrust(t *testing.T) {
+	probe := &pathProbe{status: http.StatusOK}
+	srv := httptest.NewTLSServer(probe)
+	defer srv.Close()
+
+	caFile := filepath.Join(t.TempDir(), "admin-ca.pem")
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+	if err := os.WriteFile(caFile, certPEM, 0600); err != nil {
+		t.Fatal(err)
+	}
+	listen := strings.TrimPrefix(srv.URL, "https://")
+	path := writeTemp(t, "[admin]\nenabled = true\nlisten = \""+listen+"\"\n[admin.tls]\nenabled = true\ncert = \"server.pem\"\nkey = \"server-key.pem\"\n")
+	if code, _, _ := capture(t, func() int { return cmdHealthcheck([]string{"-config", path, "-ready"}) }); code != 1 {
+		t.Fatalf("untrusted TLS probe exit = %d, want 1", code)
+	}
+	if code, _, errOut := capture(t, func() int { return cmdHealthcheck([]string{"-config", path, "-ready", "-ca-file", caFile}) }); code != 0 {
+		t.Fatalf("trusted TLS probe exit = %d, want 0 (%s)", code, errOut)
+	}
+	if got := probe.path(); got != "/readyz" {
+		t.Errorf("probed path = %q, want /readyz", got)
+	}
+}
+
+func TestCmdHealthcheckTLSOptionsAndRedirect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://example.invalid/healthz")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+	if code, _, _ := capture(t, func() int { return cmdHealthcheck([]string{"-url", srv.URL, "-client-cert", "cert.pem"}) }); code != 2 {
+		t.Fatalf("unpaired client certificate exit = %d, want 2", code)
+	}
+	if code, _, _ := capture(t, func() int { return cmdHealthcheck([]string{"-url", srv.URL, "-ca-file", filepath.Join(t.TempDir(), "missing.pem")}) }); code != 2 {
+		t.Fatalf("missing CA file exit = %d, want 2", code)
+	}
+	if code, _, _ := capture(t, func() int { return cmdHealthcheck([]string{"-url", srv.URL}) }); code != 1 {
+		t.Fatalf("redirect exit = %d, want 1", code)
+	}
+}
+
+func TestCmdHealthcheckMTLSClientCertificate(t *testing.T) {
+	srv := httptest.NewUnstartedServer(&pathProbe{status: http.StatusOK})
+	srv.TLS = &tls.Config{ClientAuth: tls.RequireAnyClientCert}
+	srv.StartTLS()
+	defer srv.Close()
+
+	dir := t.TempDir()
+	certFile := filepath.Join(dir, "client.pem")
+	keyFile := filepath.Join(dir, "client-key.pem")
+	cert := srv.TLS.Certificates[0]
+	keyDER, err := x509.MarshalPKCS8PrivateKey(cert.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	url := srv.URL + "/readyz"
+	if code, _, _ := capture(t, func() int { return cmdHealthcheck([]string{"-url", url, "-ca-file", certFile}) }); code != 1 {
+		t.Fatalf("probe without required client certificate exit = %d, want 1", code)
+	}
+	if code, _, errOut := capture(t, func() int {
+		return cmdHealthcheck([]string{"-url", url, "-ca-file", certFile, "-client-cert", certFile, "-client-key", keyFile})
+	}); code != 0 {
+		t.Fatalf("mTLS probe exit = %d, want 0 (%s)", code, errOut)
 	}
 }
 

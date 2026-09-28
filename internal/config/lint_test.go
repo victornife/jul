@@ -115,6 +115,17 @@ func TestLintAdminExposed(t *testing.T) {
 	if hasWarning(Lint(base("0.0.0.0:9090", "secret")), "unauthenticated") {
 		t.Error("tokened admin should not warn")
 	}
+	rbacOnly := base("0.0.0.0:9090", "")
+	rbacOnly.Admin.RBAC = AdminRBACConfig{Enabled: true, Principals: []AdminPrincipal{{
+		Name: "operator", Role: "admin", Token: "long-named-principal-token",
+	}}}
+	if hasWarning(Lint(rbacOnly), "unauthenticated") {
+		t.Error("RBAC-only admin should not warn about missing authentication")
+	}
+	rbacOnly.Admin.RBAC.Enabled = false
+	if !hasWarning(Lint(rbacOnly), "unauthenticated") {
+		t.Error("disabled RBAC must not count as admin authentication")
+	}
 }
 
 // TestLintAdminExposedWithoutTLS (#336) proves the cleartext-transport
