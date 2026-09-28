@@ -218,6 +218,9 @@ An explicitly configured `ca_file` must exist and contain PEM certificates;
 discovery refuses to start with an unreadable or malformed bundle. Without an
 explicit path, the mounted service-account CA is used when available; otherwise
 the transport uses platform roots.
+Use an `https://` API server in deployed configurations. `jul lint` warns about
+an explicit plaintext `http://` endpoint because its responses choose backend
+addresses and any bearer token travels over that connection.
 
 Endpoints explicitly marked not-ready are skipped; an endpoint with no readiness
 condition is treated as ready (matching Kubernetes semantics). The pod needs RBAC

@@ -465,6 +465,14 @@ func lintDiscoveryTrust(c *Config) []Diagnostic {
 			continue
 		}
 		where := fmt.Sprintf("upstreams[%d].discovery", i)
+		if k := d.Kubernetes; k != nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(k.APIServer)), "http://") {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Field:    where + ".kubernetes.api_server",
+				Message:  "Kubernetes discovery uses plaintext HTTP; its backend addresses can be altered on the network path and any bearer token is exposed",
+				Hint:     "use an https api_server with ca_file or the mounted service-account CA outside local testing",
+			})
+		}
 		if k := d.Kubernetes; k != nil && k.InsecureSkipTLSVerify {
 			diags = append(diags, Diagnostic{
 				Severity: SeverityError,
