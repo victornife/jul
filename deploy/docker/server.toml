@@ -1,7 +1,8 @@
 # Jul container configuration — baked into the Docker image at
 # /etc/jul/server.toml. This is the editable starting point for the image: the
-# admin console "Apply" and history/rollback write here, so mount a volume at
-# /etc/jul to persist edits across restarts.
+# admin console "Apply" and history/rollback write here after the operator
+# explicitly adopts the seeded file as the initial managed baseline. Mount a
+# volume at /etc/jul to persist edits across restarts.
 #
 # It differs from the repository sample (../../server.toml) in the ways that make
 # it self-consistent *inside the container*:

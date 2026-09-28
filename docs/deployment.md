@@ -213,7 +213,10 @@ docker run --rm \
   so the server starts cleanly with no host mounts.
 - **Named volumes** are seeded from the image on first use, so the baked
   `/etc/jul/server.toml` survives. It declares `config_authority = "managed"`
-  for the editable shape. The default admin listener stays on container
+  for the editable shape. On a fresh volume, preview and explicitly confirm
+  the one-time **adopt external file** action in the Console to establish the
+  managed baseline before the first Apply; until then writes return 409
+  (`managed_unadopted`). The default admin listener stays on container
   loopback for its health probe: publishing `-p 9090:9090` alone does **not**
   make the Console reachable from the host. Provision a strong token and
   [`[admin.tls]`](configuration.md#admintls) certificate/key, bind the admin
@@ -223,8 +226,8 @@ docker run --rm \
 - The [Docker deployment CI journey](../scripts/docker-deployment-e2e.py) builds
   the image and probes its baked site and healthcheck with named volumes. It
   then starts a separate disposable managed profile with a token-protected
-  admin listener on host loopback and verifies Apply, history, rollback and
-  persistence across a container restart. This local loopback exercise does
+  admin listener on host loopback and verifies initial adoption, Apply, history,
+  rollback and persistence across a container restart. This loopback exercise does
   not validate externally exposed admin TLS or a production certificate.
 - For a **read-only** config, bind-mount your config file read-only:
   `-v /host/server.toml:/etc/jul/server.toml:ro` and skip the `jul-config`

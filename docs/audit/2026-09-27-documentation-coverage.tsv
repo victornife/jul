@@ -6,7 +6,7 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/auto04-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/ci.yml	reviewed	Windows lean/full jobs and new first-run PowerShell lane inspected; PR CI Windows documentation job succeeded at da528885; rest of CI not semantically certified
 .github/workflows/diagnostics-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
-.github/workflows/docker-deployment-e2e.yml	reviewed	Docker CI job scopes a shipped-image smoke and managed loopback apply/rollback; exact-SHA CI execution pending
+.github/workflows/docker-deployment-e2e.yml	reviewed	Docker CI job scopes a shipped-image smoke and managed loopback adoption/apply/rollback; runtime rerun pending
 .github/workflows/discovery-k8s-kind.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/discovery-live.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/issue160-quality.yml	reviewed	HR-07C Go statement coverage gate inspected for comment-only false failure and corrected; other jobs not semantically certified
@@ -21,7 +21,7 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/semantic-drift-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 CHANGELOG.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 CONTRIBUTING.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-Dockerfile	reviewed	Docker CI exposed local gofast replacement missing at module download; build-order fix and runtime journey pending exact-SHA CI
+Dockerfile	reviewed	Docker CI exposed local gofast replacement missing at module download; build-order fix built and served default image at 58e7f5cb
 Makefile	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 README.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 SECURITY.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
@@ -211,7 +211,7 @@ internal/observability/**; internal/storagefs/**	not reviewed	metric contract te
 internal/observability/metric_contract_test.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/build-release.ps1	reviewed	PowerShell Go tag argument and archive shape traced to CI package exercise; Windows lean/full result pending
 scripts/docs-check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-scripts/docker-deployment-e2e.py	reviewed	temporary Docker volumes and loopback token-protected managed journey source inspected; actual runner execution pending
+scripts/docker-deployment-e2e.py	reviewed	Docker default site/health passed at 58e7f5cb; managed adoption/apply/rollback rerun pending
 scripts/semantic_drift.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/test-discovery-k8s-live.ps1	reviewed	unsafe port-owner kill replaced with a conflict error; live Kubernetes/PowerShell execution not available
 scripts/test-nginx-importer.ps1	reviewed	exit 3, JSON status and candidate assertions passed in PR #482 Windows CI at da528885; full migration compatibility not implied

@@ -129,6 +129,19 @@ def main():
         admin_url = f"http://127.0.0.1:{admin_port}"
         wait_ready(containers[1], traffic_url, admin_url)
         expect(401, *request(admin_url + "/api/config"))
+        # A fresh managed boot has no baseline. The operator must explicitly
+        # preview and adopt the seeded file before ordinary writes are allowed.
+        status, body = request(admin_url + "/api/config/adopt-external/preview", token)
+        expect(200, status, body)
+        preview = json.loads(body)
+        assert preview["ok"] and preview["origin"] == "no_baseline" and preview["observed_digest"]
+        adoption = json.dumps({"observed_digest": preview["observed_digest"],
+                               "base_version": preview.get("base_version", ""),
+                               "mode": "hot", "confirm": True}).encode()
+        status, body = request(admin_url + "/api/config/adopt-external", token,
+                               adoption, "application/json")
+        expect(200, status, body)
+        assert json.loads(body)["ok"], "initial managed adoption failed"
         before = config_get(admin_url, token)
         assert before["base_version"] and 'log_level = "info"' in before["raw"]
         changed = before["raw"].replace('log_level = "info"', 'log_level = "debug"', 1)
