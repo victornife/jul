@@ -126,21 +126,22 @@ access.
 
 ## SSRF posture
 
-Jul.IA is designed to be SSRF-safe by construction:
+The ordinary proxy, auth dependency and discovery endpoints come from operator
+configuration, not from a client-supplied URL. This protects against a client
+choosing an arbitrary destination through those fields. It does not make a
+mistyped or compromised configuration safe to fetch, and plugin code with the
+`fetch` capability chooses its URL at runtime. Protect configuration and apply
+the destination controls below to each path.
 
-**Core invariant:** the upstream target, JWKS URL, forward-auth URL, and
-discovery address are **operator configuration**, never derived from a request.
-A client request cannot cause Jul.IA to connect to a different host.
-
-| Outbound path | SSRF safe? | Notes |
-| --- | --- | --- |
-| `proxy_pass` | ✅ Static config | Target is never request-derived |
-| `grpc_transcode` / gRPC passthrough | ✅ Static config | |
-| JWKS fetch | ✅ Static config | URL is `jwt_jwks_url` in auth config |
-| Forward-auth probe | ✅ Static config | URL is `forward_url` in auth config |
-| ACME HTTP-01 / renewal | ✅ Outbound to CA only | CA URL is static config |
-| Consul / Kubernetes discovery | ✅ Static config | Provider address is static |
-| WASM plugin `fetch` | ⚠️ Plugin-controlled | Bounded by `allowed_hosts` allow-list; plugin fetch without `allowed_hosts` is rejected |
+| Outbound path | Destination source and boundary |
+| --- | --- |
+| `proxy_pass` | Configured route/upstream target; the auxiliary `[egress]` allow-list does not govern data-plane backends. |
+| `grpc_transcode` / gRPC passthrough | Configured route/upstream target; backend peer identity is checked separately by `backend_tls`. |
+| JWKS fetch | Configured `jwt.jwks_url` must use HTTPS; a request cannot choose it, but an unsafe config value can still reach an unapproved HTTPS host unless `[egress]` restricts it. |
+| Forward-auth probe | Configured `forward_auth.url`; the optional `[egress]` guard constrains connections and redirects. |
+| ACME issuance / renewal | Configured CA endpoints; the optional `[egress]` guard requires their hosts to be allowed. OCSP stapling has a separate responder destination and failure boundary. |
+| Consul / Kubernetes discovery | Configured provider address; the optional `[egress]` guard constrains its auxiliary fetches. |
+| WASM plugin `fetch` | Guest-chosen URL, potentially influenced by a request; requires plugin `allowed_hosts` and rejects private/loopback/CGNAT dial targets. Optional global `[egress]` rules intersect with the plugin guard. |
 
 **Defense-in-depth:** the optional `[egress]` allow-list
 ([docs/egress.md](egress.md)) constrains all config-driven auxiliary fetches
