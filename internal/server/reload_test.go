@@ -104,24 +104,13 @@ func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
 
 func freePort(t *testing.T) string {
 	t.Helper()
-	lc := &net.ListenConfig{}
-	for range 20 {
-		ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		addr := ln.Addr().String()
-		// HTTP/3 listeners bind the same port over UDP, which Windows may hold or reserve independently.
-		pc, err := lc.ListenPacket(context.Background(), "udp", addr)
-		_ = ln.Close()
-		if err != nil {
-			continue
-		}
-		_ = pc.Close()
-		return addr
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Fatal("no loopback port free on both TCP and UDP")
-	return ""
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	return addr
 }
 
 // testTransport disables keep-alives so no client-side connection is pooled

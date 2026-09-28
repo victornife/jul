@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"testing"
@@ -58,6 +59,29 @@ func getH3(t *testing.T, tr *http3.Transport, addr string) (*http.Response, erro
 	}
 }
 
+// freeUDPTCPPort lets the OS pick the UDP port: a TCP-allocated port may sit in
+// a Windows UDP excluded range.
+func freeUDPTCPPort(t *testing.T) string {
+	t.Helper()
+	lc := &net.ListenConfig{}
+	for range 20 {
+		pc, err := lc.ListenPacket(context.Background(), "udp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := pc.LocalAddr().String()
+		ln, err := lc.Listen(context.Background(), "tcp", addr)
+		_ = pc.Close()
+		if err != nil {
+			continue
+		}
+		_ = ln.Close()
+		return addr
+	}
+	t.Fatal("no loopback port free on both UDP and TCP")
+	return ""
+}
+
 // getH3Once issues exactly one bounded HTTP/3 GET, for an assertion that
 // expects a deterministic, fast failure (a TLS handshake the client's own
 // certificate verification rejects) rather than a "listener not ready yet"
@@ -79,7 +103,7 @@ func TestReloadRotatesHTTP3CertificateWithoutRebind(t *testing.T) {
 	dir := t.TempDir()
 	certA, keyA := writeSelfSigned(t, dir, "h3-a", "a.example.com")
 	certB, keyB := writeSelfSigned(t, dir, "h3-b", "a.example.com")
-	addr := freePort(t)
+	addr := freeUDPTCPPort(t)
 
 	withH3 := func(cert, key string) *config.Config {
 		c := tlsCfgFor(addr, cert, key, "a.example.com")
