@@ -178,7 +178,7 @@ docs/vision/README.md	not reviewed	structural link/TOML checks where applicable;
 docs/vision/appendix.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/waf.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/zeroconf.md	reviewed	lint output, severity, exit, command examples and current source categories traced to cmd/jul and internal/config; focused CLI tests passed; remaining unrelated prose not certified
-examples/auto-https/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/auto-https/README.md	reviewed	staging-to-production cache and restart procedure traced to ACME manager/lifecycle; public issuance not exercised
 examples/auto-https/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 examples/go-proxy/README.md	reviewed	documented Linux Go backend plus Jul HTTP 200 journey exercised; other platforms not run
 examples/go-proxy/jul.toml	reviewed	full-tag config-check plus Linux backend/Jul HTTP 200 exercise; failure modes not run
@@ -186,7 +186,7 @@ examples/grpc-gateway/README.md	not reviewed	inventoried; full platform/operatio
 examples/grpc-gateway/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 examples/grpc-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/grpc-proxy/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
-examples/jwt-auth/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+examples/jwt-auth/README.md	reviewed	per-user limit fallback to canonical client address traced to RateKeyFunc; live issuer journey not exercised
 examples/jwt-auth/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 examples/l4/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/l4/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value

@@ -52,16 +52,19 @@ cannot expose port 80. No `cert`/`key` files to manage.
 The config starts on Let's Encrypt **staging**, which issues *untrusted*
 certificates but has generous rate limits — ideal for verifying your setup.
 Once a staging certificate is issued successfully, switch the CA to production
-and remove the staging cache so a trusted certificate is requested:
+and use a separate, writable cache for the production account and certificates:
 
 ```toml
 [servers.tls.acme]
 ca = "letsencrypt"
+cache_dir = "./jul-data/certs-production"
 ```
 
-```bash
-rm -rf ./jul-data/certs   # drop staging certs before the production switch
-```
+Restart Jul for both changes to take effect. ACME issuer and cache identity are
+process-lifetime settings; a configuration reload does not replace the running
+manager. Keep the staging cache for a rollback until the production certificate
+is serving. The production cache directory must be writable by the Jul service
+identity and kept persistent across restarts.
 
 ## Notes
 
