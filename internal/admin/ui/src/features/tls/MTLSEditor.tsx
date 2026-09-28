@@ -92,10 +92,10 @@ function Warnings({ items }: { readonly items: string[] }) {
 
 // MTLSEditor edits one TLS-enabled server block's mutual-TLS (client certificate)
 // settings: the verification mode, the CA bundle and optional CRL the presented
-// certificates are checked against, and an optional SAN allow-list. These are
-// read when the listener binds, so the editor surfaces a persistent restart
-// caveat; the edit still routes through Validate → Diff → Apply like every other
-// guided editor.
+// certificates are checked against, and an optional SAN allow-list. They apply
+// to new handshakes on reload (#486); the banner says so because established
+// connections keep their identity. The edit routes through Validate → Diff →
+// Apply like every other guided editor.
 export function MTLSEditor({
   server,
   onClose,
@@ -153,11 +153,11 @@ export function MTLSEditor({
         </p>
 
         <div className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-xs text-jul-text">
-          <span className="font-medium">Takes effect on restart.</span> Server-level mutual TLS is
-          read when the listener binds. Saving reloads HTTP routing immediately, but the new
-          client-certificate settings apply only after you restart Jul (or change the listen
-          address). Per-route “require client certificate” toggles, by contrast, take effect
-          immediately.
+          <span className="font-medium">Applies to new connections.</span> Saving reloads the
+          client-certificate policy for every new TLS handshake, including a CA or CRL file
+          rewritten in place. Connections already established keep the certificate they were
+          accepted with. Per-route “require client certificate” toggles apply to the next
+          request.
         </div>
 
         <label className="block space-y-1">

@@ -6,7 +6,7 @@
 /**
  * Vitest tests for the Console v2 guided mutual-TLS editor (Phase 4j): the
  * projection schema, the draft → patch lib helpers, the TLS panel's Mutual TLS
- * section (server posture + per-location require_client_cert toggle, bind-time
+ * section (server posture + per-location require_client_cert toggle, reload
  * banner), and the RouteDetail require_client_cert quick edit.
  */
 
@@ -198,12 +198,12 @@ describe("TLSPanel Mutual TLS section", () => {
     expect(screen.getByText("require")).toBeInTheDocument();
   });
 
-  it("opens the editor with the bind-time restart banner", async () => {
+  it("opens the editor with the new-connections banner", async () => {
     render(<TLSPanel />, { wrapper: Wrapper });
     await screen.findByText("Mutual TLS");
     fireEvent.click(screen.getByRole("button", { name: "Edit mTLS" }));
     await waitFor(() => {
-      expect(screen.getByText(/Takes effect on restart/i)).toBeInTheDocument();
+      expect(screen.getByText(/Applies to new connections/i)).toBeInTheDocument();
     });
   });
 

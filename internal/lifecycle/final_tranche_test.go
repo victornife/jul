@@ -14,6 +14,7 @@ func TestFinalTrancheLifecycleDecisions(t *testing.T) {
 		"rate_limit.max_conns",
 		"admin.history_keep",
 		"servers.*.tls.acme.ocsp_stapling",
+		"servers.*.tls.client_auth.mode",
 	} {
 		e, ok := Lookup(path)
 		if !ok {
@@ -27,7 +28,6 @@ func TestFinalTrancheLifecycleDecisions(t *testing.T) {
 		"admin.history_dir",
 		"servers.*.http3.enabled",
 		"servers.*.tls.min_version",
-		"servers.*.tls.client_auth.mode",
 	} {
 		e, ok := Lookup(path)
 		if !ok {

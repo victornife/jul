@@ -489,10 +489,10 @@ func tlsEntries() []Entry {
 		bindBound("servers.*.tls.min_version", SubTLS, "the minimum protocol version is written into the listener's tls.Config at bind time"),
 		secretDigest(hot("servers.*.tls.cert", SubTLS, "a candidate certificate provider is built and validated during Prepare and swapped atomically into the listener's existing dynamic provider at Publish, without rebinding (#100)")),
 		secretDigest(hot("servers.*.tls.key", SubTLS, "a candidate certificate provider is built and validated during Prepare and swapped atomically into the listener's existing dynamic provider at Publish, without rebinding (#100)")),
-		bindBound("servers.*.tls.client_auth.mode", SubMTLS, "the client-certificate policy is written into the listener's tls.Config at bind time"),
-		secretDigest(bindBound("servers.*.tls.client_auth.ca_file", SubMTLS, "the client CA pool is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected")),
-		secretDigest(bindBound("servers.*.tls.client_auth.crl_file", SubMTLS, "the revocation list is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected")),
-		bindBound("servers.*.tls.client_auth.verify_san", SubMTLS, "the SAN allow-list is captured by the listener's verify callback at bind time"),
+		hot("servers.*.tls.client_auth.mode", SubMTLS, "the client-certificate policy is a per-listener holder read by every handshake; a candidate is built during Prepare and swapped at Publish without rebinding (#486)"),
+		secretDigest(hot("servers.*.tls.client_auth.ca_file", SubMTLS, "the client CA pool is loaded and validated during Prepare and swapped into the listener's client-auth holder at Publish; the fingerprint digests the file contents so an in-place rotation reloads (#486)")),
+		secretDigest(hot("servers.*.tls.client_auth.crl_file", SubMTLS, "the revocation list is loaded and signature-checked during Prepare and swapped into the listener's client-auth holder at Publish; the fingerprint digests the file contents so an in-place rotation reloads (#486)")),
+		hot("servers.*.tls.client_auth.verify_san", SubMTLS, "the SAN allow-list is part of the client-auth holder swapped at Publish (#486)"),
 		// Unlike the rest of the block this is a handler concern: what Jul sends
 		// to a backend, not how the handshake is verified.
 		hot("servers.*.tls.client_auth.forward_certificate", SubMTLS, "the client-certificate forwarding mode is read when the handler tree is rebuilt"),

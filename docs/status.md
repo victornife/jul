@@ -84,7 +84,8 @@ not inherit an older GA row merely because it lives in the same package or guide
   corpus is #456 CANDIDATE/LATER. None of this is included in v2.0.0.
 - **Post-release additions:** standard gRPC health (#427), runtime resources
   and HTTP bandwidth (#431), WASM response ABI v2 (#430), and consistent-hash
-  affinity (#432) have separate Beta / `merged` rows below. Their maturity
+  affinity (#432) and client-certificate policy hot reload (#486) have separate
+  Beta / `merged` rows below. Their maturity
   and delivery do not alter existing GA rows or the v2.0.0 tag.
 - **WASM plugin-pool memory fix (#420) and final soak (#421):** the final
   pre-stable soak found a real unbounded memory-growth defect in the pooled
@@ -188,6 +189,7 @@ release does not complete the unchecked GA criteria.
 | Resource-pressure diagnostics guidance in Console | OPS-DIAG-UX | core · `console` | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [diagnostics.md](diagnostics.md) |
 | WASM plugin response phase (jul-abi/v2) | WASM-ABI2 | `wasmplugins` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [abi.md](abi.md) |
 | Deterministic consistent-hash affinity | LB-AFFINITY | core · `stream` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [upstreams.md](upstreams.md) |
+| Client-certificate policy and CRL hot reload | MTLS-HOT | core | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [mtls.md](mtls.md) |
 
 ## Alpha
 

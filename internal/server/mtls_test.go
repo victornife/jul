@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"io"
 	"math/big"
 	"net"
@@ -33,7 +34,13 @@ type caFixture struct {
 }
 
 // newCA creates a self-signed CA suitable for signing client certificates.
+// Every such CA shares one subject name; use newNamedCA to tell issuers apart.
 func newCA(t testing.TB) *caFixture {
+	t.Helper()
+	return newNamedCA(t, "Test CA")
+}
+
+func newNamedCA(t testing.TB, name string) *caFixture {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -41,7 +48,7 @@ func newCA(t testing.TB) *caFixture {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "Test CA"},
+		Subject:               pkix.Name{CommonName: name},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(24 * time.Hour),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
@@ -289,15 +296,38 @@ func TestLoadCRLVerifiesSignature(t *testing.T) {
 	ca := newCA(t)
 	crlFile := ca.writeCRL(t, dir, "revoked.crl", 0x2a, 0x2b)
 
-	revoked, err := loadCRL(crlFile, []*x509.Certificate{ca.cert})
+	crl, err := loadCRL(crlFile, []*x509.Certificate{ca.cert})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !revoked["2a"] || !revoked["2b"] {
-		t.Errorf("expected serials 2a and 2b revoked, got %v", revoked)
+	if !crl.revoked["2a"] || !crl.revoked["2b"] {
+		t.Errorf("expected serials 2a and 2b revoked, got %v", crl.revoked)
 	}
-	if revoked["2c"] {
+	if crl.revoked["2c"] {
 		t.Error("did not expect serial 2c to be revoked")
+	}
+	if crl.nextUpdate.IsZero() || crl.nextUpdate.Before(time.Now()) {
+		t.Errorf("nextUpdate = %v, want the CRL's future NextUpdate", crl.nextUpdate)
+	}
+}
+
+// TestCRLRevocationIsScopedToItsIssuer: serials are unique per issuer only, so
+// CA-A's CRL revoking serial 0x03 must not reject CA-B's certificate 0x03 (the
+// documented CA-rotation bundle holds both CAs).
+func TestCRLRevocationIsScopedToItsIssuer(t *testing.T) {
+	dir := t.TempDir()
+	caA, caB := newNamedCA(t, "CA A"), newNamedCA(t, "CA B")
+	crl, err := loadCRL(caA.writeCRL(t, dir, "a.crl", 3), []*x509.Certificate{caA.cert, caB.cert})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromA, _ := caA.clientCert(t, "a", 3, nil, nil)
+	fromB, _ := caB.clientCert(t, "b", 3, nil, nil)
+	if err := checkClientLeaf(fromA, nil, []crlSet{crl}); err == nil {
+		t.Error("CA-A's revoked serial was accepted")
+	}
+	if err := checkClientLeaf(fromB, nil, []crlSet{crl}); err != nil {
+		t.Errorf("CA-B's certificate with the same serial was rejected: %v", err)
 	}
 }
 
@@ -342,8 +372,8 @@ func TestMakeClientCertVerifierSANAndCRL(t *testing.T) {
 
 	var results []string
 	record := func(r string) { results = append(results, r) }
-	revoked := map[string]bool{"11": true}
-	verify := makeClientCertVerifier([]string{"good.example.com"}, revoked, record)
+	crls := []crlSet{{issuer: ca.cert.RawSubject, revoked: map[string]bool{"11": true}}}
+	verify := makeClientCertVerifier([]string{"good.example.com"}, crls, record)
 
 	// Verified: allowed SAN, not revoked.
 	if err := verify(nil, [][]*x509.Certificate{{good}}); err != nil {
@@ -513,5 +543,56 @@ func TestMTLSHandshakeEndToEnd(t *testing.T) {
 	}
 	if !sawRejected {
 		t.Errorf("expected a 'rejected' result for the revoked client, got %v", results)
+	}
+}
+
+// TestClientConnVerifier covers the data-plane VerifyConnection check: no
+// certificate (request mode) passes unreported; a revoked or SAN-mismatched
+// leaf is rejected and reported.
+func TestClientConnVerifier(t *testing.T) {
+	ca := newCA(t)
+	good, _ := ca.clientCert(t, "good", 1, []string{"ok.example"}, nil)
+	bad, _ := ca.clientCert(t, "bad", 2, []string{"ok.example"}, nil)
+	var results []string
+	verify := makeClientConnVerifier([]string{"ok.example"},
+		[]crlSet{{issuer: ca.cert.RawSubject, revoked: map[string]bool{"2": true}}},
+		func(r string) { results = append(results, r) })
+	if err := verify(tls.ConnectionState{}); err != nil {
+		t.Fatalf("anonymous connection rejected: %v", err)
+	}
+	if err := verify(tls.ConnectionState{PeerCertificates: []*x509.Certificate{good}}); err != nil {
+		t.Fatalf("good certificate rejected: %v", err)
+	}
+	if err := verify(tls.ConnectionState{PeerCertificates: []*x509.Certificate{bad}, DidResume: true}); !errors.Is(err, errClientCertRevoked) {
+		t.Fatalf("revoked resumed certificate: err = %v", err)
+	}
+	if got := strings.Join(results, ","); got != "verified,rejected" {
+		t.Fatalf("results = %q", got)
+	}
+}
+
+// TestClientAuthRotationComponentAbortLeavesLivePolicy and the expired-CRL
+// report: abort installs nothing, and a CRL past NextUpdate is still reported.
+func TestClientAuthRotationComponentAbortLeavesLivePolicy(t *testing.T) {
+	live := &clientAuthBundle{mode: tls.RequireAndVerifyClientCert}
+	entry := &listenerEntry{clientAuth: &dynamicClientAuth{}, clientAuthFP: "old"}
+	entry.clientAuth.set(live)
+	comp := &clientAuthRotationComponent{swaps: []clientAuthSwap{{entry: entry, bundle: &clientAuthBundle{}, newFP: "new"}}}
+	if comp.component() != ComponentClientAuth || ComponentClientAuth == ComponentStaticCertificates {
+		t.Fatal("client auth must be its own runtime component slot")
+	}
+	comp.abort()
+	if entry.clientAuth.current.Load() != live || entry.clientAuthFP != "old" {
+		t.Fatal("abort changed the live client-auth policy")
+	}
+
+	past := time.Now().Add(-time.Hour)
+	live.crls = []crlSet{{nextUpdate: past}}
+	var got map[string]time.Time
+	s := &Server{log: quietLogger(), listeners: map[string]*listenerEntry{":8443": entry}}
+	s.CRLNextUpdateHook = func(m map[string]time.Time) { got = m }
+	s.reportCRLNextUpdates()
+	if !got[":8443"].Equal(past) {
+		t.Fatalf("reported %v, want the expired NextUpdate", got)
 	}
 }

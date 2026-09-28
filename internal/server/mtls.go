@@ -4,12 +4,15 @@
 package server
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"jul/internal/config"
 )
@@ -22,6 +25,12 @@ type clientAuthBundle struct {
 	mode   tls.ClientAuthType
 	pool   *x509.CertPool
 	verify func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error
+	// verifyConn is the data-plane check. It runs on full and resumed
+	// handshakes, so a certificate revoked or de-trusted by a reload cannot keep
+	// resuming a session ticket issued before it.
+	verifyConn func(tls.ConnectionState) error
+	// crls records each CRL's issuer and NextUpdate for expiry reporting.
+	crls []crlSet
 }
 
 // clientAuthMode maps a config mode string to a tls.ClientAuthType. "request"
@@ -55,7 +64,7 @@ func clientAuthForAddr(servers []config.ServerConfig, addr string, onResult func
 		mode     = tls.NoClientCert
 		pool     *x509.CertPool
 		sanAllow []string
-		revoked  map[string]bool
+		crls     []crlSet
 		caCerts  []*x509.Certificate
 	)
 	for i := range servers {
@@ -87,25 +96,22 @@ func clientAuthForAddr(servers []config.ServerConfig, addr string, onResult func
 			}
 		}
 		if f := strings.TrimSpace(ca.CRLFile); f != "" {
-			serials, err := loadCRL(f, caCerts)
+			crl, err := loadCRL(f, caCerts)
 			if err != nil {
 				return nil, fmt.Errorf("server %q crl_file: %w", srv.Listen, err)
 			}
-			if revoked == nil {
-				revoked = make(map[string]bool, len(serials))
-			}
-			for s := range serials {
-				revoked[s] = true
-			}
+			crls = append(crls, crl)
 		}
 	}
 	if mode == tls.NoClientCert || pool == nil {
 		return nil, nil
 	}
 	return &clientAuthBundle{
-		mode:   mode,
-		pool:   pool,
-		verify: makeClientCertVerifier(sanAllow, revoked, onResult),
+		mode:       mode,
+		pool:       pool,
+		verify:     makeClientCertVerifier(sanAllow, crls, onResult),
+		verifyConn: makeClientConnVerifier(sanAllow, crls, onResult),
+		crls:       crls,
 	}, nil
 }
 
@@ -143,17 +149,18 @@ func NewSingleClientAuthBundle(ca *config.ClientAuthConfig, onResult func(string
 			sanAllow = append(sanAllow, strings.ToLower(s))
 		}
 	}
-	var revoked map[string]bool
+	var crls []crlSet
 	if f := strings.TrimSpace(ca.CRLFile); f != "" {
-		revoked, err = loadCRL(f, caCerts)
+		crl, err := loadCRL(f, caCerts)
 		if err != nil {
 			return nil, fmt.Errorf("crl_file: %w", err)
 		}
+		crls = append(crls, crl)
 	}
 	return &ClientAuthBundle{
 		Mode:   clientAuthMode(ca.Mode),
 		Pool:   pool,
-		Verify: makeClientCertVerifier(sanAllow, revoked, onResult),
+		Verify: makeClientCertVerifier(sanAllow, crls, onResult),
 	}, nil
 }
 
@@ -201,14 +208,28 @@ func loadCABundle(path string) ([]*x509.Certificate, error) {
 	return certs, nil
 }
 
+// crlSet is one verified revocation list: the revoked serials (lowercase hex)
+// scoped to the issuer name that signed it, and when it says to expect the next.
+type crlSet struct {
+	issuer     []byte
+	revoked    map[string]bool
+	nextUpdate time.Time
+}
+
+// revokes reports whether the list revokes leaf. A serial is only unique per
+// issuer (RFC 5280 §5.2.3), so another CA's certificate with the same serial is
+// not affected.
+func (c crlSet) revokes(leaf *x509.Certificate) bool {
+	return bytes.Equal(c.issuer, leaf.RawIssuer) && c.revoked[strings.ToLower(leaf.SerialNumber.Text(16))]
+}
+
 // loadCRL parses a certificate revocation list (PEM "X509 CRL" block or raw
-// DER) and returns the set of revoked serial numbers as lowercase hexadecimal.
-// The CRL signature is verified against one of caCerts so a forged list cannot
-// revoke valid certificates; it errors if no CA signed it.
-func loadCRL(path string, caCerts []*x509.Certificate) (map[string]bool, error) {
+// DER). The CRL signature is verified against one of caCerts so a forged list
+// cannot revoke valid certificates; it errors if no CA signed it.
+func loadCRL(path string, caCerts []*x509.Certificate) (crlSet, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return crlSet{}, err
 	}
 	der := raw
 	if block, _ := pem.Decode(raw); block != nil {
@@ -216,7 +237,7 @@ func loadCRL(path string, caCerts []*x509.Certificate) (map[string]bool, error) 
 	}
 	crl, err := x509.ParseRevocationList(der)
 	if err != nil {
-		return nil, fmt.Errorf("parse CRL: %w", err)
+		return crlSet{}, fmt.Errorf("parse CRL: %w", err)
 	}
 	verified := false
 	for _, ca := range caCerts {
@@ -226,13 +247,42 @@ func loadCRL(path string, caCerts []*x509.Certificate) (map[string]bool, error) 
 		}
 	}
 	if !verified {
-		return nil, fmt.Errorf("CRL %s is not signed by any configured CA", path)
+		return crlSet{}, fmt.Errorf("CRL %s is not signed by any configured CA", path)
 	}
 	revoked := make(map[string]bool, len(crl.RevokedCertificateEntries))
 	for _, e := range crl.RevokedCertificateEntries {
 		revoked[strings.ToLower(e.SerialNumber.Text(16))] = true
 	}
-	return revoked, nil
+	return crlSet{issuer: crl.RawIssuer, revoked: revoked, nextUpdate: crl.NextUpdate}, nil
+}
+
+var (
+	errClientCertRevoked = errors.New("client certificate is revoked")
+	errClientCertSAN     = errors.New("client certificate SAN not in allow-list")
+)
+
+// checkClientLeaf applies the CRL and SAN policy to a CA-verified leaf.
+func checkClientLeaf(leaf *x509.Certificate, sanAllow []string, crls []crlSet) error {
+	for _, c := range crls {
+		if c.revokes(leaf) {
+			return fmt.Errorf("%w: serial %s", errClientCertRevoked, leaf.SerialNumber.Text(16))
+		}
+	}
+	if len(sanAllow) > 0 && !sanAllowed(leaf, sanAllow) {
+		return errClientCertSAN
+	}
+	return nil
+}
+
+func reportClientCert(onResult func(string), err error) error {
+	if onResult != nil {
+		if err != nil {
+			onResult("rejected")
+		} else {
+			onResult("verified")
+		}
+	}
+	return err
 }
 
 // makeClientCertVerifier builds the tls.Config.VerifyPeerCertificate callback
@@ -242,8 +292,8 @@ func loadCRL(path string, caCerts []*x509.Certificate) (map[string]bool, error) 
 // listener keeps the stdlib default. A handshake that presents no certificate
 // (request mode) reaches here with an empty leaf and is accepted without a
 // report, leaving the missing-certificate decision to per-location enforcement.
-func makeClientCertVerifier(sanAllow []string, revoked map[string]bool, onResult func(string)) func([][]byte, [][]*x509.Certificate) error {
-	if len(sanAllow) == 0 && len(revoked) == 0 && onResult == nil {
+func makeClientCertVerifier(sanAllow []string, crls []crlSet, onResult func(string)) func([][]byte, [][]*x509.Certificate) error {
+	if len(sanAllow) == 0 && len(crls) == 0 && onResult == nil {
 		return nil
 	}
 	return func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
@@ -258,22 +308,20 @@ func makeClientCertVerifier(sanAllow []string, revoked map[string]bool, onResult
 		if leaf == nil {
 			return nil
 		}
-		if revoked[strings.ToLower(leaf.SerialNumber.Text(16))] {
-			if onResult != nil {
-				onResult("rejected")
-			}
-			return fmt.Errorf("client certificate %s is revoked", leaf.SerialNumber.Text(16))
+		return reportClientCert(onResult, checkClientLeaf(leaf, sanAllow, crls))
+	}
+}
+
+// makeClientConnVerifier builds the data-plane tls.Config.VerifyConnection
+// callback. Unlike VerifyPeerCertificate it also runs on resumed handshakes
+// (whose chain crypto/tls re-roots against the current ClientCAs), so a
+// certificate revoked by a reload cannot keep resuming an older ticket.
+func makeClientConnVerifier(sanAllow []string, crls []crlSet, onResult func(string)) func(tls.ConnectionState) error {
+	return func(cs tls.ConnectionState) error {
+		if len(cs.PeerCertificates) == 0 {
+			return nil
 		}
-		if len(sanAllow) > 0 && !sanAllowed(leaf, sanAllow) {
-			if onResult != nil {
-				onResult("rejected")
-			}
-			return fmt.Errorf("client certificate SAN not in allow-list")
-		}
-		if onResult != nil {
-			onResult("verified")
-		}
-		return nil
+		return reportClientCert(onResult, checkClientLeaf(cs.PeerCertificates[0], sanAllow, crls))
 	}
 }
 

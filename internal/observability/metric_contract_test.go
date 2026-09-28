@@ -137,8 +137,8 @@ func TestMetricContractMatchesCollectors(t *testing.T) {
 		}
 		want[metric.Name] = normalizeMetric(metric)
 	}
-	if releasedCount != 25 || pendingCount != 44 {
-		t.Fatalf("metric contract states = %d released + %d pending, want 25 + 44", releasedCount, pendingCount)
+	if releasedCount != 25 || pendingCount != 45 {
+		t.Fatalf("metric contract states = %d released + %d pending, want 25 + 45", releasedCount, pendingCount)
 	}
 
 	for name, actual := range got {

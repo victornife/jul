@@ -2922,10 +2922,10 @@ CAFile is the PEM bundle of certificate authorities that client certificates are
 | | |
 | --- | --- |
 | Type | `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `mtls` |
-| Why | the client CA pool is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected |
-| Flags | startup-consumed, per-address, conditional, secret |
+| Why | the client CA pool is loaded and validated during Prepare and swapped into the listener's client-auth holder at Publish; the fingerprint digests the file contents so an in-place rotation reloads (#486) |
+| Flags | secret |
 
 ## `servers.*.tls.client_auth.crl_file` {#servers-x-tls-client_auth-crl_file}
 
@@ -2934,10 +2934,10 @@ CRLFile, when set, is a PEM- or DER-encoded certificate revocation list.
 | | |
 | --- | --- |
 | Type | `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `mtls` |
-| Why | the revocation list is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected |
-| Flags | startup-consumed, per-address, conditional, secret |
+| Why | the revocation list is loaded and signature-checked during Prepare and swapped into the listener's client-auth holder at Publish; the fingerprint digests the file contents so an in-place rotation reloads (#486) |
+| Flags | secret |
 
 ## `servers.*.tls.client_auth.forward_certificate` {#servers-x-tls-client_auth-forward_certificate}
 
@@ -2958,11 +2958,10 @@ Mode selects enforcement at the TLS handshake: "none" — off (the default).
 | | |
 | --- | --- |
 | Type | `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `mtls` |
-| Why | the client-certificate policy is written into the listener's tls.Config at bind time |
+| Why | the client-certificate policy is a per-listener holder read by every handshake; a candidate is built during Prepare and swapped at Publish without rebinding (#486) |
 | Default | none |
-| Flags | startup-consumed, per-address, conditional |
 | Allowed values | `none`, `request`, `require` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
@@ -2975,10 +2974,9 @@ VerifySAN, when non-empty, is an allow-list of subject alternative names (DNS na
 | | |
 | --- | --- |
 | Type | list of `string` |
-| Lifecycle | `restart_required` |
+| Lifecycle | `hot_reload` |
 | Subsystem | `mtls` |
-| Why | the SAN allow-list is captured by the listener's verify callback at bind time |
-| Flags | startup-consumed, per-address, conditional |
+| Why | the SAN allow-list is part of the client-auth holder swapped at Publish (#486) |
 
 ## `servers.*.tls.enabled` {#servers-x-tls-enabled}
 
