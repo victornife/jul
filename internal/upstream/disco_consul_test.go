@@ -91,7 +91,7 @@ func TestConsulDiscovererRequiresService(t *testing.T) {
 }
 
 func TestConsulRejectsMalformedBaseURL(t *testing.T) {
-	for _, address := range []string{"ftp://consul.example.test", "https://user:secret@consul.example.test", "https://consul.example.test?token=secret", "https://consul.example.test/#fragment", "not-a-url"} {
+	for _, address := range []string{"ftp://consul.example.test", "https://user:secret@consul.example.test", "https://consul.example.test?token=secret", "https://consul.example.test?", "https://consul.example.test/#fragment", "not-a-url"} {
 		t.Run(address, func(t *testing.T) {
 			_, err := newConsulDiscoverer(config.DiscoveryConfig{Type: "consul", Consul: &config.ConsulDiscovery{
 				Service: "web", Address: address,

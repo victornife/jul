@@ -233,7 +233,7 @@ func TestK8sRequiresNamespaceAndService(t *testing.T) {
 }
 
 func TestK8sRejectsMalformedAPIServerAtConstruction(t *testing.T) {
-	for _, apiServer := range []string{"ftp://api.example.test", "https://user:secret@api.example.test", "https://api.example.test?token=secret", "https://api.example.test/#fragment", "not-a-url"} {
+	for _, apiServer := range []string{"ftp://api.example.test", "https://user:secret@api.example.test", "https://api.example.test?token=secret", "https://api.example.test?", "https://api.example.test/#fragment", "not-a-url"} {
 		t.Run(apiServer, func(t *testing.T) {
 			_, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
 				Namespace: "default", Service: "web", APIServer: apiServer,

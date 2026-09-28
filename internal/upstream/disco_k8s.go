@@ -34,13 +34,13 @@ const (
 // lean. In a pod the API server URL and service-account credentials are read
 // from the standard in-cluster locations; config fields override them.
 type k8sDiscoverer struct {
-	client   *http.Client
-	url      string
-	token    string
-	tokenFile string // mounted service-account token, read for every list request
-	port     string // selected port name or number ("" = first port)
-	describe string
-	log      *slog.Logger
+	client    *http.Client
+	url       string
+	token     string
+	tokenFile string
+	port      string // selected port name or number ("" = first port)
+	describe  string
+	log       *slog.Logger
 }
 
 // SetLogger attaches a logger for detailed resolve diagnostics.
@@ -65,7 +65,7 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 	}
 	base = strings.TrimRight(base, "/")
 	apiURL, err := url.Parse(base)
-	if err != nil || (apiURL.Scheme != "http" && apiURL.Scheme != "https") || apiURL.Hostname() == "" || apiURL.User != nil || apiURL.RawQuery != "" || apiURL.Fragment != "" {
+	if err != nil || (apiURL.Scheme != "http" && apiURL.Scheme != "https") || apiURL.Hostname() == "" || apiURL.User != nil || apiURL.RawQuery != "" || apiURL.ForceQuery || apiURL.Fragment != "" {
 		return nil, fmt.Errorf("kubernetes discovery: api_server must be an HTTP(S) base URL without credentials, query, or fragment")
 	}
 
@@ -117,11 +117,11 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 				return http.ErrUseLastResponse
 			},
 		},
-		url:      endpoint,
-		token:    token,
+		url:       endpoint,
+		token:     token,
 		tokenFile: tokenFile,
-		port:     strings.TrimSpace(k.Port),
-		describe: "kubernetes:" + k.Namespace + "/" + k.Service,
+		port:      strings.TrimSpace(k.Port),
+		describe:  "kubernetes:" + k.Namespace + "/" + k.Service,
 	}, nil
 }
 
@@ -150,7 +150,7 @@ type k8sEndpointSliceList struct {
 	Metadata struct {
 		Continue string `json:"continue"`
 	} `json:"metadata"`
-	Items []struct {
+	Items    []struct {
 		Ports     []k8sPort     `json:"ports"`
 		Endpoints []k8sEndpoint `json:"endpoints"`
 	} `json:"items"`
@@ -199,6 +199,7 @@ func (d *k8sDiscoverer) resolvePage(ctx context.Context, endpoint string) (k8sEn
 	req.Header.Set("Accept", "application/json")
 	token := d.token
 	if d.tokenFile != "" {
+		// Mounted service-account tokens rotate independently of config reload.
 		b, err := os.ReadFile(d.tokenFile)
 		if err != nil {
 			return list, fmt.Errorf("kubernetes: read service-account token: %w", err)
