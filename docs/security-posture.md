@@ -58,6 +58,9 @@ When running with the legacy shared token (RBAC disabled):
 - Treat the admin token as a root credential. Operations can be audited under
   the shared legacy identity, but the record cannot distinguish individual
   people using that token. Enable `[admin.rbac]` for named attribution.
+- Admin authentication accepts exactly one `Authorization: Bearer` field;
+  ambiguous duplicate fields or a different scheme are rejected in both
+  shared-token and RBAC modes.
 - Do not expose the admin listener to untrusted networks under any circumstances.
 - If remote access is required, configure [`[admin.tls]`](configuration.md#admintls) with an
   operator-supplied certificate (#336) and a token or enabled RBAC — never bind
