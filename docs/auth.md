@@ -5,9 +5,11 @@
 
 Auth is a per-location **modifier**, not an action: it composes with any
 location (static, proxy, FastCGI, …). Each location applies a fixed pipeline —
-a **CIDR** network gate first, then **exactly one** credential method (HTTP
+a **CIDR** network gate first, then **at most one** credential method (HTTP
 **Basic**, **JWT** bearer tokens, or **forward-auth** to an external service).
-An empty `auth` block authorizes every request.
+A CIDR-only gate is valid. An empty `auth` block is rejected by configuration
+validation so it cannot silently leave a route open; omit `auth` entirely on a
+public route.
 
 ## Quick start
 
@@ -251,7 +253,7 @@ go test -run '^$' -bench 'BenchmarkBasicVerify|BenchmarkJWTValidate' -benchmem .
 | Algorithm confusion (`alg` swap) | 🟢 safe | allow-list + key/method type check; `none` rejected |
 | Username enumeration (timing) | 🟢 safe | constant-time bcrypt + dummy-hash on unknown user |
 | Client IP spoofing of CIDR gate | 🟢 safe under the configured trust boundary | gate uses the canonical client address: the transport peer by default, or a forwarded chain only when the peer matches the listener's explicit `trusted_proxies` policy; unattributable chains fail closed |
-| JWKS SSRF | 🟢 safe by design | `jwks_url` is operator config and must be HTTPS; never request-influenced |
+| JWKS SSRF through an unsafe config value | 🟠 residual unless egress is restricted | `jwks_url` is operator config and must be HTTPS, so a request cannot choose the endpoint; HTTPS alone does not prevent a mistyped or compromised config from reaching an unapproved HTTPS host. Protect config and enable the optional `[egress]` allow-list for destination enforcement. |
 | JWKS fetch amplification | 🟢 mitigated | unknown-kid floods throttled to ≤1 fetch / 30s; 1 MiB body cap |
 | Header spoofing (forward-auth) | 🟢 safe | client copies of `auth_response_headers` stripped before the endpoint's values are applied |
 | Token leakage in logs | 🟢 safe | tokens are never logged (only "jwt validation failed") |
