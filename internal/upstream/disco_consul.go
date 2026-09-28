@@ -35,6 +35,9 @@ func newConsulDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discoverer,
 	if c == nil || strings.TrimSpace(c.Service) == "" {
 		return nil, fmt.Errorf("consul discovery requires consul.service")
 	}
+	if strings.ContainsAny(c.Service, "/\\?#") {
+		return nil, fmt.Errorf("consul discovery: service must be a single URL path segment")
+	}
 	addr := strings.TrimSpace(c.Address)
 	if addr == "" {
 		addr = "http://127.0.0.1:8500"

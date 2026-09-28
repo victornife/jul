@@ -139,6 +139,8 @@ address+port. Requires the `consul` build tag.
 
 The `address` must be an HTTP(S) base URL without URL-embedded credentials,
 query parameters, or a fragment. Supply ACL credentials through `token`.
+`service` is a single path segment; URL path separators and query or fragment
+markers are rejected so it cannot select another Consul API endpoint.
 
 ```toml
   [upstreams.discovery]

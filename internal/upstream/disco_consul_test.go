@@ -103,6 +103,17 @@ func TestConsulRejectsMalformedBaseURL(t *testing.T) {
 	}
 }
 
+func TestConsulRejectsServicePathInjection(t *testing.T) {
+	for _, service := range []string{"../agent/self", `web\other`, "web?passing=false", "web#fragment"} {
+		_, err := newConsulDiscoverer(config.DiscoveryConfig{Type: "consul", Consul: &config.ConsulDiscovery{
+			Service: service, Address: "https://consul.example.test",
+		}}, nil)
+		if err == nil {
+			t.Errorf("service %q must not alter the Consul API path", service)
+		}
+	}
+}
+
 func TestConsulDiscovererDoesNotForwardTokenOnRedirect(t *testing.T) {
 	var forwarded bool
 	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
