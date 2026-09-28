@@ -102,7 +102,7 @@ docs/console.md	reviewed	targeted release/status, navigation or source claims ch
 docs/core-http.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/deployment.md	reviewed	Docker and Linux systemd bounded startup/recovery passed; Windows service ACLs and remote admin TLS not executed
 docs/diagnostics.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/egress.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/egress.md	reviewed	ACME issuance versus independent OCSP stapling failure traced to runtime; broader auxiliary egress generation matrix remains unexecuted
 docs/feature-status.yaml	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/ga-push.md	historical/context only	dated July GA-push execution log preserved; 2026-09-27 amendment corrects the historical release-smoke/criterion-five description, current status in feature manifest
 docs/generated/config-lifecycle.json	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
@@ -170,7 +170,7 @@ docs/specs/year-5.md	not reviewed	structural link/TOML checks where applicable; 
 docs/status.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/stream-proxy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/stream.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/tls-acme.md	reviewed	HTTP-01 quick-start listener and redirect traced to ACME handler/example and checked with an acme-tagged binary; issuance, benchmarks and remaining guide claims not certified
+docs/tls-acme.md	reviewed	HTTP-01 quick-start listener and redirect traced to ACME handler/example; CA versus OCSP egress and current mTLS lifecycle checked against runtime/manifest; public issuance and remaining guide claims not certified
 docs/troubleshooting.md	reviewed	startup/check claims compared to actual missing-root failure and CLI; reload claims sampled; remaining incident scenarios not replayed
 docs/unix-http-upstreams.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/upstreams.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified

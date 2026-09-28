@@ -180,8 +180,10 @@ allow-list` sentinel.
 
 When `[egress]` is enabled, the ACME client (directory, order, and challenge
 calls) and the OCSP responder client are guarded like every other auxiliary
-fetch. Certificate issuance therefore **requires the CA and OCSP hosts to be in
-`allow`** — otherwise issuance and stapling fail closed. Public ACME CAs front
+fetch. Certificate issuance requires its CA endpoints in `allow`; OCSP
+stapling separately requires the responder host when stapling is enabled.
+Blocking OCSP prevents a fresh staple but does not itself block issuance or
+the TLS handshake. Public ACME CAs front
 their endpoints with CDNs whose IPs rotate, so prefer **name** entries (or a
 covering suffix) over fixed CIDRs. See
 [tls-acme.md](tls-acme.md#egress-allow-list-prerequisites) for the concrete

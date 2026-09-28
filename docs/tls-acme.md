@@ -230,8 +230,9 @@ go test -run '^$' -bench 'SNICertSelection|TLSHandshakeServerAuth' -benchmem ./i
 
 The optional [egress allow-list](egress.md) is disabled by default. When enabled,
 the ACME directory/order/challenge client and OCSP responder client are guarded
-like other auxiliary fetches, so issuance and stapling fail until every required
-host is allowed.
+like other auxiliary fetches. Issuance requires the CA endpoints to be allowed;
+stapling separately requires its OCSP responder. An OCSP denial can leave the
+certificate unstapled, but does not itself block issuance or a TLS handshake.
 
 Public ACME CAs may front endpoints with rotating infrastructure. Prefer exact
 hosts or an intentional suffix rather than brittle IP ranges. For Let's Encrypt,
@@ -260,8 +261,10 @@ bounded egress-denial reason as authoritative. See
   (#100).** A cert/key content or path change is validated during preflight and
   swapped atomically into the listener's existing dynamic certificate
   provider at Publish — no rebind, no dropped connections. Enabling or
-  disabling TLS itself, and TLS minimum version / mutual-TLS policy changes,
-  remain restart-bound (`HR-16`, `HR-12`).
+  disabling TLS itself and changing the TLS minimum version remain
+  restart-bound (`HR-16`). Data-plane client-auth policy can hot reload for new
+  handshakes on `main` (#486, Beta); the stable v2.0.0 policy remains
+  restart-bound. Admin listener client auth remains restart-bound.
 - **ACME manager transitions are restart-bound.** Domain, account, issuer,
   challenge, and cache changes require planned restart/deferred manager work.
   `ocsp_stapling` itself is hot and does not replace manager identity (#106).

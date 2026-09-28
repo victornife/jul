@@ -93,6 +93,7 @@ The capability table below distinguishes stable v2.0.0 from post-release
 | Service discovery / dynamic upstreams | [service-discovery.md](service-discovery.md) | `GA` / `soaked` |
 | Web application firewall (WAF) | [waf.md](waf.md) | `GA` / `soaked` |
 | mTLS client auth | [mtls.md](mtls.md) | `GA` / `soaked` |
+| Client-certificate policy and CRL hot reload | [mtls.md](mtls.md) | `Beta` / `merged` |
 | Secrets references + log redaction | [secrets.md](secrets.md) | `GA` / `soaked` |
 | Response cache (memory + disk) | [cache.md](cache.md) | `GA` / `soaked` |
 | Core HTTP (static / proxy / FastCGI / vhosts / routing) | [core-http.md](core-http.md) | `GA` / `soaked` |

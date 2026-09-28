@@ -465,6 +465,7 @@ jobs:
           if [ -n "$files" ]; then
             echo "The following files are not gofmt-formatted:"
             echo "$files"
+            gofmt -d $files
             exit 1
           fi
 
