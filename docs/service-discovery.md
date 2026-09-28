@@ -221,6 +221,9 @@ publishing a partial list.
 | `ca_file` | string | mounted SA CA | API server CA bundle |
 | `insecure_skip_tls_verify` | bool | `false` | Skip API server TLS verification (testing) |
 
+`api_server` must be an HTTP(S) base URL without URL-embedded credentials,
+query parameters, or a fragment; malformed values fail discovery setup.
+
 When the mounted service-account token is used, the resolver rereads it for
 each API request so projected token rotation takes effect without a restart.
 An unreadable or empty previously mounted token fails that refresh and retains

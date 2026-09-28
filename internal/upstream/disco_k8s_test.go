@@ -232,6 +232,19 @@ func TestK8sRequiresNamespaceAndService(t *testing.T) {
 	}
 }
 
+func TestK8sRejectsMalformedAPIServerAtConstruction(t *testing.T) {
+	for _, apiServer := range []string{"ftp://api.example.test", "https://user:secret@api.example.test", "https://api.example.test?token=secret", "https://api.example.test/#fragment", "not-a-url"} {
+		t.Run(apiServer, func(t *testing.T) {
+			_, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+				Namespace: "default", Service: "web", APIServer: apiServer,
+			}}, nil)
+			if err == nil || !strings.Contains(err.Error(), "api_server") {
+				t.Fatalf("invalid API URL %q: %v", apiServer, err)
+			}
+		})
+	}
+}
+
 func TestK8sExplicitCAFailsClosed(t *testing.T) {
 	malformed := filepath.Join(t.TempDir(), "malformed.pem")
 	if err := os.WriteFile(malformed, []byte("not a PEM certificate"), 0o600); err != nil {

@@ -64,6 +64,10 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 		base = "https://" + net.JoinHostPort(host, port)
 	}
 	base = strings.TrimRight(base, "/")
+	apiURL, err := url.Parse(base)
+	if err != nil || (apiURL.Scheme != "http" && apiURL.Scheme != "https") || apiURL.Hostname() == "" || apiURL.User != nil || apiURL.RawQuery != "" || apiURL.Fragment != "" {
+		return nil, fmt.Errorf("kubernetes discovery: api_server must be an HTTP(S) base URL without credentials, query, or fragment")
+	}
 
 	token := strings.TrimSpace(k.Token)
 	var tokenFile string
