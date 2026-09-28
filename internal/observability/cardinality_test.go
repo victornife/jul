@@ -219,6 +219,7 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveAltSvcTransition("advertise")
 	m.ObserveAltSvcTransition("clear")
 	m.ObserveMTLSHandshake("verified")
+	m.SetMTLSCRLNextUpdates(map[string]time.Time{":8443": time.Unix(1_900_000_000, 0)})
 	m.StreamConnDelta("tcp", 1)
 	m.ObserveStreamBytes("tcp", "up", 100)
 	m.StreamUDPEvicted("idle")

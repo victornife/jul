@@ -124,6 +124,16 @@ func newStagedHTTP3WithTLS(addr string, tlsTemplate *tls.Config, handler http.Ha
 		return nil, errors.New("http3 requires TLS 1.3 but the configured maximum TLS version is lower")
 	}
 	h3TLS.MinVersion = tls.VersionTLS13
+	if gfc := h3TLS.GetConfigForClient; gfc != nil {
+		// A per-handshake config is cloned from the TCP policy; keep QUIC's floor.
+		h3TLS.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			c, err := gfc(hello)
+			if c != nil {
+				c.MinVersion = tls.VersionTLS13
+			}
+			return c, err
+		}
+	}
 	tlsConf := http3.ConfigureTLSConfig(h3TLS)
 
 	ln, err := quic.ListenEarly(udpConn, tlsConf, nil)

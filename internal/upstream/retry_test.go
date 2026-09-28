@@ -405,9 +405,13 @@ func TestDoDeadlineDominatesEveryAttempt(t *testing.T) {
 	reason, err := p.Do(context.Background(), RetryRequest{Deadline: 120 * time.Millisecond, Replayable: true},
 		func(ctx context.Context, b Attempt, n int) AttemptResult {
 			attempts++
-			select {
-			case <-ctx.Done():
-			case <-time.After(80 * time.Millisecond):
+			// The first attempt fails at once so a second one always fits in the
+			// deadline, however late a loaded runner fires timers.
+			if attempts > 1 {
+				select {
+				case <-ctx.Done():
+				case <-time.After(80 * time.Millisecond):
+				}
 			}
 			return AttemptResult{Err: errAttempt}
 		})

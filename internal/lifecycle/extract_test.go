@@ -121,8 +121,10 @@ func TestTLSCertContentRotationIsHotNotRestartRequired(t *testing.T) {
 	}
 }
 
-// TestClientCAAndCRLContentRotationIsDetected covers the remaining PKI material.
-func TestClientCAAndCRLContentRotationIsDetected(t *testing.T) {
+// TestClientCAAndCRLContentRotationIsHot (#486): like certificates, rotating
+// client CA/CRL content in place is a hot swap handled by internal/server's
+// prepareClientAuthRotation, not a startup-consumed restart value.
+func TestClientCAAndCRLContentRotationIsHot(t *testing.T) {
 	dir := t.TempDir()
 	ca := filepath.Join(dir, "ca.pem")
 	crl := filepath.Join(dir, "crl.pem")
@@ -143,9 +145,11 @@ func TestClientCAAndCRLContentRotationIsDetected(t *testing.T) {
 		if err := os.WriteFile(tc.file, []byte("v2-"+tc.path), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		changed := Diff(before, ComputeFingerprint(cfg))
-		if !contains(changed, tc.path) {
-			t.Errorf("rotating %s did not change %s (changed: %v)", tc.file, tc.path, changed)
+		if _, need := RestartRequired(before, ComputeFingerprint(cfg)); need {
+			t.Errorf("rotating %s must not be restart-required (#486)", tc.file)
+		}
+		if _, ok := before.Values[tc.path]; ok {
+			t.Errorf("%s must not be a startup-consumed fingerprint value (#486)", tc.path)
 		}
 	}
 }

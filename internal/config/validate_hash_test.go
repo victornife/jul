@@ -60,7 +60,7 @@ func TestValidateRejectsConsistentHash(t *testing.T) {
 		{"cookie without name", "consistent_hash", &HashConfig{Key: "cookie"}, nil, "hash.name: required"},
 		{"header name not a token", "consistent_hash", &HashConfig{Key: "header", Name: "X Tenant"}, nil, "not a valid header name"},
 		{"cookie name not a token", "consistent_hash", &HashConfig{Key: "cookie", Name: "a;b"}, nil, "not a valid cookie name"},
-		{"name too long", "consistent_hash", &HashConfig{Key: "header", Name: strings.Repeat("x", hashNameMaxLen+1)}, nil, "longer than"},
+		{"name too long", "consistent_hash", &HashConfig{Key: "header", Name: strings.Repeat("x", HashNameMaxLen+1)}, nil, "longer than"},
 		{"whole Cookie header", "consistent_hash", &HashConfig{Key: "header", Name: "cookie"}, nil, `use key = "cookie"`},
 		{"bad fallback", "consistent_hash", &HashConfig{Key: "client_ip", Fallback: "consistent_hash"}, nil, "invalid fallback"},
 		{"bad algorithm", "consistent_hash", &HashConfig{Key: "client_ip", Algorithm: "ketama"}, nil, "unsupported algorithm"},

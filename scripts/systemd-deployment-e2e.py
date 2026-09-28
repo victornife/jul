@@ -161,6 +161,58 @@ def main():
         assert 'log_level = "info"' in get_config(admin, token)["raw"]
         print("PASS: editable unit, service identity, adoption, Apply, rollback and restart")
 
+        # A restart-bound admin resource is persisted as one staged candidate.
+        # The current service keeps serving until the process actually restarts.
+        new_history = "/var/lib/jul/config-history-staged"
+        run("sudo", "-u", "jul", "install", "-d", "-m0700", new_history)
+        before = get_config(admin, token)
+        assert 'history_dir = "/var/lib/jul/config-history"' in before["raw"]
+        staged_raw = before["raw"].replace('history_dir = "/var/lib/jul/config-history"',
+                                           f'history_dir = "{new_history}"', 1)
+        endpoint = admin + "/api/config/apply?mode=stage_restart&base_version=" + urllib.parse.quote(before["base_version"])
+        status, body = request(endpoint, token, staged_raw.encode(), "application/toml")
+        expect(200, status, body)
+        assert json.loads(body)["ok"]
+        status, body = request(admin + "/api/config/pending-restart", token)
+        expect(200, status, body)
+        pending = json.loads(body)
+        assert pending["pending"] and pending["status"]["staged"], pending
+        assert b"Jul systemd E2E" in request(traffic)[1]
+        run("sudo", "systemctl", "restart", "jul.service")
+        wait_ready("jul.service", traffic, admin)
+        assert f'history_dir = "{new_history}"' in get_config(admin, token)["raw"]
+        status, body = request(admin + "/api/config/pending-restart", token)
+        expect(200, status, body)
+        assert not json.loads(body)["pending"], body
+        print("PASS: staged admin history path persisted and activated after restart")
+
+        # An out-of-band edit must block managed writes until explicit adoption.
+        # Write as the service identity, then force an immediate drift assessment
+        # rather than racing the file watcher.
+        edit = ('from pathlib import Path; import sys; p = Path(sys.argv[1]); '
+                'raw = p.read_text(); old = \'log_level = "info"\'; '
+                'assert raw.count(old) == 1; p.write_text(raw.replace(old, \'log_level = "debug"\', 1))')
+        run("sudo", "-u", "jul", "python3", "-c", edit, "/etc/jul/server.toml")
+        status, body = request(admin + "/api/config/authority/refresh", token, b"", "application/json")
+        expect(200, status, body)
+        authority = json.loads(body)
+        assert authority["drift"] and authority["config_state"] == "managed_drift", authority
+        stale = get_config(admin, token)["raw"].replace('log_level = "debug"', 'log_level = "info"', 1)
+        expect(409, *request(admin + "/api/config/apply", token, stale.encode(), "application/toml"))
+        status, body = request(admin + "/api/config/adopt-external/preview", token)
+        expect(200, status, body)
+        preview = json.loads(body)
+        assert preview["ok"] and preview["origin"] == "drift", preview
+        adoption = json.dumps({"observed_digest": preview["observed_digest"],
+                               "base_version": preview.get("base_version", ""),
+                               "mode": "hot", "confirm": True}).encode()
+        expect(200, *request(admin + "/api/config/adopt-external", token, adoption, "application/json"))
+        assert 'log_level = "debug"' in get_config(admin, token)["raw"]
+        status, body = request(admin + "/api/config/authority/refresh", token, b"", "application/json")
+        expect(200, status, body)
+        assert not json.loads(body)["drift"], body
+        print("PASS: external edit blocked managed Apply until confirmed adoption")
+
         run("sudo", "systemctl", "stop", "jul.service")
         readonly = raw.replace('config_authority = "managed"', 'config_authority = "file_owned"', 1)
         assert readonly != raw

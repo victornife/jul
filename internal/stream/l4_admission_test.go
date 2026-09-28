@@ -386,7 +386,7 @@ func TestPreflightBuildDoesNotDisturbLivePools(t *testing.T) {
 func TestTCPCircuitBoundsProbesOnRecovery(t *testing.T) {
 	live, stop := tcpEcho(t)
 	defer stop()
-	deadAddr := freeTCPAddr(t)
+	deadAddr := "127.0.0.1:1" // never bound; a released ephemeral port can self-connect
 
 	s := newTestServer(t, Hooks{})
 	// The dead backend is listed first so round-robin reaches it on the first

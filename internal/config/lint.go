@@ -106,6 +106,7 @@ func Lint(c *Config) []Diagnostic {
 		// (ADR 0018 §15): a coordinate clash alone no longer implies it, because
 		// two locations may now legitimately share a path and differ by predicate.
 		diags = append(diags, unreachableLocationDiagnostics(&c.Servers[i], i)...)
+		diags = append(diags, nonCanonicalPathDiagnostics(&c.Servers[i], i)...)
 		diags = append(diags, matchPredicateDiagnostics(&c.Servers[i], i)...)
 		diags = append(diags, responsePolicyDiagnostics(&c.Servers[i], i)...)
 

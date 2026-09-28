@@ -69,6 +69,10 @@ func (p *ReloadPlan) AssessServingChange() error {
 			p.ServingChange = ServingChangeAssessment{Evidence: ServingRuntimeInputChanged}
 			return nil
 		}
+		if !p.s.clientAuthUnchanged(p.Candidate.Effective) {
+			p.ServingChange = ServingChangeAssessment{Evidence: ServingRuntimeInputChanged}
+			return nil
+		}
 		if !p.s.adminTLSInputsUnchanged(p.Candidate.Effective.Admin) {
 			p.ServingChange = ServingChangeAssessment{Evidence: ServingRuntimeInputChanged}
 			return nil

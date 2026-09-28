@@ -98,6 +98,19 @@ Four properties are guaranteed.
   location.
 - **Rewrites run after selection**, on the selected location only. A rewritten
   path does not trigger a second location search.
+- **Selection uses the canonical path.** Before selection the decoded request
+  path has its dot segments removed (RFC 3986 §5.2.4, `..` never climbs above
+  `/`) and repeated slashes merged; a trailing slash is kept. The selected
+  handler — static root, FastCGI, proxy — receives that same canonical path,
+  so `/public/../admin`, `/public/%2e%2e/admin` and `//admin` are all handled
+  by the location that matches `/admin`, never by `/` or `/public/`. When
+  canonicalization changes the path, the forwarded request target is the
+  re-escaped canonical path (an original `%2F` in such a request is forwarded
+  as `/`); an already-canonical target is forwarded byte-for-byte.
+  An `exact` or `prefix` `match.path` that is not itself canonical (`/a//b`,
+  `/a/./b`) can therefore never match; `jul lint` warns about it. Slash merging
+  has no opt-out: NGINX's `merge_slashes off` is reported as untranslated, and a
+  knob will be added only for a concrete workload whose keys contain `//` (#487).
 
 If no candidate is selected the request is unhandled and the router returns
 **404**. There is no 405 and no `Allow` header — see
@@ -473,6 +486,7 @@ Labels fall into three classes by what bounds them:
 | `jul_stream_udp_sessions_rejected_total` | — | single series |
 | `jul_tls_cert_expiry_seconds` | `domain` | configured/served domains |
 | `jul_acme_renewals_total` | — | single series |
+| `jul_mtls_crl_next_update_timestamp_seconds` | `listen` | configured listen addresses with a CRL |
 | `jul_mtls_handshakes_total` | `result` | `verified`/`rejected` |
 | `jul_reload_total` | `source`, `outcome` | fixed trigger/outcome enums |
 | `jul_reload_duration_seconds` | `source`, `outcome` | fixed trigger/outcome enums; buckets fixed |

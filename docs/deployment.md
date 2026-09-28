@@ -186,8 +186,10 @@ The [systemd deployment CI journey](../scripts/systemd-deployment-e2e.py)
 starts both shipped units on a disposable Ubuntu runner. It checks the editable
 unit's ownership, initial adoption, Apply, rollback and restart, then checks
 that the read-only unit serves traffic and refuses Apply without changing the
-file. The test uses loopback admin HTTP and a temporary token; remote admin TLS
-and production certificates require separate verification.
+file. It also stages a restart-bound admin history path, verifies activation
+after process restart, and checks that an external edit blocks managed Apply
+until explicit adoption. The test uses loopback admin HTTP and a temporary
+token; remote admin TLS and production certificates require separate verification.
 
 ### Verify the units
 

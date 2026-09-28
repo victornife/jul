@@ -50,18 +50,6 @@ var bindFingerprintPaths = []struct {
 	{"servers.*.tls.min_version", func(c *config.Config) {
 		c.Servers[0].TLS.MinVersion = "1.3"
 	}},
-	{"servers.*.tls.client_auth.mode", func(c *config.Config) {
-		c.Servers[0].TLS.ClientAuth = &config.ClientAuthConfig{Mode: "require", CAFile: "/ca.pem"}
-	}},
-	{"servers.*.tls.client_auth.ca_file", func(c *config.Config) {
-		c.Servers[0].TLS.ClientAuth = &config.ClientAuthConfig{Mode: "request", CAFile: "/other-ca.pem"}
-	}},
-	{"servers.*.tls.client_auth.verify_san", func(c *config.Config) {
-		c.Servers[0].TLS.ClientAuth = &config.ClientAuthConfig{Mode: "request", CAFile: "/ca.pem", VerifySAN: []string{"a.example"}}
-	}},
-	{"servers.*.tls.client_auth.crl_file", func(c *config.Config) {
-		c.Servers[0].TLS.ClientAuth = &config.ClientAuthConfig{Mode: "request", CAFile: "/ca.pem", CRLFile: "/crl.pem"}
-	}},
 	{"servers.*.http3.enabled", func(c *config.Config) {
 		c.Servers[0].HTTP3 = &config.HTTP3Config{Enabled: true, AltSvcMaxAge: 100}
 	}},
@@ -176,6 +164,25 @@ func TestACMELeavesAreGatedByACMERestartRequired(t *testing.T) {
 		}
 		if !e.StartupConsumed {
 			t.Errorf("%s must be startup-consumed so the ACME restart gate compares it", e.Path)
+		}
+	}
+}
+
+// TestClientAuthIsNotBindFrozen (#486): client-auth policy is swapped at
+// Publish, so none of its fields may reach the bind fingerprint.
+func TestClientAuthIsNotBindFrozen(t *testing.T) {
+	for _, ca := range []*config.ClientAuthConfig{
+		{Mode: "request", CAFile: "/ca.pem"},
+		{Mode: "require", CAFile: "/other.pem", CRLFile: "/crl.pem", VerifySAN: []string{"a.example"}},
+	} {
+		next := bindSeed()
+		next.Servers[0].TLS.ClientAuth = ca
+		if listenerBindFingerprint(bindSeed(), ":8443") != listenerBindFingerprint(next, ":8443") {
+			t.Fatalf("client_auth %+v changed the bind fingerprint", ca)
+		}
+		e, _ := lifecycle.Lookup("servers.*.tls.client_auth.mode")
+		if e.Class != lifecycle.HotReloadClass {
+			t.Fatalf("servers.*.tls.client_auth.mode = %s, want hot_reload", e.Class)
 		}
 	}
 }

@@ -599,13 +599,21 @@ These subsystems are classified per exact leaf rather than as one group, so a
 restart reason names the field that actually changed:
 
 - `servers.*.tls.enabled`, `.min_version`;
-- `servers.*.tls.client_auth.mode`, `.ca_file`, `.verify_san`, `.crl_file` —
-  the **mtls** bundle installed in the listener's `tls.Config` at bind time;
 - `servers.*.tls.acme.enabled`, `.email`, `.ca`, `.domains`, `.challenge`,
   `.cache_dir`, `.ocsp_stapling`, plus the reserved `.dns_provider`;
 - `servers.*.http3.enabled` — the **http3** QUIC listener itself: whether a
   UDP socket exists at all is a bind-time decision;
 - `servers.*.h2c`.
+
+`servers.*.tls.client_auth.mode`, `.ca_file`, `.verify_san` and `.crl_file` are
+**hot** (#486): the listener reads its client-certificate policy per handshake
+from a holder that Prepare rebuilds — loading the CA bundle and
+signature-checking each CRL, so a bad file rejects the reload — and Publish
+swaps. The CA and CRL are digested by file content, so rewriting either in
+place and reloading refreshes trust without a restart. The new policy applies to
+new handshakes, including TLS session resumption; established connections keep
+the certificate they were accepted with. `admin.tls.client_auth` stays
+restart-bound.
 
 All restart-bound listener fields above are compared per listen address, so
 adding or removing an unrelated listener never produces a restart-required
@@ -862,10 +870,10 @@ now format is too.
   timeouts, max header bytes, h2c, HTTP/3, or the global connection cap cannot
   rebind the listener live.
 - **TLS handshake parameters on an existing listener** — minimum TLS version
-  and the **mtls** client-authentication bundle (mode, CA bundle, SAN allow-list,
-  CRL) are baked into the listener's TLS config. Static certificate/key content
-  is the deliberate exception: #100 hot-reloads it through a prepared dynamic
-  certificate provider. **http3** `enabled` and `h2c` are likewise decided when
+  is baked into the listener's TLS config. Static certificate/key content and
+  the data-plane **mtls** client-authentication policy are the deliberate
+  exceptions: #100 and #486 hot-reload them through prepared per-listener
+  holders. **http3** `enabled` and `h2c` are likewise decided when
   the address binds; `http3.alt_svc_max_age` is hot — see below.
 - **Tracing** — the provider/exporter/resource/propagator/tracer pipeline is
   wired once at startup. `observability.tracing.sample_ratio` is hot (#99):

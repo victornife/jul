@@ -39,7 +39,9 @@ func inspectableHTTPProxy(t *testing.T, address string, maxFails int) (*proxyHan
 }
 
 func inspectableHTTPProxyWithLocation(t *testing.T, address string, maxFails int, loc config.LocationConfig) (*proxyHandler, *upstream.Pool) {
-	return inspectableHTTPProxyWithCircuit(t, address, maxFails, 5*time.Millisecond, loc)
+	// fail_timeout bounds how long an opened circuit and a counted failure
+	// last; it must outlive the assertion on loaded Windows runners.
+	return inspectableHTTPProxyWithCircuit(t, address, maxFails, time.Minute, loc)
 }
 
 func inspectableHTTPProxyWithCircuit(t *testing.T, address string, maxFails int, failTimeout time.Duration, loc config.LocationConfig) (*proxyHandler, *upstream.Pool) {

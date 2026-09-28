@@ -237,6 +237,13 @@ func (p *ReloadPlan) Prepare() error {
 		if certRotation != nil {
 			p.Runtime.add(certRotation)
 		}
+		clientAuth, err := p.s.prepareClientAuthRotation(p.Candidate.Effective)
+		if err != nil {
+			return fmt.Errorf("prepare client auth: %w", err)
+		}
+		if clientAuth != nil {
+			p.Runtime.add(clientAuth)
+		}
 		return nil
 	})
 }
@@ -432,6 +439,7 @@ func (p *ReloadPlan) RetireRemovedListeners() {
 func (p *ReloadPlan) PostCommit() (adminErr, streamErr error) {
 	start := time.Now()
 	defer func() { p.phaseDurations["post_commit"] = time.Since(start) }()
+	p.s.reportCRLNextUpdates()
 	if p.s.OnReloaded != nil {
 		return p.s.OnReloaded(p.Candidate.Effective)
 	}

@@ -57,9 +57,9 @@ credential to protect, and liveness checking keeps working unchanged.
 The compatibility baseline was reconstructed from tag `v1.32.0` at commit
 `6bb76a08846150663d7eeb9661edb718ef357a7c`. Its released families are
 frozen except for the explicitly recorded retirements and amendments in
-[compatibility.md](compatibility.md). Of the current 69 contract families, 25
+[compatibility.md](compatibility.md). Of the current 70 contract families, 25
 are retained from v1.32.0, 38 additional families are present in stable
-`v2.0.0`, and six were added to `main` after that tag. The table below marks
+`v2.0.0`, and seven were added to `main` after that tag. The table below marks
 the stable and post-release groups separately.
 
 The complete machine-readable contract is
@@ -117,6 +117,7 @@ are never reset and previously recorded host-labeled series are not deleted.
 | `jul_managed_apply_history_total` | Counter | `operation`, `result` | Released `v2.0.0` | Configuration-history snapshot attempts made by the terminal managed-apply finalizer (WS02 §3.7), labeled by operation and result (recorded/skipped/failed). |
 | `jul_managed_apply_terminal_lookup_total` | Counter | `result` | Released `v2.0.0` | Exact-ID managed-apply lookups, labeled by bounded result (pending/finalizing/terminal/missing/invalid). |
 | `jul_managed_apply_terminal_registry_entries` | Gauge | — | Released `v2.0.0` | Number of terminal managed-apply records currently retained in the bounded ledger. |
+| `jul_mtls_crl_next_update_timestamp_seconds` | Gauge | `listen` | Merged, release pending | Earliest NextUpdate of the client-certificate revocation lists enforced on a TLS listener, as a Unix timestamp, labeled by listen address. Absent when the listener has no CRL; 0 when the CRL sets no NextUpdate. Jul keeps enforcing a CRL past this time, so alert on time() > this value. |
 | `jul_mtls_handshakes_total` | Counter | `result` | Released `v1.32.0` | Mutual-TLS handshakes presenting a CA-verified client certificate, labeled by result (verified/rejected). Certificates failing CA-chain verification are rejected by the TLS stack before this counter; a missing certificate denied per location is counted as a 403 in jul_http_requests_total. |
 | `jul_plugin_duration_seconds` | Histogram | `plugin` | Released `v1.32.0` | WASM plugin invocation latency in seconds, labeled by plugin name. |
 | `jul_plugin_invocations_total` | Counter | `plugin`, `result` | Released `v1.32.0` | WASM plugin invocations, labeled by plugin name and result (continue/stop/error). |
