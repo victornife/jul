@@ -149,10 +149,11 @@ subrequest is bounded by `timeout` (default **10s**).
 
 ### Dependency resilience
 
-Both `forward_auth.url` and `jwt.jwks_url` are on the request path of every
-authenticated request, so an unbounded number of subrequests to a struggling
-auth service is the same amplification Jul bounds everywhere else. Both now
-resolve through the shared upstream primitives:
+Forward-auth calls its endpoint for each request it evaluates. JWT validation
+consults the local JWKS cache on each request; it fetches the remote endpoint
+only for an unknown key or an aged cache, subject to the refresh throttle.
+Those outbound calls still need bounded admission when a dependency struggles.
+Both resolve through the shared upstream primitives:
 
 - if the URL's host **names a configured `[[upstreams]]`**, that pool is used, so
   an auth service can be replicated and load-balanced like any other backend;
@@ -249,7 +250,7 @@ go test -run '^$' -bench 'BenchmarkBasicVerify|BenchmarkJWTValidate' -benchmem .
 | --- | --- | --- |
 | Algorithm confusion (`alg` swap) | 🟢 safe | allow-list + key/method type check; `none` rejected |
 | Username enumeration (timing) | 🟢 safe | constant-time bcrypt + dummy-hash on unknown user |
-| Client IP spoofing of CIDR gate | 🟢 safe | gate uses `RemoteAddr`, not `X-Forwarded-For` |
+| Client IP spoofing of CIDR gate | 🟢 safe under the configured trust boundary | gate uses the canonical client address: the transport peer by default, or a forwarded chain only when the peer matches the listener's explicit `trusted_proxies` policy; unattributable chains fail closed |
 | JWKS SSRF | 🟢 safe by design | `jwks_url` is operator config and must be HTTPS; never request-influenced |
 | JWKS fetch amplification | 🟢 mitigated | unknown-kid floods throttled to ≤1 fetch / 30s; 1 MiB body cap |
 | Header spoofing (forward-auth) | 🟢 safe | client copies of `auth_response_headers` stripped before the endpoint's values are applied |

@@ -485,8 +485,12 @@ One consequence follows directly from it: a refresh that started on the old
 generation publishes into the process-shared cache even if it completes after a
 reload changed routes or backends. The result is the representation the **old**
 generation's route would have produced. Changing routing or backends therefore
-does not retroactively invalidate entries; use `[cache] enabled = false`, a
-restart, or the admin purge endpoint when that matters.
+does not retroactively invalidate entries. After old-generation work drains,
+use the admin purge endpoint when the old representation must no longer be
+served. A restart alone clears the memory tier but **retains the disk tier**;
+changing `[cache].enabled` is itself restart-required. For a cutover that must
+exclude old entries, quiesce traffic and in-flight refreshes, restart if needed,
+purge both tiers, then resume traffic.
 
 ### Observability
 
@@ -769,9 +773,10 @@ Lifecycle behavior:
     and survives configuration reloads by design, so a routing or backend change
     does not retroactively drop entries stored under the previous configuration.
     A refresh that was already in flight when the reload ran also completes
-    against the *old* generation's route and publishes its result. Use the admin
-    purge endpoint or a restart when a configuration change must invalidate
-    cached content. Characterized by
+    against the *old* generation's route and publishes its result. Purge after
+    old-generation refreshes drain; a restart alone does not clear the disk
+    tier. See [Cache data across reloads](#cache-data-across-reloads) for the
+    cutover sequence. Characterized by
     `TestReloadWaitsForCacheRevalidationHoldingGeneration` and
     `TestReloadDuringMandatorySynchronousValidation` (`internal/server`) and the
     generation-isolation tests in `internal/cache`.
