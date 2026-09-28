@@ -107,6 +107,10 @@ Four properties are guaranteed.
   canonicalization changes the path, the forwarded request target is the
   re-escaped canonical path (an original `%2F` in such a request is forwarded
   as `/`); an already-canonical target is forwarded byte-for-byte.
+  An `exact` or `prefix` `match.path` that is not itself canonical (`/a//b`,
+  `/a/./b`) can therefore never match; `jul lint` warns about it. Slash merging
+  has no opt-out: NGINX's `merge_slashes off` is reported as untranslated, and a
+  knob will be added only for a concrete workload whose keys contain `//` (#487).
 
 If no candidate is selected the request is unhandled and the router returns
 **404**. There is no 405 and no `Allow` header — see

@@ -91,6 +91,32 @@ func unreachableLocationDiagnostics(srv *ServerConfig, serverIndex int) []Diagno
 	return diags
 }
 
+// nonCanonicalPathDiagnostics reports exact and prefix locations that can never
+// match because the router canonicalizes request paths (dot segments removed,
+// repeated slashes merged) before selection.
+func nonCanonicalPathDiagnostics(srv *ServerConfig, serverIndex int) []Diagnostic {
+	var diags []Diagnostic
+	for j := range srv.Locations {
+		m := srv.Locations[j].Match
+		if normalizedMatchType(m.Type) == "regex" || !nonCanonicalRequestPath(m.Path) {
+			continue
+		}
+		diags = append(diags, Diagnostic{
+			Severity: SeverityWarning,
+			Field:    fmt.Sprintf("servers[%d].locations[%d]", serverIndex, j),
+			Message:  fmt.Sprintf("match.path %q contains a repeated slash or a dot segment, which request paths never do after canonicalization, so this location never matches", m.Path),
+			Hint:     "write the path with single slashes and no \".\" or \"..\" segments",
+		})
+	}
+	return diags
+}
+
+// nonCanonicalRequestPath mirrors router.canonicalPath's trigger.
+func nonCanonicalRequestPath(p string) bool {
+	return strings.Contains(p, "//") || strings.Contains(p, "/./") || strings.Contains(p, "/../") ||
+		strings.HasSuffix(p, "/.") || strings.HasSuffix(p, "/..")
+}
+
 // subsumes reports whether every request the later location could match is
 // already taken by the earlier one, by the provable rules of §15 and no others.
 func subsumes(earlier, later *LocationConfig) bool {
