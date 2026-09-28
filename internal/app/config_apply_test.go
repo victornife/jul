@@ -1298,10 +1298,13 @@ func TestApplyTimeoutRestoresAndBlocksConcurrentApply(t *testing.T) {
 		},
 		LiveSnapshot: func() server.LiveSnapshot {
 			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
-			cfg.Global.ReloadTimeout = config.Duration(50 * time.Millisecond)
+			// reload_timeout also bounds preflight, which must finish on a slow
+			// runner; the first apply still times out because its finalizer blocks.
+			cfg.Global.ReloadTimeout = config.Duration(time.Second * raceTimeScale)
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
 		PlannedRestart: &PlannedRestartStore{},
+		waitMargin:     10 * time.Millisecond,
 	}
 
 	// First apply times out synchronously; the finalizer goroutine is started.
@@ -1311,8 +1314,13 @@ func TestApplyTimeoutRestoresAndBlocksConcurrentApply(t *testing.T) {
 		res1Ch <- res
 	}()
 
-	<-finalizerStarted
-	res1 := <-res1Ch
+	var res1 ApplyResult
+	select {
+	case <-finalizerStarted:
+		res1 = <-res1Ch
+	case res1 = <-res1Ch:
+		t.Fatalf("first apply returned before submitting its reload: %+v", res1)
+	}
 	if !res1.OK {
 		t.Fatalf("ok = false, want true for timed-out apply; message: %s", res1.Message)
 	}
