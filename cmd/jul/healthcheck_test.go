@@ -179,6 +179,24 @@ func TestCmdHealthcheckTLSOptionsAndRedirect(t *testing.T) {
 	}
 }
 
+func TestCmdHealthcheckRejectsUnboundedOrUnsafeInvocation(t *testing.T) {
+	for _, args := range [][]string{
+		{"-url", "http://127.0.0.1/healthz", "-timeout", "0"},
+		{"-url", "http://127.0.0.1/healthz", "-timeout", "-1s"},
+		{"-url", "ftp://127.0.0.1/healthz"},
+		{"-url", "http://"},
+		{"-url", "https://user:secret@127.0.0.1/healthz", "-json"},
+	} {
+		code, out, errOut := capture(t, func() int { return cmdHealthcheck(args) })
+		if code != 2 {
+			t.Errorf("args %v: exit = %d, want usage error 2", args, code)
+		}
+		if strings.Contains(out+errOut, "secret") {
+			t.Errorf("args %v: credential leaked in output", args)
+		}
+	}
+}
+
 func TestCmdHealthcheckMTLSClientCertificate(t *testing.T) {
 	srv := httptest.NewUnstartedServer(&pathProbe{status: http.StatusOK})
 	srv.TLS = &tls.Config{ClientAuth: tls.RequireAnyClientCert}

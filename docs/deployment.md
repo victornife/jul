@@ -391,7 +391,9 @@ By default it discovers the address and HTTP/HTTPS scheme from `[admin]` in the
 config; `-addr` overrides the host/port for plaintext HTTP, while `-url` selects
 the full endpoint including scheme and path. For discovered or `-addr` targets,
 `-ready` probes `/readyz` instead of `/healthz`; an explicit `-url` supplies its
-own path. HTTPS verifies the certificate and hostname. For a private CA, pass
+own path and must be a full HTTP(S) URL without embedded userinfo. `-timeout`
+must be positive so the probe always has a deadline. HTTPS verifies the
+certificate and hostname. For a private CA, pass
 `-ca-file`; when admin TLS requires a client certificate, pass `-client-cert`
 and `-client-key` together. A redirect is unhealthy, not proof that the admin
 endpoint is responding. With a wildcard listener or a certificate lacking a

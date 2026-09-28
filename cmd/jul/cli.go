@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -620,6 +621,9 @@ func cmdHealthcheck(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if *timeout <= 0 {
+		return healthcheckFail(2, *jsonOut, *quiet, "", 0, fmt.Errorf("timeout must be positive"))
+	}
 
 	target, err := healthcheckTarget(*urlFlag, *addr, *ready, *configPath)
 	if err != nil {
@@ -711,6 +715,10 @@ func healthcheckFail(code int, jsonOut, quiet bool, target string, status int, e
 // file, supplies the host:port, and -ready selects /readyz over /healthz.
 func healthcheckTarget(urlFlag, addr string, ready bool, configPath string) (string, error) {
 	if urlFlag != "" {
+		u, err := url.Parse(urlFlag)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+			return "", fmt.Errorf("-url must be a full HTTP(S) URL with a host and no userinfo")
+		}
 		return urlFlag, nil
 	}
 	hostPort := addr
