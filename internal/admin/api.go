@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"reflect"
@@ -274,7 +273,7 @@ func (s *Server) handleConfigValidate(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	body, err := readBoundedBody(r, 1<<20)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, validationErrorResponse{OK: false, Message: err.Error()})
 		return
@@ -403,7 +402,7 @@ func (s *Server) handleConfigDiff(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot load current config: " + err.Error()})
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	body, err := readBoundedBody(r, 1<<20)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -531,7 +530,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	body, err := readBoundedBody(r, 1<<20)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

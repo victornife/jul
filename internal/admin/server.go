@@ -1194,7 +1194,7 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	body, err := readBoundedBody(r, 1<<20)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

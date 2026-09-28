@@ -18,7 +18,6 @@ package admin
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -55,7 +54,7 @@ func (s *Server) handleListenerClientAddress(w http.ResponseWriter, r *http.Requ
 	}
 
 	var req listenerClientAddressRequest
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	body, err := readBoundedBody(r, 1<<20)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot read request body"})
 		return
