@@ -4,6 +4,7 @@
 package cache
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -37,6 +38,82 @@ func authCache(t *testing.T, responseCC string) (*Cache, http.Handler) {
 		_, _ = w.Write([]byte(who))
 	}))
 	return c, h
+}
+
+func TestRepeatedAuthorizationDoesNotPublishPrivateResponse(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
+	srv := httptest.NewServer(c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=60")
+		body := "anonymous"
+		for _, value := range r.Header.Values("Authorization") {
+			if value == aliceCred {
+				body = "alice-private-data"
+			}
+		}
+		_, _ = w.Write([]byte(body))
+	})))
+	defer srv.Close()
+	authReq, err := http.NewRequest(http.MethodGet, srv.URL+"/private", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authReq.Header.Add("Authorization", "")
+	authReq.Header.Add("Authorization", aliceCred)
+	resp, err := srv.Client().Do(authReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	private, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil || string(private) != "alice-private-data" {
+		t.Fatalf("authenticated origin response = %q, err %v", private, err)
+	}
+	anon, err := srv.Client().Get(srv.URL + "/private")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer anon.Body.Close()
+	body, err := io.ReadAll(anon.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if anon.Header.Get("X-Cache") != stateMiss || string(body) != "anonymous" {
+		t.Fatalf("anonymous response reused authenticated body: state %q, body %q", anon.Header.Get("X-Cache"), body)
+	}
+}
+
+func TestRepeatedAuthorizationDoesNotReuseAnonymousEntry(t *testing.T) {
+	_, h := authCache(t, "max-age=3600")
+	wantResult(t, get(t, h, "http://x/a"), stateMiss, "anonymous")
+	req := httptest.NewRequest(http.MethodGet, "http://x/a", nil)
+	req.Header.Add("Authorization", "")
+	req.Header.Add("Authorization", aliceCred)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if state := rec.Header().Get("X-Cache"); state != stateMiss {
+		t.Fatalf("repeated Authorization reused an anonymous entry: state %q", state)
+	}
+}
+
+func TestRepeatedSetCookieResponseIsNotShared(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
+	srv := httptest.NewServer(c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		w.Header().Add("Set-Cookie", "")
+		w.Header().Add("Set-Cookie", "session=private; HttpOnly")
+		_, _ = w.Write([]byte("origin"))
+	})))
+	defer srv.Close()
+	for i := 0; i < 2; i++ {
+		resp, err := srv.Client().Get(srv.URL + "/cookie")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if state := resp.Header.Get("X-Cache"); state != stateMiss {
+			t.Fatalf("request %d: cookie-bearing response state %q, want MISS", i+1, state)
+		}
+	}
 }
 
 // TestUnauthenticatedEntryIsNotReusableByAnAuthenticatedRequest is the core

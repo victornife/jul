@@ -158,7 +158,7 @@ func validatedReusable(e *Entry, r *http.Request) bool {
 	if e.IsVaryStub || !e.matchesVary(r) {
 		return false
 	}
-	return r.Header.Get("Authorization") == "" || e.SharedAuthReuse
+	return !hasHeaderField(r.Header, "Authorization") || e.SharedAuthReuse
 }
 
 func (c *Cache) finishValidation(call *revalidateCall, e *Entry, outcome revalidateOutcome) {

@@ -229,6 +229,18 @@ func TestRemoveHopByHop(t *testing.T) {
 	}
 }
 
+func TestRemoveHopByHopFromEveryConnectionLine(t *testing.T) {
+	h := make(http.Header)
+	h.Add("Connection", "Keep-Alive")
+	h.Add("Connection", "X-Secret")
+	h.Set("X-Secret", "private")
+	h.Set("X-End-To-End", "retained")
+	removeHopByHop(h)
+	if h.Get("X-Secret") != "" || h.Get("Connection") != "" || h.Get("X-End-To-End") != "retained" {
+		t.Fatalf("connection-scoped field survived: %v", h)
+	}
+}
+
 func TestMemStoreDelAndPurge(t *testing.T) {
 	m := newMemStore(1<<20, nil)
 	e := &Entry{Status: 200, Body: []byte("hi"), ExpiresAt: time.Now().Add(time.Hour)}

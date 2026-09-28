@@ -463,7 +463,7 @@ const (
 // rules here — rather than spreading them over the serve paths — is what makes
 // the shared-cache contract auditable.
 func reuseDecision(e *Entry, r *http.Request, p requestPolicy, now time.Time) reuseKind {
-	if r.Header.Get("Authorization") != "" && !e.SharedAuthReuse {
+	if hasHeaderField(r.Header, "Authorization") && !e.SharedAuthReuse {
 		// RFC 9111 §3.5 is not a freshness rule: no amount of revalidation makes
 		// a response the origin never marked shareable usable for an
 		// authenticated request. Fetch a response of this request's own.
@@ -704,7 +704,7 @@ func (c *Cache) buildEntry(r *http.Request, status int, h http.Header, body []by
 	// A response produced FOR an authenticated request enters the shared cache
 	// only with the origin's explicit permission. See sharedAuthStorable for why
 	// this is stricter than the §3.5 reuse rule.
-	if r.Header.Get("Authorization") != "" && !p.sharedAuthStorable() {
+	if hasHeaderField(r.Header, "Authorization") && !p.sharedAuthStorable() {
 		return nil
 	}
 
@@ -828,7 +828,7 @@ func (c *Cache) freshness(status int, h http.Header, p responsePolicy, now time.
 		// Jul is a shared cache; a private response belongs to one user agent.
 		return 0, 0, false
 	}
-	if h.Get("Set-Cookie") != "" {
+	if hasHeaderField(h, "Set-Cookie") {
 		// Conservative shared-cache rule: a Set-Cookie is per-client state, and
 		// replaying it to another client is a session-fixation vector. Origins
 		// that genuinely want a cookie-bearing response shared must say so with

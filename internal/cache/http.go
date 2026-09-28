@@ -305,6 +305,13 @@ func varyFields(h http.Header) []string {
 	return parseList(strings.Join(h.Values("Vary"), ","))
 }
 
+// Header presence, not the first line's value, controls conservative shared
+// cache decisions such as Authorization and Set-Cookie. An empty first line
+// must not hide a later credential or session cookie.
+func hasHeaderField(h http.Header, name string) bool {
+	return len(h.Values(name)) > 0
+}
+
 func cloneHeader(h http.Header) http.Header {
 	out := make(http.Header, len(h))
 	for k, vs := range h {
@@ -353,8 +360,10 @@ var hopByHopHeaders = []string{
 }
 
 func removeHopByHop(h http.Header) {
-	for _, name := range parseList(h.Get("Connection")) {
-		h.Del(name)
+	for _, line := range h.Values("Connection") {
+		for _, name := range parseList(line) {
+			h.Del(name)
+		}
 	}
 	for _, name := range hopByHopHeaders {
 		h.Del(name)
