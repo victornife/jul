@@ -38,7 +38,12 @@ Consequences:
 
 ## Prepare, Publish and rollback
 
-All reload entry points converge on the same application prepare/publish path: managed apply/typed patch, raw configuration apply, rollback, SIGHUP and file watch. `PrepareAdminRuntime` runs after configuration resolution and before Publish.
+Authorized reloads converge on the same application prepare/publish path:
+managed apply/typed patch, raw configuration apply and rollback, or SIGHUP and
+file watch under `file_owned` authority. Under `managed` authority, SIGHUP and
+file watch only assess external drift; they do not publish the changed file.
+The operator must explicitly adopt it before managed writes resume.
+`PrepareAdminRuntime` runs after configuration resolution and before Publish.
 
 Prepare may construct/validate immutable candidate runtime data. It never iterates limiter clients, retunes token buckets, resets SSE counts or acquires/releases leases. A failed Prepare leaves the old snapshot and all mutable limiter state untouched.
 

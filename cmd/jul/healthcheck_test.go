@@ -162,7 +162,7 @@ func TestCmdHealthcheckTLSOptionsAndRedirect(t *testing.T) {
 	}))
 	defer destination.Close()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Location", destination.URL + "/healthz")
+		w.Header().Set("Location", destination.URL+"/healthz")
 		w.WriteHeader(http.StatusFound)
 	}))
 	defer srv.Close()

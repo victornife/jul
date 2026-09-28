@@ -54,7 +54,7 @@ dev-server.toml	not reviewed	parsed by make config-check if root/example; runtim
 docs/abi.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/accessibility.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/admin-api.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/admin-runtime-hot-reload.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
+docs/admin-runtime-hot-reload.md	reviewed	scoped authority-specific SIGHUP/file-watch versus managed prepare/publish claim traced to serve.go and reload semantics; remaining limiter/upload mechanics not certified
 docs/adr/0001-language-strategy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/adr/0002-protocol-adaptation.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/adr/0003-maturity-and-ga.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
