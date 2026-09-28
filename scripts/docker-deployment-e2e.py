@@ -21,8 +21,13 @@ import urllib.request
 import uuid
 
 
-def docker(*args):
-    return subprocess.run(["docker", *args], check=True, text=True, capture_output=True).stdout.strip()
+def docker(*args, extra_env=None):
+    env = {**os.environ, **(extra_env or {})}
+    result = subprocess.run(["docker", *args], env=env, text=True, capture_output=True)
+    if result.returncode:
+        # Do not echo argv: `docker run` may carry environment/credential flags.
+        raise AssertionError(f"Docker failed ({result.returncode}): {result.stderr[-3000:]}")
+    return result.stdout.strip()
 
 
 def available_port():
@@ -99,7 +104,8 @@ def main():
         # Host networking permits a loopback-only admin listener. Use a separate
         # ephemeral managed config whose directory is writable by uid 65532.
         traffic_port, admin_port = available_port(), available_port()
-        assert traffic_port != admin_port
+        while traffic_port == admin_port:
+            admin_port = available_port()
         token = secrets.token_urlsafe(36)
         original = Path("deploy/docker/server.toml").read_text()
         candidate = original.replace('listen = "0.0.0.0:8080"', f'listen = "127.0.0.1:{traffic_port}"', 1)
@@ -115,10 +121,10 @@ def main():
         (config_dir / "server.toml").chmod(0o600)
         subprocess.run(["sudo", "chown", "-R", "65532:65532", str(config_dir)], check=True)
         args = ("run", "-d", "--name", containers[1], "--network", "host",
-                "-e", "JUL_ADMIN_TOKEN=" + token,
+                "-e", "JUL_ADMIN_TOKEN",
                 "-v", str(config_dir) + ":/etc/jul",
                 "-v", volumes[4] + ":/var/lib/jul", image)
-        docker(*args)
+        docker(*args, extra_env={"JUL_ADMIN_TOKEN": token})
         traffic_url = f"http://127.0.0.1:{traffic_port}/"
         admin_url = f"http://127.0.0.1:{admin_port}"
         wait_ready(containers[1], traffic_url, admin_url)
@@ -143,8 +149,8 @@ def main():
         assert status in (200, 204), f"rollback HTTP {status}: {body[:500]!r}"
         assert 'log_level = "info"' in config_get(admin_url, token)["raw"]
         docker("stop", containers[1])
-        docker("rm", containers[1])
-        docker(*args)
+        docker("rm", "-v", containers[1])
+        docker(*args, extra_env={"JUL_ADMIN_TOKEN": token})
         wait_ready(containers[1], traffic_url, admin_url)
         assert 'log_level = "info"' in config_get(admin_url, token)["raw"]
         status, body = request(admin_url + "/api/config/history", token)
@@ -153,7 +159,7 @@ def main():
         print("PASS: loopback token, managed apply, history, rollback and restart persistence")
     finally:
         for container in containers:
-            subprocess.run(["docker", "rm", "-f", container], capture_output=True)
+            subprocess.run(["docker", "rm", "-fv", container], capture_output=True)
         for volume in volumes:
             subprocess.run(["docker", "volume", "rm", volume], capture_output=True)
         subprocess.run(["docker", "image", "rm", image], capture_output=True)
