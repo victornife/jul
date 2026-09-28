@@ -227,3 +227,27 @@ func TestLintDeprecatedLogDestinationFields(t *testing.T) {
 		}
 	}
 }
+
+func TestLintWAFFit(t *testing.T) {
+	c := &Config{
+		WAF: WAFConfig{Enabled: true, CRSEnabled: true, RequestBodyLimit: Size(128 << 10)},
+		Servers: []ServerConfig{{
+			Listen:            ":8080",
+			ClientMaxBodySize: Size(1 << 20),
+			Locations: []LocationConfig{
+				{Match: MatchConfig{Type: "prefix", Path: "/upload/"}, ProxyPass: "http://app"},
+				{Match: MatchConfig{Type: "prefix", Path: "/pkg.Svc/"}, ProxyPass: "http://grpc", GRPC: true},
+				{Match: MatchConfig{Type: "prefix", Path: "/small/"}, ProxyPass: "http://app", ClientMaxBodySize: Size(64 << 10)},
+				{Match: MatchConfig{Type: "prefix", Path: "/off/"}, ProxyPass: "http://grpc", GRPC: true, WAF: &WAFConfig{Enabled: false}},
+			},
+		}},
+	}
+	diags := Lint(c)
+	requireDiagnostic(t, diags, SeverityWarning, "servers[0].locations[0]", "rejects request bodies over its request_body_limit")
+	requireDiagnostic(t, diags, SeverityWarning, "servers[0].locations[1]", "rule 920420")
+	for _, d := range diags {
+		if (d.Field == "servers[0].locations[2]" || d.Field == "servers[0].locations[3]") && strings.Contains(d.Message, "WAF") {
+			t.Errorf("unexpected WAF diagnostic: %s %s", d.Field, d.Message)
+		}
+	}
+}
