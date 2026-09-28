@@ -91,7 +91,7 @@ func TestStreamConsistentHashTCPByClientAddress(t *testing.T) {
 func TestStreamConsistentHashTCPFallsThroughRankedOrder(t *testing.T) {
 	live, stop := tcpAnnounce(t, "live")
 	t.Cleanup(stop)
-	dead := freeTCPAddr(t) // reserved and released: nothing listens
+	dead := "127.0.0.1:1" // never bound; a released ephemeral port can self-connect
 	servers := []config.UpstreamServer{{Address: dead, Weight: 1}, {Address: live, Weight: 1}}
 	ups := map[string]config.UpstreamConfig{"db": {
 		Name: "db", Strategy: "consistent_hash", Hash: &config.HashConfig{Key: "client_ip"},
