@@ -2,8 +2,8 @@
 
 > Optional hardening that constrains the destinations the server itself connects
 > to for its **config-driven auxiliary fetches** — JWKS retrieval, forward-auth
-> subrequests, Consul/Kubernetes service discovery, ACME/OCSP certificate
-> issuance and revocation checks, and WASM plugin `fetch`. It is disabled by
+> subrequests, Consul/Kubernetes service discovery, ACME issuance, OCSP
+> stapling, and WASM plugin `fetch`. It is disabled by
 > default and fully backward-compatible.
 
 ## Why

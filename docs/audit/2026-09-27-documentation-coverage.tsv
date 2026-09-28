@@ -98,7 +98,7 @@ docs/compression.md	not reviewed	structural link/TOML checks where applicable; b
 docs/config-lifecycle.yaml	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
 docs/config-value-contract.json	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/configuration.md	reviewed	combined example and CLI checks plus admin-versus-data-plane mTLS lifecycle traced; remaining field sections need semantic review
-docs/console.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/console.md	reviewed	targeted admin TLS, stage outcomes, tracing sample ratio and post-tag client-auth claims traced to lifecycle/Console code; broader panel behavior not certified
 docs/core-http.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/deployment.md	reviewed	Docker and Linux systemd bounded startup/recovery passed; Windows service ACLs and remote admin TLS not executed
 docs/diagnostics.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified

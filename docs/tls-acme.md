@@ -149,7 +149,7 @@ configuration-validation time with a clear error.
 | ACME renewal under the running manager | **Automatic** — renewal continues without configuration reload. |
 | ACME enablement, domains, challenge, account, issuer, or cache | **Not reloaded** — process-owned manager identity/policy remains restart-bound or deferred. |
 | ACME `ocsp_stapling` | **Hot reload** — an atomic policy on the stable provider wrapper changes new certificate lookups without replacing the ACME manager or listener (#106). |
-| `client_auth` (mTLS) | **Not reloaded** — bound at listener start; see [mtls.md](mtls.md). |
+| `client_auth` (mTLS) | Stable v2.0.0 is restart-bound. On post-tag `main`, data-plane client-auth policy is hot for new handshakes (#486, Beta); admin listener client auth remains restart-bound. See [mtls.md](mtls.md). |
 
 When configuration is applied through a validated write path, every referenced
 static `cert`/`key` pair is parsed before persistence. A broken or mismatched pair

@@ -348,7 +348,7 @@ func TestPurgeMethodAndKey(t *testing.T) {
 func TestReloadTriggersHook(t *testing.T) {
 	var called atomic.Int64
 	s := newTestServer(t, config.AdminConfig{}, Deps{
-		Reload: func() error { called.Add(1); return nil },
+		Reload:    func() error { called.Add(1); return nil },
 		Authority: func() ConfigAuthorityStatus { return ConfigAuthorityStatus{Mode: "file_owned"} },
 	})
 	h := s.routes()
@@ -372,7 +372,7 @@ func TestReloadTriggersHook(t *testing.T) {
 
 func TestReloadReturns503OnEnqueueFailure(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{
-		Reload: func() error { return errors.New("reload coordinator backlogged") },
+		Reload:    func() error { return errors.New("reload coordinator backlogged") },
 		Authority: func() ConfigAuthorityStatus { return ConfigAuthorityStatus{Mode: "file_owned"} },
 	})
 	h := s.routes()
