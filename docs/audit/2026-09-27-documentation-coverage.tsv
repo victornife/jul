@@ -21,7 +21,7 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/semantic-drift-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 CHANGELOG.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 CONTRIBUTING.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-Dockerfile	reviewed	Docker runtime stage, default config, healthcheck and volume comments traced to deployment guide; image build not run (Docker unavailable)
+Dockerfile	reviewed	Docker CI exposed local gofast replacement missing at module download; build-order fix and runtime journey pending exact-SHA CI
 Makefile	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 README.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 SECURITY.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
