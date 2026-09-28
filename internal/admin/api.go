@@ -930,7 +930,8 @@ func (s *Server) authorizeConfigTransition(w http.ResponseWriter, r *http.Reques
 }
 
 // authorizeTrustTransition requires config:trust for any change to a
-// listener's trusted-proxy policy, whatever route produced the candidate.
+// listener's trusted-proxy or inbound PROXY-protocol policy, whatever route
+// produced the candidate.
 //
 // Gating the dedicated endpoint alone would be theatre: the same change is
 // expressible through the generic structured patch surface, so the check is on
@@ -961,17 +962,19 @@ func (s *Server) requireTrustAgainst(r *http.Request, action string, current, ne
 	return &AuthorizationError{Status: http.StatusForbidden, Message: "trusted-proxy change rejected: requires config:trust", Reason: "config_trust_required", Required: rbac.ConfigTrust}
 }
 
-// clientAddressChanged reports whether any listener's effective trusted-proxy
+// clientAddressChanged reports whether any listener's effective identity-trust
 // policy differs between two configurations.
 func clientAddressChanged(current, next *config.Config) bool {
 	return !maps.Equal(clientAddressByListen(current), clientAddressByListen(next))
 }
 
 // clientAddressByListen renders each listen address's configured policy as a
-// comparable string. Addresses with no policy are absent rather than mapped to
-// an empty value, so renaming or adding an untrusting listener is not mistaken
-// for a trust change. Validation guarantees one policy per address, so the
-// first block that declares one is authoritative.
+// comparable string, including the inbound PROXY-protocol mode. That mode lets
+// a trusted transport peer assert the client address even if forwarded_headers
+// is empty. Addresses with no policy are absent rather than mapped to an empty
+// value, so renaming or adding an untrusting listener is not mistaken for a
+// trust change. Validation guarantees one policy per address, so the first
+// block that declares one is authoritative.
 func clientAddressByListen(c *config.Config) map[string]string {
 	out := make(map[string]string, len(c.Servers))
 	for i := range c.Servers {
@@ -982,7 +985,7 @@ func clientAddressByListen(c *config.Config) map[string]string {
 		if _, seen := out[addr]; seen {
 			continue
 		}
-		out[addr] = clientAddressKey(c.Servers[i].ClientAddress)
+		out[addr] = clientAddressKey(c.Servers[i].ClientAddress) + "|proxy_protocol=" + strings.ToLower(strings.TrimSpace(c.Servers[i].ProxyProtocol))
 	}
 	return out
 }

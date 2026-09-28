@@ -144,8 +144,10 @@ A `GET` subrequest is sent to `url` carrying the original headers (fixed and
 Client-supplied copies of these three context headers are replaced with the
 actual request method, URI and host, so the auth service receives one value for
 each. Treat other forwarded request headers as client input in the auth service.
-A **2xx** authorizes the request; the listed `auth_response_headers` are copied
-onto the upstream request (client-supplied copies are stripped first). Any other
+A **2xx** authorizes the request; listed end-to-end `auth_response_headers` are
+copied onto the upstream request (client-supplied copies are stripped first).
+Fixed and `Connection`-nominated hop-by-hop response fields are never copied,
+even if listed. Any other
 status is relayed to the client (301/302/303/307/308 with `Location` remain
 redirects; other non-error statuses become 403; body capped at 64 KiB and
 hop-by-hop response headers stripped). One

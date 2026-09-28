@@ -178,6 +178,24 @@ func TestForwardAuthDropsConnectionNominatedHeaders(t *testing.T) {
 	}
 }
 
+func TestForwardAuthSuccessDoesNotCopyConnectionScopedIdentity(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "X-Auth-User")
+		w.Header().Set("X-Auth-User", "alice")
+		w.Header().Set("X-Auth-Role", "reader")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer auth.Close()
+	fa := newForwardAuth(auth.URL, []string{"X-Auth-User", "X-Auth-Role"}, auth.Client(), nil)
+	res, err := fa.decide(context.Background(), httptest.NewRequest(http.MethodGet, "http://app.example/private", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.ok || res.copyHeaders.Get("X-Auth-User") != "" || res.copyHeaders.Get("X-Auth-Role") != "reader" {
+		t.Fatalf("copied success headers = %v, want only end-to-end X-Auth-Role", res.copyHeaders)
+	}
+}
+
 func TestForwardAuthDenialRedirectRequiresLocation(t *testing.T) {
 	for _, tc := range []struct {
 		status   int

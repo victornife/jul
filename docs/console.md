@@ -941,13 +941,17 @@ Three properties of the editor are deliberate:
   sees — so the Console can never disagree with the configuration it edits.
 - **"None — always use the transport peer" is a real setting**, distinct from
   leaving the preference at its default. It sends an explicitly empty header
-  list, which means no forwarding header is read even from a trusted peer.
+  list, which means no HTTP forwarding header is read even from a trusted
+  peer. If inbound PROXY protocol is enabled, its validated source becomes
+  the transport peer before this setting is applied.
 - **It requires its own permission,** `config:trust`, not `config:write`.
   Widening `trusted_proxies` lets the named range assert any client address to
   authentication, rate limiting, the WAF and the audit trail, so it is held to a
   separate grant and recorded under its own audit category
   (`config.client_address`). A history rollback that changes this policy also
-  requires `config:trust`, even when the caller has `history:rollback`. No
+  requires `config:trust`, even when the caller has `history:rollback`. Enabling
+  inbound `proxy_protocol` with an unchanged trusted range also requires that
+  grant, because it accepts a new source of asserted client addresses. No
   predefined role except `admin` holds the trust grant.
 
 **Trust no proxy** clears the policy from every block on the listener, returning

@@ -63,6 +63,10 @@ func newConsulDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discoverer,
 	client := &http.Client{Timeout: 10 * time.Second}
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	if dial != nil {
+		// The guarded dial must see the configured Consul host, not an
+		// environment proxy's address. Keep default proxy behavior when the
+		// egress policy is disabled and no guarded dial was supplied.
+		t.Proxy = nil
 		t.DialContext = dial
 	}
 	// Boundary F: the agent that supplies this pool's addresses is authenticated

@@ -103,7 +103,7 @@ docs/console.md	reviewed	targeted admin TLS, stage outcomes, tracing sample rati
 docs/core-http.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/deployment.md	reviewed	Docker, systemd, packaged Windows service and disposable non-loopback admin TLS journeys passed; healthcheck TLS trust/hostname guidance traced to CLI; production ACL/network and release-tag variants remain unverified
 docs/diagnostics.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/egress.md	reviewed	ACME issuance versus independent OCSP stapling failure traced to runtime; broader auxiliary egress generation matrix remains unexecuted
+docs/egress.md	reviewed	ACME versus OCSP failure traced; guarded auth/Consul environment-proxy seams reproduced and corrected; broader auxiliary egress generation matrix remains unexecuted
 docs/feature-status.yaml	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/ga-push.md	historical/context only	dated July GA-push execution log preserved; 2026-09-27 amendment corrects the historical release-smoke/criterion-five description, current status in feature manifest
 docs/generated/config-lifecycle.json	generated/verified against source	make generated-check at baseline and final SHA; no hand edits

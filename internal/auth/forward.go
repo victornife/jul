@@ -96,7 +96,11 @@ func (f *forwardAuth) decide(ctx context.Context, r *http.Request) (forwardResul
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		res.ok = true
 		res.copyHeaders = make(http.Header)
+		hop := connectionScopedHeaders(resp.Header)
 		for _, name := range f.headers {
+			if hop[http.CanonicalHeaderKey(name)] {
+				continue
+			}
 			if v := resp.Header.Values(name); len(v) > 0 {
 				for _, vv := range v {
 					res.copyHeaders.Add(name, vv)

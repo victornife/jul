@@ -234,10 +234,13 @@ func readLimited(r io.Reader, max int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(r, max))
 }
 
-// guardedTransport clones the default transport and installs dial, so egress is
-// enforced at connect time while proxy, idle-pool, and TLS defaults are kept.
+// guardedTransport clones the default transport and installs dial. With an
+// enabled egress guard the proxy must be disabled: otherwise DialContext sees
+// the environment proxy address instead of the configured dependency target.
+// Disabled egress supplies no dial and keeps the default proxy behaviour.
 func guardedTransport(dial DialFunc) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = nil
 	t.DialContext = dial
 	return t
 }

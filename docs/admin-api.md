@@ -376,9 +376,10 @@ trusted, which forwarded headers are honoured, and how many hops are accepted.
 It is a sub-resource rather than a listener field because it is the one part of
 a listener with its own permission — reading it is `config:read` and changing it
 is `config:trust`, including when a history rollback changes the effective
-policy; `history:rollback` alone is insufficient. A trusted-proxy range decides which address a request is
-attributed to, and therefore what every allow-list, rate limit and audit record
-downstream sees.
+policy; `history:rollback` alone is insufficient. Enabling inbound
+`proxy_protocol` with the same trusted range also requires `config:trust` on
+Apply and rollback. That range decides which address a request is attributed
+to, and therefore what every allow-list, rate limit and audit record sees.
 
 `configured` distinguishes a written policy from the defaults, which are
 otherwise identical on the wire. An address no server block binds is

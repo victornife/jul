@@ -43,12 +43,12 @@ remains a [Y3-02](roadmap/) horizon item. See:
 One permission is deliberately outside every predefined role except `admin`:
 **`config:trust`**, required to change a listener's
 [`client_address`](configuration.md#client-address-and-trusted-proxies)
-trusted-proxy policy. Widening `trusted_proxies` lets the named range assert any
-client address to CIDR authentication, rate limiting, the WAF and the audit
-trail, so it is privilege-escalation adjacent and is held to its own grant with
-its own audit category (`config.client_address`). The check is on the effective
-configuration difference, not on the endpoint used, so the general structured
-patch surface cannot be used to route around it.
+trusted-proxy policy or inbound `proxy_protocol` mode. Widening
+`trusted_proxies`, or enabling PROXY protocol with an existing trusted range,
+lets those peers assert a client address to CIDR authentication, rate limiting,
+the WAF and the audit trail. The grant applies to the effective configuration
+difference on Apply and rollback, independent of the endpoint used; the
+dedicated client-address edit has its own audit category (`config.client_address`).
 
 - Design spec: [docs/specs/console-rbac.md](specs/console-rbac.md)
 - ADR: [docs/adr/0010-console-rbac.md](adr/0010-console-rbac.md)
