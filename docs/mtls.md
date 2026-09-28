@@ -12,9 +12,10 @@ mTLS is in **core** — no build tag — and uses only the standard library's
 `crypto/x509`. The same server-level policy is applied to HTTP/1.1, HTTP/2 and,
 when the `http3` tag is present, HTTP/3 over QUIC.
 
-> **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md)). It coexists
-> with ACME/static server certificates; the server certificate and the client CA
-> are independent.
+> **Maturity:** Core mTLS client authentication is GA (see
+> [ADR 0003](adr/0003-maturity-and-ga.md)). Client-certificate policy and CRL
+> hot reload (#486) is a separate post-v2.0.0 Beta capability on `main`.
+> Server certificates from ACME/static files and the client CA are independent.
 
 ## Contents
 
@@ -219,10 +220,14 @@ counted as `rejected`.
 
 Revocation is scoped to the CRL's issuer: a serial is only unique per CA, so a
 CRL revokes only certificates whose issuer name matches its own. To publish a
-new CRL, rewrite `crl_file` in place and reload (`SIGHUP`, file watch or an
-apply): the list is re-read, signature-checked and swapped for new handshakes,
-including resumed TLS sessions, without a restart. A CRL that fails to parse or
-verify rejects the reload and the previous list keeps being enforced.
+new CRL, rewrite `crl_file` in place and explicitly trigger a reload: for a
+`file_owned` configuration, send SIGHUP on Unix or rewrite the **config file**
+to trigger its watcher; for a `managed` configuration, submit a managed Apply
+or restart. The watcher monitors `server.toml`, not the CRL path. The new list
+is re-read, signature-checked and swapped for new handshakes, including resumed
+TLS sessions. A CRL that fails to parse or verify rejects the reload and the
+previous list keeps being enforced. The legacy `POST /reload` endpoint is
+unavailable under managed authority because it bypasses managed adoption.
 
 Jul keeps enforcing a CRL after its `NextUpdate` rather than rejecting every
 client, logs a warning when it loads one that is already past it, and exports
@@ -242,6 +247,7 @@ certificate whose SANs are all outside the list is rejected and counted as
 | Metric | Type | Labels | Meaning |
 | ------ | ---- | ------ | ------- |
 | `jul_mtls_handshakes_total` | counter | `result` | Handshakes presenting a CA-verified client certificate: `verified` (accepted) or `rejected` (revoked serial or disallowed SAN) |
+| `jul_mtls_crl_next_update_timestamp_seconds` | gauge | `listen` | Post-v2.0.0 metric for the earliest CRL NextUpdate on a listener; absent without a CRL, zero when unset. |
 
 Two cases are intentionally **not** in this counter:
 
@@ -308,8 +314,10 @@ go test -run '^$' -bench 'Handshake|MTLS' -benchmem ./internal/server/
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), mTLS is **GA**. The soak test
-(criterion 5) was completed on 2026-07-05 via Phase 2A.
+Per [ADR 0003](adr/0003-maturity-and-ga.md), core mTLS client authentication
+is **GA**. The soak test (criterion 5) was completed on 2026-07-05 via Phase
+2A. The later policy/CRL hot reload capability remains Beta and has no
+qualifying soak evidence yet.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
@@ -323,7 +331,7 @@ Per [ADR 0003](adr/0003-maturity-and-ga.md), mTLS is **GA**. The soak test
 | 8 | Fuzzing where parsing is involved | n/a — CA/CRL parsing is stdlib `crypto/x509` (no custom parser) |
 | 9 | Self-explanatory Console surface | ✅ Console **Status** panel reports *Mutual TLS (client certs)* active |
 
-All GA criteria are satisfied.
+These GA criteria apply to the original client-authentication capability.
 
 ## Build tags
 

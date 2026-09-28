@@ -72,7 +72,10 @@ if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
 # Run under the per-service virtual account (no password). The account's SID,
 # "NT SERVICE\<ServiceName>", exists once the service is registered, so the ACL
 # grants below resolve.
-sc.exe config $ServiceName obj= $serviceAccount password= "" | Out-Null
+# The virtual account has no administrator-supplied password. Passing a blank
+# password= argument through PowerShell can be interpreted by sc.exe as an
+# invalid account/password combination (1057); omit it entirely.
+sc.exe config $ServiceName obj= $serviceAccount | Out-Null
 Assert-NativeSuccess 'Setting service account'
 
 # Grant the service account read on the config (it must read it), and modify on

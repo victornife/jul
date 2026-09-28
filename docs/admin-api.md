@@ -507,7 +507,8 @@ Each internal route records its own reason in
   `/api/v1` route returns raw configuration bytes.** They remain available on
   the internal routes under `config:raw` and `history:raw` for the Console and
   for local operators, and a test fails if either is promoted.
-- **Legacy operational endpoints** (`/cache/purge`, `/reload`) and
+- **Legacy operational endpoints** (`/cache/purge`, `/reload`; the reload
+  trigger is available only with `file_owned` authority) and
   `/debug/pprof/` are not part of the configuration surface `v1` publishes.
 
 ## Authentication and authorization

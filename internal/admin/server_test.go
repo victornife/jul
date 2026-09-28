@@ -347,7 +347,10 @@ func TestPurgeMethodAndKey(t *testing.T) {
 
 func TestReloadTriggersHook(t *testing.T) {
 	var called atomic.Int64
-	s := newTestServer(t, config.AdminConfig{}, Deps{Reload: func() error { called.Add(1); return nil }})
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		Reload: func() error { called.Add(1); return nil },
+		Authority: func() ConfigAuthorityStatus { return ConfigAuthorityStatus{Mode: "file_owned"} },
+	})
 	h := s.routes()
 
 	rr := httptest.NewRecorder()
@@ -368,13 +371,38 @@ func TestReloadTriggersHook(t *testing.T) {
 }
 
 func TestReloadReturns503OnEnqueueFailure(t *testing.T) {
-	s := newTestServer(t, config.AdminConfig{}, Deps{Reload: func() error { return errors.New("reload coordinator backlogged") }})
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		Reload: func() error { return errors.New("reload coordinator backlogged") },
+		Authority: func() ConfigAuthorityStatus { return ConfigAuthorityStatus{Mode: "file_owned"} },
+	})
 	h := s.routes()
 
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/reload", nil))
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("reload = %d, want 503", rr.Code)
+	}
+}
+
+func TestReloadCannotAdoptManagedDrift(t *testing.T) {
+	var called atomic.Int64
+	for _, state := range []string{"managed_clean", "managed_drift"} {
+		t.Run(state, func(t *testing.T) {
+			s := newTestServer(t, config.AdminConfig{}, Deps{
+				Reload: func() error { called.Add(1); return nil },
+				Authority: func() ConfigAuthorityStatus {
+					return ConfigAuthorityStatus{Mode: "managed", ConfigState: state, Drift: state == "managed_drift"}
+				},
+			})
+			rr := httptest.NewRecorder()
+			s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/reload", nil))
+			if rr.Code != http.StatusConflict {
+				t.Fatalf("managed legacy reload = %d, want 409", rr.Code)
+			}
+			if called.Load() != 0 {
+				t.Fatal("managed legacy reload reached the source-only reload hook")
+			}
+		})
 	}
 }
 

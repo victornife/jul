@@ -119,7 +119,7 @@ docs/http3.md	not reviewed	structural link/TOML checks where applicable; behavio
 docs/index.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/known-limitations.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/metrics-contract.json	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/mtls.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/mtls.md	reviewed	client-auth GA versus post-tag Beta hot reload, CRL watcher path, managed reload boundary and metric traced to runtime and tests; full PKI/platform matrix unexecuted
 docs/nginx-assessment.example.json	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/nginx-assessment.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/nginx-assessment.schema.json	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
@@ -214,7 +214,7 @@ internal/observability/metric_contract_test.go	reviewed	targeted release/status,
 scripts/build-release.ps1	reviewed	PowerShell Go tag argument and archive shape traced to CI package exercise; Windows lean/full result pending
 scripts/docs-check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/docker-deployment-e2e.py	reviewed	Docker default site/health and managed adoption/apply/rollback/restart passed at 357c371d; remote TLS untested
-scripts/systemd-deployment-e2e.py	reviewed	bounded setup/cleanup and editable recovery/read-only denial passed at e450113d; stage/drift/remote TLS untested
+scripts/systemd-deployment-e2e.py	reviewed	editable/read-only recovery passed at e450113d; staged restart and drift/adoption passed at 05a540be; remote TLS untested
 scripts/semantic_drift.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/test-discovery-k8s-live.ps1	reviewed	unsafe port-owner kill replaced with a conflict error; live Kubernetes/PowerShell execution not available
 scripts/test-nginx-importer.ps1	reviewed	exit 3, JSON status and candidate assertions passed in PR #482 Windows CI at da528885; full migration compatibility not implied
