@@ -1,0 +1,52 @@
+name: Docker deployment E2E
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/docker-deployment-e2e.yml'
+      - 'Dockerfile'
+      - 'deploy/docker/**'
+      - 'docs/deployment.md'
+      - 'scripts/docker-deployment-e2e.py'
+      - 'cmd/jul/**'
+      - 'internal/admin/**'
+      - 'internal/app/**'
+      - 'internal/config/**'
+      - 'internal/handler/**'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/docker-deployment-e2e.yml'
+      - 'Dockerfile'
+      - 'deploy/docker/**'
+      - 'docs/deployment.md'
+      - 'scripts/docker-deployment-e2e.py'
+      - 'cmd/jul/**'
+      - 'internal/admin/**'
+      - 'internal/app/**'
+      - 'internal/config/**'
+      - 'internal/handler/**'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-deployment-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shipped-image-and-managed-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Record Docker runtime
+        run: docker version
+      - name: Build and exercise the Docker deployment
+        run: python3 scripts/docker-deployment-e2e.py

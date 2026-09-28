@@ -220,6 +220,12 @@ docker run --rm \
   listener to a reachable interface, and only then publish that port (or use
   another authenticated, TLS-protected administrative path). The config file
   and key must be readable by the nonroot container user.
+- The [Docker deployment CI journey](../scripts/docker-deployment-e2e.py) builds
+  the image and probes its baked site and healthcheck with named volumes. It
+  then starts a separate disposable managed profile with a token-protected
+  admin listener on host loopback and verifies Apply, history, rollback and
+  persistence across a container restart. This local loopback exercise does
+  not validate externally exposed admin TLS or a production certificate.
 - For a **read-only** config, bind-mount your config file read-only:
   `-v /host/server.toml:/etc/jul/server.toml:ro` and skip the `jul-config`
   volume. Your file must enable `[admin]` for the `HEALTHCHECK` to pass, or
