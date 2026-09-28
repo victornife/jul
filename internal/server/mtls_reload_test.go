@@ -46,12 +46,12 @@ func newMTLSReloadFixture(t *testing.T, revoked ...int64) *mtlsReloadFixture {
 	f.cfg.Servers[0].TLS.ClientAuth = &config.ClientAuthConfig{Mode: "require", CAFile: caFile, CRLFile: f.crlPath}
 
 	f.src = &stubSource{}
-	f.src.set(f.cfg, nil)
+	f.src.set(f.snapshot(), nil)
 	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 		return map[string]http.Handler{f.addr: h}, 1, func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, nil
 	}
-	srv := New(f.cfg, nil, lifecycle.Fingerprint{}, quietLogger(), factory, f.src, func(context.Context, *config.Config) error { return nil })
+	srv := New(f.snapshot(), nil, lifecycle.Fingerprint{}, quietLogger(), factory, f.src, func(context.Context, *config.Config) error { return nil })
 	srv.CRLNextUpdateHook = func(m map[string]time.Time) {
 		f.mu.Lock()
 		f.crlNext = m
@@ -63,9 +63,14 @@ func newMTLSReloadFixture(t *testing.T, revoked ...int64) *mtlsReloadFixture {
 	go func() { _ = srv.Run(ctx, f.reload, redact.EmptyState()) }()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
+		f.mu.Lock()
+		ready := f.crlNext != nil
+		f.mu.Unlock()
 		if c, err := net.DialTimeout("tcp", f.addr, 200*time.Millisecond); err == nil {
 			_ = c.Close()
-			return f
+			if ready {
+				return f
+			}
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -73,9 +78,23 @@ func newMTLSReloadFixture(t *testing.T, revoked ...int64) *mtlsReloadFixture {
 	return nil
 }
 
+// snapshot copies the parts of f.cfg a test mutates, so the running server
+// never shares them with the test goroutine.
+func (f *mtlsReloadFixture) snapshot() *config.Config {
+	c := *f.cfg
+	c.Servers = append([]config.ServerConfig(nil), f.cfg.Servers...)
+	tlsCopy := *c.Servers[0].TLS
+	if tlsCopy.ClientAuth != nil {
+		ca := *tlsCopy.ClientAuth
+		tlsCopy.ClientAuth = &ca
+	}
+	c.Servers[0].TLS = &tlsCopy
+	return &c
+}
+
 func (f *mtlsReloadFixture) doReload(id string) ReloadResult {
 	f.t.Helper()
-	f.src.set(f.cfg, nil)
+	f.src.set(f.snapshot(), nil)
 	res := make(chan ReloadResult, 1)
 	f.reload <- ReloadRequest{ID: id, Source: ReloadSourceFileWatch, Result: res}
 	select {
