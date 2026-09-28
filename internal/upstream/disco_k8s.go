@@ -150,7 +150,7 @@ type k8sEndpointSliceList struct {
 	Metadata struct {
 		Continue string `json:"continue"`
 	} `json:"metadata"`
-	Items    []struct {
+	Items []struct {
 		Ports     []k8sPort     `json:"ports"`
 		Endpoints []k8sEndpoint `json:"endpoints"`
 	} `json:"items"`
