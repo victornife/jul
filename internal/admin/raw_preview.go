@@ -6,7 +6,6 @@ package admin
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 
@@ -132,7 +131,7 @@ func (s *Server) handleConfigPreview(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	body, err := readBoundedBody(r, 1<<20)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "Could not read the candidate."})
 		return
