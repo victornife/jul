@@ -115,6 +115,10 @@ func canonicalV1Query(raw string) ([]byte, error) {
 }
 
 func v1RequestFingerprint(r *http.Request, body []byte) ([32]byte, *adminapi.Error) {
+	if len(r.Header.Values("Content-Type")) > 1 {
+		return [32]byte{}, adminapi.Errorf(adminapi.CodeInvalidRequest, "Content-Type must appear at most once").
+			WithDetails(adminapi.Details{Field: "Content-Type"})
+	}
 	query, err := canonicalV1Query(r.URL.RawQuery)
 	if err != nil {
 		return [32]byte{}, adminapi.Errorf(adminapi.CodeInvalidRequest, "query parameters are malformed").

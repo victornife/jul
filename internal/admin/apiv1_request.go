@@ -21,6 +21,10 @@ const v1MaxBodyBytes int64 = 1 << 20
 var errV1TrailingJSON = errors.New("request body must contain exactly one JSON value")
 
 func readV1Body(w http.ResponseWriter, r *http.Request, accepted ...string) ([]byte, *adminapi.Error) {
+	if len(r.Header.Values("Content-Type")) > 1 {
+		return nil, adminapi.Errorf(adminapi.CodeInvalidRequest, "Content-Type must appear at most once").
+			WithDetails(adminapi.Details{Field: "Content-Type"})
+	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType == "" {
 		return nil, unsupportedMediaType(accepted)

@@ -55,6 +55,16 @@ func TestV1RequestAdmissionExhaustive(t *testing.T) {
 		})
 	}
 
+	t.Run("ambiguous media type", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}"))
+		req.Header.Add("Content-Type", "application/json")
+		req.Header.Add("Content-Type", "text/plain")
+		_, apiErr := readV1JSON(httptest.NewRecorder(), req, &map[string]any{})
+		if apiErr == nil || apiErr.Code != adminapi.CodeInvalidRequest {
+			t.Fatalf("ambiguous Content-Type error = %#v", apiErr)
+		}
+	})
+
 	t.Run("body too large", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(strings.Repeat("x", int(v1MaxBodyBytes)+1)))

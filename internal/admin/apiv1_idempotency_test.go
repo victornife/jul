@@ -61,6 +61,16 @@ func TestV1IdempotencyRejectsExplicitEmptyKeyBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestV1FingerprintRejectsAmbiguousContentType(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/config/apply", nil)
+	r.Header.Add("Content-Type", "application/toml")
+	r.Header.Add("Content-Type", "text/plain")
+	_, apiErr := v1RequestFingerprint(r, []byte("[global]\n"))
+	if apiErr == nil || apiErr.Code != adminapi.CodeInvalidRequest {
+		t.Fatalf("ambiguous fingerprint error = %#v", apiErr)
+	}
+}
+
 func TestCanonicalV1QueryIsSortedDecodedAndInjective(t *testing.T) {
 	a, err := canonicalV1Query("z=2&a=3&a=1")
 	if err != nil {
