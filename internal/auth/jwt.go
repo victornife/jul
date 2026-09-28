@@ -29,6 +29,8 @@ import (
 // token issuer when validating time-based claims (exp/nbf/iat).
 const jwtClaimLeeway = 60 * time.Second
 
+const maxJWKSBytes = 1 << 20
+
 // jwtAuth validates RFC 7519 bearer tokens against keys published at a JWKS
 // endpoint, enforcing an algorithm allow-list plus issuer/audience/expiry.
 type jwtAuth struct {
@@ -222,9 +224,12 @@ func (c *jwksCache) refresh() error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("status %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxJWKSBytes+1))
 	if err != nil {
 		return err
+	}
+	if len(body) > maxJWKSBytes {
+		return fmt.Errorf("JWKS response exceeds %d bytes", maxJWKSBytes)
 	}
 	keys, err := parseJWKS(body)
 	if err != nil {

@@ -139,7 +139,8 @@ changes for a directly exposed server.
   - Network fetches are throttled to **at most one per 30s**, so a flood of
     tokens bearing unknown key ids cannot amplify into a storm of JWKS requests.
   - On fetch failure, cached keys are served for a **1h stale grace** window.
-  - Response body capped at **1 MiB**; client timeout `timeout` (default **10s**).
+  - Responses over **1 MiB** are rejected in full, even if the first MiB is
+    valid JSON; client timeout `timeout` defaults to **10s**.
 
 ### Forward-auth
 
