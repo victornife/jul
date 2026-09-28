@@ -701,8 +701,9 @@ for stream deployments. See [reload semantics](reload-semantics.md) for the full
 The raw editor can edit the `[admin]` block itself, which means a single apply
 could change how you reach the console — and unlike any other change, you cannot
 roll it back from a console you can no longer reach. To prevent that, an apply
-that would **disable the admin interface, move its listen address, rotate its
-token, or disable the web console** is held with **HTTP 409** and
+that would **disable the admin interface, move its listen address, change its
+TLS or client-certificate policy, rotate its token, or disable the web console**
+is held with **HTTP 409** and
 `admin_change: true` the first time, listing exactly what would change. Nothing
 is written. The console shows a confirmation dialog enumerating the changes; on
 confirm it re-applies with `?confirm_admin=true` and the write proceeds. An apply

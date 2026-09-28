@@ -745,8 +745,9 @@ func bindEffectiveBaseline(s *Server, ctx *ApplyRequestContext, fallback *config
 }
 
 // adminGuardResponse is the 409 body when an apply would change a setting that
-// governs admin reachability (disabling the admin interface, its listen address,
-// its token, or the web console) without explicit confirmation. The write was
+// governs admin reachability (disabling the admin interface, changing its listen
+// address or TLS policy, rotating its token, or disabling the web console)
+// without explicit confirmation. The write was
 // NOT performed; the operator re-sends with ?confirm_admin=true to proceed. This
 // guards against silently locking oneself out of the console with a single edit.
 type adminGuardResponse struct {
@@ -759,7 +760,8 @@ type adminGuardResponse struct {
 // adminLockoutChanges reports the admin-reachability changes between the running
 // config (prev) and a proposed one (next) that could lock an operator out of the
 // console: disabling the admin interface, moving its listen address, rotating
-// its token, or disabling the web console. It returns one human-readable
+// its token, changing its TLS/client-certificate policy, or disabling the web
+// console. It returns one human-readable
 // description per such change, or nil when none apply. Changes that only widen
 // access (enabling admin or the console) are intentionally not flagged, and the
 // guard is a no-op when admin is not currently serving.
@@ -779,10 +781,25 @@ func adminLockoutChanges(prev, next config.AdminConfig) []string {
 	if prev.Token != next.Token {
 		changes = append(changes, "the admin token would change (your current session would need to re-authenticate)")
 	}
+	if adminTLSReachabilityChanged(prev.TLS, next.TLS) {
+		changes = append(changes, "the admin TLS or client-certificate policy would change (your current connection may need different trust or credentials)")
+	}
 	if prev.ConsoleEnabled() && !next.ConsoleEnabled() {
 		changes = append(changes, "the web console would be disabled (only the basic config page would remain)")
 	}
 	return changes
+}
+
+func adminTLSReachabilityChanged(prev, next *config.AdminTLSConfig) bool {
+	prevEnabled := prev != nil && prev.Enabled
+	nextEnabled := next != nil && next.Enabled
+	if prevEnabled != nextEnabled {
+		return true
+	}
+	if !prevEnabled {
+		return false
+	}
+	return !reflect.DeepEqual(prev, next)
 }
 
 // candidateRequiresAdminManage reports whether the proposed config change

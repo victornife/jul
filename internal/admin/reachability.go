@@ -33,8 +33,9 @@ func (e *adminReachabilityError) Error() string {
 // It composes two layers:
 //
 //   - adminLockoutChanges: transport-level reachability (disabling admin,
-//     moving its listen address, rotating the legacy token, disabling the web
-//     console). These apply regardless of who is calling.
+//     moving its listen address, changing TLS/client-certificate policy,
+//     rotating the legacy token, disabling the web console). These apply
+//     regardless of who is calling.
 //
 //   - rbacCredentialLockoutChanges: identity-level reachability for the
 //     authenticated RBAC operator (removing/disabling/expiring the current
