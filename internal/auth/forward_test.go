@@ -195,6 +195,29 @@ func TestForwardAuthRejectsDuplicateAuthorizationBeforeSubrequest(t *testing.T) 
 	}
 }
 
+func TestForwardAuthReplacesClientForwardingClaims(t *testing.T) {
+	var got http.Header
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+	fa := newForwardAuth(authServer.URL, nil, authServer.Client(), nil)
+	r := httptest.NewRequest(http.MethodGet, "http://app.example/private", nil)
+	r.RemoteAddr = "203.0.113.7:1234"
+	r.Header.Set("Forwarded", "for=127.0.0.1;proto=https")
+	r.Header.Set("X-Forwarded-For", "127.0.0.1")
+	r.Header.Set("X-Real-Ip", "127.0.0.1")
+	r.Header.Set("X-Forwarded-Proto", "https")
+	if _, err := fa.decide(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get("Forwarded") != "" || got.Get("X-Forwarded-For") != "203.0.113.7" ||
+		got.Get("X-Real-Ip") != "203.0.113.7" || got.Get("X-Forwarded-Proto") != "http" {
+		t.Fatalf("forward auth saw client claims: %v", got)
+	}
+}
+
 func TestForwardAuthSuccessDoesNotCopyConnectionScopedIdentity(t *testing.T) {
 	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Connection", "X-Auth-User")

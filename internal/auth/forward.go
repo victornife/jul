@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"jul/internal/clientaddr"
 	"jul/internal/upstream"
 )
 
@@ -72,6 +73,20 @@ func (f *forwardAuth) decide(ctx context.Context, r *http.Request) (forwardResul
 		return forwardResult{}, err
 	}
 	copyForwardHeaders(req.Header, r.Header)
+	// The inbound forwarding fields are client-controlled unless the listener's
+	// address policy has attributed them. Send only the resolved identity.
+	req.Header.Del("Forwarded")
+	req.Header.Del("X-Forwarded-For")
+	req.Header.Del("X-Real-Ip")
+	if addr := clientaddr.Client(r); addr.IsValid() {
+		req.Header.Set("X-Forwarded-For", addr.String())
+		req.Header.Set("X-Real-Ip", addr.String())
+	}
+	proto := "http"
+	if r.TLS != nil {
+		proto = "https"
+	}
+	req.Header.Set("X-Forwarded-Proto", proto)
 	// Replace client-supplied context after copying headers. A duplicate value
 	// could otherwise be interpreted differently by the auth service.
 	req.Header.Set("X-Forwarded-Method", r.Method)
