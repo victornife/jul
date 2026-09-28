@@ -7,8 +7,9 @@
 #
 # The service runs under the per-service virtual account "NT SERVICE\jul", the
 # Windows analogue of the systemd unit's unprivileged service user. The data
-# directory (config, history, cache, logs) is created and ACL'd so that virtual
-# account - and administrators - can write it, while ordinary users cannot.
+# directory (config, history, cache, logs) receives grants for the virtual
+# account. Existing and inherited ACL entries are retained; review effective
+# access for ordinary users and administrators before storing secrets there.
 
 param(
     [Parameter(Mandatory = $true)] [string] $BinaryPath,

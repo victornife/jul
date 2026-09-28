@@ -47,7 +47,7 @@ deploy/docker/server.toml	reviewed	managed authority and access-log comment comp
 deploy/docker/index.html	reviewed	placeholder page presence checked against Dockerfile copy and static-root config; image runtime unverified
 deploy/systemd/jul-readonly.service	reviewed	root:jul 0640 config and rejected Apply with unchanged file passed in real systemd CI at e450113d
 deploy/systemd/jul.service	reviewed	jul:jul config/state ownership, start, adoption, Apply, rollback and restart passed in real systemd CI at e450113d
-deploy/windows/install-service.ps1	reviewed	native command failure handling and ACL grants inspected and corrected; inherited ACL restriction and elevated service execution not platform-verified
+deploy/windows/install-service.ps1	reviewed	native exit checks and grant-only ACL behavior traced; false ordinary-user denial header corrected; effective ACL/elevated service unverified
 dev-server.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 docs/abi.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/accessibility.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
