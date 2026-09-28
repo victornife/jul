@@ -15,17 +15,29 @@ build) and is gated by the `console` build tag.
 ## Enabling the console
 
 The console is served by the [admin listener](../docs/observability.md).
-Enable admin, keep it on loopback, and set a token:
+Enable admin, keep it on loopback, and set a strong token through a secret
+reference. Add these fields to your existing `server.toml` (put
+`config_authority` in its existing `[global]` block if one is present):
 
 ```toml
+[global]
+config_authority = "managed"  # required for Console apply/history rollback
+
 [admin]
 enabled = true
 listen  = "127.0.0.1:9090"
-token   = "change-me"          # sent as: Authorization: Bearer change-me
+token   = "${env:JUL_ADMIN_TOKEN}"
 # console      = true                          # default when admin is enabled
 # history_dir  = "./jul-data/config-history"   # rollback snapshots
 # history_keep = 50                            # snapshot retention
 ```
+
+Generate a unique token (for example, `openssl rand -hex 32`) and set
+`JUL_ADMIN_TOKEN` in the server process environment. Keep the managed config
+file and its parent directory writable by the service identity, and use a
+regular file rather than a symlink. If an external tool owns `server.toml`,
+leave the default `file_owned` authority: the Console can inspect and preview
+configuration, but its apply and rollback controls are disabled.
 
 Build with the tag and browse to the admin root:
 
