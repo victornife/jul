@@ -1346,7 +1346,11 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in settings
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in); err != nil {
+	body, err := readBoundedBody(r, 1<<20)
+	if err == nil {
+		err = json.Unmarshal(body, &in)
+	}
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
