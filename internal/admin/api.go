@@ -939,16 +939,26 @@ func (s *Server) authorizeConfigTransition(w http.ResponseWriter, r *http.Reques
 // authentication, rate limiting, the WAF and the audit trail, so it is held to
 // its own grant.
 func (s *Server) authorizeTrustTransition(w http.ResponseWriter, r *http.Request, action string, current, next *config.Config) bool {
+	if err := s.requireTrustAgainst(r, action, current, next); err != nil {
+		id, _ := rbacIdentityFromRequest(r)
+		writeForbidden(w, r, rbac.ConfigTrust, id)
+		return false
+	}
+	return true
+}
+
+// requireTrustAgainst is shared by apply/patch and rollback. Rollback returns
+// its authorization error to the caller because its handlers own the response.
+func (s *Server) requireTrustAgainst(r *http.Request, action string, current, next *config.Config) error {
 	if current == nil || next == nil || !clientAddressChanged(current, next) {
-		return true
+		return nil
 	}
 	id, ok := rbacIdentityFromRequest(r)
 	if !ok || id.Legacy || id.Has(rbac.ConfigTrust) {
-		return true
+		return nil
 	}
 	s.recordAudit(r, action, "config", "failure", "rejected: lacks config:trust for a trusted-proxy change")
-	writeForbidden(w, r, rbac.ConfigTrust, id)
-	return false
+	return &AuthorizationError{Status: http.StatusForbidden, Message: "trusted-proxy change rejected: requires config:trust", Reason: "config_trust_required", Required: rbac.ConfigTrust}
 }
 
 // clientAddressChanged reports whether any listener's effective trusted-proxy

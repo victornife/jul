@@ -80,8 +80,8 @@ The capability table below distinguishes stable v2.0.0 from post-release
 | Authentication (CIDR / Basic / JWT / forward-auth) | [auth.md](auth.md) | `GA` / `soaked` |
 | Active health checks (HTTP / TCP probes) | [health.md](health.md) | `GA` / `soaked` |
 | Console (operations cockpit) | [console.md](console.md) | `GA` / `soaked` |
-| Zero-config + jul lint | [zeroconf.md](zeroconf.md) | `GA-soak-pending` / `released` |
-| NGINX config importer | [nginx-importer.md](nginx-importer.md) | `GA-soak-pending` / `released` |
+| Zero-config + jul lint | [zeroconf.md](zeroconf.md) | `GA` / `soaked` |
+| NGINX config importer | [nginx-importer.md](nginx-importer.md) | `GA` / `soaked` |
 | OTel tracing + access-log sinks | [otel.md](otel.md) | `GA` / `soaked` |
 | HTTP/3 over QUIC | [http3.md](http3.md) | `GA` / `soaked` |
 | gRPC ↔ JSON transcoding | [grpc-transcoding.md](grpc-transcoding.md) | `GA` / `soaked` |

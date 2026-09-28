@@ -161,6 +161,55 @@ func TestListenerClientAddressRequiresTrustPermission(t *testing.T) {
 	})
 }
 
+// A history snapshot is still a configuration mutation: an operator with
+// history:rollback cannot restore an older, wider trusted-proxy policy without
+// config:trust. Both console rollback routes share this guard.
+func TestRollbackClientAddressRequiresTrustPermission(t *testing.T) {
+	cfg := wave1Config(t)
+	s, adminTok, opTok, _ := wave1Server(t, cfg)
+	writes := 0
+	s.deps.WriteConfigRaw = func([]byte) error { writes++; return nil }
+	previous := *cfg
+	previous.Servers = append([]config.ServerConfig(nil), cfg.Servers...)
+	previous.Servers[0].ClientAddress = &config.ClientAddressConfig{TrustedProxies: []string{"0.0.0.0/0"}}
+	raw, err := config.Marshal(&previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.hist.snapshot(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/history/rollback", "/api/config/rollback"} {
+		for _, tc := range []struct {
+			name  string
+			token string
+			want  int
+		}{
+			{name: "operator", token: opTok, want: http.StatusForbidden},
+			{name: "admin", token: adminTok, want: http.StatusOK},
+		} {
+			t.Run(tc.name+path, func(t *testing.T) {
+				before := writes
+				body := []byte(`{"id":"` + id + `"}`)
+				req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+				rr := httptest.NewRecorder()
+				s.routes().ServeHTTP(rr, req)
+				if rr.Code != tc.want {
+					t.Fatalf("status %d, want %d: %s", rr.Code, tc.want, rr.Body.String())
+				}
+				if tc.want == http.StatusForbidden && !strings.Contains(rr.Body.String(), "config:trust") {
+					t.Errorf("denial omitted config:trust: %s", rr.Body.String())
+				}
+				if tc.want == http.StatusForbidden && writes != before {
+					t.Errorf("unauthorized rollback wrote config")
+				}
+			})
+		}
+	}
+}
+
 // TestListenerClientAddressRejectsInvalidPolicy proves the whole patch is
 // rejected rather than partially written.
 func TestListenerClientAddressRejectsInvalidPolicy(t *testing.T) {

@@ -83,10 +83,9 @@ human view and evidence matrix are in [`docs/status.md`](docs/status.md).
 
 | Classification | Current examples |
 | --- | --- |
-| **GA · soaked** | Core HTTP, released TLS/ACME and mTLS, authentication, cache, compression, rate limiting, health checks, service discovery, released gRPC/L4/WASM/WAF/observability capabilities, Console, secrets, reload transaction, trusted client address, and backend TLS trust (#409, promoted with stable v2.0.0) |
+| **GA · soaked** | Core HTTP, released TLS/ACME and mTLS, authentication, cache, compression, rate limiting, health checks, service discovery, released gRPC/L4/WASM/WAF/observability capabilities, Console, secrets, reload transaction, trusted client address, backend TLS trust, zero-config/lint and the base single-file NGINX importer. The last two have [scoped post-release soak evidence](docs/soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features). |
 | **Beta · released in v2.0.0** | Auxiliary egress policy, method/header/query routing, response-header policy and CORS, upstream admission/retry/circuit controls, configuration authority/generated contracts, NGINX assessment/provenance/include traversal, diagnostics, admin TLS, external API/CLI, selected hot reload and Unix HTTP upstreams |
 | **Beta · merged on `main` after v2.0.0** | gRPC Health/Check probes, resource and storage headroom, serving WAF policy visibility, Console diagnostics guidance, WASM ABI v2 response phase and consistent-hash affinity |
-| **GA — soak pending · released** | Zero-config and `jul lint`; base NGINX importer. Both ship in v2.0.0, but their cited five-minute validation is smoke evidence rather than a qualifying ADR 0005 soak. |
 
 Stable [`v2.0.0`](https://github.com/victornife/jul/releases/tag/v2.0.0)
 was published from a post-#420 commit. The older

@@ -6,7 +6,7 @@ before they reach production.
 
 This is **Y1-08**, in **core** — no build tag.
 
-> **Maturity:** **GA — soak pending**, released in v2.0.0. The cited five-minute validation is a smoke, not long-running soak evidence under [ADR 0005](adr/0005-soak-post-ga-gate.md).
+> **Maturity:** **GA / soaked**, released in v2.0.0. Its five-minute release validation remains a smoke; the [separate 2026-09-28 feature run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features) meets [ADR 0005](adr/0005-soak-post-ga-gate.md) for zero-config serve/proxy plus lint, with the stated workload limits.
 
 ## Contents
 
@@ -146,9 +146,11 @@ A typical config lints in **< 1 ms**, including parse + validate + lint.
 
 Per [ADR 0003](adr/0003-maturity-and-ga.md) as amended by
 [ADR 0005](adr/0005-soak-post-ga-gate.md), zero-config + `jul lint` is
-**GA — soak pending**. The 2026-07-06 validation is a five-minute smoke;
-no qualifying per-feature or consolidated run covering both shortcuts and
-lint has been linked in the evidence log.
+**GA / soaked** for the released zero-config serve/proxy shortcuts and lint.
+The [2026-09-28 feature-specific one-hour run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features)
+exercised both shortcuts and lint. It does not cover public ingress, broad
+concurrency or every lint configuration. The 2026-07-06 validation remains a
+five-minute smoke.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
@@ -156,7 +158,7 @@ lint has been linked in the evidence log.
 | 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) |
 | 3 | Documented known-limitations | ✅ Conservative warnings plus error-severity trust findings; does not replace hardening |
 | 4 | Stable config/API contract (semver-guarded) | ✅ `Diagnostic` schema and `Lint` API frozen under [compatibility policy](compatibility.md) |
-| 5 | Long-running soak test (post-GA gate) | ☐ [Five-minute validation](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) is smoke evidence only; qualifying evidence remains open |
+| 5 | Long-running soak test (post-GA gate) | ✅ [Exact-head 3600.667s run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features); five-minute release validation remains smoke |
 | 6 | Runnable example + docs | ✅ `jul run --serve` / `jul run --proxy` CLI examples |
 | 7 | Security / threat note | ✅ [Security / threat note](#security--threat-note) |
 | 8 | Fuzzing where parsing is involved | ✅ `FuzzParse` in `internal/config/fuzz_test.go` (TOML → Config round-trip) |

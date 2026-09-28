@@ -35,7 +35,7 @@ workloads and dated qualifying runs. The historical v1.28.0 table below used
 | CI smoke (`soak (smoke)` job) | every push / PR | 20s × 3 scenarios | `soak-results` artifact on the [CI workflow](../.github/workflows/ci.yml) run | ❌ No (smoke only) |
 | Release gate (`soak gate (ADR 0005)` job) | version tag `v*` | 5m × 3 scenarios | `soak-results` artifact on the [release workflow](../.github/workflows/release.yml) run; a red run blocks the release | ❌ No (smoke only) |
 | Local | `scripts/soak.sh` | configurable | stdout (see runs below) | ✅ Yes, if duration meets the minimum for the scope exercised |
-| Feature-specific Y1-08/Y1-09 candidate | PR change to `scripts/feature-soak.py` or its workflow, or manual workflow dispatch after it is on the default branch | 20s preflight, then 3600s per feature | `summary.json` plus server logs in the [feature soak workflow](../.github/workflows/feature-soak.yml) artifacts; subsequent runs also retain a pre-run `manifest.json` | ☐ Duration floor met on 2026-09-28; see evidence limit below |
+| Feature-specific Y1-08/Y1-09 | PR change to `scripts/feature-soak.py` or its workflow, or manual workflow dispatch after it is on the default branch | 20s preflight, then 3600s per feature | Pre-run `manifest.json`, `summary.json` and server logs in the [feature soak workflow](../.github/workflows/feature-soak.yml) artifacts | ✅ [2026-09-28 exact-head run](#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features), for the scoped workloads |
 
 The [2026-09-28 PR preflight](https://github.com/victornife/jul/actions/runs/36438405287)
 passed at `3650e506054a829c8390256777baa1d35913dbd1`. Its retained
@@ -43,7 +43,7 @@ passed at `3650e506054a829c8390256777baa1d35913dbd1`. Its retained
 proxy requests, four lint cycles, and 20 clean/blocking importer cycles in
 20.001 seconds. Both summaries identify the same built binary hash. This is
 **smoke evidence only**; the one-hour jobs and their artifacts need review
-before either post-GA criterion can be considered satisfied.
+before either post-GA criterion could be considered satisfied at that point. The later qualifying run is recorded in the run log.
 
 ### 2026-09-28 — Feature-specific one-hour candidate, PR #482 head `13508dbc` — **bounded pass; gate pending**
 
@@ -70,8 +70,8 @@ each job. The revised harness now writes `manifest.json` before the workload,
 records the binary/harness/fixture hashes, build and compiled capability reports
 and runner details, and rejects an unexpected binary commit or missing importer
 capability. That change did **not** retroactively enrich this run. Y1-08/Y1-09
-remain `GA-soak-pending` / `released` until a self-contained exact-head one-hour
-run is reviewed. This candidate supports a bounded
+were `GA-soak-pending` / `released` at this stage, pending a self-contained exact-head one-hour
+run. This candidate supports a bounded
 stability finding, not a broader GA-soak closure or next-release sign-off.
 
 The [revised preflight on `ea0fc6b`](https://github.com/victornife/jul/actions/runs/36454794362)
@@ -79,8 +79,7 @@ passed both 20-second workloads. Its [artifact](https://github.com/victornife/ju
 contains a `manifest.json` for each mode: both match the binary's embedded
 commit to `ea0fc6bac651b1ffa2a6e7f6b09d367cbf511ad8`, report an unmodified
 build and `importer: true`, identify the same binary/harness hashes and runner
-image, and match the summary's manifest hash. The longer jobs on that head
-still need completion and inspection; this preflight is smoke evidence.
+image, and match the summary's manifest hash. At that point the longer jobs still needed completion and inspection; this preflight is smoke evidence.
 
 All three scenarios are driven by the in-tree soak tests behind the `soak` build tag:
 
@@ -114,6 +113,37 @@ artifacts; each entry states the scope (single-feature vs. consolidated) and
 whether the duration meets the ADR-0005 minimum for that scope.
 
 ## Run log
+
+### 2026-09-28 — Feature-specific exact-head one-hour soaks, PR #482 head `9ab87c1` — **criterion 5 met for scoped features**
+
+The [final-head feature soak workflow](https://github.com/victornife/jul/actions/runs/36457179441)
+passed preflight and both independent one-hour jobs at
+`9ab87c16fdadbcb47fa531a93cc19429bb56e8e9`. The retained
+[zero-config/lint artifact](https://github.com/victornife/jul/actions/runs/36457179441/artifacts/10989411614)
+and [importer artifact](https://github.com/victornife/jul/actions/runs/36457179441/artifacts/10989566583)
+each contain a pre-run manifest and summary. Both manifests match that exact
+source SHA to the Go binary's embedded commit, state `dirty: false` and
+`importer: true`, identify Go 1.26.6 on linux/amd64 and runner image Ubuntu 24
+`20260920.314.1`, and agree on binary SHA-256
+`312f80b2efa62ca9c628ef052bbb8ad7c35fd80c77b230aa8299bad296c7cb07`
+and harness SHA-256
+`6f9c0bd2bd8d92bc596f9908f7fc631fbf3401822b74199af6e28b55264f4cff`.
+The fixture fingerprints and each summary's manifest hash also match the
+retained files. The [preflight artifact](https://github.com/victornife/jul/actions/runs/36457179441/artifacts/10986276401)
+is a short harness check, not part of the duration decision.
+
+| Feature workload | Elapsed | Observed results | Inference boundary |
+| --- | ---: | --- | --- |
+| Y1-08 zero-config serve/proxy plus lint | 3600.667s | 70,640 static and 70,024 proxy responses with exact expected body; 717 lint cycles; 120 resource samples. Serve RSS 25,388 → 26,620 KiB and FDs 9 → 8; proxy RSS 22,684 → 28,836 KiB and FDs 7 → 7. Server logs show no `level=ERROR` or `panic:` and clean shutdown. | One loopback static site and backend, sequential low-rate traffic, env-secret/literal-token/strict cases; no public ingress, broad concurrency or exhaustive lint configurations. |
+| Y1-09 base importer single-file conversion | 3600.032s | 3,600 clean and blocking conversion/lint cycles, including `manual_action_required`, valid candidates and within-run stable output; child peak RSS 46,052 KiB. | Each conversion starts a fresh CLI process; two small fixtures, no extended corpus, long-lived parser or full migration-assessment/include traversal. |
+
+Each job exceeds [ADR 0005's one-hour per-feature minimum](adr/0005-soak-post-ga-gate.md).
+This closes criterion 5 for the exercised Y1-08 and base Y1-09 contracts in
+the [current manifest](feature-status.yaml); the eight-hour duration remains a
+recommendation. It does not certify all deployment conditions, a full NGINX
+corpus, or the separately tracked `MIG-ASSESS` Beta capability. Stable v2.0.0
+already shipped these base features; this later evidence does not alter that
+tag's artifacts or turn its five-minute release smoke into a qualifying soak.
 
 ### 2026-09-27 — Documentation first-run Windows CI smoke (not a GA soak)
 

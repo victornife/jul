@@ -1,6 +1,6 @@
 # NGINX config importer
 
-> Base importer: **Y1-09, GA — soak pending/released** · Assessment/provenance/includes: **MIG-ASSESS, Beta/released in v2.0.0** · Build tag: `importer`. Later bounded translations and E2E evidence on `main` are not in that tag. The base importer is in the stable release; the cited five-minute validation does not meet ADR 0005's long-running soak minimum.
+> Base importer: **Y1-09, GA/soaked** · Assessment/provenance/includes: **MIG-ASSESS, Beta/released in v2.0.0** · Build tag: `importer`. Later bounded translations and E2E evidence on `main` are not in that tag. The base importer is in the stable release; its cited five-minute validation is smoke, while a [separate post-release one-hour run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features) covers the base single-file conversion path.
 
 A best-effort migration aid that converts NGINX configuration into Jul.IA TOML.
 Common HTTP, server, location, upstream, TLS, compression, static-file, proxy,
@@ -563,7 +563,7 @@ inspect evidence before writing a candidate.
 This guide documents the current `main` surface, which is broader than
 the released base importer. The two contracts are deliberately separate:
 
-### Base importer — Y1-09 (`GA-soak-pending` / `released`)
+### Base importer — Y1-09 (`GA` / `soaked`)
 
 The released GA record covers the single-file conversion contract and the
 evidence that existed in the released line. The current support matrix above
@@ -576,7 +576,7 @@ the released GA contract.
 | Performance | Published parse and translate benchmark baselines. |
 | Limitations | Explicit unsupported-directive and semantic-difference list; no full NGINX emulation claim. |
 | Compatibility | The documented conversion CLI and generated Jul configuration behavior are governed by [compatibility.md](compatibility.md). |
-| Soak / validation | The [released importer validation](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) is a smoke, not a qualifying long-running soak. A feature-appropriate duration/evidence decision remains open under ADR 0005. |
+| Soak / validation | The [2026-09-28 exact-head one-hour run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features) meets ADR 0005's per-feature floor for 3,600 repeated clean/blocking single-file conversion and lint cycles. Fresh processes and two small fixtures limit the inference; the released five-minute validation remains smoke. Assessment, provenance and includes have separate Beta evidence. |
 | Runnable example | `examples/migrate/nginx.conf` through ordinary conversion mode. |
 | Security | Parser failure containment, secret-safe diagnostics, and use on a trusted migration host. |
 | Fuzzing | `FuzzTranslate` covers parse, translate, and marshal round trip. |

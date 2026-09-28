@@ -946,7 +946,9 @@ Three properties of the editor are deliberate:
   Widening `trusted_proxies` lets the named range assert any client address to
   authentication, rate limiting, the WAF and the audit trail, so it is held to a
   separate grant and recorded under its own audit category
-  (`config.client_address`). No predefined role except `admin` holds it.
+  (`config.client_address`). A history rollback that changes this policy also
+  requires `config:trust`, even when the caller has `history:rollback`. No
+  predefined role except `admin` holds the trust grant.
 
 **Trust no proxy** clears the policy from every block on the listener, returning
 it to peer-only identity.

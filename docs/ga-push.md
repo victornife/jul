@@ -19,6 +19,10 @@
 > feature or four hours consolidated; the release gate is a smoke test. The
 > current status/evidence pages distinguish qualifying runs from the still-open
 > Y1-08/Y1-09 long-running evidence.
+> **2026-09-28 evidence amendment:** [two exact-head one-hour feature runs](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features)
+> now close the scoped Y1-08 and base Y1-09 criterion 5 gate. Their present
+> classification is in [feature-status.yaml](feature-status.yaml); this closed
+> Wave 1 table and its historical count were not recomputed.
 
 A focused, tracked effort to move the **existing** feature set from **Beta** to
 **GA** before starting new features. Per [ADR 0005](adr/0005-soak-post-ga-gate.md)
