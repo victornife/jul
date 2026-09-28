@@ -54,7 +54,10 @@ func TestWatchFileDebounces(t *testing.T) {
 	// between the writes and fsnotify's event delivery can otherwise exceed
 	// a tight debounce and legitimately produce more than one coalesced
 	// event.
-	const debounce = 300 * time.Millisecond
+	// Full-tag CI runs this alongside the race and browser suites. fsnotify may
+	// deliver the final write event well after the write loop returns under
+	// runner contention; 300ms split one actual burst into two valid windows.
+	const debounce = time.Second
 	ch, err := WatchFile(ctx, path, debounce, nil)
 	if err != nil {
 		t.Fatalf("WatchFile: %v", err)
