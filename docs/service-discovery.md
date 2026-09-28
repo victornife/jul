@@ -137,6 +137,9 @@ are ignored; this strategy does not provide priority-based failover.
 (`/v1/health/service/<service>`) and uses each passing instance's service
 address+port. Requires the `consul` build tag.
 
+The `address` must be an HTTP(S) base URL without URL-embedded credentials,
+query parameters, or a fragment. Supply ACL credentials through `token`.
+
 ```toml
   [upstreams.discovery]
   type = "consul"

@@ -90,6 +90,19 @@ func TestConsulDiscovererRequiresService(t *testing.T) {
 	}
 }
 
+func TestConsulRejectsMalformedBaseURL(t *testing.T) {
+	for _, address := range []string{"ftp://consul.example.test", "https://user:secret@consul.example.test", "https://consul.example.test?token=secret", "https://consul.example.test/#fragment", "not-a-url"} {
+		t.Run(address, func(t *testing.T) {
+			_, err := newConsulDiscoverer(config.DiscoveryConfig{Type: "consul", Consul: &config.ConsulDiscovery{
+				Service: "web", Address: address,
+			}}, nil)
+			if err == nil || !strings.Contains(err.Error(), "address") {
+				t.Fatalf("invalid base URL %q: %v", address, err)
+			}
+		})
+	}
+}
+
 func TestConsulDiscovererDoesNotForwardTokenOnRedirect(t *testing.T) {
 	var forwarded bool
 	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

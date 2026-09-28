@@ -40,8 +40,8 @@ func newConsulDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discoverer,
 		addr = "http://127.0.0.1:8500"
 	}
 	base, err := url.Parse(addr)
-	if err != nil || base.Host == "" {
-		return nil, fmt.Errorf("consul discovery: invalid address %q", c.Address)
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Hostname() == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+		return nil, fmt.Errorf("consul discovery: address must be an HTTP(S) base URL without credentials, query, or fragment")
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + "/v1/health/service/" + c.Service
 	q := base.Query()
