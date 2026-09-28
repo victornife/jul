@@ -263,6 +263,32 @@ func TestAdminManageGuardCoversAdminTLS(t *testing.T) {
 	}
 }
 
+func TestAdminManageGuardPreservesSemanticEquivalence(t *testing.T) {
+	a := config.AdminConfig{RBAC: config.AdminRBACConfig{
+		Enabled: true,
+		Roles: []config.AdminRole{{Name: "custom", Permissions: []string{"config:apply", "config:read"}}},
+		Principals: []config.AdminPrincipal{
+			{Name: "alice", Role: "custom", Token: "alice-token"},
+			{Name: "bob", Role: "viewer", Token: "bob-token"},
+		},
+	}}
+	b := config.AdminConfig{
+		Console:      config.Bool(true),
+		PprofEnabled: config.Bool(true),
+		RBAC: config.AdminRBACConfig{
+			Enabled: true,
+			Roles: []config.AdminRole{{Name: "custom", Permissions: []string{"config:read", "config:apply"}}},
+			Principals: []config.AdminPrincipal{
+				{Name: "bob", Role: "viewer", Token: "bob-token"},
+				{Name: "alice", Role: "custom", Token: "alice-token"},
+			},
+		},
+	}
+	if !adminConfigEqual(a, b) {
+		t.Fatal("equivalent defaults and reordered RBAC entries require admin:manage")
+	}
+}
+
 // TestWave1_AdminCanApplyAdminChange verifies that an admin can still mutate
 // the [admin] subtree.
 func TestWave1_AdminCanApplyAdminChange(t *testing.T) {

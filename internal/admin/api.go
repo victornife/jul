@@ -821,6 +821,13 @@ func rbacPrincipalsEqual(a, b []config.AdminPrincipal) bool {
 			!existing.ExpiresAt.Equal(p.ExpiresAt) {
 			return false
 		}
+		// Compare the complete principal after normalizing fields already
+		// compared semantically. New credential-policy fields must fail closed.
+		existing.Token, p.Token = "", ""
+		existing.ExpiresAt, p.ExpiresAt = time.Time{}, time.Time{}
+		if !reflect.DeepEqual(existing, p) {
+			return false
+		}
 	}
 	return true
 }
@@ -842,6 +849,10 @@ func rbacRolesEqual(a, b []config.AdminRole) bool {
 			return false
 		}
 		if !stringSlicesEqualUnordered(existing.Permissions, r.Permissions) {
+			return false
+		}
+		existing.Permissions, r.Permissions = nil, nil
+		if !reflect.DeepEqual(existing, r) {
 			return false
 		}
 	}
@@ -1068,49 +1079,21 @@ func (s *Server) authorizeRawCandidate(w http.ResponseWriter, r *http.Request, a
 // subtree means the candidate requires admin:manage, regardless of whether
 // the field is restart-required or hot-swappable.
 func adminConfigEqual(a, b config.AdminConfig) bool {
-	if a.Enabled != b.Enabled ||
-		a.Listen != b.Listen ||
-		rbac.TokenDigest(a.Token) != rbac.TokenDigest(b.Token) {
+	if rbac.TokenDigest(a.Token) != rbac.TokenDigest(b.Token) ||
+		!adminRBACEqual(a.RBAC, b.RBAC) ||
+		a.ConsoleEnabled() != b.ConsoleEnabled() ||
+		pprofEnabled(a) != pprofEnabled(b) {
 		return false
 	}
-	if !adminRBACEqual(a.RBAC, b.RBAC) {
-		return false
-	}
-	if a.ConsoleEnabled() != b.ConsoleEnabled() {
-		return false
-	}
-	if a.HistoryDir != b.HistoryDir || a.HistoryKeep != b.HistoryKeep {
-		return false
-	}
-	if a.RateLimitReadPerMin != b.RateLimitReadPerMin ||
-		a.RateLimitWritePerMin != b.RateLimitWritePerMin ||
-		a.RateLimitApplyPerMin != b.RateLimitApplyPerMin ||
-		a.MaxEventConns != b.MaxEventConns {
-		return false
-	}
-	if a.AuditLogFile != b.AuditLogFile ||
-		a.AuditLogRotateMaxMB != b.AuditLogRotateMaxMB ||
-		a.AuditLogRotateKeep != b.AuditLogRotateKeep {
-		return false
-	}
-	if a.PluginUploadDir != b.PluginUploadDir ||
-		a.PluginUploadMaxSize != b.PluginUploadMaxSize {
-		return false
-	}
-	if (a.PluginUploadEnabled == nil) != (b.PluginUploadEnabled == nil) {
-		return false
-	}
-	if a.PluginUploadEnabled != nil && b.PluginUploadEnabled != nil &&
-		*a.PluginUploadEnabled != *b.PluginUploadEnabled {
-		return false
-	}
-	// These admin-only capabilities are also mutable through the generic raw,
-	// patch and rollback paths. Include their full policy, including client-auth
-	// parameters, in the admin:manage decision.
-	if pprofEnabled(a) != pprofEnabled(b) || !reflect.DeepEqual(a.TLS, b.TLS) {
-		return false
-	}
-	return true
+	// Normalize only the established semantic equivalences, then compare the
+	// entire subtree. Any new AdminConfig field automatically requires
+	// admin:manage when it changes; a hand-maintained allow-list missed TLS and
+	// pprof in the past. This is a conservative authorization check.
+	a.Token, b.Token = "", ""
+	a.RBAC, b.RBAC = config.AdminRBACConfig{}, config.AdminRBACConfig{}
+	a.Console, b.Console = nil, nil
+	a.PprofEnabled, b.PprofEnabled = nil, nil
+	return reflect.DeepEqual(a, b)
 }
 
 // adminRBACEqual compares two AdminRBACConfig values, including role and
@@ -1123,5 +1106,7 @@ func adminRBACEqual(a, b config.AdminRBACConfig) bool {
 		!rbacRolesEqual(a.Roles, b.Roles) {
 		return false
 	}
-	return true
+	a.Principals, b.Principals = nil, nil
+	a.Roles, b.Roles = nil, nil
+	return reflect.DeepEqual(a, b)
 }
