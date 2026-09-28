@@ -124,7 +124,7 @@ func TestTransportGateAllowsLoopbackAndTLS(t *testing.T) {
 
 	t.Run("loopback connection on a wildcard bind", func(t *testing.T) {
 		rr := httptest.NewRecorder()
-		req := withLocalAddr(httptest.NewRequest(http.MethodGet, "/api/status", nil), "127.0.0.1:9090")
+		req := withLocalAddr(httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9090/api/status", nil), "127.0.0.1:9090")
 		h.ServeHTTP(rr, req)
 		if rr.Code == http.StatusForbidden {
 			t.Fatalf("a loopback connection was refused: %s", rr.Body.String())
@@ -133,7 +133,7 @@ func TestTransportGateAllowsLoopbackAndTLS(t *testing.T) {
 
 	t.Run("IPv6 loopback", func(t *testing.T) {
 		rr := httptest.NewRecorder()
-		req := withLocalAddr(httptest.NewRequest(http.MethodGet, "/api/status", nil), "[::1]:9090")
+		req := withLocalAddr(httptest.NewRequest(http.MethodGet, "http://[::1]:9090/api/status", nil), "[::1]:9090")
 		h.ServeHTTP(rr, req)
 		if rr.Code == http.StatusForbidden {
 			t.Fatalf("an IPv6 loopback connection was refused: %s", rr.Body.String())
@@ -227,7 +227,7 @@ func TestTransportGateHonoursAConnectionOverTheConfiguration(t *testing.T) {
 	h := s.routes()
 
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, withLocalAddr(httptest.NewRequest(http.MethodGet, "/api/status", nil), "127.0.0.1:9090"))
+	h.ServeHTTP(rr, withLocalAddr(httptest.NewRequest(http.MethodGet, "http://localhost:9090/api/status", nil), "127.0.0.1:9090"))
 	if rr.Code == http.StatusForbidden {
 		t.Fatal("a loopback connection to a wildcard listener was refused")
 	}
