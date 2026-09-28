@@ -37,6 +37,7 @@ type k8sDiscoverer struct {
 	client   *http.Client
 	url      string
 	token    string
+	tokenFile string // mounted service-account token, read for every list request
 	port     string // selected port name or number ("" = first port)
 	describe string
 	log      *slog.Logger
@@ -65,9 +66,11 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 	base = strings.TrimRight(base, "/")
 
 	token := strings.TrimSpace(k.Token)
+	var tokenFile string
 	if token == "" {
 		if b, err := os.ReadFile(k8sTokenFile); err == nil {
 			token = strings.TrimSpace(string(b))
+			tokenFile = k8sTokenFile
 		}
 	}
 
@@ -107,6 +110,7 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 		},
 		url:      endpoint,
 		token:    token,
+		tokenFile: tokenFile,
 		port:     strings.TrimSpace(k.Port),
 		describe: "kubernetes:" + k.Namespace + "/" + k.Service,
 	}, nil
@@ -184,8 +188,19 @@ func (d *k8sDiscoverer) resolvePage(ctx context.Context, endpoint string) (k8sEn
 		return list, err
 	}
 	req.Header.Set("Accept", "application/json")
-	if d.token != "" {
-		req.Header.Set("Authorization", "Bearer "+d.token)
+	token := d.token
+	if d.tokenFile != "" {
+		b, err := os.ReadFile(d.tokenFile)
+		if err != nil {
+			return list, fmt.Errorf("kubernetes: read service-account token: %w", err)
+		}
+		token = strings.TrimSpace(string(b))
+		if token == "" {
+			return list, fmt.Errorf("kubernetes: service-account token is empty")
+		}
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := d.client.Do(req)
 	if err != nil {

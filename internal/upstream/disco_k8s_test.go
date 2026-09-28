@@ -141,6 +141,44 @@ func TestK8sDiscovererDiscardsIncompleteList(t *testing.T) {
 	}
 }
 
+func TestK8sDiscovererReloadsMountedToken(t *testing.T) {
+	var tokens []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokens = append(tokens, r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"items":[{"ports":[{"port":8080}],"endpoints":[{"addresses":["10.1.0.1"]}]}]}`))
+	}))
+	defer srv.Close()
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+		Namespace: "default", Service: "web", APIServer: srv.URL,
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mounted := filepath.Join(t.TempDir(), "token")
+	k := d.(*k8sDiscoverer)
+	k.tokenFile = mounted
+	for _, token := range []string{"first", "rotated"} {
+		if err := os.WriteFile(mounted, []byte(token), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := k.Resolve(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(tokens) != 2 || tokens[0] != "Bearer first" || tokens[1] != "Bearer rotated" {
+		t.Fatalf("observed tokens = %v, want old then rotated", tokens)
+	}
+	if err := os.Remove(mounted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.Resolve(context.Background()); err == nil {
+		t.Fatal("missing mounted token must fail the refresh")
+	}
+	if len(tokens) != 2 {
+		t.Fatal("missing mounted token caused an unauthenticated API request")
+	}
+}
+
 func TestK8sSelectPort(t *testing.T) {
 	d := &k8sDiscoverer{}
 	ports := []k8sPort{{Name: "http", Port: 8080}, {Name: "grpc", Port: 9090}}

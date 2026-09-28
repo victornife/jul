@@ -219,6 +219,11 @@ publishing a partial list.
 | `ca_file` | string | mounted SA CA | API server CA bundle |
 | `insecure_skip_tls_verify` | bool | `false` | Skip API server TLS verification (testing) |
 
+When the mounted service-account token is used, the resolver rereads it for
+each API request so projected token rotation takes effect without a restart.
+An unreadable or empty previously mounted token fails that refresh and retains
+the last-good backends. An explicit `token` follows config secret reload rules.
+
 An explicitly configured `ca_file` must exist and contain PEM certificates;
 discovery refuses to start with an unreadable or malformed bundle. Without an
 explicit path, the mounted service-account CA is used when available; otherwise
