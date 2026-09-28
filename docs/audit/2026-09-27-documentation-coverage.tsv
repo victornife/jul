@@ -136,7 +136,7 @@ docs/release-candidates/v2.0.0-rc.1.md	historical/context only	dated baseline pr
 docs/release.md	reviewed	checksum format compared to release workflow; Linux zero-config install commands exercised against local binary, not packaged platform artifacts
 docs/reload-semantics.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
 docs/remote-cli.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-docs/resource-ownership.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/resource-ownership.md	reviewed	scoped post-tag data-plane client-auth bundle identity, prepare/publish/abort and handshake boundary traced to #486 source and focused tests; other resource families not certified
 docs/reviews/README.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/reviews/jul_phases_1_7_implementation_handoff_plan_v2.1_2026-07-19.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/reviews/previous_reviews/jul_console_tech_stack_recommendation.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line

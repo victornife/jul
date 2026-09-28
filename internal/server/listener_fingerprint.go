@@ -108,10 +108,10 @@ func listenerBindFingerprint(cfg *config.Config, addr string) string {
 // clientAuthForAddr would resolve for addr, without performing the file I/O that
 // builds the actual CA pool: it mirrors that helper's aggregation across every
 // TLS-enabled block on addr — the strongest mode, and the order-insensitive
-// union of CA files, SAN allow-list entries, and CRL files. A change to any of
-// these means the listener's tls.Config.ClientAuth/ClientCAs/VerifyPeerCertificate
-// would differ, which only takes effect on a rebind. Like acmeFingerprint, it
-// compares configured paths rather than file contents.
+// union of CA files, SAN allow-list entries, and CRL files. It includes the
+// contents of CA/CRL files so an in-place rotation prepares a new bundle for
+// the retained listener. Publish swaps that bundle for new handshakes without
+// rebinding; existing connections retain their established identity.
 func mtlsConfigFingerprint(servers []config.ServerConfig, addr string) string {
 	strongest := 0
 	var caFiles, sans, crlFiles []string
@@ -150,7 +150,7 @@ func mtlsConfigFingerprint(servers []config.ServerConfig, addr string) string {
 	// Include file content hashes so that same-path CA/CRL rotation (rotating
 	// the file contents without changing the configured path) is detected.
 	// Without content hashing, rotating a CRL in place would not trigger a
-	// restart check, leaving the old trust material active indefinitely.
+	// reload-time bundle swap, leaving the old trust material active.
 	caHashes := make([]string, len(caFiles))
 	for i, f := range caFiles {
 		caHashes[i] = f + ":" + hashFileContent(f)
