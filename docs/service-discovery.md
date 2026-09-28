@@ -478,9 +478,9 @@ provider so operators can choose the right source for their deployment.
 | Console Status panel | ☐ | ✅ | ✅ | ✅ | ✅ | — |
 | Atomic reload (unchanged pool kept) | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **Security / access** | | | | | | |
-| No credentials required | ✅ | ✅ | ✅ | ☐ | ☐ | — |
-| Token required | ☐ | ☐ | ☐ | ✅ (ACL token) | ✅ (SA token) | — |
-| TLS verification | ☐ | ☐ | ☐ | ☐ | ✅ (CA bundle) | — |
+| No credentials required | ✅ | ✅ | ✅ | depends on Consul ACLs | depends on Kubernetes API RBAC | — |
+| Token supported | ☐ | ☐ | ☐ | ✅ (optional ACL token) | ✅ (mounted SA or configured bearer token) | — |
+| HTTPS server verification | ☐ | ☐ | ☐ | ✅ when `address` uses HTTPS | ✅ when `api_server` uses HTTPS | — |
 
 ## Known limitations
 
