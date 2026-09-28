@@ -153,9 +153,12 @@ func readProfile(filename, name string) (Profile, []string, error) {
 
 func readToken(filename string, stdin io.Reader) (string, []string, error) {
 	if filename == "-" {
-		data, err := io.ReadAll(io.LimitReader(stdin, 64<<10))
+		data, err := io.ReadAll(io.LimitReader(stdin, (64<<10)+1))
 		if err != nil {
 			return "", nil, fmt.Errorf("read token from stdin: %w", err)
+		}
+		if len(data) > 64<<10 {
+			return "", nil, errors.New("token from stdin exceeds 64 KiB")
 		}
 		token := strings.TrimSpace(string(data))
 		if token == "" {

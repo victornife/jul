@@ -208,6 +208,9 @@ func TestTokenFileFailures(t *testing.T) {
 	if _, _, err := readToken("-", strings.NewReader("")); err == nil {
 		t.Fatal("empty stdin token accepted")
 	}
+	if _, _, err := readToken("-", strings.NewReader("token"+strings.Repeat(" ", 64<<10))); err == nil {
+		t.Fatal("oversized stdin token accepted after truncation")
+	}
 	if _, _, err := readToken(filepath.Join(t.TempDir(), "missing"), strings.NewReader("")); err == nil {
 		t.Fatal("missing token accepted")
 	}
