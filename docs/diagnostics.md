@@ -33,7 +33,13 @@ Enable bounded network-capable checks explicitly:
 jul doctor --config /etc/jul/server.toml --check-network
 ```
 
-`--check-network` permits Jul to resolve configured secret references, run the authoritative runtime preflight, and perform immediate-close local TCP/UDP bind probes. It does not send application traffic or probe arbitrary URLs. Default doctor operation performs no external network checks.
+`--check-network` permits Jul to resolve configured secret references, run the
+stateless runtime preflight, and perform immediate-close local TCP/UDP bind
+probes. Separate default doctor checks inspect configured paths and TLS files;
+neither mode builds all serving handlers or probes live backends. Start Jul and
+exercise routes to establish deployment readiness. Doctor does not send
+application traffic or probe arbitrary URLs. Default operation performs no
+external network checks.
 
 ### Check phases
 
@@ -65,7 +71,7 @@ Later checks are marked `skipped` when an earlier prerequisite is unavailable. O
 | `ADMIN_SECURITY` | security | Listener exposure and presence of a currently usable configured credential. |
 | `CONFIG_TOPOLOGY` | runtime | Counts and enabled-state metadata only. |
 | `SYSTEM_RUNTIME` | runtime | Product, version, commit, build profile, Go, platform, CPU, and capability metadata. |
-| `RUNTIME_PREFLIGHT` | network | Opt-in authoritative runtime preflight. |
+| `RUNTIME_PREFLIGHT` | network | Opt-in stateless runtime preflight; not a full startup rehearsal. |
 | `LISTENER_BIND` | network | Opt-in immediate-close local TCP/UDP bind probes. |
 
 Later additive checks require new stable codes; existing codes are not repurposed.
