@@ -144,6 +144,10 @@ func readProfile(filename, name string) (Profile, []string, error) {
 	if err := dec.Decode(&doc); err != nil {
 		return Profile{}, nil, fmt.Errorf("parse profile file %q: %w", filename, err)
 	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		return Profile{}, nil, fmt.Errorf("profile file %q must contain exactly one JSON document", filename)
+	}
 	p, ok := doc.Profiles[name]
 	if !ok {
 		return Profile{}, nil, fmt.Errorf("profile %q not found", name)

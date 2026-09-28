@@ -189,6 +189,12 @@ func TestProfileDefaultsAndRemainingErrors(t *testing.T) {
 	if _, _, err := readProfile(profile, "missing"); err == nil {
 		t.Fatal("missing profile accepted")
 	}
+	if err := os.WriteFile(profile, []byte(`{"profiles":{"one":{"endpoint":"https://example.com"}}} {"profiles":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := readProfile(profile, "one"); err == nil {
+		t.Fatal("trailing profile document accepted")
+	}
 	if _, _, err := readToken("-", failReader{}); err == nil {
 		t.Fatal("stdin read failure ignored")
 	}
