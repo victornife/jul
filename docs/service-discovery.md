@@ -223,8 +223,9 @@ an explicit plaintext `http://` endpoint because its responses choose backend
 addresses and any bearer token travels over that connection.
 
 Endpoints explicitly marked not-ready are skipped; an endpoint with no readiness
-condition is treated as ready (matching Kubernetes semantics). The pod needs RBAC
-to `list`/`watch` `endpointslices` in the namespace.
+condition is treated as ready (matching Kubernetes semantics). The refresher
+polls the EndpointSlice list endpoint; its service account needs the `list`
+verb on `endpointslices` in the namespace. It does not open a Kubernetes watch.
 
 ## Hot reload
 
