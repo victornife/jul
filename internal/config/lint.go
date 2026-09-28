@@ -190,6 +190,7 @@ func Lint(c *Config) []Diagnostic {
 		}
 	}
 
+	diags = append(diags, lintWAFFit(c)...)
 	diags = append(diags, lintBackendTLS(c)...)
 	diags = append(diags, lintResilience(c)...)
 	diags = append(diags, lintDiscoveryTrust(c)...)
@@ -677,4 +678,57 @@ func sizeValue(s Size) string {
 		return ""
 	}
 	return strconv.FormatInt(s.Bytes(), 10)
+}
+
+// lintWAFFit reports locations where an enabled WAF policy changes what the
+// route can carry: request bodies over request_body_limit are rejected with
+// 413 (Coraza's reject action), and a native gRPC route cannot pass the WAF at
+// all, because the body is buffered before forwarding and the Core Rule Set
+// refuses application/grpc.
+func lintWAFFit(c *Config) []Diagnostic {
+	var diags []Diagnostic
+	for i := range c.Servers {
+		srv := &c.Servers[i]
+		for j := range srv.Locations {
+			loc := &srv.Locations[j]
+			w := c.WAF
+			if loc.WAF != nil {
+				w = *loc.WAF
+			}
+			if !w.Enabled {
+				continue
+			}
+			field := fmt.Sprintf("servers[%d].locations[%d]", i, j)
+			if loc.GRPC {
+				msg := "native gRPC route is covered by the WAF, which buffers the whole request body before forwarding, so client and bidirectional streams never reach the backend"
+				if w.CRSEnabled {
+					msg += ", and the Core Rule Set rejects the application/grpc content type (rule 920420)"
+				}
+				diags = append(diags, Diagnostic{
+					Severity: SeverityWarning,
+					Field:    field,
+					Message:  msg,
+					Hint:     "set [servers.locations.waf] enabled = false for this route, or expose it through grpc_transcode so the WAF inspects JSON",
+				})
+				continue
+			}
+			limit := w.RequestBodyLimit
+			if limit <= 0 {
+				limit = Size(128 << 10)
+			}
+			bodyMax := srv.ClientMaxBodySize
+			if loc.ClientMaxBodySize > 0 {
+				bodyMax = loc.ClientMaxBodySize
+			}
+			if bodyMax > limit {
+				diags = append(diags, Diagnostic{
+					Severity: SeverityWarning,
+					Field:    field,
+					Message:  fmt.Sprintf("the WAF rejects request bodies over its request_body_limit (%s) with 413, below this route's client_max_body_size (%s)", limit, bodyMax),
+					Hint:     "raise waf.request_body_limit to the largest body this route must accept, or lower client_max_body_size to match",
+				})
+			}
+		}
+	}
+	return diags
 }
