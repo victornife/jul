@@ -168,12 +168,11 @@ func TestForwardAuthDropsConnectionNominatedHeaders(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	writeForwardDenied(w, forwardResult{statusCode: http.StatusForbidden,
-		header: http.Header{
-			"Connection": []string{"X-Internal-Identity"},
-			"X-Internal-Identity": []string{"admin"},
-			"Location": []string{"/login"},
-		}})
+	denialHeaders := make(http.Header)
+	denialHeaders.Set("Connection", "X-Internal-Identity")
+	denialHeaders.Set("X-Internal-Identity", "admin")
+	denialHeaders.Set("Location", "/login")
+	writeForwardDenied(w, forwardResult{statusCode: http.StatusForbidden, header: denialHeaders})
 	if w.Header().Get("X-Internal-Identity") != "" || w.Header().Get("Location") != "/login" {
 		t.Fatalf("denial headers: %v", w.Header())
 	}
