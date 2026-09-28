@@ -95,6 +95,19 @@ func TestForwardAuthDecide(t *testing.T) {
 			t.Errorf("Location = %q, want /login", res.header.Get("Location"))
 		}
 	})
+
+	t.Run("missing original host does not forward client host", func(t *testing.T) {
+		fa := newForwardAuth(auth.URL, nil, auth.Client(), nil)
+		orig := httptest.NewRequest(http.MethodGet, "http://app.example/", nil)
+		orig.Host = ""
+		orig.Header.Set("X-Forwarded-Host", "attacker.example")
+		if _, err := fa.decide(context.Background(), orig); err != nil {
+			t.Fatalf("decide: %v", err)
+		}
+		if len(hostValues) != 0 {
+			t.Errorf("X-Forwarded-Host = %q, want no client-supplied host", hostValues)
+		}
+	})
 }
 
 // errReadCloser simulates a response body that fails on read.
