@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yookoala/gofast"
+
 	"jul/internal/config"
 )
 
@@ -338,5 +340,37 @@ func TestUWSGIHandlerRoundTrip(t *testing.T) {
 	}
 	if got.vars["SCRIPT_NAME"] != "/app.py" {
 		t.Errorf("SCRIPT_NAME = %q", got.vars["SCRIPT_NAME"])
+	}
+}
+
+// TestCGIParamsDropClientProxyHeader: a client "Proxy" header must not reach
+// the application as HTTP_PROXY (httpoxy), for uWSGI and FastCGI alike, while
+// an operator's explicit fastcgi_params value is still honoured.
+func TestCGIParamsDropClientProxyHeader(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://edge.example/index.php", nil)
+	r.Header.Set("Proxy", "http://attacker.example:8080")
+
+	if v, ok := buildCGIParams(config.LocationConfig{}, r)["HTTP_PROXY"]; ok {
+		t.Fatalf("uWSGI HTTP_PROXY = %q, want absent", v)
+	}
+	if v := buildCGIParams(config.LocationConfig{FastCGIParams: map[string]string{"HTTP_PROXY": "http://egress:3128"}}, r)["HTTP_PROXY"]; v != "http://egress:3128" {
+		t.Fatalf("uWSGI operator HTTP_PROXY = %q", v)
+	}
+
+	fcgi := func(loc config.LocationConfig) map[string]string {
+		var got map[string]string
+		inner := func(_ gofast.Client, req *gofast.Request) (*gofast.ResponsePipe, error) {
+			got = req.Params
+			return nil, nil
+		}
+		req := &gofast.Request{Raw: r, Params: map[string]string{}}
+		_, _ = gofast.Chain(gofast.MapHeader, fcgiScriptParams(loc))(inner)(nil, req)
+		return got
+	}
+	if v, ok := fcgi(config.LocationConfig{})["HTTP_PROXY"]; ok {
+		t.Fatalf("FastCGI HTTP_PROXY = %q, want absent", v)
+	}
+	if v := fcgi(config.LocationConfig{FastCGIParams: map[string]string{"HTTP_PROXY": "http://egress:3128"}})["HTTP_PROXY"]; v != "http://egress:3128" {
+		t.Fatalf("FastCGI operator HTTP_PROXY = %q", v)
 	}
 }
