@@ -72,6 +72,25 @@ See [compatibility.md](compatibility.md#admin-transport-security-adr-0019-281)
 for the migration, and [observability.md](observability.md#scraping-metrics)
 for what it means for Prometheus.
 
+## Browser origin: no cross-site requests, no rebinding
+
+After the transport gate and before authentication, every route except
+`/healthz` and `/readyz` refuses two browser-borne attacks with
+`403 forbidden`:
+
+- **Cross-site request forgery.** A `POST`/`PUT`/`PATCH`/`DELETE` that a browser
+  marks as coming from another origin (`Sec-Fetch-Site: cross-site` or
+  `same-site`, or, without that header, an `Origin` whose host differs from
+  `Host`) is refused. The Console is same-origin and the Jul CLI and scripts
+  send neither header, so they are unaffected.
+- **DNS rebinding, in open mode only.** With no `token` and RBAC disabled, a
+  cleartext request whose `Host` is not `localhost` or a loopback IP literal is
+  refused, so a web page whose domain was rebound to `127.0.0.1` cannot read or
+  change the configuration. If a local reverse proxy fronts an open-mode
+  listener, forward `Host` as the loopback address (NGINX's default
+  `proxy_set_header Host $proxy_host` does) or configure a token. Over TLS, and
+  whenever a credential is configured, `Host` is not policed.
+
 ## The error envelope
 
 Every `/api/v1` response that is not a success has one shape:

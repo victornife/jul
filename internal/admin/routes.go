@@ -42,7 +42,7 @@ func (s *Server) routes() http.Handler {
 		mux.Handle(spec.Pattern, h)
 	}
 	return s.captureAdminRuntimeSnapshot(
-		s.requireSecureTransport(s.observeConsole(mux)),
+		s.requireSecureTransport(s.requireBrowserSameOrigin(s.observeConsole(mux))),
 	)
 }
 
