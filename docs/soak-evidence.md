@@ -35,7 +35,12 @@ workloads and dated qualifying runs. The historical v1.28.0 table below used
 | CI smoke (`soak (smoke)` job) | every push / PR | 20s × 3 scenarios | `soak-results` artifact on the [CI workflow](../.github/workflows/ci.yml) run | ❌ No (smoke only) |
 | Release gate (`soak gate (ADR 0005)` job) | version tag `v*` | 5m × 3 scenarios | `soak-results` artifact on the [release workflow](../.github/workflows/release.yml) run; a red run blocks the release | ❌ No (smoke only) |
 | Local | `scripts/soak.sh` | configurable | stdout (see runs below) | ✅ Yes, if duration meets the minimum for the scope exercised |
-| Feature-specific Y1-08/Y1-09 | PR change to `scripts/feature-soak.py` or its workflow, or manual workflow dispatch after it is on the default branch | 20s preflight, then 3600s per feature | Pre-run `manifest.json`, `summary.json` and server logs in the [feature soak workflow](../.github/workflows/feature-soak.yml) artifacts | ✅ [2026-09-28 exact-head run](#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features), for the scoped workloads |
+| Feature-specific Y1-08/Y1-09 | PR changes to the harness/workflow run a 20s preflight; explicit `workflow_dispatch` runs preflight and the one-hour jobs | 20s PR preflight; 3600s per feature on dispatch | Pre-run `manifest.json`, `summary.json` and server logs in the [feature soak workflow](../.github/workflows/feature-soak.yml) artifacts | ✅ [2026-09-28 exact-head run](#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features), for the scoped workloads |
+
+The long jobs are manually triggered after qualification evidence is needed.
+GitHub evaluates `pull_request.paths` against the PR's cumulative diff, so a
+later push can still trigger the short preflight while the harness/workflow
+remains changed in that diff. It does not launch another one-hour candidate.
 
 The [2026-09-28 PR preflight](https://github.com/victornife/jul/actions/runs/36438405287)
 passed at `3650e506054a829c8390256777baa1d35913dbd1`. Its retained

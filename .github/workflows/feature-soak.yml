@@ -45,6 +45,9 @@ jobs:
 
   qualifying:
     needs: preflight
+    # The one-hour qualification is explicit. PR updates still run preflight,
+    # including when this workflow remains in the PR's changed-file set.
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:

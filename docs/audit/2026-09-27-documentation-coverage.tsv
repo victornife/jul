@@ -7,7 +7,7 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/ci.yml	reviewed	Windows first-run, PowerShell checksum positive/negative and native macOS package lanes scoped; new checksum step pending CI; rest of CI not semantically certified
 .github/workflows/diagnostics-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/docker-deployment-e2e.yml	reviewed	shipped-image/default and managed loopback adoption/apply/rollback/restart passed in Docker CI at 357c371d
-.github/workflows/feature-soak.yml	not reviewed	new 20-second preflight and 3600-second feature jobs are defined; real execution and artifact review pending
+.github/workflows/feature-soak.yml	not reviewed	20-second PR preflight and dispatch-only 3600-second feature jobs source reviewed; dated hour evidence exists, but the new trigger awaits CI and the workflow is not fully certified
 .github/workflows/discovery-k8s-kind.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/discovery-live.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/issue160-quality.yml	reviewed	HR-07C Go statement coverage gate inspected for comment-only false failure and corrected; other jobs not semantically certified
@@ -207,7 +207,7 @@ examples/rust-proxy/.cargo/config.toml	not reviewed	parsed by make config-check 
 examples/rust-proxy/Cargo.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 examples/rust-proxy/README.md	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 examples/rust-proxy/jul.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
-internal/admin/**; internal/adminapi/**; internal/apicontract/**	not reviewed	generated OpenAPI and route classification sampled; full authorization matrix and Console UI not exercised
+internal/admin/**; internal/adminapi/**; internal/apicontract/**	not reviewed	generated OpenAPI, route classification and targeted admin mutation permission comparisons sampled; full authorization matrix and Console UI not exercised
 internal/admin/route_classification.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 internal/config/**; internal/lifecycle/**	not reviewed	generated contract checked; all field behavior and lifecycle paths not independently exercised
 internal/migrate/**; internal/upstream/**; internal/plugins/**; internal/waf/**	not reviewed	key release boundaries sampled; full protocol and failure matrices not independently replayed

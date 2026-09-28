@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -1101,6 +1102,12 @@ func adminConfigEqual(a, b config.AdminConfig) bool {
 	}
 	if a.PluginUploadEnabled != nil && b.PluginUploadEnabled != nil &&
 		*a.PluginUploadEnabled != *b.PluginUploadEnabled {
+		return false
+	}
+	// These admin-only capabilities are also mutable through the generic raw,
+	// patch and rollback paths. Include their full policy, including client-auth
+	// parameters, in the admin:manage decision.
+	if pprofEnabled(a) != pprofEnabled(b) || !reflect.DeepEqual(a.TLS, b.TLS) {
 		return false
 	}
 	return true
