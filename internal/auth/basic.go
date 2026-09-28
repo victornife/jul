@@ -61,6 +61,9 @@ func isBcryptHash(h string) bool {
 // check validates the request's Basic credentials. It returns true when the
 // username exists and the password matches the stored bcrypt hash.
 func (b *basicAuth) check(r *http.Request) bool {
+	if len(r.Header.Values("Authorization")) != 1 {
+		return false
+	}
 	user, pass, ok := r.BasicAuth()
 	if !ok {
 		return false

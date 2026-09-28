@@ -65,6 +65,20 @@ func TestBasicAuthCheck(t *testing.T) {
 	}
 }
 
+func TestBasicAuthRejectsDuplicateAuthorization(t *testing.T) {
+	path := writeHtpasswd(t, map[string]string{"alice": "s3cret"})
+	b, err := newBasicAuth(path, "Restricted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.SetBasicAuth("alice", "s3cret")
+	r.Header.Add("Authorization", "Basic other")
+	if b.check(r) {
+		t.Fatal("ambiguous Basic credentials accepted")
+	}
+}
+
 func TestBasicAuthChallenge(t *testing.T) {
 	path := writeHtpasswd(t, map[string]string{"alice": "s3cret"})
 	b, err := newBasicAuth(path, "My Realm")

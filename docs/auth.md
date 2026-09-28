@@ -97,9 +97,9 @@ Within the middleware chain, auth runs **before rate limiting**, so a
 | JWT | `Authorization: Bearer` | valid signature + claims | **401** + `WWW-Authenticate: Bearer error="invalid_token"` | claims → request context (`ClaimsFrom`) |
 | Forward-auth | subrequest to `url` | endpoint returns **2xx** | endpoint's denial relayed; redirects with `Location` retain 301/302/303/307/308, other non-error statuses become **403**; **503** if unreachable | `auth_response_headers` → upstream request |
 
-JWT authentication rejects requests with multiple `Authorization` field lines,
-even when the first bearer token is valid. An intermediary and a backend could
-otherwise disagree about which credential the request carries.
+Basic and JWT authentication reject requests with multiple `Authorization`
+field lines, even when the first credential is valid. An intermediary and a
+backend could otherwise disagree about which credential the request carries.
 
 ## Schemes
 
