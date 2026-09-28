@@ -60,7 +60,8 @@ var transportExemptPaths = map[string]bool{
 // A server-side bypass would be the same hole as the `--insecure` flag the CLI
 // deliberately does not have. This is a breaking change for a deployment
 // authenticating over a non-loopback address in cleartext today; the remedy is
-// to terminate TLS in front of the listener, or to bind to loopback and tunnel.
+// to terminate TLS at Jul, or to terminate it at a local proxy which connects
+// to Jul's loopback listener. A remote proxy must use TLS to Jul as well.
 func (s *Server) requireSecureTransport(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if transportExemptPaths[r.URL.Path] || s.transportIsSecure(r) {

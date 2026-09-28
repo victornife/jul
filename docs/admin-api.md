@@ -64,8 +64,11 @@ caller; the listen address is a configuration value and is deliberately absent.
   itself, no external component is required, and the gate is satisfied on any
   address. Certificate content and same-path rotation hot-apply without a
   rebind.
-- **Terminate TLS in front of the listener** — a reverse proxy, a
-  systemd-activated socket, a loopback-bound sidecar.
+- **Terminate TLS in front of a loopback-bound Jul listener** — for example, a
+  local reverse proxy or sidecar. The proxy-to-Jul connection must arrive on
+  Jul's loopback listener (or use TLS to Jul as well). A remote terminator
+  forwarding plaintext to a non-loopback Jul listener still receives
+  `403 insecure_transport`; forwarding headers do not satisfy the gate.
 - **Bind the listener to loopback** and reach it through an SSH tunnel.
 
 See [compatibility.md](compatibility.md#admin-transport-security-adr-0019-281)

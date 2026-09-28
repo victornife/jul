@@ -53,7 +53,7 @@ deploy/windows/new-secure-data-dir.ps1	reviewed	fresh-only protected root and se
 dev-server.toml	not reviewed	parsed by make config-check if root/example; runtime behavior and secrets not manually verified for every value
 docs/abi.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 docs/accessibility.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
-docs/admin-api.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
+docs/admin-api.md	reviewed	targeted status/API and admin TLS transport gate traced to request TLS/local address; full authorization surface not certified
 docs/admin-runtime-hot-reload.md	reviewed	scoped authority-specific SIGHUP/file-watch versus managed prepare/publish claim traced to serve.go and reload semantics; remaining limiter/upload mechanics not certified
 docs/adr/0001-language-strategy.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/adr/0002-protocol-adaptation.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
@@ -93,7 +93,7 @@ docs/audit/old/combined-audit-2026-08-03.md	historical/context only	dated baseli
 docs/auth.md	reviewed	forward-auth context/header precedence, canonical CIDR identity, empty-auth validation, JWKS request-path behavior and optional egress SSRF boundary traced to implementation and focused tests; other auth claims and benchmarks remain unverified
 docs/benchmarks.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/cache.md	reviewed	scoped reload/in-flight refresh, disk persistence and restart-bound cache enablement claims traced to cache and lifecycle source; full shared-cache matrix and platforms not certified
-docs/compatibility.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
+docs/compatibility.md	reviewed	admin TLS transport migration remedy traced to gate; other compatibility/platform assertions remain unreviewed
 docs/compression.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/config-lifecycle.yaml	generated/verified against source	make generated-check at baseline and final SHA; no hand edits
 docs/config-value-contract.json	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review

@@ -163,8 +163,11 @@ plaintext on a non-loopback address stops working.**
    (#336). The admin listener presents a certificate itself; no external
    component is required and the gate is satisfied on any address. Certificate
    content and same-path rotation hot-apply without a rebind.
-2. **Terminate TLS in front of the admin listener** — a reverse proxy, a
-   systemd-activated socket or a loopback-bound sidecar.
+2. **Terminate TLS in front of a loopback-bound admin listener** — a local
+   reverse proxy or sidecar can then reach Jul over loopback. If the terminator
+   is remote, use TLS for its connection to Jul too. Forwarding plaintext to a
+   non-loopback Jul listener remains `403 insecure_transport`, regardless of
+   forwarded-protocol headers.
 3. **Bind the admin listener to loopback** (`[admin] listen = "127.0.0.1:9090"`,
    which is the default) and reach it through an SSH tunnel. Scrape
    `/metrics` over loopback, or through the same terminator.
