@@ -831,3 +831,25 @@ features:
     explicit hash.fallback for keyless requests, retries walk the rendezvous order, stream routes client_ip only
     (TCP per connection, UDP per session). NGINX ip_hash/hash map as approximated, arbitrary hash keys blocking;
     real NGINX-vs-Jul E2E fixture. Merged on main, not yet in a tagged release; no dedicated soak.'
+- id: MTLS-HOT
+  name: Client-certificate policy and CRL hot reload
+  tags:
+  - core
+  maturity: Beta
+  delivery: merged
+  doc: mtls.md
+  criteria:
+    1: true
+    2: true
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: null
+    9: true
+  notes: 'servers.*.tls.client_auth (mode, CA bundle, CRL, SAN allow-list) is rebuilt in Prepare and swapped at
+    Publish for new TCP TLS and HTTP/3 handshakes (#486); in-place CA/CRL rewrites reload, a broken file rejects the
+    reload. Revocation also applies to resumed TLS sessions and is scoped to the CRL issuer;
+    jul_mtls_crl_next_update_timestamp_seconds exposes CRL expiry. admin.tls.client_auth stays restart-bound. Does
+    not change the GA Y2-07 row. Merged on main, not yet in a tagged release; no dedicated soak.'

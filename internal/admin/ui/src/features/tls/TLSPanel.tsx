@@ -193,8 +193,8 @@ function MTLSSection() {
         <h2 className="text-lg font-semibold text-jul-text">Mutual TLS</h2>
         <p className="text-sm text-jul-muted">
           Verify client certificates on a TLS listener. Server-level settings (mode, CA bundle, CRL,
-          SAN allow-list) are read when the listener binds and take effect on restart; the per-route
-          “require client certificate” toggle takes effect immediately.
+          SAN allow-list) apply to new TLS handshakes on reload; the per-route “require client
+          certificate” toggle applies to the next request.
         </p>
       </div>
 

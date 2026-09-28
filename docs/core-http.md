@@ -482,6 +482,7 @@ Labels fall into three classes by what bounds them:
 | `jul_stream_udp_sessions_rejected_total` | — | single series |
 | `jul_tls_cert_expiry_seconds` | `domain` | configured/served domains |
 | `jul_acme_renewals_total` | — | single series |
+| `jul_mtls_crl_next_update_timestamp_seconds` | `listen` | configured listen addresses with a CRL |
 | `jul_mtls_handshakes_total` | `result` | `verified`/`rejected` |
 | `jul_reload_total` | `source`, `outcome` | fixed trigger/outcome enums |
 | `jul_reload_duration_seconds` | `source`, `outcome` | fixed trigger/outcome enums; buckets fixed |

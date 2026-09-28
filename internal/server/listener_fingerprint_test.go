@@ -124,26 +124,24 @@ func TestListenerRebindRequired(t *testing.T) {
 		}())
 		hotApplies(t, old, next)
 	})
-	t.Run("mutual TLS mode", func(t *testing.T) {
-		requiresRestart(t, mtlsSeed("request", "ca.pem"), func(s *config.ServerConfig) {
-			s.TLS.ClientAuth.Mode = "require"
+	// Client auth is a per-handshake holder swapped at Publish (#486), so
+	// none of its fields forces a rebind.
+	for name, mutate := range map[string]func(s *config.ServerConfig){
+		"mutual TLS mode":       func(s *config.ServerConfig) { s.TLS.ClientAuth.Mode = "require" },
+		"mutual TLS ca file":    func(s *config.ServerConfig) { s.TLS.ClientAuth.CAFile = "new-ca.pem" },
+		"mutual TLS verify san": func(s *config.ServerConfig) { s.TLS.ClientAuth.VerifySAN = []string{"svc.internal"} },
+		"mutual TLS crl file":   func(s *config.ServerConfig) { s.TLS.ClientAuth.CRLFile = "revoked.crl" },
+		"mutual TLS switched on": func(s *config.ServerConfig) {
+			s.TLS.ClientAuth = &config.ClientAuthConfig{Mode: "require", CAFile: "ca.pem"}
+		},
+	} {
+		t.Run(name+" hot-applies (#486)", func(t *testing.T) {
+			old := cfg(mtlsSeed("request", "ca.pem")())
+			next := cfg(mtlsSeed("request", "ca.pem")())
+			mutate(&next.Servers[0])
+			hotApplies(t, old, next)
 		})
-	})
-	t.Run("mutual TLS ca file", func(t *testing.T) {
-		requiresRestart(t, mtlsSeed("require", "old-ca.pem"), func(s *config.ServerConfig) {
-			s.TLS.ClientAuth.CAFile = "new-ca.pem"
-		})
-	})
-	t.Run("mutual TLS verify san", func(t *testing.T) {
-		requiresRestart(t, mtlsSeed("require", "ca.pem"), func(s *config.ServerConfig) {
-			s.TLS.ClientAuth.VerifySAN = []string{"svc.internal"}
-		})
-	})
-	t.Run("mutual TLS crl file", func(t *testing.T) {
-		requiresRestart(t, mtlsSeed("require", "ca.pem"), func(s *config.ServerConfig) {
-			s.TLS.ClientAuth.CRLFile = "revoked.crl"
-		})
-	})
+	}
 	t.Run("connection cap (global max_conns) hot-applies on a kept listener", func(t *testing.T) {
 		old := cfg(plain())
 		next := cfg(plain())

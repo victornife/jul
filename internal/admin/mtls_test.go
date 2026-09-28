@@ -263,12 +263,12 @@ func TestHandleMTLSEndpoint(t *testing.T) {
 }
 
 func TestDiffMTLSBindTimeWarning(t *testing.T) {
-	// Enabling mutual TLS must surface the bind-time restart caveat.
+	// Enabling mutual TLS must say which connections it affects (#486).
 	before := mtlsPatchConfig()
 	after := mtlsPatchConfig()
 	after.Servers[0].TLS.ClientAuth = &config.ClientAuthConfig{Mode: "require", CAFile: "/etc/ca.pem"}
-	if d := diffConfigs(before, after); !warnHas(d, "listener binds") {
-		t.Errorf("expected bind-time warning on enable, got %+v", d.Warnings)
+	if d := diffConfigs(before, after); !warnHas(d, "new TLS handshakes") {
+		t.Errorf("expected new-handshakes warning on enable, got %+v", d.Warnings)
 	}
 
 	// Changing a field on an already-active block must also warn.
@@ -277,12 +277,12 @@ func TestDiffMTLSBindTimeWarning(t *testing.T) {
 		c.Servers[0].TLS.ClientAuth = &config.ClientAuthConfig{Mode: "require", CAFile: ca}
 		return c
 	}
-	if d := diffConfigs(mk("/etc/ca1.pem"), mk("/etc/ca2.pem")); !warnHas(d, "listener binds") {
-		t.Errorf("expected bind-time warning on ca_file change, got %+v", d.Warnings)
+	if d := diffConfigs(mk("/etc/ca1.pem"), mk("/etc/ca2.pem")); !warnHas(d, "new TLS handshakes") {
+		t.Errorf("expected new-handshakes warning on ca_file change, got %+v", d.Warnings)
 	}
 
-	// An identical config must not emit the bind-time warning.
-	if d := diffConfigs(mk("/etc/ca1.pem"), mk("/etc/ca1.pem")); warnHas(d, "listener binds") {
-		t.Errorf("unexpected bind-time warning for identical config, got %+v", d.Warnings)
+	// An identical config must not emit the new-handshakes warning.
+	if d := diffConfigs(mk("/etc/ca1.pem"), mk("/etc/ca1.pem")); warnHas(d, "new TLS handshakes") {
+		t.Errorf("unexpected new-handshakes warning for identical config, got %+v", d.Warnings)
 	}
 }

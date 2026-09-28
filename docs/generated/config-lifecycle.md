@@ -20,9 +20,9 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 | Schema paths (containers included) | 366 |
 | Schema leaves (configurable values) | 311 |
 | Registry entries | 311 |
-| Startup-consumed entries | 32 |
-| Class `hot_reload` | 265 |
-| Class `restart_required` | 32 |
+| Startup-consumed entries | 28 |
+| Class `hot_reload` | 269 |
+| Class `restart_required` | 28 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 3 |
@@ -336,11 +336,11 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.tls.acme.enabled` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | `servers.*.tls.acme.ocsp_stapling` | `hot_reload` | `acme` | — | the process-lifetime ACME manager keeps a stable stapling wrapper whose atomic policy changes at Publish; no manager, account, cache, HostPolicy or listener is replaced (#106) |
 | `servers.*.tls.cert` | `hot_reload` | `tls` | digest | a candidate certificate provider is built and validated during Prepare and swapped atomically into the listener's existing dynamic provider at Publish, without rebinding (#100) |
-| `servers.*.tls.client_auth.ca_file` | `restart_required` | `mtls` | startup, per-address, cond., digest | the client CA pool is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected |
-| `servers.*.tls.client_auth.crl_file` | `restart_required` | `mtls` | startup, per-address, cond., digest | the revocation list is read and installed when the listener binds; the fingerprint digests the file contents so an in-place rotation is detected |
+| `servers.*.tls.client_auth.ca_file` | `hot_reload` | `mtls` | digest | the client CA pool is loaded and validated during Prepare and swapped into the listener's client-auth holder at Publish; the fingerprint digests the file contents so an in-place rotation reloads (#486) |
+| `servers.*.tls.client_auth.crl_file` | `hot_reload` | `mtls` | digest | the revocation list is loaded and signature-checked during Prepare and swapped into the listener's client-auth holder at Publish; the fingerprint digests the file contents so an in-place rotation reloads (#486) |
 | `servers.*.tls.client_auth.forward_certificate` | `hot_reload` | `mtls` | — | the client-certificate forwarding mode is read when the handler tree is rebuilt |
-| `servers.*.tls.client_auth.mode` | `restart_required` | `mtls` | startup, per-address, cond. | the client-certificate policy is written into the listener's tls.Config at bind time |
-| `servers.*.tls.client_auth.verify_san` | `restart_required` | `mtls` | startup, per-address, cond. | the SAN allow-list is captured by the listener's verify callback at bind time |
+| `servers.*.tls.client_auth.mode` | `hot_reload` | `mtls` | — | the client-certificate policy is a per-listener holder read by every handshake; a candidate is built during Prepare and swapped at Publish without rebinding (#486) |
+| `servers.*.tls.client_auth.verify_san` | `hot_reload` | `mtls` | — | the SAN allow-list is part of the client-auth holder swapped at Publish (#486) |
 | `servers.*.tls.enabled` | `restart_required` | `tls` | startup, per-address, cond. | whether the listener terminates TLS is decided when the address binds |
 | `servers.*.tls.key` | `hot_reload` | `tls` | digest | a candidate certificate provider is built and validated during Prepare and swapped atomically into the listener's existing dynamic provider at Publish, without rebinding (#100) |
 | `servers.*.tls.min_version` | `restart_required` | `tls` | startup, per-address, cond. | the minimum protocol version is written into the listener's tls.Config at bind time |

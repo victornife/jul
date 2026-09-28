@@ -217,8 +217,17 @@ foreign-signed CRL is rejected at startup so a forged list cannot silently
 disable revocation. A handshake presenting a revoked serial is rejected and
 counted as `rejected`.
 
-The CRL is read when the listener binds. Refresh it by reloading the process
-(see [Operational notes](#operational-notes)).
+Revocation is scoped to the CRL's issuer: a serial is only unique per CA, so a
+CRL revokes only certificates whose issuer name matches its own. To publish a
+new CRL, rewrite `crl_file` in place and reload (`SIGHUP`, file watch or an
+apply): the list is re-read, signature-checked and swapped for new handshakes,
+including resumed TLS sessions, without a restart. A CRL that fails to parse or
+verify rejects the reload and the previous list keeps being enforced.
+
+Jul keeps enforcing a CRL after its `NextUpdate` rather than rejecting every
+client, logs a warning when it loads one that is already past it, and exports
+`jul_mtls_crl_next_update_timestamp_seconds{listen}` so you can alert on
+`time() > jul_mtls_crl_next_update_timestamp_seconds`.
 
 ## SAN allow-list
 
@@ -264,30 +273,30 @@ go test -run '^$' -bench 'Handshake|MTLS' -benchmem ./internal/server/
 
 ## Operational notes
 
-- **Bind-time, not hot-reload.** Like `tls.min_version`, `client_auth` (mode, CA
-  bundle, CRL, SAN list) is read when the TCP and QUIC listeners start. Editing
-  it and reloading swaps HTTP routing immediately, but the new client-auth
-  settings apply after the planned process restart and to subsequent TLS/QUIC
-  handshakes. Per-location `require_client_cert` is part of normal routing and
-  takes effect on reload.
+- **Hot reload (#486).** `client_auth` (mode, CA bundle, CRL, SAN list) is
+  rebuilt during reload and swapped for new TCP TLS and QUIC handshakes; a file
+  rewritten in place counts as a change. Connections already established keep
+  the certificate they were accepted with. Per-location `require_client_cert` is
+  part of normal routing and applies to the next request. The admin listener's
+  `[admin.tls.client_auth]` is still read when the admin listener starts.
 - **Server vs client certificates are separate.** The server certificate can
   come from ACME or static `cert`/`key`; `ca_file` is only the trust anchor for
   *client* certificates. They do not interfere.
 - **Rotation.** To rotate the client CA without downtime, issue the new CA
-  alongside the old one in `ca_file` (it is a bundle), restart, then drop the old
-  CA once all clients have migrated.
+  alongside the old one in `ca_file` (it is a bundle), reload, then drop the old
+  CA and reload again once all clients have migrated.
 - **Console editing.** The Console's **TLS & Certificates → Mutual TLS** section
   edits `client_auth` in place (mode, CA bundle, CRL, SAN allow-list), and a
   per-route **require client certificate** toggle (also on the Routes detail)
-  sets `require_client_cert`. Both go through Validate → Diff → Apply. The editor
-  and the diff repeat the bind-time caveat above: saving the server-level block
-  stages a restart, while the per-location toggle takes effect on reload.
+  sets `require_client_cert`. Both go through Validate → Diff → Apply and take
+  effect on reload.
 
 ## Limits
 
 - **CRL only; no OCSP.** Revocation is checked against a configured CRL file.
   There is no OCSP or OCSP-stapling client-cert check.
-- **Bundle is read at bind time.** CA and CRL changes need a restart (above).
+- **CRL refresh is reload-driven.** Jul does not fetch CRLs (no CDP/OCSP); an
+  external job must rewrite `crl_file` and trigger a reload.
 - **Identity is delivered via headers.** The verified identity is exposed as
   `$ssl_client_*` proxy variables for the upstream to authorize on; there is no
   built-in mapping from a client certificate to Jul.IA's own auth backends.

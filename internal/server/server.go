@@ -216,6 +216,9 @@ type Server struct {
 	// verification are rejected by the stdlib before this hook and are not
 	// reported here.
 	MTLSResultHook func(result string)
+	// CRLNextUpdateHook, when set, receives after startup and every reload the
+	// earliest client-CRL NextUpdate per listen address (zero: none set).
+	CRLNextUpdateHook func(map[string]time.Time)
 
 	// OnReloaded, when set, is invoked after the new HTTP handlers are live
 	// (handler swap and listener changes committed). It applies side-effects that
@@ -495,6 +498,11 @@ type listenerEntry struct {
 	// during Publish's commit), so no additional synchronization is needed
 	// beyond that serialization (#100).
 	certFingerprint string
+	// clientAuth is the live client-certificate policy of a TLS listener,
+	// swapped at Publish (#486); clientAuthFP is mtlsConfigFingerprint of it.
+	// Both follow certFingerprint's single-reload-loop discipline.
+	clientAuth   *dynamicClientAuth
+	clientAuthFP string
 	// altSvc is the dynamic Alt-Svc advertisement state for this address
 	// (#161); nil unless HTTP/3 is enabled here. It starts at its zero value
 	// (AltSvcNone) until startServing's Activate call succeeds, and is
@@ -679,6 +687,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 	// live. Fire the hook so the composition root can reconcile any recovery
 	// state (e.g. planned-restart sidecar files) that must only be cleared
 	// after the data plane has adopted the configuration.
+	s.reportCRLNextUpdates()
 	if s.OnInitialGenerationReady != nil {
 		s.OnInitialGenerationReady()
 	}
@@ -774,20 +783,17 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 			NextProtos:     cv.listenerNextProtos(addr),
 		}
 
-		// Mutual TLS is bound at listener creation, like MinVersion: the CA
-		// bundle, mode, and verifier are read from the config once and apply to
-		// connections accepted on this listener. Changing tls.client_auth takes
-		// effect on restart, not on hot reload.
+		// The client-certificate policy is read per handshake from a holder a
+		// reload swaps at Publish (#486), for both TCP TLS and QUIC.
 		ca, err := clientAuthForAddr(cfg.Servers, addr, s.MTLSResultHook)
 		if err != nil {
 			_ = ln.Close()
 			return nil, fmt.Errorf("client auth for %s: %w", addr, err)
 		}
-		if ca != nil {
-			tlsConf.ClientAuth = ca.mode
-			tlsConf.ClientCAs = ca.pool
-			tlsConf.VerifyPeerCertificate = ca.verify
-		}
+		entry.clientAuth = &dynamicClientAuth{}
+		entry.clientAuth.set(ca)
+		entry.clientAuthFP = mtlsConfigFingerprint(cfg.Servers, addr)
+		tlsConf.GetConfigForClient = entry.clientAuth.configForClient(tlsConf)
 		ln = tls.NewListener(ln, tlsConf)
 
 		// Stage the parallel HTTP/3 (QUIC) listener on the same UDP address when

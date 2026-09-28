@@ -97,6 +97,7 @@ type Metrics struct {
 	certExpiry             *prometheus.GaugeVec
 	certRenewals           prometheus.Counter
 	mtlsHandshakes         *prometheus.CounterVec
+	mtlsCRLNextUpdate      *prometheus.GaugeVec
 	wafEvents              *prometheus.CounterVec
 	egressDecisions        *prometheus.CounterVec
 	egressDNSAnswers       *prometheus.CounterVec
@@ -408,6 +409,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_mtls_handshakes_total",
 			Help: "Mutual-TLS handshakes presenting a CA-verified client certificate, labeled by result (verified/rejected). Certificates failing CA-chain verification are rejected by the TLS stack before this counter; a missing certificate denied per location is counted as a 403 in jul_http_requests_total.",
 		}, []string{"result"}),
+		mtlsCRLNextUpdate: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "jul_mtls_crl_next_update_timestamp_seconds",
+			Help: "Earliest NextUpdate of the client-certificate revocation lists enforced on a TLS listener, as a Unix timestamp, labeled by listen address. Absent when the listener has no CRL; 0 when the CRL sets no NextUpdate. Jul keeps enforcing a CRL past this time, so alert on time() > this value.",
+		}, []string{"listen"}),
 		certSeen: make(map[string]int64),
 		traffic:  newTrafficTracker(),
 
@@ -523,6 +528,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.certExpiry,
 		m.certRenewals,
 		m.mtlsHandshakes,
+		m.mtlsCRLNextUpdate,
 		m.wafEvents,
 		m.egressDecisions,
 		m.egressDNSAnswers,
@@ -941,6 +947,20 @@ func (m *Metrics) ObserveAltSvcTransition(to string) {
 // observability.
 func (m *Metrics) ObserveMTLSHandshake(result string) {
 	m.mtlsHandshakes.WithLabelValues(result).Inc()
+}
+
+// SetMTLSCRLNextUpdates replaces the jul_mtls_crl_next_update_timestamp_seconds
+// series with next, so a listener whose CRL was removed loses its series. It is
+// installed as Server.CRLNextUpdateHook.
+func (m *Metrics) SetMTLSCRLNextUpdates(next map[string]time.Time) {
+	m.mtlsCRLNextUpdate.Reset()
+	for listen, t := range next {
+		v := 0.0
+		if !t.IsZero() {
+			v = float64(t.Unix())
+		}
+		m.mtlsCRLNextUpdate.WithLabelValues(listen).Set(v)
+	}
 }
 
 // StreamConnDelta adjusts the jul_stream_active_conns gauge for proto by delta

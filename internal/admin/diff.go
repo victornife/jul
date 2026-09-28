@@ -365,9 +365,7 @@ func diffMTLS(name string, b, a *config.ClientAuthConfig, d *ConfigDiff) {
 	}
 }
 
-// mtlsBindTimeWarn explains that server-level mutual-TLS settings are read when
-// the listener binds: a structured edit reloads HTTP routing immediately, but
-// the new client-certificate verifier takes effect only after a restart (or a
-// listen-address change that forces a re-bind). Per-location
-// require_client_cert, by contrast, hot-reloads per request.
-const mtlsBindTimeWarn = "Server-level mutual TLS on %s is read when the listener binds: saving reloads HTTP routing immediately, but the new client-certificate settings take effect only after you restart Jul (or change the listen address)."
+// mtlsBindTimeWarn tells the operator which connections a server-level mutual
+// TLS change affects: it applies to new handshakes at reload (#486), while
+// connections already established keep the identity they were accepted with.
+const mtlsBindTimeWarn = "Server-level mutual TLS on %s applies to new TLS handshakes as soon as the reload succeeds; connections already established keep the client certificate they were accepted with."

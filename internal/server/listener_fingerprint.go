@@ -93,7 +93,7 @@ func listenerBindFingerprint(cfg *config.Config, addr string) string {
 		// stays specific. The Alt-Svc max-age is likewise NOT part of this
 		// fingerprint: #161 hot-swaps it into the existing
 		// listenerEntry.altSvc without a rebind (see updateAltSvcState).
-		fmt.Fprintf(&b, "minver=%d;mtls=%s;", minVer, mtlsConfigFingerprint(cfg.Servers, addr))
+		fmt.Fprintf(&b, "minver=%d;", minVer)
 		fmt.Fprintf(&b, "h3=%t;", s.http3EnabledForAddr(addr))
 	} else {
 		// h2c only takes effect on a plaintext listener (bind enables it solely

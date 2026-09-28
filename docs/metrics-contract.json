@@ -308,6 +308,15 @@
       "state": "merged_release_pending"
     },
     {
+      "name": "jul_mtls_crl_next_update_timestamp_seconds",
+      "type": "gauge",
+      "help": "Earliest NextUpdate of the client-certificate revocation lists enforced on a TLS listener, as a Unix timestamp, labeled by listen address. Absent when the listener has no CRL; 0 when the CRL sets no NextUpdate. Jul keeps enforcing a CRL past this time, so alert on time() > this value.",
+      "labels": [
+        "listen"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_mtls_handshakes_total",
       "type": "counter",
       "help": "Mutual-TLS handshakes presenting a CA-verified client certificate, labeled by result (verified/rejected). Certificates failing CA-chain verification are rejected by the TLS stack before this counter; a missing certificate denied per location is counted as a 403 in jul_http_requests_total.",
