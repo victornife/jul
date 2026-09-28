@@ -11,7 +11,7 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/issue160-quality.yml	reviewed	HR-07C Go statement coverage gate inspected for comment-only false failure and corrected; other jobs not semantically certified
 .github/workflows/issue407-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/issue408-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
-.github/workflows/issue94-quality.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/issue94-quality.yml	reviewed	HR-05 added-Go coverage gate inspected for comment-only false failure and corrected; other jobs and negative case not semantically certified
 .github/workflows/issue94-security-matrix.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/labels.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/nginx-migration-e2e.yml	reviewed	pinned reference and real-Jul corpus command scope traced to Makefile/scripts; exact-SHA CI result pending
@@ -86,7 +86,7 @@ docs/audit/old/2026-08-31-nginx-migration-corpus-closure.md	historical/context o
 docs/audit/old/AI-IMPLEMENTATION-JOURNAL.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/audit/old/HANDOFF-session-3.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
 docs/audit/old/combined-audit-2026-08-03.md	historical/context only	dated baseline preserved; disposition reconciled through audit register and #62, not revalidated line by line
-docs/auth.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
+docs/auth.md	reviewed	forward-auth context/header precedence and authenticator generation ownership traced to implementation and focused test; other auth claims and benchmarks remain unverified
 docs/benchmarks.md	not reviewed	structural link/TOML checks where applicable; behavioral assertions require independent semantic review
 docs/cache.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed
 docs/compatibility.md	not reviewed	Targeted current/release claim corrected; full behavioral and platform assertions remain unreviewed

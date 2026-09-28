@@ -65,14 +65,16 @@ func (f *forwardAuth) decide(ctx context.Context, r *http.Request) (forwardResul
 	if err != nil {
 		return forwardResult{}, err
 	}
-	// Convey the original request context to the auth service. X-Forwarded-*
-	// describe the original request; the auth service authenticates against it.
+	copyForwardHeaders(req.Header, r.Header)
+	// Replace client-supplied context after copying headers. A duplicate value
+	// could otherwise be interpreted differently by the auth service.
 	req.Header.Set("X-Forwarded-Method", r.Method)
 	req.Header.Set("X-Forwarded-Uri", r.URL.RequestURI())
 	if host := r.Host; host != "" {
 		req.Header.Set("X-Forwarded-Host", host)
+	} else {
+		req.Header.Del("X-Forwarded-Host")
 	}
-	copyForwardHeaders(req.Header, r.Header)
 
 	resp, err := f.dep.do(req)
 	if err != nil {

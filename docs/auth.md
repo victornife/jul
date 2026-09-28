@@ -138,6 +138,9 @@ changes for a directly exposed server.
 
 A `GET` subrequest is sent to `url` carrying the original headers (hop-by-hop
 stripped) plus `X-Forwarded-Method`, `X-Forwarded-Uri`, and `X-Forwarded-Host`.
+Client-supplied copies of these three context headers are replaced with the
+actual request method, URI and host, so the auth service receives one value for
+each. Treat other forwarded request headers as client input in the auth service.
 A **2xx** authorizes the request; the listed `auth_response_headers` are copied
 onto the upstream request (client-supplied copies are stripped first). Any other
 status is relayed to the client (non-error statuses normalized to 403; body
@@ -198,20 +201,20 @@ verifies against, exactly as for a proxied backend.
 
 Authenticators are **rebuilt from scratch on every reload that reaches
 `Prepare`**: the server reconstructs one `*Authenticator` per location,
-atomically swaps in the new set, and drops the previous generation. A proven
-semantic no-op stops before that work and retains the current authenticators.
-No explicit teardown is required because an
-authenticator owns **no background worker, timer, or long-lived socket** — the
-CIDR gate and htpasswd set are pure in-memory state, and the JWKS cache refreshes
-**lazily on the request path** (throttled to ≤1 fetch / 30s), never from a
-background goroutine. Superseded authenticators are therefore simply
-garbage-collected.
+atomically swaps in the new set, and retires the previous handler generation
+after it drains. A proven semantic no-op stops before that work and retains the
+current authenticators. CIDR and htpasswd state is in memory; JWKS refreshes
+**lazily on the request path** (throttled to ≤1 fetch / 30s), without a
+background worker. JWT and forward-auth authenticators can own HTTP clients
+with idle connection pools. Their `Close` method retires those idle connections
+when the superseded handler generation drains; active exchanges are not
+cancelled, and caller-supplied clients remain caller-owned.
 
-This rebuild-and-drop model is validated at runtime by `TestReloadChurnNoLeak`
+Rebuild churn is exercised by `TestReloadChurnNoLeak`
 (`internal/auth/reload_churn_test.go`), which drives sustained reload churn
 across all permutations and asserts the goroutine count and post-GC heap return
-to their pre-churn baseline. A 3,000-cycle run holds the goroutine count exactly
-flat for every method (env-tunable via `AUTH_CHURN_ITERS`).
+to their pre-churn baseline. Its cycle count is env-tunable via
+`AUTH_CHURN_ITERS`; this unit test does not replace a live generation-drain test.
 
 ## Metrics
 

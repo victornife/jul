@@ -13,10 +13,14 @@ import (
 
 func TestForwardAuthDecide(t *testing.T) {
 	var gotMethod, gotURI, gotHost, gotConnection, gotCustom string
+	var methodValues, uriValues, hostValues []string
 	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Header.Get("X-Forwarded-Method")
 		gotURI = r.Header.Get("X-Forwarded-Uri")
 		gotHost = r.Header.Get("X-Forwarded-Host")
+		methodValues = r.Header.Values("X-Forwarded-Method")
+		uriValues = r.Header.Values("X-Forwarded-Uri")
+		hostValues = r.Header.Values("X-Forwarded-Host")
 		gotConnection = r.Header.Get("Connection")
 		gotCustom = r.Header.Get("X-Custom")
 		switch r.URL.Query().Get("decision") {
@@ -37,6 +41,10 @@ func TestForwardAuthDecide(t *testing.T) {
 		orig := httptest.NewRequest(http.MethodPost, "http://app.example/orders?q=1", nil)
 		orig.Header.Set("Connection", "keep-alive")
 		orig.Header.Set("X-Custom", "abc")
+		orig.Header.Add("X-Forwarded-Method", "GET")
+		orig.Header.Add("X-Forwarded-Method", "DELETE")
+		orig.Header.Set("X-Forwarded-Uri", "/spoofed")
+		orig.Header.Set("X-Forwarded-Host", "attacker.example")
 		res, err := fa.decide(context.Background(), orig)
 		if err != nil {
 			t.Fatalf("decide: %v", err)
@@ -55,6 +63,9 @@ func TestForwardAuthDecide(t *testing.T) {
 		}
 		if gotHost != "app.example" {
 			t.Errorf("X-Forwarded-Host = %q, want app.example", gotHost)
+		}
+		if len(methodValues) != 1 || methodValues[0] != http.MethodPost || len(uriValues) != 1 || uriValues[0] != "/orders?q=1" || len(hostValues) != 1 || hostValues[0] != "app.example" {
+			t.Errorf("forwarded context contains client-supplied values: method=%q uri=%q host=%q", methodValues, uriValues, hostValues)
 		}
 		if gotConnection != "" {
 			t.Errorf("hop-by-hop Connection header should not be forwarded, got %q", gotConnection)
