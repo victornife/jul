@@ -140,6 +140,15 @@ func TestJWTValidate(t *testing.T) {
 		}
 	})
 
+	t.Run("duplicate authorization fields", func(t *testing.T) {
+		token := signRS256(t, rsaKey, "rsa-1", validClaims())
+		r := bearerReq(token)
+		r.Header.Add("Authorization", "Bearer other")
+		if _, err := j.validate(r); err == nil {
+			t.Fatal("ambiguous authorization fields accepted")
+		}
+	})
+
 	t.Run("missing token", func(t *testing.T) {
 		if _, err := j.validate(bearerReq("")); err == nil {
 			t.Error("expected error for missing token")

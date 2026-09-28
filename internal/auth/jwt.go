@@ -102,7 +102,11 @@ func (j *jwtAuth) keyFunc(t *jwt.Token) (any, error) {
 
 // bearerToken extracts the token from an "Authorization: Bearer <token>" header.
 func bearerToken(r *http.Request) (string, bool) {
-	h := r.Header.Get("Authorization")
+	values := r.Header.Values("Authorization")
+	if len(values) != 1 {
+		return "", false
+	}
+	h := values[0]
 	const prefix = "Bearer "
 	if len(h) <= len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
 		return "", false
