@@ -519,13 +519,12 @@ provider so operators can choose the right source for their deployment.
 ### Token exposure
 
 - **Consul ACL token** and the **Kubernetes service-account token** are
-  sensitive credentials. They are stored in the config (possibly via secret
-  references, `${env:…}` or `${secret:…}`), not in a dedicated keychain. Follow
-  the same rotation and access-control discipline as any other config secret:
-  protect the config file, use secret references, and rotate tokens on
-  compromise. Tokens are never logged by Jul.IA (the config redaction mechanism
-  masks them), but they travel over the network to the provider — ensure TLS is
-  used.
+  sensitive credentials. Explicit `token` values are supplied through config
+  (possibly via secret references); the default Kubernetes service-account
+  token comes from the mounted file and is reread on every API request. Protect
+  config and mounted secrets, use references for explicit values, and rotate
+  compromised credentials. Jul.IA does not log the bearer header, but the
+  tokens travel to the provider — use HTTPS for remote control planes.
 - **Kubernetes `insecure_skip_tls_verify`.** Setting this to `true` for local
   testing bypasses API-server verification; never enable it in production.
 
