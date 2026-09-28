@@ -1,0 +1,56 @@
+name: systemd deployment E2E
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/systemd-deployment-e2e.yml'
+      - 'deploy/systemd/**'
+      - 'deploy/docker/server.toml'
+      - 'docs/deployment.md'
+      - 'scripts/systemd-deployment-e2e.py'
+      - 'cmd/jul/**'
+      - 'internal/admin/**'
+      - 'internal/app/**'
+      - 'internal/config/**'
+      - 'internal/handler/**'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/systemd-deployment-e2e.yml'
+      - 'deploy/systemd/**'
+      - 'deploy/docker/server.toml'
+      - 'docs/deployment.md'
+      - 'scripts/systemd-deployment-e2e.py'
+      - 'cmd/jul/**'
+      - 'internal/admin/**'
+      - 'internal/app/**'
+      - 'internal/config/**'
+      - 'internal/handler/**'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: systemd-deployment-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shipped-units-and-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Record systemd runtime
+        run: systemctl --version && test -d /run/systemd/system && sudo -n true
+      - name: Exercise shipped service units
+        run: python3 scripts/systemd-deployment-e2e.py

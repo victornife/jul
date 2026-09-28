@@ -19,6 +19,7 @@ path_or_surface	disposition	reason_and_limit
 .github/workflows/release.yml	reviewed	five-minute release smoke job compared to ADR 0005 and evidence log; rest of release workflow not revalidated
 .github/workflows/security-gates.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
 .github/workflows/semantic-drift-coverage.yml	not reviewed	inventoried; full platform/operational execution or line-by-line semantic review not performed
+.github/workflows/systemd-deployment-e2e.yml	reviewed	Ubuntu CI journey for shipped editable/read-only units, authority and permissions; exact-SHA runner pending
 CHANGELOG.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 CONTRIBUTING.md	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 Dockerfile	reviewed	Docker CI exposed and verified fix for local gofast build-order error; default and managed journey passed at 357c371d
@@ -212,6 +213,7 @@ internal/observability/metric_contract_test.go	reviewed	targeted release/status,
 scripts/build-release.ps1	reviewed	PowerShell Go tag argument and archive shape traced to CI package exercise; Windows lean/full result pending
 scripts/docs-check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/docker-deployment-e2e.py	reviewed	Docker default site/health and managed adoption/apply/rollback/restart passed at 357c371d; remote TLS untested
+scripts/systemd-deployment-e2e.py	reviewed	bounded service user/config/units setup and cleanup, editable recovery and read-only denial; runner execution pending
 scripts/semantic_drift.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/test-discovery-k8s-live.ps1	reviewed	unsafe port-owner kill replaced with a conflict error; live Kubernetes/PowerShell execution not available
 scripts/test-nginx-importer.ps1	reviewed	exit 3, JSON status and candidate assertions passed in PR #482 Windows CI at da528885; full migration compatibility not implied

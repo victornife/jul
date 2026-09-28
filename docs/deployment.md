@@ -153,6 +153,9 @@ sudo systemctl enable --now jul.service
 If the `jul` service user already exists, skip `useradd`. Check the effective
 owner and mode of `/etc/jul` and `server.toml` after provisioning; an upgrade
 from a root-owned tree also needs its existing files transferred deliberately.
+On a fresh managed deployment, preview and explicitly confirm the one-time
+**adopt external file** action in the Console before the first Apply. Until a
+baseline is established, ordinary writes return 409 (`managed_unadopted`).
 
 Console Apply and history rollback are available only when admin access is
 enabled, the config declares `managed` authority, and the unit can write the
@@ -177,6 +180,13 @@ sudo systemctl enable --now jul-readonly.service
 
 `CacheDirectory` and `LogsDirectory` remain writable for the disk cache, the
 ACME certificate cache, and access logs.
+
+The [systemd deployment CI journey](../scripts/systemd-deployment-e2e.py)
+starts both shipped units on a disposable Ubuntu runner. It checks the editable
+unit's ownership, initial adoption, Apply, rollback and restart, then checks
+that the read-only unit serves traffic and refuses Apply without changing the
+file. The test uses loopback admin HTTP and a temporary token; remote admin TLS
+and production certificates require separate verification.
 
 ### Verify the units
 
