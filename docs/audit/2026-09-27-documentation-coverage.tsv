@@ -214,7 +214,7 @@ internal/observability/**; internal/storagefs/**	not reviewed	metric contract te
 internal/observability/metric_contract_test.go	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/build-release.ps1	reviewed	Windows lean/full helper archive and installed service passed; Linux/macOS platform asset parity corrected, native helper packaging not exercised
 scripts/docs-check.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
-scripts/docker-deployment-e2e.py	reviewed	Docker default site/health and managed adoption/apply/rollback/restart passed at 357c371d; remote TLS untested
+scripts/docker-deployment-e2e.py	reviewed	Docker default site/health and managed adoption/apply/rollback/restart passed at 357c371d; parsed effective admin token assertion corrected after comment-sensitive CI failure, rerun pending; remote TLS untested
 scripts/systemd-deployment-e2e.py	reviewed	editable/read-only recovery passed at e450113d; stage/drift passed at 05a540be; non-loopback admin TLS extension pending CI
 scripts/semantic_drift.py	reviewed	targeted release/status, navigation or source claims checked; coverage is scoped and does not imply all prose verified
 scripts/test-discovery-k8s-live.ps1	reviewed	unsafe port-owner kill replaced with a conflict error; live Kubernetes/PowerShell execution not available

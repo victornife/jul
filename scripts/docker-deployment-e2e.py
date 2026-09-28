@@ -15,6 +15,7 @@ import socket
 import subprocess
 import tempfile
 import time
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -113,7 +114,8 @@ def main():
         candidate = candidate.replace('history_dir = "/var/lib/jul/config-history"',
                                       'token = "${env:JUL_ADMIN_TOKEN}"\n'
                                       'history_dir = "/var/lib/jul/config-history"', 1)
-        assert candidate != original and candidate.count('token = "${env:JUL_ADMIN_TOKEN}"') == 1
+        assert candidate != original
+        assert tomllib.loads(candidate)["admin"]["token"] == "${env:JUL_ADMIN_TOKEN}"
         config_dir.mkdir()
         (config_dir / "server.toml").write_text(candidate)
         tmp.chmod(0o755)
