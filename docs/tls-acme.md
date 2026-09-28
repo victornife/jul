@@ -44,10 +44,28 @@ server_names = ["example.com", "www.example.com"]
     ca        = "letsencrypt-staging"       # default; use "letsencrypt" in prod
     challenge = "http-01"                   # or "tls-alpn-01"
     cache_dir = "./jul-data/certs"          # issued certs + account key
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 200                            # replace with your site's action
+
+# HTTP-01 needs a reachable plaintext listener on port 80. Its challenge path
+# is answered by ACME before the normal HTTPS redirect runs.
+[[servers]]
+listen = "0.0.0.0:80"
+server_names = ["example.com", "www.example.com"]
+redirect_https = 308
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 200
 ```
 
 > The CA defaults to **staging** so an accidental deployment never burns
 > production rate limits. Set `ca = "letsencrypt"` for trusted certificates.
+> Replace the domains and email, make both ports reachable, and give the Jul
+> service identity write access to the cache directory. If you select
+> `challenge = "tls-alpn-01"`, the port 80 block is unnecessary.
 
 ## Configuration reference
 
