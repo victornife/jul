@@ -136,6 +136,33 @@ func TestRewriteRedirect(t *testing.T) {
 	}
 }
 
+// TestRewriteRedirectStaysOnOrigin: a rewrite that moves request path bytes to
+// the front of a relative target must not yield a scheme-relative Location.
+func TestRewriteRedirectStaysOnOrigin(t *testing.T) {
+	cfg := &config.Config{Servers: []config.ServerConfig{{
+		Listen: "127.0.0.1:80",
+		Locations: []config.LocationConfig{{
+			Match: config.MatchConfig{Type: "prefix", Path: "/"},
+			Root:  "/root",
+			Rewrites: []config.RewriteConfig{
+				{Pattern: "^/go/(.*)$", Replacement: "/$1", Flag: "permanent"},
+				{Pattern: "^/ext$", Replacement: "https://example.org/x", Flag: "redirect"},
+			},
+		}},
+	}}}
+	r := testRouter(t, cfg)
+	for target, want := range map[string]string{
+		"/go/%5Cevil.example/x":   "/evil.example/x",
+		"/go/%2F%5Cevil.example/": "/evil.example/",
+		"/go/page":                "/page",
+		"/ext":                    "https://example.org/x",
+	} {
+		if loc := do(t, r, "127.0.0.1:80", "h", target).Header().Get("Location"); loc != want {
+			t.Errorf("%s: Location = %q, want %q", target, loc, want)
+		}
+	}
+}
+
 func TestRewriteInternal(t *testing.T) {
 	cfg := &config.Config{Servers: []config.ServerConfig{{
 		Listen: "127.0.0.1:80",

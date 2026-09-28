@@ -32,10 +32,10 @@ func applyRewrites(rules []compiledRewrite, w http.ResponseWriter, r *http.Reque
 		target := rw.re.ReplaceAllString(path, rw.replacement)
 		switch rw.flag {
 		case "redirect":
-			http.Redirect(w, r, target, http.StatusFound)
+			http.Redirect(w, r, localRedirectTarget(target), http.StatusFound)
 			return true
 		case "permanent":
-			http.Redirect(w, r, target, http.StatusMovedPermanently)
+			http.Redirect(w, r, localRedirectTarget(target), http.StatusMovedPermanently)
 			return true
 		default: // "", "last", "break"
 			path = target
@@ -46,6 +46,17 @@ func applyRewrites(rules []compiledRewrite, w http.ResponseWriter, r *http.Reque
 		}
 	}
 	return false
+}
+
+// localRedirectTarget keeps a path-relative rewrite target on this origin. The
+// target embeds request path bytes, and browsers read a leading "//" or "/\"
+// as a scheme-relative URL, so `/go/(.*)` -> `/$1` must not become a redirect
+// to another host. Absolute targets written by the operator are untouched.
+func localRedirectTarget(target string) string {
+	if !strings.HasPrefix(target, "/") {
+		return target
+	}
+	return "/" + strings.TrimLeft(target, "/\\")
 }
 
 // selectLocation resolves a request to a location within a server, implementing
