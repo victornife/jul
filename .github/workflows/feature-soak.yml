@@ -1,0 +1,76 @@
+name: Y1-08 and Y1-09 feature soak evidence
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/feature-soak.py'
+      - '.github/workflows/feature-soak.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: feature-soak-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build importer-enabled binary
+        run: go build -tags importer -o "$RUNNER_TEMP/jul" ./cmd/jul
+      - name: Exercise both feature workloads briefly
+        shell: bash
+        env:
+          JUL_SOAK_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/feature-soak.py zero-config --jul "$RUNNER_TEMP/jul" --seconds 20 --out "$RUNNER_TEMP/feature-smoke/zero-config"
+          python3 scripts/feature-soak.py importer --jul "$RUNNER_TEMP/jul" --seconds 20 --out "$RUNNER_TEMP/feature-smoke/importer"
+      - name: Retain smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: feature-soak-preflight
+          path: ${{ runner.temp }}/feature-smoke/
+          if-no-files-found: warn
+
+  qualifying:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        feature: [zero-config, importer]
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build importer-enabled binary
+        run: go build -tags importer -o "$RUNNER_TEMP/jul" ./cmd/jul
+      - name: Run feature-specific one-hour candidate
+        shell: bash
+        env:
+          JUL_SOAK_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/feature-soak.py '${{ matrix.feature }}' --jul "$RUNNER_TEMP/jul" --seconds 3600 --out "$RUNNER_TEMP/feature-soak/${{ matrix.feature }}"
+      - name: Retain exact-head evidence and diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: feature-soak-${{ matrix.feature }}
+          path: ${{ runner.temp }}/feature-soak/${{ matrix.feature }}/
+          if-no-files-found: warn

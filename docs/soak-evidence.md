@@ -35,6 +35,7 @@ workloads and dated qualifying runs. The historical v1.28.0 table below used
 | CI smoke (`soak (smoke)` job) | every push / PR | 20s × 3 scenarios | `soak-results` artifact on the [CI workflow](../.github/workflows/ci.yml) run | ❌ No (smoke only) |
 | Release gate (`soak gate (ADR 0005)` job) | version tag `v*` | 5m × 3 scenarios | `soak-results` artifact on the [release workflow](../.github/workflows/release.yml) run; a red run blocks the release | ❌ No (smoke only) |
 | Local | `scripts/soak.sh` | configurable | stdout (see runs below) | ✅ Yes, if duration meets the minimum for the scope exercised |
+| Feature-specific Y1-08/Y1-09 candidate | PR change to `scripts/feature-soak.py` or its workflow, or manual workflow dispatch after it is on the default branch | 20s preflight, then 3600s per feature | `summary.json` plus server logs in the [feature soak workflow](../.github/workflows/feature-soak.yml) artifacts | ☐ Pending execution and evidence review; a green smoke is not qualifying |
 
 All three scenarios are driven by the in-tree soak tests behind the `soak` build tag:
 

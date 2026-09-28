@@ -87,6 +87,41 @@ make config-check            # every shipped .toml still loads
 
 All three must pass before proceeding to a real-binary run.
 
+## Feature-specific Y1-08 and Y1-09 candidates
+
+`scripts/feature-soak.py` supplies real-binary Linux workloads for the two
+features whose long-running evidence is still open. Build the importer-enabled
+binary once, then run each workload separately for at least one hour:
+
+```sh
+go build -tags importer -o /tmp/jul-feature-soak ./cmd/jul
+python3 scripts/feature-soak.py zero-config --jul /tmp/jul-feature-soak \
+  --seconds 3600 --out /tmp/jul-soak-zero-config
+python3 scripts/feature-soak.py importer --jul /tmp/jul-feature-soak \
+  --seconds 3600 --out /tmp/jul-soak-importer
+```
+
+- **Y1-08:** two live `jul run` processes serve a temporary static page and
+  proxy a local backend under concurrent HTTP traffic. The same binary repeatedly
+  lints a valid env-secret config and verifies a literal-token warning plus the
+  strict/quiet refusal. The artifact records counts and both processes' RSS/FD
+  samples and enforces generous growth bounds.
+- **Y1-09:** each cycle invokes the importer on a clean single-file config and
+  a blocking directive, checks the expected exit and assessment, lints both
+  candidates, and requires byte-stable output hashes. This tests repeated CLI
+  invocations, the released single-file path and safe manual-action behavior;
+  it does not claim long-lived parser-process leak evidence, include traversal,
+  or general NGINX equivalence.
+
+The [feature soak workflow](../.github/workflows/feature-soak.yml) first runs a
+20-second preflight, then runs two independent 3600-second jobs on Linux and
+uploads `summary.json` and server logs. Its result is **candidate evidence**:
+inspect the exact SHA, elapsed active workload, resource samples, failure
+counts and artifacts before changing either feature's maturity or criterion 5.
+Keep the artifact and a dated conclusion in [soak-evidence.md](soak-evidence.md)
+and the [soak evidence directory](../soak-artifacts/README.md). A short preflight
+or a long run of the generic Phase 2A profile does not qualify.
+
 ## Procedure A — 5-minute local validation
 
 **Goal:** reproduce the CI release gate's scale locally before a real run.
