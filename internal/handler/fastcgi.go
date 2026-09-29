@@ -703,13 +703,16 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 	for _, hop := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "TE", "Trailer", "Transfer-Encoding", "Upgrade", "Proxy-Authenticate", "Proxy-Authorization"} {
 		parsedHeaders.Del(hop)
 	}
+	declaredLength := int64(-1)
 	if lengths := parsedHeaders.Values("Content-Length"); len(lengths) > 0 {
 		if len(lengths) != 1 {
 			return errors.New("uwsgi response has ambiguous Content-Length")
 		}
-		if n, err := strconv.ParseInt(lengths[0], 10, 64); err != nil || n < 0 {
+		n, err := strconv.ParseInt(lengths[0], 10, 64)
+		if err != nil || n < 0 {
 			return errors.New("uwsgi response has invalid Content-Length")
 		}
+		declaredLength = n
 	}
 	for name, values := range parsedHeaders {
 		for _, value := range values {
@@ -719,6 +722,13 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 	w.WriteHeader(status)
 	// This forwards the upstream FastCGI/uWSGI response body unchanged; the
 	// origin application is responsible for sanitizing any output it generates.
+	if declaredLength >= 0 {
+		_, err := io.CopyN(w, br, declaredLength)
+		if errors.Is(err, io.EOF) {
+			return io.ErrUnexpectedEOF
+		}
+		return err
+	}
 	_, err := io.Copy(w, br) // lgtm[go/reflected-xss]
 	return err
 }

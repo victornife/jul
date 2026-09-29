@@ -101,6 +101,19 @@ func TestCGIRejectsAmbiguousResponseLengths(t *testing.T) {
 		}
 	}
 }
+
+func TestCGIClassifiesTruncatedDeclaredResponse(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := writeCGIResponse(bufio.NewReader(strings.NewReader("Content-Length: 10\r\n\r\nshort")), rec)
+	if !errors.Is(err, io.ErrUnexpectedEOF) || rec.Body.String() != "short" {
+		t.Fatalf("truncated declared response = %v, %q", err, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	err = writeCGIResponse(bufio.NewReader(strings.NewReader("Content-Length: 2\r\n\r\nlonger")), rec)
+	if err != nil || rec.Body.String() != "lo" {
+		t.Fatalf("declared response overrun = %v, %q", err, rec.Body.String())
+	}
+}
 func (*cgiDiscardWriter) WriteHeader(int)             {}
 func (*cgiDiscardWriter) Write(p []byte) (int, error) { return len(p), nil }
 
