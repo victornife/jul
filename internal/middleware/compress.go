@@ -214,7 +214,7 @@ func (cw *compressWriter) WriteHeader(code int) {
 	// that prohibit intermediary transformation never get compressed. The Vary
 	// header is added in flushHeader so it is guaranteed even for empty bodies.
 	if !bodyAllowed(code) ||
-		cw.Header().Get("Content-Encoding") != "" ||
+		len(cw.Header().Values("Content-Encoding")) != 0 ||
 		cacheControlNoTransform(cw.r.Header) ||
 		cacheControlNoTransform(cw.Header()) {
 		cw.startPassthrough()

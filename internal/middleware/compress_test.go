@@ -157,6 +157,21 @@ func TestCompressNoDoubleEncode(t *testing.T) {
 	}
 }
 
+func TestCompressNoDoubleEncodeWhenFirstCodingFieldEmpty(t *testing.T) {
+	mw := gzipMiddleware(t, CompressionOptions{MinSize: 1})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := serveCompress(mw, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Add("Content-Encoding", "")
+		w.Header().Add("Content-Encoding", "br")
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, "already encoded")
+	}, req)
+	if got := rec.Header().Values("Content-Encoding"); len(got) != 2 || got[1] != "br" {
+		t.Fatalf("response was encoded twice: %v", got)
+	}
+}
+
 func TestCompressSkipsRange(t *testing.T) {
 	mw := gzipMiddleware(t, CompressionOptions{MinSize: 8})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
