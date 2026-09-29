@@ -250,6 +250,64 @@ func TestPlaintextAdminDialRefusesOffHostResolution(t *testing.T) {
 	}
 }
 
+func TestPlaintextAdminDialLoopbackResolutionAndFallback(t *testing.T) {
+	ctx := context.Background()
+	lookup := func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("::1")}, {IP: net.ParseIP("127.0.0.1")}}, nil
+	}
+	first := errors.New("IPv6 loopback unavailable")
+	client, peer := net.Pipe()
+	defer client.Close()
+	defer peer.Close()
+	var attempts []string
+	dial := func(_ context.Context, _, address string) (net.Conn, error) {
+		attempts = append(attempts, address)
+		if address == "[::1]:9090" {
+			return nil, first
+		}
+		return client, nil
+	}
+	conn, err := dialLoopbackWith(ctx, "tcp", "localhost:9090", lookup, dial)
+	if err != nil || conn != client || !reflect.DeepEqual(attempts, []string{"[::1]:9090", "127.0.0.1:9090"}) {
+		t.Fatalf("loopback fallback: conn=%v err=%v attempts=%v", conn, err, attempts)
+	}
+
+	if _, err := dialLoopbackWith(ctx, "tcp", "127.0.0.1:9090", func(context.Context, string) ([]net.IPAddr, error) {
+		t.Fatal("literal loopback IP should not need DNS")
+		return nil, nil
+	}, dial); err != nil {
+		t.Fatalf("literal loopback: %v", err)
+	}
+	if _, err := dialLoopbackWith(ctx, "tcp", "localhost:9090", func(context.Context, string) ([]net.IPAddr, error) {
+		return nil, errors.New("DNS failed")
+	}, dial); err == nil {
+		t.Fatal("DNS failure accepted")
+	}
+	if _, err := dialLoopbackWith(ctx, "tcp", "localhost:9090", func(context.Context, string) ([]net.IPAddr, error) {
+		return nil, nil
+	}, dial); err == nil {
+		t.Fatal("empty DNS answer accepted")
+	}
+	if _, err := dialLoopbackWith(ctx, "tcp", "localhost:9090", lookup, func(context.Context, string, string) (net.Conn, error) {
+		return nil, first
+	}); !errors.Is(err, first) {
+		t.Fatalf("all loopback dials failed: %v, want %v", err, first)
+	}
+}
+
+func TestProfileFileRejectsNonRegularAndOversizedInput(t *testing.T) {
+	if _, _, err := readProfile(t.TempDir(), "prod"); err == nil {
+		t.Fatal("directory accepted as a profile file")
+	}
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	if err := os.WriteFile(path, []byte(`{"profiles":{"prod":{"endpoint":"https://example.com"}}}`+strings.Repeat(" ", 1<<20)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := readProfile(path, "prod"); err == nil {
+		t.Fatal("oversized profile accepted after a valid JSON prefix")
+	}
+}
+
 func TestNewTLSConfigurationFailures(t *testing.T) {
 	dir := t.TempDir()
 	ca := filepath.Join(dir, "bad.pem")
