@@ -90,6 +90,39 @@ func routesFromSet(set *descriptorpb.FileDescriptorSet) ([]*route, error) {
 	return routesFromFiles(files)
 }
 
+// reflectionFiles tracks the total received descriptor bytes across messages.
+// The backend may send many individually bounded gRPC replies during Prepare.
+type reflectionFiles struct {
+	collected map[string]*descriptorpb.FileDescriptorProto
+	seen      map[string]bool
+	pending   []string
+	bytes     int
+}
+
+func (f *reflectionFiles) add(resp *refv1.FileDescriptorResponse) error {
+	for _, raw := range resp.GetFileDescriptorProto() {
+		if len(raw) > maxDescriptorSetBytes-f.bytes {
+			return fmt.Errorf("reflection descriptors exceed %d bytes", maxDescriptorSetBytes)
+		}
+		f.bytes += len(raw)
+		fdp := &descriptorpb.FileDescriptorProto{}
+		if err := proto.Unmarshal(raw, fdp); err != nil {
+			return fmt.Errorf("reflection: decode file descriptor: %w", err)
+		}
+		if _, ok := f.collected[fdp.GetName()]; ok {
+			continue
+		}
+		f.collected[fdp.GetName()] = fdp
+		for _, dep := range fdp.GetDependency() {
+			if !f.seen[dep] {
+				f.seen[dep] = true
+				f.pending = append(f.pending, dep)
+			}
+		}
+	}
+	return nil
+}
+
 // routesFromFiles scans every method in every file for a google.api.http
 // annotation and compiles the resulting bindings into routes.
 func routesFromFiles(files *protoregistry.Files) ([]*route, error) {
@@ -295,29 +328,7 @@ func fetchDescriptorSet(ctx context.Context, conn *grpc.ClientConn) (*descriptor
 		return nil, fmt.Errorf("reflection: unexpected response to ListServices")
 	}
 
-	collected := make(map[string]*descriptorpb.FileDescriptorProto)
-	seen := make(map[string]bool)
-	var pending []string
-
-	addFiles := func(fdResp *refv1.FileDescriptorResponse) error {
-		for _, raw := range fdResp.GetFileDescriptorProto() {
-			fdp := &descriptorpb.FileDescriptorProto{}
-			if err := proto.Unmarshal(raw, fdp); err != nil {
-				return fmt.Errorf("reflection: decode file descriptor: %w", err)
-			}
-			if _, ok := collected[fdp.GetName()]; ok {
-				continue
-			}
-			collected[fdp.GetName()] = fdp
-			for _, dep := range fdp.GetDependency() {
-				if !seen[dep] {
-					seen[dep] = true
-					pending = append(pending, dep)
-				}
-			}
-		}
-		return nil
-	}
+	files := &reflectionFiles{collected: make(map[string]*descriptorpb.FileDescriptorProto), seen: make(map[string]bool)}
 
 	for _, svc := range list.GetService() {
 		switch svc.GetName() {
@@ -333,15 +344,15 @@ func fetchDescriptorSet(ctx context.Context, conn *grpc.ClientConn) (*descriptor
 		if e := resp.GetErrorResponse(); e != nil {
 			return nil, fmt.Errorf("reflection file for %s: %s", svc.GetName(), e.GetErrorMessage())
 		}
-		if err := addFiles(resp.GetFileDescriptorResponse()); err != nil {
+		if err := files.add(resp.GetFileDescriptorResponse()); err != nil {
 			return nil, err
 		}
 	}
 
-	for len(pending) > 0 {
-		name := pending[0]
-		pending = pending[1:]
-		if _, ok := collected[name]; ok {
+	for len(files.pending) > 0 {
+		name := files.pending[0]
+		files.pending = files.pending[1:]
+		if _, ok := files.collected[name]; ok {
 			continue
 		}
 		resp, err := send(&refv1.ServerReflectionRequest{
@@ -355,13 +366,13 @@ func fetchDescriptorSet(ctx context.Context, conn *grpc.ClientConn) (*descriptor
 			// into our binary; filesFromSet's fallback resolver handles it.
 			continue
 		}
-		if err := addFiles(resp.GetFileDescriptorResponse()); err != nil {
+		if err := files.add(resp.GetFileDescriptorResponse()); err != nil {
 			return nil, err
 		}
 	}
 
 	set := &descriptorpb.FileDescriptorSet{}
-	for _, fdp := range collected {
+	for _, fdp := range files.collected {
 		set.File = append(set.File, fdp)
 	}
 	return set, nil
