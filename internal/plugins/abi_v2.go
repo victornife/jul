@@ -6,10 +6,8 @@
 package plugins
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -320,18 +318,8 @@ func registerJulV2HostModule(ctx context.Context, r wazero.Runtime, p *plugin) e
 		if inv == nil || !requestOnly(inv) {
 			return 0
 		}
-		if !inv.bodyBuffered {
-			inv.bodyBuffered = true
-			if inv.r.Body != nil {
-				data, _ := io.ReadAll(io.LimitReader(inv.r.Body, int64(inv.maxReqBody)+1))
-				if len(data) > inv.maxReqBody {
-					inv.fail(errBodyTooLarge)
-					return 0
-				}
-				inv.body = data
-				inv.r.Body = io.NopCloser(bytes.NewReader(data))
-				inv.r.ContentLength = int64(len(data))
-			}
+		if !inv.bufferRequestBody() {
+			return 0
 		}
 		return v2write(inv, m, buf, limit, inv.body)
 	})

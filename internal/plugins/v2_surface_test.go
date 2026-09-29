@@ -93,6 +93,19 @@ func TestV2RequestSurface(t *testing.T) {
 	}
 }
 
+func TestV2RequestBodyReadErrorFailsBeforeDownstream(t *testing.T) {
+	s := surfaceSet(t, nil)
+	called := false
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true })
+	r := httptest.NewRequest(http.MethodPost, "/p", nil)
+	r.Header.Set("X-Op", "req-surface")
+	r.Body = io.NopCloser(io.MultiReader(strings.NewReader("abc"), errorReader{}))
+	rec := serve(chainFor(s, next, "p"), r)
+	if rec.Code != http.StatusInternalServerError || called {
+		t.Fatalf("read failure status = %d, downstream called = %v", rec.Code, called)
+	}
+}
+
 func TestV2ResponseSurface(t *testing.T) {
 	m, _ := v2Manager(t, nil)
 	s := buildSet(t, m, map[string]config.PluginConfig{"p": v2cfg(func(pc *config.PluginConfig) { pc.KV = true })})
