@@ -205,6 +205,9 @@ func TestResolveConnectionFailuresAndPermissions(t *testing.T) {
 }
 
 func TestTokenFileFailures(t *testing.T) {
+	if _, _, err := readToken(t.TempDir(), strings.NewReader("")); err == nil {
+		t.Fatal("directory accepted as token file")
+	}
 	if _, _, err := readToken("-", strings.NewReader("")); err == nil {
 		t.Fatal("empty stdin token accepted")
 	}

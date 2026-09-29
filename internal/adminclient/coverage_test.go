@@ -189,6 +189,9 @@ func TestProfileDefaultsAndRemainingErrors(t *testing.T) {
 	if _, _, err := readProfile(profile, "missing"); err == nil {
 		t.Fatal("missing profile accepted")
 	}
+	if _, _, err := readProfile(dir, "one"); err == nil {
+		t.Fatal("directory accepted as profile file")
+	}
 	if err := os.WriteFile(profile, []byte(`{"profiles":{"one":{"endpoint":"https://example.com"}}} {"profiles":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}

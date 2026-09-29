@@ -138,6 +138,10 @@ func readProfile(filename, name string) (Profile, []string, error) {
 		_ = file.Close()
 		return Profile{}, nil, fmt.Errorf("inspect profile file %q: %w", filename, err)
 	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return Profile{}, nil, fmt.Errorf("profile file %q must be a regular file", filename)
+	}
 	warnings := permissionWarnings(filename, info)
 	data, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
 	closeErr := file.Close()
@@ -190,6 +194,10 @@ func readToken(filename string, stdin io.Reader) (string, []string, error) {
 	if err != nil {
 		_ = file.Close()
 		return "", nil, fmt.Errorf("inspect token file %q: %w", filename, err)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return "", nil, fmt.Errorf("token file %q must be a regular file", filename)
 	}
 	warnings := permissionWarnings(filename, info)
 	data, readErr := io.ReadAll(io.LimitReader(file, (64<<10)+1))
