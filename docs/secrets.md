@@ -81,6 +81,8 @@ written back to disk or surfaced through the Console — only counted (below).
 `${file:}`/`${secret:}` trims **all trailing CR/LF characters** so a secret
 stored one-per-file does not pick up an editor's newline. If trailing newlines
 are part of a secret's bytes, this source cannot preserve them.
+The source must be a regular file and its content must fit within 1 MiB;
+oversized or special-device paths fail resolution before publication.
 
 ## Log redaction
 
