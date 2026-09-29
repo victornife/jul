@@ -144,8 +144,8 @@ func validateGRPCTranscode(g *GRPCTranscodeConfig, where string, upstreamNames m
 	default:
 		errs = append(errs, fmt.Errorf("%s: stream_mode %q must be \"ndjson\" or \"sse\"", where, g.StreamMode))
 	}
-	if g.MaxMessageSize.Bytes() < 0 {
-		errs = append(errs, fmt.Errorf("%s: max_message_size must not be negative", where))
+	if size := g.MaxMessageSize.Bytes(); size < 0 || size > 16<<20 {
+		errs = append(errs, fmt.Errorf("%s: max_message_size must be between 0 and 16 MiB", where))
 	}
 	return errs
 }

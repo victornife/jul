@@ -414,7 +414,7 @@ func normalizeStreamMode(mode string) string {
 // maxMessageBytes resolves the per-message ceiling, applying the default when
 // the configured size is non-positive.
 func maxMessageBytes(s config.Size) int {
-	if n := s.Bytes(); n > 0 {
+	if n := s.Bytes(); n > 0 && n <= 16<<20 {
 		return int(n)
 	}
 	return maxBodyBytes

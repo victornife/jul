@@ -599,7 +599,7 @@ type GRPCTranscodeConfig struct {
 	// Events). It has no effect on unary methods.
 	StreamMode string `toml:"stream_mode"`
 	// MaxMessageSize caps a single encoded message (a JSON request frame or a
-	// gRPC reply). Zero applies the 4 MiB default.
+	// gRPC reply). Zero applies the 4 MiB default; the maximum is 16 MiB.
 	MaxMessageSize Size `toml:"max_message_size"`
 }
 
