@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -205,8 +206,14 @@ func TestResolveConnectionFailuresAndPermissions(t *testing.T) {
 }
 
 func TestTokenFileFailures(t *testing.T) {
+	if _, _, err := readToken(t.TempDir(), strings.NewReader("")); err == nil {
+		t.Fatal("directory accepted as token file")
+	}
 	if _, _, err := readToken("-", strings.NewReader("")); err == nil {
 		t.Fatal("empty stdin token accepted")
+	}
+	if _, _, err := readToken("-", strings.NewReader("token"+strings.Repeat(" ", 64<<10))); err == nil {
+		t.Fatal("oversized stdin token accepted after truncation")
 	}
 	if _, _, err := readToken(filepath.Join(t.TempDir(), "missing"), strings.NewReader("")); err == nil {
 		t.Fatal("missing token accepted")
@@ -217,6 +224,87 @@ func TestTokenFileFailures(t *testing.T) {
 	}
 	if _, _, err := readToken(f, strings.NewReader("")); err == nil {
 		t.Fatal("empty token accepted")
+	}
+	if err := os.WriteFile(f, []byte("token"+strings.Repeat(" ", 64<<10)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := readToken(f, strings.NewReader("")); err == nil {
+		t.Fatal("oversized token file accepted")
+	}
+}
+
+func TestPlaintextAdminDialRefusesOffHostResolution(t *testing.T) {
+	dialed := false
+	lookup := func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}, {IP: net.ParseIP("198.51.100.7")}}, nil
+	}
+	dial := func(context.Context, string, string) (net.Conn, error) {
+		dialed = true
+		return nil, errors.New("unexpected dial")
+	}
+	if _, err := dialLoopbackWith(context.Background(), "tcp", "localhost:9090", lookup, dial); err == nil || dialed {
+		t.Fatalf("mixed localhost resolution: err=%v dialed=%v, want refusal", err, dialed)
+	}
+	if _, err := dialLoopbackWith(context.Background(), "tcp", "public.example:9090", lookup, dial); err == nil || dialed {
+		t.Fatalf("public dial: err=%v dialed=%v, want refusal", err, dialed)
+	}
+}
+
+func TestPlaintextAdminDialLoopbackResolutionAndFallback(t *testing.T) {
+	ctx := context.Background()
+	lookup := func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("::1")}, {IP: net.ParseIP("127.0.0.1")}}, nil
+	}
+	first := errors.New("IPv6 loopback unavailable")
+	client, peer := net.Pipe()
+	defer client.Close()
+	defer peer.Close()
+	var attempts []string
+	dial := func(_ context.Context, _, address string) (net.Conn, error) {
+		attempts = append(attempts, address)
+		if address == "[::1]:9090" {
+			return nil, first
+		}
+		return client, nil
+	}
+	conn, err := dialLoopbackWith(ctx, "tcp", "localhost:9090", lookup, dial)
+	if err != nil || conn != client || !reflect.DeepEqual(attempts, []string{"[::1]:9090", "127.0.0.1:9090"}) {
+		t.Fatalf("loopback fallback: conn=%v err=%v attempts=%v", conn, err, attempts)
+	}
+
+	if _, err := dialLoopbackWith(ctx, "tcp", "127.0.0.1:9090", func(context.Context, string) ([]net.IPAddr, error) {
+		t.Fatal("literal loopback IP should not need DNS")
+		return nil, nil
+	}, dial); err != nil {
+		t.Fatalf("literal loopback: %v", err)
+	}
+	if _, err := dialLoopbackWith(ctx, "tcp", "localhost:9090", func(context.Context, string) ([]net.IPAddr, error) {
+		return nil, errors.New("DNS failed")
+	}, dial); err == nil {
+		t.Fatal("DNS failure accepted")
+	}
+	if _, err := dialLoopbackWith(ctx, "tcp", "localhost:9090", func(context.Context, string) ([]net.IPAddr, error) {
+		return nil, nil
+	}, dial); err == nil {
+		t.Fatal("empty DNS answer accepted")
+	}
+	if _, err := dialLoopbackWith(ctx, "tcp", "localhost:9090", lookup, func(context.Context, string, string) (net.Conn, error) {
+		return nil, first
+	}); !errors.Is(err, first) {
+		t.Fatalf("all loopback dials failed: %v, want %v", err, first)
+	}
+}
+
+func TestProfileFileRejectsNonRegularAndOversizedInput(t *testing.T) {
+	if _, _, err := readProfile(t.TempDir(), "prod"); err == nil {
+		t.Fatal("directory accepted as a profile file")
+	}
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	if err := os.WriteFile(path, []byte(`{"profiles":{"prod":{"endpoint":"https://example.com"}}}`+strings.Repeat(" ", 1<<20)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := readProfile(path, "prod"); err == nil {
+		t.Fatal("oversized profile accepted after a valid JSON prefix")
 	}
 }
 

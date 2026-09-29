@@ -5,7 +5,6 @@ package admin
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -201,7 +200,7 @@ func (s *Server) handleClientError(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 8<<10))
+	body, err := readBoundedBody(r, 8<<10)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return

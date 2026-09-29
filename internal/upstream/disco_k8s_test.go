@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -141,6 +142,42 @@ func TestK8sDiscovererDiscardsIncompleteList(t *testing.T) {
 	}
 }
 
+func TestK8sDiscovererRejectsUnboundedPagination(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"metadata":{"continue":"page-` + strconv.Itoa(requests) + `"},"items":[]}`))
+	}))
+	defer srv.Close()
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+		Namespace: "default", Service: "web", APIServer: srv.URL,
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targets, err := d.Resolve(context.Background()); err == nil || len(targets) != 0 || requests != maxK8sDiscoveryPages {
+		t.Fatalf("targets=%+v err=%v requests=%d, want bounded failure", targets, err, requests)
+	}
+}
+
+func TestK8sDiscovererRejectsOversizedContinueToken(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"metadata":{"continue":"` + strings.Repeat("x", maxK8sContinueBytes+1) + `"},"items":[]}`))
+	}))
+	defer srv.Close()
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+		Namespace: "default", Service: "web", APIServer: srv.URL,
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targets, err := d.Resolve(context.Background()); err == nil || len(targets) != 0 || requests != 1 {
+		t.Fatalf("targets=%+v err=%v requests=%d, want local rejection", targets, err, requests)
+	}
+}
+
 func TestK8sDiscovererReloadsMountedToken(t *testing.T) {
 	var tokens []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -176,6 +213,24 @@ func TestK8sDiscovererReloadsMountedToken(t *testing.T) {
 	}
 	if len(tokens) != 2 {
 		t.Fatal("missing mounted token caused an unauthenticated API request")
+	}
+	if err := os.WriteFile(mounted, []byte("token"+strings.Repeat(" ", 64<<10)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.Resolve(context.Background()); err == nil || len(tokens) != 2 {
+		t.Fatalf("oversized mounted token: err=%v requests=%d, want local rejection", err, len(tokens))
+	}
+}
+
+func TestK8sMountedTokenReadFailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	for _, contents := range []string{"", strings.Repeat("x", (64<<10)+1)} {
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if token, err := readK8sMountedToken(path); err == nil || token != "" {
+			t.Fatalf("size=%d token=%q err=%v, want rejection", len(contents), token, err)
+		}
 	}
 }
 
@@ -262,6 +317,21 @@ func TestK8sExplicitCAFailsClosed(t *testing.T) {
 				t.Fatalf("explicit CA %q: got %v, want a ca_file error", caFile, err)
 			}
 		})
+	}
+}
+
+func TestK8sMountedCARejectsMalformedAndOversizedBundles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mounted.pem")
+	if pool, err := loadK8sCABundle(path, false); err != nil || pool != nil {
+		t.Fatalf("absent mounted CA: pool=%v err=%v", pool, err)
+	}
+	for _, data := range []string{"not PEM", strings.Repeat("x", (1<<20)+1)} {
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if pool, err := loadK8sCABundle(path, false); err == nil || pool != nil {
+			t.Fatalf("mounted CA size %d silently fell back to system roots", len(data))
+		}
 	}
 }
 

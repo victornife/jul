@@ -57,6 +57,9 @@ Active health checks are configured inside an `[[upstreams]]` block under `[upst
 | `unhealthy_threshold` | int | `3` | Consecutive failures to eject a backend. |
 | `expect_status` | []int | `[200]` | Acceptable HTTP status codes. Rejected for `"tcp"`/`"grpc"`. |
 | `expect_body` | string | `""` | Optional substring the HTTP response body must contain. Rejected for `"tcp"`/`"grpc"`. |
+
+An HTTP body check rejects a response larger than 64 KiB even if the expected
+substring appears near the start; it cannot declare a truncated body healthy.
 | `service` | string | `""` | `grpc.health.v1.HealthCheckRequest` service name for `type = "grpc"` (empty means whole-server health). Rejected for `"http"`/`"tcp"`. |
 
 ### TCP probes

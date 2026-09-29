@@ -291,6 +291,14 @@ func TestLoadCABundleEmpty(t *testing.T) {
 	}
 }
 
+func TestLoadCABundleRejectsOversizedValidPrefix(t *testing.T) {
+	ca := newCA(t)
+	path := writePEM(t, t.TempDir(), "oversized-ca.pem", append(ca.pem, []byte(strings.Repeat(" ", 4<<20))...))
+	if _, err := loadCABundle(path); err == nil {
+		t.Fatal("oversized CA bundle accepted after valid prefix")
+	}
+}
+
 func TestLoadCRLVerifiesSignature(t *testing.T) {
 	dir := t.TempDir()
 	ca := newCA(t)
@@ -308,6 +316,21 @@ func TestLoadCRLVerifiesSignature(t *testing.T) {
 	}
 	if crl.nextUpdate.IsZero() || crl.nextUpdate.Before(time.Now()) {
 		t.Errorf("nextUpdate = %v, want the CRL's future NextUpdate", crl.nextUpdate)
+	}
+}
+
+func TestLoadCRLRejectsTrailingPEMDocument(t *testing.T) {
+	ca := newCA(t)
+	path := ca.writeCRL(t, t.TempDir(), "revoked.crl", 1)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(raw, []byte("unexpected trailing data")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadCRL(path, []*x509.Certificate{ca.cert}); err == nil {
+		t.Fatal("CRL with an ignored trailing document accepted")
 	}
 }
 

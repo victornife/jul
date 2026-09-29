@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
@@ -65,6 +66,20 @@ func TestBasicAuthCheck(t *testing.T) {
 	}
 }
 
+func TestBasicAuthRejectsDuplicateAuthorization(t *testing.T) {
+	path := writeHtpasswd(t, map[string]string{"alice": "s3cret"})
+	b, err := newBasicAuth(path, "Restricted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.SetBasicAuth("alice", "s3cret")
+	r.Header.Add("Authorization", "Basic other")
+	if b.check(r) {
+		t.Fatal("ambiguous Basic credentials accepted")
+	}
+}
+
 func TestBasicAuthChallenge(t *testing.T) {
 	path := writeHtpasswd(t, map[string]string{"alice": "s3cret"})
 	b, err := newBasicAuth(path, "My Realm")
@@ -82,6 +97,37 @@ func TestBasicAuthChallenge(t *testing.T) {
 }
 
 func TestNewBasicAuthErrors(t *testing.T) {
+	t.Run("duplicate username rejected", func(t *testing.T) {
+		path := writeHtpasswd(t, map[string]string{"alice": "password"})
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(data, data...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := newBasicAuth(path, "r"); err == nil {
+			t.Fatal("duplicate user silently changed its credential")
+		}
+	})
+	t.Run("oversized valid prefix rejected", func(t *testing.T) {
+		path := writeHtpasswd(t, map[string]string{"alice": "password"})
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(data, []byte(strings.Repeat(" ", 1<<20))...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := newBasicAuth(path, "r"); err == nil {
+			t.Fatal("oversized htpasswd accepted")
+		}
+	})
+	t.Run("nonregular file rejected", func(t *testing.T) {
+		if _, err := newBasicAuth(t.TempDir(), "r"); err == nil {
+			t.Fatal("directory accepted as htpasswd")
+		}
+	})
 	t.Run("missing file", func(t *testing.T) {
 		if _, err := newBasicAuth(filepath.Join(t.TempDir(), "nope"), "r"); err == nil {
 			t.Error("expected error for missing file")
@@ -94,6 +140,15 @@ func TestNewBasicAuthErrors(t *testing.T) {
 		}
 		if _, err := newBasicAuth(path, "r"); err == nil {
 			t.Error("expected error for non-bcrypt hash")
+		}
+	})
+	t.Run("malformed bcrypt hash rejected at load", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "htpasswd")
+		if err := os.WriteFile(path, []byte("alice:$2a$invalid\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := newBasicAuth(path, "r"); err == nil {
+			t.Fatal("invalid bcrypt prefix accepted until a user tries to log in")
 		}
 	})
 	t.Run("malformed entry rejected", func(t *testing.T) {

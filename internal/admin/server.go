@@ -1194,7 +1194,7 @@ func (s *Server) handleConfigRaw(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	body, err := readBoundedBody(r, 1<<20)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -1346,7 +1346,11 @@ func (s *Server) handleConfigSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in settings
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in); err != nil {
+	body, err := readBoundedBody(r, 1<<20)
+	if err == nil {
+		err = json.Unmarshal(body, &in)
+	}
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}

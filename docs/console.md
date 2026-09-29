@@ -60,8 +60,9 @@ the root instead; the JSON APIs below that do not require the tag (for example
 > **Protect remote admin access.** Keep the listener on loopback or configure
 > `[admin.tls]` with a trusted certificate and an authenticated token/RBAC
 > principal before exposing it on another interface; restrict reachability at
-> the network boundary. `jul lint` warns about off-loopback cleartext and missing
-> authentication. See [configuration.md](configuration.md#admintls) for the
+> the network boundary. Configuration validation rejects off-loopback admin
+> without a token or RBAC; `jul lint` still warns about cleartext transport.
+> See [configuration.md](configuration.md#admintls) for the
 > supported TLS setup.
 
 ## Panels

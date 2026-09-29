@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
@@ -210,7 +209,11 @@ func (s *Server) handleHistoryRollback(w http.ResponseWriter, r *http.Request) {
 		ID          string `json:"id"`
 		BaseVersion string `json:"base_version"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+	body, err := readBoundedBody(r, 1<<16)
+	if err == nil {
+		err = json.Unmarshal(body, &req)
+	}
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -390,7 +393,11 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 		ID          string `json:"id"`
 		BaseVersion string `json:"base_version"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+	body, err := readBoundedBody(r, 1<<16)
+	if err == nil {
+		err = json.Unmarshal(body, &req)
+	}
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}

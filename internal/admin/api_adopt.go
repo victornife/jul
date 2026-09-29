@@ -10,7 +10,6 @@ package admin
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 )
 
@@ -54,7 +53,11 @@ func (s *Server) handleAdoptExternal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req AdoptExternalRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+	body, err := readBoundedBody(r, 1<<16)
+	if err == nil {
+		err = json.Unmarshal(body, &req)
+	}
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}

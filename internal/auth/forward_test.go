@@ -8,7 +8,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
+
+	"jul/internal/clientaddr"
 )
 
 func TestForwardAuthDecide(t *testing.T) {
@@ -175,6 +178,85 @@ func TestForwardAuthDropsConnectionNominatedHeaders(t *testing.T) {
 	writeForwardDenied(w, forwardResult{statusCode: http.StatusForbidden, header: denialHeaders})
 	if w.Header().Get("X-Internal-Identity") != "" || w.Header().Get("Location") != "/login" {
 		t.Fatalf("denial headers: %v", w.Header())
+	}
+}
+
+func TestForwardAuthRejectsDuplicateAuthorizationBeforeSubrequest(t *testing.T) {
+	called := false
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+	fa := newForwardAuth(authServer.URL, nil, authServer.Client(), nil)
+	r := httptest.NewRequest(http.MethodGet, "http://app.example/private", nil)
+	r.Header.Add("Authorization", "Bearer first")
+	r.Header.Add("Authorization", "Bearer second")
+	res, err := fa.decide(context.Background(), r)
+	if err != nil || res.ok || res.statusCode != http.StatusUnauthorized || called {
+		t.Fatalf("result=%+v err=%v authCalled=%v, want local 401", res, err, called)
+	}
+}
+
+func TestForwardAuthReplacesClientForwardingClaims(t *testing.T) {
+	var got http.Header
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+	fa := newForwardAuth(authServer.URL, nil, authServer.Client(), nil)
+	r := httptest.NewRequest(http.MethodGet, "http://app.example/private", nil)
+	r.RemoteAddr = "203.0.113.7:1234"
+	r.Header.Set("Forwarded", "for=127.0.0.1;proto=https")
+	r.Header.Set("X-Forwarded-For", "127.0.0.1")
+	r.Header.Set("X-Real-Ip", "127.0.0.1")
+	r.Header.Set("X-Forwarded-Proto", "https")
+	if _, err := fa.decide(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get("Forwarded") != "" || got.Get("X-Forwarded-For") != "203.0.113.7" ||
+		got.Get("X-Real-Ip") != "203.0.113.7" || got.Get("X-Forwarded-Proto") != "http" {
+		t.Fatalf("forward auth saw client claims: %v", got)
+	}
+}
+
+func TestForwardAuthRejectsUnattributedProxyHopLocally(t *testing.T) {
+	called := false
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+	fa := newForwardAuth(authServer.URL, nil, authServer.Client(), nil)
+	r := httptest.NewRequest(http.MethodGet, "http://app.example/private", nil)
+	id := clientaddr.Identity{Client: netip.MustParseAddr("10.0.0.1"), Result: clientaddr.ResultMalformed}
+	r = r.WithContext(clientaddr.NewContext(r.Context(), id))
+	res, err := fa.decide(context.Background(), r)
+	if err != nil || res.ok || res.statusCode != http.StatusForbidden || called {
+		t.Fatalf("result=%+v err=%v called=%v, want local 403", res, err, called)
+	}
+}
+
+func TestForwardAuthDropsClientCertificateAssertions(t *testing.T) {
+	var got http.Header
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+	fa := newForwardAuth(authServer.URL, nil, authServer.Client(), nil)
+	r := httptest.NewRequest(http.MethodGet, "http://app.example/private", nil)
+	for _, name := range []string{"Client-Cert", "Client-Cert-Chain", "X-Forwarded-Client-Cert"} {
+		r.Header.Set(name, "forged")
+	}
+	if _, err := fa.decide(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Client-Cert", "Client-Cert-Chain", "X-Forwarded-Client-Cert"} {
+		if got.Get(name) != "" {
+			t.Fatalf("forward auth received forged %s", name)
+		}
 	}
 }
 

@@ -21,6 +21,19 @@ import (
 	"time"
 )
 
+func TestBackendTLSMaterialRejectsOversizedAndNonregularFiles(t *testing.T) {
+	if _, err := readTLSFile(t.TempDir(), 4<<20); err == nil {
+		t.Fatal("directory accepted as TLS material")
+	}
+	path := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", (4<<20)+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readTLSFile(path, 4<<20); err == nil {
+		t.Fatal("oversized TLS material accepted")
+	}
+}
+
 // pki is a throwaway certificate authority for the tests.
 type pki struct {
 	cert   *x509.Certificate

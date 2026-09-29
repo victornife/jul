@@ -129,20 +129,40 @@ func firstNonEmpty(values ...string) string {
 }
 
 func readProfile(filename, name string) (Profile, []string, error) {
-	info, err := os.Stat(filename)
+	file, err := os.Open(filename)
 	if err != nil {
 		return Profile{}, nil, fmt.Errorf("read profile file %q: %w", filename, err)
 	}
-	warnings := permissionWarnings(filename, info)
-	data, err := os.ReadFile(filename)
+	info, err := file.Stat()
 	if err != nil {
-		return Profile{}, nil, fmt.Errorf("read profile file %q: %w", filename, err)
+		_ = file.Close()
+		return Profile{}, nil, fmt.Errorf("inspect profile file %q: %w", filename, err)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return Profile{}, nil, fmt.Errorf("profile file %q must be a regular file", filename)
+	}
+	warnings := permissionWarnings(filename, info)
+	data, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return Profile{}, nil, fmt.Errorf("read profile file %q: %w", filename, readErr)
+	}
+	if closeErr != nil {
+		return Profile{}, nil, fmt.Errorf("close profile file %q: %w", filename, closeErr)
+	}
+	if len(data) > 1<<20 {
+		return Profile{}, nil, errors.New("profile file exceeds 1 MiB")
 	}
 	var doc profileDocument
 	dec := json.NewDecoder(strings.NewReader(string(data)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&doc); err != nil {
 		return Profile{}, nil, fmt.Errorf("parse profile file %q: %w", filename, err)
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		return Profile{}, nil, fmt.Errorf("profile file %q must contain exactly one JSON document", filename)
 	}
 	p, ok := doc.Profiles[name]
 	if !ok {
@@ -153,9 +173,12 @@ func readProfile(filename, name string) (Profile, []string, error) {
 
 func readToken(filename string, stdin io.Reader) (string, []string, error) {
 	if filename == "-" {
-		data, err := io.ReadAll(io.LimitReader(stdin, 64<<10))
+		data, err := io.ReadAll(io.LimitReader(stdin, (64<<10)+1))
 		if err != nil {
 			return "", nil, fmt.Errorf("read token from stdin: %w", err)
+		}
+		if len(data) > 64<<10 {
+			return "", nil, errors.New("token from stdin exceeds 64 KiB")
 		}
 		token := strings.TrimSpace(string(data))
 		if token == "" {
@@ -163,14 +186,30 @@ func readToken(filename string, stdin io.Reader) (string, []string, error) {
 		}
 		return token, nil, nil
 	}
-	info, err := os.Stat(filename)
+	file, err := os.Open(filename)
 	if err != nil {
 		return "", nil, fmt.Errorf("read token file %q: %w", filename, err)
 	}
-	warnings := permissionWarnings(filename, info)
-	data, err := os.ReadFile(filename)
+	info, err := file.Stat()
 	if err != nil {
-		return "", nil, fmt.Errorf("read token file %q: %w", filename, err)
+		_ = file.Close()
+		return "", nil, fmt.Errorf("inspect token file %q: %w", filename, err)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return "", nil, fmt.Errorf("token file %q must be a regular file", filename)
+	}
+	warnings := permissionWarnings(filename, info)
+	data, readErr := io.ReadAll(io.LimitReader(file, (64<<10)+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return "", nil, fmt.Errorf("read token file %q: %w", filename, readErr)
+	}
+	if closeErr != nil {
+		return "", nil, fmt.Errorf("close token file %q: %w", filename, closeErr)
+	}
+	if len(data) > 64<<10 {
+		return "", nil, errors.New("token file exceeds 64 KiB")
 	}
 	token := strings.TrimSpace(string(data))
 	if token == "" {

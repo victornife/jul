@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -168,14 +169,22 @@ func mtlsConfigFingerprint(servers []config.ServerConfig, addr string) string {
 // file cannot be read so a non-readable file looks different from any readable
 // one.
 func hashFileContent(path string) string {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		// Unreadable: return a marker that changes if the path changes, so a
 		// later successful read of the same path still looks different.
 		return "err:" + path
 	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return "err:" + path
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, file); err != nil {
+		return "err:" + path
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // SingleCertFingerprint digests one cert/key pair's file content, the same

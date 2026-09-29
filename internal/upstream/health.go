@@ -305,8 +305,8 @@ func (hc *healthChecker) probeHTTP(ctx context.Context, b *Backend) bool {
 		return false
 	}
 	if hc.params.expectBody != "" {
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		if err != nil {
+		body, err := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
+		if err != nil || len(body) > 64<<10 {
 			return false
 		}
 		if !strings.Contains(string(body), hc.params.expectBody) {

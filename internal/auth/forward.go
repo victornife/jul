@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"jul/internal/clientaddr"
 	"jul/internal/upstream"
 )
 
@@ -62,11 +63,39 @@ type forwardResult struct {
 
 // decide performs the forward-auth subrequest for r.
 func (f *forwardAuth) decide(ctx context.Context, r *http.Request) (forwardResult, error) {
+	if id, ok := clientaddr.FromContext(r.Context()); ok && !id.Attributed() {
+		return forwardResult{statusCode: http.StatusForbidden}, nil
+	}
+	if len(r.Header.Values("Authorization")) > 1 {
+		// The auth service and the eventual backend may choose different values.
+		// Refuse the request before either dependency sees ambiguous credentials.
+		return forwardResult{statusCode: http.StatusUnauthorized}, nil
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url, nil)
 	if err != nil {
 		return forwardResult{}, err
 	}
 	copyForwardHeaders(req.Header, r.Header)
+	// These fields claim a TLS client certificate, but the request header is
+	// never proof that the listener verified one. Do not pass a forged claim to
+	// an authorization service.
+	for _, name := range []string{"Client-Cert", "Client-Cert-Chain", "X-Forwarded-Client-Cert"} {
+		req.Header.Del(name)
+	}
+	// The inbound forwarding fields are client-controlled unless the listener's
+	// address policy has attributed them. Send only the resolved identity.
+	req.Header.Del("Forwarded")
+	req.Header.Del("X-Forwarded-For")
+	req.Header.Del("X-Real-Ip")
+	if addr := clientaddr.Client(r); addr.IsValid() {
+		req.Header.Set("X-Forwarded-For", addr.String())
+		req.Header.Set("X-Real-Ip", addr.String())
+	}
+	proto := "http"
+	if r.TLS != nil {
+		proto = "https"
+	}
+	req.Header.Set("X-Forwarded-Proto", proto)
 	// Replace client-supplied context after copying headers. A duplicate value
 	// could otherwise be interpreted differently by the auth service.
 	req.Header.Set("X-Forwarded-Method", r.Method)

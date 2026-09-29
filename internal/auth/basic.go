@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -25,9 +26,25 @@ type basicAuth struct {
 // supported; other hash schemes are rejected at load so a misconfiguration is
 // caught at startup rather than silently denying every request.
 func newBasicAuth(file, realm string) (*basicAuth, error) {
-	data, err := os.ReadFile(file)
+	f, err := os.Open(file)
 	if err != nil {
 		return nil, fmt.Errorf("basic auth: read htpasswd %q: %w", file, err)
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("basic auth: htpasswd %q must be a regular file", file)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	closeErr := f.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("basic auth: read htpasswd %q: %w", file, readErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("basic auth: close htpasswd %q: %w", file, closeErr)
+	}
+	if len(data) > 1<<20 {
+		return nil, fmt.Errorf("basic auth: htpasswd %q exceeds 1 MiB", file)
 	}
 	users := make(map[string]string)
 	sc := bufio.NewScanner(bytes.NewReader(data))
@@ -42,6 +59,12 @@ func newBasicAuth(file, realm string) (*basicAuth, error) {
 		}
 		if !isBcryptHash(hash) {
 			return nil, fmt.Errorf("basic auth: %q line %d: only bcrypt hashes are supported", file, line)
+		}
+		if _, err := bcrypt.Cost([]byte(hash)); err != nil {
+			return nil, fmt.Errorf("basic auth: %q line %d: invalid bcrypt hash: %w", file, line, err)
+		}
+		if _, exists := users[user]; exists {
+			return nil, fmt.Errorf("basic auth: %q line %d: duplicate username", file, line)
 		}
 		users[user] = hash
 	}
@@ -61,6 +84,9 @@ func isBcryptHash(h string) bool {
 // check validates the request's Basic credentials. It returns true when the
 // username exists and the password matches the stored bcrypt hash.
 func (b *basicAuth) check(r *http.Request) bool {
+	if len(r.Header.Values("Authorization")) != 1 {
+		return false
+	}
 	user, pass, ok := r.BasicAuth()
 	if !ok {
 		return false

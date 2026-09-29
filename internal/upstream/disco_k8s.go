@@ -9,8 +9,9 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -27,6 +28,9 @@ const (
 	k8sTokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 	k8sCAFile    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 )
+
+const maxK8sDiscoveryPages = 100
+const maxK8sContinueBytes = 4096
 
 // k8sDiscoverer resolves a Service's endpoints from the Kubernetes API server's
 // EndpointSlice REST endpoint over HTTPS. client-go is not linked in; only the
@@ -72,9 +76,11 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 	token := strings.TrimSpace(k.Token)
 	var tokenFile string
 	if token == "" {
-		if b, err := os.ReadFile(k8sTokenFile); err == nil {
-			token = strings.TrimSpace(string(b))
+		if loaded, err := readK8sMountedToken(k8sTokenFile); err == nil {
+			token = loaded
 			tokenFile = k8sTokenFile
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
 		}
 	}
 
@@ -87,16 +93,11 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 		if caFile == "" {
 			caFile = k8sCAFile
 		}
-		if b, err := os.ReadFile(caFile); err == nil {
-			pool := x509.NewCertPool()
-			if pool.AppendCertsFromPEM(b) {
-				tlsConf.RootCAs = pool
-			} else if explicitCA {
-				return nil, fmt.Errorf("kubernetes discovery: ca_file %q contains no PEM certificates", caFile)
-			}
-		} else if explicitCA {
-			return nil, fmt.Errorf("kubernetes discovery: read ca_file %q: %w", caFile, err)
+		pool, err := loadK8sCABundle(caFile, explicitCA)
+		if err != nil {
+			return nil, err
 		}
+		tlsConf.RootCAs = pool
 	}
 
 	endpoint := fmt.Sprintf("%s/apis/discovery.k8s.io/v1/namespaces/%s/endpointslices?labelSelector=%s",
@@ -173,6 +174,12 @@ func (d *k8sDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
 		if next == "" {
 			break
 		}
+		if len(next) > maxK8sContinueBytes {
+			return nil, fmt.Errorf("kubernetes: EndpointSlice continue token exceeds %d bytes", maxK8sContinueBytes)
+		}
+		if len(seen)+1 >= maxK8sDiscoveryPages {
+			return nil, fmt.Errorf("kubernetes: EndpointSlice list exceeds %d pages", maxK8sDiscoveryPages)
+		}
 		if seen[next] {
 			return nil, fmt.Errorf("kubernetes: repeated EndpointSlice continue token")
 		}
@@ -200,13 +207,9 @@ func (d *k8sDiscoverer) resolvePage(ctx context.Context, endpoint string) (k8sEn
 	token := d.token
 	if d.tokenFile != "" {
 		// Mounted service-account tokens rotate independently of config reload.
-		b, err := os.ReadFile(d.tokenFile)
+		token, err = readK8sMountedToken(d.tokenFile)
 		if err != nil {
-			return list, fmt.Errorf("kubernetes: read service-account token: %w", err)
-		}
-		token = strings.TrimSpace(string(b))
-		if token == "" {
-			return list, fmt.Errorf("kubernetes: service-account token is empty")
+			return list, err
 		}
 	}
 	if token != "" {
@@ -226,10 +229,59 @@ func (d *k8sDiscoverer) resolvePage(ctx context.Context, endpoint string) (k8sEn
 	if resp.StatusCode != http.StatusOK {
 		return list, fmt.Errorf("kubernetes: unexpected status %s", resp.Status)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+	if err := decodeDiscoveryResponse(resp.Body, &list); err != nil {
 		return list, fmt.Errorf("kubernetes: decode response: %w", err)
 	}
 	return list, nil
+}
+
+func readK8sMountedToken(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("kubernetes: read service-account token: %w", err)
+	}
+	b, readErr := io.ReadAll(io.LimitReader(file, (64<<10)+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return "", fmt.Errorf("kubernetes: read service-account token: %w", readErr)
+	}
+	if closeErr != nil {
+		return "", fmt.Errorf("kubernetes: close service-account token: %w", closeErr)
+	}
+	if len(b) > 64<<10 {
+		return "", fmt.Errorf("kubernetes: service-account token exceeds 64 KiB")
+	}
+	token := strings.TrimSpace(string(b))
+	if token == "" {
+		return "", fmt.Errorf("kubernetes: service-account token is empty")
+	}
+	return token, nil
+}
+
+func loadK8sCABundle(path string, explicit bool) (*x509.CertPool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		if !explicit && errors.Is(err, os.ErrNotExist) {
+			return nil, nil // no projected CA: use platform trust roots
+		}
+		return nil, fmt.Errorf("kubernetes discovery: read ca_file %q: %w", path, err)
+	}
+	b, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("kubernetes discovery: read ca_file %q: %w", path, readErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("kubernetes discovery: close ca_file %q: %w", path, closeErr)
+	}
+	if len(b) > 1<<20 {
+		return nil, fmt.Errorf("kubernetes discovery: ca_file %q exceeds 1 MiB", path)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(b) {
+		return nil, fmt.Errorf("kubernetes discovery: ca_file %q contains no PEM certificates", path)
+	}
+	return pool, nil
 }
 
 func (d *k8sDiscoverer) targetsFromList(list k8sEndpointSliceList) []Target {

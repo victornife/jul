@@ -115,6 +115,10 @@ func canonicalV1Query(raw string) ([]byte, error) {
 }
 
 func v1RequestFingerprint(r *http.Request, body []byte) ([32]byte, *adminapi.Error) {
+	if len(r.Header.Values("Content-Type")) > 1 {
+		return [32]byte{}, adminapi.Errorf(adminapi.CodeInvalidRequest, "Content-Type must appear at most once").
+			WithDetails(adminapi.Details{Field: "Content-Type"})
+	}
 	query, err := canonicalV1Query(r.URL.RawQuery)
 	if err != nil {
 		return [32]byte{}, adminapi.Errorf(adminapi.CodeInvalidRequest, "query parameters are malformed").
@@ -149,10 +153,15 @@ func v1OperationTemplate(r *http.Request) string {
 }
 
 func (s *Server) v1IdempotencyMetadata(r *http.Request, body []byte) (*v1IdempotencyMetadata, *adminapi.Error) {
-	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	if key == "" {
+	values := r.Header.Values("Idempotency-Key")
+	if len(values) > 1 {
+		return nil, adminapi.Errorf(adminapi.CodeInvalidRequest,
+			"Idempotency-Key must appear exactly once").WithDetails(adminapi.Details{Field: "Idempotency-Key"})
+	}
+	if len(values) == 0 {
 		return nil, nil
 	}
+	key := strings.TrimSpace(values[0])
 	if !validV1IdempotencyKey(key) {
 		return nil, adminapi.Errorf(adminapi.CodeInvalidRequest,
 			"Idempotency-Key must be 8-128 ASCII characters from [A-Za-z0-9_-]").

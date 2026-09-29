@@ -59,6 +59,19 @@ func TestTOMLSourceLoad(t *testing.T) {
 	})
 }
 
+func TestTOMLSourceRejectsOversizedAndNonregularFiles(t *testing.T) {
+	if _, err := NewTOMLSource(t.TempDir()).ReadRaw(); err == nil {
+		t.Fatal("directory accepted as config")
+	}
+	path := filepath.Join(t.TempDir(), "oversized.toml")
+	if err := os.WriteFile(path, []byte("[global]\n"+strings.Repeat(" ", 16<<20)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewTOMLSource(path).Load(); err == nil {
+		t.Fatal("oversized valid config prefix accepted")
+	}
+}
+
 func TestMarshalRoundTripErrors(t *testing.T) {
 	// This baseline test ensures Marshal encodes effectively.
 	cfg := &Config{

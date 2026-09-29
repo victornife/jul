@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -140,6 +141,15 @@ func TestJWTValidate(t *testing.T) {
 		}
 	})
 
+	t.Run("duplicate authorization fields", func(t *testing.T) {
+		token := signRS256(t, rsaKey, "rsa-1", validClaims())
+		r := bearerReq(token)
+		r.Header.Add("Authorization", "Bearer other")
+		if _, err := j.validate(r); err == nil {
+			t.Fatal("ambiguous authorization fields accepted")
+		}
+	})
+
 	t.Run("missing token", func(t *testing.T) {
 		if _, err := j.validate(bearerReq("")); err == nil {
 			t.Error("expected error for missing token")
@@ -202,6 +212,24 @@ func TestJWTValidate(t *testing.T) {
 			t.Error("expected error for token signed by a different key")
 		}
 	})
+}
+
+func TestJWKSRejectsOversizedValidPrefix(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newJWKSServer(t, rsaJWK("rsa-1", &key.PublicKey))
+	srv.mu.Lock()
+	srv.body = append(srv.body, bytes.Repeat([]byte(" "), maxJWKSBytes)...)
+	srv.mu.Unlock()
+	cache := newJWKSCache(srv.URL, srv.Client(), nil)
+	if err := cache.refresh(); err == nil {
+		t.Fatal("accepted a JWKS response larger than the documented cap")
+	}
+	if !cache.fetchedAt.IsZero() {
+		t.Fatal("oversized JWKS was installed in the cache")
+	}
 }
 
 func TestJWTValidateEC(t *testing.T) {

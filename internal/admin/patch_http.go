@@ -11,6 +11,7 @@ package admin
 //   POST /api/config/patch/apply      — atomic managed apply
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -101,8 +102,16 @@ func patchReadAvailable(s *Server) bool {
 
 func decodePatchBatch(r *http.Request) (patchApplyRequest, error) {
 	var req patchApplyRequest
-	err := decodePatchJSON(io.LimitReader(r.Body, 1<<16), &req)
+	err := decodeBoundedPatchJSON(r, &req)
 	return req, err
+}
+
+func decodeBoundedPatchJSON(r *http.Request, dst any) error {
+	body, err := readBoundedBody(r, 1<<16)
+	if err != nil {
+		return err
+	}
+	return decodePatchJSON(bytes.NewReader(body), dst)
 }
 
 func decodePatchJSON(r io.Reader, dst any) error {
@@ -203,7 +212,7 @@ func (s *Server) handleConfigPatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req patchRequest
-	if err := decodePatchJSON(io.LimitReader(r.Body, 1<<16), &req); err != nil {
+	if err := decodeBoundedPatchJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}

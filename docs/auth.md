@@ -97,6 +97,11 @@ Within the middleware chain, auth runs **before rate limiting**, so a
 | JWT | `Authorization: Bearer` | valid signature + claims | **401** + `WWW-Authenticate: Bearer error="invalid_token"` | claims → request context (`ClaimsFrom`) |
 | Forward-auth | subrequest to `url` | endpoint returns **2xx** | endpoint's denial relayed; redirects with `Location` retain 301/302/303/307/308, other non-error statuses become **403**; **503** if unreachable | `auth_response_headers` → upstream request |
 
+Basic, JWT and forward-auth reject requests with multiple `Authorization`
+field lines, even when the first credential is valid. Forward-auth returns 401
+without sending an ambiguous request to its auth service. An intermediary and
+a backend could otherwise disagree about which credential the request carries.
+
 ## Schemes
 
 ### CIDR gate
@@ -115,7 +120,9 @@ changes for a directly exposed server.
 ### HTTP Basic
 
 - htpasswd is loaded at reload; **only** bcrypt entries (`$2a$`/`$2b$`/`$2y$`)
-  are accepted — any other scheme fails fast with a clear error.
+  are accepted — any other scheme or malformed bcrypt hash fails fast with a clear error.
+- The htpasswd path must be a regular file of at most 1 MiB. Duplicate
+  usernames fail reload instead of silently replacing an earlier hash.
 - Password comparison uses `bcrypt.CompareHashAndPassword` (constant-time).
 - An **unknown username** still runs a bcrypt comparison against a fixed dummy
   hash, so response timing does not reveal whether a username exists.
@@ -134,7 +141,8 @@ changes for a directly exposed server.
   - Network fetches are throttled to **at most one per 30s**, so a flood of
     tokens bearing unknown key ids cannot amplify into a storm of JWKS requests.
   - On fetch failure, cached keys are served for a **1h stale grace** window.
-  - Response body capped at **1 MiB**; client timeout `timeout` (default **10s**).
+  - Responses over **1 MiB** are rejected in full, even if the first MiB is
+    valid JSON; client timeout `timeout` defaults to **10s**.
 
 ### Forward-auth
 
@@ -143,7 +151,12 @@ A `GET` subrequest is sent to `url` carrying the original headers (fixed and
 `X-Forwarded-Uri`, and `X-Forwarded-Host`.
 Client-supplied copies of these three context headers are replaced with the
 actual request method, URI and host, so the auth service receives one value for
-each. Treat other forwarded request headers as client input in the auth service.
+each. Jul also replaces `X-Forwarded-For`, `X-Real-Ip` and
+`X-Forwarded-Proto` with its resolved client address and connection scheme,
+and drops unverified `Forwarded`, `Client-Cert`, `Client-Cert-Chain` and
+`X-Forwarded-Client-Cert` claims. An unattributable trusted-proxy chain is
+denied before the auth service is called. Treat other request headers as
+client input in the auth service.
 A **2xx** authorizes the request; listed end-to-end `auth_response_headers` are
 copied onto the upstream request (client-supplied copies are stripped first).
 Fixed and `Connection`-nominated hop-by-hop response fields are never copied,

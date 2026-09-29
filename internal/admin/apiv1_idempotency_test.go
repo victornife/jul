@@ -30,6 +30,47 @@ func TestV1IdempotencyKeyGrammar(t *testing.T) {
 	}
 }
 
+func TestV1IdempotencyRejectsDuplicateKeyBeforeMutation(t *testing.T) {
+	s := &Server{}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/config/apply", nil)
+	r.Header.Add("Idempotency-Key", "first-key")
+	r.Header.Add("Idempotency-Key", "second-key")
+	called := false
+	w := httptest.NewRecorder()
+	s.runIdempotentCanonicalV1(w, r, "v1", nil, func(http.ResponseWriter, *http.Request) {
+		called = true
+	})
+	if called || w.Code != http.StatusBadRequest {
+		t.Fatalf("mutation called=%v status=%d, want local 400", called, w.Code)
+	}
+}
+
+func TestV1IdempotencyRejectsExplicitEmptyKeyBeforeMutation(t *testing.T) {
+	s := &Server{}
+	for _, value := range []string{"", "   "} {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/config/apply", nil)
+		r.Header.Set("Idempotency-Key", value)
+		called := false
+		w := httptest.NewRecorder()
+		s.runIdempotentCanonicalV1(w, r, "v1", nil, func(http.ResponseWriter, *http.Request) {
+			called = true
+		})
+		if called || w.Code != http.StatusBadRequest {
+			t.Fatalf("key=%q mutation called=%v status=%d, want local 400", value, called, w.Code)
+		}
+	}
+}
+
+func TestV1FingerprintRejectsAmbiguousContentType(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/config/apply", nil)
+	r.Header.Add("Content-Type", "application/toml")
+	r.Header.Add("Content-Type", "text/plain")
+	_, apiErr := v1RequestFingerprint(r, []byte("[global]\n"))
+	if apiErr == nil || apiErr.Code != adminapi.CodeInvalidRequest {
+		t.Fatalf("ambiguous fingerprint error = %#v", apiErr)
+	}
+}
+
 func TestCanonicalV1QueryIsSortedDecodedAndInjective(t *testing.T) {
 	a, err := canonicalV1Query("z=2&a=3&a=1")
 	if err != nil {

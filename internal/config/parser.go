@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -42,12 +43,12 @@ func (s *TOMLSource) Name() string { return s.Path }
 
 // ReadRaw returns the raw TOML bytes from disk.
 func (s *TOMLSource) ReadRaw() ([]byte, error) {
-	return os.ReadFile(s.Path)
+	return readTOMLSource(s.Path)
 }
 
 // Load reads and decodes the TOML file into a Config, applying defaults.
 func (s *TOMLSource) Load() (*Config, error) {
-	data, err := os.ReadFile(s.Path)
+	data, err := readTOMLSource(s.Path)
 	if err != nil {
 		return nil, fmt.Errorf("read config %q: %w", s.Path, err)
 	}
@@ -56,6 +57,31 @@ func (s *TOMLSource) Load() (*Config, error) {
 		return nil, fmt.Errorf("%q: %w", s.Path, err)
 	}
 	return cfg, nil
+}
+
+func readTOMLSource(path string) ([]byte, error) {
+	const limit = 16 << 20
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("config %q must be a regular file", path)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(f, limit+1))
+	closeErr := f.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if len(data) > limit {
+		return nil, fmt.Errorf("config %q exceeds 16 MiB", path)
+	}
+	return data, nil
 }
 
 // Parse decodes TOML bytes into a Config and applies defaults. Unknown fields

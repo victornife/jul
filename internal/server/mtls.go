@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -181,7 +182,7 @@ func authStrength(m tls.ClientAuthType) int {
 // and returns them parsed. It errors if the file holds no usable certificate so
 // a typo does not silently disable verification.
 func loadCABundle(path string) ([]*x509.Certificate, error) {
-	pemBytes, err := os.ReadFile(path)
+	pemBytes, err := readBoundedMTLSFile(path, 4<<20)
 	if err != nil {
 		return nil, err
 	}
@@ -208,6 +209,30 @@ func loadCABundle(path string) ([]*x509.Certificate, error) {
 	return certs, nil
 }
 
+func readBoundedMTLSFile(path string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("TLS trust file %q must be a regular file", path)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(f, limit+1))
+	closeErr := f.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("TLS trust file %q exceeds %d bytes", path, limit)
+	}
+	return data, nil
+}
+
 // crlSet is one verified revocation list: the revoked serials (lowercase hex)
 // scoped to the issuer name that signed it, and when it says to expect the next.
 type crlSet struct {
@@ -227,12 +252,15 @@ func (c crlSet) revokes(leaf *x509.Certificate) bool {
 // DER). The CRL signature is verified against one of caCerts so a forged list
 // cannot revoke valid certificates; it errors if no CA signed it.
 func loadCRL(path string, caCerts []*x509.Certificate) (crlSet, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := readBoundedMTLSFile(path, 16<<20)
 	if err != nil {
 		return crlSet{}, err
 	}
 	der := raw
-	if block, _ := pem.Decode(raw); block != nil {
+	if block, rest := pem.Decode(raw); block != nil {
+		if block.Type != "X509 CRL" || len(bytes.TrimSpace(rest)) != 0 {
+			return crlSet{}, fmt.Errorf("CRL %s must contain exactly one X509 CRL block", path)
+		}
 		der = block.Bytes
 	}
 	crl, err := x509.ParseRevocationList(der)

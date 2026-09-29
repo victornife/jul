@@ -1043,7 +1043,7 @@ name = "inventory"
 
 | Key | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `ca_file` | string | — | PEM bundle of trust roots; consulted only when `ca_mode` selects it |
+| `ca_file` | string | — | PEM bundle of trust roots (regular file, at most 4 MiB); consulted only when `ca_mode` selects it |
 | `ca_mode` | string | `system` | `system`, `system_and_file`, or `file_only`. **Never inferred** from the presence of `ca_file` |
 | `client_cert` / `client_key` | string | — | Client certificate for mutual TLS; both or neither |
 | `server_name` | string | derived from the target | The verified name and the SNI value. A discovery-returned address never becomes the identity |
@@ -1437,6 +1437,8 @@ A malformed or missing certificate/key pair is rejected before the candidate
 configuration is persisted or applied. Binding off-loopback without `[admin.tls]`
 enabled produces a `jul lint` warning (L7); binding off-loopback with TLS
 configured is a supported configuration.
+An off-loopback admin listener also requires a token or enabled RBAC;
+`jul check` rejects TLS-only remote administration without API credentials.
 
 #### `[admin.tls.client_auth]`
 

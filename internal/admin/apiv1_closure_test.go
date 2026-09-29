@@ -55,6 +55,16 @@ func TestV1RequestAdmissionExhaustive(t *testing.T) {
 		})
 	}
 
+	t.Run("ambiguous media type", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}"))
+		req.Header.Add("Content-Type", "application/json")
+		req.Header.Add("Content-Type", "text/plain")
+		_, apiErr := readV1JSON(httptest.NewRecorder(), req, &map[string]any{})
+		if apiErr == nil || apiErr.Code != adminapi.CodeInvalidRequest {
+			t.Fatalf("ambiguous Content-Type error = %#v", apiErr)
+		}
+	})
+
 	t.Run("body too large", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(strings.Repeat("x", int(v1MaxBodyBytes)+1)))
@@ -124,6 +134,16 @@ func TestV1RequestAdmissionExhaustive(t *testing.T) {
 		base, apiErr := requiredBaseVersion(req)
 		if apiErr != nil || base != "abc" {
 			t.Fatalf("base=%q err=%v", base, apiErr)
+		}
+		for _, query := range []string{
+			"base_version=first&base_version=second",
+			"base_version=first&broken=%zz",
+		} {
+			req = httptest.NewRequest(http.MethodPost, "/api/v1/config/apply", nil)
+			req.URL.RawQuery = query
+			if _, apiErr := requiredBaseVersion(req); apiErr == nil || apiErr.Code != adminapi.CodeInvalidRequest {
+				t.Fatalf("query %q error = %#v", query, apiErr)
+			}
 		}
 	})
 }

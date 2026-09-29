@@ -361,6 +361,16 @@ func TestOCSPFetchRespectsEgressGuard(t *testing.T) {
 	}
 }
 
+func TestOCSPFetchRejectsOversizedReply(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte{'x'}, ocspMaxResponseBytes+1))
+	}))
+	defer srv.Close()
+	if body, err := ocspFetchWith(srv.Client())(context.Background(), nil, srv.URL); err == nil || body != nil {
+		t.Fatalf("oversized reply returned %d bytes, err=%v", len(body), err)
+	}
+}
+
 // TestACMEDirectoryFetchRespectsEgressGuard proves the guarded HTTP client that
 // NewACMEManager assigns to acme.Client.HTTPClient enforces the allow-list on
 // the ACME directory fetch: a directory outside the allow-list is refused at

@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -301,7 +302,7 @@ func defaultServerName(logicalHost string) string {
 
 // loadCAPool reads a PEM bundle and returns the pool plus a content digest.
 func loadCAPool(path string, withSystem bool) (*x509.CertPool, string, error) {
-	data, err := os.ReadFile(path)
+	data, err := readTLSFile(path, 4<<20)
 	if err != nil {
 		return nil, "", fmt.Errorf("backend_tls: ca_file %q is not readable: %w", path, err)
 	}
@@ -325,11 +326,11 @@ func loadCAPool(path string, withSystem bool) (*x509.CertPool, string, error) {
 // loadClientCertificate parses the certificate/key pair. A mismatched pair is
 // rejected here rather than at the first handshake.
 func loadClientCertificate(certPath, keyPath string) (*tls.Certificate, string, error) {
-	certPEM, err := os.ReadFile(certPath)
+	certPEM, err := readTLSFile(certPath, 4<<20)
 	if err != nil {
 		return nil, "", fmt.Errorf("backend_tls: client_cert %q is not readable: %w", certPath, err)
 	}
-	keyPEM, err := os.ReadFile(keyPath)
+	keyPEM, err := readTLSFile(keyPath, 4<<20)
 	if err != nil {
 		return nil, "", fmt.Errorf("backend_tls: client_key %q is not readable: %w", keyPath, err)
 	}
@@ -340,6 +341,30 @@ func loadClientCertificate(certPath, keyPath string) (*tls.Certificate, string, 
 	// The key digest covers the key bytes so an in-place rotation is detected,
 	// but the bytes themselves are dropped with this function's frame.
 	return &cert, digest(append(append([]byte(nil), certPEM...), keyPEM...)), nil
+}
+
+func readTLSFile(path string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("TLS material %q must be a regular file", path)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(f, limit+1))
+	closeErr := f.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("TLS material %q exceeds %d bytes", path, limit)
+	}
+	return data, nil
 }
 
 // certificateMetadata extracts the safe leaf fields for status projection.

@@ -197,8 +197,19 @@ func checkLegacyToken(r *http.Request, token string) bool {
 		return true
 	}
 	const prefix = "Bearer "
-	h := r.Header.Get("Authorization")
-	return len(h) > len(prefix) && subtle.ConstantTimeCompare([]byte(h[len(prefix):]), []byte(token)) == 1
+	h := adminAuthorization(r)
+	return len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) &&
+		subtle.ConstantTimeCompare([]byte(h[len(prefix):]), []byte(token)) == 1
+}
+
+// Multiple Authorization lines are ambiguous across intermediaries. Refuse
+// them before either the shared-token or RBAC policy interprets a credential.
+func adminAuthorization(r *http.Request) string {
+	values := r.Header.Values("Authorization")
+	if len(values) != 1 {
+		return ""
+	}
+	return values[0]
 }
 
 // requirePermission reuses the generation pinned by captureAdminRuntimeSnapshot.
@@ -212,7 +223,7 @@ func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http
 			writeRBACUnavailable(w, r)
 			return
 		case authModeRBAC:
-			bearer := r.Header.Get("Authorization")
+			bearer := adminAuthorization(r)
 			authID, err := snap.policy.Authenticate(bearer, now)
 			if err == rbac.ErrDisabled {
 				writeUnauthenticated(w, r, "The principal is disabled or expired.")
@@ -246,7 +257,7 @@ func (s *Server) requireAnyPermission(perms []rbac.Permission, next http.Handler
 			writeRBACUnavailable(w, r)
 			return
 		case authModeRBAC:
-			bearer := r.Header.Get("Authorization")
+			bearer := adminAuthorization(r)
 			authID, err := snap.policy.Authenticate(bearer, now)
 			if err == rbac.ErrDisabled {
 				writeUnauthenticated(w, r, "The principal is disabled or expired.")
@@ -282,7 +293,7 @@ func (s *Server) authWithRBAC(next http.Handler) http.Handler {
 			writeRBACUnavailable(w, r)
 			return
 		case authModeRBAC:
-			bearer := r.Header.Get("Authorization")
+			bearer := adminAuthorization(r)
 			id, err := snap.policy.Authenticate(bearer, now)
 			if err == rbac.ErrDisabled {
 				writeUnauthenticated(w, r, "The principal is disabled or expired.")

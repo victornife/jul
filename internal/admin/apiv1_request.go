@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"jul/internal/adminapi"
@@ -21,6 +22,10 @@ const v1MaxBodyBytes int64 = 1 << 20
 var errV1TrailingJSON = errors.New("request body must contain exactly one JSON value")
 
 func readV1Body(w http.ResponseWriter, r *http.Request, accepted ...string) ([]byte, *adminapi.Error) {
+	if len(r.Header.Values("Content-Type")) > 1 {
+		return nil, adminapi.Errorf(adminapi.CodeInvalidRequest, "Content-Type must appear at most once").
+			WithDetails(adminapi.Details{Field: "Content-Type"})
+	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType == "" {
 		return nil, unsupportedMediaType(accepted)
@@ -88,7 +93,20 @@ func restoreRequestBody(r *http.Request, body []byte) {
 }
 
 func requiredBaseVersion(r *http.Request) (string, *adminapi.Error) {
-	base := strings.TrimSpace(r.URL.Query().Get("base_version"))
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return "", adminapi.Errorf(adminapi.CodeInvalidRequest, "query parameters are malformed").
+			WithDetails(adminapi.Details{Field: "query"})
+	}
+	values := query["base_version"]
+	if len(values) > 1 {
+		return "", adminapi.Errorf(adminapi.CodeInvalidRequest, "base_version must appear exactly once").
+			WithDetails(adminapi.Details{Field: "base_version"})
+	}
+	base := ""
+	if len(values) == 1 {
+		base = strings.TrimSpace(values[0])
+	}
 	if base == "" {
 		return "", adminapi.Errorf(adminapi.CodeInvalidRequest,
 			"base_version is required for this mutation").WithDetails(adminapi.Details{Field: "base_version"})
