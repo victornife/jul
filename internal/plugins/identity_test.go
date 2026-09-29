@@ -157,6 +157,13 @@ func TestReadModuleRejectsInvalidAndOversized(t *testing.T) {
 	}
 }
 
+func TestReadModuleRejectsNonRegularPath(t *testing.T) {
+	_, err := ReadModule(config.PluginConfig{Path: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("device as module source: %v", err)
+	}
+}
+
 func TestSameModules(t *testing.T) {
 	a := testModuleBytes(t, "header-inject")
 	dir := t.TempDir()
