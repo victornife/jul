@@ -126,6 +126,9 @@ func readModuleFile(path string) ([]byte, error) {
 	if !st.Mode().IsRegular() {
 		return nil, errors.New("module source must be a regular file")
 	}
+	if st.Size() > int64(moduleByteLimit) {
+		return nil, fmt.Errorf("module exceeds %d bytes", moduleByteLimit)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -135,6 +138,8 @@ func readModuleFile(path string) ([]byte, error) {
 		return nil, err
 	} else if !st.Mode().IsRegular() {
 		return nil, errors.New("module source must be a regular file")
+	} else if st.Size() > int64(moduleByteLimit) {
+		return nil, fmt.Errorf("module exceeds %d bytes", moduleByteLimit)
 	}
 	b, err := io.ReadAll(io.LimitReader(f, int64(moduleByteLimit)+1))
 	if err != nil {
