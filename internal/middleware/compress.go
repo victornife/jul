@@ -454,6 +454,13 @@ func clientQuality(q map[string]float64, name string) (float64, bool) {
 	return 0, false
 }
 
+// AcceptsEncoding applies the same strict coding negotiation used by dynamic
+// compression to precompressed static representations.
+func AcceptsEncoding(header, name string) bool {
+	q, ok := clientQuality(parseAcceptEncoding(header), name)
+	return ok && q > 0
+}
+
 // mimeMatcher matches a response Content-Type against an allow-list of exact
 // types ("application/json"), families ("text/*"), or a wildcard ("*"/"*/*").
 type mimeMatcher struct {

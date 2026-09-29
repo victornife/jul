@@ -274,3 +274,33 @@ func TestStaticStaleSidecarFallsBackToCurrentSource(t *testing.T) {
 		t.Fatalf("stale sidecar served: code=%d body=%q encoding=%q", rec.Code, rec.Body.String(), rec.Header().Get("Content-Encoding"))
 	}
 }
+
+func TestStaticSidecarHonorsLaterFieldAndExplicitDenial(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "file.txt"), "plain")
+	mustWrite(t, filepath.Join(dir, "file.txt.gz"), "encoded")
+	h, err := NewStaticWithOptions(config.ServerConfig{}, config.LocationConfig{Root: dir}, StaticOptions{Precompressed: true, Encoders: []string{"gzip"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.(interface{ Close() error }).Close() })
+	for _, tc := range []struct {
+		values  []string
+		encoded bool
+	}{
+		{[]string{"identity", "gzip"}, true},
+		{[]string{"gzip;q=0", "gzip"}, false},
+		{[]string{"gzip;q=not-a-number"}, false},
+		{[]string{"*"}, true},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "http://h/file.txt", nil)
+		for _, value := range tc.values {
+			req.Header.Add("Accept-Encoding", value)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if got := rec.Header().Get("Content-Encoding") == "gzip"; got != tc.encoded {
+			t.Errorf("Accept-Encoding %v served gzip=%v, want %v", tc.values, got, tc.encoded)
+		}
+	}
+}

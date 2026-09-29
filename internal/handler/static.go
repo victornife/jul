@@ -12,10 +12,10 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"jul/internal/config"
+	"jul/internal/middleware"
 )
 
 // staticHandler serves files from a directory, confined by os.Root so that no
@@ -233,14 +233,14 @@ func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Reques
 // precompressedPick returns the preferred sidecar coding (br before gzip) that
 // is both enabled and accepted by the client, with its file extension.
 func (h *staticHandler) precompressedPick(r *http.Request) (enc, ext string) {
-	ae := r.Header.Get("Accept-Encoding")
+	ae := strings.Join(r.Header.Values("Accept-Encoding"), ",")
 	if ae == "" {
 		return "", ""
 	}
-	if h.encoderEnabled("br") && acceptsToken(ae, "br") {
+	if h.encoderEnabled("br") && middleware.AcceptsEncoding(ae, "br") {
 		return "br", ".br"
 	}
-	if h.encoderEnabled("gzip") && acceptsToken(ae, "gzip") {
+	if h.encoderEnabled("gzip") && middleware.AcceptsEncoding(ae, "gzip") {
 		return "gzip", ".gz"
 	}
 	return "", ""
@@ -250,30 +250,6 @@ func (h *staticHandler) encoderEnabled(name string) bool {
 	for _, e := range h.precompressEncoders {
 		if e == name {
 			return true
-		}
-	}
-	return false
-}
-
-// acceptsToken reports whether an Accept-Encoding header includes token with a
-// non-zero q-value.
-func acceptsToken(acceptEncoding, token string) bool {
-	for _, part := range strings.Split(acceptEncoding, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		name := part
-		qv := "1"
-		if i := strings.IndexByte(part, ';'); i >= 0 {
-			name = strings.TrimSpace(part[:i])
-			if j := strings.Index(part[i+1:], "q="); j >= 0 {
-				qv = strings.TrimSpace(part[i+1+j+2:])
-			}
-		}
-		if strings.EqualFold(name, token) {
-			f, err := strconv.ParseFloat(qv, 64)
-			return err != nil || f > 0
 		}
 	}
 	return false
