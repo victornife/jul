@@ -471,6 +471,15 @@ func TestLaterEventStreamContentTypeIsNeverCaptured(t *testing.T) {
 	}
 }
 
+func TestValidationRecorderIgnoresInterimStatus(t *testing.T) {
+	r := &recorder{header: http.Header{}, limit: 1024}
+	r.WriteHeader(http.StatusEarlyHints)
+	r.WriteHeader(http.StatusNotModified)
+	if r.status != http.StatusNotModified || !r.storable() {
+		t.Fatalf("early hints latched validation: status=%d storable=%v", r.status, r.storable())
+	}
+}
+
 // TestCaptureBufferStaysEmptyForStreams asserts the memory half of the policy
 // directly on the capture writer: neither an event stream nor an oversized body
 // may accumulate bytes that will only be discarded.

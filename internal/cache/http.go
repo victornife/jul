@@ -210,6 +210,12 @@ func (r *recorder) WriteHeader(code int) {
 	if r.status != 0 {
 		return
 	}
+	// Informational responses before 101 are interim. Capture the final
+	// validation status instead of mistaking an early hint for the origin's
+	// answer and issuing an unnecessary second request.
+	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
+		return
+	}
 	r.status = code
 	// A 1xx is an interim or protocol-switch response, not a representation, and
 	// an event stream never ends — buffering one would grow to the size limit
