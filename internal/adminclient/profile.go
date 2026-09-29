@@ -134,9 +134,20 @@ func readProfile(filename, name string) (Profile, []string, error) {
 		return Profile{}, nil, fmt.Errorf("read profile file %q: %w", filename, err)
 	}
 	warnings := permissionWarnings(filename, info)
-	data, err := os.ReadFile(filename)
+	file, err := os.Open(filename)
 	if err != nil {
 		return Profile{}, nil, fmt.Errorf("read profile file %q: %w", filename, err)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return Profile{}, nil, fmt.Errorf("read profile file %q: %w", filename, readErr)
+	}
+	if closeErr != nil {
+		return Profile{}, nil, fmt.Errorf("close profile file %q: %w", filename, closeErr)
+	}
+	if len(data) > 1<<20 {
+		return Profile{}, nil, errors.New("profile file exceeds 1 MiB")
 	}
 	var doc profileDocument
 	dec := json.NewDecoder(strings.NewReader(string(data)))

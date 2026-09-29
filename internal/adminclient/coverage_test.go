@@ -195,6 +195,12 @@ func TestProfileDefaultsAndRemainingErrors(t *testing.T) {
 	if _, _, err := readProfile(profile, "one"); err == nil {
 		t.Fatal("trailing profile document accepted")
 	}
+	if err := os.WriteFile(profile, []byte(`{"profiles":{}}`+strings.Repeat(" ", (1<<20)+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := readProfile(profile, "one"); err == nil {
+		t.Fatal("oversized valid profile prefix accepted")
+	}
 	if _, _, err := readToken("-", failReader{}); err == nil {
 		t.Fatal("stdin read failure ignored")
 	}
