@@ -16,8 +16,6 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"golang.org/x/net/http/httpguts"
-
-	"jul/internal/egress"
 )
 
 // jul-abi/v2 wire constants. Every numeric value here is frozen by
@@ -408,15 +406,9 @@ func registerJulV2HostModule(ctx context.Context, r wazero.Runtime, p *plugin) e
 		}
 		status, respBody, err := p.doFetch(ctx, method, rawURL, body)
 		if err != nil {
-			inv.log.Warn("plugin: fetch denied", "name", p.name, "url", rawURL, "err", err)
-			switch {
-			case errors.Is(err, egress.ErrBlocked):
-				return -5
-			case errors.Is(err, errFetchBlocked):
-				return -3
-			default:
-				return -4
-			}
+			code, reason := fetchFailure(err)
+			inv.log.Warn("plugin: fetch failed", "name", p.name, "reason", reason)
+			return code
 		}
 		v2write(inv, m, buf, limit, respBody)
 		return int32(status)

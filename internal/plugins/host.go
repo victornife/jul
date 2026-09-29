@@ -340,18 +340,9 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 		body, _ := readMem(m, bodyPtr, bodyLen)
 		status, respBody, err := p.doFetch(ctx, method, rawURL, body)
 		if err != nil {
-			inv.log.Warn("plugin: fetch denied", "name", p.name, "url", rawURL, "err", err)
-			switch {
-			case errors.Is(err, egress.ErrBlocked):
-				// Refused by the server-wide [egress] allow-list. Distinct from a
-				// plugin-local block so a guest can tell the two apart; no network
-				// detail is exposed to the guest.
-				return -5
-			case errors.Is(err, errFetchBlocked):
-				return -3
-			default:
-				return -4
-			}
+			code, reason := fetchFailure(err)
+			inv.log.Warn("plugin: fetch failed", "name", p.name, "reason", reason)
+			return code
 		}
 		writeInto(m, buf, limit, respBody)
 		return int32(status)
@@ -393,4 +384,17 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 
 	_, err := b.Instantiate(ctx)
 	return err
+}
+
+// fetchFailure uses closed reason labels. A guest URL or transport error can
+// carry userinfo and query credentials and must never enter an operator log.
+func fetchFailure(err error) (int32, string) {
+	switch {
+	case errors.Is(err, egress.ErrBlocked):
+		return -5, "egress"
+	case errors.Is(err, errFetchBlocked):
+		return -3, "ssrf"
+	default:
+		return -4, "transport"
+	}
 }

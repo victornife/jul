@@ -372,7 +372,8 @@ the guest grows it and calls again. The SDK helpers (`readInto`, `KVGet`,
     [egress allow-list](egress.md#plugin-fetch) is enabled, a fetch must ALSO
     satisfy it — the two are intersected, so a destination the plugin allows but
     the global policy refuses is blocked at dial time and returns the distinct
-    `-5` code (versus `-3` for a plugin-local block).
+    `-5` code (versus `-3` for a plugin-local block). Failed fetches log only
+    a bounded reason; guest URLs and transport errors are omitted.
 
   Capability grants are evaluated on every activation/build of a plugin. A new
   generation re-checks the current config's capability policy instead of carrying

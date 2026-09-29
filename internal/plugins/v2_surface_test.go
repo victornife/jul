@@ -6,8 +6,10 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -103,6 +105,19 @@ func TestV2RequestBodyReadErrorFailsBeforeDownstream(t *testing.T) {
 	rec := serve(chainFor(s, next, "p"), r)
 	if rec.Code != http.StatusInternalServerError || called {
 		t.Fatalf("read failure status = %d, downstream called = %v", rec.Code, called)
+	}
+}
+
+func TestV2FetchFailureLogOmitsGuestURLAndTransportError(t *testing.T) {
+	s := surfaceSet(t, nil)
+	var out bytes.Buffer
+	s.plugins["p"].log = slog.New(slog.NewTextHandler(&out, nil))
+	r := httptest.NewRequest(http.MethodPost, "/p", strings.NewReader("abc"))
+	r.Header.Set("X-Op", "req-surface")
+	r.Header.Set("X-Fetch", "https://user:password@other.test/path?token=secret")
+	serve(chainFor(s, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), "p"), r)
+	if log := out.String(); strings.Contains(log, "password") || strings.Contains(log, "secret") || strings.Contains(log, "other.test") || !strings.Contains(log, "reason=ssrf") {
+		t.Fatalf("fetch failure log contains request data or lacks reason: %q", log)
 	}
 }
 
