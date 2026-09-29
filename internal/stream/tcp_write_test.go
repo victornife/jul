@@ -8,7 +8,9 @@ package stream
 import (
 	"bytes"
 	"io"
+	"net"
 	"testing"
+	"time"
 )
 
 type shortStreamWriter struct{ bytes.Buffer }
@@ -31,5 +33,18 @@ func TestStreamWriteCompletesShortWrites(t *testing.T) {
 	}
 	if n, err := writeStreamChunk(stalledStreamWriter{}, []byte("x")); n != 0 || err != io.ErrShortWrite {
 		t.Fatalf("stalled write = %d, %v", n, err)
+	}
+}
+
+func TestOutboundProxyHeaderWriteHasDeadline(t *testing.T) {
+	client, backend := net.Pipe()
+	defer client.Close()
+	defer backend.Close()
+	src := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1000}
+	dst := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 2000}
+	start := time.Now()
+	err := writeOutboundProxyHeader(client, src, dst, 20*time.Millisecond)
+	if ne, ok := err.(net.Error); !ok || !ne.Timeout() || time.Since(start) > time.Second {
+		t.Fatalf("blocked PROXY header write = %v after %v", err, time.Since(start))
 	}
 }
