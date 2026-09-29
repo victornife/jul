@@ -185,7 +185,7 @@ func (h *staticHandler) serveFile(w http.ResponseWriter, r *http.Request, rel st
 // It returns true if it wrote a response. Range requests fall back to the
 // uncompressed file to avoid byte-range/encoding mismatches.
 func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Request, rel string, source os.FileInfo) bool {
-	if !h.precompressed || r.Header.Get("Range") != "" {
+	if !h.precompressed || len(r.Header.Values("Range")) != 0 {
 		return false
 	}
 	enc, ext := h.precompressedPick(r)

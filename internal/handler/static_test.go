@@ -240,6 +240,15 @@ func TestStaticPrecompressedSidecar(t *testing.T) {
 	if rec.Header().Get("Content-Encoding") == "gzip" {
 		t.Fatal("Range request must not serve the precompressed sidecar")
 	}
+	repeated := httptest.NewRequest(http.MethodGet, "http://h/app.js", nil)
+	repeated.Header.Set("Accept-Encoding", "gzip")
+	repeated.Header.Add("Range", "")
+	repeated.Header.Add("Range", "bytes=0-3")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, repeated)
+	if rec.Header().Get("Content-Encoding") != "" {
+		t.Fatal("repeated Range must not select an encoded representation")
+	}
 }
 
 func TestStaticStaleSidecarFallsBackToCurrentSource(t *testing.T) {
