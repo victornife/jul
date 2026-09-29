@@ -58,7 +58,8 @@ Named profiles live at the platform user configuration directory returned by
 Unknown profile fields are rejected. On POSIX, the CLI warns when an existing
 profile or token file is group/other-readable or writable. Windows uses its
 platform ACL model rather than pretending POSIX mode bits are a security
-boundary.
+boundary. Profiles must be regular files of at most 1 MiB; token files must
+be regular files of at most 64 KiB. Stdin tokens have the same 64 KiB cap.
 
 ## Credentials and TLS
 
@@ -71,7 +72,9 @@ restricted token file/profile reference is preferred for automation.
 The client rejects credential-bearing endpoint URLs. HTTPS verifies certificates
 and hostnames normally. `--ca-file` adds a trust bundle and `--client-cert` plus
 `--client-key` enable mTLS. There is no generic `--insecure` verification bypass.
-Plain HTTP is accepted only for loopback. Control-plane redirects are not
+Plain HTTP is accepted only for loopback. Plaintext dials resolve `localhost`
+to loopback addresses only and ignore environment proxies, so a bearer token
+cannot travel to a changed localhost mapping. Control-plane redirects are not
 followed, so credentials cannot be forwarded to a different host/origin or an
 HTTPS-to-HTTP downgrade.
 
