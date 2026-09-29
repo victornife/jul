@@ -17,6 +17,30 @@ import (
 	"jul/internal/config"
 )
 
+// Coraza's synchronous compiler does not accept a context. Simulate a
+// deadline reached while it runs, and require New to reject the candidate
+// before the compiled policy can be published.
+type cancelAfterCompileContext struct {
+	context.Context
+	checks int
+}
+
+func (c *cancelAfterCompileContext) Err() error {
+	c.checks++
+	if c.checks > 1 {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+func TestCompilationFinishedAfterDeadlineIsRejected(t *testing.T) {
+	ctx := &cancelAfterCompileContext{Context: context.Background()}
+	fw, err := New(ctx, config.WAFConfig{Enabled: true, InlineRules: `SecRuleEngine On`}, Options{})
+	if fw != nil || err != context.DeadlineExceeded || ctx.checks < 2 {
+		t.Fatalf("New after deadline = %v, %v (checks %d)", fw, err, ctx.checks)
+	}
+}
+
 // newOKHandler is the protected action: it returns 200 and a fixed body so a
 // test can tell a request that reached the action from one the WAF blocked.
 func newOKHandler() http.Handler {
