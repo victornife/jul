@@ -263,9 +263,16 @@ func (h *staticHandler) listDir(w http.ResponseWriter, r *http.Request, rel stri
 	}
 	defer f.Close()
 
-	entries, err := f.ReadDir(-1)
+	// Directory listings are reachable by clients. Reading an unbounded
+	// directory into a slice and then rendering every name can exhaust memory.
+	const maxDirectoryEntries = 4096
+	entries, err := f.ReadDir(maxDirectoryEntries + 1)
 	if err != nil {
 		h.errPages.Render(w, r, http.StatusInternalServerError)
+		return
+	}
+	if len(entries) > maxDirectoryEntries {
+		h.errPages.Render(w, r, http.StatusServiceUnavailable)
 		return
 	}
 

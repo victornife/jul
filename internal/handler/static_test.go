@@ -4,6 +4,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -302,5 +303,20 @@ func TestStaticSidecarHonorsLaterFieldAndExplicitDenial(t *testing.T) {
 		if got := rec.Header().Get("Content-Encoding") == "gzip"; got != tc.encoded {
 			t.Errorf("Accept-Encoding %v served gzip=%v, want %v", tc.values, got, tc.encoded)
 		}
+	}
+}
+
+func TestStaticDirectoryListingHasEntryBound(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i <= 4096; i++ {
+		name := filepath.Join(dir, fmt.Sprintf("%04d", i))
+		if err := os.WriteFile(name, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := newStatic(t, config.LocationConfig{Root: dir, DirectoryListing: true})
+	rec := get(h, "http://h/", nil)
+	if rec.Code != http.StatusServiceUnavailable || rec.Body.Len() > 1024 {
+		t.Fatalf("oversized directory listing: code=%d size=%d", rec.Code, rec.Body.Len())
 	}
 }
