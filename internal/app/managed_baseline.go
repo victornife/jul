@@ -137,7 +137,7 @@ func (s *ManagedBaselineStore) Status() BaselineStatus {
 // loadMarkerLocked reads and decodes the marker file. It returns (nil, nil)
 // when no marker file exists.
 func (s *ManagedBaselineStore) loadMarkerLocked() (*ManagedBaselineMarker, error) {
-	data, err := os.ReadFile(s.markerPath())
+	data, err := readStateMarker(s.markerPath())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -162,7 +162,7 @@ func (s *ManagedBaselineStore) writeMarkerLocked(m ManagedBaselineMarker) error 
 }
 
 func (s *ManagedBaselineStore) readSnapshotLocked() ([]byte, error) {
-	return os.ReadFile(s.snapshotPath())
+	return readConfigFile(s.snapshotPath())
 }
 
 func (s *ManagedBaselineStore) writeSnapshotLocked(raw []byte) error {
