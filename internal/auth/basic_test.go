@@ -97,6 +97,19 @@ func TestBasicAuthChallenge(t *testing.T) {
 }
 
 func TestNewBasicAuthErrors(t *testing.T) {
+	t.Run("duplicate username rejected", func(t *testing.T) {
+		path := writeHtpasswd(t, map[string]string{"alice": "password"})
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(data, data...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := newBasicAuth(path, "r"); err == nil {
+			t.Fatal("duplicate user silently changed its credential")
+		}
+	})
 	t.Run("oversized valid prefix rejected", func(t *testing.T) {
 		path := writeHtpasswd(t, map[string]string{"alice": "password"})
 		data, err := os.ReadFile(path)

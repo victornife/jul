@@ -60,6 +60,9 @@ func newBasicAuth(file, realm string) (*basicAuth, error) {
 		if !isBcryptHash(hash) {
 			return nil, fmt.Errorf("basic auth: %q line %d: only bcrypt hashes are supported", file, line)
 		}
+		if _, exists := users[user]; exists {
+			return nil, fmt.Errorf("basic auth: %q line %d: duplicate username", file, line)
+		}
 		users[user] = hash
 	}
 	if err := sc.Err(); err != nil {
