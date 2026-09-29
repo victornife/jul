@@ -205,6 +205,21 @@ func TestHealthCheckExpectBody(t *testing.T) {
 	}
 }
 
+func TestHealthCheckRejectsOversizedBodyWithExpectedPrefix(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("SERVING" + strings.Repeat(" ", 64<<10)))
+	}))
+	defer srv.Close()
+	p := singlePool(t, strings.TrimPrefix(srv.URL, "http://"))
+	hc := testChecker(p, healthParamsFrom(config.HealthCheckConfig{
+		Enabled: true, Type: "http", Path: "/", ExpectBody: "SERVING",
+		Timeout: config.Duration(time.Second),
+	}))
+	if hc.probe(p.Backends()[0]) {
+		t.Fatal("oversized response with a valid prefix passed the health check")
+	}
+}
+
 func TestHealthCheckTCP(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
