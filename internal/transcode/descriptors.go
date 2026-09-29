@@ -8,6 +8,7 @@ package transcode
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -42,10 +43,27 @@ type httpBinding struct {
 
 // loadRoutesFromFile reads a protoc FileDescriptorSet and builds the route table
 // from the google.api.http annotations it carries.
+const maxDescriptorSetBytes = 16 << 20
+
 func loadRoutesFromFile(path string) ([]*route, error) {
-	raw, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("read descriptor_set: %w", err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat descriptor_set: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxDescriptorSetBytes {
+		return nil, fmt.Errorf("descriptor_set must be a regular file of at most %d bytes", maxDescriptorSetBytes)
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, maxDescriptorSetBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read descriptor_set: %w", err)
+	}
+	if len(raw) > maxDescriptorSetBytes {
+		return nil, fmt.Errorf("descriptor_set exceeds %d bytes", maxDescriptorSetBytes)
 	}
 	var set descriptorpb.FileDescriptorSet
 	if err := proto.Unmarshal(raw, &set); err != nil {
