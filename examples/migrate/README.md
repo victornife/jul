@@ -3,12 +3,19 @@
 This example shows `jul import nginx` translating a real-world NGINX
 configuration into Jul.IA TOML.
 
-> **Maturity: beta (best-effort).** The importer covers common reverse-proxy and
-> static-file setups, never fails silently (every unmapped directive is
+> **Maturity: base importer GA; assessment and extended translation Beta.**
+> The importer covers common reverse-proxy and static-file setups, never fails
+> silently (every unmapped directive is
 > reported), and always re-validates its own output — but it is not a complete
 > NGINX emulator. Review the structured assessment and the `# TODO`/notes in
 > the output before serving the result. A candidate with blocking findings is
 > generated for review, but the command exits 3 (`manual_action_required`).
+
+Published v2.0.0 includes the base importer and Beta assessment/include support.
+The proposed v2.1.0 tree adds bounded stream, protocol and affinity translations
+and focused migration E2E evidence; those additions are not yet published and
+do not promise universal NGINX equivalence. See the
+[status matrix](../../docs/status.md) for delivery and maturity.
 
 - [`nginx.conf`](nginx.conf) — the source NGINX configuration.
 - [`jul.toml`](jul.toml) — an illustrative snapshot of importer output. The
