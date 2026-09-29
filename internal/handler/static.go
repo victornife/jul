@@ -165,6 +165,9 @@ func (h *staticHandler) serveFile(w http.ResponseWriter, r *http.Request, rel st
 	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}
+	if h.precompressed {
+		w.Header().Add("Vary", "Accept-Encoding")
+	}
 	if h.servePrecompressed(w, r, rel, info) {
 		return true
 	}
@@ -222,7 +225,6 @@ func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Reques
 	}
 	hdr.Set("Content-Type", ctype)
 	hdr.Set("Content-Encoding", enc)
-	hdr.Add("Vary", "Accept-Encoding")
 	hdr.Set("ETag", fmt.Sprintf(`"%x-%x"`, si.ModTime().UnixNano(), si.Size()))
 	if h.cacheControl != "" {
 		hdr.Set("Cache-Control", h.cacheControl)

@@ -235,6 +235,9 @@ func TestStaticPrecompressedSidecar(t *testing.T) {
 	if rec.Body.String() != "console.log('plain')" {
 		t.Fatalf("plain body = %q", rec.Body.String())
 	}
+	if !strings.Contains(rec.Header().Get("Vary"), "Accept-Encoding") {
+		t.Fatal("plain representation omitted Vary: Accept-Encoding")
+	}
 
 	// A Range request bypasses the sidecar.
 	rec = get(h, "http://h/app.js", map[string]string{"Accept-Encoding": "gzip", "Range": "bytes=0-3"})
