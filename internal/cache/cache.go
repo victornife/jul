@@ -847,20 +847,29 @@ func (c *Cache) freshness(status int, h http.Header, p responsePolicy, now time.
 	case p.HasMaxAge:
 		ttl = p.MaxAge
 	default:
-		if exp := h.Get("Expires"); exp != "" {
-			t, err := http.ParseTime(exp)
-			if err != nil {
-				// RFC 9111 §5.3: an unparseable Expires means "already expired".
-				return 0, 0, false
+		if expires := h.Values("Expires"); len(expires) > 0 {
+			var earliest time.Time
+			for _, exp := range expires {
+				t, err := http.ParseTime(exp)
+				if err != nil {
+					// An invalid field must not hide behind a valid one.
+					return 0, 0, false
+				}
+				if earliest.IsZero() || t.Before(earliest) {
+					earliest = t
+				}
 			}
 			// Expires is absolute, so it is measured against the origin's own
 			// Date when there is one; using Jul's clock instead would fold
 			// clock skew into the lifetime.
 			base := now
-			if d, err := http.ParseTime(h.Get("Date")); err == nil {
-				base = d
+			foundDate := false
+			for _, value := range h.Values("Date") {
+				if d, err := http.ParseTime(value); err == nil && (!foundDate || d.After(base)) {
+					base, foundDate = d, true
+				}
 			}
-			ttl = t.Sub(base)
+			ttl = earliest.Sub(base)
 		}
 	}
 	if ttl <= 0 && !p.NoCache {

@@ -421,6 +421,20 @@ func TestFreshnessPrecedence(t *testing.T) {
 			header: http.Header{"Expires": {"0"}, "Date": {date}},
 		},
 		{
+			name:    "earliest repeated Expires wins",
+			header:  http.Header{"Expires": {now.Add(time.Hour).Format(http.TimeFormat), now.Add(10 * time.Second).Format(http.TimeFormat)}},
+			wantTTL: 10 * time.Second, wantOK: true,
+		},
+		{
+			name:   "invalid later Expires cannot restore default freshness",
+			header: http.Header{"Expires": {now.Add(time.Hour).Format(http.TimeFormat), "invalid"}},
+		},
+		{
+			name:    "latest repeated Date shortens Expires lifetime",
+			header:  http.Header{"Expires": {now.Add(time.Hour).Format(http.TimeFormat)}, "Date": {now.Add(-time.Hour).Format(http.TimeFormat), date}},
+			wantTTL: time.Hour, wantOK: true,
+		},
+		{
 			name:    "no explicit freshness falls back to default_ttl",
 			header:  http.Header{},
 			wantTTL: 30 * time.Second, wantOK: true,
