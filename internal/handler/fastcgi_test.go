@@ -268,6 +268,8 @@ func TestWriteCGIResponse(t *testing.T) {
 		{name: "interim status", raw: "Status: 103 Early Hints\r\n\r\n"},
 		{name: "out-of-range status", raw: "Status: 999 Invalid\r\n\r\n"},
 		{name: "interim HTTP status", raw: "HTTP/1.1 103 Early Hints\r\n\r\n"},
+		{name: "repeated status", raw: "Status: 200 OK\r\nStatus: 404 Not Found\r\n\r\n"},
+		{name: "conflicting status line", raw: "HTTP/1.1 200 OK\r\nStatus: 404 Not Found\r\n\r\n"},
 		{name: "malformed header", raw: "not-a-header\r\n\r\n"},
 		{name: "unterminated header", raw: "Content-Type: text/plain"},
 		{name: "oversized header line", raw: "X-Large: " + strings.Repeat("x", cgiResponseHeaderMax) + "\r\n\r\n"},

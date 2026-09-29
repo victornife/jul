@@ -658,6 +658,7 @@ func (w *writeTrackingResponseWriter) Write(p []byte) (int, error) {
 
 func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 	status := http.StatusOK
+	seenStatus := false
 	parsedHeaders := make(http.Header)
 	first := true
 	headerBytes := 0
@@ -682,6 +683,7 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 		}
 
 		if first && strings.HasPrefix(trimmed, "HTTP/") {
+			seenStatus = true
 			fields := strings.Fields(trimmed)
 			if len(fields) < 2 {
 				return errors.New("uwsgi response has malformed HTTP status line")
@@ -710,6 +712,10 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 			return errors.New("uwsgi response has invalid header")
 		}
 		if strings.EqualFold(key, "Status") {
+			if seenStatus {
+				return errors.New("uwsgi response has conflicting status declarations")
+			}
+			seenStatus = true
 			fields := strings.Fields(val)
 			if len(fields) == 0 {
 				return errors.New("uwsgi response has empty Status header")
