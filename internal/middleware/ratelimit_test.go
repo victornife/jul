@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -58,6 +59,18 @@ func TestRateHeaderKeyFallsBackForAmbiguousFields(t *testing.T) {
 	r.Header.Add("X-Tenant", "two")
 	if got, want := RateKeyFunc("header:X-Tenant")(r), clientKey(r); got != want {
 		t.Fatalf("ambiguous tenant key = %q, want peer %q", got, want)
+	}
+}
+
+func TestRateHeaderKeyDoesNotRetainUnboundedInput(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-Tenant", strings.Repeat("a", 4096))
+	key := RateKeyFunc("header:X-Tenant")(r)
+	if len(key) > 80 || key == "" {
+		t.Fatalf("long tenant retained in bucket map: key length=%d", len(key))
+	}
+	if RateKeyFunc("header:X-Tenant")(r) != key {
+		t.Fatal("same tenant did not get a stable key")
 	}
 }
 

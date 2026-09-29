@@ -5,6 +5,8 @@ package middleware
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"strconv"
 	"strings"
@@ -231,7 +233,7 @@ func RateKeyFunc(spec string) KeyFunc {
 		name := http.CanonicalHeaderKey(spec[len("header:"):])
 		return func(r *http.Request) string {
 			if values := r.Header.Values(name); len(values) == 1 && values[0] != "" {
-				return values[0]
+				return boundedRateKey(values[0])
 			}
 			return clientKey(r)
 		}
@@ -243,7 +245,7 @@ func RateKeyFunc(spec string) KeyFunc {
 		return func(r *http.Request) string {
 			if claims := ClaimsFrom(r.Context()); claims != nil {
 				if v, ok := claims[claim].(string); ok && v != "" {
-					return v
+					return boundedRateKey(v)
 				}
 			}
 			return clientKey(r)
@@ -251,6 +253,16 @@ func RateKeyFunc(spec string) KeyFunc {
 	default:
 		return clientKey
 	}
+}
+
+func boundedRateKey(value string) string {
+	if len(value) <= 256 {
+		return value
+	}
+	// Preserve equality without retaining a potentially megabyte-sized header
+	// or JWT claim in the per-client bucket map until its TTL expires.
+	digest := sha256.Sum256([]byte(value))
+	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 // clientKey renders the canonical client address as a stable bucket key. It is
