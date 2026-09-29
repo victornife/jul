@@ -66,7 +66,7 @@ apply/reload path.
 | `-slow-client` | Paces a POST body over ~3.2s, exercising slow-client/read-timeout handling. |
 | `-slow-upstream` | Requests `/bounded/slow?ms=N`, exercising pending-timeout/circuit accounting against a genuinely slow backend. |
 | `-fault` | A weighted mix of every failure class the backend can inject against `/bounded/` (5xx storms, slow responses, mid-body TCP resets, malformed framing), plus a separate goroutine that schedules a kill/restore cycle directly against each backend in turn — exercising retry/circuit/admission behavior against a genuinely, alternately unhealthy pool rather than a clean one. |
-| `-rbac` | Runs a concurrent allow/deny probe against `-admin` using `burn-in-current.toml`'s viewer/operator/admin principals. |
+| `-rbac` | Runs an allow/deny probe every 10 seconds against `-admin` using `burn-in-current.toml`'s viewer/operator/admin principals. Requires 403 for viewer validation and 415 for operator/admin requests with deliberately omitted Content-Type; 429 and 5xx are violations, not proof of authorization. The cadence leaves room for apply churn within the default shared admission budget. |
 | `-apply-churn` | Runs a concurrent config-apply churn against `-admin`, resubmitting `-applyConfig` (default `burn-in-current.toml`) as a semantic no-op reload every `-applyEvery` (default 10s). Adopts the on-disk file as the managed baseline automatically on first use. Requires `config_authority = "managed"` in the target config. |
 
 Combine independent modes freely (e.g. run `-current` in one window and

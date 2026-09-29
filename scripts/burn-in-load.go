@@ -680,9 +680,8 @@ func runFaultKillCycle(addrs []string, duration, every, killFor time.Duration) {
 // against a running server (not just at config-parse time). All three
 // predefined roles hold status:read, so /api/v1/status must be 200 for
 // each. Only viewer lacks config:write, so a POST to
-// /api/v1/config/validate must be 403 for viewer and must NOT be 403 for
-// operator/admin (whatever else it returns depends on the submitted body,
-// which this probe does not attempt to make valid).
+// /api/v1/config/validate must be 403 for viewer and 415 for operator/admin
+// because the probe deliberately omits Content-Type.
 func runRBACProbe(adminURL string, duration time.Duration, viewerToken, operatorToken, adminToken string) {
 	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 	end := time.Now().Add(duration)
@@ -713,18 +712,6 @@ func runRBACProbe(adminURL string, duration time.Duration, viewerToken, operator
 			logErrorOnce(fmt.Sprintf("rbac probe %s: got %d, want %d", label, code, want))
 		}
 	}
-	assertNotForbidden := func(label string, code int, err error) {
-		checks++
-		if err != nil {
-			violations++
-			logErrorOnce("rbac probe " + label + ": " + err.Error())
-			return
-		}
-		if code == http.StatusForbidden {
-			violations++
-			logErrorOnce(fmt.Sprintf("rbac probe %s: got 403, permission should have been granted", label))
-		}
-	}
 	for time.Now().Before(end) {
 		for _, tok := range []string{viewerToken, operatorToken, adminToken} {
 			code, err := do(http.MethodGet, tok, "/api/v1/status")
@@ -733,10 +720,10 @@ func runRBACProbe(adminURL string, duration time.Duration, viewerToken, operator
 		code, err := do(http.MethodPost, viewerToken, "/api/v1/config/validate")
 		assertEqual("viewer denied config:write", code, err, http.StatusForbidden)
 		code, err = do(http.MethodPost, operatorToken, "/api/v1/config/validate")
-		assertNotForbidden("operator granted config:write", code, err)
+		assertEqual("operator granted config:write", code, err, http.StatusUnsupportedMediaType)
 		code, err = do(http.MethodPost, adminToken, "/api/v1/config/validate")
-		assertNotForbidden("admin granted config:write", code, err)
-		time.Sleep(2 * time.Second)
+		assertEqual("admin granted config:write", code, err, http.StatusUnsupportedMediaType)
+		time.Sleep(10 * time.Second)
 	}
 	fmt.Printf("%s rbac probe: checks=%d violations=%d\n", time.Now().Format("15:04:05"), checks, violations)
 }
