@@ -426,6 +426,9 @@ func (h *uwsgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		h.pool.RecordAttempt(chosen, upstream.SuccessfulAttempt())
 	}
+	if rerr != nil && !downstream.wroteHeader && r.Context().Err() == nil && downstream.writeErr == nil {
+		http.Error(downstream, "502 Bad Gateway", http.StatusBadGateway)
+	}
 	if rerr != nil && h.log != nil {
 		// Headers may already be written; just log.
 		h.log.Error("uwsgi response error", "path", r.URL.Path, "error", rerr,
@@ -600,10 +603,17 @@ var errCGIResponseHeaderTooLarge = errors.New("CGI response header exceeds 64 Ki
 type writeTrackingResponseWriter struct {
 	http.ResponseWriter
 	writeErr     error
+	wroteHeader  bool
 	onWriteError func()
 }
 
+func (w *writeTrackingResponseWriter) WriteHeader(code int) {
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(code)
+}
+
 func (w *writeTrackingResponseWriter) Write(p []byte) (int, error) {
+	w.wroteHeader = true
 	n, err := w.ResponseWriter.Write(p)
 	if err == nil && n != len(p) {
 		err = io.ErrShortWrite
