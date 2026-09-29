@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -138,6 +139,24 @@ func TestK8sDiscovererDiscardsIncompleteList(t *testing.T) {
 	}
 	if targets, err := d.Resolve(context.Background()); err == nil || len(targets) != 0 {
 		t.Fatalf("incomplete list targets=%+v err=%v, want error without partial targets", targets, err)
+	}
+}
+
+func TestK8sDiscovererRejectsUnboundedPagination(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"metadata":{"continue":"page-`+strconv.Itoa(requests)+`"},"items":[]}`))
+	}))
+	defer srv.Close()
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+		Namespace: "default", Service: "web", APIServer: srv.URL,
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targets, err := d.Resolve(context.Background()); err == nil || len(targets) != 0 || requests != maxK8sDiscoveryPages {
+		t.Fatalf("targets=%+v err=%v requests=%d, want bounded failure", targets, err, requests)
 	}
 }
 

@@ -27,6 +27,8 @@ const (
 	k8sCAFile    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 )
 
+const maxK8sDiscoveryPages = 100
+
 // k8sDiscoverer resolves a Service's endpoints from the Kubernetes API server's
 // EndpointSlice REST endpoint over HTTPS. client-go is not linked in; only the
 // documented discovery.k8s.io/v1 list endpoint is queried, keeping the binary
@@ -171,6 +173,9 @@ func (d *k8sDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
 		next := list.Metadata.Continue
 		if next == "" {
 			break
+		}
+		if len(seen)+1 >= maxK8sDiscoveryPages {
+			return nil, fmt.Errorf("kubernetes: EndpointSlice list exceeds %d pages", maxK8sDiscoveryPages)
 		}
 		if seen[next] {
 			return nil, fmt.Errorf("kubernetes: repeated EndpointSlice continue token")
