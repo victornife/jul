@@ -134,7 +134,7 @@ func (h *staticHandler) tryServe(w http.ResponseWriter, r *http.Request, candida
 	if info.IsDir() {
 		return h.serveDir(w, r, rel)
 	}
-	return h.serveFile(w, r, rel, info)
+	return h.serveFile(w, r, rel)
 }
 
 func (h *staticHandler) serveDir(w http.ResponseWriter, r *http.Request, rel string) bool {
@@ -144,7 +144,7 @@ func (h *staticHandler) serveDir(w http.ResponseWriter, r *http.Request, rel str
 			continue
 		}
 		if info, err := h.root.Stat(ip); err == nil && !info.IsDir() {
-			return h.serveFile(w, r, ip, info)
+			return h.serveFile(w, r, ip)
 		}
 	}
 	if h.dirListing {
@@ -154,15 +154,19 @@ func (h *staticHandler) serveDir(w http.ResponseWriter, r *http.Request, rel str
 	return false
 }
 
-func (h *staticHandler) serveFile(w http.ResponseWriter, r *http.Request, rel string, info os.FileInfo) bool {
-	if h.servePrecompressed(w, r, rel) {
-		return true
-	}
+func (h *staticHandler) serveFile(w http.ResponseWriter, r *http.Request, rel string) bool {
 	f, err := h.root.Open(rel)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	if h.servePrecompressed(w, r, rel) {
+		return true
+	}
 
 	// Weak validators derived from size and mtime. http.ServeContent honors
 	// If-None-Match / If-Range against the ETag and If-Modified-Since against
