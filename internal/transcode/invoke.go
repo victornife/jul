@@ -819,6 +819,9 @@ func (t *Transcoder) buildRequest(msg *dynamicpb.Message, rt *route, vars map[st
 	}
 
 	if rt.body != "*" {
+		if err := validateTranscodeQuery(r.URL.RawQuery); err != nil {
+			return err
+		}
 		for key, values := range r.URL.Query() {
 			if _, captured := vars[key]; captured {
 				continue
@@ -832,6 +835,15 @@ func (t *Transcoder) buildRequest(msg *dynamicpb.Message, rt *route, vars map[st
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// net/url allocates a map and value slice for each decoded query pair. Reject
+// oversized queries before that allocation on public transcoding routes.
+func validateTranscodeQuery(raw string) error {
+	if len(raw) > 64<<10 || strings.Count(raw, "&") >= 1024 {
+		return fmt.Errorf("transcoding query exceeds 64 KiB or 1024 pairs")
 	}
 	return nil
 }

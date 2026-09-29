@@ -8,6 +8,7 @@ package transcode
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/metadata"
@@ -42,5 +43,16 @@ func TestTranscodeRejectsRepeatedAuthorizationBeforeBackend(t *testing.T) {
 	(&Transcoder{}).ServeHTTP(rec, r)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("ambiguous authorization returned %d", rec.Code)
+	}
+}
+
+func TestTranscodeQueryBoundsBeforeDecode(t *testing.T) {
+	for _, query := range []string{strings.Repeat("x", (64<<10)+1), strings.Repeat("a&", 1024)} {
+		if err := validateTranscodeQuery(query); err == nil {
+			t.Errorf("oversized query accepted: %d bytes", len(query))
+		}
+	}
+	if err := validateTranscodeQuery("a=one&b=two"); err != nil {
+		t.Fatal(err)
 	}
 }
