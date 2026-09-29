@@ -172,6 +172,20 @@ func TestCompressNoDoubleEncodeWhenFirstCodingFieldEmpty(t *testing.T) {
 	}
 }
 
+func TestCompressNegotiatesLaterAcceptEncodingField(t *testing.T) {
+	mw := gzipMiddleware(t, CompressionOptions{MinSize: 1})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Add("Accept-Encoding", "identity")
+	req.Header.Add("Accept-Encoding", "gzip")
+	rec := serveCompress(mw, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, strings.Repeat("response", 10))
+	}, req)
+	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("later encoding offer ignored: %q", got)
+	}
+}
+
 func TestCompressSkipsRange(t *testing.T) {
 	mw := gzipMiddleware(t, CompressionOptions{MinSize: 8})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

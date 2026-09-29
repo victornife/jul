@@ -156,7 +156,7 @@ func NewCompression(opts CompressionOptions) (Middleware, error) {
 // negotiate selects the best registered encoder for the request, honoring
 // Accept-Encoding q-values with server preference as the tie-break.
 func (c *compression) negotiate(r *http.Request) *encoderPool {
-	header := r.Header.Get("Accept-Encoding")
+	header := strings.Join(r.Header.Values("Accept-Encoding"), ",")
 	if header == "" {
 		return nil
 	}
