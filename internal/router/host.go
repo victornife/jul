@@ -19,9 +19,9 @@ func normalizeHost(host string) string {
 		return host
 	}
 	if i := strings.LastIndex(host, ":"); i >= 0 {
-		return host[:i]
+		host = host[:i]
 	}
-	return host
+	return strings.TrimSuffix(host, ".")
 }
 
 // hostScore reports how well host matches one of the server's names. Higher is
@@ -29,7 +29,7 @@ func normalizeHost(host string) string {
 func hostScore(names []string, host string) int {
 	best := 0
 	for _, name := range names {
-		name = strings.ToLower(strings.TrimSpace(name))
+		name = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".")
 		switch {
 		case name == host:
 			return 3

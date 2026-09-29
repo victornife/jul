@@ -17,6 +17,7 @@ func TestNormalizeHost(t *testing.T) {
 		{"[2001:db8::1]", "[2001:db8::1]"},
 		{"192.168.1.1:9090", "192.168.1.1"},
 		{"localhost", "localhost"},
+		{"Example.COM.:443", "example.com"},
 		{":8080", ""},
 		{"", ""},
 	}
@@ -74,6 +75,15 @@ func TestHostScoreCaseInsensitive(t *testing.T) {
 	score := hostScore(names, "example.com")
 	if score != 3 {
 		t.Fatalf("score = %d, want 3 (case-insensitive)", score)
+	}
+}
+
+func TestHostScoreCanonicalizesDNSRootDot(t *testing.T) {
+	if score := hostScore([]string{"example.com."}, normalizeHost("EXAMPLE.COM.")); score != 3 {
+		t.Fatalf("absolute DNS name routed with score %d", score)
+	}
+	if score := hostScore([]string{"*.example.com"}, normalizeHost("API.EXAMPLE.COM.")); score != 2 {
+		t.Fatalf("absolute wildcard DNS name routed with score %d", score)
 	}
 }
 
