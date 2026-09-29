@@ -2550,6 +2550,15 @@ func TestConfigRollbackUnknownID(t *testing.T) {
 	}
 }
 
+func TestConfigRollbackRejectsInvalidBody(t *testing.T) {
+	s, _ := v2WriteServer(t)
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/rollback", strings.NewReader("{")))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
 // ── /api/wizard/generate ─────────────────────────────────────────────────────
 
 func TestWizardGenerateProducesValidTOML(t *testing.T) {

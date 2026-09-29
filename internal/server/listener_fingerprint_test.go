@@ -293,4 +293,7 @@ func TestHashFileContentUsesFullSHA256(t *testing.T) {
 	if strings.HasPrefix(got, "err:") {
 		t.Fatalf("hashFileContent returned error marker: %q", got)
 	}
+	if dir := hashFileContent(t.TempDir()); !strings.HasPrefix(dir, "err:") {
+		t.Fatalf("directory fingerprint = %q, want error marker", dir)
+	}
 }

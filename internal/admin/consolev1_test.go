@@ -377,6 +377,15 @@ func TestHistoryRollbackUnknownID(t *testing.T) {
 	}
 }
 
+func TestHistoryRollbackRejectsInvalidBody(t *testing.T) {
+	s, _ := historyTestServer(t)
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/history/rollback", strings.NewReader("{")))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
 func TestConsoleAPIRequiresToken(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{Token: "secret"}, Deps{
 		Upstreams: func() []UpstreamStatus { return nil },

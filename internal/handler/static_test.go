@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -326,13 +328,21 @@ func TestStaticDirectoryListingHasEntryBound(t *testing.T) {
 
 func TestStaticDirectoryLinksEscapeURLDelimiters(t *testing.T) {
 	dir := t.TempDir()
-	mustWrite(t, filepath.Join(dir, "a?b#%.txt"), "correct")
+	// '?' is reserved in Windows filenames, so the cross-platform listing uses
+	// '#' and '%', which are still URL fragment and percent delimiters. Unix
+	// also covers '?' because that is the query delimiter the bug allowed.
+	name := "a#b%.txt"
+	if runtime.GOOS != "windows" {
+		name = "a?b#%.txt"
+	}
+	mustWrite(t, filepath.Join(dir, name), "correct")
+	href := (&url.URL{Path: "/" + name}).EscapedPath()
 	h := newStatic(t, config.LocationConfig{Root: dir, DirectoryListing: true})
 	rec := get(h, "http://h/", nil)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `href="/a%3Fb%23%25.txt"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `href="`+href+`"`) {
 		t.Fatalf("listing has broken link: %d %q", rec.Code, rec.Body.String())
 	}
-	if got := get(h, "http://h/a%3Fb%23%25.txt", nil); got.Body.String() != "correct" {
+	if got := get(h, "http://h"+href, nil); got.Body.String() != "correct" {
 		t.Fatalf("escaped link did not resolve: %d %q", got.Code, got.Body.String())
 	}
 }
