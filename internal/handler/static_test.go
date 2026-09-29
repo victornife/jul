@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 )
@@ -238,5 +239,29 @@ func TestStaticPrecompressedSidecar(t *testing.T) {
 	rec = get(h, "http://h/app.js", map[string]string{"Accept-Encoding": "gzip", "Range": "bytes=0-3"})
 	if rec.Header().Get("Content-Encoding") == "gzip" {
 		t.Fatal("Range request must not serve the precompressed sidecar")
+	}
+}
+
+func TestStaticStaleSidecarFallsBackToCurrentSource(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "app.js")
+	sidecar := source + ".gz"
+	mustWrite(t, source, "current")
+	mustWrite(t, sidecar, "old compressed bytes")
+	now := time.Now()
+	if err := os.Chtimes(sidecar, now.Add(-time.Minute), now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(source, now, now); err != nil {
+		t.Fatal(err)
+	}
+	h, err := NewStaticWithOptions(config.ServerConfig{}, config.LocationConfig{Root: dir}, StaticOptions{Precompressed: true, Encoders: []string{"gzip"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.(interface{ Close() error }).Close() })
+	rec := get(h, "http://h/app.js", map[string]string{"Accept-Encoding": "gzip"})
+	if rec.Code != http.StatusOK || rec.Body.String() != "current" || rec.Header().Get("Content-Encoding") != "" {
+		t.Fatalf("stale sidecar served: code=%d body=%q encoding=%q", rec.Code, rec.Body.String(), rec.Header().Get("Content-Encoding"))
 	}
 }

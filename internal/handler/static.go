@@ -164,7 +164,7 @@ func (h *staticHandler) serveFile(w http.ResponseWriter, r *http.Request, rel st
 	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}
-	if h.servePrecompressed(w, r, rel) {
+	if h.servePrecompressed(w, r, rel, info) {
 		return true
 	}
 
@@ -184,7 +184,7 @@ func (h *staticHandler) serveFile(w http.ResponseWriter, r *http.Request, rel st
 // serving is enabled, the client accepts the coding, and the sidecar exists.
 // It returns true if it wrote a response. Range requests fall back to the
 // uncompressed file to avoid byte-range/encoding mismatches.
-func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Request, rel string) bool {
+func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Request, rel string, source os.FileInfo) bool {
 	if !h.precompressed || r.Header.Get("Range") != "" {
 		return false
 	}
@@ -197,7 +197,9 @@ func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Reques
 		return false
 	}
 	si, err := h.root.Stat(sidecar)
-	if err != nil || si.IsDir() {
+	if err != nil || !si.Mode().IsRegular() || si.ModTime().Before(source.ModTime()) {
+		// A sidecar built for an older source is a different representation.
+		// Serving it after the source changes would return stale bytes as fresh.
 		return false
 	}
 	sf, err := h.root.Open(sidecar)
@@ -205,6 +207,10 @@ func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Reques
 		return false
 	}
 	defer sf.Close()
+	si, err = sf.Stat()
+	if err != nil || !si.Mode().IsRegular() || si.ModTime().Before(source.ModTime()) {
+		return false
+	}
 
 	hdr := w.Header()
 	// Set Content-Type from the original resource so the compressed bytes are
