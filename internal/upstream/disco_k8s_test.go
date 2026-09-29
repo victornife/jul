@@ -196,6 +196,12 @@ func TestK8sDiscovererReloadsMountedToken(t *testing.T) {
 	if len(tokens) != 2 {
 		t.Fatal("missing mounted token caused an unauthenticated API request")
 	}
+	if err := os.WriteFile(mounted, []byte("token"+strings.Repeat(" ", 64<<10)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.Resolve(context.Background()); err == nil || len(tokens) != 2 {
+		t.Fatalf("oversized mounted token: err=%v requests=%d, want local rejection", err, len(tokens))
+	}
 }
 
 func TestK8sDiscovererRejectsAPIRedirect(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -204,9 +205,20 @@ func (d *k8sDiscoverer) resolvePage(ctx context.Context, endpoint string) (k8sEn
 	token := d.token
 	if d.tokenFile != "" {
 		// Mounted service-account tokens rotate independently of config reload.
-		b, err := os.ReadFile(d.tokenFile)
+		file, err := os.Open(d.tokenFile)
 		if err != nil {
 			return list, fmt.Errorf("kubernetes: read service-account token: %w", err)
+		}
+		b, readErr := io.ReadAll(io.LimitReader(file, (64<<10)+1))
+		closeErr := file.Close()
+		if readErr != nil {
+			return list, fmt.Errorf("kubernetes: read service-account token: %w", readErr)
+		}
+		if closeErr != nil {
+			return list, fmt.Errorf("kubernetes: close service-account token: %w", closeErr)
+		}
+		if len(b) > 64<<10 {
+			return list, fmt.Errorf("kubernetes: service-account token exceeds 64 KiB")
 		}
 		token = strings.TrimSpace(string(b))
 		if token == "" {
