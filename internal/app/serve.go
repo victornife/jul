@@ -1291,11 +1291,39 @@ func watchConfig(ctx context.Context, path string, log *slog.Logger) <-chan [32]
 					}
 					continue
 				}
-				out <- sha256.Sum256(data)
+				if !sendLatestConfigDigest(ctx, out, sha256.Sum256(data)) {
+					return
+				}
 			}
 		}
 	}()
 	return out
+}
+
+// A burst of file events may fill the one-element notification channel. Keep
+// the latest disk state and let cancellation stop the watcher even if nobody
+// is consuming reload notifications anymore.
+func sendLatestConfigDigest(ctx context.Context, out chan [32]byte, digest [32]byte) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	select {
+	case out <- digest:
+		return true
+	case <-ctx.Done():
+		return false
+	default:
+	}
+	select {
+	case <-out:
+	default:
+	}
+	select {
+	case out <- digest:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // parseWorkerThreads converts a [global].worker_threads value to a GOMAXPROCS

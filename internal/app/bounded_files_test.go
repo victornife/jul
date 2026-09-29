@@ -4,6 +4,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,5 +41,21 @@ func TestStateMarkerRejectsOversizedInput(t *testing.T) {
 	}
 	if _, err := readStateMarker(path); err == nil {
 		t.Fatal("oversized state marker accepted")
+	}
+}
+
+func TestConfigWatcherKeepsLatestDigestWhenReceiverIsSlow(t *testing.T) {
+	ch := make(chan [32]byte, 1)
+	ch <- [32]byte{1}
+	if !sendLatestConfigDigest(context.Background(), ch, [32]byte{2}) {
+		t.Fatal("watcher failed to publish latest digest")
+	}
+	if got := <-ch; got[0] != 2 {
+		t.Fatalf("watcher retained stale digest %v", got)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if sendLatestConfigDigest(ctx, ch, [32]byte{3}) {
+		t.Fatal("watcher continued after cancellation")
 	}
 }
