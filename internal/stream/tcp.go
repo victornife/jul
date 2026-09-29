@@ -185,13 +185,29 @@ func (l *listener) copyStream(dst io.Writer, src io.Reader, srcConn net.Conn, id
 		}
 		n, rerr := src.Read(buf)
 		if n > 0 {
-			if _, werr := dst.Write(buf[:n]); werr != nil {
+			written, werr := writeStreamChunk(dst, buf[:n])
+			l.server.addBytes(l.proto, dir, int64(written))
+			if werr != nil {
 				return
 			}
-			l.server.addBytes(l.proto, dir, int64(n))
 		}
 		if rerr != nil {
 			return
 		}
 	}
+}
+
+func writeStreamChunk(dst io.Writer, chunk []byte) (int, error) {
+	written := 0
+	for written < len(chunk) {
+		n, err := dst.Write(chunk[written:])
+		written += n
+		if err != nil {
+			return written, err
+		}
+		if n == 0 {
+			return written, io.ErrShortWrite
+		}
+	}
+	return written, nil
 }
