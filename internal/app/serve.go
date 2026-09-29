@@ -410,7 +410,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	var configPath string
 	if ts, ok := src.(*config.TOMLSource); ok {
 		configPath = ts.Path
-		deps.ReadConfigRaw = func() ([]byte, error) { return os.ReadFile(configPath) }
+		deps.ReadConfigRaw = func() ([]byte, error) { return readConfigFile(configPath) }
 	}
 
 	// Construct the server and wire LastReload into deps BEFORE creating the
@@ -607,7 +607,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			// ADR 0019 §11.2.3: the baseline reconciles second, against
 			// whatever the planned-restart reconciliation above left on disk.
 			if authority == AuthorityManaged {
-				diskRaw, diskErr := os.ReadFile(configPath)
+				diskRaw, diskErr := readConfigFile(configPath)
 				var diskVersion, diskParseErr string
 				if diskErr == nil {
 					if diskCfg, perr := config.Parse(diskRaw); perr == nil {
@@ -1284,7 +1284,7 @@ func watchConfig(ctx context.Context, path string, log *slog.Logger) <-chan [32]
 				if !ok {
 					return
 				}
-				data, err := os.ReadFile(path)
+				data, err := readConfigFile(path)
 				if err != nil {
 					if log != nil {
 						log.Warn("config watcher: failed to read file for digest", "path", path, "error", err)
