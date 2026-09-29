@@ -9,6 +9,7 @@ live issue tracker.
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
 | [2026-09-27 documentation review](audit/2026-09-27-documentation-review.md) | `36e0411a` at clean `main`; remediation on isolated branch | Current **partial** documentation review and findings/coverage ledger; no exhaustive certification or 10/10 claim | Verified release/status, migration and onboarding corrections made; semantic and platform coverage gaps remain explicit in its ledger |
+| [2026-09-29 high-risk continuation](audit/2026-09-29-high-risk-continuation.md) | PR #482 head `bd8f5b0`; separate local remediation batch | Targeted security and runtime boundary review; final batch CI pending | Authentication ambiguity, admin mutation admission, bounded dependency and file reads; remaining scopes and verification limits explicit |
 | [2026-09-16 pre-soak readiness audit](audit/2026-09-16-pre-soak-readiness-audit.md) | `b1e2dfc5` plus PR #416 | Historical readiness evidence at its dated baseline; #421/#425 record the subsequent soak and stable release | P0 items BL-01..BL-07 and P1 items BL-08..BL-10/BL-13/BL-16/BL-24..BL-26 closed via PR #416 (merged `03fda9f8`); its remaining backlog table describes that baseline, not current issue state |
 
 ## Archived records
