@@ -687,7 +687,7 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 				return errors.New("uwsgi response has malformed HTTP status line")
 			}
 			code, parseErr := strconv.Atoi(fields[1])
-			if parseErr != nil || code < 100 || code > 999 {
+			if parseErr != nil || code < http.StatusOK || code > 599 {
 				return errors.New("uwsgi response has invalid HTTP status")
 			}
 			status = code
@@ -715,7 +715,7 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 				return errors.New("uwsgi response has empty Status header")
 			}
 			code, parseErr := strconv.Atoi(fields[0])
-			if parseErr != nil || code < 100 || code > 999 {
+			if parseErr != nil || code < http.StatusOK || code > 599 {
 				return errors.New("uwsgi response has invalid Status header")
 			}
 			status = code
