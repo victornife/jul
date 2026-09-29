@@ -192,7 +192,7 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Past this point a byte may reach the client, so nothing here is retried.
-	errBuffer := new(bytes.Buffer)
+	errBuffer := &boundedCGIStderr{}
 	downstream := &writeTrackingResponseWriter{
 		ResponseWriter: w,
 		onWriteError:   pipe.Close,
@@ -220,6 +220,26 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"stderr", errBuffer.String(),
 		)
 	}
+}
+
+// FastCGI stderr is backend controlled and may be streamed indefinitely while
+// a request stays open. Retain a diagnostic prefix without retaining the whole
+// stream in memory; report every write as consumed so stderr cannot stall the
+// response pipe.
+const maxCGIStderrBytes = 8 << 10
+
+type boundedCGIStderr struct{ bytes.Buffer }
+
+func (b *boundedCGIStderr) Write(p []byte) (int, error) {
+	n := len(p)
+	remaining := maxCGIStderrBytes - b.Len()
+	if remaining > 0 {
+		if remaining > n {
+			remaining = n
+		}
+		_, _ = b.Buffer.Write(p[:remaining])
+	}
+	return n, nil
 }
 
 // noteFailure records a failed attempt against passive health and logs it on

@@ -36,6 +36,19 @@ func (w *cgiDiscardWriter) Header() http.Header {
 	}
 	return w.header
 }
+
+func TestFastCGIStderrIsBoundedWithoutShortWrites(t *testing.T) {
+	var b boundedCGIStderr
+	chunk := bytes.Repeat([]byte("x"), maxCGIStderrBytes+100)
+	for i := 0; i < 3; i++ {
+		if n, err := b.Write(chunk); err != nil || n != len(chunk) {
+			t.Fatalf("stderr write = %d, %v", n, err)
+		}
+	}
+	if b.Len() != maxCGIStderrBytes {
+		t.Fatalf("stderr retained %d bytes", b.Len())
+	}
+}
 func (*cgiDiscardWriter) WriteHeader(int)             {}
 func (*cgiDiscardWriter) Write(p []byte) (int, error) { return len(p), nil }
 
