@@ -18,6 +18,7 @@ func TestTranscodeMetadataCannotOverrideAuthorization(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer intended")
 	r.Header.Set("Grpc-Metadata-Authorization", "Bearer alternate")
 	r.Header.Set("Grpc-Metadata-X-Trace", "trace")
+	r.Header.Set("Grpc-Metadata-Grpc-Timeout", "1n")
 	md, ok := metadata.FromOutgoingContext(outgoingContext(r))
 	if !ok {
 		t.Fatal("missing outgoing metadata")
@@ -27,6 +28,9 @@ func TestTranscodeMetadataCannotOverrideAuthorization(t *testing.T) {
 	}
 	if got := md.Get("x-trace"); len(got) != 1 || got[0] != "trace" {
 		t.Fatalf("ordinary metadata was lost: %v", got)
+	}
+	if got := md.Get("grpc-timeout"); len(got) != 0 {
+		t.Fatalf("client injected transport deadline: %v", got)
 	}
 }
 

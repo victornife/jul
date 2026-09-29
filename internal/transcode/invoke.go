@@ -995,10 +995,11 @@ func outgoingContext(r *http.Request) context.Context {
 		if !ok || rest == "" {
 			continue
 		}
-		if strings.EqualFold(rest, "authorization") {
+		if strings.EqualFold(rest, "authorization") || strings.HasPrefix(strings.ToLower(rest), "grpc-") {
 			// Authorization has exactly one forwarding channel. Letting an
 			// arbitrary metadata header append a second value makes the
-			// backend's choice of identity dependent on its parser.
+			// backend's choice of identity dependent on its parser. grpc-*
+			// metadata is reserved for transport status and deadlines.
 			continue
 		}
 		md.Append(strings.ToLower(rest), values...)
