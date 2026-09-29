@@ -4,6 +4,7 @@
 package handler
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -80,6 +81,19 @@ func TestRenderMissingFileFallsBack(t *testing.T) {
 	}
 	if rec.Body.String() == "" {
 		t.Fatal("expected default error page body")
+	}
+}
+
+func TestRenderOversizedPageFallsBack(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "error.html")
+	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), maxErrorPageBytes+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ep, _ := NewErrorPages(map[string]string{"503": path})
+	rec := httptest.NewRecorder()
+	ep.Render(rec, httptest.NewRequest(http.MethodGet, "/", nil), 503)
+	if rec.Code != 503 || rec.Body.Len() >= maxErrorPageBytes {
+		t.Fatalf("oversized error page served: code=%d size=%d", rec.Code, rec.Body.Len())
 	}
 }
 
