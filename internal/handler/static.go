@@ -8,14 +8,15 @@ import (
 	"html"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"jul/internal/config"
+	"jul/internal/middleware"
 )
 
 // staticHandler serves files from a directory, confined by os.Root so that no
@@ -134,7 +135,7 @@ func (h *staticHandler) tryServe(w http.ResponseWriter, r *http.Request, candida
 	if info.IsDir() {
 		return h.serveDir(w, r, rel)
 	}
-	return h.serveFile(w, r, rel, info)
+	return h.serveFile(w, r, rel)
 }
 
 func (h *staticHandler) serveDir(w http.ResponseWriter, r *http.Request, rel string) bool {
@@ -144,7 +145,7 @@ func (h *staticHandler) serveDir(w http.ResponseWriter, r *http.Request, rel str
 			continue
 		}
 		if info, err := h.root.Stat(ip); err == nil && !info.IsDir() {
-			return h.serveFile(w, r, ip, info)
+			return h.serveFile(w, r, ip)
 		}
 	}
 	if h.dirListing {
@@ -154,15 +155,22 @@ func (h *staticHandler) serveDir(w http.ResponseWriter, r *http.Request, rel str
 	return false
 }
 
-func (h *staticHandler) serveFile(w http.ResponseWriter, r *http.Request, rel string, info os.FileInfo) bool {
-	if h.servePrecompressed(w, r, rel) {
-		return true
-	}
+func (h *staticHandler) serveFile(w http.ResponseWriter, r *http.Request, rel string) bool {
 	f, err := h.root.Open(rel)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	if h.precompressed {
+		w.Header().Add("Vary", "Accept-Encoding")
+	}
+	if h.servePrecompressed(w, r, rel, info) {
+		return true
+	}
 
 	// Weak validators derived from size and mtime. http.ServeContent honors
 	// If-None-Match / If-Range against the ETag and If-Modified-Since against
@@ -180,8 +188,8 @@ func (h *staticHandler) serveFile(w http.ResponseWriter, r *http.Request, rel st
 // serving is enabled, the client accepts the coding, and the sidecar exists.
 // It returns true if it wrote a response. Range requests fall back to the
 // uncompressed file to avoid byte-range/encoding mismatches.
-func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Request, rel string) bool {
-	if !h.precompressed || r.Header.Get("Range") != "" {
+func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Request, rel string, source os.FileInfo) bool {
+	if !h.precompressed || len(r.Header.Values("Range")) != 0 {
 		return false
 	}
 	enc, ext := h.precompressedPick(r)
@@ -193,7 +201,9 @@ func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Reques
 		return false
 	}
 	si, err := h.root.Stat(sidecar)
-	if err != nil || si.IsDir() {
+	if err != nil || !si.Mode().IsRegular() || si.ModTime().Before(source.ModTime()) {
+		// A sidecar built for an older source is a different representation.
+		// Serving it after the source changes would return stale bytes as fresh.
 		return false
 	}
 	sf, err := h.root.Open(sidecar)
@@ -201,6 +211,10 @@ func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Reques
 		return false
 	}
 	defer sf.Close()
+	si, err = sf.Stat()
+	if err != nil || !si.Mode().IsRegular() || si.ModTime().Before(source.ModTime()) {
+		return false
+	}
 
 	hdr := w.Header()
 	// Set Content-Type from the original resource so the compressed bytes are
@@ -211,7 +225,6 @@ func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Reques
 	}
 	hdr.Set("Content-Type", ctype)
 	hdr.Set("Content-Encoding", enc)
-	hdr.Add("Vary", "Accept-Encoding")
 	hdr.Set("ETag", fmt.Sprintf(`"%x-%x"`, si.ModTime().UnixNano(), si.Size()))
 	if h.cacheControl != "" {
 		hdr.Set("Cache-Control", h.cacheControl)
@@ -223,14 +236,14 @@ func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Reques
 // precompressedPick returns the preferred sidecar coding (br before gzip) that
 // is both enabled and accepted by the client, with its file extension.
 func (h *staticHandler) precompressedPick(r *http.Request) (enc, ext string) {
-	ae := r.Header.Get("Accept-Encoding")
+	ae := strings.Join(r.Header.Values("Accept-Encoding"), ",")
 	if ae == "" {
 		return "", ""
 	}
-	if h.encoderEnabled("br") && acceptsToken(ae, "br") {
+	if h.encoderEnabled("br") && middleware.AcceptsEncoding(ae, "br") {
 		return "br", ".br"
 	}
-	if h.encoderEnabled("gzip") && acceptsToken(ae, "gzip") {
+	if h.encoderEnabled("gzip") && middleware.AcceptsEncoding(ae, "gzip") {
 		return "gzip", ".gz"
 	}
 	return "", ""
@@ -245,30 +258,6 @@ func (h *staticHandler) encoderEnabled(name string) bool {
 	return false
 }
 
-// acceptsToken reports whether an Accept-Encoding header includes token with a
-// non-zero q-value.
-func acceptsToken(acceptEncoding, token string) bool {
-	for _, part := range strings.Split(acceptEncoding, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		name := part
-		qv := "1"
-		if i := strings.IndexByte(part, ';'); i >= 0 {
-			name = strings.TrimSpace(part[:i])
-			if j := strings.Index(part[i+1:], "q="); j >= 0 {
-				qv = strings.TrimSpace(part[i+1+j+2:])
-			}
-		}
-		if strings.EqualFold(name, token) {
-			f, err := strconv.ParseFloat(qv, 64)
-			return err != nil || f > 0
-		}
-	}
-	return false
-}
-
 func (h *staticHandler) listDir(w http.ResponseWriter, r *http.Request, rel string) {
 	f, err := h.root.Open(rel)
 	if err != nil {
@@ -277,9 +266,16 @@ func (h *staticHandler) listDir(w http.ResponseWriter, r *http.Request, rel stri
 	}
 	defer f.Close()
 
-	entries, err := f.ReadDir(-1)
+	// Directory listings are reachable by clients. Reading an unbounded
+	// directory into a slice and then rendering every name can exhaust memory.
+	const maxDirectoryEntries = 4096
+	entries, err := f.ReadDir(maxDirectoryEntries + 1)
 	if err != nil {
 		h.errPages.Render(w, r, http.StatusInternalServerError)
+		return
+	}
+	if len(entries) > maxDirectoryEntries {
+		h.errPages.Render(w, r, http.StatusServiceUnavailable)
 		return
 	}
 
@@ -306,7 +302,7 @@ func (h *staticHandler) listDir(w http.ResponseWriter, r *http.Request, rel stri
 	fmt.Fprintf(&b, "<!DOCTYPE html>\n<html><head><title>Index of %s</title></head><body>\n", html.EscapeString(base))
 	fmt.Fprintf(&b, "<h1>Index of %s</h1>\n<ul>\n", html.EscapeString(base))
 	for _, name := range names {
-		href := base + name
+		href := (&url.URL{Path: base + name}).EscapedPath()
 		fmt.Fprintf(&b, "<li><a href=\"%s\">%s</a></li>\n", html.EscapeString(href), html.EscapeString(name))
 	}
 	b.WriteString("</ul>\n</body></html>\n")

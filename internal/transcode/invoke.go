@@ -414,7 +414,7 @@ func normalizeStreamMode(mode string) string {
 // maxMessageBytes resolves the per-message ceiling, applying the default when
 // the configured size is non-positive.
 func maxMessageBytes(s config.Size) int {
-	if n := s.Bytes(); n > 0 {
+	if n := s.Bytes(); n > 0 && n <= 16<<20 {
 		return int(n)
 	}
 	return maxBodyBytes
@@ -602,6 +602,11 @@ func dial(addr string, useTLS bool, policy *backendtls.Policy) (*grpc.ClientConn
 }
 
 func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if len(r.Header.Values("Authorization")) > 1 {
+		t.writeError(w, http.StatusBadRequest, "ambiguous Authorization fields")
+		t.report("", http.StatusBadRequest)
+		return
+	}
 	rt, vars := t.match(r.Method, r.URL.Path)
 	if rt == nil {
 		t.writeError(w, http.StatusNotFound, "no transcoding route matches "+r.Method+" "+r.URL.Path)
@@ -814,6 +819,9 @@ func (t *Transcoder) buildRequest(msg *dynamicpb.Message, rt *route, vars map[st
 	}
 
 	if rt.body != "*" {
+		if err := validateTranscodeQuery(r.URL.RawQuery); err != nil {
+			return err
+		}
 		for key, values := range r.URL.Query() {
 			if _, captured := vars[key]; captured {
 				continue
@@ -827,6 +835,15 @@ func (t *Transcoder) buildRequest(msg *dynamicpb.Message, rt *route, vars map[st
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// net/url allocates a map and value slice for each decoded query pair. Reject
+// oversized queries before that allocation on public transcoding routes.
+func validateTranscodeQuery(raw string) error {
+	if len(raw) > 64<<10 || strings.Count(raw, "&") >= 1024 {
+		return fmt.Errorf("transcoding query exceeds 64 KiB or 1024 pairs")
 	}
 	return nil
 }
@@ -988,6 +1005,13 @@ func outgoingContext(r *http.Request) context.Context {
 	for key, values := range r.Header {
 		rest, ok := cutPrefixFold(key, "Grpc-Metadata-")
 		if !ok || rest == "" {
+			continue
+		}
+		if strings.EqualFold(rest, "authorization") || strings.HasPrefix(strings.ToLower(rest), "grpc-") {
+			// Authorization has exactly one forwarding channel. Letting an
+			// arbitrary metadata header append a second value makes the
+			// backend's choice of identity dependent on its parser. grpc-*
+			// metadata is reserved for transport status and deadlines.
 			continue
 		}
 		md.Append(strings.ToLower(rest), values...)

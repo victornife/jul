@@ -461,8 +461,12 @@ func TestUWSGIMalformedResponseStillTripsCircuit(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(p.Close)
+	rec := httptest.NewRecorder()
 	(&uwsgiHandler{pool: p, dialer: &net.Dialer{}}).ServeHTTP(
-		httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://edge/app", nil))
+		rec, httptest.NewRequest(http.MethodGet, "http://edge/app", nil))
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("malformed backend response returned %d, want 502", rec.Code)
+	}
 	if p.Backends()[0].Available() {
 		t.Fatal("malformed uWSGI response did not trip max_fails=1 circuit")
 	}

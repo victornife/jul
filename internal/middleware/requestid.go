@@ -28,10 +28,17 @@ const (
 func RequestID() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			id := r.Header.Get(HeaderRequestID)
+			values := r.Header.Values(HeaderRequestID)
+			id := ""
+			if len(values) == 1 && len(values[0]) <= 128 && isCORSToken(values[0]) {
+				id = values[0]
+			}
 			if id == "" {
 				id = newID()
 			}
+			// The context, echoed response and forwarded request must agree.
+			// Remove ambiguous or unbounded client field lines before routing.
+			r.Header.Set(HeaderRequestID, id)
 			w.Header().Set(HeaderRequestID, id)
 			ctx := context.WithValue(r.Context(), requestIDKey, id)
 			next.ServeHTTP(w, r.WithContext(ctx))

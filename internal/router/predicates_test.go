@@ -124,6 +124,17 @@ func TestPreflightWideningAcceptsACORSPreflight(t *testing.T) {
 	if matches(p, two) {
 		t.Error("two Origin field lines is not a preflight")
 	}
+	for _, values := range [][]string{{""}, {"POST", "DELETE"}, {"POST, DELETE"}} {
+		bad := selectRequest("/api/users", "")
+		bad.Method = http.MethodOptions
+		bad.Header.Set("Origin", "https://app.example.test")
+		for _, v := range values {
+			bad.Header.Add("Access-Control-Request-Method", v)
+		}
+		if matches(p, bad) {
+			t.Errorf("malformed preflight method fields %v widened a route", values)
+		}
+	}
 
 	// Without the widening bit the same preflight is rejected.
 	p.preflightWidening = false

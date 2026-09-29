@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"jul/internal/config"
+	"jul/internal/middleware"
 )
 
 // This file holds the compiled request predicates a location may carry beyond
@@ -154,13 +155,7 @@ func (p *compiledPredicates) matchMethod(r *http.Request) bool {
 // carrying exactly one Origin and an Access-Control-Request-Method. A plain
 // OPTIONS that is not a preflight still obeys the methods predicate.
 func isCORSPreflight(r *http.Request) bool {
-	if r.Method != http.MethodOptions {
-		return false
-	}
-	if len(r.Header.Values("Origin")) != 1 {
-		return false
-	}
-	return len(r.Header.Values("Access-Control-Request-Method")) > 0
+	return middleware.IsPreflight(r)
 }
 
 // match evaluates one header predicate. Lookup is by canonical name, so field

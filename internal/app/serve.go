@@ -410,7 +410,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	var configPath string
 	if ts, ok := src.(*config.TOMLSource); ok {
 		configPath = ts.Path
-		deps.ReadConfigRaw = func() ([]byte, error) { return os.ReadFile(configPath) }
+		deps.ReadConfigRaw = func() ([]byte, error) { return readConfigFile(configPath) }
 	}
 
 	// Construct the server and wire LastReload into deps BEFORE creating the
@@ -607,7 +607,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 			// ADR 0019 §11.2.3: the baseline reconciles second, against
 			// whatever the planned-restart reconciliation above left on disk.
 			if authority == AuthorityManaged {
-				diskRaw, diskErr := os.ReadFile(configPath)
+				diskRaw, diskErr := readConfigFile(configPath)
 				var diskVersion, diskParseErr string
 				if diskErr == nil {
 					if diskCfg, perr := config.Parse(diskRaw); perr == nil {
@@ -1284,18 +1284,46 @@ func watchConfig(ctx context.Context, path string, log *slog.Logger) <-chan [32]
 				if !ok {
 					return
 				}
-				data, err := os.ReadFile(path)
+				data, err := readConfigFile(path)
 				if err != nil {
 					if log != nil {
 						log.Warn("config watcher: failed to read file for digest", "path", path, "error", err)
 					}
 					continue
 				}
-				out <- sha256.Sum256(data)
+				if !sendLatestConfigDigest(ctx, out, sha256.Sum256(data)) {
+					return
+				}
 			}
 		}
 	}()
 	return out
+}
+
+// A burst of file events may fill the one-element notification channel. Keep
+// the latest disk state and let cancellation stop the watcher even if nobody
+// is consuming reload notifications anymore.
+func sendLatestConfigDigest(ctx context.Context, out chan [32]byte, digest [32]byte) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	select {
+	case out <- digest:
+		return true
+	case <-ctx.Done():
+		return false
+	default:
+	}
+	select {
+	case <-out:
+	default:
+	}
+	select {
+	case out <- digest:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // parseWorkerThreads converts a [global].worker_threads value to a GOMAXPROCS

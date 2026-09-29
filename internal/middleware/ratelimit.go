@@ -4,7 +4,10 @@
 package middleware
 
 import (
+	"container/list"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,6 +33,10 @@ type Limiter interface {
 // contention stays low even under high concurrency.
 const rateLimiterShards = 32
 
+// TTL eviction alone does not bound a high-cardinality public key space during
+// the TTL window. This caps live buckets even under sustained key churn.
+const maxLimiterBucketsPerShard = 4096
+
 // RateLimiterStore holds one token bucket per key, sharded to reduce lock
 // contention. Buckets are created lazily on first use and evicted once idle,
 // keeping memory bounded under churny key spaces such as per-IP limiting.
@@ -41,6 +48,7 @@ type RateLimiterStore struct {
 type rateLimiterShard struct {
 	mu      sync.Mutex
 	entries map[string]*rateLimiterEntry
+	order   list.List // least recently used at the front
 }
 
 type rateLimiterEntry struct {
@@ -48,6 +56,7 @@ type rateLimiterEntry struct {
 	limit    rate.Limit
 	burst    int
 	lastSeen time.Time
+	elem     *list.Element
 }
 
 // NewRateLimiterStore creates a store and starts a janitor, bound to ctx, that
@@ -74,7 +83,7 @@ func NewRateLimiterStore(ctx context.Context, ttl, sweep time.Duration) *RateLim
 // global bucket versus a per-location bucket) never collide inside the shared
 // store. Keeping rate.Limit internal lets callers think in plain requests/sec.
 func (s *RateLimiterStore) Scoped(scope string, ratePerSec, burst int) Limiter {
-	return &scopedLimiter{store: s, prefix: scope + "\x00", limit: rate.Limit(ratePerSec), burst: burst}
+	return &scopedLimiter{store: s, prefix: strconv.Itoa(len(scope)) + ":" + scope, limit: rate.Limit(ratePerSec), burst: burst}
 }
 
 type scopedLimiter struct {
@@ -99,9 +108,16 @@ func (s *RateLimiterStore) allow(key string, limit rate.Limit, burst int) (bool,
 	sh.mu.Lock()
 	e := sh.entries[key]
 	if e == nil {
+		if len(sh.entries) >= maxLimiterBucketsPerShard {
+			old := sh.order.Front()
+			delete(sh.entries, old.Value.(string))
+			sh.order.Remove(old)
+		}
 		e = &rateLimiterEntry{lim: rate.NewLimiter(limit, burst), limit: limit, burst: burst}
+		e.elem = sh.order.PushBack(key)
 		sh.entries[key] = e
 	} else {
+		sh.order.MoveToBack(e.elem)
 		if e.limit != limit {
 			e.lim.SetLimit(limit)
 			e.limit = limit
@@ -151,6 +167,7 @@ func (s *RateLimiterStore) evict(now time.Time) {
 		for k, e := range sh.entries {
 			if e.lastSeen.Before(cutoff) {
 				delete(sh.entries, k)
+				sh.order.Remove(e.elem)
 			}
 		}
 		sh.mu.Unlock()
@@ -220,8 +237,8 @@ func RateKeyFunc(spec string) KeyFunc {
 	case strings.HasPrefix(spec, "header:"):
 		name := http.CanonicalHeaderKey(spec[len("header:"):])
 		return func(r *http.Request) string {
-			if v := r.Header.Get(name); v != "" {
-				return v
+			if values := r.Header.Values(name); len(values) == 1 && values[0] != "" {
+				return boundedRateKey(values[0])
 			}
 			return clientKey(r)
 		}
@@ -233,7 +250,7 @@ func RateKeyFunc(spec string) KeyFunc {
 		return func(r *http.Request) string {
 			if claims := ClaimsFrom(r.Context()); claims != nil {
 				if v, ok := claims[claim].(string); ok && v != "" {
-					return v
+					return boundedRateKey(v)
 				}
 			}
 			return clientKey(r)
@@ -241,6 +258,16 @@ func RateKeyFunc(spec string) KeyFunc {
 	default:
 		return clientKey
 	}
+}
+
+func boundedRateKey(value string) string {
+	if len(value) <= 256 {
+		return value
+	}
+	// Preserve equality without retaining a potentially megabyte-sized header
+	// or JWT claim in the per-client bucket map until its TTL expires.
+	digest := sha256.Sum256([]byte(value))
+	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 // clientKey renders the canonical client address as a stable bucket key. It is

@@ -6,22 +6,48 @@
 // NGINX server_name and location semantics.
 package router
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // normalizeHost lowercases the host and strips any port suffix.
 func normalizeHost(host string) string {
 	host = strings.ToLower(strings.TrimSpace(host))
 	// Strip port. IPv6 literals are wrapped in brackets: [::1]:8080.
 	if strings.HasPrefix(host, "[") {
-		if i := strings.LastIndex(host, "]"); i >= 0 {
-			return host[:i+1]
+		if i := strings.IndexByte(host, ']'); i >= 0 {
+			rest := host[i+1:]
+			if rest == "" || (strings.HasPrefix(rest, ":") && validHostPort(rest[1:])) {
+				return host[:i+1]
+			}
 		}
-		return host
+		return ""
 	}
 	if i := strings.LastIndex(host, ":"); i >= 0 {
-		return host[:i]
+		if strings.Count(host, ":") != 1 || !validHostPort(host[i+1:]) {
+			return ""
+		}
+		host = host[:i]
+	}
+	host = strings.TrimSuffix(host, ".")
+	if strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") || strings.Contains(host, "..") {
+		return ""
 	}
 	return host
+}
+
+func validHostPort(port string) bool {
+	if port == "" {
+		return false
+	}
+	for i := 0; i < len(port); i++ {
+		if port[i] < '0' || port[i] > '9' {
+			return false
+		}
+	}
+	n, err := strconv.Atoi(port)
+	return err == nil && n <= 65535
 }
 
 // hostScore reports how well host matches one of the server's names. Higher is
@@ -29,7 +55,7 @@ func normalizeHost(host string) string {
 func hostScore(names []string, host string) int {
 	best := 0
 	for _, name := range names {
-		name = strings.ToLower(strings.TrimSpace(name))
+		name = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".")
 		switch {
 		case name == host:
 			return 3

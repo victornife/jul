@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/yookoala/gofast"
+	"golang.org/x/net/http/httpguts"
 
 	"jul/internal/config"
 	"jul/internal/middleware"
@@ -192,7 +193,7 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Past this point a byte may reach the client, so nothing here is retried.
-	errBuffer := new(bytes.Buffer)
+	errBuffer := &boundedCGIStderr{}
 	downstream := &writeTrackingResponseWriter{
 		ResponseWriter: w,
 		onWriteError:   pipe.Close,
@@ -220,6 +221,26 @@ func (h *fastcgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"stderr", errBuffer.String(),
 		)
 	}
+}
+
+// FastCGI stderr is backend controlled and may be streamed indefinitely while
+// a request stays open. Retain a diagnostic prefix without retaining the whole
+// stream in memory; report every write as consumed so stderr cannot stall the
+// response pipe.
+const maxCGIStderrBytes = 8 << 10
+
+type boundedCGIStderr struct{ bytes.Buffer }
+
+func (b *boundedCGIStderr) Write(p []byte) (int, error) {
+	n := len(p)
+	remaining := maxCGIStderrBytes - b.Len()
+	if remaining > 0 {
+		if remaining > n {
+			remaining = n
+		}
+		_, _ = b.Buffer.Write(p[:remaining])
+	}
+	return n, nil
 }
 
 // noteFailure records a failed attempt against passive health and logs it on
@@ -282,6 +303,7 @@ func fcgiScriptParams(loc config.LocationConfig) gofast.Middleware {
 			}
 			req.Params["SCRIPT_NAME"] = scriptName
 			delete(req.Params, "HTTP_PROXY") // httpoxy: a client "Proxy" header must not become HTTP_PROXY
+			sanitizeCGIIdentityParams(req.Params, req.Raw)
 			for k, v := range loc.FastCGIParams {
 				req.Params[k] = v
 			}
@@ -405,6 +427,9 @@ func (h *uwsgiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		h.pool.RecordAttempt(chosen, upstream.SuccessfulAttempt())
 	}
+	if rerr != nil && !downstream.wroteHeader && r.Context().Err() == nil && downstream.writeErr == nil {
+		http.Error(downstream, "502 Bad Gateway", http.StatusBadGateway)
+	}
 	if rerr != nil && h.log != nil {
 		// Headers may already be written; just log.
 		h.log.Error("uwsgi response error", "path", r.URL.Path, "error", rerr,
@@ -419,10 +444,10 @@ func (h *uwsgiHandler) sendRequest(conn net.Conn, r *http.Request, body io.ReadC
 	params := buildCGIParams(h.loc, r)
 	var vars bytes.Buffer
 	for k, v := range params {
+		if len(k) > 0xffff || len(v) > 0xffff || vars.Len()+4+len(k)+len(v) > 0xffff {
+			return fmt.Errorf("uwsgi var block exceeds 65535 bytes")
+		}
 		writeUWSGIVar(&vars, k, v)
-	}
-	if vars.Len() > 0xffff {
-		return fmt.Errorf("uwsgi var block too large (%d bytes)", vars.Len())
 	}
 
 	// Packet header: modifier1=0, datasize uint16 little-endian, modifier2=0.
@@ -547,20 +572,48 @@ func buildCGIParams(loc config.LocationConfig, r *http.Request) map[string]strin
 		key := "HTTP_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
 		p[key] = strings.Join(vals, ", ")
 	}
-	// The inbound chain is attacker input unless it came from a trusted proxy,
-	// and the application cannot tell the difference. Overwrite it with Jul's
-	// own trusted chain rather than laundering what arrived.
 	delete(p, "HTTP_PROXY") // httpoxy: a client "Proxy" header must not become HTTP_PROXY
-	p["HTTP_X_FORWARDED_FOR"] = forwardedChain(client, peer)
-	if p["HTTP_X_FORWARDED_FOR"] == "" {
-		delete(p, "HTTP_X_FORWARDED_FOR")
-	}
+	sanitizeCGIIdentityParams(p, r)
 
 	// fastcgi_params doubles as the explicit param override map for uWSGI.
 	for k, v := range loc.FastCGIParams {
 		p[k] = v
 	}
 	return p
+}
+
+// CGI backends commonly trust HTTP_* identity assertions. Rebuild those
+// fields from the listener's canonical view, never from client headers.
+func sanitizeCGIIdentityParams(p map[string]string, r *http.Request) {
+	for name := range p {
+		if strings.HasPrefix(name, "HTTP_X_FORWARDED_") || strings.HasPrefix(name, "HTTP_X_SSL_CLIENT_") || strings.HasPrefix(name, "HTTP_SSL_CLIENT_") {
+			delete(p, name)
+		}
+	}
+	for _, name := range []string{"HTTP_FORWARDED", "HTTP_X_REAL_IP", "HTTP_CLIENT_CERT", "HTTP_CLIENT_CERT_CHAIN", "HTTP_X_FORWARDED_CLIENT_CERT", "HTTP_X_CLIENT_CERT", "HTTP_X_CLIENT_VERIFY"} {
+		delete(p, name)
+	}
+	client, peer := forwardedAddrs(r)
+	if client != "" {
+		p["REMOTE_ADDR"] = client
+	} else if peer != "" {
+		p["REMOTE_ADDR"] = peer
+	}
+	if peer != "" {
+		p["JUL_PEER_ADDR"] = peer
+	}
+	if chain := forwardedChain(client, peer); chain != "" {
+		p["HTTP_X_FORWARDED_FOR"] = chain
+	}
+	p["HTTP_X_FORWARDED_HOST"] = r.Host
+	if r.TLS == nil {
+		p["HTTP_X_FORWARDED_PROTO"] = "http"
+	} else {
+		p["HTTP_X_FORWARDED_PROTO"] = "https"
+	}
+	if id := middleware.PeerCertIdentityFrom(r.Context()); id != nil && len(id.Raw) > 0 {
+		p["HTTP_CLIENT_CERT"] = certItem(id.Raw)
+	}
 }
 
 // writeCGIResponse parses a CGI-style response (optional HTTP status line, then
@@ -579,10 +632,17 @@ var errCGIResponseHeaderTooLarge = errors.New("CGI response header exceeds 64 Ki
 type writeTrackingResponseWriter struct {
 	http.ResponseWriter
 	writeErr     error
+	wroteHeader  bool
 	onWriteError func()
 }
 
+func (w *writeTrackingResponseWriter) WriteHeader(code int) {
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(code)
+}
+
 func (w *writeTrackingResponseWriter) Write(p []byte) (int, error) {
+	w.wroteHeader = true
 	n, err := w.ResponseWriter.Write(p)
 	if err == nil && n != len(p) {
 		err = io.ErrShortWrite
@@ -598,6 +658,8 @@ func (w *writeTrackingResponseWriter) Write(p []byte) (int, error) {
 
 func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 	status := http.StatusOK
+	seenStatus := false
+	parsedHeaders := make(http.Header)
 	first := true
 	headerBytes := 0
 	headerFields := 0
@@ -621,12 +683,13 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 		}
 
 		if first && strings.HasPrefix(trimmed, "HTTP/") {
+			seenStatus = true
 			fields := strings.Fields(trimmed)
 			if len(fields) < 2 {
 				return errors.New("uwsgi response has malformed HTTP status line")
 			}
 			code, parseErr := strconv.Atoi(fields[1])
-			if parseErr != nil || code < 100 || code > 999 {
+			if parseErr != nil || code < http.StatusOK || code > 599 {
 				return errors.New("uwsgi response has invalid HTTP status")
 			}
 			status = code
@@ -645,27 +708,68 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 		}
 		key := strings.TrimSpace(trimmed[:idx])
 		val := strings.TrimSpace(trimmed[idx+1:])
-		if key == "" || strings.ContainsAny(key, " \t\x00") || strings.ContainsRune(val, '\x00') {
+		if !httpguts.ValidHeaderFieldName(key) || !httpguts.ValidHeaderFieldValue(val) {
 			return errors.New("uwsgi response has invalid header")
 		}
 		if strings.EqualFold(key, "Status") {
+			if seenStatus {
+				return errors.New("uwsgi response has conflicting status declarations")
+			}
+			seenStatus = true
 			fields := strings.Fields(val)
 			if len(fields) == 0 {
 				return errors.New("uwsgi response has empty Status header")
 			}
 			code, parseErr := strconv.Atoi(fields[0])
-			if parseErr != nil || code < 100 || code > 999 {
+			if parseErr != nil || code < http.StatusOK || code > 599 {
 				return errors.New("uwsgi response has invalid Status header")
 			}
 			status = code
 		} else {
-			w.Header().Add(key, val)
+			parsedHeaders.Add(key, val)
 		}
 	}
 
+	for _, field := range parsedHeaders.Values("Connection") {
+		for _, token := range strings.Split(field, ",") {
+			parsedHeaders.Del(strings.TrimSpace(token))
+		}
+	}
+	for _, hop := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "TE", "Trailer", "Transfer-Encoding", "Upgrade", "Proxy-Authenticate", "Proxy-Authorization"} {
+		parsedHeaders.Del(hop)
+	}
+	declaredLength := int64(-1)
+	if lengths := parsedHeaders.Values("Content-Length"); len(lengths) > 0 {
+		if len(lengths) != 1 {
+			return errors.New("uwsgi response has ambiguous Content-Length")
+		}
+		n, err := strconv.ParseInt(lengths[0], 10, 64)
+		if err != nil || n < 0 {
+			return errors.New("uwsgi response has invalid Content-Length")
+		}
+		declaredLength = n
+	}
+	if status == http.StatusNoContent {
+		parsedHeaders.Del("Content-Length")
+	}
+	for name, values := range parsedHeaders {
+		for _, value := range values {
+			w.Header().Add(name, value)
+		}
+	}
 	w.WriteHeader(status)
+	if status == http.StatusNoContent || status == http.StatusNotModified {
+		return nil
+	}
 	// This forwards the upstream FastCGI/uWSGI response body unchanged; the
 	// origin application is responsible for sanitizing any output it generates.
+	if declaredLength >= 0 {
+		_, err := io.CopyN(w, br, declaredLength)
+		if errors.Is(err, io.EOF) {
+			return io.ErrUnexpectedEOF
+		}
+		return err
+	}
 	_, err := io.Copy(w, br) // lgtm[go/reflected-xss]
 	return err
 }

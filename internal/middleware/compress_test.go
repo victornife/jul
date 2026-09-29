@@ -125,6 +125,21 @@ func TestCompressMIMEGate(t *testing.T) {
 	}
 }
 
+func TestCompressionLargeThresholdStreamsWithoutGrowingProbe(t *testing.T) {
+	mw := gzipMiddleware(t, CompressionOptions{MinSize: 1 << 30})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	body := strings.Repeat("a", maxCompressionProbeBytes+100)
+	rec := serveCompress(mw, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, body[:100])
+		_, _ = io.WriteString(w, body[100:])
+	}, req)
+	if rec.Header().Get("Content-Encoding") != "" || rec.Body.String() != body {
+		t.Fatalf("large min_size changed response: encoding=%q body size=%d", rec.Header().Get("Content-Encoding"), rec.Body.Len())
+	}
+}
+
 func TestCompressNoDoubleEncode(t *testing.T) {
 	mw := gzipMiddleware(t, CompressionOptions{MinSize: 1})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -142,6 +157,46 @@ func TestCompressNoDoubleEncode(t *testing.T) {
 	}
 }
 
+func TestCompressNoDoubleEncodeWhenFirstCodingFieldEmpty(t *testing.T) {
+	mw := gzipMiddleware(t, CompressionOptions{MinSize: 1})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := serveCompress(mw, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Add("Content-Encoding", "")
+		w.Header().Add("Content-Encoding", "br")
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, "already encoded")
+	}, req)
+	if got := rec.Header().Values("Content-Encoding"); len(got) != 2 || got[1] != "br" {
+		t.Fatalf("response was encoded twice: %v", got)
+	}
+}
+
+func TestCompressNegotiatesLaterAcceptEncodingField(t *testing.T) {
+	mw := gzipMiddleware(t, CompressionOptions{MinSize: 1})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Add("Accept-Encoding", "identity")
+	req.Header.Add("Accept-Encoding", "gzip")
+	rec := serveCompress(mw, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, strings.Repeat("response", 10))
+	}, req)
+	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("later encoding offer ignored: %q", got)
+	}
+}
+
+func TestCompressMalformedAndConflictingWeightsDenyCoding(t *testing.T) {
+	for _, header := range []string{"gzip;q=oops", "gzip;q=2", "gzip;q=NaN", "gzip;q=0, gzip;q=1", "gzip;q=1, gzip;q=0", "gzip;foo"} {
+		t.Run(header, func(t *testing.T) {
+			q := parseAcceptEncoding(header)
+			if v, ok := clientQuality(q, "gzip"); !ok || v != 0 {
+				t.Fatalf("quality for %q = %v, %v; want denial", header, v, ok)
+			}
+		})
+	}
+}
+
 func TestCompressSkipsRange(t *testing.T) {
 	mw := gzipMiddleware(t, CompressionOptions{MinSize: 8})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -153,6 +208,21 @@ func TestCompressSkipsRange(t *testing.T) {
 	}, req)
 	if rec.Header().Get("Content-Encoding") != "" {
 		t.Fatalf("Range requests must not be compressed")
+	}
+}
+
+func TestCompressSkipsRepeatedRange(t *testing.T) {
+	mw := gzipMiddleware(t, CompressionOptions{MinSize: 8})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Add("Range", "")
+	req.Header.Add("Range", "bytes=0-10")
+	rec := serveCompress(mw, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, strings.Repeat("y", 1000))
+	}, req)
+	if got := rec.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("repeated Range response encoded as %q", got)
 	}
 }
 

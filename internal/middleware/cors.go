@@ -144,8 +144,8 @@ func (p *CORSPolicy) requestedHeadersApproved(values []string) bool {
 	for _, v := range values {
 		for _, tok := range strings.Split(v, ",") {
 			tok = strings.TrimSpace(tok)
-			if tok == "" {
-				continue
+			if !isCORSToken(tok) {
+				return false
 			}
 			total++
 			if total > maxPreflightRequestHeaders {

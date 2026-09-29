@@ -408,7 +408,7 @@ func (c *ConfigApplyCoordinator) readConfigRaw() ([]byte, error) {
 	if c.ReadConfigRaw != nil {
 		return c.ReadConfigRaw()
 	}
-	return os.ReadFile(c.Path)
+	return readConfigFile(c.Path)
 }
 
 func (c *ConfigApplyCoordinator) conflictResult(mode ApplyMode, persistedVersion, desiredVersion, currentVersion string) ApplyResult {

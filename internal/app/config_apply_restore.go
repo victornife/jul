@@ -78,7 +78,7 @@ func (c *ConfigApplyCoordinator) withRestorationOutcome(res ApplyResult, prevRaw
 		return res
 	}
 
-	current, err := os.ReadFile(c.Path)
+	current, err := readConfigFile(c.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// File absent. Restoration succeeded only if the candidate did not
@@ -156,7 +156,7 @@ func (c *ConfigApplyCoordinator) buildTerminalResult(mode ApplyMode, persistedVe
 	if res.OK {
 		res.Persisted = true
 		res.FinalDiskVersion = persistedVersion
-		if current, err := os.ReadFile(c.Path); err == nil {
+		if current, err := readConfigFile(c.Path); err == nil {
 			res.FinalDiskVersion = canonicalVersionFromRaw(current)
 		}
 	} else {
@@ -222,7 +222,7 @@ func (c *ConfigApplyCoordinator) restorePreviousLocked(prevRaw []byte, previousl
 		return nil
 	}
 
-	current, err := os.ReadFile(c.Path)
+	current, err := readConfigFile(c.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// Candidate file is already gone; nothing to restore.

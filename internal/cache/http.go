@@ -125,6 +125,12 @@ func (w *cacheWriter) Flush() {
 	if w.hijacked {
 		return
 	}
+	// Flush commits an implicit 200 on the wire even before a body is written.
+	// Capture that final status and its headers before the underlying writer
+	// commits them, so a later WriteHeader cannot store a different response.
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}

@@ -4,12 +4,14 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 )
@@ -233,10 +235,104 @@ func TestStaticPrecompressedSidecar(t *testing.T) {
 	if rec.Body.String() != "console.log('plain')" {
 		t.Fatalf("plain body = %q", rec.Body.String())
 	}
+	if !strings.Contains(rec.Header().Get("Vary"), "Accept-Encoding") {
+		t.Fatal("plain representation omitted Vary: Accept-Encoding")
+	}
 
 	// A Range request bypasses the sidecar.
 	rec = get(h, "http://h/app.js", map[string]string{"Accept-Encoding": "gzip", "Range": "bytes=0-3"})
 	if rec.Header().Get("Content-Encoding") == "gzip" {
 		t.Fatal("Range request must not serve the precompressed sidecar")
+	}
+	repeated := httptest.NewRequest(http.MethodGet, "http://h/app.js", nil)
+	repeated.Header.Set("Accept-Encoding", "gzip")
+	repeated.Header.Add("Range", "")
+	repeated.Header.Add("Range", "bytes=0-3")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, repeated)
+	if rec.Header().Get("Content-Encoding") != "" {
+		t.Fatal("repeated Range must not select an encoded representation")
+	}
+}
+
+func TestStaticStaleSidecarFallsBackToCurrentSource(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "app.js")
+	sidecar := source + ".gz"
+	mustWrite(t, source, "current")
+	mustWrite(t, sidecar, "old compressed bytes")
+	now := time.Now()
+	if err := os.Chtimes(sidecar, now.Add(-time.Minute), now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(source, now, now); err != nil {
+		t.Fatal(err)
+	}
+	h, err := NewStaticWithOptions(config.ServerConfig{}, config.LocationConfig{Root: dir}, StaticOptions{Precompressed: true, Encoders: []string{"gzip"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.(interface{ Close() error }).Close() })
+	rec := get(h, "http://h/app.js", map[string]string{"Accept-Encoding": "gzip"})
+	if rec.Code != http.StatusOK || rec.Body.String() != "current" || rec.Header().Get("Content-Encoding") != "" {
+		t.Fatalf("stale sidecar served: code=%d body=%q encoding=%q", rec.Code, rec.Body.String(), rec.Header().Get("Content-Encoding"))
+	}
+}
+
+func TestStaticSidecarHonorsLaterFieldAndExplicitDenial(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "file.txt"), "plain")
+	mustWrite(t, filepath.Join(dir, "file.txt.gz"), "encoded")
+	h, err := NewStaticWithOptions(config.ServerConfig{}, config.LocationConfig{Root: dir}, StaticOptions{Precompressed: true, Encoders: []string{"gzip"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.(interface{ Close() error }).Close() })
+	for _, tc := range []struct {
+		values  []string
+		encoded bool
+	}{
+		{[]string{"identity", "gzip"}, true},
+		{[]string{"gzip;q=0", "gzip"}, false},
+		{[]string{"gzip;q=not-a-number"}, false},
+		{[]string{"*"}, true},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "http://h/file.txt", nil)
+		for _, value := range tc.values {
+			req.Header.Add("Accept-Encoding", value)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if got := rec.Header().Get("Content-Encoding") == "gzip"; got != tc.encoded {
+			t.Errorf("Accept-Encoding %v served gzip=%v, want %v", tc.values, got, tc.encoded)
+		}
+	}
+}
+
+func TestStaticDirectoryListingHasEntryBound(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i <= 4096; i++ {
+		name := filepath.Join(dir, fmt.Sprintf("%04d", i))
+		if err := os.WriteFile(name, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := newStatic(t, config.LocationConfig{Root: dir, DirectoryListing: true})
+	rec := get(h, "http://h/", nil)
+	if rec.Code != http.StatusServiceUnavailable || rec.Body.Len() > 1024 {
+		t.Fatalf("oversized directory listing: code=%d size=%d", rec.Code, rec.Body.Len())
+	}
+}
+
+func TestStaticDirectoryLinksEscapeURLDelimiters(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a?b#%.txt"), "correct")
+	h := newStatic(t, config.LocationConfig{Root: dir, DirectoryListing: true})
+	rec := get(h, "http://h/", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `href="/a%3Fb%23%25.txt"`) {
+		t.Fatalf("listing has broken link: %d %q", rec.Code, rec.Body.String())
+	}
+	if got := get(h, "http://h/a%3Fb%23%25.txt", nil); got.Body.String() != "correct" {
+		t.Fatalf("escaped link did not resolve: %d %q", got.Code, got.Body.String())
 	}
 }

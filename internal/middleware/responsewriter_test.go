@@ -103,6 +103,16 @@ func TestRecorderFlushDelegates(t *testing.T) {
 	// Should not panic
 }
 
+func TestRecorderFlushCommitsStatusBeforeLateHeader(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rw := NewRecorder(rec)
+	rw.Flush()
+	rw.WriteHeader(http.StatusNotFound)
+	if rec.Code != http.StatusOK || rw.Status() != http.StatusOK {
+		t.Fatalf("flush status diverged: wire=%d recorded=%d", rec.Code, rw.Status())
+	}
+}
+
 func TestRecorderHijackNotSupported(t *testing.T) {
 	rec := httptest.NewRecorder()
 	rw := NewRecorder(rec)

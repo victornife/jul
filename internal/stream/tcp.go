@@ -143,13 +143,23 @@ func (l *listener) handleTCP(client net.Conn) {
 	defer backend.Close()
 
 	if r.proxyOut {
-		if err := proxyproto.WriteV2(backend, clientAddr, client.LocalAddr()); err != nil {
+		if err := writeOutboundProxyHeader(backend, clientAddr, client.LocalAddr(), r.connectTimeout); err != nil {
 			s.log.Warn("stream: write proxy-protocol header", "addr", l.addr, "error", err)
 			return
 		}
 	}
 
 	l.relayTCP(client, backend, br, r.idleTimeout)
+}
+
+func writeOutboundProxyHeader(conn net.Conn, src, dst net.Addr, timeout time.Duration) error {
+	if timeout > 0 {
+		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			return err
+		}
+		defer conn.SetWriteDeadline(time.Time{})
+	}
+	return proxyproto.WriteV2(conn, src, dst)
 }
 
 // relayTCP copies data in both directions until either side closes, then tears
@@ -185,13 +195,29 @@ func (l *listener) copyStream(dst io.Writer, src io.Reader, srcConn net.Conn, id
 		}
 		n, rerr := src.Read(buf)
 		if n > 0 {
-			if _, werr := dst.Write(buf[:n]); werr != nil {
+			written, werr := writeStreamChunk(dst, buf[:n])
+			l.server.addBytes(l.proto, dir, int64(written))
+			if werr != nil {
 				return
 			}
-			l.server.addBytes(l.proto, dir, int64(n))
 		}
 		if rerr != nil {
 			return
 		}
 	}
+}
+
+func writeStreamChunk(dst io.Writer, chunk []byte) (int, error) {
+	written := 0
+	for written < len(chunk) {
+		n, err := dst.Write(chunk[written:])
+		written += n
+		if err != nil {
+			return written, err
+		}
+		if n == 0 {
+			return written, io.ErrShortWrite
+		}
+	}
+	return written, nil
 }

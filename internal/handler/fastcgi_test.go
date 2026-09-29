@@ -36,6 +36,120 @@ func (w *cgiDiscardWriter) Header() http.Header {
 	}
 	return w.header
 }
+
+func TestFastCGIStderrIsBoundedWithoutShortWrites(t *testing.T) {
+	var b boundedCGIStderr
+	chunk := bytes.Repeat([]byte("x"), maxCGIStderrBytes+100)
+	for i := 0; i < 3; i++ {
+		if n, err := b.Write(chunk); err != nil || n != len(chunk) {
+			t.Fatalf("stderr write = %d, %v", n, err)
+		}
+	}
+	if b.Len() != maxCGIStderrBytes {
+		t.Fatalf("stderr retained %d bytes", b.Len())
+	}
+}
+
+func TestUWSGIRejectsOversizedVarBeforeFraming(t *testing.T) {
+	h := &uwsgiHandler{loc: config.LocationConfig{FastCGIParams: map[string]string{"LARGE": strings.Repeat("x", 65536)}}}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	if err := h.sendRequest(nil, r, http.NoBody); err == nil || !strings.Contains(err.Error(), "var block") {
+		t.Fatalf("oversized uWSGI var result = %v", err)
+	}
+}
+
+func TestCGIRejectsInvalidHeaderTokensAndControls(t *testing.T) {
+	for _, raw := range []string{"Bad(Name: value\r\n\r\n", "X-Value: has\x01control\r\n\r\n"} {
+		if err := writeCGIResponse(bufio.NewReader(strings.NewReader(raw)), httptest.NewRecorder()); err == nil {
+			t.Errorf("malformed CGI field was accepted: %q", raw)
+		}
+	}
+}
+
+func TestCGIInvalidLateHeaderDoesNotPublishPartialHeaders(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := writeCGIResponse(bufio.NewReader(strings.NewReader("X-Secret: leaked\r\nBad(Name: nope\r\n\r\n")), rec)
+	if err == nil || rec.Header().Get("X-Secret") != "" {
+		t.Fatalf("partial CGI headers published: error=%v header=%q", err, rec.Header().Get("X-Secret"))
+	}
+}
+
+func TestCGIDropsHopHeadersAndConnectionNominations(t *testing.T) {
+	rec := httptest.NewRecorder()
+	raw := "Connection: X-Internal, keep-alive\r\nX-Internal: secret\r\nTransfer-Encoding: chunked\r\nX-End-To-End: kept\r\n\r\nbody"
+	if err := writeCGIResponse(bufio.NewReader(strings.NewReader(raw)), rec); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Connection", "X-Internal", "Transfer-Encoding"} {
+		if got := rec.Header().Get(name); got != "" {
+			t.Errorf("hop header %s leaked: %q", name, got)
+		}
+	}
+	if rec.Header().Get("X-End-To-End") != "kept" || rec.Body.String() != "body" {
+		t.Fatalf("end-to-end response lost: %v %q", rec.Header(), rec.Body.String())
+	}
+}
+
+func TestCGIRejectsAmbiguousResponseLengths(t *testing.T) {
+	for _, headers := range []string{"Content-Length: 2\r\nContent-Length: 3\r\n", "Content-Length: 2, 2\r\n", "Content-Length: -1\r\n", "Content-Length: nonsense\r\n"} {
+		rec := httptest.NewRecorder()
+		if err := writeCGIResponse(bufio.NewReader(strings.NewReader(headers+"\r\nbody")), rec); err == nil {
+			t.Errorf("invalid length accepted: %q", headers)
+		}
+		if rec.Header().Get("Content-Length") != "" {
+			t.Errorf("invalid length published: %q", headers)
+		}
+	}
+}
+
+func TestCGIClassifiesTruncatedDeclaredResponse(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := writeCGIResponse(bufio.NewReader(strings.NewReader("Content-Length: 10\r\n\r\nshort")), rec)
+	if !errors.Is(err, io.ErrUnexpectedEOF) || rec.Body.String() != "short" {
+		t.Fatalf("truncated declared response = %v, %q", err, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	err = writeCGIResponse(bufio.NewReader(strings.NewReader("Content-Length: 2\r\n\r\nlonger")), rec)
+	if err != nil || rec.Body.String() != "lo" {
+		t.Fatalf("declared response overrun = %v, %q", err, rec.Body.String())
+	}
+}
+
+func TestUWSGIReplacesClientIdentityAssertions(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://edge.test/app", nil)
+	r.RemoteAddr = "192.0.2.9:1234"
+	for _, key := range []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Client-Cert", "Client-Cert", "Forwarded", "X-Real-Ip", "X-Ssl-Client-Verify", "Ssl-Client-Cert", "X-Client-Cert"} {
+		r.Header.Set(key, "attacker")
+	}
+	p := buildCGIParams(config.LocationConfig{}, r)
+	if p["HTTP_X_FORWARDED_FOR"] != "192.0.2.9" || p["HTTP_X_FORWARDED_HOST"] != "edge.test" || p["HTTP_X_FORWARDED_PROTO"] != "http" {
+		t.Fatalf("uWSGI identity did not come from listener: %v", p)
+	}
+	for _, key := range []string{"HTTP_CLIENT_CERT", "HTTP_X_FORWARDED_CLIENT_CERT", "HTTP_FORWARDED", "HTTP_X_REAL_IP", "HTTP_X_SSL_CLIENT_VERIFY", "HTTP_SSL_CLIENT_CERT", "HTTP_X_CLIENT_CERT"} {
+		if p[key] != "" {
+			t.Errorf("spoofed %s survived: %q", key, p[key])
+		}
+	}
+}
+
+func TestFastCGIReplacesClientIdentityAssertions(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://edge.test/app", nil)
+	r.RemoteAddr = "192.0.2.9:1234"
+	r.Header.Set("X-Forwarded-Proto", "https")
+	r.Header.Set("Client-Cert", "attacker")
+	var params map[string]string
+	session := gofast.Chain(gofast.BasicParamsMap, gofast.MapHeader, fcgiScriptParams(config.LocationConfig{}))(
+		func(_ gofast.Client, req *gofast.Request) (*gofast.ResponsePipe, error) {
+			params = req.Params
+			return nil, nil
+		})
+	if _, err := session(nil, gofast.NewRequest(r)); err != nil {
+		t.Fatal(err)
+	}
+	if params["HTTP_X_FORWARDED_PROTO"] != "http" || params["HTTP_CLIENT_CERT"] != "" || params["REMOTE_ADDR"] != "192.0.2.9" {
+		t.Fatalf("FastCGI forwarded spoofed identity: %v", params)
+	}
+}
 func (*cgiDiscardWriter) WriteHeader(int)             {}
 func (*cgiDiscardWriter) Write(p []byte) (int, error) { return len(p), nil }
 
@@ -151,6 +265,11 @@ func TestWriteCGIResponse(t *testing.T) {
 	}{
 		{name: "empty status", raw: "Status:\r\n\r\n"},
 		{name: "invalid status", raw: "Status: nope\r\n\r\n"},
+		{name: "interim status", raw: "Status: 103 Early Hints\r\n\r\n"},
+		{name: "out-of-range status", raw: "Status: 999 Invalid\r\n\r\n"},
+		{name: "interim HTTP status", raw: "HTTP/1.1 103 Early Hints\r\n\r\n"},
+		{name: "repeated status", raw: "Status: 200 OK\r\nStatus: 404 Not Found\r\n\r\n"},
+		{name: "conflicting status line", raw: "HTTP/1.1 200 OK\r\nStatus: 404 Not Found\r\n\r\n"},
 		{name: "malformed header", raw: "not-a-header\r\n\r\n"},
 		{name: "unterminated header", raw: "Content-Type: text/plain"},
 		{name: "oversized header line", raw: "X-Large: " + strings.Repeat("x", cgiResponseHeaderMax) + "\r\n\r\n"},
@@ -159,6 +278,24 @@ func TestWriteCGIResponse(t *testing.T) {
 			rec := httptest.NewRecorder()
 			if err := writeCGIResponse(bufio.NewReader(strings.NewReader(tt.raw)), rec); err == nil {
 				t.Fatal("malformed response was accepted")
+			}
+		})
+	}
+}
+
+func TestWriteCGIResponseSuppressesForbiddenBodies(t *testing.T) {
+	for _, code := range []int{http.StatusNoContent, http.StatusNotModified} {
+		t.Run(strconv.Itoa(code), func(t *testing.T) {
+			raw := fmt.Sprintf("Status: %d\r\nContent-Length: 7\r\n\r\nignored", code)
+			rec := httptest.NewRecorder()
+			if err := writeCGIResponse(bufio.NewReader(strings.NewReader(raw)), rec); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != code || rec.Body.Len() != 0 {
+				t.Fatalf("status %d body %q", rec.Code, rec.Body.String())
+			}
+			if code == http.StatusNoContent && rec.Header().Get("Content-Length") != "" {
+				t.Fatal("204 forwarded an invalid Content-Length")
 			}
 		})
 	}

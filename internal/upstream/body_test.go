@@ -133,6 +133,24 @@ func TestAttemptBodyCompleteReadIsSuccess(t *testing.T) {
 	}
 }
 
+func TestAttemptBodyDeclaredLengthTruncationIsBackendFailure(t *testing.T) {
+	var got AttemptClassification
+	w := WrapAttemptBody(io.NopCloser(strings.NewReader("short")), 20,
+		context.Background(), context.Background(), func(c AttemptClassification, err error) {
+			got = c
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Errorf("completion error = %v", err)
+			}
+		})
+	if _, err := io.ReadAll(w); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("read error = %v, want unexpected EOF", err)
+	}
+	_ = w.Close()
+	if got.Health() != HealthFailure || got.Origin() != OriginBackendTransport {
+		t.Fatalf("truncated response classified as %q/%d", got.Origin(), got.Health())
+	}
+}
+
 func TestAttemptBodyEmptyResponseIsSuccess(t *testing.T) {
 	var calls atomic.Int32
 	var got AttemptClassification

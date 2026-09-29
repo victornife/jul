@@ -47,6 +47,11 @@ func (b *attemptBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
 	seen := b.read.Add(int64(n))
 	switch {
+	case errors.Is(err, io.EOF) && b.expected >= 0 && seen < b.expected:
+		// EOF before the declared body length is a backend truncation, not a
+		// successful response. Preserve that error for the proxy's copy loop.
+		err = io.ErrUnexpectedEOF
+		b.finish(ClassifyAttemptError(err, b.inbound, b.attempt), err)
 	case errors.Is(err, io.EOF), b.expected >= 0 && seen >= b.expected:
 		b.finish(SuccessfulAttempt(), nil)
 	case err != nil:

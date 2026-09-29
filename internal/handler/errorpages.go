@@ -7,6 +7,7 @@ package handler
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -19,6 +20,31 @@ import (
 // mapping exists (or the file cannot be read) a plain default page is used.
 type ErrorPages struct {
 	pages map[int]string
+}
+
+const maxErrorPageBytes = 1 << 20
+
+func readErrorPage(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxErrorPageBytes {
+		return nil, fmt.Errorf("error page is not a bounded regular file")
+	}
+	body, err := io.ReadAll(io.LimitReader(f, maxErrorPageBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxErrorPageBytes {
+		return nil, fmt.Errorf("error page exceeds read limit")
+	}
+	return body, nil
 }
 
 // NewErrorPages builds an ErrorPages from a config map keyed by status code
@@ -43,7 +69,7 @@ func (e *ErrorPages) Render(w http.ResponseWriter, r *http.Request, code int) {
 				http.Redirect(w, r, target, http.StatusFound)
 				return
 			}
-			if body, err := os.ReadFile(target); err == nil {
+			if body, err := readErrorPage(target); err == nil {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(code)
 				_, _ = w.Write(body)

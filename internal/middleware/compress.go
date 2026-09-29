@@ -8,6 +8,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -110,6 +111,10 @@ type compression struct {
 	onCompress func(string)
 }
 
+// A very large configured min_size must not turn every concurrent response
+// into a buffer of that size. Beyond this probe, stream it uncompressed.
+const maxCompressionProbeBytes = 64 << 10
+
 // NewCompression builds the Compression middleware. It returns an error if a
 // configured encoder is not compiled into this build so the caller can fail
 // startup/reload with a clear "not compiled in this build" message.
@@ -152,7 +157,7 @@ func NewCompression(opts CompressionOptions) (Middleware, error) {
 // negotiate selects the best registered encoder for the request, honoring
 // Accept-Encoding q-values with server preference as the tie-break.
 func (c *compression) negotiate(r *http.Request) *encoderPool {
-	header := r.Header.Get("Accept-Encoding")
+	header := strings.Join(r.Header.Values("Accept-Encoding"), ",")
 	if header == "" {
 		return nil
 	}
@@ -210,7 +215,7 @@ func (cw *compressWriter) WriteHeader(code int) {
 	// that prohibit intermediary transformation never get compressed. The Vary
 	// header is added in flushHeader so it is guaranteed even for empty bodies.
 	if !bodyAllowed(code) ||
-		cw.Header().Get("Content-Encoding") != "" ||
+		len(cw.Header().Values("Content-Encoding")) != 0 ||
 		cacheControlNoTransform(cw.r.Header) ||
 		cacheControlNoTransform(cw.Header()) {
 		cw.startPassthrough()
@@ -224,6 +229,13 @@ func (cw *compressWriter) Write(b []byte) (int, error) {
 	if cw.decided {
 		if cw.enc != nil {
 			return cw.enc.Write(b)
+		}
+		return cw.ResponseWriter.Write(b)
+	}
+	if cw.minSize > maxCompressionProbeBytes && len(b) > maxCompressionProbeBytes-len(cw.buf) {
+		cw.startPassthrough()
+		if err := cw.flushBuf(); err != nil {
+			return 0, err
 		}
 		return cw.ResponseWriter.Write(b)
 	}
@@ -280,7 +292,7 @@ func (cw *compressWriter) decide() {
 	if cw.decided {
 		return
 	}
-	if cw.r.Header.Get("Range") != "" ||
+	if len(cw.r.Header.Values("Range")) != 0 ||
 		cacheControlNoTransform(cw.r.Header) ||
 		cacheControlNoTransform(cw.Header()) {
 		cw.startPassthrough()
@@ -404,16 +416,28 @@ func parseAcceptEncoding(header string) map[string]float64 {
 		q := 1.0
 		if i := strings.IndexByte(part, ';'); i >= 0 {
 			name = strings.TrimSpace(part[:i])
+			seenWeight := false
 			for _, p := range strings.Split(part[i+1:], ";") {
 				p = strings.TrimSpace(p)
-				if strings.HasPrefix(p, "q=") {
-					if v, err := strconv.ParseFloat(strings.TrimSpace(p[2:]), 64); err == nil {
-						q = v
-					}
+				if !strings.HasPrefix(p, "q=") || seenWeight {
+					q = 0
+					break
 				}
+				seenWeight = true
+				v, err := strconv.ParseFloat(strings.TrimSpace(p[2:]), 64)
+				if err != nil || math.IsNaN(v) || v < 0 || v > 1 {
+					q = 0
+					break
+				}
+				q = v
 			}
 		}
-		out[strings.ToLower(name)] = q
+		name = strings.ToLower(name)
+		if old, ok := out[name]; !ok || q < old {
+			// An explicit refusal or malformed duplicate must not be
+			// overridden by a later field line.
+			out[name] = q
+		}
 	}
 	return out
 }
@@ -428,6 +452,13 @@ func clientQuality(q map[string]float64, name string) (float64, bool) {
 		return v, true
 	}
 	return 0, false
+}
+
+// AcceptsEncoding applies the same strict coding negotiation used by dynamic
+// compression to precompressed static representations.
+func AcceptsEncoding(header, name string) bool {
+	q, ok := clientQuality(parseAcceptEncoding(header), name)
+	return ok && q > 0
 }
 
 // mimeMatcher matches a response Content-Type against an allow-list of exact

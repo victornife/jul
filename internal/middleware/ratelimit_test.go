@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -31,6 +32,69 @@ func storeSize(s *RateLimiterStore) int {
 		s.shards[i].mu.Unlock()
 	}
 	return n
+}
+
+func TestLimiterCapsBucketsDuringKeyChurn(t *testing.T) {
+	store := newTestStore(t)
+	key := "new-key"
+	shard := shardIndex(key)
+	sh := &store.shards[shard]
+	keys := make([]string, 0, maxLimiterBucketsPerShard)
+	for i := 0; len(keys) < maxLimiterBucketsPerShard; i++ {
+		candidate := strconv.Itoa(i)
+		if shardIndex(candidate) != shard {
+			continue
+		}
+		keys = append(keys, candidate)
+		store.allow(candidate, 1, 1)
+	}
+	store.allow(keys[0], 1, 1) // active bucket must not be evicted first
+	if ok, _ := store.allow(key, 1, 1); !ok {
+		t.Fatal("new key was denied")
+	}
+	if got := len(sh.entries); got != maxLimiterBucketsPerShard {
+		t.Fatalf("key churn retained %d buckets", got)
+	}
+	if sh.entries[key] == nil {
+		t.Fatal("new key was not installed")
+	}
+	if sh.entries[keys[0]] == nil || sh.entries[keys[1]] != nil {
+		t.Fatal("eviction discarded a recently active bucket instead of the oldest")
+	}
+}
+
+func TestRateHeaderKeyFallsBackForAmbiguousFields(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "192.0.2.4:1234"
+	r.Header.Add("X-Tenant", "one")
+	r.Header.Add("X-Tenant", "two")
+	if got, want := RateKeyFunc("header:X-Tenant")(r), clientKey(r); got != want {
+		t.Fatalf("ambiguous tenant key = %q, want peer %q", got, want)
+	}
+}
+
+func TestRateHeaderKeyDoesNotRetainUnboundedInput(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-Tenant", strings.Repeat("a", 4096))
+	key := RateKeyFunc("header:X-Tenant")(r)
+	if len(key) > 80 || key == "" {
+		t.Fatalf("long tenant retained in bucket map: key length=%d", len(key))
+	}
+	if RateKeyFunc("header:X-Tenant")(r) != key {
+		t.Fatal("same tenant did not get a stable key")
+	}
+}
+
+func TestRateScopesCannotCollideAcrossDelimiterInKey(t *testing.T) {
+	store := newTestStore(t)
+	one := store.Scoped("a", 1, 1)
+	two := store.Scoped("a\x00b", 1, 1)
+	if ok, _ := one.Allow("b\x00c"); !ok {
+		t.Fatal("first bucket denied")
+	}
+	if ok, _ := two.Allow("c"); !ok {
+		t.Fatal("distinct scope collided with key")
+	}
 }
 
 func TestRateLimiterAllowsBurstThenThrottles(t *testing.T) {
@@ -85,9 +149,10 @@ func TestRateLimiterReloadUpdatesBucketParams(t *testing.T) {
 	store.Scoped("s", 1, 1).Allow("k")
 	store.Scoped("s", 5, 9).Allow("k")
 
-	sh := &store.shards[shardIndex("s\x00k")]
+	key := store.Scoped("s", 1, 1).(*scopedLimiter).prefix + "k"
+	sh := &store.shards[shardIndex(key)]
 	sh.mu.Lock()
-	e := sh.entries["s\x00k"]
+	e := sh.entries[key]
 	sh.mu.Unlock()
 	if e == nil {
 		t.Fatal("entry missing after reload")

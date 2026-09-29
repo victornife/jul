@@ -1186,6 +1186,16 @@ func TestValidateGRPCTranscode(t *testing.T) {
 			t.Errorf("valid reflection grpc_transcode rejected: %v", err)
 		}
 	})
+	t.Run("message cap", func(t *testing.T) {
+		g := &GRPCTranscodeConfig{Target: "grpcbackend", DescriptorSet: descFile, MaxMessageSize: Size(16 << 20)}
+		if err := Validate(withGRPC(g, nil)); err != nil {
+			t.Fatal(err)
+		}
+		g.MaxMessageSize++
+		if err := Validate(withGRPC(g, nil)); err == nil {
+			t.Fatal("unbounded message size accepted")
+		}
+	})
 	t.Run("target required", func(t *testing.T) {
 		g := &GRPCTranscodeConfig{DescriptorSet: descFile}
 		if err := Validate(withGRPC(g, nil)); err == nil {
