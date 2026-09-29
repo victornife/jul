@@ -108,8 +108,10 @@ was published 2026-09-21 at
 and #421 post-fix soak. Exact release evidence is recorded in
 [#425](https://github.com/victornife/jul/issues/425).
 
-`v2.0.0-rc.1`Proposed v2.1.0 is a separate tag from v2.0.0. Until that tag
-is published, v2.0.0 remains the latest published stabl
+Proposed v2.1.0 is a separate tag from v2.0.0. Until that tag is published,
+v2.0.0 remains the latest published stable release.
+
+`v2.0.0-rc.1` remains an immutable historical prerelease at
 `c9ab3a05af6a6088b2721de0a87995ce37d468cf`;
 its [candidate evidence](../release-candidates/v2.0.0-rc.1.md) and the older
 [`v1.32.1-rc.1` record](../release-candidates/v1.32.1-rc.1.md) are historical
