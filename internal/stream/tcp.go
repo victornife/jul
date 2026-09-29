@@ -157,7 +157,7 @@ func writeOutboundProxyHeader(conn net.Conn, src, dst net.Addr, timeout time.Dur
 		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
 			return err
 		}
-		defer conn.SetWriteDeadline(time.Time{})
+		defer func() { _ = conn.SetWriteDeadline(time.Time{}) }()
 	}
 	return proxyproto.WriteV2(conn, src, dst)
 }
