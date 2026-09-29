@@ -327,6 +327,12 @@ func fetchDescriptorSet(ctx context.Context, conn *grpc.ClientConn) (*descriptor
 	if list == nil {
 		return nil, fmt.Errorf("reflection: unexpected response to ListServices")
 	}
+	// Each service causes a round trip and a descriptor decode. A reflection
+	// endpoint with an enormous list must not turn one reload into unbounded
+	// backend calls, even when every individual reply fits gRPC's limit.
+	if len(list.GetService()) > 1024 {
+		return nil, fmt.Errorf("reflection lists more than 1024 services")
+	}
 
 	files := &reflectionFiles{collected: make(map[string]*descriptorpb.FileDescriptorProto), seen: make(map[string]bool)}
 
