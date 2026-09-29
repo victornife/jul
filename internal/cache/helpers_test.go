@@ -143,6 +143,41 @@ func TestNotModified(t *testing.T) {
 	}
 }
 
+func TestNotModifiedConditionalFieldPrecedenceAndLists(t *testing.T) {
+	lastModified := time.Now().UTC().Format(http.TimeFormat)
+	tests := []struct {
+		name string
+		etag string
+		inm  []string
+		ims  []string
+		want bool
+	}{
+		{"later ETag field matches", `"abc"`, []string{`"other"`, `"abc"`}, nil, true},
+		{"empty ETag field still overrides date", `"abc"`, []string{"", `"other"`}, []string{lastModified}, false},
+		{"missing stored ETag still overrides date", "", []string{`"other"`}, []string{lastModified}, false},
+		{"weak client ETag matches", `"abc"`, []string{`W/"abc"`}, nil, true},
+		{"weak stored ETag matches", `W/"abc"`, []string{`"abc"`}, nil, true},
+		{"comma inside ETag is opaque", `"a,b"`, []string{`"other", "a,b"`}, nil, true},
+		{"wildcard matches without stored ETag", "", []string{"*"}, nil, true},
+		{"malformed list does not validate", `"abc"`, []string{`"abc", *`}, []string{lastModified}, false},
+		{"multiple date fields ignored", `"abc"`, nil, []string{lastModified, lastModified}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			for _, value := range tc.inm {
+				r.Header.Add("If-None-Match", value)
+			}
+			for _, value := range tc.ims {
+				r.Header.Add("If-Modified-Since", value)
+			}
+			if got := notModified(r, &Entry{ETag: tc.etag, LastModified: lastModified}); got != tc.want {
+				t.Errorf("notModified = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseList(t *testing.T) {
 	got := parseList("a, b, c")
 	want := []string{"a", "b", "c"}

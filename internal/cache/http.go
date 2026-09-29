@@ -270,22 +270,71 @@ func isRangeRequest(r *http.Request) bool {
 // notModified reports whether a conditional request can be answered with 304
 // from the cached entry.
 func notModified(r *http.Request, e *Entry) bool {
-	if inm := r.Header.Get("If-None-Match"); inm != "" && e.ETag != "" {
-		for _, tag := range parseList(inm) {
-			if tag == "*" || tag == e.ETag {
-				return true
-			}
-		}
-		return false
+	if inm := r.Header.Values("If-None-Match"); len(inm) != 0 {
+		// Presence takes precedence over If-Modified-Since, even when the
+		// field is empty or the stored representation has no ETag.
+		return matchesIfNoneMatch(inm, e.ETag)
 	}
-	if ims := r.Header.Get("If-Modified-Since"); ims != "" && e.LastModified != "" {
-		t1, err1 := http.ParseTime(ims)
+	if ims := r.Header.Values("If-Modified-Since"); len(ims) == 1 && e.LastModified != "" {
+		t1, err1 := http.ParseTime(ims[0])
 		t2, err2 := http.ParseTime(e.LastModified)
 		if err1 == nil && err2 == nil && !t2.After(t1) {
 			return true
 		}
 	}
 	return false
+}
+
+// matchesIfNoneMatch reads every field line, splitting only on commas outside
+// quoted entity tags. Weak comparison ignores the W/ prefix on either side.
+// A malformed list cannot justify returning 304 for a cached representation.
+func matchesIfNoneMatch(fields []string, stored string) bool {
+	if len(fields) == 1 && strings.TrimSpace(fields[0]) == "*" {
+		return true
+	}
+	want, valid := opaqueETag(stored)
+	if !valid {
+		return false
+	}
+	matched := false
+	for _, line := range fields {
+		start := 0
+		quoted := false
+		for i := 0; i <= len(line); i++ {
+			if i < len(line) && line[i] == '"' {
+				quoted = !quoted
+			}
+			if i < len(line) && (line[i] != ',' || quoted) {
+				continue
+			}
+			part := strings.TrimSpace(line[start:i])
+			if part != "" {
+				got, ok := opaqueETag(part)
+				if !ok {
+					return false
+				}
+				matched = matched || got == want
+			}
+			start = i + 1
+		}
+		if quoted {
+			return false
+		}
+	}
+	return matched
+}
+
+func opaqueETag(tag string) (string, bool) {
+	tag = strings.TrimPrefix(tag, "W/")
+	if len(tag) < 2 || tag[0] != '"' || tag[len(tag)-1] != '"' {
+		return "", false
+	}
+	for i := 1; i < len(tag)-1; i++ {
+		if tag[i] < '!' || tag[i] == '"' || tag[i] == 0x7f {
+			return "", false
+		}
+	}
+	return tag, true
 }
 
 // parseList splits a comma-separated header value, trimming whitespace.
