@@ -22,22 +22,31 @@ import (
 // before the compiled policy can be published.
 type cancelAfterCompileContext struct {
 	context.Context
-	checks int
+	checks   int
+	cancelAt int
 }
 
 func (c *cancelAfterCompileContext) Err() error {
 	c.checks++
-	if c.checks > 1 {
+	if c.checks >= c.cancelAt {
 		return context.DeadlineExceeded
 	}
 	return nil
 }
 
 func TestCompilationFinishedAfterDeadlineIsRejected(t *testing.T) {
-	ctx := &cancelAfterCompileContext{Context: context.Background()}
+	ctx := &cancelAfterCompileContext{Context: context.Background(), cancelAt: 3}
 	fw, err := New(ctx, config.WAFConfig{Enabled: true, InlineRules: `SecRuleEngine On`}, Options{})
-	if fw != nil || err != context.DeadlineExceeded || ctx.checks < 2 {
+	if fw != nil || err != context.DeadlineExceeded || ctx.checks < 3 {
 		t.Fatalf("New after deadline = %v, %v (checks %d)", fw, err, ctx.checks)
+	}
+}
+
+func TestDeadlineAfterDirectiveAssemblyStopsBeforeCompile(t *testing.T) {
+	ctx := &cancelAfterCompileContext{Context: context.Background(), cancelAt: 2}
+	fw, err := New(ctx, config.WAFConfig{Enabled: true, InlineRules: `SecRuleEngine On`}, Options{})
+	if fw != nil || err != context.DeadlineExceeded || ctx.checks != 2 {
+		t.Fatalf("New before compile = %v, %v (checks %d)", fw, err, ctx.checks)
 	}
 }
 

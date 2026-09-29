@@ -53,6 +53,9 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	rec := newSourceRecorder(mergefsio.OSFS)
 	var counter ruleCounter
