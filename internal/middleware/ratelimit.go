@@ -80,7 +80,7 @@ func NewRateLimiterStore(ctx context.Context, ttl, sweep time.Duration) *RateLim
 // global bucket versus a per-location bucket) never collide inside the shared
 // store. Keeping rate.Limit internal lets callers think in plain requests/sec.
 func (s *RateLimiterStore) Scoped(scope string, ratePerSec, burst int) Limiter {
-	return &scopedLimiter{store: s, prefix: scope + "\x00", limit: rate.Limit(ratePerSec), burst: burst}
+	return &scopedLimiter{store: s, prefix: strconv.Itoa(len(scope)) + ":" + scope, limit: rate.Limit(ratePerSec), burst: burst}
 }
 
 type scopedLimiter struct {

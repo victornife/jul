@@ -74,6 +74,18 @@ func TestRateHeaderKeyDoesNotRetainUnboundedInput(t *testing.T) {
 	}
 }
 
+func TestRateScopesCannotCollideAcrossDelimiterInKey(t *testing.T) {
+	store := newTestStore(t)
+	one := store.Scoped("a", 1, 1)
+	two := store.Scoped("a\x00b", 1, 1)
+	if ok, _ := one.Allow("b\x00c"); !ok {
+		t.Fatal("first bucket denied")
+	}
+	if ok, _ := two.Allow("c"); !ok {
+		t.Fatal("distinct scope collided with key")
+	}
+}
+
 func TestRateLimiterAllowsBurstThenThrottles(t *testing.T) {
 	store := newTestStore(t)
 	lim := store.Scoped("test", 1, 5) // 1 rps, burst 5
