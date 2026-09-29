@@ -45,6 +45,21 @@ func TestCacheWriterFlush(t *testing.T) {
 	}
 }
 
+func TestCacheWriterFlushCommitsImplicitStatus(t *testing.T) {
+	rec := httptest.NewRecorder()
+	cw := &cacheWriter{ResponseWriter: rec, limit: 1024}
+	cw.Header().Set("X-Origin", "before")
+	cw.Flush()
+	cw.Header().Set("X-Origin", "after")
+	cw.WriteHeader(http.StatusNotFound)
+	if cw.status != http.StatusOK || rec.Code != http.StatusOK {
+		t.Fatalf("capture status %d, wire status %d; want 200", cw.status, rec.Code)
+	}
+	if cw.snapshot.Get("X-Origin") != "before" {
+		t.Fatalf("captured header = %q, want pre-flush value", cw.snapshot.Get("X-Origin"))
+	}
+}
+
 func TestCacheWriterTooBig(t *testing.T) {
 	rec := httptest.NewRecorder()
 	cw := &cacheWriter{ResponseWriter: rec, limit: 4}
