@@ -365,7 +365,8 @@ the guest grows it and calls again. The SDK helpers (`readInto`, `KVGet`,
     plugin's instances. Without the capability `kv_get`/`kv_set` return "denied".
   - **`fetch`** — a guarded outbound HTTP capability restricted to
     `allowed_hosts`. The host validates each URL against the allow-list, refuses
-    addresses that resolve to loopback/private/link-local/CGNAT/multicast ranges
+    addresses that resolve to loopback/private/link-local/CGNAT/multicast,
+    `0.0.0.0/8`, `240.0.0.0/4`, or the benchmarking range (`198.18.0.0/15`)
     (SSRF guard), re-checks the allow-list on every redirect, and caps the
     response at `max_fetch_response` within `fetch_timeout`. When the server-wide
     [egress allow-list](egress.md#plugin-fetch) is enabled, a fetch must ALSO
@@ -558,7 +559,7 @@ are addressed by design, configuration, or runtime containment:
 | ------ | ------ | ---------- | ------------- |
 | Guest escape via memory corruption | Malformed `.wasm` or JIT bug | wazero is a pure-Go interpreter with no JIT/no cgo; the linear memory cap bounds blast radius; Go memory safety protects the host runtime | Unknown engine bug in wazero (defense-in-depth: keep wazero updated) |
 | Infinite loop / CPU exhaustion | Guest spins without yielding | Per-invocation `timeout` (default 100 ms) enforced by context cancellation; guest torn down on overrun | Very short spike before cancellation (~timeout + scheduler jitter) |
-| SSRF via `fetch` | Guest calls allowed host that redirects to private IP | `dialValidatedIPs` blocks loopback/private/link-local/CGNAT/multicast at dial time; redirect targets re-check allow-list | DNS rebinding to a *public* IP that later changes (low probability; TTL-dependent) |
+| SSRF via `fetch` | Guest calls allowed host that redirects to private or special-use IP | `dialValidatedIPs` blocks loopback/private/link-local/CGNAT/multicast, `0.0.0.0/8`, `240.0.0.0/4`, and `198.18.0.0/15` at dial time; redirect targets re-check allow-list | DNS rebinding to a *public* IP that later changes (low probability; TTL-dependent) |
 | KV DoS (unbounded growth) | Guest fills KV with unbounded keys/values | `kv_max_entries` (default 1024) and `kv_max_bytes` (default 1 MiB) enforced per plugin; `kv_set` returns "quota exceeded" | Admin misconfigures quotas to very large values |
 | Admin uploads malicious module | Attacker with admin token uploads crafted `.wasm` | Admin endpoint requires bearer token; upload disabled by default; filename hardened; path-traversal defense; module still sandboxed | Compromised admin token (rotate tokens, restrict admin to loopback/mTLS) |
 | Information leak via guest error | Guest panics and leaks stack or data in error message | Panic is contained; the host returns generic "plugin error" `500`; guest log goes to server log, not the HTTP client | Server log exposed to attacker (standard log-hardening hygiene) |

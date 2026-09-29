@@ -171,10 +171,14 @@ func ipBlocked(ip net.IP) bool {
 		ip.IsMulticast() || ip.IsUnspecified() || ip.IsPrivate() {
 		return true
 	}
-	// Unique-local IPv6 (fc00::/7) — IsPrivate covers it, but keep an explicit
-	// CGNAT bound (100.64.0.0/10) which IsPrivate does not.
+	// IsPrivate covers IPv6 unique-local, but does not cover special-use IPv4
+	// ranges that can be routed inside a local network. Reject those before
+	// dialing even when an allow-listed name resolves to one of them.
 	if v4 := ip.To4(); v4 != nil {
 		if v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 {
+			return true
+		}
+		if v4[0] == 0 || v4[0] >= 240 || (v4[0] == 198 && (v4[1] == 18 || v4[1] == 19)) {
 			return true
 		}
 	}

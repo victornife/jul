@@ -41,7 +41,7 @@ func TestHostAllowed(t *testing.T) {
 }
 
 func TestIPBlocked(t *testing.T) {
-	blocked := []string{"127.0.0.1", "10.0.0.1", "192.168.1.1", "169.254.1.1", "100.64.0.1", "0.0.0.0", "::1"}
+	blocked := []string{"127.0.0.1", "10.0.0.1", "192.168.1.1", "169.254.1.1", "100.64.0.1", "0.0.0.0", "0.1.2.3", "198.18.0.1", "198.19.255.254", "240.0.0.1", "::1"}
 	for _, s := range blocked {
 		if !ipBlocked(net.ParseIP(s)) {
 			t.Errorf("ipBlocked(%s) = false, want true", s)
@@ -52,6 +52,18 @@ func TestIPBlocked(t *testing.T) {
 		if ipBlocked(net.ParseIP(s)) {
 			t.Errorf("ipBlocked(%s) = true, want false (public)", s)
 		}
+	}
+}
+
+func TestFetchBlocksSpecialUseDNSAnswerBeforeDial(t *testing.T) {
+	for _, ip := range []string{"0.1.2.3", "198.18.0.1", "240.0.0.1"} {
+		t.Run(ip, func(t *testing.T) {
+			md := &mockDialer{}
+			_, err := dialValidatedIPs(context.Background(), md, multiIPResolver{ips: []string{"8.8.8.8", ip}}, "tcp", "api.example.com", "443")
+			if !errors.Is(err, errFetchBlocked) || len(md.attempted) != 0 {
+				t.Fatalf("mixed DNS answer: err = %v, dials = %v", err, md.attempted)
+			}
+		})
 	}
 }
 
