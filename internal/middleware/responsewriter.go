@@ -83,6 +83,9 @@ func (r *Recorder) Flush() {
 	if r.hijacked {
 		return
 	}
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
