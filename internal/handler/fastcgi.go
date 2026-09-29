@@ -703,6 +703,14 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 	for _, hop := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "TE", "Trailer", "Transfer-Encoding", "Upgrade", "Proxy-Authenticate", "Proxy-Authorization"} {
 		parsedHeaders.Del(hop)
 	}
+	if lengths := parsedHeaders.Values("Content-Length"); len(lengths) > 0 {
+		if len(lengths) != 1 {
+			return errors.New("uwsgi response has ambiguous Content-Length")
+		}
+		if n, err := strconv.ParseInt(lengths[0], 10, 64); err != nil || n < 0 {
+			return errors.New("uwsgi response has invalid Content-Length")
+		}
+	}
 	for name, values := range parsedHeaders {
 		for _, value := range values {
 			w.Header().Add(name, value)

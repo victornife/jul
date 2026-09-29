@@ -89,6 +89,18 @@ func TestCGIDropsHopHeadersAndConnectionNominations(t *testing.T) {
 		t.Fatalf("end-to-end response lost: %v %q", rec.Header(), rec.Body.String())
 	}
 }
+
+func TestCGIRejectsAmbiguousResponseLengths(t *testing.T) {
+	for _, headers := range []string{"Content-Length: 2\r\nContent-Length: 3\r\n", "Content-Length: 2, 2\r\n", "Content-Length: -1\r\n", "Content-Length: nonsense\r\n"} {
+		rec := httptest.NewRecorder()
+		if err := writeCGIResponse(bufio.NewReader(strings.NewReader(headers+"\r\nbody")), rec); err == nil {
+			t.Errorf("invalid length accepted: %q", headers)
+		}
+		if rec.Header().Get("Content-Length") != "" {
+			t.Errorf("invalid length published: %q", headers)
+		}
+	}
+}
 func (*cgiDiscardWriter) WriteHeader(int)             {}
 func (*cgiDiscardWriter) Write(p []byte) (int, error) { return len(p), nil }
 
