@@ -129,15 +129,16 @@ func firstNonEmpty(values ...string) string {
 }
 
 func readProfile(filename, name string) (Profile, []string, error) {
-	info, err := os.Stat(filename)
-	if err != nil {
-		return Profile{}, nil, fmt.Errorf("read profile file %q: %w", filename, err)
-	}
-	warnings := permissionWarnings(filename, info)
 	file, err := os.Open(filename)
 	if err != nil {
 		return Profile{}, nil, fmt.Errorf("read profile file %q: %w", filename, err)
 	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return Profile{}, nil, fmt.Errorf("inspect profile file %q: %w", filename, err)
+	}
+	warnings := permissionWarnings(filename, info)
 	data, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
 	closeErr := file.Close()
 	if readErr != nil {
@@ -181,15 +182,16 @@ func readToken(filename string, stdin io.Reader) (string, []string, error) {
 		}
 		return token, nil, nil
 	}
-	info, err := os.Stat(filename)
-	if err != nil {
-		return "", nil, fmt.Errorf("read token file %q: %w", filename, err)
-	}
-	warnings := permissionWarnings(filename, info)
 	file, err := os.Open(filename)
 	if err != nil {
 		return "", nil, fmt.Errorf("read token file %q: %w", filename, err)
 	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return "", nil, fmt.Errorf("inspect token file %q: %w", filename, err)
+	}
+	warnings := permissionWarnings(filename, info)
 	data, readErr := io.ReadAll(io.LimitReader(file, (64<<10)+1))
 	closeErr := file.Close()
 	if readErr != nil {
