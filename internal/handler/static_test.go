@@ -320,3 +320,16 @@ func TestStaticDirectoryListingHasEntryBound(t *testing.T) {
 		t.Fatalf("oversized directory listing: code=%d size=%d", rec.Code, rec.Body.Len())
 	}
 }
+
+func TestStaticDirectoryLinksEscapeURLDelimiters(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a?b#%.txt"), "correct")
+	h := newStatic(t, config.LocationConfig{Root: dir, DirectoryListing: true})
+	rec := get(h, "http://h/", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `href="/a%3Fb%23%25.txt"`) {
+		t.Fatalf("listing has broken link: %d %q", rec.Code, rec.Body.String())
+	}
+	if got := get(h, "http://h/a%3Fb%23%25.txt", nil); got.Body.String() != "correct" {
+		t.Fatalf("escaped link did not resolve: %d %q", got.Code, got.Body.String())
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"html"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -299,7 +300,7 @@ func (h *staticHandler) listDir(w http.ResponseWriter, r *http.Request, rel stri
 	fmt.Fprintf(&b, "<!DOCTYPE html>\n<html><head><title>Index of %s</title></head><body>\n", html.EscapeString(base))
 	fmt.Fprintf(&b, "<h1>Index of %s</h1>\n<ul>\n", html.EscapeString(base))
 	for _, name := range names {
-		href := base + name
+		href := (&url.URL{Path: base + name}).EscapedPath()
 		fmt.Fprintf(&b, "<li><a href=\"%s\">%s</a></li>\n", html.EscapeString(href), html.EscapeString(name))
 	}
 	b.WriteString("</ul>\n</body></html>\n")
