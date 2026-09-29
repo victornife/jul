@@ -1,6 +1,6 @@
 # Upstreams and backend trust
 
-> **Maturity and delivery:** the pool/balancing/health foundation and `backend_tls` are GA/soaked in stable v2.0.0. Admission/retry/circuit controls are separately tracked Beta/released capabilities. Consistent-hash affinity is Beta/merged on post-release `main`. See [status.md](status.md) and [Reload behaviour](#reload-behaviour).
+> **Maturity and delivery:** the pool/balancing/health foundation and `backend_tls` are GA/soaked in published v2.0.0. Admission/retry/circuit controls are separately tracked Beta/released capabilities. Consistent-hash affinity is Beta and is in the proposed v2.1.0 tree, not in v2.0.0. See [status.md](status.md) and [Reload behaviour](#reload-behaviour).
 
 An `[[upstreams]]` block is a named pool of backends with a balancing strategy,
 passive and optional active health checking, optional dynamic discovery, and —

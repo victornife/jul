@@ -6,8 +6,9 @@ no cgo, so enabling plugins keeps the server a single static binary.
 
 Plugins are opt-in behind the `wasmplugins` build tag:
 
-The `jul-abi/v1` request phase shipped in stable v2.0.0; the bounded
-`jul-abi/v2` response phase is Beta/merged on post-release `main` only.
+The `jul-abi/v1` request phase shipped in published v2.0.0 and remains the
+default. The bounded `jul-abi/v2` response phase is Beta and is in the proposed
+v2.1.0 tree, not in v2.0.0.
 
 ```bash
 go build -tags wasmplugins -o jul ./cmd/jul

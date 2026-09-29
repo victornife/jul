@@ -28,6 +28,26 @@ requests to configured routes. Its duration cannot establish zero-config/lint
 workloads and dated qualifying runs. The historical v1.28.0 table below used
 “soaked” for a short release smoke and does not override this requirement.
 
+## Predeclared v2.1.0 integrated soak (not yet a result)
+
+This section is the pass/fail contract for the one RC-equivalent real-binary
+soak of the frozen v2.1.0 candidate. It is not evidence that the run passed.
+Results, if any, are a later dated entry tied to the exact SHA that was run.
+The 2026-09-28 one-hour runs cover only zero-config/base-importer scope at
+`9ab87c1`. They do not certify this candidate.
+
+| Item | Predeclared value |
+| --- | --- |
+| Profile | `burn-in-current.toml` plus the fault, RBAC, apply-churn and L4 generators in [soak-procedures.md](soak-procedures.md) |
+| Duration | **4 hours** wall clock. This is ADR 0005's multi-feature minimum. Procedure C's 24 hours applies to a GA declaration or a major tag; v2.1.0 is neither, and Beta rows are not being promoted. The 8-hour recommendation is not claimed. |
+| Why not the release-workflow 5-minute smoke | That job is a crash smoke. It does not meet ADR 0005. |
+| Workload | `-current` HTTP/HTTPS at 32 workers, L4 stream at 16 workers, continuous `-rbac`, `-apply-churn` every 5 minutes, and `-fault` at 4 workers with kill/restore |
+| Features covered | Whatever `burn-in-current.toml` and those generators actually exercise: proxy, cache, rate limit, compression, WAF if the profile enables it, WASM if present, resilience, stream, admin RBAC, managed apply. A feature absent from that profile is not covered by this run. |
+| Features not claimed | Dedicated gRPC health transitions, storage-pressure recovery, HTTP/3, and ACME issuance are not part of this profile unless the config and logs show them. Focused historical evidence is not re-labeled as this SHA. |
+| Pass | Single process for the full window; clean-path `-current` and stream loads report no unexplained 5xx; fault-window 503s are expected while backends are down; goroutine and RSS trends do not track cumulative requests after warm-up; apply-churn does not leave the process on a failed candidate; no unplanned restart |
+| Fail | Crash, unbounded RSS/FD/goroutine growth, a clean-path error budget breach, or a reload that serves the rejected candidate |
+| Performance baseline | CI `tcp-hot-path-benchmark` compares `BenchmarkProxyRoundTrip` with the previous main commit and fails above +5%. That is the release performance gate. It is not a v2.0.0-to-v2.1.0 laboratory study. |
+
 ## Where soak evidence is produced
 
 | Context | Trigger | Duration | Artifact | Counts toward gate? |

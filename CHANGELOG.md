@@ -9,6 +9,38 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+Nothing since the v2.1.0 candidate notes below. Do not treat a later commit as
+part of that tag.
+
+## [2.1.0] - 2026-09-29
+
+Proposed stable minor after published `v2.0.0`. The SemVer choice is recorded
+in [compatibility.md](docs/compatibility.md#version-decision-on-2026-09-29-v210).
+It is a MINOR because the delta adds optional capabilities and corrects
+behavior that contradicted documented contracts. It is not v3.0.0: no
+documented GA key, CLI flag, or metric family was removed or renamed. #434
+stays CANDIDATE/LATER (no-go). Shipping a Beta capability in this tag does not
+make it GA. `jul-abi/v1` remains the default; `jul-abi/v2` is opt-in and
+additive. Dependency updates in this range: `github.com/quic-go/quic-go`
+v0.62.0 to v0.63.0 and `google.golang.org/grpc` v1.83.2 to v1.84.0.
+
+### Security
+
+- **Pre-release audit stack (#482, #495, #496, #497).** Integrated on `main`
+  with the same tree as `5a592d40`. Operators upgrading from v2.0.0 should
+  expect these corrections, not new feature flags: an off-loopback admin
+  listener without a token or enabled RBAC is rejected; request paths are
+  canonicalized before location selection; repeated request and response
+  fields no longer collapse cache variants, Authorization, Set-Cookie, Range,
+  or Connection policy to the first line; FastCGI/uWSGI identity and
+  certificate assertions are rebuilt from the trusted listener; forward-auth
+  drops client-supplied certificate and forwarding claims and refuses
+  ambiguous Authorization; plaintext remote CLI dials resolve and connect only
+  to loopback; discovery, credential, WAF, and plugin reads are bounded. The
+  documentation coverage ledger still has unreviewed rows. This release is
+  not a claim that the repository is fully audited. See
+  [audit-register.md](docs/audit-register.md).
+
 ### Added
 
 - **Client-certificate revocation and trust refresh without a restart (#486).** `servers.*.tls.client_auth` (mode, CA bundle, CRL, SAN allow-list) is now rebuilt during reload and swapped for new TCP TLS and HTTP/3 handshakes; rewriting `ca_file` or `crl_file` in place and reloading takes effect immediately, and a broken file rejects the reload. Revocation is enforced on resumed TLS sessions too, and is scoped to the CRL's issuer, so another CA's certificate with the same serial is no longer rejected. New gauge `jul_mtls_crl_next_update_timestamp_seconds{listen}` plus a load-time warning expose a CRL past its `NextUpdate`. `admin.tls.client_auth` remains restart-bound.

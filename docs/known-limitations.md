@@ -26,12 +26,14 @@ discovered correctness/security findings still pre-empt the roadmap.
   admin, core HTTP and base NGINX importer GA rows cover their own contracts.
 - **GA in stable `v2.0.0`:** trusted client address and backend TLS trust were
   separately certified under #409; their manifest delivery is `soaked`.
-- **Merged on `main` after `v2.0.0`:** gRPC Health/Check probes, runtime resource
-  and storage headroom, serving WAF policy/provenance visibility, Console
-  diagnostics guidance, WASM ABI v2 response handling and consistent-hash
-  affinity. These retain separate Beta / `merged` entries in
-  [feature status](status.md); the stable tag does not contain them. Bounded
-  NGINX translation and migration E2E improvements also arrived after the tag.
+- **In the proposed v2.1.0 tree, still Beta / `merged` until publication:**
+  gRPC Health/Check probes, runtime resource and storage headroom, serving WAF
+  policy/provenance visibility, Console diagnostics guidance, WASM ABI v2
+  response handling, consistent-hash affinity, and client-certificate policy
+  hot reload. Published v2.0.0 does not contain them. Inclusion in v2.1.0 does
+  not promote them to GA. Bounded NGINX translation and migration E2E
+  improvements are in the same candidate and remain approximated or blocking
+  where the importer guide says so.
 - **Remaining operational boundaries:** Unix-domain upstreams support named
   plaintext HTTP/1.1 pools, not TLS, HTTP/2 or direct Unix `proxy_pass`.
   Resilience keeps client/Jul-owned cancellation neutral while backend

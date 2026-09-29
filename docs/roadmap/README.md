@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.15 · Updated 2026-09-28
+> Version 2.16 · Updated 2026-09-29
 >
 > This roadmap owns the **durable portfolio sequence**. It deliberately does
 > not duplicate volatile READY/NEXT/blocked issue state. The current issue-level
@@ -35,6 +35,11 @@ separate decisions rather than implicit completion requirements.
 
 ## Current execution sequence
 
+After the proposed v2.1.0 closure, the durable sequence is: keep #434, #456
+and the other unactivated candidates deferred; do not start another feature
+tranche from release housekeeping; let #62 record live execution. This page
+does not replace that tracker.
+
 The durable current sequence is summarized in the active operating roadmap below. Exact issue-level status remains in #62.
 
 ## Active operating roadmap
@@ -49,9 +54,9 @@ The durable current sequence is summarized in the active operating roadmap below
 | **5 — Generic resilience** | Admission, queue/connection bounds, retry budget/deadline/backoff, circuit state and bounded operations evidence | #287/#144 closed; published in v2.0.0 as Beta. Further feature-specific GA evidence remains a separate decision |
 | **6 — Configuration authority and automation** | Managed/file-owned authority, generated contracts, supported external API, thin remote CLI | #150/#151 closed; authority, versioned external API and remote CLI published in v2.0.0 as separately tracked Beta capabilities |
 | **7 — Selected runtime dynamics** | Value-ranked runtime changes and truthful restart boundaries | Bounded tranche complete (#88); selected changes published as Beta. Further hot reload requires an explicit value trigger |
-| **8 — Migration and diagnostics** | NGINX assessment, evidence, support bundle and `jul doctor` | Base assessment/diagnostics published in v2.0.0 as Beta. #426/#365/#366/#367 and the permanent #368 migration-impact rule are complete on post-release `main`; optional full corpus is #456 CANDIDATE/LATER. #422 host-fault follow-up and Wave 6 (#437/#440/#445) are complete on `main`. Next: #434 Phase-0 go/no-go, feature freeze and [#480](https://github.com/victornife/jul/issues/480) exact-SHA release certification. |
+| **8 — Migration and diagnostics** | NGINX assessment, evidence, support bundle and `jul doctor` | Base assessment/diagnostics published in v2.0.0 as Beta. #426/#365/#366/#367, the #368 migration-impact rule, #422 and Wave 6 are in the proposed v2.1.0 tree. Optional full corpus remains #456 CANDIDATE/LATER. #434 is no-go for this release. [#480](https://github.com/victornife/jul/issues/480) owns exact-SHA certification. |
 | **9 — One bounded experiment** | AI Gateway or another explicitly approved category | #162 remains deferred under #113; no experiment activated by the v2.0.0 release |
-| **10 — Integrated closure** | Exact-SHA verification, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Completed for stable v2.0.0 (#425/#421); new unreleased features require their own evidence and publication decision |
+| **10 — Integrated closure** | Exact-SHA verification, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Completed for stable v2.0.0 (#425/#421). Proposed v2.1.0 repeats that closure under #480; it is not complete until the tag is published from the frozen SHA |
 
 For exact issue state, child decomposition, active pull requests and sequencing,
 read #62. This table changes only when the durable portfolio boundary or stage
@@ -87,9 +92,13 @@ outcome changes.
 - #422 completed focused host-fault runs and retained metrics evidence, finding
   and fixing four defects. This does not retroactively change the v2.0.0 gate.
 - Wave 6 completed #437 Jul-owned storage headroom, #440 serving WAF policy
-  visibility and #445 guidance toward existing diagnostic tools on post-release
-  `main`. Their Beta/merged rows do not change the stable v2.0.0 tag. The next
-  #434 Phase-0 go/no-go and release sequence are tracked in #62.
+  visibility and #445 guidance toward existing diagnostic tools. Those Beta
+  rows are in the proposed v2.1.0 tree and do not change the v2.0.0 tag or
+  become GA by shipping.
+- **#434 decision (2026-09-29): no-go.** No concrete SNI+ALPN routing workload
+  and no Phase-0 parser/fuzz/benchmark evidence were produced. The candidate
+  stays CANDIDATE/LATER and is not activated by this release. Live sequencing
+  remains in #62, not in this table.
 
 ## Published stable checkpoint
 
@@ -99,7 +108,8 @@ was published 2026-09-21 at
 and #421 post-fix soak. Exact release evidence is recorded in
 [#425](https://github.com/victornife/jul/issues/425).
 
-`v2.0.0-rc.1` remains a distinct immutable prerelease at
+`v2.0.0-rc.1`Proposed v2.1.0 is a separate tag from v2.0.0. Until that tag
+is published, v2.0.0 remains the latest published stabl
 `c9ab3a05af6a6088b2721de0a87995ce37d468cf`;
 its [candidate evidence](../release-candidates/v2.0.0-rc.1.md) and the older
 [`v1.32.1-rc.1` record](../release-candidates/v1.32.1-rc.1.md) are historical

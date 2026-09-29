@@ -5,8 +5,10 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 
 ## Start with product truth
 
-The capability table below distinguishes stable v2.0.0 from post-release
-`main`: `released`/`soaked` are in the stable tag, while `merged` is not.
+The capability table distinguishes published v2.0.0 from the proposed v2.1.0
+tree. `released`/`soaked` are in the published tag. `merged` rows are in this
+candidate and stay Beta until their own GA evidence exists. They are not
+described as published until the v2.1.0 tag is published.
 
 - **[Feature status and evidence](status.md)** — maintained human view of maturity
   and delivery, checked against

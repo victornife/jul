@@ -1,6 +1,10 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.15 · Updated 2026-09-28
+> Version 2.16 · Updated 2026-09-29
+>
+> Proposed v2.1.0 is the selected next stable tag. Rows still marked `merged`
+> are in that candidate tree and were not in published v2.0.0. They are not
+> `released` until the tag is published, and they are not GA.
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -87,13 +91,14 @@ not inherit an older GA row merely because it lives in the same package or guide
   translation and focused NGINX-vs-Jul evidence on `main` after the stable tag;
   #368 established the permanent migration-impact rule. The optional public/full
   corpus is #456 CANDIDATE/LATER. None of this is included in v2.0.0.
-- **Post-release additions:** standard gRPC health (#427), runtime resources
-  and HTTP bandwidth (#431), storage headroom (#437) within OPS-RESOURCES,
-  serving WAF policy visibility (#440), Console diagnostics guidance (#445),
-  WASM response ABI v2 (#430), consistent-hash affinity (#432), and
-  client-certificate policy hot reload (#486) have separate Beta / `merged`
-  rows below. Their maturity and delivery do not alter existing GA rows or
-  the v2.0.0 tag.
+- **Proposed v2.1.0 additions, still Beta / `merged`:** standard gRPC health
+  (#427), runtime resources and HTTP bandwidth (#431), storage headroom
+  (#437) within OPS-RESOURCES, serving WAF policy visibility (#440), Console
+  diagnostics guidance (#445), WASM response ABI v2 (#430), consistent-hash
+  affinity (#432), and client-certificate policy hot reload (#486) have
+  separate rows below. They are in this candidate and were not in the v2.0.0
+  tag. Their maturity and delivery do not alter existing GA rows. Delivery
+  becomes `released` only after the tag is published.
 - **WASM plugin-pool memory fix (#420) and final soak (#421):** the final
   pre-stable soak found a real unbounded memory-growth defect in the pooled
   WASM instance runtime; [#420](https://github.com/victornife/jul/pull/420)
@@ -173,9 +178,9 @@ long-running post-GA soak gate.
 ## Beta
 
 Usable capabilities whose contract, release, soak, or integrated evidence is
-not yet at the GA bar. Rows marked `released` shipped as Beta in stable
-v2.0.0; rows marked `merged` are available only on post-release `main`.
-Publication does not complete the unchecked GA criteria.
+not yet at the GA bar. Rows marked `released` shipped as Beta in published
+v2.0.0. Rows marked `merged` are in the proposed v2.1.0 tree and were not in
+that tag. Publication does not complete the unchecked GA criteria.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
@@ -247,6 +252,7 @@ the [soak evidence log](soak-evidence.md).
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-09-29 | 2.16 | Recorded the proposed v2.1.0 freeze. Post-v2.0.0 rows stay `merged` and Beta until the tag is published. #434 is no-go. | [feature-status.yaml](feature-status.yaml); [compatibility.md](compatibility.md) |
 | 2026-09-28 | 2.15 | Promoted Y1-08 and base Y1-09 to `GA` / `soaked` after two independent exact-head feature runs exceeded the ADR 0005 one-hour floor and their retained pre-run provenance and results were inspected. The decision applies to the exercised workloads, after v2.0.0; MIG-ASSESS stays Beta. | [feature-status.yaml](feature-status.yaml); [soak-evidence.md](soak-evidence.md) |
 | 2026-09-27 | 2.14 | Corrected two unsupported `soaked` classifications: Y1-08 and Y1-09 are stable-released GA — soak pending while their five-minute smoke evidence is distinguished from ADR 0005's long-running criterion. Stable v2.0.0 availability is unchanged. | [feature-status.yaml](feature-status.yaml); [soak-evidence.md](soak-evidence.md); [ADR 0005](adr/0005-soak-post-ga-gate.md) |
 | 2026-09-27 | 2.13 | Reconciled completed migration and host-fault work on post-release `main`; corrected the OPS-RESOURCES merged-PR note and preserved separate Beta / `merged` statuses for new capabilities. | [feature-status.yaml](feature-status.yaml); [roadmap/README.md](roadmap/README.md); [#62](https://github.com/victornife/jul/issues/62) |

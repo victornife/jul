@@ -1,6 +1,6 @@
 # NGINX config importer
 
-> Base importer: **Y1-09, GA/soaked** · Assessment/provenance/includes: **MIG-ASSESS, Beta/released in v2.0.0** · Build tag: `importer`. Later bounded translations and E2E evidence on `main` are not in that tag. The base importer is in the stable release; its cited five-minute validation is smoke, while a [separate post-release one-hour run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features) covers the base single-file conversion path.
+> Base importer: **Y1-09, GA/soaked** · Assessment/provenance/includes: **MIG-ASSESS, Beta/released in v2.0.0** · Build tag: `importer`. Later bounded stream, protocol, cache, mTLS and affinity translations are in the proposed v2.1.0 tree, not in the v2.0.0 tag. They are not universal NGINX equivalence. The base importer's cited five-minute validation is smoke; a [separate one-hour run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features) covers only the base single-file conversion path at that head.
 
 A best-effort migration aid that converts NGINX configuration into Jul.IA TOML.
 Common HTTP, server, location, upstream, TLS, compression, static-file, proxy,
