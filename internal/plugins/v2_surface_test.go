@@ -152,6 +152,8 @@ func callerModule(module, name string, params, results []api.ValueType) []byte {
 	out = append(out, wasmSection(1, [][]byte{ty(params, results), ty(nil, nil)})...)
 	out = append(out, wasmSection(2, [][]byte{append(append(wasmName(module), wasmName(name)...), 0x00, 0x00)})...)
 	out = append(out, wasmSection(3, [][]byte{leb(1)})...)
+	// Give host calls a real memory so zero-length guest ranges are valid.
+	out = append(out, wasmSection(5, [][]byte{{0x00, 0x01}})...)
 	out = append(out, wasmSection(7, [][]byte{append(wasmName("call"), 0x00, 0x01)})...)
 	return append(out, wasmSection(10, [][]byte{append(leb(len(body)), body...)})...)
 }

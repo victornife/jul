@@ -15,10 +15,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/tetratelabs/wazero"
 
 	"jul/internal/config"
 	"jul/internal/egress"
@@ -466,6 +469,48 @@ func TestFetchBodyReadErrorReturnsTransportError(t *testing.T) {
 	}
 	if inv.lastFetchTruncated {
 		t.Fatal("lastFetchTruncated true after body read error, want false")
+	}
+}
+
+func TestV1HostFetchAndRequestBodyFailures(t *testing.T) {
+	ctx := context.Background()
+	runtime := wazero.NewRuntime(ctx)
+	defer runtime.Close(ctx)
+	var output bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&output, nil))
+	p := &plugin{name: "legacy", capFetch: true, allowedHosts: []string{"fetch.test"}, fetchTimeout: time.Second, maxFetchResp: 1024, log: logger}
+	if err := registerJulHostModule(ctx, runtime, p); err != nil {
+		t.Fatal(err)
+	}
+	host := runtime.Module("jul")
+	call := func(name string, inv *invocation) {
+		t.Helper()
+		def := host.ExportedFunctionDefinitions()[name]
+		guest, err := runtime.Instantiate(ctx, callerModule("jul", name, def.ParamTypes(), def.ResultTypes()))
+		if err != nil {
+			t.Fatalf("instantiate %s: %v", name, err)
+		}
+		defer guest.Close(ctx)
+		if _, err := guest.ExportedFunction("call").Call(withInvocation(ctx, inv)); err != nil {
+			t.Fatalf("call %s: %v", name, err)
+		}
+	}
+
+	call("fetch", &invocation{r: httptest.NewRequest(http.MethodGet, "/", nil), log: logger})
+	if !strings.Contains(output.String(), "reason=ssrf") {
+		t.Fatalf("v1 fetch failure did not use bounded reason: %q", output.String())
+	}
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	r.Body = io.NopCloser(io.MultiReader(strings.NewReader("abc"), errorReader{}))
+	inv := &invocation{r: r, log: logger, maxReqBody: 8}
+	call("read_request_body", inv)
+	if inv.err == nil || !strings.Contains(inv.err.Error(), "read request body") {
+		t.Fatalf("v1 partial body read did not fail: %v", inv.err)
+	}
+	nilBody := &invocation{r: httptest.NewRequest(http.MethodGet, "/", nil)}
+	nilBody.r.Body = nil
+	if !nilBody.bufferRequestBody() || nilBody.err != nil {
+		t.Fatalf("nil body rejected: %v", nilBody.err)
 	}
 }
 func TestPluginCloseClosesIdleConnections(t *testing.T) {
