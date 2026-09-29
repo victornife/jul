@@ -131,16 +131,17 @@ func TestEvaluatePreflightHeaders(t *testing.T) {
 	}
 }
 
-func TestRequestedHeadersApprovedSkipsEmptyTokens(t *testing.T) {
+func TestRequestedHeadersRejectMalformedTokens(t *testing.T) {
 	p := compileCORS(t, &config.CORSConfig{
 		Enabled:        true,
 		AllowedOrigins: []string{"https://a.example.test"},
 		AllowedHeaders: []string{"X-A"},
 	})
-	r := preflightRequest("https://a.example.test", "GET")
-	r.Header.Set("Access-Control-Request-Headers", "X-A,") // trailing comma: an empty token
-	if _, ok := p.EvaluatePreflight(r); !ok {
-		t.Error("a trailing empty token must not affect approval")
+	for _, raw := range []string{"X-A,", ",X-A", "X-A,,X-A", "X-A;bad", ""} {
+		r := preflightRequest("https://a.example.test", "GET", raw)
+		if _, ok := p.EvaluatePreflight(r); ok {
+			t.Errorf("malformed requested header %q was approved", raw)
+		}
 	}
 }
 
