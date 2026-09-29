@@ -59,3 +59,24 @@ func TestConfigWatcherKeepsLatestDigestWhenReceiverIsSlow(t *testing.T) {
 		t.Fatal("watcher continued after cancellation")
 	}
 }
+
+// Cancellation can arrive between the initial Err check and either send.
+// Simulate that exact edge so a watcher does not block without a receiver.
+type cancelAfterErrCheck struct {
+	context.Context
+	cancel context.CancelFunc
+}
+
+func (c cancelAfterErrCheck) Err() error {
+	c.cancel()
+	return nil
+}
+
+func TestConfigDigestSendStopsWhenCancellationRacesInitialCheck(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out := make(chan [32]byte) // no receiver: only cancellation can release the send
+	if sendLatestConfigDigest(cancelAfterErrCheck{Context: ctx, cancel: cancel}, out, [32]byte{1}) {
+		t.Fatal("digest was published after watcher cancellation")
+	}
+}
