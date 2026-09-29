@@ -149,18 +149,29 @@ func (w *cacheWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 // isEventStream reports whether the response is a Server-Sent Events stream.
 func isEventStream(h http.Header) bool {
-	ct := h.Get("Content-Type")
-	if i := strings.IndexByte(ct, ';'); i >= 0 {
-		ct = ct[:i]
+	for _, ct := range h.Values("Content-Type") {
+		if i := strings.IndexByte(ct, ';'); i >= 0 {
+			ct = ct[:i]
+		}
+		if strings.EqualFold(strings.TrimSpace(ct), "text/event-stream") {
+			return true
+		}
 	}
-	return strings.EqualFold(strings.TrimSpace(ct), "text/event-stream")
+	return false
 }
 
 // isUpgradeRequest reports whether r asks to switch protocols (RFC 9110 §7.8).
 // Both halves are required: an Upgrade header is only meaningful when the same
 // hop also lists "upgrade" in Connection.
 func isUpgradeRequest(r *http.Request) bool {
-	if r.Header.Get("Upgrade") == "" {
+	upgrade := false
+	for _, v := range r.Header.Values("Upgrade") {
+		if strings.TrimSpace(v) != "" {
+			upgrade = true
+			break
+		}
+	}
+	if !upgrade {
 		return false
 	}
 	for _, v := range r.Header.Values("Connection") {

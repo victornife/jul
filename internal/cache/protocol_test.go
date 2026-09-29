@@ -98,6 +98,25 @@ func TestUpgradeRequestBypassesCache(t *testing.T) {
 	}
 }
 
+func TestUpgradeLaterFieldBypassesCachedResponse(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
+	r := upgradeRequest("http://x/ws")
+	r.Header.Del("Upgrade")
+	r.Header.Add("Upgrade", "")
+	r.Header.Add("Upgrade", "websocket")
+	c.set(key(r), &Entry{Status: 200, Body: []byte("cached"), ExpiresAt: time.Now().Add(time.Hour)})
+	calls := 0
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if calls != 1 || rec.Code != http.StatusSwitchingProtocols || rec.Header().Get("X-Cache") != stateBypass {
+		t.Fatalf("later Upgrade field: calls=%d status=%d X-Cache=%q", calls, rec.Code, rec.Header().Get("X-Cache"))
+	}
+}
+
 // TestUpgradeDetectionRequiresBothHeaders proves the bypass is not a hole: an
 // Upgrade header alone, which a client can always send, must not disable
 // caching for an ordinary request.
@@ -438,6 +457,17 @@ func TestEventStreamIsNeverStoredOrBuffered(t *testing.T) {
 	}
 	if !under.Flushed {
 		t.Fatal("flushes did not reach the client")
+	}
+}
+
+func TestLaterEventStreamContentTypeIsNeverCaptured(t *testing.T) {
+	cw := &cacheWriter{ResponseWriter: httptest.NewRecorder(), limit: 1 << 20}
+	cw.Header().Add("Content-Type", "")
+	cw.Header().Add("Content-Type", "text/event-stream; charset=utf-8")
+	cw.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(cw, "data: event\n\n")
+	if cw.storable() || cw.buf.Len() != 0 {
+		t.Fatalf("later SSE field captured: storable=%v size=%d", cw.storable(), cw.buf.Len())
 	}
 }
 
