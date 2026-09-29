@@ -49,6 +49,14 @@ func TestFastCGIStderrIsBoundedWithoutShortWrites(t *testing.T) {
 		t.Fatalf("stderr retained %d bytes", b.Len())
 	}
 }
+
+func TestUWSGIRejectsOversizedVarBeforeFraming(t *testing.T) {
+	h := &uwsgiHandler{loc: config.LocationConfig{FastCGIParams: map[string]string{"LARGE": strings.Repeat("x", 65536)}}}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	if err := h.sendRequest(nil, r, http.NoBody); err == nil || !strings.Contains(err.Error(), "var block") {
+		t.Fatalf("oversized uWSGI var result = %v", err)
+	}
+}
 func (*cgiDiscardWriter) WriteHeader(int)             {}
 func (*cgiDiscardWriter) Write(p []byte) (int, error) { return len(p), nil }
 

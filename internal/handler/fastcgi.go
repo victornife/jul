@@ -439,10 +439,10 @@ func (h *uwsgiHandler) sendRequest(conn net.Conn, r *http.Request, body io.ReadC
 	params := buildCGIParams(h.loc, r)
 	var vars bytes.Buffer
 	for k, v := range params {
+		if len(k) > 0xffff || len(v) > 0xffff || vars.Len()+4+len(k)+len(v) > 0xffff {
+			return fmt.Errorf("uwsgi var block exceeds 65535 bytes")
+		}
 		writeUWSGIVar(&vars, k, v)
-	}
-	if vars.Len() > 0xffff {
-		return fmt.Errorf("uwsgi var block too large (%d bytes)", vars.Len())
 	}
 
 	// Packet header: modifier1=0, datasize uint16 little-endian, modifier2=0.
