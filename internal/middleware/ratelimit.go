@@ -4,6 +4,7 @@
 package middleware
 
 import (
+	"container/list"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -47,6 +48,7 @@ type RateLimiterStore struct {
 type rateLimiterShard struct {
 	mu      sync.Mutex
 	entries map[string]*rateLimiterEntry
+	order   list.List // least recently used at the front
 }
 
 type rateLimiterEntry struct {
@@ -54,6 +56,7 @@ type rateLimiterEntry struct {
 	limit    rate.Limit
 	burst    int
 	lastSeen time.Time
+	elem     *list.Element
 }
 
 // NewRateLimiterStore creates a store and starts a janitor, bound to ctx, that
@@ -106,14 +109,15 @@ func (s *RateLimiterStore) allow(key string, limit rate.Limit, burst int) (bool,
 	e := sh.entries[key]
 	if e == nil {
 		if len(sh.entries) >= maxLimiterBucketsPerShard {
-			for old := range sh.entries {
-				delete(sh.entries, old)
-				break
-			}
+			old := sh.order.Front()
+			delete(sh.entries, old.Value.(string))
+			sh.order.Remove(old)
 		}
 		e = &rateLimiterEntry{lim: rate.NewLimiter(limit, burst), limit: limit, burst: burst}
+		e.elem = sh.order.PushBack(key)
 		sh.entries[key] = e
 	} else {
+		sh.order.MoveToBack(e.elem)
 		if e.limit != limit {
 			e.lim.SetLimit(limit)
 			e.limit = limit
@@ -163,6 +167,7 @@ func (s *RateLimiterStore) evict(now time.Time) {
 		for k, e := range sh.entries {
 			if e.lastSeen.Before(cutoff) {
 				delete(sh.entries, k)
+				sh.order.Remove(e.elem)
 			}
 		}
 		sh.mu.Unlock()

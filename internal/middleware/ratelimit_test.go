@@ -37,10 +37,18 @@ func storeSize(s *RateLimiterStore) int {
 func TestLimiterCapsBucketsDuringKeyChurn(t *testing.T) {
 	store := newTestStore(t)
 	key := "new-key"
-	sh := &store.shards[shardIndex(key)]
-	for i := 0; i < maxLimiterBucketsPerShard; i++ {
-		sh.entries[strconv.Itoa(i)] = &rateLimiterEntry{lim: rate.NewLimiter(1, 1)}
+	shard := shardIndex(key)
+	sh := &store.shards[shard]
+	keys := make([]string, 0, maxLimiterBucketsPerShard)
+	for i := 0; len(keys) < maxLimiterBucketsPerShard; i++ {
+		candidate := strconv.Itoa(i)
+		if shardIndex(candidate) != shard {
+			continue
+		}
+		keys = append(keys, candidate)
+		store.allow(candidate, 1, 1)
 	}
+	store.allow(keys[0], 1, 1) // active bucket must not be evicted first
 	if ok, _ := store.allow(key, 1, 1); !ok {
 		t.Fatal("new key was denied")
 	}
@@ -49,6 +57,9 @@ func TestLimiterCapsBucketsDuringKeyChurn(t *testing.T) {
 	}
 	if sh.entries[key] == nil {
 		t.Fatal("new key was not installed")
+	}
+	if sh.entries[keys[0]] == nil || sh.entries[keys[1]] != nil {
+		t.Fatal("eviction discarded a recently active bucket instead of the oldest")
 	}
 }
 
@@ -138,9 +149,10 @@ func TestRateLimiterReloadUpdatesBucketParams(t *testing.T) {
 	store.Scoped("s", 1, 1).Allow("k")
 	store.Scoped("s", 5, 9).Allow("k")
 
-	sh := &store.shards[shardIndex("s\x00k")]
+	key := store.Scoped("s", 1, 1).(*scopedLimiter).prefix + "k"
+	sh := &store.shards[shardIndex(key)]
 	sh.mu.Lock()
-	e := sh.entries["s\x00k"]
+	e := sh.entries[key]
 	sh.mu.Unlock()
 	if e == nil {
 		t.Fatal("entry missing after reload")
