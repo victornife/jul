@@ -7,6 +7,7 @@ package stream
 
 import (
 	"errors"
+	"io"
 	"math"
 	"net"
 	"sync/atomic"
@@ -46,12 +47,22 @@ func (l *listener) serveUDP() {
 			continue
 		}
 		sess.lastSeen.Store(time.Now().UnixNano())
-		if _, werr := sess.backend.Write(buf[:n]); werr != nil {
+		if werr := writeUDPDatagram(sess.backend, buf[:n]); werr != nil {
 			l.closeUDPSession(clientAddr.String(), sess)
 			continue
 		}
 		l.server.addBytes("udp", "up", int64(n))
 	}
+}
+
+// A datagram cannot be resumed after a partial write: the next write would
+// become a separate packet. Treat that as a failed session, not delivered data.
+func writeUDPDatagram(dst io.Writer, packet []byte) error {
+	n, err := dst.Write(packet)
+	if err == nil && n != len(packet) {
+		return io.ErrShortWrite
+	}
+	return err
 }
 
 // udpSessionFor returns the existing session for clientAddr or creates one,
@@ -191,7 +202,8 @@ func (l *listener) udpDownstream(clientAddr *net.UDPAddr, sess *udpSession, idle
 		n, err := sess.backend.Read(buf)
 		if n > 0 {
 			sess.lastSeen.Store(time.Now().UnixNano())
-			if _, werr := l.udpLn.WriteToUDP(buf[:n], clientAddr); werr != nil {
+			written, werr := l.udpLn.WriteToUDP(buf[:n], clientAddr)
+			if werr != nil || written != n {
 				break
 			}
 			l.server.addBytes("udp", "down", int64(n))
