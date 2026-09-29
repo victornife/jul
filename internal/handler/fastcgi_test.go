@@ -73,6 +73,22 @@ func TestCGIInvalidLateHeaderDoesNotPublishPartialHeaders(t *testing.T) {
 		t.Fatalf("partial CGI headers published: error=%v header=%q", err, rec.Header().Get("X-Secret"))
 	}
 }
+
+func TestCGIDropsHopHeadersAndConnectionNominations(t *testing.T) {
+	rec := httptest.NewRecorder()
+	raw := "Connection: X-Internal, keep-alive\r\nX-Internal: secret\r\nTransfer-Encoding: chunked\r\nX-End-To-End: kept\r\n\r\nbody"
+	if err := writeCGIResponse(bufio.NewReader(strings.NewReader(raw)), rec); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Connection", "X-Internal", "Transfer-Encoding"} {
+		if got := rec.Header().Get(name); got != "" {
+			t.Errorf("hop header %s leaked: %q", name, got)
+		}
+	}
+	if rec.Header().Get("X-End-To-End") != "kept" || rec.Body.String() != "body" {
+		t.Fatalf("end-to-end response lost: %v %q", rec.Header(), rec.Body.String())
+	}
+}
 func (*cgiDiscardWriter) WriteHeader(int)             {}
 func (*cgiDiscardWriter) Write(p []byte) (int, error) { return len(p), nil }
 

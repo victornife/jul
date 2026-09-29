@@ -695,6 +695,14 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 		}
 	}
 
+	for _, field := range parsedHeaders.Values("Connection") {
+		for _, token := range strings.Split(field, ",") {
+			parsedHeaders.Del(strings.TrimSpace(token))
+		}
+	}
+	for _, hop := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "TE", "Trailer", "Transfer-Encoding", "Upgrade", "Proxy-Authenticate", "Proxy-Authorization"} {
+		parsedHeaders.Del(hop)
+	}
 	for name, values := range parsedHeaders {
 		for _, value := range values {
 			w.Header().Add(name, value)
