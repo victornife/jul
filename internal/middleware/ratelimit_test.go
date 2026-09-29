@@ -33,6 +33,24 @@ func storeSize(s *RateLimiterStore) int {
 	return n
 }
 
+func TestLimiterCapsBucketsDuringKeyChurn(t *testing.T) {
+	store := newTestStore(t)
+	key := "new-key"
+	sh := &store.shards[shardIndex(key)]
+	for i := 0; i < maxLimiterBucketsPerShard; i++ {
+		sh.entries[strconv.Itoa(i)] = &rateLimiterEntry{lim: rate.NewLimiter(1, 1)}
+	}
+	if ok, _ := store.allow(key, 1, 1); !ok {
+		t.Fatal("new key was denied")
+	}
+	if got := len(sh.entries); got != maxLimiterBucketsPerShard {
+		t.Fatalf("key churn retained %d buckets", got)
+	}
+	if sh.entries[key] == nil {
+		t.Fatal("new key was not installed")
+	}
+}
+
 func TestRateLimiterAllowsBurstThenThrottles(t *testing.T) {
 	store := newTestStore(t)
 	lim := store.Scoped("test", 1, 5) // 1 rps, burst 5

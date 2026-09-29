@@ -30,6 +30,10 @@ type Limiter interface {
 // contention stays low even under high concurrency.
 const rateLimiterShards = 32
 
+// TTL eviction alone does not bound a high-cardinality public key space during
+// the TTL window. This caps live buckets even under sustained key churn.
+const maxLimiterBucketsPerShard = 4096
+
 // RateLimiterStore holds one token bucket per key, sharded to reduce lock
 // contention. Buckets are created lazily on first use and evicted once idle,
 // keeping memory bounded under churny key spaces such as per-IP limiting.
@@ -99,6 +103,12 @@ func (s *RateLimiterStore) allow(key string, limit rate.Limit, burst int) (bool,
 	sh.mu.Lock()
 	e := sh.entries[key]
 	if e == nil {
+		if len(sh.entries) >= maxLimiterBucketsPerShard {
+			for old := range sh.entries {
+				delete(sh.entries, old)
+				break
+			}
+		}
 		e = &rateLimiterEntry{lim: rate.NewLimiter(limit, burst), limit: limit, burst: burst}
 		sh.entries[key] = e
 	} else {
