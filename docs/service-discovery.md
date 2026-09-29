@@ -241,9 +241,9 @@ API redirects fail discovery rather than forwarding the bearer token to a
 different destination.
 
 An explicitly configured `ca_file` must exist and contain PEM certificates;
-discovery refuses to start with an unreadable or malformed bundle. Without an
-explicit path, the mounted service-account CA is used when available; otherwise
-the transport uses platform roots.
+discovery refuses to start with an unreadable or malformed bundle. The same
+rule applies to an existing mounted service-account CA; an absent mounted CA
+uses platform roots. Either CA file is limited to 1 MiB.
 Use an `https://` API server in deployed configurations. `jul lint` warns about
 an explicit plaintext `http://` endpoint because its responses choose backend
 addresses and any bearer token travels over that connection.
