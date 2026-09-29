@@ -283,6 +283,24 @@ func TestWriteCGIResponse(t *testing.T) {
 	}
 }
 
+func TestWriteCGIResponseSuppressesForbiddenBodies(t *testing.T) {
+	for _, code := range []int{http.StatusNoContent, http.StatusNotModified} {
+		t.Run(strconv.Itoa(code), func(t *testing.T) {
+			raw := fmt.Sprintf("Status: %d\r\nContent-Length: 7\r\n\r\nignored", code)
+			rec := httptest.NewRecorder()
+			if err := writeCGIResponse(bufio.NewReader(strings.NewReader(raw)), rec); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != code || rec.Body.Len() != 0 {
+				t.Fatalf("status %d body %q", rec.Code, rec.Body.String())
+			}
+			if code == http.StatusNoContent && rec.Header().Get("Content-Length") != "" {
+				t.Fatal("204 forwarded an invalid Content-Length")
+			}
+		})
+	}
+}
+
 func TestWriteCGIResponseHeaderBounds(t *testing.T) {
 	for _, size := range []int{(4 << 10) - 1, 4 << 10, (4 << 10) + 1, 16 << 10} {
 		t.Run(strconv.Itoa(size), func(t *testing.T) {

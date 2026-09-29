@@ -749,12 +749,18 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 		}
 		declaredLength = n
 	}
+	if status == http.StatusNoContent {
+		parsedHeaders.Del("Content-Length")
+	}
 	for name, values := range parsedHeaders {
 		for _, value := range values {
 			w.Header().Add(name, value)
 		}
 	}
 	w.WriteHeader(status)
+	if status == http.StatusNoContent || status == http.StatusNotModified {
+		return nil
+	}
 	// This forwards the upstream FastCGI/uWSGI response body unchanged; the
 	// origin application is responsible for sanitizing any output it generates.
 	if declaredLength >= 0 {
