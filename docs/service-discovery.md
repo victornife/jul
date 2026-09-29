@@ -235,7 +235,7 @@ query parameters, or a fragment; malformed values fail discovery setup.
 
 When the mounted service-account token is used, the resolver rereads it for
 each API request so projected token rotation takes effect without a restart.
-An unreadable, empty, or over-64-KiB previously mounted token fails that refresh and retains
+An unreadable, empty, or oversized (over 64 KiB) previously mounted token fails that refresh and retains
 the last-good backends. An explicit `token` follows config secret reload rules.
 API redirects fail discovery rather than forwarding the bearer token to a
 different destination.
