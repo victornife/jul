@@ -586,11 +586,11 @@ func buildCGIParams(loc config.LocationConfig, r *http.Request) map[string]strin
 // fields from the listener's canonical view, never from client headers.
 func sanitizeCGIIdentityParams(p map[string]string, r *http.Request) {
 	for name := range p {
-		if strings.HasPrefix(name, "HTTP_X_FORWARDED_") {
+		if strings.HasPrefix(name, "HTTP_X_FORWARDED_") || strings.HasPrefix(name, "HTTP_X_SSL_CLIENT_") || strings.HasPrefix(name, "HTTP_SSL_CLIENT_") {
 			delete(p, name)
 		}
 	}
-	for _, name := range []string{"HTTP_FORWARDED", "HTTP_X_REAL_IP", "HTTP_CLIENT_CERT", "HTTP_CLIENT_CERT_CHAIN", "HTTP_X_FORWARDED_CLIENT_CERT"} {
+	for _, name := range []string{"HTTP_FORWARDED", "HTTP_X_REAL_IP", "HTTP_CLIENT_CERT", "HTTP_CLIENT_CERT_CHAIN", "HTTP_X_FORWARDED_CLIENT_CERT", "HTTP_X_CLIENT_CERT", "HTTP_X_CLIENT_VERIFY"} {
 		delete(p, name)
 	}
 	client, peer := forwardedAddrs(r)
