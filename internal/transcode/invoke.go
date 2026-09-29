@@ -990,6 +990,12 @@ func outgoingContext(r *http.Request) context.Context {
 		if !ok || rest == "" {
 			continue
 		}
+		if strings.EqualFold(rest, "authorization") {
+			// Authorization has exactly one forwarding channel. Letting an
+			// arbitrary metadata header append a second value makes the
+			// backend's choice of identity dependent on its parser.
+			continue
+		}
 		md.Append(strings.ToLower(rest), values...)
 	}
 	if len(md) == 0 {
