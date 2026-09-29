@@ -46,6 +46,24 @@ func TestRequestIDGeneratesNewWhenMissing(t *testing.T) {
 	}
 }
 
+func TestRequestIDReplacesAmbiguousAndUnboundedClientValues(t *testing.T) {
+	for _, values := range [][]string{{"first", "second"}, {strings.Repeat("x", 129)}, {"has spaces"}} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		for _, value := range values {
+			req.Header.Add(HeaderRequestID, value)
+		}
+		rec := httptest.NewRecorder()
+		RequestID()(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Values(HeaderRequestID); len(got) != 1 || got[0] != RequestIDFrom(r.Context()) {
+				t.Errorf("forwarded ID differs from context: %v", got)
+			}
+		})).ServeHTTP(rec, req)
+		if got := rec.Header().Get(HeaderRequestID); len(got) != 16 {
+			t.Errorf("unsafe ID %v preserved as %q", values, got)
+		}
+	}
+}
+
 func TestRequestIDInContext(t *testing.T) {
 	var captured string
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
