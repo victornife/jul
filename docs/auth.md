@@ -120,7 +120,7 @@ changes for a directly exposed server.
 ### HTTP Basic
 
 - htpasswd is loaded at reload; **only** bcrypt entries (`$2a$`/`$2b$`/`$2y$`)
-  are accepted — any other scheme fails fast with a clear error.
+  are accepted — any other scheme or malformed bcrypt hash fails fast with a clear error.
 - The htpasswd path must be a regular file of at most 1 MiB. Duplicate
   usernames fail reload instead of silently replacing an earlier hash.
 - Password comparison uses `bcrypt.CompareHashAndPassword` (constant-time).

@@ -217,6 +217,9 @@ signature is verified against one of the CAs in `ca_file`; an unsigned or
 foreign-signed CRL is rejected at startup so a forged list cannot silently
 disable revocation. A handshake presenting a revoked serial is rejected and
 counted as `rejected`.
+The CA file is capped at 4 MiB and the CRL at 16 MiB. Both must be regular
+files, and a PEM CRL must contain exactly one `X509 CRL` block with no trailing
+data. A rejected file leaves the previous trust generation in service.
 
 Revocation is scoped to the CRL's issuer: a serial is only unique per CA, so a
 CRL revokes only certificates whose issuer name matches its own. To publish a

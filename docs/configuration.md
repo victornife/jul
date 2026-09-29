@@ -1043,7 +1043,7 @@ name = "inventory"
 
 | Key | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `ca_file` | string | — | PEM bundle of trust roots; consulted only when `ca_mode` selects it |
+| `ca_file` | string | — | PEM bundle of trust roots (regular file, at most 4 MiB); consulted only when `ca_mode` selects it |
 | `ca_mode` | string | `system` | `system`, `system_and_file`, or `file_only`. **Never inferred** from the presence of `ca_file` |
 | `client_cert` / `client_key` | string | — | Client certificate for mutual TLS; both or neither |
 | `server_name` | string | derived from the target | The verified name and the SNI value. A discovery-returned address never becomes the identity |
