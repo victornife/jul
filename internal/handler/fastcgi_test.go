@@ -131,6 +131,25 @@ func TestUWSGIReplacesClientIdentityAssertions(t *testing.T) {
 		}
 	}
 }
+
+func TestFastCGIReplacesClientIdentityAssertions(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://edge.test/app", nil)
+	r.RemoteAddr = "192.0.2.9:1234"
+	r.Header.Set("X-Forwarded-Proto", "https")
+	r.Header.Set("Client-Cert", "attacker")
+	var params map[string]string
+	session := gofast.Chain(gofast.BasicParamsMap, gofast.MapHeader, fcgiScriptParams(config.LocationConfig{}))(
+		func(_ gofast.Client, req *gofast.Request) (*gofast.ResponsePipe, error) {
+			params = req.Params
+			return nil, nil
+		})
+	if _, err := session(nil, gofast.NewRequest(r)); err != nil {
+		t.Fatal(err)
+	}
+	if params["HTTP_X_FORWARDED_PROTO"] != "http" || params["HTTP_CLIENT_CERT"] != "" || params["REMOTE_ADDR"] != "192.0.2.9" {
+		t.Fatalf("FastCGI forwarded spoofed identity: %v", params)
+	}
+}
 func (*cgiDiscardWriter) WriteHeader(int)             {}
 func (*cgiDiscardWriter) Write(p []byte) (int, error) { return len(p), nil }
 

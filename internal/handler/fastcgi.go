@@ -303,6 +303,7 @@ func fcgiScriptParams(loc config.LocationConfig) gofast.Middleware {
 			}
 			req.Params["SCRIPT_NAME"] = scriptName
 			delete(req.Params, "HTTP_PROXY") // httpoxy: a client "Proxy" header must not become HTTP_PROXY
+			sanitizeCGIIdentityParams(req.Params, req.Raw)
 			for k, v := range loc.FastCGIParams {
 				req.Params[k] = v
 			}
