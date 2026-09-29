@@ -30,7 +30,11 @@ func normalizeHost(host string) string {
 		}
 		host = host[:i]
 	}
-	return strings.TrimSuffix(host, ".")
+	host = strings.TrimSuffix(host, ".")
+	if strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") || strings.Contains(host, "..") {
+		return ""
+	}
+	return host
 }
 
 func validHostPort(port string) bool {

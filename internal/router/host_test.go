@@ -22,6 +22,9 @@ func TestNormalizeHost(t *testing.T) {
 		{"192.168.1.1:9090", "192.168.1.1"},
 		{"localhost", "localhost"},
 		{"Example.COM.:443", "example.com"},
+		{"a..example.com", ""},
+		{".example.com", ""},
+		{"a.example.com..", ""},
 		{":8080", ""},
 		{"", ""},
 	}
