@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -25,9 +26,25 @@ type basicAuth struct {
 // supported; other hash schemes are rejected at load so a misconfiguration is
 // caught at startup rather than silently denying every request.
 func newBasicAuth(file, realm string) (*basicAuth, error) {
-	data, err := os.ReadFile(file)
+	f, err := os.Open(file)
 	if err != nil {
 		return nil, fmt.Errorf("basic auth: read htpasswd %q: %w", file, err)
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("basic auth: htpasswd %q must be a regular file", file)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	closeErr := f.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("basic auth: read htpasswd %q: %w", file, readErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("basic auth: close htpasswd %q: %w", file, closeErr)
+	}
+	if len(data) > 1<<20 {
+		return nil, fmt.Errorf("basic auth: htpasswd %q exceeds 1 MiB", file)
 	}
 	users := make(map[string]string)
 	sc := bufio.NewScanner(bytes.NewReader(data))

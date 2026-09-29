@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
@@ -96,6 +97,24 @@ func TestBasicAuthChallenge(t *testing.T) {
 }
 
 func TestNewBasicAuthErrors(t *testing.T) {
+	t.Run("oversized valid prefix rejected", func(t *testing.T) {
+		path := writeHtpasswd(t, map[string]string{"alice": "password"})
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(data, []byte(strings.Repeat(" ", 1<<20))...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := newBasicAuth(path, "r"); err == nil {
+			t.Fatal("oversized htpasswd accepted")
+		}
+	})
+	t.Run("nonregular file rejected", func(t *testing.T) {
+		if _, err := newBasicAuth(t.TempDir(), "r"); err == nil {
+			t.Fatal("directory accepted as htpasswd")
+		}
+	})
 	t.Run("missing file", func(t *testing.T) {
 		if _, err := newBasicAuth(filepath.Join(t.TempDir(), "nope"), "r"); err == nil {
 			t.Error("expected error for missing file")
