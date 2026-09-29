@@ -125,6 +125,21 @@ func TestCompressMIMEGate(t *testing.T) {
 	}
 }
 
+func TestCompressionLargeThresholdStreamsWithoutGrowingProbe(t *testing.T) {
+	mw := gzipMiddleware(t, CompressionOptions{MinSize: 1 << 30})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	body := strings.Repeat("a", maxCompressionProbeBytes+100)
+	rec := serveCompress(mw, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, body[:100])
+		_, _ = io.WriteString(w, body[100:])
+	}, req)
+	if rec.Header().Get("Content-Encoding") != "" || rec.Body.String() != body {
+		t.Fatalf("large min_size changed response: encoding=%q body size=%d", rec.Header().Get("Content-Encoding"), rec.Body.Len())
+	}
+}
+
 func TestCompressNoDoubleEncode(t *testing.T) {
 	mw := gzipMiddleware(t, CompressionOptions{MinSize: 1})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

@@ -110,6 +110,10 @@ type compression struct {
 	onCompress func(string)
 }
 
+// A very large configured min_size must not turn every concurrent response
+// into a buffer of that size. Beyond this probe, stream it uncompressed.
+const maxCompressionProbeBytes = 64 << 10
+
 // NewCompression builds the Compression middleware. It returns an error if a
 // configured encoder is not compiled into this build so the caller can fail
 // startup/reload with a clear "not compiled in this build" message.
@@ -224,6 +228,13 @@ func (cw *compressWriter) Write(b []byte) (int, error) {
 	if cw.decided {
 		if cw.enc != nil {
 			return cw.enc.Write(b)
+		}
+		return cw.ResponseWriter.Write(b)
+	}
+	if cw.minSize > maxCompressionProbeBytes && len(b) > maxCompressionProbeBytes-len(cw.buf) {
+		cw.startPassthrough()
+		if err := cw.flushBuf(); err != nil {
+			return 0, err
 		}
 		return cw.ResponseWriter.Write(b)
 	}
