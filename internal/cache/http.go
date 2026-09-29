@@ -264,7 +264,9 @@ func (w *statusWriter) Write(p []byte) (int, error) {
 // lookup so decision D05 (bypass, never substitute a stored full response, never
 // store a 206) is taken before any cache state is consulted.
 func isRangeRequest(r *http.Request) bool {
-	return r.Header.Get("Range") != "" || r.Header.Get("If-Range") != ""
+	// Any field presence opts the exchange out. Header.Get only sees the first
+	// field, so an empty first line could otherwise hide a later Range value.
+	return hasHeaderField(r.Header, "Range") || hasHeaderField(r.Header, "If-Range")
 }
 
 // notModified reports whether a conditional request can be answered with 304
