@@ -160,6 +160,24 @@ func TestK8sDiscovererRejectsUnboundedPagination(t *testing.T) {
 	}
 }
 
+func TestK8sDiscovererRejectsOversizedContinueToken(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"metadata":{"continue":"`+strings.Repeat("x", maxK8sContinueBytes+1)+`"},"items":[]}`))
+	}))
+	defer srv.Close()
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+		Namespace: "default", Service: "web", APIServer: srv.URL,
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targets, err := d.Resolve(context.Background()); err == nil || len(targets) != 0 || requests != 1 {
+		t.Fatalf("targets=%+v err=%v requests=%d, want local rejection", targets, err, requests)
+	}
+}
+
 func TestK8sDiscovererReloadsMountedToken(t *testing.T) {
 	var tokens []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

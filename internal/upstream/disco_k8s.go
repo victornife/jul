@@ -29,6 +29,7 @@ const (
 )
 
 const maxK8sDiscoveryPages = 100
+const maxK8sContinueBytes = 4096
 
 // k8sDiscoverer resolves a Service's endpoints from the Kubernetes API server's
 // EndpointSlice REST endpoint over HTTPS. client-go is not linked in; only the
@@ -174,6 +175,9 @@ func (d *k8sDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
 		next := list.Metadata.Continue
 		if next == "" {
 			break
+		}
+		if len(next) > maxK8sContinueBytes {
+			return nil, fmt.Errorf("kubernetes: EndpointSlice continue token exceeds %d bytes", maxK8sContinueBytes)
 		}
 		if len(seen)+1 >= maxK8sDiscoveryPages {
 			return nil, fmt.Errorf("kubernetes: EndpointSlice list exceeds %d pages", maxK8sDiscoveryPages)
