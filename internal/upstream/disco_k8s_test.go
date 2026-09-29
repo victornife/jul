@@ -222,6 +222,18 @@ func TestK8sDiscovererReloadsMountedToken(t *testing.T) {
 	}
 }
 
+func TestK8sMountedTokenReadFailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	for _, contents := range []string{"", strings.Repeat("x", (64<<10)+1)} {
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if token, err := readK8sMountedToken(path); err == nil || token != "" {
+			t.Fatalf("size=%d token=%q err=%v, want rejection", len(contents), token, err)
+		}
+	}
+}
+
 func TestK8sDiscovererRejectsAPIRedirect(t *testing.T) {
 	var forwarded bool
 	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

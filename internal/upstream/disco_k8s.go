@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -75,9 +76,11 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 	token := strings.TrimSpace(k.Token)
 	var tokenFile string
 	if token == "" {
-		if b, err := os.ReadFile(k8sTokenFile); err == nil {
-			token = strings.TrimSpace(string(b))
+		if loaded, err := readK8sMountedToken(k8sTokenFile); err == nil {
+			token = loaded
 			tokenFile = k8sTokenFile
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
 		}
 	}
 
@@ -209,24 +212,9 @@ func (d *k8sDiscoverer) resolvePage(ctx context.Context, endpoint string) (k8sEn
 	token := d.token
 	if d.tokenFile != "" {
 		// Mounted service-account tokens rotate independently of config reload.
-		file, err := os.Open(d.tokenFile)
+		token, err = readK8sMountedToken(d.tokenFile)
 		if err != nil {
-			return list, fmt.Errorf("kubernetes: read service-account token: %w", err)
-		}
-		b, readErr := io.ReadAll(io.LimitReader(file, (64<<10)+1))
-		closeErr := file.Close()
-		if readErr != nil {
-			return list, fmt.Errorf("kubernetes: read service-account token: %w", readErr)
-		}
-		if closeErr != nil {
-			return list, fmt.Errorf("kubernetes: close service-account token: %w", closeErr)
-		}
-		if len(b) > 64<<10 {
-			return list, fmt.Errorf("kubernetes: service-account token exceeds 64 KiB")
-		}
-		token = strings.TrimSpace(string(b))
-		if token == "" {
-			return list, fmt.Errorf("kubernetes: service-account token is empty")
+			return list, err
 		}
 	}
 	if token != "" {
@@ -250,6 +238,29 @@ func (d *k8sDiscoverer) resolvePage(ctx context.Context, endpoint string) (k8sEn
 		return list, fmt.Errorf("kubernetes: decode response: %w", err)
 	}
 	return list, nil
+}
+
+func readK8sMountedToken(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("kubernetes: read service-account token: %w", err)
+	}
+	b, readErr := io.ReadAll(io.LimitReader(file, (64<<10)+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return "", fmt.Errorf("kubernetes: read service-account token: %w", readErr)
+	}
+	if closeErr != nil {
+		return "", fmt.Errorf("kubernetes: close service-account token: %w", closeErr)
+	}
+	if len(b) > 64<<10 {
+		return "", fmt.Errorf("kubernetes: service-account token exceeds 64 KiB")
+	}
+	token := strings.TrimSpace(string(b))
+	if token == "" {
+		return "", fmt.Errorf("kubernetes: service-account token is empty")
+	}
+	return token, nil
 }
 
 func (d *k8sDiscoverer) targetsFromList(list k8sEndpointSliceList) []Target {
