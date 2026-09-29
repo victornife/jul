@@ -320,6 +320,21 @@ func TestK8sExplicitCAFailsClosed(t *testing.T) {
 	}
 }
 
+func TestK8sMountedCARejectsMalformedAndOversizedBundles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mounted.pem")
+	if pool, err := loadK8sCABundle(path, false); err != nil || pool != nil {
+		t.Fatalf("absent mounted CA: pool=%v err=%v", pool, err)
+	}
+	for _, data := range []string{"not PEM", strings.Repeat("x", (1<<20)+1)} {
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if pool, err := loadK8sCABundle(path, false); err == nil || pool != nil {
+			t.Fatalf("mounted CA size %d silently fell back to system roots", len(data))
+		}
+	}
+}
+
 // k8sDiscoverer builds a discoverer against srv guarded by an egress policy that
 // allows the given entry. It shares the payload/setup of TestK8sDiscovererResolve.
 func newK8sEgressDiscoverer(t *testing.T, apiServer string, allow ...string) Discoverer {
