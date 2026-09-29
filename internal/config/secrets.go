@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"regexp"
@@ -237,9 +238,25 @@ func resolveOne(scheme, body string) (string, error) {
 		if body == "" {
 			return "", errors.New("empty ${file:} reference (want ${file:/path})")
 		}
-		data, err := os.ReadFile(body)
+		file, err := os.Open(body)
 		if err != nil {
 			return "", fmt.Errorf("reading ${file:%s}: %w", body, err)
+		}
+		info, err := file.Stat()
+		if err != nil || !info.Mode().IsRegular() {
+			_ = file.Close()
+			return "", fmt.Errorf("${file:%s} must be a regular file", body)
+		}
+		data, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+		closeErr := file.Close()
+		if readErr != nil {
+			return "", fmt.Errorf("reading ${file:%s}: %w", body, readErr)
+		}
+		if closeErr != nil {
+			return "", fmt.Errorf("closing ${file:%s}: %w", body, closeErr)
+		}
+		if len(data) > 1<<20 {
+			return "", fmt.Errorf("${file:%s} exceeds 1 MiB", body)
 		}
 		// Trim all trailing CR/LF characters so a
 		// secret stored one-per-file does not carry the editor's newline.

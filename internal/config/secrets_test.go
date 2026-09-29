@@ -225,3 +225,16 @@ func TestResolveReturnsFileDigest(t *testing.T) {
 		t.Fatal("expected digest for file reference")
 	}
 }
+
+func TestSecretFileRejectsOversizedAndNonregularSources(t *testing.T) {
+	if _, err := resolveOne("file", t.TempDir()); err == nil {
+		t.Fatal("directory accepted as secret")
+	}
+	path := filepath.Join(t.TempDir(), "oversized-secret")
+	if err := os.WriteFile(path, []byte("credential"+strings.Repeat(" ", 1<<20)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveOne("file", path); err == nil {
+		t.Fatal("oversized secret file accepted")
+	}
+}
