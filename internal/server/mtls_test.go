@@ -291,6 +291,14 @@ func TestLoadCABundleEmpty(t *testing.T) {
 	}
 }
 
+func TestLoadCABundleRejectsOversizedValidPrefix(t *testing.T) {
+	ca := newCA(t)
+	path := writePEM(t, t.TempDir(), "oversized-ca.pem", append(ca.pem, []byte(strings.Repeat(" ", 4<<20))...))
+	if _, err := loadCABundle(path); err == nil {
+		t.Fatal("oversized CA bundle accepted after valid prefix")
+	}
+}
+
 func TestLoadCRLVerifiesSignature(t *testing.T) {
 	dir := t.TempDir()
 	ca := newCA(t)
