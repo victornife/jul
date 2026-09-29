@@ -533,7 +533,7 @@ func TestValidateRequiresAuthenticationForExposedAdmin(t *testing.T) {
 	base := func(listen, token string) *Config {
 		return &Config{
 			Servers: []ServerConfig{{Listen: "127.0.0.1:8080", Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}}}},
-			Admin: AdminConfig{Enabled: true, Listen: listen, Token: token, PluginUploadMaxSize: 1},
+			Admin:   AdminConfig{Enabled: true, Listen: listen, Token: token, PluginUploadMaxSize: 1},
 		}
 	}
 	for _, listen := range []string{"0.0.0.0:9090", ":9090", "192.0.2.10:9090"} {
