@@ -2,7 +2,7 @@
 
 > **Maturity and API boundary:** the released embedded Console foundation is GA. Newer authority, route-policy and resilience panels on current `main` retain their own maturity rows. Existing unversioned `/api/*` routes are Console-internal unless #150 explicitly publishes them in the supported external `/api/v1` contract.
 
-The Console is a loopback-bound web control plane for operating a running
+The Console is a separate admin web control plane, loopback-bound by default, for operating a running
 Jul.IA server: a live metrics dashboard, a runtime-status overview of which
 capabilities are active, upstream health, certificate inventory, safe
 configuration editing with version history and one-click rollback, and a setup
@@ -15,17 +15,29 @@ build) and is gated by the `console` build tag.
 ## Enabling the console
 
 The console is served by the [admin listener](../docs/observability.md).
-Enable admin, keep it on loopback, and set a token:
+Enable admin, keep it on loopback, and set a strong token through a secret
+reference. Add these fields to your existing `server.toml` (put
+`config_authority` in its existing `[global]` block if one is present):
 
 ```toml
+[global]
+config_authority = "managed"  # required for Console apply/history rollback
+
 [admin]
 enabled = true
 listen  = "127.0.0.1:9090"
-token   = "change-me"          # sent as: Authorization: Bearer change-me
+token   = "${env:JUL_ADMIN_TOKEN}"
 # console      = true                          # default when admin is enabled
 # history_dir  = "./jul-data/config-history"   # rollback snapshots
 # history_keep = 50                            # snapshot retention
 ```
+
+Generate a unique token (for example, `openssl rand -hex 32`) and set
+`JUL_ADMIN_TOKEN` in the server process environment. Keep the managed config
+file and its parent directory writable by the service identity, and use a
+regular file rather than a symlink. If an external tool owns `server.toml`,
+leave the default `file_owned` authority: the Console can inspect and preview
+configuration, but its apply and rollback controls are disabled.
 
 Build with the tag and browse to the admin root:
 
@@ -45,10 +57,12 @@ Binaries built **without** `-tags console` serve the basic configuration page at
 the root instead; the JSON APIs below that do not require the tag (for example
 `/api/stats`, `/api/upstreams`) remain available for scripting.
 
-> **Keep the admin listener on loopback.** It exposes operational controls. If
-> you must reach it remotely, front it with your own authenticated tunnel rather
-> than binding it to a public address. `jul lint` warns when admin is bound
-> off-loopback without a token.
+> **Protect remote admin access.** Keep the listener on loopback or configure
+> `[admin.tls]` with a trusted certificate and an authenticated token/RBAC
+> principal before exposing it on another interface; restrict reachability at
+> the network boundary. `jul lint` warns about off-loopback cleartext and missing
+> authentication. See [configuration.md](configuration.md#admintls) for the
+> supported TLS setup.
 
 ## Panels
 
@@ -164,6 +178,9 @@ Traffic** above: history is ephemeral and scoped to this browser tab. Prometheus
 truth; the Console's local window is for at-a-glance operator context only.
 
 #### Storage (#437)
+
+This section is Beta/merged on post-v2.0.0 `main` and requires the `console`
+build tag; it is not present in the stable v2.0.0 Console.
 
 A **Storage** section follows Capacity when Jul is configured to write at least
 one location of its own. It is not a host disk view: only the bounded Jul-owned
@@ -572,21 +589,24 @@ ACME, adding or removing domains, or changing the issuer cannot be hot-applied.
 The same applies to other startup-bound settings:
 
 - **Listener bind-time settings** on an address the server already holds — the
-  global max-connections limit, the listener read/read-header/write/idle
-  timeouts, the max header bytes, and toggling HTTP/3 or h2c. These come from
+  listener read/read-header/write/idle timeouts, the max header bytes, and
+  toggling HTTP/3 or h2c. These come from
   the first server block on each `listen` address and are fixed when the socket
-  is bound; adding a *new* listen address is still hot-applied.
-- **TLS handshake parameters** on an existing listener — the minimum TLS
-  version and the mutual-TLS client-auth policy (mode, CAs, allowed SANs, CRLs).
-- **Tracing** — the OpenTelemetry tracer is wired once at startup, so changing
-  the endpoint or sample ratio, or enabling/disabling it, requires a restart.
+  is bound; adding a *new* listen address is still hot-applied. The global
+  `rate_limit.max_conns` admission cap is hot on retained listeners (#106).
+- **TLS minimum version** on an existing listener; admin listener client-auth
+  policy also stays restart-bound. Data-plane client-auth policy (mode, CA,
+  CRL, SANs) hot-applies to new handshakes on post-tag `main` (#486, Beta),
+  including in-place CA/CRL changes followed by a reload.
+- **Tracing provider/exporter identity** — enabling/disabling tracing or changing
+  the endpoint requires a restart. `sample_ratio` hot-applies to new root spans.
 
-When an apply is otherwise valid but changes such a setting, the write path
-**refuses it without persisting anything** and returns **HTTP 409** with
-`restart_required: true`. The console shows a *restart required* notice — distinct
-from the optimistic-concurrency conflict above — explaining that nothing was
-saved and that the operator must edit the configuration file and restart the
-server for the change to take effect. Removing ACME is not restart-required (the
+The Console previews the complete candidate and offers **Save for next restart**
+when the lifecycle permits `stage_restart`; this persists a validated candidate
+without changing the live runtime. A forced hot apply of a restart-bound
+candidate is refused without persistence, with a distinct restart-required
+outcome. File-owned deployments edit their external source and restart through
+their provisioning workflow. Removing ACME is not restart-required (the
 listener swaps to static certificates on the next reload). See
 [tls-acme.md](tls-acme.md#restart-required-acme-changes) and
 [reload-semantics.md](reload-semantics.md).
@@ -615,10 +635,12 @@ severity-tagged outcome banner**. The primary operator outcomes are:
   L4 stream (`[[stream]]`) proxy, whose reload runs after the response is sent.
   The banner names the failed subsystem and its error so the operator can act,
   rather than the failure being buried in the overview.
-- **Restart required — not applied** *(blocked)* — the change touches a
-  startup-bound setting (see *Restart-required changes* above); **nothing was
-  saved** and the operator must edit the file and restart. This is the only
-  outcome that is blocking, and it is styled distinctly from the others.
+- **Saved for next restart** *(info)* — the validated candidate was staged;
+  the live runtime is unchanged until the process restarts. A later stage
+  update preserves the original rollback base.
+- **Restart required — change not applied** *(blocked)* — a hot apply attempted
+  a startup-bound change; **nothing was saved**. Preview and stage the complete
+  candidate when the managed write path permits it.
 
 The banner reports success and info outcomes with a capabilities tally (how many
 feature groups are active) and, for the two non-live outcomes, surfaces the
@@ -679,8 +701,9 @@ for stream deployments. See [reload semantics](reload-semantics.md) for the full
 The raw editor can edit the `[admin]` block itself, which means a single apply
 could change how you reach the console — and unlike any other change, you cannot
 roll it back from a console you can no longer reach. To prevent that, an apply
-that would **disable the admin interface, move its listen address, rotate its
-token, or disable the web console** is held with **HTTP 409** and
+that would **disable the admin interface, move its listen address, change its
+TLS or client-certificate policy, rotate its token, or disable the web console**
+is held with **HTTP 409** and
 `admin_change: true` the first time, listing exactly what would change. Nothing
 is written. The console shows a confirmation dialog enumerating the changes; on
 confirm it re-applies with `?confirm_admin=true` and the write proceeds. An apply
@@ -834,12 +857,12 @@ sets the verification mode (`none` / `request` / `require`), the CA bundle and
 optional CRL presented certificates are checked against, and an optional SAN
 allow-list (`[tls.client_auth]`); a per-route **require client certificate**
 toggle (also offered from the Routes detail) sets a location's
-`require_client_cert`. Both edits route through Validate → Diff → Apply. Note the
-two take effect on different schedules: server-level `client_auth` is read when
-the listener **binds**, so saving reloads HTTP routing immediately but the new
-client-certificate verifier applies only after a restart (or a listen-address
-change) — the editor and the diff both surface this caveat; per-location
-`require_client_cert` is enforced per request and takes effect on hot reload.
+`require_client_cert`. Both edits route through Validate → Diff → Apply. On
+post-tag `main`, server-level data-plane policy swaps for **new handshakes** on
+reload; established connections retain their accepted identity. Per-location
+`require_client_cert` is enforced on the next request. The original stable
+v2.0.0 client-auth policy was restart-bound, and admin listener client auth
+still is; see [mtls.md](mtls.md).
 
 With mutual TLS now guided, the [capability matrix](#capability-matrix) below is
 the authoritative, per-feature breakdown of what is guided-editable versus
@@ -919,12 +942,18 @@ Three properties of the editor are deliberate:
   sees — so the Console can never disagree with the configuration it edits.
 - **"None — always use the transport peer" is a real setting**, distinct from
   leaving the preference at its default. It sends an explicitly empty header
-  list, which means no forwarding header is read even from a trusted peer.
+  list, which means no HTTP forwarding header is read even from a trusted
+  peer. If inbound PROXY protocol is enabled, its validated source becomes
+  the transport peer before this setting is applied.
 - **It requires its own permission,** `config:trust`, not `config:write`.
   Widening `trusted_proxies` lets the named range assert any client address to
   authentication, rate limiting, the WAF and the audit trail, so it is held to a
   separate grant and recorded under its own audit category
-  (`config.client_address`). No predefined role except `admin` holds it.
+  (`config.client_address`). A history rollback that changes this policy also
+  requires `config:trust`, even when the caller has `history:rollback`. Enabling
+  inbound `proxy_protocol` with an unchanged trusted range also requires that
+  grant, because it accepts a new source of asserted client addresses. No
+  predefined role except `admin` holds the trust grant.
 
 **Trust no proxy** clears the policy from every block on the listener, returning
 it to peer-only identity.
@@ -984,7 +1013,7 @@ raw TOML), *Raw-only* (no dedicated surface; edit the TOML), or *No surface*.
 | Rate limiting | Structured-edit (global + per-location toggle) | Traffic Controls, Routes |
 | Access control (auth) | Guided-create · Structured-edit (per-location: CIDR / Basic / JWT / forward-auth) | Routes, Security |
 | TLS / HTTPS | Guided-create (New TLS server) · Raw-only to edit existing | TLS |
-| Mutual TLS | Guided-create (within the TLS editor) · Structured-edit (mode / CA bundle / CRL / SAN allow-list — bind-time; per-location require-client-cert — immediate) | TLS, Security, Routes |
+| Mutual TLS | Guided-create (within the TLS editor) · Structured-edit (data-plane mode / CA bundle / CRL / SAN allow-list — new handshakes on post-tag `main`; per-location require-client-cert — next request) | TLS, Security, Routes |
 | Automatic HTTPS (ACME) | Guided-create (within the TLS editor) · Raw-only to edit existing | TLS |
 | HTTP/3, h2c | Structured-edit (per-server toggle; HTTP/3 requires TLS, h2c plaintext only) | Routes |
 | Upstream pools | Guided-create · Structured-edit (backends, strategy, health checks, discovery) | Apps |

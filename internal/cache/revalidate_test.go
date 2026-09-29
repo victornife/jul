@@ -555,7 +555,7 @@ func TestPublishedEntryDoesNotAliasHandlerState(t *testing.T) {
 	if string(stored.Body) != "payload" {
 		t.Errorf("stored body aliased the response buffer: %q", stored.Body)
 	}
-	if got := stored.VaryValues["Accept"]; got != "application/json" {
+	if got := stored.VaryValues["Accept"]; got != "\x00v2:1:16:application/json" {
 		t.Errorf("stored VaryValues aliased the request header: %q", got)
 	}
 }

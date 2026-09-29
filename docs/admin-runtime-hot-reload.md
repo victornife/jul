@@ -15,7 +15,7 @@ The following fields are `hot_reload` when an admin server already exists:
 - `admin.rate_limit_apply_per_min`
 - `admin.max_event_conns`
 
-`admin.enabled` and `admin.listen` remain `restart_required`. History and audit resource fields also retain their independently governed lifecycle classifications. A candidate that also changes a structural listener field is not partially hot-applied: canonical lifecycle planning governs the whole candidate. Listener enable/disable/address movement remains the separately gated HR-08 work in #97; durable audit sink dynamics remain #160 and history backend/retention remains #159.
+`admin.enabled` and `admin.listen` remain `restart_required`. History and audit resource fields retain their individual lifecycle classifications in the generated reference. A candidate that also changes a structural listener field is not partially hot-applied: canonical lifecycle planning governs the whole candidate. #97 retained the listener boundary as an explicit restart-required decision; #160 delivered selected durable audit sink dynamics, while #159 hot-reloads history retention but leaves `admin.history_dir` restart-bound.
 
 The lifecycle registry in `internal/lifecycle/registry.go` is authoritative; generated lifecycle/reference artifacts must be regenerated rather than edited by hand.
 
@@ -38,7 +38,12 @@ Consequences:
 
 ## Prepare, Publish and rollback
 
-All reload entry points converge on the same application prepare/publish path: managed apply/typed patch, raw configuration apply, rollback, SIGHUP and file watch. `PrepareAdminRuntime` runs after configuration resolution and before Publish.
+Authorized reloads converge on the same application prepare/publish path:
+managed apply/typed patch, raw configuration apply and rollback, or SIGHUP and
+file watch under `file_owned` authority. Under `managed` authority, SIGHUP and
+file watch only assess external drift; they do not publish the changed file.
+The operator must explicitly adopt it before managed writes resume.
+`PrepareAdminRuntime` runs after configuration resolution and before Publish.
 
 Prepare may construct/validate immutable candidate runtime data. It never iterates limiter clients, retunes token buckets, resets SSE counts or acquires/releases leases. A failed Prepare leaves the old snapshot and all mutable limiter state untouched.
 

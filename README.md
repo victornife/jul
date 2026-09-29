@@ -61,8 +61,11 @@ NGINX who want a gentler on-ramp.
 ## Current direction
 
 Jul.IA has published the bounded standalone gateway as stable v2.0.0.
-The current selected follow-through emphasizes truthful NGINX migration evidence,
-day-2 operability and runtime-resource ownership. Additional features on `main`
+The completed post-release waves strengthened NGINX migration evidence,
+day-2 operability and runtime-resource ownership. The next programme decision
+is the #434 Phase-0 go/no-go before feature freeze and the selected
+[release closure #480](https://github.com/victornife/jul/issues/480).
+Additional features on `main`
 do not inherit the release or GA status of older capabilities. Fleet, hosted
 cloud, GraphQL composition and AI remain optional horizons or bounded
 experiments; none is required for the single-node product to remain useful. See the
@@ -80,9 +83,9 @@ human view and evidence matrix are in [`docs/status.md`](docs/status.md).
 
 | Classification | Current examples |
 | --- | --- |
-| **GA · soaked** | Core HTTP, released TLS/ACME and mTLS, authentication, cache, compression, rate limiting, health checks, service discovery, released gRPC/L4/WASM/WAF/observability/importer capabilities, Console, secrets, reload transaction, trusted client address, and backend TLS trust (#409, promoted with stable v2.0.0) |
+| **GA · soaked** | Core HTTP, released TLS/ACME and mTLS, authentication, cache, compression, rate limiting, health checks, service discovery, released gRPC/L4/WASM/WAF/observability capabilities, Console, secrets, reload transaction, trusted client address, backend TLS trust, zero-config/lint and the base single-file NGINX importer. The last two have [scoped post-release soak evidence](docs/soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features). |
 | **Beta · released in v2.0.0** | Auxiliary egress policy, method/header/query routing, response-header policy and CORS, upstream admission/retry/circuit controls, configuration authority/generated contracts, NGINX assessment/provenance/include traversal, diagnostics, admin TLS, external API/CLI, selected hot reload and Unix HTTP upstreams |
-| **GA — soak pending** | None at this snapshot |
+| **Beta · merged on `main` after v2.0.0** | gRPC Health/Check probes, resource and storage headroom, serving WAF policy visibility, Console diagnostics guidance, WASM ABI v2 response phase and consistent-hash affinity |
 
 Stable [`v2.0.0`](https://github.com/victornife/jul/releases/tag/v2.0.0)
 was published from a post-#420 commit. The older
@@ -110,8 +113,8 @@ a `full` release artifact to enable all optional capabilities.
 | **Static files** | Document root serving, index files, `try_files`, optional directory listing, hidden-file control, `Cache-Control` headers |
 | **Reverse proxy** | `proxy_pass` to a concrete URL or a named upstream; named upstreams may use `unix:/path.sock` backends for plaintext HTTP; per-location connect/read/send timeouts; custom upstream headers with variable expansion |
 | **WebSocket & SSE** | Transparent passthrough of `Connection: Upgrade` (HTTP `101`) connections — text and binary frames spliced bidirectionally (Apollo GraphQL subscriptions, Socket.IO) — and `text/event-stream` / chunked responses streamed per write, never buffered (Node/Python SSE) |
-| **Load balancing** | `round_robin`, `weighted_round_robin`, `least_conn`, and deterministic `consistent_hash` affinity (client IP, header or cookie key) across an upstream pool |
-| **Health & failover** | Released passive/active health checking plus merged Beta resilience controls: bounded admission and pending work, per-backend capacity, retry attempts/deadline/backoff/budget, and an explicit closed/open/half-open circuit model. See [upstreams.md](docs/upstreams.md). |
+| **Load balancing** | `round_robin`, `weighted_round_robin`, `least_conn`, and deterministic `consistent_hash` affinity (client IP, header or cookie key) across an upstream pool; `consistent_hash` is on post-v2.0.0 `main` only |
+| **Health & failover** | Released passive/active health checking and Beta resilience controls: bounded admission and pending work, per-backend capacity, retry attempts/deadline/backoff/budget, and an explicit closed/open/half-open circuit model. The newer gRPC Health/Check probe is on post-release `main`. See [upstreams.md](docs/upstreams.md) and [health.md](docs/health.md). |
 | **Service discovery** | Resolve an upstream's backends dynamically and refresh the pool live without a reload (`[upstreams.discovery]`): **DNS** A/AAAA and **DNS SRV** in every build, plus **Consul** and **Kubernetes** EndpointSlices behind the `consul`/`kubernetes` build tags — failed or empty resolves keep the last-good backends |
 | **Backend trust** | One normalized `backend_tls` policy for private/system roots, backend client certificates, SNI/verified names, minimum TLS and peer identities across HTTP, native gRPC, transcoding/reflection and active health probes. GA (#409). |
 | **Upstream resilience** | Pool-scoped admission and retry budget state, location-overridable stateless controls, bounded queueing, protocol-aware lifetime accounting, and one per-backend circuit state machine reused by HTTP, gRPC, FastCGI/uWSGI and L4 TCP. Integrated closure remains tracked separately. |
@@ -122,14 +125,14 @@ a `full` release artifact to enable all optional capabilities.
 | **Compression** | On-the-fly `gzip` (every build) plus `br`/`zstd` codings (via the `brotli`/`zstd` build tags); `Accept-Encoding` negotiation, `Cache-Control: no-transform`, MIME allow-list, size threshold, and precompressed `.br`/`.gz` sidecars |
 | **Rate limiting** | Token-bucket request limiting keyed by client IP, a request header, or a JWT claim, with burst, global or per-location policy, and `429` + `Retry-After`; plus a per-listener concurrent-connection cap |
 | **Trusted client identity** | Per-listener `trusted_proxies` and bounded Forwarded/X-Forwarded-For derivation produce one canonical client address used by CIDR auth, rate limiting, WAF, logs, forwarding and FastCGI. Untrusted assertions are ignored. GA (#409). |
-| **Access control** | Per-location CIDR allow/deny lists plus one credential method — HTTP Basic (bcrypt `htpasswd`), JWT bearer tokens validated against a JWKS endpoint (asymmetric algorithms only, `none` rejected), or forward-auth to an external service |
+| **Access control** | Per-location CIDR allow/deny lists and at most one credential method — HTTP Basic (bcrypt `htpasswd`), JWT bearer tokens validated against a JWKS endpoint (asymmetric algorithms only, `none` rejected), or forward-auth to an external service; a CIDR-only gate is valid |
 | **WAF** | ModSecurity-compatible web application firewall ([Coraza](https://github.com/corazawaf/coraza)) with the **OWASP Core Rule Set embedded** in the binary (`[waf]`, global or per-location): `block`/`detect` modes, paranoia levels, your own SecLang files or inline rules, request/response body inspection, and a `jul_waf_events_total` metric — opt-in `waf` build tag ([docs/waf.md](docs/waf.md)) |
-| **Secrets references** | Keep credentials out of the config file: any string field accepts `${env:NAME}`, `${file:/path}`, or `${secret:/path}` references resolved at serve time, resolved values are **masked from logs**, and `jul lint` flags literal admin/Consul/Kubernetes tokens — core, no build tag ([docs/secrets.md](docs/secrets.md)) |
+| **Secrets references** | Keep credentials out of the config file: any string field accepts `${env:NAME}`, `${file:/path}`, or `${secret:/path}` references resolved at serve time, eligible resolved values receive best-effort log redaction (default minimum length: four characters), and `jul lint` flags literal admin/Consul/Kubernetes tokens — core, no build tag ([docs/secrets.md](docs/secrets.md)) |
 | **Egress allow-list** | Optional hardening (`[egress]`) that constrains the server's own config-driven fetches — JWKS, forward-auth, Consul/Kubernetes discovery, ACME/OCSP, and the WASM plugin `fetch` intersection — to an approved set of hosts/CIDRs, refused at connect time; bounds the SSRF blast radius of a misconfigured or compromised config, disabled by default — core, no build tag ([docs/egress.md](docs/egress.md)) |
 | **TLS** | TLS 1.2/1.3 termination per server block, configurable minimum version, optional HTTP→HTTPS redirect |
 | **Automatic HTTPS** | ACME certificate issuance and auto-renewal using the configured exclusive HTTP-01 or TLS-ALPN-01 challenge, with on-disk account/certificate cache — opt-in `acme` build tag |
 | **HTTP/3** | HTTP/3 over QUIC on the same address (UDP), sharing the complete server TLS/mTLS policy and certificate provider, advertised through `Alt-Svc`; static certificate-file changes remain restart-bound — opt-in `http3` build tag |
-| **Routing & response policy** | Deterministic exact/prefix/regex precedence, method/header/query predicates, rewrites, ordered response-header add/set/remove operations, and bounded CORS/preflight handling. The predicate/response-policy additions are merged Beta capabilities. |
+| **Routing & response policy** | Deterministic exact/prefix/regex precedence, method/header/query predicates, rewrites, ordered response-header add/set/remove operations, and bounded CORS/preflight handling. The predicate/response-policy additions shipped in v2.0.0 as Beta. |
 | **Virtual hosts** | Multiple `server_names` per listener; multiple listen addresses |
 | **Limits & timeouts** | `client_max_body_size`, header size caps, read/write/idle/header timeouts (per-server, location overrides for body size) |
 | **Redirects** | `return`, `redirect`, and `deny` (403) location actions; custom error pages |
@@ -138,7 +141,7 @@ a `full` release artifact to enable all optional capabilities.
 | **Diagnostics** | Read-only `jul doctor` checks with deterministic human/JSON output, plus operator-triggered, bounded, secret-safe local support bundles with no automatic upload ([docs/diagnostics.md](docs/diagnostics.md)) |
 | **Admin GUI** | Loopback-bound web console with live metrics, upstream/certificate status, config history and rollback, setup and structured editors. Legacy shared-token mode remains available; opt-in local multi-principal RBAC with predefined/custom roles, scoped revocable tokens and per-principal audit attribution is shipped (`console` build tag). External OIDC/SAML/SCIM identity is not shipped. |
 | **Developer experience** | Zero-config `jul run --serve`/`--proxy` (no file needed), `jul lint` best-practice checks with CI-friendly exit codes, and `jul fmt` canonical formatting |
-| **Generated contracts** | Deterministic JSON Schema, machine metadata, generated field reference and lifecycle reference derive from code-defined authorities; durable `route_id` supports stable route addressability. Merged Beta. |
+| **Generated contracts** | Deterministic JSON Schema, machine metadata, generated field reference and lifecycle reference derive from code-defined authorities; durable `route_id` supports stable route addressability. Released in v2.0.0 with separate Beta maturity. |
 | **Migration** | `jul import nginx` can convert supported NGINX constructs and emit deterministic human/JSON assessment with blocking/approximate findings, source provenance, guidance, and opt-in bounded root-confined include traversal — opt-in `importer` build tag. |
 | **WebAssembly plugins** | Sandboxed request middleware and handlers compiled to WASM and run on the embedded [wazero](https://wazero.io) runtime (pure Go, no cgo): per-plugin memory and time limits, panic isolation, capability-gated key/value store, hot-reloadable — opt-in `wasmplugins` build tag |
 | **L4 stream proxy** | TCP and UDP reverse proxying (`[[stream]]`) with load balancing and health checks across an upstream pool, TLS **SNI routing** by host without terminating, and HAProxy **PROXY protocol** v1/v2 (in and out) to preserve the client address — survives hot reload, opt-in `stream` build tag |
@@ -196,28 +199,40 @@ Not sure which architecture you need?
 
 ## Quick start
 
-From the extracted folder (or the repo root if running from source):
+From the extracted folder (or the repo root if running from source), create a
+page and serve it on loopback:
 
 **Windows (PowerShell):**
 
 ```powershell
-.\jul.exe --config .\server.toml
+New-Item -ItemType Directory -Force public | Out-Null
+Set-Content public/index.html '<h1>Hello from Jul.IA</h1>'
+.\jul.exe run --serve .\public --listen 127.0.0.1:8080
 ```
 
 **Linux / macOS:**
 
 ```bash
-chmod +x ./jul
-./jul --config ./server.toml
+mkdir -p public
+printf '<h1>Hello from Jul.IA</h1>\n' > public/index.html
+./jul run --serve ./public --listen 127.0.0.1:8080
 ```
 
 **From source (Go installed):**
 
 ```bash
-go run ./cmd/jul --config server.toml
+mkdir -p public
+printf '<h1>Hello from Jul.IA</h1>\n' > public/index.html
+go run ./cmd/jul run --serve ./public --listen 127.0.0.1:8080
 ```
 
-Validate a configuration without starting the server:
+Open <http://127.0.0.1:8080/>. The bundled `server.toml` is a configuration
+template: its `/srv/www/example` static root and backend addresses must be
+adapted to your machine before starting it. See [Getting started](docs/getting-started.md)
+for a complete first config.
+
+After adapting the template and creating its static directory, validate it
+without starting the server:
 
 ```bash
 jul check -config server.toml
@@ -422,67 +437,46 @@ service discovery, plugins, and soak interpretation — see
 
 ## Migrating from NGINX
 
-`jul import nginx` reads an NGINX configuration file and produces an equivalent
-Jul.IA TOML config. It is a **best-effort migration aid**, not a 1:1 converter:
-common directives are translated, and everything it cannot map is reported with
-its source line so you can port it by hand. The importer is gated behind the
-`importer` build tag to keep the default binary lean:
+The `importer` build tag enables a **best-effort migration aid**, not an
+NGINX-equivalence certificate. It classifies source directives as translated,
+approximated, ignored or blocking, with source locations and guidance. Review
+those findings and validate the generated Jul configuration before cutover.
 
 ```bash
 go build -tags importer -o jul ./cmd/jul
-jul import nginx -o server.toml /etc/nginx/nginx.conf
+./jul import nginx --assess --follow-includes --root /etc/nginx /etc/nginx/nginx.conf
+./jul import nginx --follow-includes --root /etc/nginx \
+  --input /etc/nginx/nginx.conf --output server.toml \
+  --report migration-assessment.json
+./jul check -config server.toml
 ```
 
-The generated file is re-parsed and validated exactly as the server would load
-it, so a successful run always yields a config that passes `jul lint`. Run the
-import, then review the `# TODO` comments at the top of the output and the
-summary printed to stderr.
+Include traversal is **off by default** and requires `--follow-includes`; the
+explicit root confines both direct files and symlink targets. Do not treat a
+successful parse or generated TOML as proof of traffic equivalence. Inspect
+blocking and approximate findings, then test the Jul candidate against the
+behaviour your NGINX estate actually uses. The assessment may exit with code
+`3` when manual action is required (as the sample fixture does); resolve that
+result before cutover. The assessment schema and exact directive boundaries are
+in the [importer guide](docs/nginx-importer.md)
+and [migration assessment](docs/nginx-assessment.md); the [migration corpus](docs/nginx-migration-corpus.md)
+records the tested scenarios and remaining differences.
 
-### What gets translated
-
-| NGINX | Jul.IA |
-| ----- | ------ |
-| `http { ... }` | top-level config |
-| `server { ... }` | `[[servers]]` |
-| `listen 80;` / `listen 443 ssl;` | `listen = ":80"` / `":443"` + `[servers.tls]` |
-| `server_name a b;` (`_` dropped) | `server_names = ["a", "b"]` |
-| `root` / `index` / `try_files` | location `root` / `index` / `try_files` |
-| `location / { ... }` | `[[servers.locations]]` with a `prefix` match |
-| `location = /p` / `^~ /p` / `~ re` / `~* re` | `exact` / `prefix` / `regex` / `regex` match |
-| `proxy_pass http://name;` | location `proxy_pass` (a bare host gets `http://`) |
-| `fastcgi_pass` | location `fastcgi_pass` |
-| `return 301 https://h/;` / `return 404;` | location `redirect` + `return` / `return` |
-| `rewrite re repl flag;` | location `[[...rewrites]]` |
-| `upstream name { server ... }` | `[[upstreams]]` with `servers` |
-| `server h weight=3;` | upstream server `weight` (→ `weighted_round_robin`) |
-| `least_conn;` | upstream `strategy = "least_conn"` |
-| `ip_hash;` / `hash $cookie_sid consistent;` | upstream `strategy = "consistent_hash"` with `[upstreams.hash]` (placement differs from NGINX; approximated) |
-| `ssl_certificate` / `ssl_certificate_key` | `[servers.tls]` `cert` / `key` |
-| `ssl_protocols TLSv1.2 TLSv1.3;` | `[servers.tls]` `min_version` |
-| `gzip on;` | `[compression] enabled = true` |
-
-### What is not translated (reported, not dropped)
-
-- **`include` directives are not followed** — import each included file
-  separately, or concatenate them first.
-- **Process-level directives** (`worker_processes`, `events`, `pid`, `user`, …)
-  have no per-server equivalent and are ignored.
-- **`stream` / `mail` modules**, `map` / `geo` / `if` blocks, named locations
-  (`@name`), Lua, and any directive without a Jul.IA equivalent
-  (`add_header`, `proxy_set_header`, `client_max_body_size`, `autoindex`, …)
-  are listed in the report for manual porting.
-
-See [`examples/migrate`](examples/migrate) for a sample `nginx.conf`, the config
-it produces, and a walkthrough.
-
----
+Stable v2.0.0 includes the base importer and the Beta assessment/provenance/include
+surface. Further stream, protocol and affinity translations and focused
+NGINX-versus-Jul tests landed on `main` after that tag. Use the
+[status matrix](docs/status.md) and the installed binary's version when
+assessing a specific deployment. A sample input and walkthrough live under
+[`examples/migrate`](examples/migrate).
 
 ## Configuration reference
 
 Jul.IA is configured by a single TOML document. The top-level tables are
 `[global]`, `[[servers]]`, `[[upstreams]]`, `[cache]`, and `[admin]`.
 
-A minimal, working example:
+An illustrative config template (create `/srv/www/example`, start backends on
+ports 3000 and 3001, and set `JUL_ADMIN_TOKEN` in the server process environment
+before running it; adapt paths, hosts and credentials to your deployment):
 
 ```toml
 [global]
@@ -524,7 +518,7 @@ stale_if_error = "300s"
 [admin]
 enabled = true
 listen = "127.0.0.1:9090"
-token = "change-me"
+token = "${env:JUL_ADMIN_TOKEN}"
 console = true
 ```
 

@@ -12,7 +12,7 @@ Authentication is a **core feature** — no build tag is required.
 | Public front | `http://localhost:8080/` (static) |
 | Protected API | `http://localhost:8080/api` (requires `Authorization: Bearer <token>`) |
 | Token validation | JWKS at `jwks_url`, asymmetric algorithms only (`none`/`HS*` rejected) |
-| Rate limit | `20 req/s` (burst `40`) **per `sub` claim** |
+| Rate limit | `20 req/s` (burst `40`) per nonempty string `sub` claim; otherwise per client address |
 
 ## How it works
 
@@ -34,14 +34,18 @@ Authentication is a **core feature** — no build tag is required.
    identity provider — Auth0, Keycloak, Okta, AWS Cognito, Google, etc. all
    publish a JWKS document, usually at `/.well-known/jwks.json`.
 
-2. Validate the config:
+2. From this example directory, create the static root required by the public
+   route, then validate the config. `jul -check` opens configured static roots
+   and fails if `./public` does not exist:
 
    ```bash
+   mkdir -p public
+   printf '%s\n' 'JWT gateway ready' > public/index.html
    ../../jul -check -config jul.toml
    ```
 
-3. Start an upstream on `127.0.0.1:3000` (any app), create a `public/` folder
-   with an `index.html`, then start Jul:
+3. Start an upstream on `127.0.0.1:3000` (any app), then start Jul from this
+   directory:
 
    ```bash
    ../../jul -config jul.toml
@@ -67,7 +71,9 @@ Authentication is a **core feature** — no build tag is required.
   over an authenticated channel.
 - **Per-user limiting.** Because authentication runs *before* rate limiting, the
   `jwt:sub` key sees the validated `sub` claim. Swap `sub` for any claim your
-  tokens carry (e.g. a tenant or API-key id).
+  tokens carry (e.g. a tenant or API-key id). If the claim is absent, empty, or
+  not a string, the limiter falls back to the canonical client address; ensure
+  your issuer includes a suitable claim if per-user isolation is required.
 - **Observability.** Every decision is counted in
   `jul_auth_decisions_total{method="jwt",result="allow|deny"}`.
 

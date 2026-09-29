@@ -52,7 +52,8 @@ the bundled script:
 ## Try it
 
 Build a plugins-enabled server, point it at a config that loads these modules,
-and send a request:
+and send a request. Save the following as `jul-plugins.toml` in the repository
+root; the plugin paths are relative to that working directory:
 
 ```toml
 # jul.toml
@@ -83,7 +84,8 @@ plugins = ["header-inject"]
 
 ```bash
 go build -tags wasmplugins -o jul ./cmd/jul
-./jul run -c jul.toml &
+./jul check -config jul-plugins.toml
+./jul -config jul-plugins.toml &
 
 curl -i http://127.0.0.1:8080/            # X-Plugin and X-Count headers present
 curl -i http://127.0.0.1:8080/ -H 'X-Block: 1'   # passes (kv-counter middleware)

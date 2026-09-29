@@ -1,56 +1,38 @@
-# Test NGINX importer (feature #6) — one-shot validation
-# Requires binary built with -tags importer
-# Usage: .\scripts\test-nginx-importer.ps1
+# Windows assessment and conversion check for the documented migration fixture.
+# From any directory: .\scripts\test-nginx-importer.ps1 -BinaryPath .\jul-importer.exe
+param([string]$BinaryPath)
 
-$ErrorActionPreference = "Stop"
-$outFile = "tmp\nginx-imported.toml"
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if (-not $BinaryPath) { $BinaryPath = Join-Path $root 'jul.exe' }
+$jul = (Resolve-Path $BinaryPath).Path
+$scratch = Join-Path ([IO.Path]::GetTempPath()) ('jul-import-' + [guid]::NewGuid().ToString('N'))
+$source = Join-Path $root 'examples\migrate\nginx.conf'
+$assessment = Join-Path $scratch 'assessment.json'
+$conversion = Join-Path $scratch 'conversion.json'
+$candidate = Join-Path $scratch 'candidate.toml'
 
-# Ensure tmp dir exists
-New-Item -ItemType Directory -Force -Path "tmp" | Out-Null
+try {
+    New-Item -ItemType Directory -Force -Path $scratch | Out-Null
+    & $jul import nginx --assess --report $assessment $source
+    if ($LASTEXITCODE -ne 3) { throw "assessment exited $LASTEXITCODE; expected manual_action_required (3)" }
+    $a = Get-Content -Path $assessment -Raw | ConvertFrom-Json
+    if ($a.status -ne 'manual_action_required') { throw "assessment status: $($a.status)" }
 
-# 1) Run importer
-Write-Host "=== Running jul import nginx ..."
-& .\jul.exe import nginx -o $outFile examples\migrate\nginx.conf
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "FAIL: jul import nginx exited with code $LASTEXITCODE"
-    exit 1
-}
+    & $jul import nginx -o $candidate --report $conversion $source
+    if ($LASTEXITCODE -ne 3) { throw "conversion exited $LASTEXITCODE; expected manual_action_required (3)" }
+    $c = Get-Content -Path $conversion -Raw | ConvertFrom-Json
+    if ($c.status -ne 'manual_action_required') { throw "conversion status: $($c.status)" }
+    if (-not (Test-Path $candidate)) { throw 'candidate TOML was not written' }
 
-# 2) Verify output exists
-if (-not (Test-Path $outFile)) {
-    Write-Host "FAIL: output file $outFile not created"
-    exit 1
-}
-
-# 3) Validate generated TOML with jul lint
-Write-Host "=== Validating generated TOML ..."
-& .\jul.exe lint -config $outFile
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "FAIL: lint of imported TOML failed"
-    exit 1
-}
-
-# 4) Sanity-check known content is present
-$content = Get-Content $outFile -Raw
-$checks = @(
-    @{ Pattern = 'listen = ''\:80''';      Desc = "HTTP listener" },
-    @{ Pattern = 'listen = ''\:443''';     Desc = "HTTPS listener" },
-    @{ Pattern = 'proxy_pass = ''http://app'''; Desc = "upstream proxy" },
-    @{ Pattern = "least_conn";            Desc = "least_conn strategy" }
-)
-
-$allOk = $true
-foreach ($c in $checks) {
-    if ($content -match $c.Pattern) {
-        Write-Host "OK  : $($c.Desc)"
-    } else {
-        Write-Host "FAIL: $($c.Desc) not found in output"
-        $allOk = $false
+    & $jul lint -config $candidate
+    if ($LASTEXITCODE -ne 0) { throw "candidate lint exited $LASTEXITCODE" }
+    $content = Get-Content -Path $candidate -Raw
+    foreach ($pattern in @("listen = ':80'", "listen = ':443'", "proxy_pass = 'http://app'", "strategy = 'least_conn'", 'TODO line 52: proxy_set_header')) {
+        if (-not $content.Contains($pattern)) { throw "candidate is missing expected $pattern" }
     }
+    Write-Host 'Windows NGINX migration assessment and candidate check passed (manual action remains required)'
+} finally {
+    Remove-Item -Path $scratch -Recurse -Force -ErrorAction SilentlyContinue
 }
-
-if (-not $allOk) {
-    exit 1
-}
-
-Write-Host "=== NGINX importer test PASSED ==="

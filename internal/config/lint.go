@@ -196,14 +196,14 @@ func Lint(c *Config) []Diagnostic {
 	diags = append(diags, lintDiscoveryTrust(c)...)
 	diags = append(diags, listenerScopedDiagnostics(c)...)
 
-	// An admin listener reachable off-loopback without a token is unauthenticated
-	// remote control of the server.
-	if c.Admin.Enabled && c.Admin.Token == "" && !isLoopbackListen(c.Admin.Listen) {
+	// An admin listener reachable off-loopback without a shared token or
+	// named-principal RBAC is unauthenticated remote control of the server.
+	if c.Admin.Enabled && c.Admin.Token == "" && !c.Admin.RBAC.Enabled && !isLoopbackListen(c.Admin.Listen) {
 		diags = append(diags, Diagnostic{
 			Severity: SeverityWarning,
 			Field:    "[admin]",
-			Message:  fmt.Sprintf("admin listener %q is not loopback and has no token; it is unauthenticated", c.Admin.Listen),
-			Hint:     "set [admin].token, or bind listen to 127.0.0.1",
+			Message:  fmt.Sprintf("admin listener %q is not loopback and has no token or enabled RBAC; it is unauthenticated", c.Admin.Listen),
+			Hint:     "set [admin].token, enable [admin.rbac] with named principals, or bind listen to 127.0.0.1",
 		})
 	}
 
@@ -465,6 +465,14 @@ func lintDiscoveryTrust(c *Config) []Diagnostic {
 			continue
 		}
 		where := fmt.Sprintf("upstreams[%d].discovery", i)
+		if k := d.Kubernetes; k != nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(k.APIServer)), "http://") {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Field:    where + ".kubernetes.api_server",
+				Message:  "Kubernetes discovery uses plaintext HTTP; its backend addresses can be altered on the network path and any bearer token is exposed",
+				Hint:     "use an https api_server with ca_file or the mounted service-account CA outside local testing",
+			})
+		}
 		if k := d.Kubernetes; k != nil && k.InsecureSkipTLSVerify {
 			diags = append(diags, Diagnostic{
 				Severity: SeverityError,

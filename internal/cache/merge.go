@@ -56,7 +56,7 @@ func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry
 	// under. Publishing it at the old key would leave an entry reachable
 	// through a keying rule that no longer describes it, so the safe answer is
 	// to discard: the caller re-fetches and stores it under the correct key.
-	if !sameFields(stored.Vary, parseList(merged.Get("Vary"))) {
+	if !sameFields(stored.Vary, varyFields(merged)) {
 		return nil, mergeDiscard
 	}
 

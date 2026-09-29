@@ -8,6 +8,10 @@ supported**:
 - **`jul-abi/v2`** — v1's request phase plus an opt-in, bounded **response
   phase** that sees the response the location actually produced.
 
+The v1 ABI is GA in stable v2.0.0. The v2 response phase is a separate
+Beta/merged capability on post-release `main`, absent from the stable tag;
+both require a binary built with `wasmplugins`.
+
 v2 is not "v1, but newer". It exists for one reason: letting a plugin act on the
 real upstream/handler response. A plugin that does not need that should stay on
 v1; nothing is deprecated.

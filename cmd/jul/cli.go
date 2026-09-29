@@ -6,12 +6,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -73,9 +76,10 @@ func usage() {
 Usage:
   jul [flags]                          run the server (default)
   jul serve [-config f]                run the server (explicit form)
-  jul check [-config f] [-json] [-quiet]
-                                       full runtime preflight check
+  jul check [-config f] [-json] [-quiet] [-skip-static-roots]
+                                       structural and stateless runtime preflight
   jul healthcheck [-config f] [-addr host:port | -url u] [-ready] [-timeout d]
+                  [-ca-file f] [-client-cert f -client-key f]
                                        probe the admin health endpoint (exit 0 healthy, 1 unhealthy)
   jul lint [-config f] [-strict] [-json] [-quiet]
                                        validate and report best-practice warnings
@@ -146,16 +150,24 @@ func cmdLint(args []string) int {
 	authority, _ := app.ResolveConfigAuthority(cfg.Global.ConfigAuthority, hasConfigPath)
 	diags = append(diags, app.CheckManagedFilesystem(*configPath, authority)...)
 	diags = append(diags, app.CheckFileOwnedArtifacts(*configPath, authority)...)
-	var lintErrs, warns []config.Diagnostic
+	var lintErrs, warns, infos []config.Diagnostic
 	for _, d := range diags {
-		if d.Severity == config.SeverityError {
+		switch d.Severity {
+		case config.SeverityError:
 			lintErrs = append(lintErrs, d)
-			continue
+		case config.SeverityInfo:
+			infos = append(infos, d)
+		default:
+			warns = append(warns, d)
 		}
-		warns = append(warns, d)
 	}
+	// Quiet controls rendering only. In particular, -strict -quiet must still
+	// fail when advisory findings are present.
+	visibleWarns := warns
+	visibleInfos := infos
 	if *quiet {
-		warns = nil
+		visibleWarns = nil
+		visibleInfos = nil
 	}
 
 	if *jsonOut {
@@ -166,7 +178,7 @@ func cmdLint(args []string) int {
 		// Lint findings stay in warnings whatever their severity, so the JSON
 		// shape is unchanged; each carries its own "severity" field, and the
 		// exit code reflects the highest one.
-		out.Warnings = append(append([]config.Diagnostic(nil), lintErrs...), warns...)
+		out.Warnings = append(append(append([]config.Diagnostic(nil), lintErrs...), visibleWarns...), visibleInfos...)
 		_ = json.NewEncoder(stdout).Encode(out)
 	} else {
 		color := wantColor(stdout)
@@ -176,10 +188,15 @@ func cmdLint(args []string) int {
 		for _, d := range lintErrs {
 			printDiagnostic(stdout, d, color)
 		}
-		for _, d := range warns {
+		for _, d := range visibleWarns {
 			printDiagnostic(stdout, d, color)
 		}
-		fmt.Fprintf(stdout, "\n%s: %d error(s), %d warning(s)\n", src.Name(), len(verrs)+len(lintErrs), len(warns))
+		for _, d := range visibleInfos {
+			printDiagnostic(stdout, d, color)
+		}
+		if !*quiet {
+			fmt.Fprintf(stdout, "\n%s: %d error(s), %d warning(s), %d info\n", src.Name(), len(verrs)+len(lintErrs), len(warns), len(infos))
+		}
 	}
 
 	switch {
@@ -188,7 +205,7 @@ func cmdLint(args []string) int {
 	case *strict && len(warns) > 0:
 		return 2
 	default:
-		if !*jsonOut {
+		if !*jsonOut && !*quiet {
 			fmt.Fprintf(stdout, "%s is valid\n", src.Name())
 		}
 		return 0
@@ -472,16 +489,17 @@ func cmdServe(args []string) int {
 	return app.Serve(ctx, reloadSig, src, cfg, productName, version)
 }
 
-// cmdCheck performs a full runtime preflight of the configuration. It validates
-// structurally *and* dry-runs every component that could fail during serve/reload
-// (WAF compilation, auth initialisation, compression encoder availability, etc.).
-// Exit codes: 0 = ok, 1 = validation/runtime error.
+// cmdCheck validates structure, stateless runtime prerequisites, and the
+// configured static roots with immediate-close directory handles. It does not
+// prepare handlers, probe listeners or check live backends; startup can still
+// fail after a successful check. Exit codes: 0 = ok, 1 = validation error.
 func cmdCheck(args []string) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "server.toml", "path to the TOML configuration file")
 	jsonOut := fs.Bool("json", false, "emit result as JSON")
 	quiet := fs.Bool("quiet", false, "suppress non-error output")
+	skipStaticRoots := fs.Bool("skip-static-roots", false, "validate template configuration without opening static content directories")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -520,6 +538,14 @@ func cmdCheck(args []string) int {
 			}
 			return 1
 		}
+		if err := checkStaticRoots(cfg, *skipStaticRoots); err != nil {
+			if *jsonOut {
+				_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "error": err.Error()})
+			} else {
+				fmt.Fprintf(stderr, "resource check: %v\n", err)
+			}
+			return 1
+		}
 		if *jsonOut {
 			_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": true})
 		} else if !*quiet {
@@ -527,6 +553,30 @@ func cmdCheck(args []string) int {
 		}
 	}
 	return 0
+}
+
+// checkStaticRoots mirrors the startup open for static locations without
+// retaining a handle or making filesystem changes. A later removal or
+// permission change can still make startup fail.
+func checkStaticRoots(cfg *config.Config, skip bool) error {
+	if skip {
+		return nil
+	}
+	for i, srv := range cfg.Servers {
+		for j, loc := range srv.Locations {
+			if loc.Root == "" {
+				continue
+			}
+			root, err := os.OpenRoot(loc.Root)
+			if err != nil {
+				return fmt.Errorf("server %d location %d static root %q: %w", i+1, j+1, loc.Root, err)
+			}
+			if err := root.Close(); err != nil {
+				return fmt.Errorf("server %d location %d static root %q: close: %w", i+1, j+1, loc.Root, err)
+			}
+		}
+	}
+	return nil
 }
 
 // healthcheckOutput is the shape written by cmdHealthcheck when -json is used.
@@ -561,6 +611,9 @@ func cmdHealthcheck(args []string) int {
 	configPath := fs.String("config", "server.toml", "config file used to discover the admin listen address")
 	urlFlag := fs.String("url", "", "probe this full URL instead of discovering it from the config")
 	addr := fs.String("addr", "", "override the admin host:port to probe (keeps the endpoint path)")
+	caFile := fs.String("ca-file", "", "additional PEM CA bundle for an HTTPS probe")
+	clientCert := fs.String("client-cert", "", "mTLS client certificate for an HTTPS probe")
+	clientKey := fs.String("client-key", "", "mTLS client private key for an HTTPS probe")
 	ready := fs.Bool("ready", false, "probe readiness (/readyz) instead of liveness (/healthz)")
 	timeout := fs.Duration("timeout", 3*time.Second, "overall request timeout")
 	jsonOut := fs.Bool("json", false, "emit the result as JSON")
@@ -568,17 +621,25 @@ func cmdHealthcheck(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if *timeout <= 0 {
+		return healthcheckFail(2, *jsonOut, *quiet, "", 0, fmt.Errorf("timeout must be positive"))
+	}
 
 	target, err := healthcheckTarget(*urlFlag, *addr, *ready, *configPath)
 	if err != nil {
 		return healthcheckFail(2, *jsonOut, *quiet, "", 0, err)
 	}
+	client, closeIdle, err := healthcheckClient(*timeout, *caFile, *clientCert, *clientKey)
+	if err != nil {
+		return healthcheckFail(2, *jsonOut, *quiet, target, 0, err)
+	}
+	defer closeIdle()
 
 	req, err := http.NewRequest(http.MethodGet, target, nil)
 	if err != nil {
 		return healthcheckFail(2, *jsonOut, *quiet, target, 0, err)
 	}
-	resp, err := (&http.Client{Timeout: *timeout}).Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return healthcheckFail(1, *jsonOut, *quiet, target, 0, fmt.Errorf("unreachable: %w", err))
 	}
@@ -597,6 +658,47 @@ func cmdHealthcheck(args []string) int {
 	return 0
 }
 
+// healthcheckClient keeps normal certificate and hostname verification. A
+// redirected probe is not health evidence for the configured admin endpoint;
+// refusing redirects also prevents forwarding a client certificate to another
+// origin. TLS options are explicit so a local operator can trust a private CA
+// and authenticate to an mTLS-protected admin listener without disabling TLS.
+func healthcheckClient(timeout time.Duration, caFile, clientCert, clientKey string) (*http.Client, func(), error) {
+	if (clientCert == "") != (clientKey == "") {
+		return nil, nil, fmt.Errorf("client certificate and key must be supplied together")
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil // probe the named admin endpoint directly, not through an environment proxy
+	if caFile != "" || clientCert != "" {
+		tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+		if caFile != "" {
+			pem, err := os.ReadFile(caFile)
+			if err != nil {
+				return nil, nil, fmt.Errorf("read CA file: %w", err)
+			}
+			roots, err := x509.SystemCertPool()
+			if err != nil || roots == nil {
+				roots = x509.NewCertPool()
+			}
+			if !roots.AppendCertsFromPEM(pem) {
+				return nil, nil, fmt.Errorf("CA file contains no usable certificates")
+			}
+			tlsConfig.RootCAs = roots
+		}
+		if clientCert != "" {
+			cert, err := tls.LoadX509KeyPair(clientCert, clientKey)
+			if err != nil {
+				return nil, nil, fmt.Errorf("load client certificate: %w", err)
+			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
+		}
+		transport.TLSClientConfig = tlsConfig
+	}
+	return &http.Client{Timeout: timeout, Transport: transport, CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}, transport.CloseIdleConnections, nil
+}
+
 // healthcheckFail reports a failed probe on the requested output channel and
 // returns the given exit code, so every failure path stays consistent.
 func healthcheckFail(code int, jsonOut, quiet bool, target string, status int, err error) int {
@@ -613,9 +715,14 @@ func healthcheckFail(code int, jsonOut, quiet bool, target string, status int, e
 // file, supplies the host:port, and -ready selects /readyz over /healthz.
 func healthcheckTarget(urlFlag, addr string, ready bool, configPath string) (string, error) {
 	if urlFlag != "" {
+		u, err := url.Parse(urlFlag)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+			return "", fmt.Errorf("-url must be a full HTTP(S) URL with a host and no userinfo")
+		}
 		return urlFlag, nil
 	}
 	hostPort := addr
+	scheme := "http"
 	if hostPort == "" {
 		cfg, err := config.NewTOMLSource(configPath).Load()
 		if err != nil {
@@ -625,12 +732,15 @@ func healthcheckTarget(urlFlag, addr string, ready bool, configPath string) (str
 			return "", fmt.Errorf("admin listener is not enabled in %s; pass -addr host:port or -url to probe a specific endpoint", configPath)
 		}
 		hostPort = cfg.Admin.Listen
+		if cfg.Admin.TLS != nil && cfg.Admin.TLS.Enabled {
+			scheme = "https"
+		}
 	}
 	path := "/healthz"
 	if ready {
 		path = "/readyz"
 	}
-	return "http://" + probeHostPort(hostPort) + path, nil
+	return scheme + "://" + probeHostPort(hostPort) + path, nil
 }
 
 // probeHostPort rewrites an unspecified bind host (empty, 0.0.0.0, or ::) to a

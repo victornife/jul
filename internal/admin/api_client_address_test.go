@@ -161,6 +161,152 @@ func TestListenerClientAddressRequiresTrustPermission(t *testing.T) {
 	})
 }
 
+// A history snapshot is still a configuration mutation: an operator with
+// history:rollback cannot restore an older, wider trusted-proxy policy without
+// config:trust. Both console rollback routes share this guard.
+func TestRollbackClientAddressRequiresTrustPermission(t *testing.T) {
+	cfg := wave1Config(t)
+	s, adminTok, opTok, _ := wave1Server(t, cfg)
+	writes := 0
+	s.deps.WriteConfigRaw = func([]byte) error { writes++; return nil }
+	previous := *cfg
+	previous.Servers = append([]config.ServerConfig(nil), cfg.Servers...)
+	previous.Servers[0].ClientAddress = &config.ClientAddressConfig{TrustedProxies: []string{"0.0.0.0/0"}}
+	raw, err := config.Marshal(&previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.hist.snapshot(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/history/rollback", "/api/config/rollback"} {
+		for _, tc := range []struct {
+			name  string
+			token string
+			want  int
+		}{
+			{name: "operator", token: opTok, want: http.StatusForbidden},
+			{name: "admin", token: adminTok, want: http.StatusOK},
+		} {
+			t.Run(tc.name+path, func(t *testing.T) {
+				before := writes
+				body := []byte(`{"id":"` + id + `"}`)
+				req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+				rr := httptest.NewRecorder()
+				s.routes().ServeHTTP(rr, req)
+				if rr.Code != tc.want {
+					t.Fatalf("status %d, want %d: %s", rr.Code, tc.want, rr.Body.String())
+				}
+				if tc.want == http.StatusForbidden && !strings.Contains(rr.Body.String(), "config:trust") {
+					t.Errorf("denial omitted config:trust: %s", rr.Body.String())
+				}
+				if tc.want == http.StatusForbidden && writes != before {
+					t.Errorf("unauthorized rollback wrote config")
+				}
+			})
+		}
+	}
+}
+
+// Enabling PROXY protocol lets an allowed transport peer assert the client
+// address even when HTTP forwarding headers are explicitly disabled. This is
+// an identity trust transition despite an unchanged client_address block.
+func TestInboundProxyProtocolRequiresTrustPermission(t *testing.T) {
+	cfg := wave1Config(t)
+	cfg.Servers[0].ClientAddress = &config.ClientAddressConfig{
+		TrustedProxies:   []string{"127.0.0.1/32"},
+		ForwardedHeaders: []string{},
+	}
+	candidate := *cfg
+	candidate.Servers = append([]config.ServerConfig(nil), cfg.Servers...)
+	candidate.Servers[0].ProxyProtocol = "in"
+	raw, err := config.Marshal(&candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Validate(&candidate); err != nil {
+		t.Fatalf("candidate validation: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		admin bool
+		want  int
+	}{
+		{name: "operator", want: http.StatusForbidden},
+		{name: "admin", admin: true, want: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, adminTok, opTok, _ := wave1Server(t, cfg)
+			var writes int
+			s.deps.WriteConfigRaw = func([]byte) error { writes++; return nil }
+			token := opTok
+			if tc.admin {
+				token = adminTok
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/config/apply?mode=stage_restart", bytes.NewReader(raw))
+			req.Header.Set("Authorization", "Bearer "+token)
+			rr := httptest.NewRecorder()
+			s.routes().ServeHTTP(rr, req)
+			if rr.Code != tc.want {
+				t.Fatalf("status %d, want %d: %s", rr.Code, tc.want, rr.Body.String())
+			}
+			if !tc.admin && (!strings.Contains(rr.Body.String(), "config:trust") || writes != 0) {
+				t.Fatalf("unauthorized identity transition: writes %d, body %s", writes, rr.Body.String())
+			}
+			if tc.admin && writes != 1 {
+				t.Fatalf("authorized identity transition wrote %d times, want 1", writes)
+			}
+		})
+	}
+}
+
+func TestRollbackInboundProxyProtocolRequiresTrustPermission(t *testing.T) {
+	cfg := wave1Config(t)
+	cfg.Servers[0].ClientAddress = &config.ClientAddressConfig{
+		TrustedProxies: []string{"127.0.0.1/32"}, ForwardedHeaders: []string{},
+	}
+	s, adminTok, opTok, _ := wave1Server(t, cfg)
+	var writes int
+	s.deps.WriteConfigRaw = func([]byte) error { writes++; return nil }
+	candidate := *cfg
+	candidate.Servers = append([]config.ServerConfig(nil), cfg.Servers...)
+	candidate.Servers[0].ProxyProtocol = "in"
+	raw, err := config.Marshal(&candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.hist.snapshot(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/history/rollback", "/api/config/rollback"} {
+		for _, tc := range []struct {
+			name  string
+			token string
+			want  int
+		}{
+			{name: "operator", token: opTok, want: http.StatusForbidden},
+			{name: "admin", token: adminTok, want: http.StatusOK},
+		} {
+			t.Run(tc.name+path, func(t *testing.T) {
+				before := writes
+				req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{"id":"`+id+`"}`)))
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+				rr := httptest.NewRecorder()
+				s.routes().ServeHTTP(rr, req)
+				if rr.Code != tc.want {
+					t.Fatalf("status %d, want %d: %s", rr.Code, tc.want, rr.Body.String())
+				}
+				if tc.want == http.StatusForbidden && (writes != before || !strings.Contains(rr.Body.String(), "config:trust")) {
+					t.Fatalf("unauthorized rollback: writes %d, body %s", writes-before, rr.Body.String())
+				}
+			})
+		}
+	}
+}
+
 // TestListenerClientAddressRejectsInvalidPolicy proves the whole patch is
 // rejected rather than partially written.
 func TestListenerClientAddressRejectsInvalidPolicy(t *testing.T) {

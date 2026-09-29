@@ -13,6 +13,9 @@ WORKDIR /src
 
 # Cache module downloads.
 COPY go.mod go.sum ./
+# go.mod replaces gofast with a local module; its manifest must be present
+# before `go mod download`, while the rest of the source can remain uncopied.
+COPY third_party/gofast/go.mod ./third_party/gofast/go.mod
 RUN go mod download
 
 # Build a static binary (CGO disabled) for a minimal final image.
@@ -53,7 +56,8 @@ COPY --from=build /out/jul /usr/local/bin/jul
 # so each created directory is owned by nonroot.
 COPY --from=build --chown=nonroot:nonroot /seed/ /
 # Container-tailored default config (admin enabled on loopback for the
-# HEALTHCHECK; static root at /var/www) plus the placeholder site it serves, so
+# HEALTHCHECK, managed authority for the writable config volume, static root at
+# /var/www) plus the placeholder site it serves, so
 # the image starts cleanly and its health probe passes with no host mounts.
 COPY --chown=nonroot:nonroot deploy/docker/server.toml /etc/jul/server.toml
 COPY --chown=nonroot:nonroot deploy/docker/index.html /var/www/index.html

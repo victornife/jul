@@ -34,12 +34,13 @@ const (
 // lean. In a pod the API server URL and service-account credentials are read
 // from the standard in-cluster locations; config fields override them.
 type k8sDiscoverer struct {
-	client   *http.Client
-	url      string
-	token    string
-	port     string // selected port name or number ("" = first port)
-	describe string
-	log      *slog.Logger
+	client    *http.Client
+	url       string
+	token     string
+	tokenFile string
+	port      string // selected port name or number ("" = first port)
+	describe  string
+	log       *slog.Logger
 }
 
 // SetLogger attaches a logger for detailed resolve diagnostics.
@@ -63,11 +64,17 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 		base = "https://" + net.JoinHostPort(host, port)
 	}
 	base = strings.TrimRight(base, "/")
+	apiURL, err := url.Parse(base)
+	if err != nil || (apiURL.Scheme != "http" && apiURL.Scheme != "https") || apiURL.Hostname() == "" || apiURL.User != nil || apiURL.RawQuery != "" || apiURL.ForceQuery || apiURL.Fragment != "" {
+		return nil, fmt.Errorf("kubernetes discovery: api_server must be an HTTP(S) base URL without credentials, query, or fragment")
+	}
 
 	token := strings.TrimSpace(k.Token)
+	var tokenFile string
 	if token == "" {
 		if b, err := os.ReadFile(k8sTokenFile); err == nil {
 			token = strings.TrimSpace(string(b))
+			tokenFile = k8sTokenFile
 		}
 	}
 
@@ -76,6 +83,7 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 		tlsConf.InsecureSkipVerify = true
 	} else {
 		caFile := strings.TrimSpace(k.CAFile)
+		explicitCA := caFile != ""
 		if caFile == "" {
 			caFile = k8sCAFile
 		}
@@ -83,7 +91,11 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 			pool := x509.NewCertPool()
 			if pool.AppendCertsFromPEM(b) {
 				tlsConf.RootCAs = pool
+			} else if explicitCA {
+				return nil, fmt.Errorf("kubernetes discovery: ca_file %q contains no PEM certificates", caFile)
 			}
+		} else if explicitCA {
+			return nil, fmt.Errorf("kubernetes discovery: read ca_file %q: %w", caFile, err)
 		}
 	}
 
@@ -99,11 +111,17 @@ func newKubernetesDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discove
 		client: &http.Client{
 			Timeout:   10 * time.Second,
 			Transport: transport,
+			// A discovery redirect can change the API server trust boundary.
+			// Preserve last-good backends instead of following it with a bearer token.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
-		url:      endpoint,
-		token:    token,
-		port:     strings.TrimSpace(k.Port),
-		describe: "kubernetes:" + k.Namespace + "/" + k.Service,
+		url:       endpoint,
+		token:     token,
+		tokenFile: tokenFile,
+		port:      strings.TrimSpace(k.Port),
+		describe:  "kubernetes:" + k.Namespace + "/" + k.Service,
 	}, nil
 }
 
@@ -129,6 +147,9 @@ type k8sEndpoint struct {
 
 // k8sEndpointSliceList is the subset of the EndpointSlice list response read.
 type k8sEndpointSliceList struct {
+	Metadata struct {
+		Continue string `json:"continue"`
+	} `json:"metadata"`
 	Items []struct {
 		Ports     []k8sPort     `json:"ports"`
 		Endpoints []k8sEndpoint `json:"endpoints"`
@@ -136,36 +157,82 @@ type k8sEndpointSliceList struct {
 }
 
 func (d *k8sDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
-	if d.log != nil {
-		d.log.Warn("kubernetes resolve request", "url", d.url)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.url, nil)
+	endpoint, err := url.Parse(d.url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("kubernetes: parse API URL: %w", err)
+	}
+	seen := make(map[string]bool)
+	var out []Target
+	for {
+		list, err := d.resolvePage(ctx, endpoint.String())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d.targetsFromList(list)...)
+		next := list.Metadata.Continue
+		if next == "" {
+			break
+		}
+		if seen[next] {
+			return nil, fmt.Errorf("kubernetes: repeated EndpointSlice continue token")
+		}
+		seen[next] = true
+		query := endpoint.Query()
+		query.Set("continue", next)
+		endpoint.RawQuery = query.Encode()
+	}
+	if d.log != nil {
+		d.log.Warn("kubernetes resolve result", "url", d.url, "targets", len(out))
+	}
+	return out, nil
+}
+
+func (d *k8sDiscoverer) resolvePage(ctx context.Context, endpoint string) (k8sEndpointSliceList, error) {
+	var list k8sEndpointSliceList
+	if d.log != nil {
+		d.log.Warn("kubernetes resolve request", "url", endpoint)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return list, err
 	}
 	req.Header.Set("Accept", "application/json")
-	if d.token != "" {
-		req.Header.Set("Authorization", "Bearer "+d.token)
+	token := d.token
+	if d.tokenFile != "" {
+		// Mounted service-account tokens rotate independently of config reload.
+		b, err := os.ReadFile(d.tokenFile)
+		if err != nil {
+			return list, fmt.Errorf("kubernetes: read service-account token: %w", err)
+		}
+		token = strings.TrimSpace(string(b))
+		if token == "" {
+			return list, fmt.Errorf("kubernetes: service-account token is empty")
+		}
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := d.client.Do(req)
 	if err != nil {
 		if d.log != nil {
 			d.log.Warn("kubernetes resolve request failed", "url", d.url, "error", err)
 		}
-		return nil, err
+		return list, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if d.log != nil {
 		d.log.Warn("kubernetes resolve response", "url", d.url, "status", resp.Status)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("kubernetes: unexpected status %s", resp.Status)
+		return list, fmt.Errorf("kubernetes: unexpected status %s", resp.Status)
 	}
-	var list k8sEndpointSliceList
 	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return nil, fmt.Errorf("kubernetes: decode response: %w", err)
+		return list, fmt.Errorf("kubernetes: decode response: %w", err)
 	}
+	return list, nil
+}
 
+func (d *k8sDiscoverer) targetsFromList(list k8sEndpointSliceList) []Target {
 	var out []Target
 	for i, slice := range list.Items {
 		port := d.selectPort(slice.Ports)
@@ -193,10 +260,7 @@ func (d *k8sDiscoverer) Resolve(ctx context.Context) ([]Target, error) {
 			}
 		}
 	}
-	if d.log != nil {
-		d.log.Warn("kubernetes resolve result", "url", d.url, "targets", len(out))
-	}
-	return out, nil
+	return out
 }
 
 // selectPort picks the configured port (by name or number) from a slice's port

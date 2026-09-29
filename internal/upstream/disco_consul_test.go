@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -89,6 +90,55 @@ func TestConsulDiscovererRequiresService(t *testing.T) {
 	}
 }
 
+func TestConsulRejectsMalformedBaseURL(t *testing.T) {
+	for _, address := range []string{"ftp://consul.example.test", "https://user:secret@consul.example.test", "https://consul.example.test?token=secret", "https://consul.example.test?", "https://consul.example.test/#fragment", "not-a-url"} {
+		t.Run(address, func(t *testing.T) {
+			_, err := newConsulDiscoverer(config.DiscoveryConfig{Type: "consul", Consul: &config.ConsulDiscovery{
+				Service: "web", Address: address,
+			}}, nil)
+			if err == nil || !strings.Contains(err.Error(), "address") {
+				t.Fatalf("invalid base URL %q: %v", address, err)
+			}
+		})
+	}
+}
+
+func TestConsulRejectsServicePathInjection(t *testing.T) {
+	for _, service := range []string{"../agent/self", `web\other`, "web?passing=false", "web#fragment"} {
+		_, err := newConsulDiscoverer(config.DiscoveryConfig{Type: "consul", Consul: &config.ConsulDiscovery{
+			Service: service, Address: "https://consul.example.test",
+		}}, nil)
+		if err == nil {
+			t.Errorf("service %q must not alter the Consul API path", service)
+		}
+	}
+}
+
+func TestConsulDiscovererDoesNotForwardTokenOnRedirect(t *testing.T) {
+	var forwarded bool
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		forwarded = true
+	}))
+	defer destination.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", destination.URL)
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer redirect.Close()
+	d, err := newConsulDiscoverer(config.DiscoveryConfig{Type: "consul", Consul: &config.ConsulDiscovery{
+		Address: redirect.URL, Service: "web", Token: "secret",
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Resolve(context.Background()); err == nil {
+		t.Fatal("redirected discovery response must fail")
+	}
+	if forwarded {
+		t.Fatal("redirect target received a request carrying the discovery token")
+	}
+}
+
 // TestConsulDiscovererEgressBlocked proves the discovery client honours the
 // egress guard: a dial that refuses the destination fails the resolve rather
 // than reaching an unapproved Consul endpoint.
@@ -140,6 +190,46 @@ func TestConsulDiscovererEgressAllowed(t *testing.T) {
 	}
 	if len(targets) != 1 || targets[0].Address != "10.0.0.1:8080" {
 		t.Errorf("targets = %+v, want one 10.0.0.1:8080", targets)
+	}
+}
+
+func TestConsulEgressDoesNotUseAllowedEnvironmentProxy(t *testing.T) {
+	var proxyCalls atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyCalls.Add(1)
+		_, _ = w.Write([]byte(`[{"Service":{"Address":"10.0.0.1","Port":8080}}]`))
+	}))
+	defer proxy.Close()
+	t.Setenv("HTTP_PROXY", proxy.URL)
+	t.Setenv("NO_PROXY", "")
+	policy, err := egress.New(config.EgressConfig{Enabled: true, Allow: []string{"127.0.0.1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := config.DiscoveryConfig{Type: "consul", Consul: &config.ConsulDiscovery{
+		Address: "http://blocked.example.invalid:8500", Service: "web",
+	}}
+	guard := policy.For(egress.SubsystemDiscovery).DialContext(nil)
+	d, err := newConsulDiscoverer(configured, guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport := d.(*consulDiscoverer).client.Transport.(*http.Transport); transport.Proxy != nil {
+		t.Fatal("guarded Consul transport may route a blocked target through an environment proxy")
+	}
+	if _, err := d.Resolve(context.Background()); err == nil {
+		t.Error("blocked Consul target resolved through an allowed proxy")
+	}
+	if got := proxyCalls.Load(); got != 0 {
+		t.Errorf("proxy received %d requests for a blocked target", got)
+	}
+
+	open, err := newConsulDiscoverer(configured, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport := open.(*consulDiscoverer).client.Transport.(*http.Transport); transport.Proxy == nil {
+		t.Error("disabled egress lost default environment-proxy configuration")
 	}
 }
 

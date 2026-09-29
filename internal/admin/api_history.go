@@ -62,8 +62,8 @@ func (s *Server) handleHistoryGet(w http.ResponseWriter, r *http.Request) {
 // other (Finding REG-1). It returns the HTTP status to send plus a non-nil error
 // on failure.
 //
-// The admin-subtree guard is enforced inside the lock after loading the
-// snapshot and the current config, so a concurrent admin change cannot
+// The admin-subtree and trusted-proxy guards are enforced inside the lock after
+// loading the snapshot and the current config, so a concurrent change cannot
 // invalidate the authorization decision (N-02).
 //
 // baseVersion is the canonical configuration the operator reviewed in the
@@ -132,6 +132,9 @@ func (s *Server) rollbackToSnapshot(id, baseVersion string, w http.ResponseWrite
 
 	// Authorize against the same exact raw-first baseline passed to the
 	// coordinator, not a separate LoadConfig call.
+	if authErr := s.requireTrustAgainst(r, "config.rollback", currentEffective, effectiveNext.Effective); authErr != nil {
+		return ConfigApplyResult{}, http.StatusForbidden, authErr
+	}
 	if authErr := s.requireAdminManageAgainst(r, "config.rollback", currentEffective, effectiveNext.Effective); authErr != nil {
 		authID, ok := authErr.(*AuthorizationError)
 		if ok {

@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.13 · Updated 2026-09-27
+> Version 2.15 · Updated 2026-09-28
 >
 > This roadmap owns the **durable portfolio sequence**. It deliberately does
 > not duplicate volatile READY/NEXT/blocked issue state. The current issue-level
@@ -49,7 +49,7 @@ The durable current sequence is summarized in the active operating roadmap below
 | **5 — Generic resilience** | Admission, queue/connection bounds, retry budget/deadline/backoff, circuit state and bounded operations evidence | #287/#144 closed; published in v2.0.0 as Beta. Further feature-specific GA evidence remains a separate decision |
 | **6 — Configuration authority and automation** | Managed/file-owned authority, generated contracts, supported external API, thin remote CLI | #150/#151 closed; authority, versioned external API and remote CLI published in v2.0.0 as separately tracked Beta capabilities |
 | **7 — Selected runtime dynamics** | Value-ranked runtime changes and truthful restart boundaries | Bounded tranche complete (#88); selected changes published as Beta. Further hot reload requires an explicit value trigger |
-| **8 — Migration and diagnostics** | NGINX assessment, evidence, support bundle and `jul doctor` | Base assessment/diagnostics published in v2.0.0 as Beta. #426/#365/#366/#367 and the permanent #368 migration-impact rule are complete on post-release `main`; optional full corpus is #456 CANDIDATE/LATER. #422 host-fault follow-up is complete. Wave 6 selects #437/#440/#445 for operational truth and diagnostics before the next release checkpoint |
+| **8 — Migration and diagnostics** | NGINX assessment, evidence, support bundle and `jul doctor` | Base assessment/diagnostics published in v2.0.0 as Beta. #426/#365/#366/#367 and the permanent #368 migration-impact rule are complete on post-release `main`; optional full corpus is #456 CANDIDATE/LATER. #422 host-fault follow-up and Wave 6 (#437/#440/#445) are complete on `main`. Next: #434 Phase-0 go/no-go, feature freeze and [#480](https://github.com/victornife/jul/issues/480) exact-SHA release certification. |
 | **9 — One bounded experiment** | AI Gateway or another explicitly approved category | #162 remains deferred under #113; no experiment activated by the v2.0.0 release |
 | **10 — Integrated closure** | Exact-SHA verification, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Completed for stable v2.0.0 (#425/#421); new unreleased features require their own evidence and publication decision |
 
@@ -86,9 +86,10 @@ outcome changes.
   #456 CANDIDATE/LATER. None of this retroactively changes the tagged importer.
 - #422 completed focused host-fault runs and retained metrics evidence, finding
   and fixing four defects. This does not retroactively change the v2.0.0 gate.
-- Wave 6 selects #437 Jul-owned storage headroom and #440 bounded effective-WAF
-  visibility independently, followed by #445 guidance toward existing diagnostic
-  tools. Exact implementation status and sequencing remain in #62.
+- Wave 6 completed #437 Jul-owned storage headroom, #440 serving WAF policy
+  visibility and #445 guidance toward existing diagnostic tools on post-release
+  `main`. Their Beta/merged rows do not change the stable v2.0.0 tag. The next
+  #434 Phase-0 go/no-go and release sequence are tracked in #62.
 
 ## Published stable checkpoint
 

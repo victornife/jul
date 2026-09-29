@@ -1,7 +1,9 @@
 # Track 2 burn-in config — Phase 2A consolidated (features #1-5 + #8)
-# Tests: gRPC transcoding + gRPC passthrough + service discovery (DNS)
-#        + secrets + zero-config + WASM plugins
-#        + existing: TLS/mTLS + auth + cache + rate-limit + WAF + compression + admin
+# The -phase2a HTTP load mix exercises proxy/static routes, DNS-discovered
+# upstreams, WASM plugins and TLS/mTLS paths, with auth/cache/rate-limit/WAF
+# configured. gRPC listeners and secret references are configured here, but
+# -phase2a does not send gRPC traffic or rotate secrets. This explicit config
+# does not exercise zero-config synthesis, jul lint or the NGINX importer.
 #
 # Build:
 #   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul.exe ./cmd/jul

@@ -159,13 +159,12 @@ keeps its established complete-replacement/default behavior and rejects
 `max_conns`; `rate_limit_global_set` is sparse and accepts the listener-global
 field.
 
-`enabled`, `key`, `rate`, and `burst` are hot. `max_conns` is listener-bound: a
-change requires planned restart if any currently bound desired address is
-retained, including a candidate that adds a new listener while retaining an old
-one. It may apply live only when every affected desired listener is newly bound
-in the same complete candidate. Mixed hot and listener-bound changes stage the
-whole candidate. Summaries contain field names only. The current Traffic
-Controls form migrates to this operation in #81.
+`enabled`, `key`, `rate`, `burst`, and `max_conns` are hot (#106). At Publish,
+retained listeners update their stable admission limiter; new listeners start
+with the candidate cap. Lowering the cap never closes already admitted
+connections. A mixed candidate still stages the whole change if it includes a
+different restart-required field. Summaries contain field names only. The
+Traffic Controls form uses this operation.
 
 ## Benchmarks
 
@@ -216,6 +215,5 @@ the soak test (criterion 5) was completed on 2026-07-04.
 The global editor uses the distinct complete global projection and a sparse
 `rate_limit_global_set`, while route projections and `route_set_rate_limit`
 remain unchanged and cannot use `max_conns`. Disabled policies retain dormant
-key/rate/burst/max-connections values. `max_conns` is listener-level and not
-unconditionally restart-required: the canonical lifecycle preview stages a
-retained-listener transition and may permit an all-new-listener transition.
+key/rate/burst/max-connections values. The listener-level `max_conns` cap
+hot-applies on retained and newly created listeners at Publish (#106).

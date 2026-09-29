@@ -225,6 +225,70 @@ listen = ":8081"
 	}
 }
 
+// The profiler is an admin-only capability. Enabling it through a generic
+// config write must require admin:manage, even when the operator has
+// config:apply. Check the real route, rather than only the equality helper.
+func TestWave1_OperatorCannotEnableAdminPprof(t *testing.T) {
+	cfg := wave1Config(t)
+	cfg.Admin.PprofEnabled = config.Bool(false)
+	s, _, opTok, _ := wave1Server(t, cfg)
+
+	candidate := []byte(`
+[global]
+log_level = "info"
+
+[admin]
+enabled = true
+listen = "127.0.0.1:8080"
+token = "admin-token-32-chars-padded--"
+pprof = true
+
+[[servers]]
+listen = ":8081"
+`)
+	req := httptest.NewRequest(http.MethodPost, "/api/config/raw", bytes.NewReader(candidate))
+	req.Header.Set("Authorization", "Bearer "+opTok)
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("operator enabling admin profiler got %d, want 403: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestAdminManageGuardCoversAdminTLS(t *testing.T) {
+	a := config.AdminConfig{TLS: &config.AdminTLSConfig{Enabled: true, Cert: "admin.pem", Key: "admin.key"}}
+	b := config.AdminConfig{TLS: &config.AdminTLSConfig{Enabled: true, Cert: "admin.pem", Key: "admin.key", MinVersion: "1.3"}}
+	if adminConfigEqual(a, b) {
+		t.Fatal("changing admin TLS parameters did not require admin:manage")
+	}
+}
+
+func TestAdminManageGuardPreservesSemanticEquivalence(t *testing.T) {
+	a := config.AdminConfig{RBAC: config.AdminRBACConfig{
+		Enabled: true,
+		Roles:   []config.AdminRole{{Name: "custom", Permissions: []string{"config:apply", "config:read"}}},
+		Principals: []config.AdminPrincipal{
+			{Name: "alice", Role: "custom", Token: "alice-token"},
+			{Name: "bob", Role: "viewer", Token: "bob-token"},
+		},
+	}}
+	b := config.AdminConfig{
+		Console:      config.Bool(true),
+		PprofEnabled: config.Bool(true),
+		RBAC: config.AdminRBACConfig{
+			Enabled: true,
+			Roles:   []config.AdminRole{{Name: "custom", Permissions: []string{"config:read", "config:apply"}}},
+			Principals: []config.AdminPrincipal{
+				{Name: "bob", Role: "viewer", Token: "bob-token"},
+				{Name: "alice", Role: "custom", Token: "alice-token"},
+			},
+		},
+	}
+	if !adminConfigEqual(a, b) {
+		t.Fatal("equivalent defaults and reordered RBAC entries require admin:manage")
+	}
+}
+
 // TestWave1_AdminCanApplyAdminChange verifies that an admin can still mutate
 // the [admin] subtree.
 func TestWave1_AdminCanApplyAdminChange(t *testing.T) {

@@ -54,9 +54,10 @@ field up in the generated table rather than here.
 |---|---|---|---|---|---|---|
 | HTTP listener | `server.listenerEntry` | listener | listen address | `listenerBindFingerprint` (bind-time properties); a change is `restart_required` | none — a bound socket is live until closed | listeners |
 | HTTP/3 listener | `listenerEntry.h3` | listener | listen address + HTTP/3 enabled | bind-time with the TCP listener | `h3Degraded`: an exited accept loop clears Alt-Svc and is not recovered until restart | listeners |
-| Handler generation | `server.handlerGen` | generation | generation ID | `lifecycle.Classify` + `ReloadPlan.AssessServingChange` (semantic no-op proof) | static-cert content, admin TLS content, admin runtime health (#415), WASM module content digests (#429), and fail-closed opaque inputs (`hasOpaqueReloadInputs`) | all hot-reload subsystems |
+| Handler generation | `server.handlerGen` | generation | generation ID | `lifecycle.Classify` + `ReloadPlan.AssessServingChange` (semantic no-op proof) | static-cert content, data-plane client-auth CA/CRL content (#486), admin TLS content, admin runtime health (#415), WASM module content digests (#429), and fail-closed opaque inputs (`hasOpaqueReloadInputs`) | all hot-reload subsystems |
 | Generation closer set | `app.GenerationResources` / `app.Generation` | generation | generation span | none — rebuilt with the generation | — | — |
 | Static TLS provider | `server.DynamicCertProvider` | listener | listen address | `tlsIdentityFingerprint` (certificate/key **content**) | content fingerprint: same-path rotation is a change | tls |
+| Data-plane TLS client-auth bundle | `server.dynamicClientAuth` | listener | listen address | `mtlsConfigFingerprint` (strongest mode and CA/CRL/SAN union, including CA/CRL file **content**) | same-path trust or revocation rotation is a change; no-op assessment checks the live fingerprint | tls (post-v2.0.0 Beta hot policy) |
 | Admin runtime (auth snapshot, audit sink, upload dir) | `admin.PreparedCommit`, `auditFileOwner` | admin generation | admin listener | `auditSinkConfig` equality; admin TLS content | `AdminRuntimeHealthy` (audit sink writable, upload dir usable) — #415 | admin |
 | Access-log sinks | `observability.BuildAccessSinks` closers | generation | sink kind + path | rebuilt with the generation | writable-directory probe at Prepare | observability |
 | Response cache | `cache.Cache` | process | the process cache | none | none | cache (restart boundary for the store) |
@@ -93,6 +94,7 @@ field up in the generated table rather than here.
 | Handler generation | factory `Prepare` | atomic `handlers.Store` | factory `abortFn` | a newer Publish | `acquireGen` in-flight count; bounded by `shutdown_timeout`, then force-retired | retire callback, `retireOnce` | `TestReloadDrainsBeforeRetiringClosers`, `TestSemanticNoopPreservesGenerationAndResources` ([semantic_noop_test.go](../internal/server/semantic_noop_test.go)) |
 | Generation closer set | `Generation.Stage` | `Generation.Commit` adopts the staged set | `Generation.Abort` closes staged closers once | the next `Commit` returns the retire callback | the server calls it after the previous generation drains | yes, **exactly once** (structural since #428) | `TestGenerationOwnershipInvariants`, `TestFactoryChurnReturnsToQuiescence` ([generation_lifecycle_test.go](../internal/app/generation_lifecycle_test.go)) |
 | Static TLS provider | `prepareCertRotation` loads candidate material | `PreparedRuntime.Commit` swaps the provider value | no-op (value never installed) | next swap | handshakes in progress keep their certificate | no | `TestCertRotationComponentAbortDoesNotMutateLiveState` |
+| Data-plane TLS client-auth bundle | `prepareClientAuthRotation` validates CA, CRL and policy for retained TLS listeners | `clientAuthRotationComponent.commit` swaps the listener's atomic bundle | no-op (candidate never installed) | next swap | new handshakes read the new bundle; established connections retain their identity | no | `TestReloadRefreshesClientCRLWithoutRestart`, `TestReloadEnablesClientAuthWithoutRestart`, `TestClientAuthRotationComponentAbortLeavesLivePolicy` |
 | Admin runtime | `PrepareAdmin` / `PrepareAdminRuntime` | `PreparedAdmin.Commit` | `PreparedAdmin.Abort` (once) | next Commit | `RetirePreparedRuntime`, asynchronous and bounded | audit file owner reference-counted | `TestRuntimeHealthyDetectsDegradedAuditSinkAndRepairAfterFix`, `TestServingChangeForcesReloadWhenAdminRuntimeDegraded` |
 | Access-log sinks | opened in `buildHandlers`, staged | adopted with the generation | closed by `Generation.Abort` | generation retirement | old generation keeps writing until it drains ([known limitation](known-limitations.md)) | yes | `TestAccessLogCandidateAbortLeavesNoRealFile`, `TestFakeAccessSinkClosesOnlyAfterOldRequestsDrain` |
 | Response cache | — | — | — | process exit | — | at shutdown | [churn_test.go](../internal/cache/churn_test.go) |
@@ -129,13 +131,16 @@ running object":
 | Discovery worker reuse | config **and** egress generation equal | a worker built under a superseded egress policy must not refresh again |
 | Transcoder connection reuse | dial address **and** logical identity equal, entry not expired | a recycled address is a different workload (#414) |
 | Audit sink reuse | sink config equal **and** sink healthy | the path can become unwritable independently (#415) |
+| Data-plane client-auth bundle reuse | mode, CA/CRL/SAN config **and** CA/CRL file content equal | an in-place trust or revocation edit changes the live handshake policy on the next authorized reload (#486) |
 | WASM plugin set (no-op) | declaration equal **and** every module's fresh digest equals the serving digest | bytes behind a path can change; a path is not a content identity (#429) |
 | WASM compilation cache | exact module bytes + compile-affecting runtime flags | wazero keys compiled code by SHA-256 of the bytes; capabilities and ABI are bound at build/instantiation, not cached |
 | Egress generation reuse | policy equal | generations are immutable values; nothing to go stale |
 | Rate-limit bucket reuse | key equal | buckets are process state; a reload must not reset limits |
 | WASM KV quota | plugin namespace | the ledger is process-owned with the store it accounts for (#428) |
 
-No other reuse site needed a liveness predicate.
+The data-plane client-auth row is post-v2.0.0 Beta behavior; the admin
+listener's client-auth settings remain restart-bound. See [mTLS](mtls.md) for
+the release and handshake boundary.
 
 ## Deliberate boundaries
 

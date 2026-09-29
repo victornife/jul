@@ -6,6 +6,9 @@ no cgo, so enabling plugins keeps the server a single static binary.
 
 Plugins are opt-in behind the `wasmplugins` build tag:
 
+The `jul-abi/v1` request phase shipped in stable v2.0.0; the bounded
+`jul-abi/v2` response phase is Beta/merged on post-release `main` only.
+
 ```bash
 go build -tags wasmplugins -o jul ./cmd/jul
 ```
@@ -601,4 +604,3 @@ Run one target at a time: `go test -tags wasmplugins -run='^$' -fuzz='^FuzzRespo
 Changing directory `A → B` does not migrate, copy or delete plugin files. Disabling uploads also leaves existing files intact and does not activate/deactivate plugins: activation remains configuration-driven. Candidate storage is checked before Publish with reversible probes that do not create the configured final directory. Request writes are confined with `os.Root`, use owner-only temporary/final files on Unix, reject symlink/special-file destinations and retain atomic replacement semantics.
 
 See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
-

@@ -21,12 +21,11 @@ import (
 // authenticators on every configuration reload leaks neither goroutines nor
 // heap, across Basic, JWT, forward-auth, and a mixed all-methods permutation.
 //
-// On each reload the server reconstructs its per-location authByScope map with
-// fresh *Authenticator values and drops the previous generation without an
-// explicit Close (see cmd/jul buildHandlers). That is only safe because the type
-// owns no background worker, timer, or long-lived socket: auth.New spawns
-// nothing and JWKS refresh is lazy and request-driven. This test proves that
-// invariant at runtime — a sustained build+exercise+drop churn must return to
+// This test builds and exercises fresh authenticators without running the server
+// generation lifecycle. auth.New spawns no background worker and JWKS refresh
+// is lazy and request-driven. In production, generation retirement calls Close
+// to retire idle HTTP client connections after the old handler drains; this
+// isolated churn does not prove that retirement path. Build+exercise+drop must return to
 // its pre-churn goroutine and heap baseline. A per-reload leak would grow the
 // goroutine count in proportion to the hundreds/thousands of reload cycles, so
 // the gate fails on any growth beyond a small constant slack that absorbs

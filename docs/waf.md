@@ -352,6 +352,10 @@ the original, uncompressed request and response bodies.
 
 ## Effective policy and provenance
 
+This visibility is Beta/merged on post-v2.0.0 `main` and requires the `waf`
+build tag (`console` as well for the Security panel). It is absent from the
+stable v2.0.0 release, although its base WAF is GA there.
+
 `GET /api/security` (`status:read`) carries `waf_effective`, and the Security
 panel renders it as **Serving WAF policy** (#440). It answers "what is this
 serving generation actually enforcing?" from the compiled engines, recorded

@@ -109,7 +109,8 @@ func ResolveContext(ctx context.Context, c *Config) (*Config, redact.State, map[
 // ExpandSecrets resolves secret references in every string field of c in place,
 // replacing each reference with its resolved value, and installs the resulting
 // redaction State as the live global state. Resolved values are masked from
-// logs. It returns an error that joins every reference it could not resolve.
+// logs. It joins errors across fields; within a string it reports the first
+// failed reference from that resolution attempt.
 //
 // This compatibility helper resolves and installs in one step. Production
 // startup and reload paths use Resolve to keep resolution separate from the
@@ -240,7 +241,7 @@ func resolveOne(scheme, body string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("reading ${file:%s}: %w", body, err)
 		}
-		// Trim a single trailing newline (and surrounding whitespace) so a
+		// Trim all trailing CR/LF characters so a
 		// secret stored one-per-file does not carry the editor's newline.
 		return strings.TrimRight(string(data), "\r\n"), nil
 	default:

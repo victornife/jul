@@ -49,7 +49,8 @@ adds no third-party dependency.
   goroutine resolves the source immediately, then re-resolves every `refresh`
   interval (with a little jitter) until the pool is closed.
 - **State-preserving updates.** Each resolve is applied through the pool's
-  `UpdateBackends`, which merges by address+weight: surviving backends keep their
+  `UpdateTargets`, which reuses a backend when its provider identity, network,
+  and address match; a weight change alone does not reset it. Surviving backends keep their
   runtime state (in-flight count, passive-failure cooldown), new ones are added,
   removed ones drop out. Active health checks automatically begin probing
   newly-discovered backends.
@@ -127,14 +128,19 @@ weight directly — so no port is configured. `target` is the full SRV name.
   target = "_grpc._tcp.svc.cluster.local"
 ```
 
-SRV weights map to backend weights, so a weighted strategy (`strategy =
-"weighted"`) honours the priorities published in DNS.
+SRV weights map to backend weights for `strategy = "weighted"`. SRV priorities
+are ignored; this strategy does not provide priority-based failover.
 
 ## Consul
 
 `type = "consul"` queries Consul's health API
 (`/v1/health/service/<service>`) and uses each passing instance's service
 address+port. Requires the `consul` build tag.
+
+The `address` must be an HTTP(S) base URL without URL-embedded credentials,
+query parameters, or a fragment. Supply ACL credentials through `token`.
+`service` is a single path segment; URL path separators and query or fragment
+markers are rejected so it cannot select another Consul API endpoint.
 
 ```toml
   [upstreams.discovery]
@@ -182,6 +188,8 @@ An `https` address without a `tls` block still verifies, against the platform
 roots. **An ACL token over a plaintext `http://` address is readable and
 replayable by anything on the network path**, so `jul lint` warns about it, and
 `insecure_skip_verify` here is a lint **error** exactly as it is for a backend.
+Discovery rejects API redirects so the `X-Consul-Token` header cannot be
+forwarded to a different destination.
 
 ## Kubernetes
 
@@ -190,6 +198,10 @@ replayable by anything on the network path**, so `jul lint` warns about it, and
 port. Requires the `kubernetes` build tag. In-cluster, the API server URL and
 service-account token/CA are read from the standard pod locations; the fields
 below override them when running outside a cluster.
+
+The resolver follows the list response's `metadata.continue` token through
+every page. A failed later page keeps the prior backend set instead of
+publishing a partial list.
 
 ```toml
   [upstreams.discovery]
@@ -214,9 +226,28 @@ below override them when running outside a cluster.
 | `ca_file` | string | mounted SA CA | API server CA bundle |
 | `insecure_skip_tls_verify` | bool | `false` | Skip API server TLS verification (testing) |
 
+`api_server` must be an HTTP(S) base URL without URL-embedded credentials,
+query parameters, or a fragment; malformed values fail discovery setup.
+
+When the mounted service-account token is used, the resolver rereads it for
+each API request so projected token rotation takes effect without a restart.
+An unreadable or empty previously mounted token fails that refresh and retains
+the last-good backends. An explicit `token` follows config secret reload rules.
+API redirects fail discovery rather than forwarding the bearer token to a
+different destination.
+
+An explicitly configured `ca_file` must exist and contain PEM certificates;
+discovery refuses to start with an unreadable or malformed bundle. Without an
+explicit path, the mounted service-account CA is used when available; otherwise
+the transport uses platform roots.
+Use an `https://` API server in deployed configurations. `jul lint` warns about
+an explicit plaintext `http://` endpoint because its responses choose backend
+addresses and any bearer token travels over that connection.
+
 Endpoints explicitly marked not-ready are skipped; an endpoint with no readiness
-condition is treated as ready (matching Kubernetes semantics). The pod needs RBAC
-to `list`/`watch` `endpointslices` in the namespace.
+condition is treated as ready (matching Kubernetes semantics). The refresher
+polls the EndpointSlice list endpoint; its service account needs the `list`
+verb on `endpointslices` in the namespace. It does not open a Kubernetes watch.
 
 ## Hot reload
 
@@ -230,8 +261,8 @@ Discovery pools take part in the normal atomic reload:
 
 ## Backend identity
 
-A backend's per-request state — in-flight count, failure history, health verdict — follows the
-**workload**, not the address it happens to hold.
+A backend's per-request state — in-flight count, failure history, health verdict —
+is reused only when both its provider identity and network address match.
 
 | Provider | Identity | Source |
 | --- | --- | --- |
@@ -243,7 +274,8 @@ This matters because an address is not an identity. Kubernetes recycles pod IPs 
 without it a replacement pod inherits the failure history of the one it replaced and arrives partway
 to being taken out of rotation — for failures it never caused. With it, a refresh that reports the
 same address under a **new** identity produces a **fresh backend with clean state**, and a refresh
-that reports the same identity keeps everything it had.
+that reports the same identity **at the same address** keeps its runtime state.
+Moving an identity to a new address creates a fresh backend.
 
 A provider that offers no identity is unchanged: the address remains the reuse key, which is correct
 for a DNS record or a static server list, where there is nothing else to go on.
@@ -454,9 +486,9 @@ provider so operators can choose the right source for their deployment.
 | Console Status panel | ☐ | ✅ | ✅ | ✅ | ✅ | — |
 | Atomic reload (unchanged pool kept) | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **Security / access** | | | | | | |
-| No credentials required | ✅ | ✅ | ✅ | ☐ | ☐ | — |
-| Token required | ☐ | ☐ | ☐ | ✅ (ACL token) | ✅ (SA token) | — |
-| TLS verification | ☐ | ☐ | ☐ | ☐ | ✅ (CA bundle) | — |
+| No credentials required | ✅ | ✅ | ✅ | depends on Consul ACLs | depends on Kubernetes API RBAC | — |
+| Token supported | ☐ | ☐ | ☐ | ✅ (optional ACL token) | ✅ (mounted SA or configured bearer token) | — |
+| HTTPS server verification | ☐ | ☐ | ☐ | ✅ when `address` uses HTTPS | ✅ when `api_server` uses HTTPS | — |
 
 ## Known limitations
 
@@ -487,13 +519,12 @@ provider so operators can choose the right source for their deployment.
 ### Token exposure
 
 - **Consul ACL token** and the **Kubernetes service-account token** are
-  sensitive credentials. They are stored in the config (possibly via secret
-  references, `${env:…}` or `${secret:…}`), not in a dedicated keychain. Follow
-  the same rotation and access-control discipline as any other config secret:
-  protect the config file, use secret references, and rotate tokens on
-  compromise. Tokens are never logged by Jul.IA (the config redaction mechanism
-  masks them), but they travel over the network to the provider — ensure TLS is
-  used.
+  sensitive credentials. Explicit `token` values are supplied through config
+  (possibly via secret references); the default Kubernetes service-account
+  token comes from the mounted file and is reread on every API request. Protect
+  config and mounted secrets, use references for explicit values, and rotate
+  compromised credentials. Jul.IA does not log the bearer header, but the
+  tokens travel to the provider — use HTTPS for remote control planes.
 - **Kubernetes `insecure_skip_tls_verify`.** Setting this to `true` for local
   testing bypasses API-server verification; never enable it in production.
 

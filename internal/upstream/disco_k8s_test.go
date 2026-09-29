@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +89,121 @@ func TestK8sDiscovererResolve(t *testing.T) {
 	}
 }
 
+func TestK8sDiscovererFollowsAllEndpointSlicePages(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Query().Get("labelSelector") != "kubernetes.io/service-name=web" || r.Header.Get("Authorization") != "Bearer tok" {
+			t.Errorf("page %d lost service selector or authorization", requests)
+		}
+		switch r.URL.Query().Get("continue") {
+		case "":
+			_, _ = w.Write([]byte(`{"metadata":{"continue":"next/page"},"items":[{"ports":[{"port":8080}],"endpoints":[{"addresses":["10.1.0.1"]}]}]}`))
+		case "next/page":
+			_, _ = w.Write([]byte(`{"items":[{"ports":[{"port":8080}],"endpoints":[{"addresses":["10.1.0.2"]}]}]}`))
+		default:
+			t.Errorf("unexpected continue token %q", r.URL.Query().Get("continue"))
+		}
+	}))
+	defer srv.Close()
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+		Namespace: "default", Service: "web", APIServer: srv.URL, Token: "tok",
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets, err := d.Resolve(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || len(targets) != 2 || targets[0].Address != "10.1.0.1:8080" || targets[1].Address != "10.1.0.2:8080" {
+		t.Fatalf("requests=%d targets=%+v, want both pages", requests, targets)
+	}
+}
+
+func TestK8sDiscovererDiscardsIncompleteList(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("continue") == "" {
+			_, _ = w.Write([]byte(`{"metadata":{"continue":"next"},"items":[{"ports":[{"port":8080}],"endpoints":[{"addresses":["10.1.0.1"]}]}]}`))
+			return
+		}
+		http.Error(w, "expired", http.StatusGone)
+	}))
+	defer srv.Close()
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+		Namespace: "default", Service: "web", APIServer: srv.URL,
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targets, err := d.Resolve(context.Background()); err == nil || len(targets) != 0 {
+		t.Fatalf("incomplete list targets=%+v err=%v, want error without partial targets", targets, err)
+	}
+}
+
+func TestK8sDiscovererReloadsMountedToken(t *testing.T) {
+	var tokens []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokens = append(tokens, r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"items":[{"ports":[{"port":8080}],"endpoints":[{"addresses":["10.1.0.1"]}]}]}`))
+	}))
+	defer srv.Close()
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+		Namespace: "default", Service: "web", APIServer: srv.URL,
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mounted := filepath.Join(t.TempDir(), "token")
+	k := d.(*k8sDiscoverer)
+	k.tokenFile = mounted
+	for _, token := range []string{"first", "rotated"} {
+		if err := os.WriteFile(mounted, []byte(token), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := k.Resolve(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(tokens) != 2 || tokens[0] != "Bearer first" || tokens[1] != "Bearer rotated" {
+		t.Fatalf("observed tokens = %v, want old then rotated", tokens)
+	}
+	if err := os.Remove(mounted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.Resolve(context.Background()); err == nil {
+		t.Fatal("missing mounted token must fail the refresh")
+	}
+	if len(tokens) != 2 {
+		t.Fatal("missing mounted token caused an unauthenticated API request")
+	}
+}
+
+func TestK8sDiscovererRejectsAPIRedirect(t *testing.T) {
+	var forwarded bool
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		forwarded = true
+	}))
+	defer destination.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", destination.URL)
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer redirect.Close()
+	d, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+		Namespace: "default", Service: "web", APIServer: redirect.URL, Token: "secret",
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Resolve(context.Background()); err == nil {
+		t.Fatal("redirected discovery response must fail")
+	}
+	if forwarded {
+		t.Fatal("redirect target received a discovery request")
+	}
+}
+
 func TestK8sSelectPort(t *testing.T) {
 	d := &k8sDiscoverer{}
 	ports := []k8sPort{{Name: "http", Port: 8080}, {Name: "grpc", Port: 9090}}
@@ -112,6 +229,39 @@ func TestK8sSelectPort(t *testing.T) {
 func TestK8sRequiresNamespaceAndService(t *testing.T) {
 	if _, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{Service: "web", APIServer: "https://x"}}, nil); err == nil {
 		t.Fatal("expected error: kubernetes without namespace")
+	}
+}
+
+func TestK8sRejectsMalformedAPIServerAtConstruction(t *testing.T) {
+	for _, apiServer := range []string{"ftp://api.example.test", "https://user:secret@api.example.test", "https://api.example.test?token=secret", "https://api.example.test?", "https://api.example.test/#fragment", "not-a-url"} {
+		t.Run(apiServer, func(t *testing.T) {
+			_, err := newKubernetesDiscoverer(config.DiscoveryConfig{Type: "kubernetes", Kubernetes: &config.KubernetesDiscovery{
+				Namespace: "default", Service: "web", APIServer: apiServer,
+			}}, nil)
+			if err == nil || !strings.Contains(err.Error(), "api_server") {
+				t.Fatalf("invalid API URL %q: %v", apiServer, err)
+			}
+		})
+	}
+}
+
+func TestK8sExplicitCAFailsClosed(t *testing.T) {
+	malformed := filepath.Join(t.TempDir(), "malformed.pem")
+	if err := os.WriteFile(malformed, []byte("not a PEM certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, caFile := range []string{filepath.Join(t.TempDir(), "missing.pem"), malformed} {
+		t.Run(filepath.Base(caFile), func(t *testing.T) {
+			_, err := newKubernetesDiscoverer(config.DiscoveryConfig{
+				Type: "kubernetes",
+				Kubernetes: &config.KubernetesDiscovery{
+					Namespace: "default", Service: "web", APIServer: "https://api.example.test", CAFile: caFile,
+				},
+			}, nil)
+			if err == nil || !strings.Contains(err.Error(), "ca_file") {
+				t.Fatalf("explicit CA %q: got %v, want a ca_file error", caFile, err)
+			}
+		})
 	}
 }
 

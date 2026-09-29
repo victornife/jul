@@ -921,15 +921,15 @@ now format is too.
   admin static certificate/key are all hot-reloadable; see the generated
   lifecycle reference for the exact leaves.
 
-### Selected runtime gaps
+### Selected runtime changes and remaining boundaries
 
-The first selected gap is now implemented: #99 hot-reloads only
-`observability.tracing.sample_ratio` without replacing the tracing pipeline. #94
-remains the next selected gap and will make `[egress]` generation-correct across
-every auxiliary outbound consumer and reusable connection pool; the egress
-registry classification remains restart-required until that implementation lands. See
-[hot-reload strategy](hot-reload-strategy.md) for the decision rubric, target
-contracts and effort.
+Both selected gaps are implemented: #99 hot-reloads
+`observability.tracing.sample_ratio` without replacing the tracing pipeline,
+and #94 hot-reloads `egress.enabled`/`egress.allow` with generation-correct
+auxiliary outbound consumers and connection pools. The egress leaves are
+classified `hot_reload` in the lifecycle registry. Structural/startup leaves
+remain restart-bound; [hot-reload strategy](hot-reload-strategy.md) explains
+the value-based decision rubric for any later change.
 
 Adding a brand-new `listen` address is *not* restart-required: the reload binds
 it fresh. Only changes to an address the server is already serving are gated.

@@ -198,18 +198,34 @@ func (a *Authenticator) logError(msg string, err error) {
 // that flows such as redirect-to-login work transparently. Hop-by-hop headers
 // are stripped and a non-error status is normalized to 403.
 func writeForwardDenied(w http.ResponseWriter, res forwardResult) {
+	hop := connectionScopedHeaders(res.header)
 	for name, vals := range res.header {
-		if hopByHopHeaders[http.CanonicalHeaderKey(name)] {
+		if hop[http.CanonicalHeaderKey(name)] {
 			continue
 		}
 		w.Header()[http.CanonicalHeaderKey(name)] = vals
 	}
 	status := res.statusCode
-	if status < 400 {
+	if status < 400 && !forwardLoginRedirect(status, res.header.Get("Location")) {
 		status = http.StatusForbidden
 	}
 	w.WriteHeader(status)
 	_, _ = w.Write(res.body)
+}
+
+// Preserve an auth service's explicit browser redirect without treating a
+// non-error response with no destination as an authorization decision.
+func forwardLoginRedirect(status int, location string) bool {
+	if location == "" {
+		return false
+	}
+	switch status {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
+		http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		return true
+	default:
+		return false
+	}
 }
 
 // readLimited reads at most max bytes from r, guarding against an unbounded
@@ -218,10 +234,13 @@ func readLimited(r io.Reader, max int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(r, max))
 }
 
-// guardedTransport clones the default transport and installs dial, so egress is
-// enforced at connect time while proxy, idle-pool, and TLS defaults are kept.
+// guardedTransport clones the default transport and installs dial. With an
+// enabled egress guard the proxy must be disabled: otherwise DialContext sees
+// the environment proxy address instead of the configured dependency target.
+// Disabled egress supplies no dial and keeps the default proxy behaviour.
 func guardedTransport(dial DialFunc) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = nil
 	t.DialContext = dial
 	return t
 }

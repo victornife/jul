@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.13 · Updated 2026-09-27
+> Version 2.15 · Updated 2026-09-28
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -63,6 +63,11 @@ not inherit an older GA row merely because it lives in the same package or guide
 - **Dated audit disposition:** lives in the
   [audit register](audit-register.md). Historical audits remain evidence rather
   than a second current-status source.
+- **Zero-config/lint and base importer:** both are published in v2.0.0. Their
+  five-minute release validations remain smoke tests. Separate feature-specific
+  one-hour runs on PR #482 head `9ab87c1` now meet criterion 5 for zero-config
+  serve/proxy plus lint and the base single-file importer, respectively. See
+  [the dated evidence and workload boundaries](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features).
 
 ### Current notices
 
@@ -83,10 +88,12 @@ not inherit an older GA row merely because it lives in the same package or guide
   #368 established the permanent migration-impact rule. The optional public/full
   corpus is #456 CANDIDATE/LATER. None of this is included in v2.0.0.
 - **Post-release additions:** standard gRPC health (#427), runtime resources
-  and HTTP bandwidth (#431), WASM response ABI v2 (#430), and consistent-hash
-  affinity (#432) and client-certificate policy hot reload (#486) have separate
-  Beta / `merged` rows below. Their maturity
-  and delivery do not alter existing GA rows or the v2.0.0 tag.
+  and HTTP bandwidth (#431), storage headroom (#437) within OPS-RESOURCES,
+  serving WAF policy visibility (#440), Console diagnostics guidance (#445),
+  WASM response ABI v2 (#430), consistent-hash affinity (#432), and
+  client-certificate policy hot reload (#486) have separate Beta / `merged`
+  rows below. Their maturity and delivery do not alter existing GA rows or
+  the v2.0.0 tag.
 - **WASM plugin-pool memory fix (#420) and final soak (#421):** the final
   pre-stable soak found a real unbounded memory-growth defect in the pooled
   WASM instance runtime; [#420](https://github.com/victornife/jul/pull/420)
@@ -166,8 +173,9 @@ long-running post-GA soak gate.
 ## Beta
 
 Usable capabilities whose contract, release, soak, or integrated evidence is
-not yet at the GA bar. The rows below are published as Beta in stable v2.0.0;
-release does not complete the unchecked GA criteria.
+not yet at the GA bar. Rows marked `released` shipped as Beta in stable
+v2.0.0; rows marked `merged` are available only on post-release `main`.
+Publication does not complete the unchecked GA criteria.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
@@ -205,8 +213,8 @@ release does not complete the unchecked GA criteria.
 
 ## Soak tracking (post-GA gate)
 
-Criterion 5 for the GA — soak pending features. A soak failure is a
-release-blocking regression. Mirrors the
+Criterion 5 for the features previously GA — soak pending. A soak failure is a
+release-blocking regression. This historical tracking table mirrors the
 [GA push soak table](ga-push.md#soak-tracking-post-ga-gate-per-adr-0005).
 Dated soak runs and where the CI/release artifacts are published are recorded in
 the [soak evidence log](soak-evidence.md).
@@ -225,10 +233,10 @@ the [soak evidence log](soak-evidence.md).
 | Service discovery / dynamic upstreams (Y2-05) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-06 (`/discovery/` traffic via `dns-backend`, resolved successfully) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-h-50-workers) |
 | Secrets references + log redaction (SEC-1) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-06 (admin token `${env:JUL_ADMIN_TOKEN}` expanded; API reachable) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-h-50-workers) |
 | Rate + connection limiting (Y1-03) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (12.5M req, 0% err, token-bucket allow/reject verified) — [evidence](soak-evidence.md#2026-07-04--rate-limit-soak-local-windows-1-hour-50-workers) |
-| Zero-config + `jul lint` (Y1-08) | 2026-07-03 | ✅ validated via `test-zero-config.ps1` 2026-07-06: zero-config serve returns 200, lint passes with secret refs, strict lint correctly flags literal secrets — [evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) |
+| Zero-config + `jul lint` (Y1-08) | 2026-07-03 | ✅ [2026-09-28 exact-head one-hour feature run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features): zero-config serve/proxy and 717 lint cycles; earlier five-minute validation remains smoke. |
 | Compression (Y1-02) | 2026-07-03 | ✅ soaked 1h windows 2026-07-04 (11.6M req, 0% err, zstd/br/gzip verified) — [evidence](soak-evidence.md#2026-07-04--compression-soak-local-windows-1-hour-50-workers) |
 | **Phase 2A consolidated** (proxy+cache+rate-limit+WAF+auth+compression+TLS+mTLS+health+OTel+discovery+secrets+WASM) | 2026-07-05 | ✅ **soaked ~8h** windows 2026-07-06 (5.05M req, 0% err, 100% success, 13 features simultaneously) — [evidence](soak-evidence.md#2026-07-06--phase-2a-consolidated-burn-in-completed-local-windows-8-h-50-workers) |
-| NGINX config importer (Y1-09) | 2026-07-03 | ✅ validated via `test-nginx-importer.ps1` 2026-07-06: import produces valid TOML, HTTP `:80`, HTTPS `:443`, `least_conn`, proxy verified — [evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) |
+| NGINX config importer (Y1-09) | 2026-07-03 | ✅ [2026-09-28 exact-head one-hour feature run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features): 3,600 clean/blocking single-file cycles; assessment/includes remain separate Beta. |
 | OTel tracing + access-log sinks (Y1-10) | 2026-07-03 | ✅ soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err, W3C traceparent observed in telemetry) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | Response cache (memory + disk) | 2026-07-03; recertified 2026-08-07 | ✅ historical 1h soak (1.5M req, 0% err) plus post-correction focused correctness soak (422,042 req, 0 errors; HIT/MISS/STALE/REVALIDATED/BYPASS; stable resources) — [evidence](soak-evidence.md#2026-08-07--cache-recertification-correctness-soak-linux-30-seconds-16-workers) |
 | HTTP/3 over QUIC (Y1-11) | 2026-07-03 | ✅ **soaked 8h Linux** 2026-07-13 (55,302,486 requests, 0 errors, 100% success, isolated QUIC+TLS on `:8443`) — [evidence](soak-evidence.md#2026-07-13--http3-over-quic-8h-isolated-soak-linux-completed) |
@@ -239,6 +247,8 @@ the [soak evidence log](soak-evidence.md).
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-09-28 | 2.15 | Promoted Y1-08 and base Y1-09 to `GA` / `soaked` after two independent exact-head feature runs exceeded the ADR 0005 one-hour floor and their retained pre-run provenance and results were inspected. The decision applies to the exercised workloads, after v2.0.0; MIG-ASSESS stays Beta. | [feature-status.yaml](feature-status.yaml); [soak-evidence.md](soak-evidence.md) |
+| 2026-09-27 | 2.14 | Corrected two unsupported `soaked` classifications: Y1-08 and Y1-09 are stable-released GA — soak pending while their five-minute smoke evidence is distinguished from ADR 0005's long-running criterion. Stable v2.0.0 availability is unchanged. | [feature-status.yaml](feature-status.yaml); [soak-evidence.md](soak-evidence.md); [ADR 0005](adr/0005-soak-post-ga-gate.md) |
 | 2026-09-27 | 2.13 | Reconciled completed migration and host-fault work on post-release `main`; corrected the OPS-RESOURCES merged-PR note and preserved separate Beta / `merged` statuses for new capabilities. | [feature-status.yaml](feature-status.yaml); [roadmap/README.md](roadmap/README.md); [#62](https://github.com/victornife/jul/issues/62) |
 | 2026-09-23 | 2.12 | Reconciled stable v2.0.0 delivery for twelve separately tracked Beta capabilities without changing maturity or unmet GA criteria; recorded #426/#365 as post-release completed migration work and #366/#367 as open. | [feature-status.yaml](feature-status.yaml); [roadmap/README.md](roadmap/README.md); [#62](https://github.com/victornife/jul/issues/62) |
 | 2026-09-21 | 2.11 | **Stable v2.0.0 cut; trusted client identity and backend TLS trust promoted Beta → GA (#409).** Certification evidence (protocol/spoof matrix, backend TLS/mTLS/discovery-identity-stability/health-parity matrix, race, fuzz, security/cardinality review, and the existing #421 ~25h soak) all passed; no new soak was required. Delivery moves `merged` → `soaked` for both, consistent with every other GA row in this manifest. | Issue #409; [feature-status.yaml](feature-status.yaml); [known-limitations.md](known-limitations.md); [README.md](../README.md) |

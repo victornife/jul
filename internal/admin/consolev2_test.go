@@ -1939,6 +1939,9 @@ func TestAdminLockoutChanges(t *testing.T) {
 		{"disable admin", base, config.AdminConfig{Enabled: false}, true},
 		{"listen change", base, config.AdminConfig{Enabled: true, Listen: "0.0.0.0:9090", Token: "t"}, true},
 		{"token change", base, config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "u"}, true},
+		{"TLS enabled", base, config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "t", TLS: &config.AdminTLSConfig{Enabled: true, Cert: "admin.pem", Key: "admin.key"}}, true},
+		{"TLS trust change", config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "t", TLS: &config.AdminTLSConfig{Enabled: true, Cert: "admin.pem", Key: "admin.key"}}, config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "t", TLS: &config.AdminTLSConfig{Enabled: true, Cert: "admin.pem", Key: "admin.key", ClientAuth: &config.ClientAuthConfig{Mode: "require", CAFile: "clients.pem"}}}, true},
+		{"disabled TLS metadata", base, config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "t", TLS: &config.AdminTLSConfig{Cert: "unused.pem"}}, false},
 		{"console disabled", base, config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "t", Console: &consoleOff}, true},
 		{"admin not serving", config.AdminConfig{Enabled: false}, base, false},
 	}

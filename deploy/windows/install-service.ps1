@@ -7,8 +7,9 @@
 #
 # The service runs under the per-service virtual account "NT SERVICE\jul", the
 # Windows analogue of the systemd unit's unprivileged service user. The data
-# directory (config, history, cache, logs) is created and ACL'd so that virtual
-# account - and administrators - can write it, while ordinary users cannot.
+# directory (config, history, cache, logs) receives grants for the virtual
+# account. Existing and inherited ACL entries are retained; review effective
+# access for ordinary users and administrators before storing secrets there.
 
 param(
     [Parameter(Mandatory = $true)] [string] $BinaryPath,
@@ -23,6 +24,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# PowerShell's ErrorActionPreference does not turn nonzero native-tool exits
+# into exceptions. Stop on failed service registration, ACL or recovery setup.
+function Assert-NativeSuccess([string] $Operation) {
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Operation failed (exit $LASTEXITCODE)"
+    }
+}
 
 if (-not (Test-Path $BinaryPath)) {
     throw "Binary not found: $BinaryPath"
@@ -53,6 +62,7 @@ $binLine = '"{0}" --config "{1}"' -f $BinaryPath, $ConfigPath
 if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
     Write-Host "Service '$ServiceName' already exists; updating binary path."
     sc.exe config $ServiceName binPath= $binLine | Out-Null
+    Assert-NativeSuccess 'Updating service binary path'
 } else {
     New-Service -Name $ServiceName -DisplayName $DisplayName `
         -BinaryPathName $binLine -StartupType Automatic | Out-Null
@@ -62,23 +72,31 @@ if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
 # Run under the per-service virtual account (no password). The account's SID,
 # "NT SERVICE\<ServiceName>", exists once the service is registered, so the ACL
 # grants below resolve.
-sc.exe config $ServiceName obj= $serviceAccount password= "" | Out-Null
+# The virtual account has no administrator-supplied password. Passing a blank
+# password= argument through PowerShell can be interpreted by sc.exe as an
+# invalid account/password combination (1057); omit it entirely.
+sc.exe config $ServiceName obj= $serviceAccount | Out-Null
+Assert-NativeSuccess 'Setting service account'
 
 # Grant the service account read on the config (it must read it), and modify on
 # the writable state directories. The admin console rewrites the config
 # atomically via temp-file + rename, which needs write on the *directory* that
 # holds it - granted below.
 icacls $ConfigPath /grant "$($serviceAccount):(R)" | Out-Null
+Assert-NativeSuccess 'Granting config read access'
 foreach ($dir in $writableDirs) {
     # (OI)(CI) so the grant is inherited by files and subdirectories; (M) =
     # modify (read/write/delete) but not full control.
     icacls $dir /grant "$($serviceAccount):(OI)(CI)(M)" | Out-Null
+    Assert-NativeSuccess "Granting writable access to $dir"
 }
 $configDir = Split-Path -Parent $ConfigPath
 icacls $configDir /grant "$($serviceAccount):(OI)(CI)(M)" | Out-Null
+Assert-NativeSuccess 'Granting config-directory write access'
 
 # Restart on failure (recover after 5s, twice, then every 60s).
 sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/5000/restart/60000 | Out-Null
+Assert-NativeSuccess 'Configuring service recovery'
 
 Write-Host "Done."
 Write-Host "  Service account: $serviceAccount"

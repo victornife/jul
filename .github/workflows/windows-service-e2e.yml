@@ -1,0 +1,75 @@
+name: Windows service E2E
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-service-e2e.yml'
+      - 'deploy/windows/install-service.ps1'
+      - 'deploy/windows/new-secure-data-dir.ps1'
+      - 'scripts/build-release.ps1'
+      - 'docs/deployment.md'
+      - 'scripts/test-windows-service.ps1'
+      - 'cmd/jul/**'
+      - 'internal/admin/**'
+      - 'internal/app/**'
+      - 'internal/config/**'
+      - 'internal/handler/**'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/windows-service-e2e.yml'
+      - 'deploy/windows/install-service.ps1'
+      - 'deploy/windows/new-secure-data-dir.ps1'
+      - 'scripts/build-release.ps1'
+      - 'docs/deployment.md'
+      - 'scripts/test-windows-service.ps1'
+      - 'cmd/jul/**'
+      - 'internal/admin/**'
+      - 'internal/app/**'
+      - 'internal/config/**'
+      - 'internal/handler/**'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-service-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  virtual-account-recovery:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build and expand full Windows package
+        run: |
+          .\scripts\build-release.ps1 -Version ci-service -Targets @('windows/amd64') -Profile full
+          $name = 'jul-ci-service-windows-amd64-full'
+          $archive = Join-Path dist "$name.zip"
+          $expanded = Join-Path $env:RUNNER_TEMP 'jul-service-package'
+          Expand-Archive -Path $archive -DestinationPath $expanded -Force
+          $package = Join-Path $expanded $name
+          foreach ($file in @('jul.exe', 'install-service.ps1', 'new-secure-data-dir.ps1')) {
+            if (-not (Test-Path (Join-Path $package $file))) { throw "Package missing $file" }
+          }
+          "JUL_SERVICE_PACKAGE=$package" >> $env:GITHUB_ENV
+      - name: Exercise packaged Windows service
+        run: |
+          .\scripts\test-windows-service.ps1 `
+            -BinaryPath (Join-Path $env:JUL_SERVICE_PACKAGE 'jul.exe') `
+            -InstallerPath (Join-Path $env:JUL_SERVICE_PACKAGE 'install-service.ps1') `
+            -ProvisionPath (Join-Path $env:JUL_SERVICE_PACKAGE 'new-secure-data-dir.ps1')

@@ -170,6 +170,18 @@ jobs:
           total = sum(key[2] for key in executions)
           covered = sum(key[2] for key, count in executions.items() if count > 0)
           if total == 0:
+              # A documentation-only edit to a Go comment has hunk lines but
+              # no instrumented statements. Keep a real missing-coverage case
+              # failing when the added lines contain code.
+              comment_only = all(
+                  not text.strip() or text.lstrip().startswith(('//', '/*', '*', '*/'))
+                  for path, line_numbers in added.items()
+                  for text in (Path(path).read_text().splitlines()[n - 1]
+                               for n in line_numbers)
+              )
+              if comment_only:
+                  print('HR-07C added Go production coverage: not applicable (comment-only edit)')
+                  raise SystemExit(0)
               raise SystemExit('added relevant production Go lines found but no statements were found in coverage profile')
           pct = covered * 100.0 / total
           print(f'HR-07C added Go production statements: {covered}/{total} = {pct:.4f}%')

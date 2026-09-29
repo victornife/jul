@@ -43,20 +43,21 @@ remains a [Y3-02](roadmap/) horizon item. See:
 One permission is deliberately outside every predefined role except `admin`:
 **`config:trust`**, required to change a listener's
 [`client_address`](configuration.md#client-address-and-trusted-proxies)
-trusted-proxy policy. Widening `trusted_proxies` lets the named range assert any
-client address to CIDR authentication, rate limiting, the WAF and the audit
-trail, so it is privilege-escalation adjacent and is held to its own grant with
-its own audit category (`config.client_address`). The check is on the effective
-configuration difference, not on the endpoint used, so the general structured
-patch surface cannot be used to route around it.
+trusted-proxy policy or inbound `proxy_protocol` mode. Widening
+`trusted_proxies`, or enabling PROXY protocol with an existing trusted range,
+lets those peers assert a client address to CIDR authentication, rate limiting,
+the WAF and the audit trail. The grant applies to the effective configuration
+difference on Apply and rollback, independent of the endpoint used; the
+dedicated client-address edit has its own audit category (`config.client_address`).
 
 - Design spec: [docs/specs/console-rbac.md](specs/console-rbac.md)
 - ADR: [docs/adr/0010-console-rbac.md](adr/0010-console-rbac.md)
 - Migration: the numbered enable → migrate → revoke procedure in [docs/console.md](console.md)
 
 When running with the legacy shared token (RBAC disabled):
-- Treat the admin token as a root credential with no audit trail — or enable
-  `[admin.rbac]` to get named principals and attribution.
+- Treat the admin token as a root credential. Operations can be audited under
+  the shared legacy identity, but the record cannot distinguish individual
+  people using that token. Enable `[admin.rbac]` for named attribution.
 - Do not expose the admin listener to untrusted networks under any circumstances.
 - If remote access is required, configure [`[admin.tls]`](configuration.md#admintls) with an
   operator-supplied certificate (#336) — never bind off-loopback in cleartext.
@@ -125,21 +126,22 @@ access.
 
 ## SSRF posture
 
-Jul.IA is designed to be SSRF-safe by construction:
+The ordinary proxy, auth dependency and discovery endpoints come from operator
+configuration, not from a client-supplied URL. This protects against a client
+choosing an arbitrary destination through those fields. It does not make a
+mistyped or compromised configuration safe to fetch, and plugin code with the
+`fetch` capability chooses its URL at runtime. Protect configuration and apply
+the destination controls below to each path.
 
-**Core invariant:** the upstream target, JWKS URL, forward-auth URL, and
-discovery address are **operator configuration**, never derived from a request.
-A client request cannot cause Jul.IA to connect to a different host.
-
-| Outbound path | SSRF safe? | Notes |
-| --- | --- | --- |
-| `proxy_pass` | ✅ Static config | Target is never request-derived |
-| `grpc_transcode` / gRPC passthrough | ✅ Static config | |
-| JWKS fetch | ✅ Static config | URL is `jwt_jwks_url` in auth config |
-| Forward-auth probe | ✅ Static config | URL is `forward_url` in auth config |
-| ACME HTTP-01 / renewal | ✅ Outbound to CA only | CA URL is static config |
-| Consul / Kubernetes discovery | ✅ Static config | Provider address is static |
-| WASM plugin `fetch` | ⚠️ Plugin-controlled | Bounded by `allowed_hosts` allow-list; plugin fetch without `allowed_hosts` is rejected |
+| Outbound path | Destination source and boundary |
+| --- | --- |
+| `proxy_pass` | Configured route/upstream target; the auxiliary `[egress]` allow-list does not govern data-plane backends. |
+| `grpc_transcode` / gRPC passthrough | Configured route/upstream target; backend peer identity is checked separately by `backend_tls`. |
+| JWKS fetch | Configured `jwt.jwks_url` must use HTTPS; a request cannot choose it, but an unsafe config value can still reach an unapproved HTTPS host unless `[egress]` restricts it. |
+| Forward-auth probe | Configured `forward_auth.url`; the optional `[egress]` guard constrains connections and redirects. |
+| ACME issuance / renewal | Configured CA endpoints; the optional `[egress]` guard requires their hosts to be allowed. OCSP stapling has a separate responder destination and failure boundary. |
+| Consul / Kubernetes discovery | Configured provider address; the optional `[egress]` guard constrains its auxiliary fetches. |
+| WASM plugin `fetch` | Guest-chosen URL, potentially influenced by a request; requires plugin `allowed_hosts` and rejects private/loopback/CGNAT dial targets. Optional global `[egress]` rules intersect with the plugin guard. |
 
 **Defense-in-depth:** the optional `[egress]` allow-list
 ([docs/egress.md](egress.md)) constrains all config-driven auxiliary fetches
@@ -168,10 +170,12 @@ token = "${env:JUL_ADMIN_TOKEN}"   # env var resolved at startup
 token = "${file:/run/secrets/admin_token}"   # file contents resolved at startup
 ```
 
-- Resolved values are **masked from all log output** by the redact writer.
-- The on-disk config file and history snapshots retain the **unresolved
-  reference** (not the plaintext value), so a config backup does not leak
-  credentials.
+- Resolved reference values at or above the configured redaction floor are
+  masked by Jul's log writer. Shorter values and literal secrets are not
+  registered for that masking; redaction is defense in depth.
+- The on-disk config file and history snapshots retain reference expressions
+  rather than their expanded values. They can still contain other literal
+  credentials, so protect config backups and snapshots as secrets.
 - `jul lint` (with `--strict`) flags literal admin, Consul, and Kubernetes
   tokens that should be secret references.
 
@@ -191,18 +195,24 @@ These controls reduce disclosure risk but cannot prove that every business-sensi
 
 ## File permissions and atomic writes
 
-All writes that may contain credentials (config file, history snapshots, plugin
-upload) use:
+On POSIX systems, new config files, history snapshots and plugin uploads that
+may contain credentials use:
 
 - Mode `0o600` — owner-readable only on new files.
 - Atomic write — a same-directory temp file is written, fsync'd, and renamed.
   A crash mid-write leaves the previous complete file, never a truncated one.
 - History snapshots are stored in `history_dir` with the same `0o600` mode.
 
+On Windows, POSIX modes do not establish effective access. The installer grants
+the virtual service account but retains inherited ACLs; verify access to the
+config, history and data directories for ordinary users. See
+[deployment.md](deployment.md#windows-service).
+
 **Recommendation:** run Jul.IA as a dedicated service user with a restricted
-`umask`, and grant write access only to `cache_dir`, `history_dir`, and the
-ACME `cache_dir`. See [docs/deployment.md](deployment.md) for the systemd unit
-with `NoNewPrivileges`, `PrivateTmp`, and related hardening.
+`umask` on POSIX, and grant write access only where the chosen deployment
+needs it: an editable config directory, history, cache, ACME cache and file
+logs. See [deployment.md](deployment.md) for the systemd unit with
+`NoNewPrivileges`, `PrivateTmp`, and related hardening.
 
 ---
 

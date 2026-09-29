@@ -1,13 +1,14 @@
 # Jul container configuration — baked into the Docker image at
 # /etc/jul/server.toml. This is the editable starting point for the image: the
-# admin console "Apply" and history/rollback write here, so mount a volume at
-# /etc/jul to persist edits across restarts.
+# admin console "Apply" and history/rollback write here after the operator
+# explicitly adopts the seeded file as the initial managed baseline. Mount a
+# volume at /etc/jul to persist edits across restarts.
 #
 # It differs from the repository sample (../../server.toml) in the ways that make
 # it self-consistent *inside the container*:
 #   * the admin listener is ENABLED on loopback so the image HEALTHCHECK works
 #     out of the box (`jul healthcheck` -> GET /healthz). 127.0.0.1:9090 is
-#     reachable only from the container's own probe, never exposed externally —
+#     reachable only inside the container (including its probe), never exposed externally —
 #     set a token below before you map that port out;
 #   * the static root points at /var/www, which the image seeds with a
 #     placeholder index.html, so the server starts cleanly with no host mounts;
@@ -17,6 +18,7 @@
 # docs/configuration.md for every option.
 
 [global]
+config_authority = "managed" # named /etc/jul volume is writable by Jul
 worker_threads = "auto"
 log_level = "info"
 log_format = "text"
@@ -44,8 +46,8 @@ idle_timeout = "60s"
 # present in the default image (built with -tags console).
 enabled = true
 listen = "127.0.0.1:9090"
-# token = "change-me"            # require `Authorization: Bearer <token>` before
-                                 # exposing the admin port beyond the container.
+# token = "${env:JUL_ADMIN_TOKEN}"  # set a strong process-environment secret
+                                    # before exposing the admin port beyond the container.
 history_dir = "/var/lib/jul/config-history"
 history_keep = 50
 
@@ -59,7 +61,7 @@ history_keep = 50
 # sinks = ["file"]
 # file  = "/var/log/jul/access.log"
 #
-# To suppress access logs entirely (e.g. during a soak or benchmark run):
+# To suppress request access records entirely (e.g. during a benchmark run):
 #
 # [observability.access_log]
-# sinks = []
+# enabled = false

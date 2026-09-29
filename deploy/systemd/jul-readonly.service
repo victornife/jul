@@ -15,7 +15,8 @@
 #   sudo install -m0640 -o root -g jul server.toml /etc/jul/server.toml
 #
 # The config is root-owned and group-readable by jul (0640), so the service
-# reads it but no process — including the service — can rewrite it.
+# reads it but cannot rewrite it. A privileged provisioning process may replace
+# the file and then reload/restart this unit.
 
 [Unit]
 Description=Jul NGINX-inspired HTTP edge server (read-only config)
@@ -56,7 +57,7 @@ RestrictRealtime=yes
 RestrictSUIDSGID=yes
 
 # The config tree is read-only: an admin "Apply" cannot rewrite it, so the
-# deployment is provably immutable. ProtectSystem=strict already makes /etc
+# service cannot mutate its mounted config. ProtectSystem=strict already makes /etc
 # read-only; this makes the intent explicit and survives a looser ProtectSystem.
 ReadOnlyPaths=/etc/jul
 

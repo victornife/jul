@@ -38,7 +38,7 @@ consult (ADR 0019). The two line up directly:
 
 | Filesystem shape | `config_authority` | Result |
 | --- | --- | --- |
-| Editable | `managed` | Console/API writes are validated, persisted, and reloaded; an external edit to the mounted file becomes drift, resolved only through an explicit `POST /api/config/adopt-external`. |
+| Editable | `managed` | Console/API writes are validated, persisted, and reloaded; an external edit to the mounted file becomes drift, resolved only through explicit adoption (supported external `POST /api/v1/config/adopt-external`, or the Console workflow). |
 | Read-only | `file_owned` (the default) | Every mutating admin endpoint is refused with `409 config_authority_read_only` before any side effect. SIGHUP and the file watcher behave exactly as before: an external edit — from your provisioning pipeline re-rendering the mount — is validated and adopted live or staged, same as today. |
 
 **`config_authority` defaults to `file_owned` when omitted.** This is a fixed
@@ -113,9 +113,12 @@ Two units ship in [deploy/systemd](../deploy/systemd/):
 
 ### Editable — `jul.service`
 
-Uses `DynamicUser=yes` plus systemd's managed directories, so the four writable
-paths above are created, owned by the service user, and survive restarts while
-`ProtectSystem=strict` keeps everything else read-only:
+Uses a dedicated unprivileged `jul` service user. systemd creates and owns the
+state, cache and log directories for that user; seed `/etc/jul` with ownership
+of `jul:jul` because `ConfigurationDirectory=` does **not** change ownership
+to the service user. A root-owned `0700` directory or root-owned `0600`
+`server.toml` prevents this editable service from reading or rewriting it.
+`ProtectSystem=strict` keeps everything outside these paths read-only:
 
 ```ini
 ConfigurationDirectory=jul       # /etc/jul        (0700)
@@ -124,21 +127,50 @@ CacheDirectory=jul               # /var/cache/jul
 LogsDirectory=jul                # /var/log/jul
 ```
 
-Seed the initial config, then start:
+Before seeding the config, choose an actual static root or running backends.
+The repository's `server.toml` is a multi-service example that expects
+`/srv/www/example` and two local backends; copying it alone does not create
+those dependencies. For a minimal static route, use the
+[getting-started example](getting-started.md) and point its root at a readable
+directory outside the unit's protected home paths. Set
+`[global].config_authority = "managed"` to make this the editable shape, and
+enable `[admin]` with a properly provisioned token before relying on Console
+Apply. `jul check` opens configured static roots at check time; run it under
+the service account or an equivalent filesystem identity. It cannot prove
+that content and backends remain available when the service starts.
+The published v2.0.0 `jul check` does not open static roots; verify those
+paths separately when deploying that binary.
+
+After preparing that config and its content or backends, seed and start:
 
 ```sh
-sudo install -D -m600 server.toml /etc/jul/server.toml
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin jul
+sudo install -d -o jul -g jul -m0700 /etc/jul
+sudo install -o jul -g jul -m0600 server.toml /etc/jul/server.toml
 sudo systemctl enable --now jul.service
 ```
 
-The admin console can now apply changes and roll back from history.
+If the `jul` service user already exists, skip `useradd`. Check the effective
+owner and mode of `/etc/jul` and `server.toml` after provisioning; an upgrade
+from a root-owned tree also needs its existing files transferred deliberately.
+On a fresh managed deployment, preview and explicitly confirm the one-time
+**adopt external file** action in the Console before the first Apply. Until a
+baseline is established, ordinary writes return 409 (`managed_unadopted`).
+
+Console Apply and history rollback are available only when admin access is
+enabled, the config declares `managed` authority, and the unit can write the
+config and history directories. Verify those operations in the running service
+before treating the deployment as editable.
 
 ### Read-only — `jul-readonly.service`
 
 Pins the config: `/etc/jul` is mounted `ReadOnlyPaths`, so an admin "Apply" is
-rejected. It uses a **static** service user (a dynamic UID changes between boots,
-which is awkward for an operator-owned config file). Create the user and seed the
-immutable config:
+rejected. It uses the same dedicated service user with a root-owned,
+group-readable config. The service cannot change that file; a privileged
+provisioning process can replace it and reload or restart the unit. Set
+`[global].config_authority = "file_owned"` explicitly in your deployment
+config (the omitted default has the same effect), provision its static content
+and backends as above, then create the user and seed the immutable config:
 
 ```sh
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin jul
@@ -149,6 +181,17 @@ sudo systemctl enable --now jul-readonly.service
 
 `CacheDirectory` and `LogsDirectory` remain writable for the disk cache, the
 ACME certificate cache, and access logs.
+
+The [systemd deployment CI journey](../scripts/systemd-deployment-e2e.py)
+starts both shipped units on a disposable Ubuntu runner. It checks the editable
+unit's ownership, initial adoption, Apply, rollback and restart, then checks
+that the read-only unit serves traffic and refuses Apply without changing the
+file. It also stages a restart-bound admin history path, verifies activation
+after process restart, and checks that an external edit blocks managed Apply
+until explicit adoption. A final staged restart binds the admin listener to
+the runner's non-loopback address with a trusted temporary TLS certificate and
+checks that tokenless requests are denied. This is a disposable single-host
+TLS exercise; production certificates and network policy require separate verification.
 
 ### Verify the units
 
@@ -184,7 +227,23 @@ docker run --rm \
   [Health checks](#health-checks)) and serves a placeholder page from `/var/www`
   so the server starts cleanly with no host mounts.
 - **Named volumes** are seeded from the image on first use, so the baked
-  `/etc/jul/server.toml` survives; edit it through the console (editable shape).
+  `/etc/jul/server.toml` survives. It declares `config_authority = "managed"`
+  for the editable shape. On a fresh volume, preview and explicitly confirm
+  the one-time **adopt external file** action in the Console to establish the
+  managed baseline before the first Apply; until then writes return 409
+  (`managed_unadopted`). The default admin listener stays on container
+  loopback for its health probe: publishing `-p 9090:9090` alone does **not**
+  make the Console reachable from the host. Provision a strong token and
+  [`[admin.tls]`](configuration.md#admintls) certificate/key, bind the admin
+  listener to a reachable interface, and only then publish that port (or use
+  another authenticated, TLS-protected administrative path). The config file
+  and key must be readable by the nonroot container user.
+- The [Docker deployment CI journey](../scripts/docker-deployment-e2e.py) builds
+  the image and probes its baked site and healthcheck with named volumes. It
+  then starts a separate disposable managed profile with a token-protected
+  admin listener on host loopback and verifies initial adoption, Apply, history,
+  rollback and persistence across a container restart. This loopback exercise does
+  not validate externally exposed admin TLS or a production certificate.
 - For a **read-only** config, bind-mount your config file read-only:
   `-v /host/server.toml:/etc/jul/server.toml:ro` and skip the `jul-config`
   volume. Your file must enable `[admin]` for the `HEALTHCHECK` to pass, or
@@ -193,9 +252,10 @@ docker run --rm \
   `-v /host/site:/var/www:ro`, or edit the route to `proxy_pass` to a backend.
 - The ACME cache lives under `/var/cache/jul`; keep that volume to avoid
   re-issuing certificates (and hitting CA rate limits) on every restart.
-- Set an `[admin] token` (and only then map `-p 9090:9090`) before exposing the
-  admin API beyond the container; by default it binds to `127.0.0.1` and is
-  reachable only by the container's own health probe.
+- To expose the admin API beyond the container, set an `[admin] token`, enable
+  `[admin.tls]`, and bind the listener on a reachable interface before mapping
+  `-p 9090:9090`. By default it binds to `127.0.0.1` inside the container and
+  is reachable only from inside the container (including its health probe).
 - **Access logs at high throughput.** The default config writes access logs to
   `stdout` (Docker's log driver). At ≥10,000 req/s this generates several MB/s
   of log output; if Docker's log driver buffers to disk it can fill container
@@ -216,12 +276,15 @@ docker run --rm \
 
 [deploy/windows/install-service.ps1](../deploy/windows/install-service.ps1)
 registers the service under the per-service virtual account `NT SERVICE\jul`
-(the Windows analogue of the unprivileged systemd user) and creates an ACL'd
-data directory:
+(the Windows analogue of the unprivileged systemd user). For a fresh dedicated
+data/config root, create a protected empty directory **before** writing a
+secret-bearing config, then run the installer:
 
 ```powershell
-# Elevated PowerShell
-.\install-service.ps1 `
+# Elevated PowerShell from the repository root, after preparing your config
+.\deploy\windows\new-secure-data-dir.ps1 -Path 'C:\ProgramData\jul'
+Copy-Item 'C:\path\to\prepared\server.toml' 'C:\ProgramData\jul\server.toml'
+.\deploy\windows\install-service.ps1 `
   -BinaryPath 'C:\Program Files\jul\jul.exe' `
   -ConfigPath 'C:\ProgramData\jul\server.toml' `
   -DataDir    'C:\ProgramData\jul'
@@ -229,9 +292,26 @@ Start-Service jul
 ```
 
 It creates `C:\ProgramData\jul\{history,cache,logs}` and grants the service
-account **modify** there and **read** on the config; ordinary users get neither.
+account **modify** there and **read** on the config. The fresh-directory helper
+refuses an existing path, removes inherited access from the empty directory and
+grants SYSTEM/Administrators; descendants inherit that protected ACL. The
+installer only adds service grants and does not remove inherited or pre-existing
+access for other users. For existing directories or a config stored elsewhere,
+review the effective ACLs before storing secrets or relying on confidentiality.
+The supplied `server.toml` also needs
+real static content/backends, and editable Console use requires
+`[global].config_authority = "managed"`, an enabled admin listener and a
+provisioned token.
 Point `servers.tls.acme.cache_dir`, the disk cache, the access-log file sink, and
 `history_dir` at the matching subdirectories.
+
+The [Windows service CI journey](../scripts/test-windows-service.ps1) builds and
+expands the full Windows ZIP, installs its default `jul` service and bundled
+scripts on an elevated disposable runner, checks the virtual
+account, then exercises initial managed adoption, Apply, history rollback and
+restart with a loopback admin token. It provisions the fresh protected directory
+and runs a separate ordinary local user to deny config reads and history writes.
+Existing production directories still require their own ACL review.
 
 ## Behind a reverse proxy or load balancer
 
@@ -307,8 +387,19 @@ shell or `curl`** (the distroless image ships neither):
 | `1` | unhealthy — non-`2xx`, unreachable, or the timeout elapsed |
 | `2` | usage/config error — bad flags, unreadable config, or admin disabled |
 
-By default it discovers the address from `[admin] listen` in the config; `-addr`
-or `-url` override it, and `-ready` probes `/readyz` instead of `/healthz`.
+By default it discovers the address and HTTP/HTTPS scheme from `[admin]` in the
+config; `-addr` overrides the host/port for plaintext HTTP, while `-url` selects
+the full endpoint including scheme and path. For discovered or `-addr` targets,
+`-ready` probes `/readyz` instead of `/healthz`; an explicit `-url` supplies its
+own path and must be a full HTTP(S) URL without embedded userinfo. `-timeout`
+must be positive so the probe always has a deadline. HTTPS verifies the
+certificate and hostname. For a private CA, pass
+`-ca-file`; when admin TLS requires a client certificate, pass `-client-cert`
+and `-client-key` together. A redirect is unhealthy, not proof that the admin
+endpoint is responding. With a wildcard listener or a certificate lacking a
+loopback IP SAN, use `-url https://<certificate-name>:<port>/readyz` with a name
+that resolves to the listener from the probe environment. Do not bypass TLS
+verification to make a probe pass.
 
 **Docker** — the image already declares this `HEALTHCHECK` (exec form, no shell),
 and its baked config enables the admin listener on loopback so the probe passes
@@ -322,12 +413,18 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 `docker inspect --format '{{.State.Health.Status}}' <container>` then reports
 `healthy` once the server is up. If you bind-mount your own config, keep `[admin]`
 enabled (or override the healthcheck) so the probe can reach a health endpoint.
+When your mounted config enables admin TLS, override the image healthcheck with
+an HTTPS `-url` and the required CA/client-certificate options; the baked probe
+is intended for its loopback plaintext default.
 
 **systemd** — confirm the admin endpoint is live after start:
 
 ```ini
 ExecStartPost=/usr/local/bin/jul healthcheck --config /etc/jul/server.toml --ready --quiet
 ```
+
+For admin TLS, include `-ca-file` and, if required, the client certificate/key;
+use a full `-url` when the certificate name differs from the listener address.
 
 **Kubernetes** — use it as an exec probe (no `curl` needed in the image):
 

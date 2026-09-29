@@ -41,7 +41,9 @@ silently dropping listeners.
   only the backend address is dialed.
 - **Runs alongside HTTP.** Stream listeners live next to the HTTP server in the
   same process and share its lifecycle: they start at boot, reload on SIGHUP /
-  file-watch / admin reload, and drain on shutdown.
+  file-watch under `file_owned` authority or through an authorized managed
+  apply, and drain on shutdown. Under `managed` authority, SIGHUP and file-watch
+  assess external drift; they do not publish the changed file.
 
 ## Configuration
 
@@ -330,8 +332,11 @@ session cap with all sessions active — raise `max_udp_sessions`, shorten
   block, or pass it through with `sni_routes`.
 - **Passive health only.** L4 backends are gated by dial outcomes; there is no
   active L4 probe in v1.
-- **Pool state resets on reload.** A reload rebuilds pools, so passive health
-  counters start fresh for the new generation.
+- **Pool reuse is shape-dependent.** The stream server keeps its own upstream
+  registry across reloads. An equal pool shape reuses the live pool, preserving
+  passive health and resilience accounting; a changed pool shape replaces it
+  and starts fresh state. An unrelated stream-route edit does not reset the
+  pool merely because a reload occurred.
 
 ### TCP socket reuse behaviour
 

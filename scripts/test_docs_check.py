@@ -6,6 +6,7 @@ Run with: python3 scripts/test_docs_check.py
 
 import sys
 import tempfile
+import shutil
 from pathlib import Path
 
 import importlib.util
@@ -97,6 +98,36 @@ def _run_in_tmp(root: Path, fn) -> tuple[int, int]:
     finally:
         docs_check.ROOT = original_root
         docs_check.DOCS = original_docs
+
+
+def test_index_status_projection_catches_stale_delivery():
+    """The index must not say merged when the manifest says released."""
+    import yaml
+
+    source = Path(__file__).resolve().parent.parent
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        docs = root / "docs"
+        docs.mkdir()
+        for name in ("feature-status.yaml", "index.md", "status.md"):
+            shutil.copyfile(source / "docs" / name, docs / name)
+        shutil.copyfile(source / "README.md", root / "README.md")
+        features = yaml.safe_load((docs / "feature-status.yaml").read_text())["features"]
+        for entry in features:
+            path = docs / entry["doc"]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.exists():
+                path.touch()
+
+        _, failures = _run_in_tmp(root, docs_check.check_feature_status_manifest)
+        assert failures == 0, f"current projections disagree: {failures} errors"
+        index = docs / "index.md"
+        text = index.read_text()
+        old = "| Auxiliary egress allow-list | [egress.md](egress.md) | `Beta` / `released` |"
+        assert old in text
+        index.write_text(text.replace(old, old.replace("`released`", "`merged`"), 1))
+        _, failures = _run_in_tmp(root, docs_check.check_feature_status_manifest)
+        assert failures == 1, f"stale index delivery should be one failure, got {failures}"
 
 
 def test_check_horizon_specs_detects_missing_banner():
@@ -500,6 +531,7 @@ def test_lifecycle_generator_check_is_non_mutating_and_names_the_remedy():
 
 
 def _run_existing_tests():
+    test_index_status_projection_catches_stale_delivery()
     test_check_finding_uniqueness_detects_conflict()
     test_check_finding_uniqueness_allows_decimal_suffixes()
     test_check_horizon_specs_detects_missing_banner()
@@ -537,7 +569,7 @@ def _write_feature_truth_tree(root: Path, *, readme_claim=False, index_link=True
         "    criteria: {1: true, 2: null, 3: true, 4: false, 5: false, 6: true, 7: true, 8: null, 9: null}\n",
         encoding="utf-8",
     )
-    link = "[feature](feature.md)" if index_link else "No feature link"
+    link = f"| Feature one | [feature](feature.md) | `Beta` / `{delivery}` |" if index_link else "No feature link"
     (docs / "index.md").write_text(f"# Index\n\n{link}\n", encoding="utf-8")
     (docs / "status.md").write_text(
         "# Status\n\n## Beta\n\n"
@@ -555,7 +587,7 @@ def test_feature_manifest_rejects_readme_all_ga_claim():
         root = Path(tmpdir)
         _write_feature_truth_tree(root, readme_claim=True)
         _, fail = _run_in_tmp(root, docs_check.check_feature_status_manifest)
-        assert fail == 1, f"expected one failure, got {fail}"
+        assert fail == 1, f"expected README maturity claim failure, got {fail}"
 
 
 def test_feature_manifest_requires_index_discoverability():
@@ -563,7 +595,7 @@ def test_feature_manifest_requires_index_discoverability():
         root = Path(tmpdir)
         _write_feature_truth_tree(root, index_link=False)
         _, fail = _run_in_tmp(root, docs_check.check_feature_status_manifest)
-        assert fail == 1, f"expected one failure, got {fail}"
+        assert fail == 2, f"expected missing guide link and status row, got {fail}"
 
 
 def test_feature_manifest_compares_delivery_state():

@@ -366,11 +366,11 @@ func driftOnlyFileConsumer(ctx context.Context, in <-chan [32]byte, assessReques
 	}
 }
 
-// ValidateRuntimeConfig performs the full runtime preflight for a configuration:
-// it clones the config, runs the structural validation, and dry-runs the
-// build-tag-gated subsystems (WAF, auth, compression) so an edit that a lean
-// build cannot serve — or that a compiled build would reject — fails here,
-// before anything is written, keeping admin "apply" truthful.
+// ValidateRuntimeConfig performs stateless runtime preflight for a
+// configuration: it clones the config, runs structural validation, and dry-runs
+// build-tag-gated subsystems (WAF, auth, compression). It does not prepare
+// handlers or probe external resources. Admin apply has additional handler,
+// TLS, stream and listener preflight gates before writing a candidate.
 //
 // config.PreflightClone resolves secrets into a deep-copied clone without
 // mutating the live redaction registry, so no save/restore dance is needed

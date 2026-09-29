@@ -1,4 +1,4 @@
-# Jul sample configuration (v1)
+# Jul sample configuration
 # NGINX-inspired concepts expressed in TOML.
 
 [global]
@@ -172,8 +172,10 @@ precompressed = false
 enabled = false
 # Bucket identity: "ip" (client address), "header:<Name>" (e.g. header:X-Api-Key),
 # or "jwt:<claim>" (a validated JWT claim from a location's auth block, falling
-# back to client IP when absent). The client address is the real transport peer,
-# never an untrusted X-Forwarded-For value.
+# back to client IP when absent). The IP key uses the canonical client address:
+# the transport peer by default, or a trusted forwarding chain when this
+# listener declares [servers.client_address].trusted_proxies. Untrusted
+# X-Forwarded-For values never become the key.
 key = "ip"
 # Sustained requests/second allowed per key.
 rate = 100
@@ -187,7 +189,7 @@ max_conns = 0
 [admin]
 enabled = false
 listen = "127.0.0.1:9090"
-# token = "change-me"            # require `Authorization: Bearer <token>`
+# token = "${env:JUL_ADMIN_TOKEN}" # set the process environment before enabling admin
 # console = true                 # web console dashboard (default: true when
 #                                # admin is enabled; needs a binary built with
 #                                # `-tags console`). Set false for the basic
@@ -199,10 +201,11 @@ listen = "127.0.0.1:9090"
 # [egress]
 # Optional outbound allow-list (hardening). When enabled, the server's
 # config-driven auxiliary fetches — JWKS retrieval, forward-auth subrequests,
-# and Consul/Kubernetes discovery — may only connect to the destinations listed
+# Consul/Kubernetes discovery, ACME/OCSP and WASM plugin fetch — may only
+# connect to the destinations listed
 # in `allow`; every other destination is refused at connect time. This bounds
 # the blast radius of a misconfigured or compromised config (an SSRF-shaped
-# risk). Disabled by default; upstream proxying and ACME are unaffected. Each
+# risk). Disabled by default; upstream proxying/active health are unaffected. Each
 # allow entry is a hostname, a leading-dot suffix, a bare IP, or a CIDR.
 # enabled = true
 # allow = ["idp.example.com", ".discovery.internal", "10.0.0.0/8"]
@@ -227,8 +230,9 @@ listen = "127.0.0.1:9090"
 # Where the access log is written. Always available (no build tag required).
 # The default sink "stdout" emits the structured access line in the server log,
 # honoring [global].log_format. Add "file" for a dedicated rotating file and/or
-# "syslog" for the system log (syslog is not supported on Windows). Settings are
-# fixed at startup; changing this block needs a restart. Omitted `enabled`
+# "syslog" for the system log (syslog is not supported on Windows). These
+# access-log leaves hot-apply through a prepared sink generation (#98).
+# Omitted `enabled`
 # preserves the default-on behavior; false stops request records only.
 # enabled = true
 # sinks = ["stdout", "file"]        # any of "stdout", "file", "syslog"
@@ -398,4 +402,3 @@ listen = "127.0.0.1:9090"
 # proxy_pass = "redis_pool"
 # proxy_protocol = "out"             # "" (off), "in", "out", or "both" (TCP only)
 # trusted_proxies = ["10.0.0.0/8"]   # required when proxy_protocol ingests a header
-

@@ -64,8 +64,11 @@ caller; the listen address is a configuration value and is deliberately absent.
   itself, no external component is required, and the gate is satisfied on any
   address. Certificate content and same-path rotation hot-apply without a
   rebind.
-- **Terminate TLS in front of the listener** — a reverse proxy, a
-  systemd-activated socket, a loopback-bound sidecar.
+- **Terminate TLS in front of a loopback-bound Jul listener** — for example, a
+  local reverse proxy or sidecar. The proxy-to-Jul connection must arrive on
+  Jul's loopback listener (or use TLS to Jul as well). A remote terminator
+  forwarding plaintext to a non-loopback Jul listener still receives
+  `403 insecure_transport`; forwarding headers do not satisfy the gate.
 - **Bind the listener to loopback** and reach it through an SSH tunnel.
 
 See [compatibility.md](compatibility.md#admin-transport-security-adr-0019-281)
@@ -372,9 +375,11 @@ trusted, which forwarded headers are honoured, and how many hops are accepted.
 
 It is a sub-resource rather than a listener field because it is the one part of
 a listener with its own permission — reading it is `config:read` and changing it
-is `config:trust`. A trusted-proxy range decides which address a request is
-attributed to, and therefore what every allow-list, rate limit and audit record
-downstream sees.
+is `config:trust`, including when a history rollback changes the effective
+policy; `history:rollback` alone is insufficient. Enabling inbound
+`proxy_protocol` with the same trusted range also requires `config:trust` on
+Apply and rollback. That range decides which address a request is attributed
+to, and therefore what every allow-list, rate limit and audit record sees.
 
 `configured` distinguishes a written policy from the defaults, which are
 otherwise identical on the wire. An address no server block binds is
@@ -507,7 +512,8 @@ Each internal route records its own reason in
   `/api/v1` route returns raw configuration bytes.** They remain available on
   the internal routes under `config:raw` and `history:raw` for the Console and
   for local operators, and a test fails if either is promoted.
-- **Legacy operational endpoints** (`/cache/purge`, `/reload`) and
+- **Legacy operational endpoints** (`/cache/purge`, `/reload`; the reload
+  trigger is available only with `file_owned` authority) and
   `/debug/pprof/` are not part of the configuration surface `v1` publishes.
 
 ## Authentication and authorization

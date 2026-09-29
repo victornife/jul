@@ -13,10 +13,10 @@
 # it its own entry or an explicit relationship. A GA row must be released and
 # soaked under ADR 0003/0005. Volatile issue sequencing belongs in #62, not here.
 #
-# Updated 2026-09-27 for post-release status accuracy (Beta maturity unchanged).
+# Updated 2026-09-28 after feature-specific post-release soak evidence.
 
 version: 2
-updated: '2026-09-27'
+updated: '2026-09-28'
 features:
 - id: Y1-01
   name: TLS + automatic HTTPS (ACME)

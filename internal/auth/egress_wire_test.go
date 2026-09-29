@@ -11,10 +11,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/egress"
 )
 
 // These tests prove the egress seam: an Options.DialContext is installed on the
@@ -93,5 +95,45 @@ func TestEgressDialContextGuardsForward(t *testing.T) {
 	// Passthrough egress: the subrequest reaches the auth service and allows.
 	if code := serveStatus(newAuthWithDial(t, cfg, passDial), newReq()); code != http.StatusOK {
 		t.Errorf("open egress: code = %d, want 200", code)
+	}
+}
+
+// An environment HTTP proxy may itself be allow-listed for other auxiliary
+// traffic. Forward-auth must still check its configured destination, not only
+// the proxy's dial address, when the egress policy is enabled.
+func TestEgressForwardDoesNotUseAllowedEnvironmentProxy(t *testing.T) {
+	var proxyCalls atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer proxy.Close()
+	t.Setenv("HTTP_PROXY", proxy.URL)
+	t.Setenv("NO_PROXY", "")
+	policy, err := egress.New(config.EgressConfig{Enabled: true, Allow: []string{"127.0.0.1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := policy.For(egress.SubsystemAuth).DialContext(nil)
+	a := newAuthWithDial(t, config.AuthConfig{ForwardAuth: &config.ForwardAuthConfig{
+		URL: "http://blocked.example.invalid/auth",
+	}}, guard)
+	if transport := a.forward.dep.client.Transport.(*http.Transport); transport.Proxy != nil {
+		t.Fatal("guarded auth transport may route a blocked target through an environment proxy")
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://app.example/allow", nil)
+	if code := serveStatus(a, request); code != http.StatusServiceUnavailable {
+		t.Errorf("forward-auth status = %d, want 503 for blocked target", code)
+	}
+	if got := proxyCalls.Load(); got != 0 {
+		t.Errorf("proxy received %d requests for a blocked target", got)
+	}
+	// A disabled policy does not supply a guarded dial, so the historical
+	// environment-proxy behaviour remains available to this dependency.
+	open := newAuthWithDial(t, config.AuthConfig{ForwardAuth: &config.ForwardAuthConfig{
+		URL: "http://blocked.example.invalid/auth",
+	}}, nil)
+	if open.forward.dep.client.Transport != nil {
+		t.Error("disabled egress should retain the default HTTP transport and proxy behavior")
 	}
 }

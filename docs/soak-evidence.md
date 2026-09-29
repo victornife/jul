@@ -22,6 +22,11 @@ wall-clock minimums to count toward the post-GA gate:
 Runs below the minimum (e.g., the 20-second CI smoke or the 5-minute release gate)
 are **smoke tests only** — they validate that the harness compiles and the feature
 does not immediately crash, but they do **not** satisfy the post-GA soak criterion.
+The `-phase2a` burn-in profile uses an explicit TOML file and sends HTTP
+requests to configured routes. Its duration cannot establish zero-config/lint
+(Y1-08) or NGINX importer (Y1-09) soak evidence; those features need their own
+workloads and dated qualifying runs. The historical v1.28.0 table below used
+“soaked” for a short release smoke and does not override this requirement.
 
 ## Where soak evidence is produced
 
@@ -30,6 +35,56 @@ does not immediately crash, but they do **not** satisfy the post-GA soak criteri
 | CI smoke (`soak (smoke)` job) | every push / PR | 20s × 3 scenarios | `soak-results` artifact on the [CI workflow](../.github/workflows/ci.yml) run | ❌ No (smoke only) |
 | Release gate (`soak gate (ADR 0005)` job) | version tag `v*` | 5m × 3 scenarios | `soak-results` artifact on the [release workflow](../.github/workflows/release.yml) run; a red run blocks the release | ❌ No (smoke only) |
 | Local | `scripts/soak.sh` | configurable | stdout (see runs below) | ✅ Yes, if duration meets the minimum for the scope exercised |
+| Feature-specific Y1-08/Y1-09 | PR changes to the harness/workflow run a 20s preflight; explicit `workflow_dispatch` runs preflight and the one-hour jobs | 20s PR preflight; 3600s per feature on dispatch | Pre-run `manifest.json`, `summary.json` and server logs in the [feature soak workflow](../.github/workflows/feature-soak.yml) artifacts | ✅ [2026-09-28 exact-head run](#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features), for the scoped workloads |
+
+The long jobs are manually triggered after qualification evidence is needed.
+GitHub evaluates `pull_request.paths` against the PR's cumulative diff, so a
+later push can still trigger the short preflight while the harness/workflow
+remains changed in that diff. It does not launch another one-hour candidate.
+
+The [2026-09-28 PR preflight](https://github.com/victornife/jul/actions/runs/36438405287)
+passed at `3650e506054a829c8390256777baa1d35913dbd1`. Its retained
+`feature-soak-preflight` artifact reports 20.64 seconds, 394 static and 391
+proxy requests, four lint cycles, and 20 clean/blocking importer cycles in
+20.001 seconds. Both summaries identify the same built binary hash. This is
+**smoke evidence only**; the one-hour jobs and their artifacts need review
+before either post-GA criterion could be considered satisfied at that point. The later qualifying run is recorded in the run log.
+
+### 2026-09-28 — Feature-specific one-hour candidate, PR #482 head `13508dbc` — **bounded pass; gate pending**
+
+The [feature soak run](https://github.com/victornife/jul/actions/runs/36439579989)
+completed its preflight and two independent one-hour jobs on
+`13508dbc6ae48902d4fd16a084da6e1b74ea656e`. Its retained
+[`feature-soak-zero-config`](https://github.com/victornife/jul/actions/runs/36439579989/artifacts/10981410717)
+and [`feature-soak-importer`](https://github.com/victornife/jul/actions/runs/36439579989/artifacts/10982550045)
+artifacts identify the same binary SHA-256,
+`0e76456a3246badfde2ee85bc947d134f12debe076b635b70da07c214e9f6ed6`.
+Both report Linux x86_64, Python 3.12.3 and success:
+
+| Candidate | Elapsed | Exercised and measured | Boundary |
+| --- | ---: | --- | --- |
+| Y1-08 zero-config + lint | 3600.612s | 70,817 static and 70,161 proxy HTTP 200 responses with exact body; 717 lint cycles (env secret, literal-token warning, strict exit 2); 120 resource samples. Serve RSS 23,508 → 26,596 KiB, proxy 22,764 → 29,616 KiB; final FDs 8/7, equal to baseline. Both processes drained cleanly; no panic/error lines in their logs. | Single loopback site and backend, sequential low-rate client per mode; not public ingress, broad concurrency or all lint configurations. |
+| Y1-09 importer | 3600.008s | 3,600 cycles, each converting clean and blocking single-file NGINX fixtures, checking the blocking report's `manual_action_required`, valid candidates, lint and identical output within the run; child peak RSS 45,932 KiB. | Fresh CLI process on every conversion; two tiny fixtures, not an extended corpus, long-lived parser or cross-run byte identity. |
+
+Each exceeds ADR 0005's **one-hour per-feature duration floor**. The original
+artifact has a result summary and static/proxy logs, but **no pre-run manifest,
+build metadata, capability report or fixture/environment fingerprint**. The
+candidate hashes differ between the 20-second and one-hour importer jobs because
+the outputs contain temporary paths; the harness checked determinism only within
+each job. The revised harness now writes `manifest.json` before the workload,
+records the binary/harness/fixture hashes, build and compiled capability reports
+and runner details, and rejects an unexpected binary commit or missing importer
+capability. That change did **not** retroactively enrich this run. Y1-08/Y1-09
+were `GA-soak-pending` / `released` at this stage, pending a self-contained exact-head one-hour
+run. This candidate supports a bounded
+stability finding, not a broader GA-soak closure or next-release sign-off.
+
+The [revised preflight on `ea0fc6b`](https://github.com/victornife/jul/actions/runs/36454794362)
+passed both 20-second workloads. Its [artifact](https://github.com/victornife/jul/actions/runs/36454794362/artifacts/10984193591)
+contains a `manifest.json` for each mode: both match the binary's embedded
+commit to `ea0fc6bac651b1ffa2a6e7f6b09d367cbf511ad8`, report an unmodified
+build and `importer: true`, identify the same binary/harness hashes and runner
+image, and match the summary's manifest hash. At that point the longer jobs still needed completion and inspection; this preflight is smoke evidence.
 
 All three scenarios are driven by the in-tree soak tests behind the `soak` build tag:
 
@@ -63,6 +118,51 @@ artifacts; each entry states the scope (single-feature vs. consolidated) and
 whether the duration meets the ADR-0005 minimum for that scope.
 
 ## Run log
+
+### 2026-09-28 — Feature-specific exact-head one-hour soaks, PR #482 head `9ab87c1` — **criterion 5 met for scoped features**
+
+The [final-head feature soak workflow](https://github.com/victornife/jul/actions/runs/36457179441)
+passed preflight and both independent one-hour jobs at
+`9ab87c16fdadbcb47fa531a93cc19429bb56e8e9`. The retained
+[zero-config/lint artifact](https://github.com/victornife/jul/actions/runs/36457179441/artifacts/10989411614)
+and [importer artifact](https://github.com/victornife/jul/actions/runs/36457179441/artifacts/10989566583)
+each contain a pre-run manifest and summary. Both manifests match that exact
+source SHA to the Go binary's embedded commit, state `dirty: false` and
+`importer: true`, identify Go 1.26.6 on linux/amd64 and runner image Ubuntu 24
+`20260920.314.1`, and agree on binary SHA-256
+`312f80b2efa62ca9c628ef052bbb8ad7c35fd80c77b230aa8299bad296c7cb07`
+and harness SHA-256
+`6f9c0bd2bd8d92bc596f9908f7fc631fbf3401822b74199af6e28b55264f4cff`.
+The fixture fingerprints and each summary's manifest hash also match the
+retained files. The [preflight artifact](https://github.com/victornife/jul/actions/runs/36457179441/artifacts/10986276401)
+is a short harness check, not part of the duration decision.
+
+| Feature workload | Elapsed | Observed results | Inference boundary |
+| --- | ---: | --- | --- |
+| Y1-08 zero-config serve/proxy plus lint | 3600.667s | 70,640 static and 70,024 proxy responses with exact expected body; 717 lint cycles; 120 resource samples. Serve RSS 25,388 → 26,620 KiB and FDs 9 → 8; proxy RSS 22,684 → 28,836 KiB and FDs 7 → 7. Server logs show no `level=ERROR` or `panic:` and clean shutdown. | One loopback static site and backend, sequential low-rate traffic, env-secret/literal-token/strict cases; no public ingress, broad concurrency or exhaustive lint configurations. |
+| Y1-09 base importer single-file conversion | 3600.032s | 3,600 clean and blocking conversion/lint cycles, including `manual_action_required`, valid candidates and within-run stable output; child peak RSS 46,052 KiB. | Each conversion starts a fresh CLI process; two small fixtures, no extended corpus, long-lived parser or full migration-assessment/include traversal. |
+
+Each job exceeds [ADR 0005's one-hour per-feature minimum](adr/0005-soak-post-ga-gate.md).
+This closes criterion 5 for the exercised Y1-08 and base Y1-09 contracts in
+the [current manifest](feature-status.yaml); the eight-hour duration remains a
+recommendation. It does not certify all deployment conditions, a full NGINX
+corpus, or the separately tracked `MIG-ASSESS` Beta capability. Stable v2.0.0
+already shipped these base features; this later evidence does not alter that
+tag's artifacts or turn its five-minute release smoke into a qualifying soak.
+
+### 2026-09-27 — Documentation first-run Windows CI smoke (not a GA soak)
+
+The [PR #482 CI run](https://github.com/victornife/jul/actions/runs/36355994434)
+at commit `da5288853dadc853c4a37c6d095e2f97c7a03f24` completed the
+`docs first run (Windows PowerShell)` job. The lean binary served a temporary
+static page over HTTP 200, env-secret lint passed, a structurally valid
+literal-token fixture reported the exact `[admin].token` warning, and
+`-strict -quiet` returned 2. The importer-tagged binary assessed and converted
+the NGINX fixture with `manual_action_required` (exit 3), wrote both JSON
+reports and a candidate, and linted that candidate successfully. This is a
+first-run regression smoke, **not** the long-running evidence still needed for
+Y1-08/Y1-09 under ADR 0005. Windows service installation and Console rollback
+were not exercised.
 
 ### 2026-09-27 — Storage headroom under the Wave-5 disk-exhaustion scenario (#437) — **executed on real Linux; advance signal present, write behavior unchanged, no path leak**
 
@@ -585,25 +685,27 @@ soak/udp: goroutines stable, heap bounded
 
 - No goroutine leak; session cap held; every reaped session tore down fully.
 
-> The authoritative GA-soak artifact is the Linux release-gate `soak-results`
-> produced by the `v1.28.0` tag-triggered workflow. The local run above
-> demonstrates the harness is healthy and the stream (udp-churn) data path
-> is leak-free under sustained load. Link the artifact below when the CI run
-> completes.
+> **2026-09-27 evidence correction:** the `v1.28.0` release-gate artifact
+> ran five minutes and is a smoke under ADR 0005, not a qualifying GA soak.
+> The local run above demonstrates the harness and stream data path during
+> that brief window; consult later feature-specific runs for the long-run gate.
 >
 > Artifact: pending -- add the GitHub Actions run URL once the release-gate workflow completes.
 
 ### 2026-07-03 — release soak queued (v1.29.0 tag)
 
 Tag `v1.29.0` pushed at 2026-07-03; the release workflow triggered the full
-**5-minute ADR-0005 soak gate** (`SOAK_DURATION=5m`, `SOAK_WORKERS=32`) over
+**5-minute release smoke gate** (`SOAK_DURATION=5m`, `SOAK_WORKERS=32`) over
 both the **proxy** and **udp-churn** scenarios. This run exercises all features
 including the three newly queued ones: **HTTP/3 over QUIC (Y1-11)**, **WASM
 plugins (Y2-02)**, and **L4 stream proxy (Y2-03)** (UDP-churn scenario directly
 covers the L4 stream data path). They were later completed during the 2026-07-11
 through 2026-07-13 Linux evidence pass for the 1.32 release-track documentation,
 so the historical queue entry should be read as "queued initially, completed
-later" rather than "still pending".
+later" rather than "still pending". The following historical table used
+"soaked" for the release smoke; those labels do not by themselves establish
+the long-running ADR 0005 gate. The current [per-feature tracking](status.md#soak-tracking-post-ga-gate)
+distinguishes qualifying runs from still-pending evidence.
 
 **Local Windows runs** (2026-07-03, 2026-07-04): proxy soak fails at 32 workers
 and 16 workers — Windows ephemeral port exhaustion is a persistent client-side
@@ -1002,8 +1104,9 @@ or timeout errors.
 >
 > **OTel schema-URL conflict:** `internal/observability/tracing.go` imported `semconv/v1.39.0` while the build pulled `otel v1.44.0` (which uses `semconv/v1.41.0`). `resource.Merge()` failed with mismatched schema URLs, preventing tracer initialization. Fixed by updating the import to `semconv/v1.41.0`.
 
-> The authoritative GA-soak artifact is the Linux release-gate `soak-results`
-> produced by the `v1.30.0` tag-triggered workflow.
+> **2026-09-27 evidence correction:** the five-minute `v1.30.0` release
+> artifact is a smoke; the separate eight-hour Phase 2A run below is the
+> qualifying consolidated evidence for the features it actually exercises.
 
 ### 2026-07-05 — Phase 2A consolidated burn-in COMPLETED (local, 8 hours, 50 workers, ALL features)
 
@@ -1123,6 +1226,11 @@ Feature: L4 stream proxy (#9)
 
 Script: `scripts/test-nginx-importer.ps1`
 
+> **2026-09-27 harness correction:** this dated result is preserved as recorded.
+> The current script checks the importer's `manual_action_required` exit 3 and
+> JSON report for this fixture; the original script expected exit 0 and could
+> no longer serve as a regression check. See the current audit D19.
+
 - `jul import nginx examples/migrate/nginx.conf` → `tmp/nginx-imported.toml`
 - Lint passes (0 errors, 0 warnings)
 - Verified: HTTP listener `:80`, HTTPS listener `:443`, `proxy_pass = "http://app"`, `least_conn` strategy
@@ -1135,6 +1243,13 @@ Script: `scripts/test-nginx-importer.ps1`
 #### Validation 2 — Zero-config + secrets lint (#5)
 
 Script: `scripts/test-zero-config.ps1`
+
+> **2026-09-27 harness correction:** the current script uses a temporary site,
+> repository-relative paths and only stops its own child process. The original
+> contained a machine-specific path and force-stopped any owner of port 18080.
+> The current strict-warning exit is 2, not the historical exit 1 stated below.
+> The July outcome is historical; the separate 2026-09-27 Windows CI smoke above
+> exercises the corrected script without retroactively changing that record.
 
 - `jul run --serve testdata/www --listen 127.0.0.1:18080` → returns 200 for `/`
 - `jul lint -config burn-in-phase2a.toml` → 0 errors, 0 warnings (admin token uses `${env:JUL_ADMIN_TOKEN}`)

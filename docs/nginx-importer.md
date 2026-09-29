@@ -1,6 +1,6 @@
 # NGINX config importer
 
-> Base importer: **Y1-09, GA/soaked** · Assessment/provenance/includes: **MIG-ASSESS, Beta/merged** · Build tag: `importer`
+> Base importer: **Y1-09, GA/soaked** · Assessment/provenance/includes: **MIG-ASSESS, Beta/released in v2.0.0** · Build tag: `importer`. Later bounded translations and E2E evidence on `main` are not in that tag. The base importer is in the stable release; its cited five-minute validation is smoke, while a [separate post-release one-hour run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features) covers the base single-file conversion path.
 
 A best-effort migration aid that converts NGINX configuration into Jul.IA TOML.
 Common HTTP, server, location, upstream, TLS, compression, static-file, proxy,
@@ -576,18 +576,18 @@ the released GA contract.
 | Performance | Published parse and translate benchmark baselines. |
 | Limitations | Explicit unsupported-directive and semantic-difference list; no full NGINX emulation claim. |
 | Compatibility | The documented conversion CLI and generated Jul configuration behavior are governed by [compatibility.md](compatibility.md). |
-| Soak / validation | [Released importer validation evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts). |
+| Soak / validation | The [2026-09-28 exact-head one-hour run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features) meets ADR 0005's per-feature floor for 3,600 repeated clean/blocking single-file conversion and lint cycles. Fresh processes and two small fixtures limit the inference; the released five-minute validation remains smoke. Assessment, provenance and includes have separate Beta evidence. |
 | Runnable example | `examples/migrate/nginx.conf` through ordinary conversion mode. |
 | Security | Parser failure containment, secret-safe diagnostics, and use on a trusted migration host. |
 | Fuzzing | `FuzzTranslate` covers parse, translate, and marshal round trip. |
 | Operable surface | `jul import nginx -o <file> <nginx.conf>`. |
 
-### Assessment, provenance, and includes — MIG-ASSESS (`Beta` / `merged`)
+### Assessment, provenance, and includes — MIG-ASSESS (`Beta` / `released`)
 
 Schema-v2 human/JSON assessment, stable findings and guidance, source spans,
-target mappings, and bounded root-confined include traversal are merged on
-current `main`. They are not contained in the older released GA record and
-have not completed a separate stable-release and long-running-soak promotion.
+target mappings, and bounded root-confined include traversal shipped in
+v2.0.0 with separate Beta maturity. They do not inherit the older base
+importer's GA evidence; feature-specific GA/soak evidence remains open.
 Their machine contract and operating boundary are documented in
 [nginx-assessment.md](nginx-assessment.md) and tracked explicitly in
 [status.md](status.md).

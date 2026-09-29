@@ -6,7 +6,7 @@ before they reach production.
 
 This is **Y1-08**, in **core** — no build tag.
 
-> **Maturity:** **GA** (see [ADR 0003](adr/0003-maturity-and-ga.md)).
+> **Maturity:** **GA / soaked**, released in v2.0.0. Its five-minute release validation remains a smoke; the [separate 2026-09-28 feature run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features) meets [ADR 0005](adr/0005-soak-post-ga-gate.md) for zero-config serve/proxy plus lint, with the stated workload limits.
 
 ## Contents
 
@@ -23,14 +23,19 @@ Two CLI shortcuts synthesise a runnable config in-memory — no file is written:
 
 ```bash
 # Serve a directory
+mkdir -p public
+printf 'Hello from Jul\n' > public/index.html
 jul run --serve ./public --listen :8080
 
-# Proxy to a backend
+# Or proxy to an already-running backend on port 3000
 jul run --proxy 127.0.0.1:3000 --listen :8080
 ```
 
-Both modes apply production-ready defaults (compression on, standard timeouts,
-index fallback) so the result is immediately usable.
+Both modes enable compression and standard timeouts. Static mode looks for
+`index.html`; proxy mode needs a reachable backend. The default listener binds
+`:8080` without TLS or admin authentication. Treat these shortcuts as local
+starting points and choose an appropriate listener, TLS and deployment policy
+before exposing them to untrusted networks.
 
 ### Synthesizers
 
@@ -45,18 +50,25 @@ produces an equivalent config).
 
 ## `jul lint`
 
-`jul lint [-config <file>] [-strict] [-json] [-quiet]` inspects a configuration
-for best-practice and security issues that are syntactically valid but
-operationally risky.  It produces **warnings** (`SeverityWarning`) — unlike
-`Validate`, which returns **errors** that block startup.
+`jul lint [-config <file>] [-strict] [-json] [-quiet]` parses and validates a
+configuration, then reports operational and security findings. Most lint
+findings are **warnings**; a few trust-boundary findings have `error` severity
+and fail even without `-strict`. Managed-mode route IDs can produce `info`
+suggestions. `Validate` errors also fail the command.
 
 Output formats:
 
 - **Human** (default): one line per diagnostic with severity, field, message,
   and hint.
-- **JSON** (`-json`): machine-readable array of `Diagnostic` objects for CI
-  gates.
-- **Quiet** (`-quiet`): exit code only (non-zero if any warning).
+- **JSON** (`-json`): one object with `source`, optional `errors`, and optional
+  `warnings` (an array of diagnostic objects, each with its own severity).
+- **Quiet** (`-quiet`): suppress advisory output; errors still appear. Use
+  `-strict -quiet` for a silent nonzero exit on warnings. Without `-strict`,
+  warnings alone exit 0. `-json -quiet` still emits the JSON object.
+
+Exit codes are `0` for no errors (and warnings without `-strict`), `1` for
+validation or error-severity lint findings, and `2` for warnings under
+`-strict` or invalid flag usage. `info` suggestions never fail `-strict`.
 
 ### Diagnostic schema
 
@@ -71,23 +83,20 @@ Output formats:
 
 ## Lint checks matrix
 
-| # | Check | Trigger | Severity | Rationale | Test |
-| --- | --- | --- | --- | --- | --- |
-| L1 | Empty server | `len(Locations) == 0` and no `redirect_https` | warning | Every request returns 404 | `TestLintEmptyServerWarns` |
-| L2 | HTTPS redirector exempt | `redirect_https` set | — | Intentional no-location server | `TestLintEmptyServerWithRedirectIsClean` |
-| L3 | Duplicate location match | Same `(type, path)` pair seen before | warning | Later block is unreachable | `TestLintDuplicateLocation` |
-| L4 | Directory listing enabled | `directory_listing = true` | warning | Exposes file names to clients | `TestLintDirectoryListing` |
-| L5 | TLS without min_version | `tls.enabled && tls.min_version == ""` | warning | Relies on runtime default | `TestLintTLSMinVersion` |
-| L6 | Exposed admin without token | Admin not loopback and no token | warning | Unauthenticated remote control | `TestLintAdminExposed` |
-| L7 | Exposed admin without TLS | Admin not loopback and `admin.tls` not enabled | warning | Credentials and config travel in cleartext | `TestLintAdminExposedWithoutTLS` |
-| L8 | Literal admin token | `admin.token` non-empty and not a `${…}` ref | warning | Secret committed to config file | `TestLintLiteralSecret` |
-| L9 | Literal Consul token | `discovery.consul.token` non-empty, not `${…}` | warning | ACL token committed to config file | `TestLintLiteralSecret` |
-| L10 | Literal Kubernetes token | `discovery.kubernetes.token` non-empty, not `${…}` | warning | SA token committed to config file | `TestLintLiteralSecret` |
-| L11 | Compression disabled | `!compression.enabled` | warning | Wasted bandwidth on text responses | `TestLintCompressionDisabled` |
+These are the material categories, not an exhaustive numbered rule inventory.
+The implementation in `internal/config/lint*.go` and the filesystem checks in
+`cmd/jul/cli.go` are authoritative when rules are added.
 
-All rules are **conservative** (low false-positive rate).  A clean config
-(strong TLS, references for secrets, loopback admin, compression on, no
-duplicates, no directory listing) produces **zero diagnostics**.
+| Area | Examples of findings | Severity | Evidence |
+| --- | --- | --- | --- |
+| Route and response policy | Provably shadowed locations, risky header predicates, CORS/response-header interactions, directory listing, missing managed route ID | warning, error for forwarded-header routing, or info for route ID | `lint_match.go`, `lint_cors.go`, `lint_route_id_test.go` |
+| Listener and admin | Conflicting listener-scoped settings, missing TLS minimum, off-loopback admin without token or TLS | warning | `lint.go`, `listener_scope_test.go` |
+| Client and backend trust | Broad trusted-proxy ranges, unverified backend or discovery TLS, union trust without peer identity | warning or error for disabled peer verification | `lint.go`, `backendtls_test.go`, `discovery_trust_test.go` |
+| Secrets and operational defaults | Literal admin/RBAC/Consul/Kubernetes tokens, disabled compression, ignored legacy log destinations | warning | `lint.go`, `lint_test.go` |
+| Upstream resilience and filesystem | Admission sizing or multiplexed connection bounds; managed config path and file-owned artifact checks | warning or error depending on path condition | `lint_resilience.go`, `cmd/jul/cli.go`, `internal/app` |
+
+Lint is advisory except for its error-severity findings. A clean lint result
+does not prove that a deployment is secure or that backends are reachable.
 
 ## Benchmarks
 
@@ -125,26 +134,31 @@ A typical config lints in **< 1 ms**, including parse + validate + lint.
 
 | Threat | Risk | Mitigation |
 | --- | --- | --- |
-| **Literal secrets in VCS** | Admin, Consul, or K8s tokens committed to repo | Checks L7–L9 flag any literal value in a sensitive field; CI gate `jul lint -json` in pre-commit |
-| **Admin API exposed to internet** | `0.0.0.0:9090` with no token = remote code execution | Check L6 warns when admin binds non-loopback without authentication |
-| **Weak TLS default** | Missing `min_version` may negotiate an obsolete protocol | Check L5 encourages explicit `1.3` or `1.2` |
-| **Information disclosure** | `directory_listing` leaks directory contents | Check L4 flags it |
-| **Unreachable config** | Duplicate location blocks shadow later rules | Check L3 surfaces the collision |
-| **Lint bypass via `-strict` confusion** | Operator thinks `-strict` upgrades warnings to errors, but they skip fixes | `-strict` makes warnings fatal; document the difference from `Validate` errors |
+| **Literal secrets in VCS** | Admin, RBAC, Consul, or K8s tokens committed to repo | Lint flags literals in these fields without printing their values; run `jul lint -strict` in CI if warnings should fail the gate |
+| **Admin API exposed to internet** | An off-loopback admin listener without a token grants unauthenticated control | The admin listener checks warn on missing authentication and TLS; use loopback or authenticated TLS |
+| **Unspecified TLS minimum** | Operators may assume a stronger protocol floor than the runtime default | The TLS minimum-version check suggests explicitly choosing `1.3` or `1.2` |
+| **Information disclosure** | `directory_listing` exposes directory contents | The route check warns when it is enabled |
+| **Unreachable route** | An earlier location provably subsumes a later one | The route matcher lint warns on provable shadowing, including predicates |
+| **Lint bypass via `-strict` confusion** | Operator treats a zero exit without `-strict` as proof that no warnings exist | Use `-strict` in a warning-sensitive gate; error-severity trust findings fail either way |
 | **False sense of security** | Clean lint does not mean secure deployment | Lint is advisory; pair with `Validate`, `jul check`, and the [hardening guide](../SECURITY.md#hardening-defaults--recommendations) |
 
 ## GA status
 
-Per [ADR 0003](adr/0003-maturity-and-ga.md), zero-config + `jul lint` is **GA**:
-the soak test (criterion 5) was validated on 2026-07-06.
+Per [ADR 0003](adr/0003-maturity-and-ga.md) as amended by
+[ADR 0005](adr/0005-soak-post-ga-gate.md), zero-config + `jul lint` is
+**GA / soaked** for the released zero-config serve/proxy shortcuts and lint.
+The [2026-09-28 feature-specific one-hour run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features)
+exercised both shortcuts and lint. It does not cover public ingress, broad
+concurrency or every lint configuration. The 2026-07-06 validation remains a
+five-minute smoke.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
 | 1 | Behaviour matrix published | ✅ [Lint checks matrix](#lint-checks-matrix) + [Synthesizers table](#synthesizers) |
 | 2 | Published benchmark numbers | ✅ [Benchmarks](#benchmarks) |
-| 3 | Documented known-limitations | ✅ Conservative rules, advisory-only, does not replace hardening |
+| 3 | Documented known-limitations | ✅ Conservative warnings plus error-severity trust findings; does not replace hardening |
 | 4 | Stable config/API contract (semver-guarded) | ✅ `Diagnostic` schema and `Lint` API frozen under [compatibility policy](compatibility.md) |
-| 5 | Long-running soak test passed | ✅ validated via test-zero-config.ps1 2026-07-06 — [evidence](soak-evidence.md#2026-07-06--phase-2b-soak-preparation-local-windows-5-min-smoke--validation-scripts) |
+| 5 | Long-running soak test (post-GA gate) | ✅ [Exact-head 3600.667s run](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features); five-minute release validation remains smoke |
 | 6 | Runnable example + docs | ✅ `jul run --serve` / `jul run --proxy` CLI examples |
 | 7 | Security / threat note | ✅ [Security / threat note](#security--threat-note) |
 | 8 | Fuzzing where parsing is involved | ✅ `FuzzParse` in `internal/config/fuzz_test.go` (TOML → Config round-trip) |

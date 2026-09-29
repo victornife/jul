@@ -32,9 +32,19 @@ preflight rather than silently ignored.
 > and are authoritative over the field-level facts. **Schema validity is
 > necessary and not sufficient: Jul's runtime configuration validation
 > (`jul check`) remains authoritative**, and a document may satisfy the schema
-> while `jul lint` still reports an error-severity finding.
+> while `jul lint` still reports an error-severity finding. `jul check` validates
+> the configuration and stateless runtime prerequisites; it does not confirm
+> that external files and backends will exist when the server starts. Start the
+> server and exercise its routes before treating a deployment as verified.
 
-A minimal, working example:
+An illustrative combined configuration follows. To run it, provide
+`JUL_ADMIN_TOKEN` in the Jul process environment, create
+`/srv/www/example/index.html`, start HTTP backends on `127.0.0.1:3000` and
+`127.0.0.1:3001`, and use a binary with the `console` build tag if you want
+the web Console. Paths in this example are host paths, not bundled assets;
+see [Getting started](getting-started.md) for a minimal runnable first run.
+With the token set, `jul check -config <path>` validates this configuration;
+without it, runtime preflight fails rather than starting with an empty token.
 
 ```toml
 [global]
@@ -151,11 +161,19 @@ Durations use Go syntax: `30s`, `5m`, `1h`. Sizes use `512k`, `1m`,
 runtime; parsing rejects overflow before unit multiplication. Zero is accepted
 only with the meaning documented for the specific field.
 
-Run `jul check -config server.toml` before deployment for structural validation
-plus runtime preflight. `jul lint` adds advisory best-practice findings; it never
+Run `jul check -config server.toml` before deployment for structural validation,
+stateless runtime preflight, and an immediate-close check of configured static
+roots. The `-skip-static-roots` option is for validating templates whose content
+directories have not been provisioned; it weakens the deployment check. Neither
+form binds listeners or probes live backends. `jul lint` adds advisory
+best-practice findings; it never
 downgrades a runtime-invalid value to a warning. `jul fmt` validates before
 printing or writing canonical TOML, so formatting cannot persist an invalid
 candidate.
+
+The static-root check is a post-v2.0.0 development change. The published
+v2.0.0 binary does not open static roots during `jul check`; verify their
+presence and access separately before starting that package.
 
 ### Structured sparse global operations
 
@@ -861,7 +879,7 @@ return = 200
 | `rewrites` | array | Regex rewrite rules (`pattern`, `replacement`, `flag`) |
 | `cache` | bool | Enable response caching for this location (requires `[cache].enabled`) |
 | `client_max_body_size` | size | Override the server default for this location |
-| `rate_limit` | table | Override the global `[rate_limit]` for this location (`enabled`, `key`, `rate`, `burst`; `max_conns` is ignored) |
+| `rate_limit` | table | Override the global `[rate_limit]` for this location (`enabled`, `key`, `rate`, `burst`; per-location `max_conns` is rejected by validation) |
 
 ---
 
@@ -1266,7 +1284,7 @@ max_conns = 1000
 | `key` | string | Bucket identity: `ip` (client address, default), `header:<Name>`, or `jwt:<claim>` |
 | `rate` | int | Sustained requests/second allowed per key |
 | `burst` | int | Maximum momentary burst above `rate` (defaults to `rate`) |
-| `max_conns` | int | Concurrent connections per listener; `0` = unlimited. Active only when the block is `enabled`; listener-global, so it is ignored on per-location overrides |
+| `max_conns` | int | Concurrent connections per listener; `0` = unlimited. Active only when the block is `enabled`; per-location use is rejected by validation. Hot-reloadable (#106). |
 
 ---
 
@@ -1429,8 +1447,10 @@ with — does not replace —** the bearer-token/RBAC layer: the handshake itsel
 gates the connection, and every request that reaches the handler still goes
 through the normal auth chokepoint, so a valid client certificate never
 bypasses the token or RBAC check and a valid token never bypasses the
-certificate requirement. The whole block is restart-required, like the data
-plane's mutual TLS — there is no hot path for handshake policy.
+certificate requirement. The admin listener's client-auth block remains
+restart-required. Data-plane `servers.*.tls.client_auth` policy and CA/CRL
+content are hot-reloadable on retained TLS listeners on post-v2.0.0 `main`
+(#486; Beta); see [mTLS](mtls.md#operational-notes).
 
 ```toml
 [admin.tls.client_auth]
@@ -1838,13 +1858,15 @@ parse findings instead of scraping text. Field names are lowercase and stable.
 | `source` | string | Config source name (path or `stdin`) |
 | `errors` | string[] | Validation errors; omitted when empty. Any entry ⇒ exit code `1` |
 | `warnings` | object[] | Lint findings; omitted when empty |
-| `warnings[].severity` | string | `"warning"` or `"error"` — always a string, never a number |
+| `warnings[].severity` | string | `"info"`, `"warning"`, or `"error"` — always a string, never a number. The legacy `warnings` key also carries informational suggestions. |
 | `warnings[].field` | string | Config path the finding applies to; omitted when empty |
 | `warnings[].message` | string | Human-readable description of the finding |
 | `warnings[].hint` | string | Suggested fix; omitted when empty |
 
-Exit codes: `0` = no errors, `1` = validation error(s), `2` = warnings present
-under `-strict`.
+Exit codes: `0` = no errors (ordinary warnings without `-strict` and `info`
+suggestions do not fail), `1` = validation or error-severity lint finding,
+`2` = ordinary warnings under `-strict` or invalid flags. `-quiet` suppresses
+advisory rendering without changing the exit status.
 
 ### `jul check -json`
 

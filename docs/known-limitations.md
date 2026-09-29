@@ -1,7 +1,7 @@
 # Jul.IA — Known limitations
 
 This page separates active defects from deliberate product boundaries,
-merged-but-unreleased constraints, restart-bound/deferred behavior and historical
+release boundaries, restart-bound/deferred behavior and historical
 corrections. A limitation is not a place to hide a correctness defect, and a
 closed issue must not remain phrased as future work.
 
@@ -15,28 +15,28 @@ This page is not an audit authority and does not waive a current finding. The
 race, fuzz, cross-platform, security and documentation gates pass; newly
 discovered correctness/security findings still pre-empt the roadmap.
 
-## Implemented on `main`, not yet stable GA publication
+## Publication and maturity boundaries
 
-- **Admin TLS/mTLS, external API and remote CLI:** merged Beta surfaces; none
-  inherits the older admin/Console maturity or soak record.
-- **Selected runtime-policy hot reload:** merged Beta; explicit restart
-  boundaries remain and universal hot reload is not claimed.
-- **HTTP over Unix-domain upstreams:** merged Beta for named plaintext HTTP/1.1
-  pools. TLS, HTTP/2 and direct Unix `proxy_pass` remain outside its contract.
-- **Routing and response policy:** method/header/query predicates,
-  response-header operations and CORS are merged after the current RC.
-- **Generic resilience:** admission, retry and circuit implementations are
-  merged. Cross-protocol failure attribution now keeps client/Jul-owned
-  cancellation neutral while backend transport/protocol faults still affect
-  the circuit; stable release and long-running soak remain open.
-- **Configuration authority/generated contracts:** managed/file-owned authority,
-  drift/adoption, route identity, JSON Schema, metadata and generated reference
-  are merged. The later supported external API and remote CLI have separate
-  Beta maturity entries.
-- **NGINX assessment/provenance/includes:** schema-v2 assessment and bounded
-  source traversal are merged separately from the released base importer GA row.
-- **Auxiliary egress allow-list:** present in `v1.32.1-rc.1`; the prerelease is
-  not a stable publication.
+- **Published in stable `v2.0.0`, still Beta:** admin TLS/mTLS, external API and
+  remote CLI, selected runtime-policy hot reload, HTTP over Unix-domain
+  upstreams, routing/response policy, generic resilience, configuration
+  authority/generated contracts, NGINX assessment/provenance/includes, local
+  diagnostics/support bundles and the auxiliary egress allow-list. Publication
+  does not supply their missing feature-specific GA or soak evidence. The older
+  admin, core HTTP and base NGINX importer GA rows cover their own contracts.
+- **GA in stable `v2.0.0`:** trusted client address and backend TLS trust were
+  separately certified under #409; their manifest delivery is `soaked`.
+- **Merged on `main` after `v2.0.0`:** gRPC Health/Check probes, runtime resource
+  and storage headroom, serving WAF policy/provenance visibility, Console
+  diagnostics guidance, WASM ABI v2 response handling and consistent-hash
+  affinity. These retain separate Beta / `merged` entries in
+  [feature status](status.md); the stable tag does not contain them. Bounded
+  NGINX translation and migration E2E improvements also arrived after the tag.
+- **Remaining operational boundaries:** Unix-domain upstreams support named
+  plaintext HTTP/1.1 pools, not TLS, HTTP/2 or direct Unix `proxy_pass`.
+  Resilience keeps client/Jul-owned cancellation neutral while backend
+  transport/protocol faults affect the circuit. Selected hot reload does not
+  remove structural restart requirements. See the feature guides below.
 
 ## Deliberate product boundaries
 
@@ -467,9 +467,12 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   `jul_discovery_errors_total`.
 - **DNS TTL is not respected.** Jul.IA polls on a fixed `refresh` interval
   regardless of TTL; fast DNS changes propagate only when the poll fires.
-- **Kubernetes discovery requires a token.** The `kubernetes` tag needs a
-  service-account token with EndpointSlice read permission; misconfigured RBAC
-  returns an empty pool without an obvious error.
+- **Kubernetes discovery depends on API read access.** In-cluster service
+  accounts normally need the `list` verb on EndpointSlices in the target
+  namespace. A 403 fails that refresh, increments
+  `jul_discovery_errors_total`, and retains the last-good backend set; on a
+  first failed resolution there is no previously discovered backend to keep.
+  Check the discovery error log and RBAC when the pool remains empty.
 
 ---
 
@@ -512,9 +515,11 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 
 ## Egress allow-list ([egress.md](egress.md))
 
-- **Startup-bound.** The `[egress]` policy is built once from the startup config;
-  changing `enabled`/`allow` takes effect only after a **restart** (it is
-  restart-required, staged through `stage_restart`).
+- **Hot policy applies by consumer generation.** Changes to `egress.enabled`
+  and `egress.allow` are prepared and published on hot reload. Newly selected
+  auth, plugin, discovery, ACME and OCSP clients use the published policy;
+  in-flight work in a retired generation may finish under its prior policy.
+  See [egress reload](egress.md#reload-behaviour).
 - **Auxiliary fetches only.** It guards the server's own config-driven fetches
   (JWKS, forward-auth, discovery, ACME/OCSP, plugin `fetch`). The **data-plane
   reverse proxy** — upstream proxying and active health checks — is out of scope.

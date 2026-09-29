@@ -51,7 +51,10 @@ try {
     New-Item -ItemType Directory -Path $distRoot | Out-Null
 
     $ldflags = "-s -w -X main.version=$Version"
-    $buildTags = if ($Profile -eq "full") { "-tags `"$fullTags`"" } else { "" }
+    # Pass -tags and its space-separated value as two native arguments.
+    # PowerShell does not re-parse an interpolated string into CLI tokens.
+    $buildTags = @()
+    if ($Profile -eq "full") { $buildTags = @('-tags', $fullTags) }
 
     foreach ($target in $Targets) {
         $os, $arch = $target.Split("/")
@@ -68,24 +71,27 @@ try {
         $env:GOOS = $os
         $env:GOARCH = $arch
         $env:CGO_ENABLED = "0"
-        go build $buildTags -ldflags $ldflags -o $binPath ./cmd/jul
+        go build @buildTags -ldflags $ldflags -o $binPath ./cmd/jul
         if ($LASTEXITCODE -ne 0) { throw "go build failed for $target" }
 
         # Bundle a sample config and the matching deploy assets.
         Copy-Item (Join-Path $root "server.toml") (Join-Path $stage "server.toml")
         if ($os -eq "windows") {
-            Copy-Item (Join-Path $root "deploy/windows/install-service.ps1") $stage -ErrorAction SilentlyContinue
-        } else {
-            Copy-Item (Join-Path $root "deploy/systemd/jul.service") $stage -ErrorAction SilentlyContinue
+            Copy-Item (Join-Path $root "deploy/windows/install-service.ps1") $stage
+            Copy-Item (Join-Path $root "deploy/windows/new-secure-data-dir.ps1") $stage
+        } elseif ($os -eq "linux") {
+            Copy-Item (Join-Path $root "deploy/systemd/jul.service") $stage
+            Copy-Item (Join-Path $root "deploy/systemd/jul-readonly.service") $stage
         }
 
         # Create an archive: .zip for Windows, .tar.gz for Linux.
         if ($os -eq "windows") {
             $archive = Join-Path $distRoot "$name.zip"
-            Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $archive -Force
+            Compress-Archive -Path $stage -DestinationPath $archive -Force
         } else {
             $archive = Join-Path $distRoot "$name.tar.gz"
-            tar -czf $archive -C $stage .
+            tar -czf $archive -C $distRoot $name
+            if ($LASTEXITCODE -ne 0) { throw "tar failed for $target" }
         }
         Write-Host "Packaged $archive" -ForegroundColor Green
     }

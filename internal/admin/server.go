@@ -985,6 +985,15 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// A source-only reload reads the current file without the managed baseline
+	// check used by Apply/adoption. An external edit could otherwise become live
+	// through this legacy endpoint while the managed authority reports drift.
+	if s.currentAuthority().Mode == "managed" {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "Legacy reload is unavailable under managed config authority; use managed Apply or restart.",
+		})
+		return
+	}
 	if s.deps.Reload == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return

@@ -118,8 +118,11 @@ preserves:
   middleware.
 
 Existing HTTP/3 connections are governed by the policy used for their TLS
-handshake. Listener-level TLS and mTLS settings remain restart-bound today, so a
-policy change applies after the planned restart and to subsequent handshakes.
+handshake. On post-v2.0.0 `main`, data-plane client-auth mode, CA, CRL and SAN
+policy can reload for new HTTP/3 handshakes (#486, Beta). Other listener-level
+TLS structural settings retain their lifecycle classification; inspect the
+[generated reference](generated/config-lifecycle.md) before choosing Apply or
+staging. The admin listener's client-auth policy still requires a restart.
 
 ## Known limitations
 

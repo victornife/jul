@@ -1,6 +1,6 @@
 # Jul.IA — Soak Procedures (Linux)
 
-> Version 2.0 · Updated 2026-09-17
+> Version 2.1 · Updated 2026-09-27
 >
 > Rewritten from scratch (JUL-AUD-006): the previous version documented only
 > the in-tree `go test -tags soak` scenarios on Windows/PowerShell, but every
@@ -46,7 +46,7 @@ apply/reload path.
 
 | Component | Role |
 | --- | --- |
-| `burn-in-*.toml` | Real server configs, one per scenario. `burn-in-current.toml` is the consolidated profile covering every merged-Beta capability (JUL-AUD-004); the others are single-feature or historical-regression profiles. |
+| `burn-in-*.toml` | Real server configs, one per scenario. `burn-in-current.toml` is the consolidated v2.0.0-era profile that covered the then-selected Beta surface (JUL-AUD-004); it does not automatically cover post-release additions. The others are single-feature or historical-regression profiles. |
 | `scripts/burn-in-backend.go` | HTTP backend. `-port N` (TCP), `-unix /path.sock` (HTTP-over-Unix, #407), `-tls` (HTTPS, for `backend_tls`). Also serves `/…/slow?ms=N` (deliberately slow response), `/…/flaky?rate=N` (intermittent 500s), `/…/reset` (mid-body TCP RST via `SO_LINGER 0`), `/…/malformed[?kind=bad-chunk]` (declared-but-unfulfilled `Content-Length`, or an invalid chunk-size line), and `POST /control/kill?duration=Ns` (refuses every path for the window, then auto-restores — a scheduled kill/restore cycle without actually stopping the process) for fault-injection load patterns (JUL-AUD-019). |
 | `scripts/stream-echo.go` | TCP echo backend for `[[stream]]` L4 profiles. |
 | `scripts/burn-in-load.go` | HTTP/HTTPS load generator. Mode flags select the traffic pattern (see below); `-duration`/`-workers` control load. |
@@ -60,8 +60,8 @@ apply/reload path.
 | Flag | Exercises |
 | --- | --- |
 | `-full` | The July Phase 2A feature set (cache, rate limit, WAF, auth, compression, TLS/mTLS) — use with `burn-in-full.toml`. |
-| `-phase2a` | Transcoding, passthrough, discovery, secrets, zero-config, WASM — use with `burn-in-phase2a.toml`. |
-| `-current` | The merged-Beta surface: resilience pools, Unix upstream, DNS discovery, `backend_tls`, routing predicates/response headers/CORS, WASM plugin — use with `burn-in-current.toml` (JUL-AUD-004). |
+| `-phase2a` | HTTP proxy/static, DNS discovery, WASM and TLS/mTLS routes in `burn-in-phase2a.toml`. gRPC listeners and secret references are configured, but this request mix does not exercise gRPC, secret rotation, zero-config synthesis, `jul lint`, or the NGINX importer. Do not count it as Y1-08/Y1-09 soak evidence. |
+| `-current` | The historically named v2.0.0-era consolidated profile: resilience pools, Unix upstream, DNS discovery, `backend_tls`, routing predicates/response headers/CORS, WASM plugin — use with `burn-in-current.toml` (JUL-AUD-004). It does not imply every feature currently on `main` is exercised. |
 | `-cache`, `-ratelimit`, `-waf`, `-compress`, `-http3` | Single-feature patterns for the matching `burn-in-<feature>.toml`. |
 | `-slow-client` | Paces a POST body over ~3.2s, exercising slow-client/read-timeout handling. |
 | `-slow-upstream` | Requests `/bounded/slow?ms=N`, exercising pending-timeout/circuit accounting against a genuinely slow backend. |
@@ -86,6 +86,41 @@ make config-check            # every shipped .toml still loads
 ```
 
 All three must pass before proceeding to a real-binary run.
+
+## Feature-specific Y1-08 and Y1-09 candidates
+
+`scripts/feature-soak.py` supplies real-binary Linux workloads for the two
+features whose long-running evidence is still open. Build the importer-enabled
+binary once, then run each workload separately for at least one hour:
+
+```sh
+go build -tags importer -o /tmp/jul-feature-soak ./cmd/jul
+python3 scripts/feature-soak.py zero-config --jul /tmp/jul-feature-soak \
+  --seconds 3600 --out /tmp/jul-soak-zero-config
+python3 scripts/feature-soak.py importer --jul /tmp/jul-feature-soak \
+  --seconds 3600 --out /tmp/jul-soak-importer
+```
+
+- **Y1-08:** two live `jul run` processes serve a temporary static page and
+  proxy a local backend under concurrent HTTP traffic. The same binary repeatedly
+  lints a valid env-secret config and verifies a literal-token warning plus the
+  strict/quiet refusal. The artifact records counts and both processes' RSS/FD
+  samples and enforces generous growth bounds.
+- **Y1-09:** each cycle invokes the importer on a clean single-file config and
+  a blocking directive, checks the expected exit and assessment, lints both
+  candidates, and requires byte-stable output hashes. This tests repeated CLI
+  invocations, the released single-file path and safe manual-action behavior;
+  it does not claim long-lived parser-process leak evidence, include traversal,
+  or general NGINX equivalence.
+
+The [feature soak workflow](../.github/workflows/feature-soak.yml) first runs a
+20-second preflight, then runs two independent 3600-second jobs on Linux and
+uploads `summary.json` and server logs. Its result is **candidate evidence**:
+inspect the exact SHA, elapsed active workload, resource samples, failure
+counts and artifacts before changing either feature's maturity or criterion 5.
+Keep the artifact and a dated conclusion in [soak-evidence.md](soak-evidence.md)
+and the [soak evidence directory](../soak-artifacts/README.md). A short preflight
+or a long run of the generic Phase 2A profile does not qualify.
 
 ## Procedure A — 5-minute local validation
 
@@ -179,7 +214,7 @@ sleep 2
 # Server
 ./jul -config burn-in-current.toml > "$DIR/jul.log" 2>&1 &
 
-# Load: the merged-Beta surface, sustained
+# Load: the v2.0.0-era consolidated profile, sustained
 go run scripts/burn-in-load.go -duration 24h -workers 64 -current \
   -health "http://127.0.0.1:8080/bounded/" | tee "$DIR/load-current.log" &
 

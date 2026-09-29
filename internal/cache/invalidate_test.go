@@ -354,6 +354,33 @@ func TestLegacyVaryStubFailsClosed(t *testing.T) {
 	}
 }
 
+// Pre-fix entries may have been generated for multiple request field lines but
+// keyed only by their first value. Even a legacy stub with a valid membership
+// list must miss under the new encoding after restart.
+func TestFirstValueVaryEntriesFailClosedAfterUpgrade(t *testing.T) {
+	c, _ := conformanceCache(t, memCfg())
+	h := varyHandler(c)
+	r := httptest.NewRequest(http.MethodGet, "http://x/doc", nil)
+	r.Header.Set("Accept", "application/json")
+	base := key(r)
+	oldKey := base + "\x00accept\x1fapplication/json"
+	c.set(oldKey, &Entry{
+		Status:     http.StatusOK,
+		Header:     http.Header{"Cache-Control": {"max-age=3600"}},
+		Body:       []byte("legacy-cross-variant"),
+		CreatedAt:  c.clock(),
+		ExpiresAt:  c.clock().Add(time.Hour),
+		Vary:       []string{"Accept"},
+		VaryValues: map[string]string{"Accept": "application/json"},
+	})
+	c.set(base, &Entry{IsVaryStub: true, Vary: []string{"Accept"}, Variants: []string{oldKey}})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Header().Get("X-Cache") != stateMiss || rec.Body.String() != "variant:application/json" {
+		t.Fatalf("legacy variant was reused: state %q, body %q", rec.Header().Get("X-Cache"), rec.Body.String())
+	}
+}
+
 // TestChangedVaryReplacesTheVariantSet proves an origin that changes what it
 // varies on does not leave the old variants reachable.
 func TestChangedVaryReplacesTheVariantSet(t *testing.T) {

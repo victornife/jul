@@ -154,7 +154,7 @@ func (e *Entry) matchesVary(req *http.Request) bool {
 		if name == "*" {
 			return false // Vary: * is never reusable
 		}
-		if req.Header.Get(name) != e.VaryValues[name] {
+		if varyRequestValue(req.Header, name) != e.VaryValues[name] {
 			return false
 		}
 	}

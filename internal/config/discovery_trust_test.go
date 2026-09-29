@@ -147,6 +147,35 @@ func TestLintFlagsConsulTokenOverPlaintext(t *testing.T) {
 	}
 }
 
+func TestLintFlagsKubernetesPlaintextAPI(t *testing.T) {
+	for _, tt := range []struct {
+		name, apiServer string
+		want            bool
+	}{
+		{"plaintext", "http://127.0.0.1:8001", true},
+		{"verified TLS", "https://api.internal:6443", false},
+		{"in-cluster default", "", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &DiscoveryConfig{Type: "kubernetes", Kubernetes: &KubernetesDiscovery{
+				Namespace: "default", Service: "app", APIServer: tt.apiServer,
+			}}
+			var found bool
+			for _, diag := range Lint(discoveryConfig(d)) {
+				if strings.HasSuffix(diag.Field, ".kubernetes.api_server") {
+					found = true
+					if diag.Severity != SeverityWarning {
+						t.Errorf("severity = %v, want warning", diag.Severity)
+					}
+				}
+			}
+			if found != tt.want {
+				t.Fatalf("plaintext warning = %v, want %v", found, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateConsulTLSUsesTheSharedRules(t *testing.T) {
 	// The block is the same type as [upstreams.backend_tls], so its
 	// self-contradictory combinations are rejected by the same validator.

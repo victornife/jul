@@ -35,13 +35,16 @@ func newConsulDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discoverer,
 	if c == nil || strings.TrimSpace(c.Service) == "" {
 		return nil, fmt.Errorf("consul discovery requires consul.service")
 	}
+	if strings.ContainsAny(c.Service, "/\\?#") {
+		return nil, fmt.Errorf("consul discovery: service must be a single URL path segment")
+	}
 	addr := strings.TrimSpace(c.Address)
 	if addr == "" {
 		addr = "http://127.0.0.1:8500"
 	}
 	base, err := url.Parse(addr)
-	if err != nil || base.Host == "" {
-		return nil, fmt.Errorf("consul discovery: invalid address %q", c.Address)
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Hostname() == "" || base.User != nil || base.RawQuery != "" || base.ForceQuery || base.Fragment != "" {
+		return nil, fmt.Errorf("consul discovery: address must be an HTTP(S) base URL without credentials, query, or fragment")
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + "/v1/health/service/" + c.Service
 	q := base.Query()
@@ -60,9 +63,17 @@ func newConsulDiscoverer(cfg config.DiscoveryConfig, dial DialFunc) (Discoverer,
 	}
 	base.RawQuery = q.Encode()
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	// A redirect could forward X-Consul-Token to another origin. Treat a
+	// redirected discovery response as an error and retain last-good targets.
+	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	if dial != nil {
+		// The guarded dial must see the configured Consul host, not an
+		// environment proxy's address. Keep default proxy behavior when the
+		// egress policy is disabled and no guarded dial was supplied.
+		t.Proxy = nil
 		t.DialContext = dial
 	}
 	// Boundary F: the agent that supplies this pool's addresses is authenticated

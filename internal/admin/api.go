@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -744,8 +745,9 @@ func bindEffectiveBaseline(s *Server, ctx *ApplyRequestContext, fallback *config
 }
 
 // adminGuardResponse is the 409 body when an apply would change a setting that
-// governs admin reachability (disabling the admin interface, its listen address,
-// its token, or the web console) without explicit confirmation. The write was
+// governs admin reachability (disabling the admin interface, changing its listen
+// address or TLS policy, rotating its token, or disabling the web console)
+// without explicit confirmation. The write was
 // NOT performed; the operator re-sends with ?confirm_admin=true to proceed. This
 // guards against silently locking oneself out of the console with a single edit.
 type adminGuardResponse struct {
@@ -758,7 +760,8 @@ type adminGuardResponse struct {
 // adminLockoutChanges reports the admin-reachability changes between the running
 // config (prev) and a proposed one (next) that could lock an operator out of the
 // console: disabling the admin interface, moving its listen address, rotating
-// its token, or disabling the web console. It returns one human-readable
+// its token, changing its TLS/client-certificate policy, or disabling the web
+// console. It returns one human-readable
 // description per such change, or nil when none apply. Changes that only widen
 // access (enabling admin or the console) are intentionally not flagged, and the
 // guard is a no-op when admin is not currently serving.
@@ -778,10 +781,25 @@ func adminLockoutChanges(prev, next config.AdminConfig) []string {
 	if prev.Token != next.Token {
 		changes = append(changes, "the admin token would change (your current session would need to re-authenticate)")
 	}
+	if adminTLSReachabilityChanged(prev.TLS, next.TLS) {
+		changes = append(changes, "the admin TLS or client-certificate policy would change (your current connection may need different trust or credentials)")
+	}
 	if prev.ConsoleEnabled() && !next.ConsoleEnabled() {
 		changes = append(changes, "the web console would be disabled (only the basic config page would remain)")
 	}
 	return changes
+}
+
+func adminTLSReachabilityChanged(prev, next *config.AdminTLSConfig) bool {
+	prevEnabled := prev != nil && prev.Enabled
+	nextEnabled := next != nil && next.Enabled
+	if prevEnabled != nextEnabled {
+		return true
+	}
+	if !prevEnabled {
+		return false
+	}
+	return !reflect.DeepEqual(prev, next)
 }
 
 // candidateRequiresAdminManage reports whether the proposed config change
@@ -820,6 +838,13 @@ func rbacPrincipalsEqual(a, b []config.AdminPrincipal) bool {
 			!existing.ExpiresAt.Equal(p.ExpiresAt) {
 			return false
 		}
+		// Compare the complete principal after normalizing fields already
+		// compared semantically. New credential-policy fields must fail closed.
+		existing.Token, p.Token = "", ""
+		existing.ExpiresAt, p.ExpiresAt = time.Time{}, time.Time{}
+		if !reflect.DeepEqual(existing, p) {
+			return false
+		}
 	}
 	return true
 }
@@ -841,6 +866,10 @@ func rbacRolesEqual(a, b []config.AdminRole) bool {
 			return false
 		}
 		if !stringSlicesEqualUnordered(existing.Permissions, r.Permissions) {
+			return false
+		}
+		existing.Permissions, r.Permissions = nil, nil
+		if !reflect.DeepEqual(existing, r) {
 			return false
 		}
 	}
@@ -930,7 +959,8 @@ func (s *Server) authorizeConfigTransition(w http.ResponseWriter, r *http.Reques
 }
 
 // authorizeTrustTransition requires config:trust for any change to a
-// listener's trusted-proxy policy, whatever route produced the candidate.
+// listener's trusted-proxy or inbound PROXY-protocol policy, whatever route
+// produced the candidate.
 //
 // Gating the dedicated endpoint alone would be theatre: the same change is
 // expressible through the generic structured patch surface, so the check is on
@@ -939,29 +969,41 @@ func (s *Server) authorizeConfigTransition(w http.ResponseWriter, r *http.Reques
 // authentication, rate limiting, the WAF and the audit trail, so it is held to
 // its own grant.
 func (s *Server) authorizeTrustTransition(w http.ResponseWriter, r *http.Request, action string, current, next *config.Config) bool {
+	if err := s.requireTrustAgainst(r, action, current, next); err != nil {
+		id, _ := rbacIdentityFromRequest(r)
+		writeForbidden(w, r, rbac.ConfigTrust, id)
+		return false
+	}
+	return true
+}
+
+// requireTrustAgainst is shared by apply/patch and rollback. Rollback returns
+// its authorization error to the caller because its handlers own the response.
+func (s *Server) requireTrustAgainst(r *http.Request, action string, current, next *config.Config) error {
 	if current == nil || next == nil || !clientAddressChanged(current, next) {
-		return true
+		return nil
 	}
 	id, ok := rbacIdentityFromRequest(r)
 	if !ok || id.Legacy || id.Has(rbac.ConfigTrust) {
-		return true
+		return nil
 	}
 	s.recordAudit(r, action, "config", "failure", "rejected: lacks config:trust for a trusted-proxy change")
-	writeForbidden(w, r, rbac.ConfigTrust, id)
-	return false
+	return &AuthorizationError{Status: http.StatusForbidden, Message: "trusted-proxy change rejected: requires config:trust", Reason: "config_trust_required", Required: rbac.ConfigTrust}
 }
 
-// clientAddressChanged reports whether any listener's effective trusted-proxy
+// clientAddressChanged reports whether any listener's effective identity-trust
 // policy differs between two configurations.
 func clientAddressChanged(current, next *config.Config) bool {
 	return !maps.Equal(clientAddressByListen(current), clientAddressByListen(next))
 }
 
 // clientAddressByListen renders each listen address's configured policy as a
-// comparable string. Addresses with no policy are absent rather than mapped to
-// an empty value, so renaming or adding an untrusting listener is not mistaken
-// for a trust change. Validation guarantees one policy per address, so the
-// first block that declares one is authoritative.
+// comparable string, including the inbound PROXY-protocol mode. That mode lets
+// a trusted transport peer assert the client address even if forwarded_headers
+// is empty. Addresses with no policy are absent rather than mapped to an empty
+// value, so renaming or adding an untrusting listener is not mistaken for a
+// trust change. Validation guarantees one policy per address, so the first
+// block that declares one is authoritative.
 func clientAddressByListen(c *config.Config) map[string]string {
 	out := make(map[string]string, len(c.Servers))
 	for i := range c.Servers {
@@ -972,7 +1014,7 @@ func clientAddressByListen(c *config.Config) map[string]string {
 		if _, seen := out[addr]; seen {
 			continue
 		}
-		out[addr] = clientAddressKey(c.Servers[i].ClientAddress)
+		out[addr] = clientAddressKey(c.Servers[i].ClientAddress) + "|proxy_protocol=" + strings.ToLower(strings.TrimSpace(c.Servers[i].ProxyProtocol))
 	}
 	return out
 }
@@ -1054,43 +1096,21 @@ func (s *Server) authorizeRawCandidate(w http.ResponseWriter, r *http.Request, a
 // subtree means the candidate requires admin:manage, regardless of whether
 // the field is restart-required or hot-swappable.
 func adminConfigEqual(a, b config.AdminConfig) bool {
-	if a.Enabled != b.Enabled ||
-		a.Listen != b.Listen ||
-		rbac.TokenDigest(a.Token) != rbac.TokenDigest(b.Token) {
+	if rbac.TokenDigest(a.Token) != rbac.TokenDigest(b.Token) ||
+		!adminRBACEqual(a.RBAC, b.RBAC) ||
+		a.ConsoleEnabled() != b.ConsoleEnabled() ||
+		pprofEnabled(a) != pprofEnabled(b) {
 		return false
 	}
-	if !adminRBACEqual(a.RBAC, b.RBAC) {
-		return false
-	}
-	if a.ConsoleEnabled() != b.ConsoleEnabled() {
-		return false
-	}
-	if a.HistoryDir != b.HistoryDir || a.HistoryKeep != b.HistoryKeep {
-		return false
-	}
-	if a.RateLimitReadPerMin != b.RateLimitReadPerMin ||
-		a.RateLimitWritePerMin != b.RateLimitWritePerMin ||
-		a.RateLimitApplyPerMin != b.RateLimitApplyPerMin ||
-		a.MaxEventConns != b.MaxEventConns {
-		return false
-	}
-	if a.AuditLogFile != b.AuditLogFile ||
-		a.AuditLogRotateMaxMB != b.AuditLogRotateMaxMB ||
-		a.AuditLogRotateKeep != b.AuditLogRotateKeep {
-		return false
-	}
-	if a.PluginUploadDir != b.PluginUploadDir ||
-		a.PluginUploadMaxSize != b.PluginUploadMaxSize {
-		return false
-	}
-	if (a.PluginUploadEnabled == nil) != (b.PluginUploadEnabled == nil) {
-		return false
-	}
-	if a.PluginUploadEnabled != nil && b.PluginUploadEnabled != nil &&
-		*a.PluginUploadEnabled != *b.PluginUploadEnabled {
-		return false
-	}
-	return true
+	// Normalize only the established semantic equivalences, then compare the
+	// entire subtree. Any new AdminConfig field automatically requires
+	// admin:manage when it changes; a hand-maintained allow-list missed TLS and
+	// pprof in the past. This is a conservative authorization check.
+	a.Token, b.Token = "", ""
+	a.RBAC, b.RBAC = config.AdminRBACConfig{}, config.AdminRBACConfig{}
+	a.Console, b.Console = nil, nil
+	a.PprofEnabled, b.PprofEnabled = nil, nil
+	return reflect.DeepEqual(a, b)
 }
 
 // adminRBACEqual compares two AdminRBACConfig values, including role and
@@ -1103,5 +1123,7 @@ func adminRBACEqual(a, b config.AdminRBACConfig) bool {
 		!rbacRolesEqual(a.Roles, b.Roles) {
 		return false
 	}
-	return true
+	a.Principals, b.Principals = nil, nil
+	a.Roles, b.Roles = nil, nil
+	return reflect.DeepEqual(a, b)
 }

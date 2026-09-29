@@ -8,11 +8,21 @@
 > merged after this page's date (trusted client identity, backend TLS trust,
 > RBAC, routing/response policy, generic resilience, configuration authority,
 > admin TLS, the external API/remote CLI, HTTP-over-Unix upstreams, and more)
-> are **not** covered here and are **not** GA — see the current maturity
+> were **not** covered at this historical baseline. Some have since reached GA
+> (#409); others remain Beta. See the current maturity
 > matrix in [docs/status.md](status.md) and
 > [docs/feature-status.yaml](feature-status.yaml), and open soak/promotion
 > items in [docs/known-limitations.md](known-limitations.md). Do not read this
 > page's closing summary as a present-tense claim about `main`.
+> **2026-09-27 evidence amendment:** this log called the five-minute release
+> gate an enforcement of criterion 5. ADR 0005 requires at least one hour per
+> feature or four hours consolidated; the release gate is a smoke test. The
+> current status/evidence pages distinguish qualifying runs from the still-open
+> Y1-08/Y1-09 long-running evidence.
+> **2026-09-28 evidence amendment:** [two exact-head one-hour feature runs](soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features)
+> now close the scoped Y1-08 and base Y1-09 criterion 5 gate. Their present
+> classification is in [feature-status.yaml](feature-status.yaml); this closed
+> Wave 1 table and its historical count were not recomputed.
 
 A focused, tracked effort to move the **existing** feature set from **Beta** to
 **GA** before starting new features. Per [ADR 0005](adr/0005-soak-post-ga-gate.md)
@@ -20,9 +30,8 @@ the long-running **soak test** is a *post-GA* gate, so GA here is declared again
 the **other eight** criteria of the [ADR 0003](adr/0003-maturity-and-ga.md) bar;
 soak is tracked openly per feature and completed after the label lands.
 
-This is the execution log for that push. **Keep it current:** tick a feature's
-criteria as they land, flip its row to ✅ when it reaches GA, and add a changelog
-row.
+This is the closed execution log for that push. New maturity decisions belong
+in [feature-status.yaml](feature-status.yaml), not this dated record.
 
 > - At a glance: [docs/status.md](status.md) is the canonical maturity +
 > - GA-criteria matrix across **all** features (it consolidates the waves and soak
@@ -58,7 +67,7 @@ Status key: ✅ done · ◐ in progress · ☐ not started.
 | Freeze v1 config/API + semver policy ([docs/compatibility.md](compatibility.md)) | **4** for every feature | M | ✅ |
 | Perf-gate benchmark harness ([scripts/bench.sh](../scripts/bench.sh)) + [CI job](../.github/workflows/ci.yml) | hosts **2** | M | ✅ |
 | Fuzz corpus + CI fuzz job ([scripts/fuzz.sh](../scripts/fuzz.sh)) | hosts **8** | S–M | ✅ |
-| Soak harness + release gate ([scripts/soak.sh](../scripts/soak.sh)) + [CI smoke](../.github/workflows/ci.yml) + [release gate](../.github/workflows/release.yml) | enforces **5** (post-GA) | S–M | ✅ |
+| Soak harness + release smoke ([scripts/soak.sh](../scripts/soak.sh)) + [CI smoke](../.github/workflows/ci.yml) + [release gate](../.github/workflows/release.yml) | Smoke regression gate; criterion **5** needs a separate qualifying long run | S–M | ✅ harness; feature evidence tracked separately |
 | [`SECURITY.md`](../SECURITY.md) umbrella threat model | anchors **7** | S | ✅ |
 
 ## Wave 1 — P0 (foundation + quick wins)

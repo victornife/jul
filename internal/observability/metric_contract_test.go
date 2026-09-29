@@ -121,7 +121,7 @@ func TestMetricContractMatchesCollectors(t *testing.T) {
 
 	want := make(map[string]metricContractMetric, len(contract.Metrics))
 	lastName := ""
-	releasedCount, pendingCount := 0, 0
+	releasedCount, releasedV2Count, pendingCount := 0, 0, 0
 	for _, metric := range contract.Metrics {
 		if metric.Name <= lastName {
 			t.Fatalf("metrics contract is not strictly name-sorted at %q", metric.Name)
@@ -130,6 +130,8 @@ func TestMetricContractMatchesCollectors(t *testing.T) {
 		switch metric.State {
 		case "released_v1.32.0":
 			releasedCount++
+		case "released_v2.0.0":
+			releasedV2Count++
 		case "merged_release_pending":
 			pendingCount++
 		default:
@@ -137,8 +139,8 @@ func TestMetricContractMatchesCollectors(t *testing.T) {
 		}
 		want[metric.Name] = normalizeMetric(metric)
 	}
-	if releasedCount != 25 || pendingCount != 45 {
-		t.Fatalf("metric contract states = %d released + %d pending, want 25 + 45", releasedCount, pendingCount)
+	if releasedCount != 25 || releasedV2Count != 38 || pendingCount != 7 {
+		t.Fatalf("metric contract states = %d v1.32.0 + %d v2.0.0 + %d pending, want 25 + 38 + 7", releasedCount, releasedV2Count, pendingCount)
 	}
 
 	for name, actual := range got {

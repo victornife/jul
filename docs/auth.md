@@ -5,9 +5,11 @@
 
 Auth is a per-location **modifier**, not an action: it composes with any
 location (static, proxy, FastCGI, …). Each location applies a fixed pipeline —
-a **CIDR** network gate first, then **exactly one** credential method (HTTP
+a **CIDR** network gate first, then **at most one** credential method (HTTP
 **Basic**, **JWT** bearer tokens, or **forward-auth** to an external service).
-An empty `auth` block authorizes every request.
+A CIDR-only gate is valid. An empty `auth` block is rejected by configuration
+validation so it cannot silently leave a route open; omit `auth` entirely on a
+public route.
 
 ## Quick start
 
@@ -93,7 +95,7 @@ Within the middleware chain, auth runs **before rate limiting**, so a
 | CIDR | canonical client address | in `allow`, not in `deny` | **403** | — (gate only) |
 | Basic | `Authorization: Basic` | user in htpasswd + bcrypt match | **401** + `WWW-Authenticate: Basic realm="…"` | — |
 | JWT | `Authorization: Bearer` | valid signature + claims | **401** + `WWW-Authenticate: Bearer error="invalid_token"` | claims → request context (`ClaimsFrom`) |
-| Forward-auth | subrequest to `url` | endpoint returns **2xx** | endpoint's status relayed (non-error → 403); **503** if unreachable | `auth_response_headers` → upstream request |
+| Forward-auth | subrequest to `url` | endpoint returns **2xx** | endpoint's denial relayed; redirects with `Location` retain 301/302/303/307/308, other non-error statuses become **403**; **503** if unreachable | `auth_response_headers` → upstream request |
 
 ## Schemes
 
@@ -136,20 +138,28 @@ changes for a directly exposed server.
 
 ### Forward-auth
 
-A `GET` subrequest is sent to `url` carrying the original headers (hop-by-hop
-stripped) plus `X-Forwarded-Method`, `X-Forwarded-Uri`, and `X-Forwarded-Host`.
-A **2xx** authorizes the request; the listed `auth_response_headers` are copied
-onto the upstream request (client-supplied copies are stripped first). Any other
-status is relayed to the client (non-error statuses normalized to 403; body
-capped at 64 KiB); redirects from the auth service are passed through. One
+A `GET` subrequest is sent to `url` carrying the original headers (fixed and
+`Connection`-nominated hop-by-hop fields stripped) plus `X-Forwarded-Method`,
+`X-Forwarded-Uri`, and `X-Forwarded-Host`.
+Client-supplied copies of these three context headers are replaced with the
+actual request method, URI and host, so the auth service receives one value for
+each. Treat other forwarded request headers as client input in the auth service.
+A **2xx** authorizes the request; listed end-to-end `auth_response_headers` are
+copied onto the upstream request (client-supplied copies are stripped first).
+Fixed and `Connection`-nominated hop-by-hop response fields are never copied,
+even if listed. Any other
+status is relayed to the client (301/302/303/307/308 with `Location` remain
+redirects; other non-error statuses become 403; body capped at 64 KiB and
+hop-by-hop response headers stripped). One
 subrequest is bounded by `timeout` (default **10s**).
 
 ### Dependency resilience
 
-Both `forward_auth.url` and `jwt.jwks_url` are on the request path of every
-authenticated request, so an unbounded number of subrequests to a struggling
-auth service is the same amplification Jul bounds everywhere else. Both now
-resolve through the shared upstream primitives:
+Forward-auth calls its endpoint for each request it evaluates. JWT validation
+consults the local JWKS cache on each request; it fetches the remote endpoint
+only for an unknown key or an aged cache, subject to the refresh throttle.
+Those outbound calls still need bounded admission when a dependency struggles.
+Both resolve through the shared upstream primitives:
 
 - if the URL's host **names a configured `[[upstreams]]`**, that pool is used, so
   an auth service can be replicated and load-balanced like any other backend;
@@ -198,20 +208,20 @@ verifies against, exactly as for a proxied backend.
 
 Authenticators are **rebuilt from scratch on every reload that reaches
 `Prepare`**: the server reconstructs one `*Authenticator` per location,
-atomically swaps in the new set, and drops the previous generation. A proven
-semantic no-op stops before that work and retains the current authenticators.
-No explicit teardown is required because an
-authenticator owns **no background worker, timer, or long-lived socket** — the
-CIDR gate and htpasswd set are pure in-memory state, and the JWKS cache refreshes
-**lazily on the request path** (throttled to ≤1 fetch / 30s), never from a
-background goroutine. Superseded authenticators are therefore simply
-garbage-collected.
+atomically swaps in the new set, and retires the previous handler generation
+after it drains. A proven semantic no-op stops before that work and retains the
+current authenticators. CIDR and htpasswd state is in memory; JWKS refreshes
+**lazily on the request path** (throttled to ≤1 fetch / 30s), without a
+background worker. JWT and forward-auth authenticators can own HTTP clients
+with idle connection pools. Their `Close` method retires those idle connections
+when the superseded handler generation drains; active exchanges are not
+cancelled, and caller-supplied clients remain caller-owned.
 
-This rebuild-and-drop model is validated at runtime by `TestReloadChurnNoLeak`
+Rebuild churn is exercised by `TestReloadChurnNoLeak`
 (`internal/auth/reload_churn_test.go`), which drives sustained reload churn
 across all permutations and asserts the goroutine count and post-GC heap return
-to their pre-churn baseline. A 3,000-cycle run holds the goroutine count exactly
-flat for every method (env-tunable via `AUTH_CHURN_ITERS`).
+to their pre-churn baseline. Its cycle count is env-tunable via
+`AUTH_CHURN_ITERS`; this unit test does not replace a live generation-drain test.
 
 ## Metrics
 
@@ -246,8 +256,8 @@ go test -run '^$' -bench 'BenchmarkBasicVerify|BenchmarkJWTValidate' -benchmem .
 | --- | --- | --- |
 | Algorithm confusion (`alg` swap) | 🟢 safe | allow-list + key/method type check; `none` rejected |
 | Username enumeration (timing) | 🟢 safe | constant-time bcrypt + dummy-hash on unknown user |
-| Client IP spoofing of CIDR gate | 🟢 safe | gate uses `RemoteAddr`, not `X-Forwarded-For` |
-| JWKS SSRF | 🟢 safe by design | `jwks_url` is operator config and must be HTTPS; never request-influenced |
+| Client IP spoofing of CIDR gate | 🟢 safe under the configured trust boundary | gate uses the canonical client address: the transport peer by default, or a forwarded chain only when the peer matches the listener's explicit `trusted_proxies` policy; unattributable chains fail closed |
+| JWKS SSRF through an unsafe config value | 🟠 residual unless egress is restricted | `jwks_url` is operator config and must be HTTPS, so a request cannot choose the endpoint; HTTPS alone does not prevent a mistyped or compromised config from reaching an unapproved HTTPS host. Protect config and enable the optional `[egress]` allow-list for destination enforcement. |
 | JWKS fetch amplification | 🟢 mitigated | unknown-kid floods throttled to ≤1 fetch / 30s; 1 MiB body cap |
 | Header spoofing (forward-auth) | 🟢 safe | client copies of `auth_response_headers` stripped before the endpoint's values are applied |
 | Token leakage in logs | 🟢 safe | tokens are never logged (only "jwt validation failed") |

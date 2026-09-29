@@ -79,8 +79,9 @@ header is ever part of a key; reuse restrictions are enforced by the stored
 entry's recorded policy instead, because a credential-derived key would silently
 turn a leak into an unbounded cache.
 
-When an upstream response carries a `Vary` header, each combination of the varied
-request-header values is stored as a **distinct variant** under its own key, so
+When an upstream response carries `Vary` on one or more header lines, each
+combination of the varied request-header values (including every repeated
+request field line) is stored as a **distinct variant** under its own key, so
 (for example) `Vary: Accept` keeps the JSON and XML representations of one URL
 cached at the same time instead of overwriting each other. A pointer entry under
 the base key records both the varied field names and the **membership list** of
@@ -99,6 +100,13 @@ responses are never reused. Membership is capped at 64 variants per base
 resource; past the cap the oldest variant is deleted with its membership entry,
 so a pathological `Vary` cannot grow one record without bound.
 
+The 2026-09-28 correction to repeated-field handling uses a new variant-value
+encoding. Existing disk entries written with the old first-value encoding
+cannot match a new lookup, even when a legacy pointer still claims them; the
+first request after upgrade fetches and stores a fresh variant. This is a
+deliberate miss rather than reuse of a representation whose full request-header
+combination was not recorded.
+
 ## Cache result values
 
 Every response reports its disposition in the `X-Cache` header. The set is closed:
@@ -116,9 +124,9 @@ request-derived may ever appear here.
 > The `jul_cache_events_total` **help string** still reads
 > `(HIT/MISS/STALE/BYPASS)`. That text is frozen by the v1.32.0 released metric
 > contract and is intentionally preserved; `REVALIDATED` is an additive label
-> value, which the released contract does not freeze. The separate release-pending
-> `jul_cache_revalidations_total` description covers both synchronous validation
-> and background revalidation.
+> value, which the released contract does not freeze. The separate
+> `jul_cache_revalidations_total` family shipped in v2.0.0; its description
+> covers synchronous validation and background revalidation.
 
 ## Shared-cache contract
 
@@ -153,7 +161,7 @@ test in `internal/cache` (unit and policy matrices) or `internal/handler`
 | `stale-while-revalidate=N` | yes | Replaces the global stale window for this entry |
 | `stale-if-error=N` | yes | Replaces the global `stale_if_error` for this entry, in both directions: an explicit `0` disables it |
 | `Expires` | yes | Fallback when no `s-maxage`/`max-age`. Measured against the response's own `Date` when present, so clock skew is not folded into the lifetime. An unparseable value means "already expired" |
-| `Set-Cookie` present | no | Conservative shared-cache rule: replaying per-client state to another client is a session-fixation vector |
+| `Set-Cookie` present on any response line | no | Conservative shared-cache rule: replaying per-client state to another client is a session-fixation vector; an empty first line cannot hide a later cookie |
 
 ### Malformed and duplicate directives
 
@@ -259,6 +267,10 @@ falls back to a complete fetch, which stores it under the correct key.
 Jul is a shared cache, so it applies RFC 9111 §3.5 with a deliberately stricter
 storage rule:
 
+Any `Authorization` field line marks the request as authenticated for this
+policy, including when an earlier repeated line is empty. The cache never
+infers that a later credential is absent from the first line's value.
+
 | Stored response says | May satisfy an authenticated request? | May a response **generated for** an authenticated request be stored? |
 | --- | :---: | :---: |
 | nothing | no | no |
@@ -347,10 +359,10 @@ the complete audit record is [the 2026-08-07 cache recertification](audit/old/20
 | Response `no-cache` | Stored, but every reuse validates before serving | `TestResponseNoCacheRequiresValidationBeforeEveryReuse`, `TestConcurrentMandatoryValidatorsIssueOneOriginRequest` |
 | `must-revalidate` / `proxy-revalidate` | Forbid stale reuse and outrank stale-if-error | `TestMustRevalidateForbidsStaleReuse`, `TestStaleIfErrorRespectsMustRevalidate`, `TestFreshnessStaleWindowIsZeroWhenRevalidationIsMandatory` |
 | SWR/SIE | Bounded stale reuse; explicit response values replace global defaults; canceled work never extends SIE | `TestExplicitStaleIfErrorReplacesTheGlobalSetting`, `TestStaleOnErrorWindowContract`, `TestRevalidationCanceledByLeaseCancel`, `TestCacheRecertificationSoak` |
-| `Authorization` | Shared reuse only when explicitly permitted; identities and credentials never leak through keys or variants | `TestSharedReusePermissionMatrix`, `TestNoCrossIdentityLeakage`, `TestUnauthenticatedEntryIsNotReusableByAnAuthenticatedRequest`, `TestVaryAuthorizationStillEnforcesTheSharedReuseRule`, `TestRealAuthenticatedIdentityIsolation` |
-| `Set-Cookie` | Never stored | `TestResponseDirectiveStorage`, `TestSharedReusePermissionMatrix` |
-| `Vary` and membership | Distinct variants coexist; 64-entry membership cap; invalidation removes every owned memory/disk variant | `TestHandlerVaryVariantsCoexist`, `TestUnsafeMethodRemovesEveryVaryVariant`, `TestDeletedVariantCannotBeResurrectedByANewStub`, `TestChangedVaryReplacesTheVariantSet` |
-| ETag / Last-Modified / 304 | ETag precedence; immutable metadata merge; changed/unsafe metadata discards | `TestValidatorPrecedence`, `TestMerge304UpdatesMetadata`, `TestMerge304Discards`, `TestMerge304NeverMutatesThePublishedEntry`, `TestMerge304AcrossBothTiers` |
+| `Authorization` | Shared reuse only when explicitly permitted, including repeated field lines; identities and credentials never leak through keys or variants | `TestSharedReusePermissionMatrix`, `TestNoCrossIdentityLeakage`, `TestUnauthenticatedEntryIsNotReusableByAnAuthenticatedRequest`, `TestRepeatedAuthorizationDoesNotPublishPrivateResponse`, `TestRepeatedAuthorizationDoesNotReuseAnonymousEntry`, `TestVaryAuthorizationStillEnforcesTheSharedReuseRule`, `TestRealAuthenticatedIdentityIsolation` |
+| `Set-Cookie` | Never stored, even when an earlier field line is empty | `TestResponseDirectiveStorage`, `TestRepeatedSetCookieResponseIsNotShared`, `TestSharedReusePermissionMatrix` |
+| `Vary` and membership | Distinct variants coexist across repeated request/response field lines; 64-entry membership cap; old first-value entries miss after upgrade; invalidation removes every owned memory/disk variant | `TestHandlerVaryVariantsCoexist`, `TestVaryDistinguishesRepeatedRequestHeaderValues`, `TestVaryHonorsEveryResponseFieldLine`, `TestFirstValueVaryEntriesFailClosedAfterUpgrade`, `TestUnsafeMethodRemovesEveryVaryVariant`, `TestDeletedVariantCannotBeResurrectedByANewStub`, `TestChangedVaryReplacesTheVariantSet` |
+| ETag / Last-Modified / 304 | ETag precedence; immutable metadata merge; changed/unsafe metadata discards; every `Connection` line's nominated fields excluded | `TestValidatorPrecedence`, `TestMerge304UpdatesMetadata`, `TestMerge304Discards`, `TestRemoveHopByHopFromEveryConnectionLine`, `TestMerge304NeverMutatesThePublishedEntry`, `TestMerge304AcrossBothTiers` |
 | Range / If-Range | Bypass before lookup/store; 206 is never stored | `TestRangeRequestBypassesLookup`, `TestIfRangeBypassesLookup`, `TestRangeResponsesAreNeverStored`, `TestRealRangePassThrough` |
 | WebSocket / 101 | Upgrade requests bypass with the original writer; 101 is never stored | `TestWebSocketThroughCachedProxy`, `TestWebSocketThroughFullMiddlewareChain`, `TestUpgradeRequestBypassesCache`, `TestProtocolSwitchResponseNeverStored`, `TestRepeatedUpgradesThroughCachedProxy` |
 | SSE / flushed / oversized | SSE is not buffered or stored; ordinary flushed chunked responses remain cacheable; oversized capture is not stored | `TestSSEThroughCachedProxyStreamsAndIsNotStored`, `TestEventStreamIsNeverStoredOrBuffered`, `TestFlushedChunkedResponseIsStillCached`, `TestOversizedStreamIsNotStored` |
@@ -485,8 +497,12 @@ One consequence follows directly from it: a refresh that started on the old
 generation publishes into the process-shared cache even if it completes after a
 reload changed routes or backends. The result is the representation the **old**
 generation's route would have produced. Changing routing or backends therefore
-does not retroactively invalidate entries; use `[cache] enabled = false`, a
-restart, or the admin purge endpoint when that matters.
+does not retroactively invalidate entries. After old-generation work drains,
+use the admin purge endpoint when the old representation must no longer be
+served. A restart alone clears the memory tier but **retains the disk tier**;
+changing `[cache].enabled` is itself restart-required. For a cutover that must
+exclude old entries, quiesce traffic and in-flight refreshes, restart if needed,
+purge both tiers, then resume traffic.
 
 ### Observability
 
@@ -769,9 +785,10 @@ Lifecycle behavior:
     and survives configuration reloads by design, so a routing or backend change
     does not retroactively drop entries stored under the previous configuration.
     A refresh that was already in flight when the reload ran also completes
-    against the *old* generation's route and publishes its result. Use the admin
-    purge endpoint or a restart when a configuration change must invalidate
-    cached content. Characterized by
+    against the *old* generation's route and publishes its result. Purge after
+    old-generation refreshes drain; a restart alone does not clear the disk
+    tier. See [Cache data across reloads](#cache-data-across-reloads) for the
+    cutover sequence. Characterized by
     `TestReloadWaitsForCacheRevalidationHoldingGeneration` and
     `TestReloadDuringMandatorySynchronousValidation` (`internal/server`) and the
     generation-isolation tests in `internal/cache`.

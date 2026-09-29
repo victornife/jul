@@ -44,10 +44,28 @@ server_names = ["example.com", "www.example.com"]
     ca        = "letsencrypt-staging"       # default; use "letsencrypt" in prod
     challenge = "http-01"                   # or "tls-alpn-01"
     cache_dir = "./jul-data/certs"          # issued certs + account key
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 200                            # replace with your site's action
+
+# HTTP-01 needs a reachable plaintext listener on port 80. Its challenge path
+# is answered by ACME before the normal HTTPS redirect runs.
+[[servers]]
+listen = "0.0.0.0:80"
+server_names = ["example.com", "www.example.com"]
+redirect_https = 308
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 200
 ```
 
 > The CA defaults to **staging** so an accidental deployment never burns
 > production rate limits. Set `ca = "letsencrypt"` for trusted certificates.
+> Replace the domains and email, make both ports reachable, and give the Jul
+> service identity write access to the cache directory. If you select
+> `challenge = "tls-alpn-01"`, the port 80 block is unnecessary.
 
 ## Configuration reference
 
@@ -131,7 +149,7 @@ configuration-validation time with a clear error.
 | ACME renewal under the running manager | **Automatic** — renewal continues without configuration reload. |
 | ACME enablement, domains, challenge, account, issuer, or cache | **Not reloaded** — process-owned manager identity/policy remains restart-bound or deferred. |
 | ACME `ocsp_stapling` | **Hot reload** — an atomic policy on the stable provider wrapper changes new certificate lookups without replacing the ACME manager or listener (#106). |
-| `client_auth` (mTLS) | **Not reloaded** — bound at listener start; see [mtls.md](mtls.md). |
+| `client_auth` (mTLS) | Stable v2.0.0 is restart-bound. On post-tag `main`, data-plane client-auth policy is hot for new handshakes (#486, Beta); admin listener client auth remains restart-bound. See [mtls.md](mtls.md). |
 
 When configuration is applied through a validated write path, every referenced
 static `cert`/`key` pair is parsed before persistence. A broken or mismatched pair
@@ -212,8 +230,9 @@ go test -run '^$' -bench 'SNICertSelection|TLSHandshakeServerAuth' -benchmem ./i
 
 The optional [egress allow-list](egress.md) is disabled by default. When enabled,
 the ACME directory/order/challenge client and OCSP responder client are guarded
-like other auxiliary fetches, so issuance and stapling fail until every required
-host is allowed.
+like other auxiliary fetches. Issuance requires the CA endpoints to be allowed;
+stapling separately requires its OCSP responder. An OCSP denial can leave the
+certificate unstapled, but does not itself block issuance or a TLS handshake.
 
 Public ACME CAs may front endpoints with rotating infrastructure. Prefer exact
 hosts or an intentional suffix rather than brittle IP ranges. For Let's Encrypt,
@@ -242,8 +261,10 @@ bounded egress-denial reason as authoritative. See
   (#100).** A cert/key content or path change is validated during preflight and
   swapped atomically into the listener's existing dynamic certificate
   provider at Publish — no rebind, no dropped connections. Enabling or
-  disabling TLS itself, and TLS minimum version / mutual-TLS policy changes,
-  remain restart-bound (`HR-16`, `HR-12`).
+  disabling TLS itself and changing the TLS minimum version remain
+  restart-bound (`HR-16`). Data-plane client-auth policy can hot reload for new
+  handshakes on `main` (#486, Beta); the stable v2.0.0 policy remains
+  restart-bound. Admin listener client auth remains restart-bound.
 - **ACME manager transitions are restart-bound.** Domain, account, issuer,
   challenge, and cache changes require planned restart/deferred manager work.
   `ocsp_stapling` itself is hot and does not replace manager identity (#106).

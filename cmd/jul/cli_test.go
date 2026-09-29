@@ -204,6 +204,26 @@ func TestCmdLintStrictWarnings(t *testing.T) {
 	}
 }
 
+func TestCmdLintQuietPreservesStrictExitStatus(t *testing.T) {
+	path := writeTemp(t, warnConfig)
+	code, out, errOut := capture(t, func() int { return cmdLint([]string{"-config", path, "-strict", "-quiet"}) })
+	if code != 2 || out != "" || errOut != "" {
+		t.Errorf("strict quiet lint: exit %d, stdout %q, stderr %q; want exit 2 and no output", code, out, errOut)
+	}
+	code, out, errOut = capture(t, func() int { return cmdLint([]string{"-config", path, "-quiet"}) })
+	if code != 0 || out != "" || errOut != "" {
+		t.Errorf("non-strict quiet lint: exit %d, stdout %q, stderr %q; want exit 0 and no output", code, out, errOut)
+	}
+}
+
+func TestCmdLintInfoDoesNotFailStrict(t *testing.T) {
+	path := writeTemp(t, strings.Replace(validConfig, "[compression]", "[global]\nconfig_authority = \"managed\"\n\n[compression]", 1))
+	code, out, errOut := capture(t, func() int { return cmdLint([]string{"-config", path, "-strict"}) })
+	if code != 0 || errOut != "" || !strings.Contains(out, "info: servers[0].locations[0]: route has no durable route_id") || !strings.Contains(out, "0 warning(s), 1 info") {
+		t.Errorf("info-only strict lint: exit %d, stdout %q, stderr %q; want exit 0 with informational suggestion", code, out, errOut)
+	}
+}
+
 func TestCmdLintParseError(t *testing.T) {
 	path := writeTemp(t, "servers = [\n")
 	code, _, errOut := capture(t, func() int { return cmdLint([]string{"-config", path}) })
@@ -442,7 +462,7 @@ func TestCmdCheckInvalidJson(t *testing.T) {
 }
 
 func TestCmdCheckValid(t *testing.T) {
-	path := writeTemp(t, validConfig)
+	path := writeTemp(t, strings.Replace(validConfig, "/srv", filepath.ToSlash(t.TempDir()), 1))
 	code, out, errOut := capture(t, func() int { return cmdCheck([]string{"-config", path}) })
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0\nstdout: %s\nstderr: %s", code, out, errOut)
@@ -487,7 +507,7 @@ func TestCmdCheckInvalidJSON(t *testing.T) {
 }
 
 func TestCmdCheckValidQuiet(t *testing.T) {
-	path := writeTemp(t, validConfig)
+	path := writeTemp(t, strings.Replace(validConfig, "/srv", filepath.ToSlash(t.TempDir()), 1))
 	code, out, errOut := capture(t, func() int { return cmdCheck([]string{"-config", path, "-quiet"}) })
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0\nstdout: %s\nstderr: %s", code, out, errOut)
@@ -508,6 +528,46 @@ func TestCmdCheckRuntimePreflightFailure(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "basic auth") {
 		t.Errorf("expected stderr to mention basic auth error; got:\n%s", errOut)
+	}
+}
+
+func TestCmdCheckRejectsMissingStaticRoot(t *testing.T) {
+	missing := filepath.ToSlash(filepath.Join(t.TempDir(), "missing"))
+	path := writeTemp(t, strings.Replace(validConfig, `root = "/srv"`, `root = "`+missing+`"`, 1))
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"text", nil},
+		{"json", []string{"-json"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"-config", path}, tc.args...)
+			code, out, errOut := capture(t, func() int { return cmdCheck(args) })
+			if code != 1 || !strings.Contains(out+errOut, "static root") {
+				t.Fatalf("missing root: exit %d, stdout %q, stderr %q", code, out, errOut)
+			}
+			if tc.name == "json" {
+				var result struct {
+					OK    bool   `json:"ok"`
+					Error string `json:"error"`
+				}
+				if err := json.Unmarshal([]byte(out), &result); err != nil || result.OK || result.Error == "" || errOut != "" {
+					t.Fatalf("invalid JSON failure: result %+v, parse error %v, stderr %q", result, err, errOut)
+				}
+			}
+		})
+	}
+}
+
+func TestCmdCheckTemplateSkipsStaticRoot(t *testing.T) {
+	missing := filepath.ToSlash(filepath.Join(t.TempDir(), "missing"))
+	path := writeTemp(t, strings.Replace(validConfig, `root = "/srv"`, `root = "`+missing+`"`, 1))
+	code, out, errOut := capture(t, func() int {
+		return cmdCheck([]string{"-config", path, "-skip-static-roots", "-quiet"})
+	})
+	if code != 0 || out != "" || errOut != "" {
+		t.Fatalf("template validation: exit %d, stdout %q, stderr %q", code, out, errOut)
 	}
 }
 
