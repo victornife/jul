@@ -755,14 +755,14 @@ func (c *Cache) buildEntry(r *http.Request, status int, h http.Header, body []by
 // than the moment it arrived.
 func initialAge(h http.Header, now time.Time) time.Duration {
 	var apparent time.Duration
-	if d, err := http.ParseTime(h.Get("Date")); err == nil {
-		apparent = now.Sub(d)
-	}
-	if apparent < 0 {
-		apparent = 0
+	for _, value := range h.Values("Date") {
+		if d, err := http.ParseTime(value); err == nil && now.Sub(d) > apparent {
+			apparent = now.Sub(d)
+		}
 	}
 	age := apparent
-	if v := strings.TrimSpace(h.Get("Age")); v != "" {
+	for _, value := range h.Values("Age") {
+		v := strings.TrimSpace(value)
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
 			if n > maxDeltaSeconds {
 				n = maxDeltaSeconds
@@ -770,6 +770,9 @@ func initialAge(h http.Header, now time.Time) time.Duration {
 			if d := time.Duration(n) * time.Second; d > age {
 				age = d
 			}
+		} else if err != nil && strings.Trim(v, "0123456789") == "" && len(v) > 0 {
+			// A syntactically valid but overflowing Age is maximally old.
+			age = maxDeltaSeconds * time.Second
 		}
 	}
 	return age

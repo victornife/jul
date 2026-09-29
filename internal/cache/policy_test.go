@@ -534,7 +534,9 @@ func TestInitialAgeCorrection(t *testing.T) {
 		{"a negative Age is ignored", http.Header{"Age": {"-5"}}, 0},
 		{"a malformed Age is ignored", http.Header{"Age": {"soon"}}, 0},
 		{"an unparseable Date is ignored", http.Header{"Date": {"whenever"}}, 0},
-		{"an overflowing Age is clamped", http.Header{"Age": {"99999999999999999999"}}, 0},
+		{"an overflowing Age is clamped", http.Header{"Age": {"99999999999999999999"}}, maxDeltaSeconds * time.Second},
+		{"later Age cannot be hidden by an empty first field", http.Header{"Age": {"", "90"}}, 90 * time.Second},
+		{"older Date wins across repeated fields", http.Header{"Date": {now.Format(http.TimeFormat), now.Add(-time.Minute).Format(http.TimeFormat)}}, time.Minute},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
