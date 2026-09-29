@@ -602,6 +602,11 @@ func dial(addr string, useTLS bool, policy *backendtls.Policy) (*grpc.ClientConn
 }
 
 func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if len(r.Header.Values("Authorization")) > 1 {
+		t.writeError(w, http.StatusBadRequest, "ambiguous Authorization fields")
+		t.report("", http.StatusBadRequest)
+		return
+	}
 	rt, vars := t.match(r.Method, r.URL.Path)
 	if rt == nil {
 		t.writeError(w, http.StatusNotFound, "no transcoding route matches "+r.Method+" "+r.URL.Path)

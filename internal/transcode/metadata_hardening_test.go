@@ -29,3 +29,14 @@ func TestTranscodeMetadataCannotOverrideAuthorization(t *testing.T) {
 		t.Fatalf("ordinary metadata was lost: %v", got)
 	}
 }
+
+func TestTranscodeRejectsRepeatedAuthorizationBeforeBackend(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Add("Authorization", "Bearer one")
+	r.Header.Add("Authorization", "Bearer two")
+	rec := httptest.NewRecorder()
+	(&Transcoder{}).ServeHTTP(rec, r)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("ambiguous authorization returned %d", rec.Code)
+	}
+}
