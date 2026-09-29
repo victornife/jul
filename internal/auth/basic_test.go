@@ -142,6 +142,15 @@ func TestNewBasicAuthErrors(t *testing.T) {
 			t.Error("expected error for non-bcrypt hash")
 		}
 	})
+	t.Run("malformed bcrypt hash rejected at load", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "htpasswd")
+		if err := os.WriteFile(path, []byte("alice:$2a$invalid\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := newBasicAuth(path, "r"); err == nil {
+			t.Fatal("invalid bcrypt prefix accepted until a user tries to log in")
+		}
+	})
 	t.Run("malformed entry rejected", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "htpasswd")
 		if err := os.WriteFile(path, []byte("no-colon-here\n"), 0o600); err != nil {
