@@ -1,6 +1,6 @@
 # Jul.IA — compatibility & versioning policy
 
-> Version 1.10 · Updated 2026-09-27
+> Version 1.11 · Updated 2026-09-29
 
 This document defines what "stable" means for Jul.IA and what a **GA** label
 guarantees about a feature's contract. It is the fleet-wide answer to GA
@@ -295,6 +295,40 @@ stable `v2.0.0` tag now exists. Later changes on `main` are not released
 compatibility promises until a subsequent stable publication. Delivery and
 maturity remain independent; see [status.md](status.md).
 
+### Version decision on 2026-09-29: v2.1.0 {#version-decision-on-2026-09-29-v210}
+
+The selected next stable tag is **v2.1.0**, not v2.0.1 and not v3.0.0.
+
+- **Not a patch.** The frozen delta since `v2.0.0` (`d56f5cea`, 331 commits at
+  the pre-docs integration SHA `23c68d6f`) adds optional capabilities: bounded
+  NGINX stream/protocol translation, gRPC health probes, WASM content identity,
+  `jul-abi/v2` while keeping v1, runtime/storage visibility, consistent-hash
+  affinity, WAF serving provenance, diagnostics guidance, and client-certificate
+  policy hot reload. Those are MINOR additions.
+- **Not a major.** No documented GA configuration key, CLI flag, or released
+  metric family is removed or renamed. `quic-go` v0.63.0 and `grpc` v1.84.0 are
+  dependency updates inside the existing HTTP/3 and gRPC features, not a new
+  wire contract. `jul-abi/v2` is opt-in; v1 guests keep working.
+- **Corrections that change observable behavior** are the same class already
+  accepted inside a minor/patch line: they reject previously accepted unsafe or
+  undocumented behavior, and they are called out rather than silently relabeled.
+  Operators upgrading from v2.0.0 must run `jul check` and read the v2.1.0
+  changelog. The material corrections are:
+  - off-loopback admin without a token or enabled RBAC fails validation;
+  - request paths are canonicalized before location selection, so a route that
+    depended on a dot-segment or repeated-slash bypass no longer matches the
+    old location;
+  - cache variant keys include every repeated field line, so upgraded disk
+    entries from the old first-value encoding miss;
+  - CGI/uWSGI responses with ambiguous length, conflicting status, or hop-by-hop
+    framing fail instead of being forwarded;
+  - plaintext remote administration still requires a loopback name, and the
+    client now dials only the resolved loopback addresses.
+- **#434 is no-go.** No ALPN-routing workload and no Phase-0 evidence exist.
+  The release does not activate that candidate or any other deferred feature.
+- **Beta stays Beta.** Publication, once #480's gates pass, changes delivery
+  from `merged` to `released`. It does not satisfy missing GA criteria.
+
 Existing Console routes are implementation surfaces for the embedded UI. This
 policy does not accidentally freeze all of them as an external automation API.
 The classification is machine-enforced: the route catalog carries a stability
@@ -348,6 +382,7 @@ cut at the first GA release.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-09-29 | 1.11 | Selected **v2.1.0** as the next stable tag and recorded the upgrade corrections. | v2.0.0 remains the published baseline until that tag is published. GA contracts are not removed. #434 is not activated. | [#480](https://github.com/victornife/jul/issues/480); [status.md](status.md) |
 | 2026-09-27 | 1.10 | Distinguished the dated v2.0.0 version decision from the subsequently published stable tag. | The decision rationale and every v1 GA contract remain unchanged. | [v2.0.0](https://github.com/victornife/jul/releases/tag/v2.0.0); [status.md](status.md) |
 | 2026-09-17 | 1.9 | Recorded the decision to cut **v2.0.0** rather than v1.33.0 as the next tag, and why: [see above](#version-decision-on-2026-09-17-v200-rather-than-v1330). | Every v1 GA contract already covered by this policy keeps its stated guarantees under the same deprecation rules on entry to the v2.0.0 line. | v2.0.0-rc.1; pre-soak readiness audit backlog BL-09 |
 | 2026-09-15 | 1.8 | Added the `no_change` value to the v1 reload-outcome enum for a validated, accepted candidate that provably leaves serving state unchanged. | Existing outcome values, HTTP status rules, polling terminality, and exit codes keep their meanings; `no_change` is an additive terminal success using exit 0. | #408; [reload semantics](reload-semantics.md#identity-planes-and-the-no-change-proof) |

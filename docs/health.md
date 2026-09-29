@@ -1,8 +1,8 @@
 # Active Health Checks
 
 > **Maturity:** GA (see [status.md](status.md)) for `http`/`tcp` probes. The
-> `grpc` probe type is new (merged on `main`, not yet in a tagged release) and
-> is Beta: it has not been through a dedicated soak.
+> `grpc` probe type is Beta in the proposed v2.1.0 tree. It is not in published
+> v2.0.0 and has not had a dedicated soak.
 
 Jul.IA supports **active** health checking for upstream pools: the server periodically probes each backend and ejects unhealthy backends from the balancer rotation. This complements the built-in **passive** health checking (which parks a backend after `max_fails` consecutive request failures).
 
@@ -242,7 +242,7 @@ Validate with `jul check` before starting.
 
 The released HTTP/TCP active health checks have reached **GA** against the
 [ADR 0003](adr/0003-maturity-and-ga.md) bar. This table is their historical
-evidence; the post-release gRPC probe is separately **Beta / merged** with its
+evidence; the gRPC probe in the proposed v2.1.0 tree is separately **Beta / merged** with its
 criterion 5 open in the [feature manifest](feature-status.yaml).
 
 | Criterion | Status | Evidence |

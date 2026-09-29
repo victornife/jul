@@ -13,10 +13,12 @@
 # it its own entry or an explicit relationship. A GA row must be released and
 # soaked under ADR 0003/0005. Volatile issue sequencing belongs in #62, not here.
 #
-# Updated 2026-09-28 after feature-specific post-release soak evidence.
+# Updated 2026-09-29 for the proposed v2.1.0 freeze.
+# Delivery stays merged for post-v2.0.0 rows until that tag is actually
+# published. Do not read this file as a GA promotion.
 
 version: 2
-updated: '2026-09-28'
+updated: '2026-09-29'
 features:
 - id: Y1-01
   name: TLS + automatic HTTPS (ACME)
@@ -708,7 +710,7 @@ features:
     9: true
   notes: 'health_check.type = "grpc" (#427) issues a standard grpc.health.v1.Health/Check probe reusing the pool''s
     resolved backend_tls trust policy exactly as live gRPC traffic, feeding the existing active-health threshold state
-    machine (no parallel health registry, no new metric labels). Merged on main (PR #458), not yet in a tagged release;
+    machine (no parallel health registry, no new metric labels). In the proposed v2.1.0 tree (PR #458), not in published v2.0.0;
     no dedicated soak has been run (not required for this tranche per the programme authority). Requires the "grpc"
     build tag; a lean build rejects the configuration clearly rather than silently falling back to TCP/HTTP.'
 - id: OPS-RESOURCES
@@ -784,7 +786,7 @@ features:
     readings to the existing gated pprof endpoint, jul doctor, support bundles and Operations. Guidance, not
     diagnosis; a pprof command is shown only when admin_runtime.pprof_enabled and admin:manage allow it, with a
     token placeholder. No capture job, artifact store, upload or background profiling. Builds on OPS-RESOURCES
-    (including #437 storage headroom) and OPS-DIAG. Merged on main, not yet in a tagged release; no soak (UI guidance only).'
+    (including #437 storage headroom) and OPS-DIAG. In the proposed v2.1.0 tree, not in published v2.0.0; no soak (UI guidance only).'
 - id: WASM-ABI2
   name: WASM plugin response phase (jul-abi/v2)
   tags:
@@ -830,7 +832,7 @@ features:
     of a closed key source (client_ip, one header, one cookie) over the health/circuit/capacity-eligible set,
     explicit hash.fallback for keyless requests, retries walk the rendezvous order, stream routes client_ip only
     (TCP per connection, UDP per session). NGINX ip_hash/hash map as approximated, arbitrary hash keys blocking;
-    real NGINX-vs-Jul E2E fixture. Merged on main, not yet in a tagged release; no dedicated soak.'
+    real NGINX-vs-Jul E2E fixture. In the proposed v2.1.0 tree, not in published v2.0.0; no dedicated soak.'
 - id: MTLS-HOT
   name: Client-certificate policy and CRL hot reload
   tags:
@@ -852,4 +854,4 @@ features:
     Publish for new TCP TLS and HTTP/3 handshakes (#486); in-place CA/CRL rewrites reload, a broken file rejects the
     reload. Revocation also applies to resumed TLS sessions and is scoped to the CRL issuer;
     jul_mtls_crl_next_update_timestamp_seconds exposes CRL expiry. admin.tls.client_auth stays restart-bound. Does
-    not change the GA Y2-07 row. Merged on main, not yet in a tagged release; no dedicated soak.'
+    not change the GA Y2-07 row. In the proposed v2.1.0 tree, not in published v2.0.0; no dedicated soak.'

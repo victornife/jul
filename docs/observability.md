@@ -58,9 +58,10 @@ The compatibility baseline was reconstructed from tag `v1.32.0` at commit
 `6bb76a08846150663d7eeb9661edb718ef357a7c`. Its released families are
 frozen except for the explicitly recorded retirements and amendments in
 [compatibility.md](compatibility.md). Of the current 70 contract families, 25
-are retained from v1.32.0, 38 additional families are present in stable
-`v2.0.0`, and seven were added to `main` after that tag. The table below marks
-the stable and post-release groups separately.
+are retained from v1.32.0, 38 additional families are present in published
+`v2.0.0`, and seven were added after that tag and are in the proposed v2.1.0
+tree. The table below marks the published and post-v2.0.0 groups separately.
+New families are additive MINOR metrics, not renames.
 
 The complete machine-readable contract is
 [`docs/metrics-contract.json`](metrics-contract.json). CI compares it with the

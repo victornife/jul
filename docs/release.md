@@ -90,6 +90,29 @@ starting point: before publication they must be reconciled with `CHANGELOG.md`,
 the current security/status/known-limitations documents, and the actual
 artifacts produced for the tagged SHA.
 
+## Upgrading from v2.0.0 to proposed v2.1.0
+
+Run `jul check` with the target binary before replacing a running process.
+Rollback is the previous published archive, `v2.0.0`, started against a config
+that `v2.0.0`'s `jul check` accepts. Do not point a v2.0.0 binary at a config
+that uses keys added after that tag (`consistent_hash`, gRPC health probes,
+`plugins.*.abi = "jul-abi/v2"`, plugin `sha256` pins).
+
+Before upgrading an existing deployment:
+
+1. If admin listens off loopback without a token or enabled RBAC, add one or
+   bind loopback. TLS alone does not authenticate callers.
+2. Expect canonical path matching. A location that only matched via `//`, `.`
+   or `..` will not match those requests anymore; `jul lint` reports
+   unreachable exact/prefix paths.
+3. Cache disk entries written by v2.0.0 miss after upgrade because variant
+   keys changed. That is a cold cache, not corruption. Rollback to v2.0.0
+   likewise misses v2.1.0 entries.
+4. CGI and uWSGI backends that emit conflicting status lines, repeated
+   `Content-Length`, or hop-by-hop response fields now produce 502.
+5. A plaintext remote CLI URL must still be loopback, and the client dials
+   only addresses that resolve to loopback.
+
 ## Release candidates
 
 A release-candidate tag uses the normal semantic-version pre-release form:

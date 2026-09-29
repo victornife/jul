@@ -10,7 +10,8 @@ live issue tracker.
 | --- | --- | --- | --- |
 | [2026-09-27 documentation review](audit/2026-09-27-documentation-review.md) | `36e0411a` at clean `main`; remediation on isolated branch | Current **partial** documentation review and findings/coverage ledger; no exhaustive certification or 10/10 claim | Verified release/status, migration and onboarding corrections made; semantic and platform coverage gaps remain explicit in its ledger |
 | [2026-09-29 high-risk continuation](audit/2026-09-29-high-risk-continuation.md) | PR #482 head `bd8f5b0`; stacked PR #495 at `731fced8` | Targeted security and runtime boundary review; nine branch workflows passed on the exact PR head | Authentication ambiguity, admin mutation admission, bounded dependency and file reads; remaining scopes and verification limits explicit |
-| [2026-09-29 cache/WAF/plugin continuation](audit/2026-09-29-cache-waf-plugin-continuation.md) | Stacked after PR #495 head `731fced8` | 20 focused source fixes; package pass green, own PR CI pending | Conditional/cache timing and occupancy, WAF compilation input/deadline, plugin fetch/module/request integrity; other ledger rows remain open |
+| [2026-09-29 cache/WAF/plugin continuation](audit/2026-09-29-cache-waf-plugin-continuation.md) | Stacked after PR #495 head `731fced8` | Merged via #496; tree matches `ed302aae` | Conditional/cache timing and occupancy, WAF compilation input/deadline, plugin fetch/module/request integrity; other ledger rows remain open |
+| [2026-09-29 final high-impact batch](audit/2026-09-29-final-high-impact-batch.md) | Stacked tip `5a592d40` | Merged via #497; integrated tree matches that tip at `23c68d6f` | CGI/uWSGI framing, short stream writes, bounds and host routing; not a full audit |
 | [2026-09-16 pre-soak readiness audit](audit/2026-09-16-pre-soak-readiness-audit.md) | `b1e2dfc5` plus PR #416 | Historical readiness evidence at its dated baseline; #421/#425 record the subsequent soak and stable release | P0 items BL-01..BL-07 and P1 items BL-08..BL-10/BL-13/BL-16/BL-24..BL-26 closed via PR #416 (merged `03fda9f8`); its remaining backlog table describes that baseline, not current issue state |
 
 ## Archived records
@@ -52,8 +53,14 @@ Superseded or fully closed audits, preserved as historical evidence under
   rows. Internal Console routes do not inherit the external API contract.
   The bounded AI experiment remains a later portfolio decision.
 - Wave 6 (#437 storage headroom, #440 WAF policy visibility and #445
-  diagnostics guidance) completed on post-release `main`. These Beta/merged
+  diagnostics guidance) is in the proposed v2.1.0 tree. These Beta/merged
   additions do not inherit the stable v2.0.0 release or base-feature GA.
+- The 2026-09-27 documentation ledger's **D11** and **D12** remain open.
+  D11 is unfinished review of examples, config leaves and platform
+  instructions. D12 is unfinished production-like certificate, existing
+  Windows ACL, and non-loopback admin TLS evidence. Passing release gates
+  does not close them and does not make the repository fully audited.
+- #434 is no-go for v2.1.0. It stays CANDIDATE/LATER.
 
 Volatile issue-level sequencing is owned by
 [#62](https://github.com/victornife/jul/issues/62). Feature maturity/delivery is
