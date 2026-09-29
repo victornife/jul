@@ -619,6 +619,7 @@ func (w *writeTrackingResponseWriter) Write(p []byte) (int, error) {
 
 func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 	status := http.StatusOK
+	parsedHeaders := make(http.Header)
 	first := true
 	headerBytes := 0
 	headerFields := 0
@@ -680,10 +681,15 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 			}
 			status = code
 		} else {
-			w.Header().Add(key, val)
+			parsedHeaders.Add(key, val)
 		}
 	}
 
+	for name, values := range parsedHeaders {
+		for _, value := range values {
+			w.Header().Add(name, value)
+		}
+	}
 	w.WriteHeader(status)
 	// This forwards the upstream FastCGI/uWSGI response body unchanged; the
 	// origin application is responsible for sanitizing any output it generates.

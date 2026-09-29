@@ -65,6 +65,14 @@ func TestCGIRejectsInvalidHeaderTokensAndControls(t *testing.T) {
 		}
 	}
 }
+
+func TestCGIInvalidLateHeaderDoesNotPublishPartialHeaders(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := writeCGIResponse(bufio.NewReader(strings.NewReader("X-Secret: leaked\r\nBad(Name: nope\r\n\r\n")), rec)
+	if err == nil || rec.Header().Get("X-Secret") != "" {
+		t.Fatalf("partial CGI headers published: error=%v header=%q", err, rec.Header().Get("X-Secret"))
+	}
+}
 func (*cgiDiscardWriter) WriteHeader(int)             {}
 func (*cgiDiscardWriter) Write(p []byte) (int, error) { return len(p), nil }
 
