@@ -560,3 +560,24 @@ func TestInitialAgeCorrection(t *testing.T) {
 		})
 	}
 }
+
+func TestAmbiguousValidatorsAreNotStored(t *testing.T) {
+	for _, field := range []string{"ETag", "Last-Modified"} {
+		t.Run(field, func(t *testing.T) {
+			c, _ := conformanceCache(t, memCfg())
+			calls := 0
+			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls++
+				w.Header().Set("Cache-Control", "max-age=3600")
+				w.Header().Add(field, "first")
+				w.Header().Add(field, "second")
+				_, _ = w.Write([]byte("body"))
+			}))
+			get(t, h, "http://x/ambiguous")
+			get(t, h, "http://x/ambiguous")
+			if calls != 2 {
+				t.Fatalf("ambiguous %s reused from cache after %d origin calls", field, calls)
+			}
+		})
+	}
+}

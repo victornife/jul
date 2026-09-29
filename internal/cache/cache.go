@@ -824,6 +824,11 @@ func (c *Cache) freshness(status int, h http.Header, p responsePolicy, now time.
 	if !cacheableStatus[status] {
 		return 0, 0, false
 	}
+	if len(h.Values("ETag")) > 1 || len(h.Values("Last-Modified")) > 1 {
+		// Validators are singleton fields. Selecting the first of conflicting
+		// values could validate a different representation on a later 304.
+		return 0, 0, false
+	}
 	if p.NoStore {
 		return 0, 0, false
 	}
