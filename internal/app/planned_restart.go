@@ -324,7 +324,7 @@ func (s *PlannedRestartStore) StageManaged(baseRaw, candidateRaw []byte, marker 
 		marker.PreviousStagedAt = existing.StagedAt
 		if s.baseRaw == nil {
 			// Load base raw from backup if in-memory cache was lost.
-			if base, err := os.ReadFile(s.backupPath()); err == nil {
+			if base, err := readConfigFile(s.backupPath()); err == nil {
 				s.baseRaw = base
 			}
 		}
@@ -505,7 +505,7 @@ func (s *PlannedRestartStore) Refresh() error {
 		return nil
 	}
 
-	diskBytes, err := os.ReadFile(s.ConfigPath)
+	diskBytes, err := readConfigFile(s.ConfigPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		s.inconsistent = true
 		return fmt.Errorf("planned-restart refresh: read config: %w", err)
@@ -535,7 +535,7 @@ func (s *PlannedRestartStore) Refresh() error {
 			}
 			s.pending = true
 			if s.baseRaw == nil {
-				if base, rerr := os.ReadFile(s.backupPath()); rerr == nil {
+				if base, rerr := readConfigFile(s.backupPath()); rerr == nil {
 					s.baseRaw = base
 				}
 			}
@@ -566,7 +566,7 @@ func (s *PlannedRestartStore) Refresh() error {
 				}
 				s.pending = true
 				if s.baseRaw == nil {
-					if base, rerr := os.ReadFile(s.backupPath()); rerr == nil {
+					if base, rerr := readConfigFile(s.backupPath()); rerr == nil {
 						s.baseRaw = base
 					}
 				}
@@ -586,7 +586,7 @@ func (s *PlannedRestartStore) Refresh() error {
 		if diskDigest == marker.StagedRawSHA256 {
 			s.pending = true
 			if s.baseRaw == nil {
-				if base, rerr := os.ReadFile(s.backupPath()); rerr == nil {
+				if base, rerr := readConfigFile(s.backupPath()); rerr == nil {
 					s.baseRaw = base
 				}
 			}
@@ -700,7 +700,7 @@ func (s *PlannedRestartStore) PromoteToStagedVerified(candidateRaw []byte) error
 	}
 
 	// Pre-promotion disk check: the active config must still be the candidate.
-	before, err := os.ReadFile(s.ConfigPath)
+	before, err := readConfigFile(s.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("planned-restart promote: read config before promotion: %w", err)
 	}
@@ -726,7 +726,7 @@ func (s *PlannedRestartStore) PromoteToStagedVerified(candidateRaw []byte) error
 
 	// Post-promotion disk check: detect a write that landed during the marker
 	// update. The marker is already staged, so a mismatch is an inconsistency.
-	after, err := os.ReadFile(s.ConfigPath)
+	after, err := readConfigFile(s.ConfigPath)
 	if err != nil {
 		s.inconsistent = true
 		return fmt.Errorf("planned-restart promote: read config after promotion: %w", err)
@@ -797,7 +797,7 @@ func (s *PlannedRestartStore) DiscardSafe(liveServingVersion string) (restoredBy
 	}
 
 	// Verify current disk digest matches the staged digest.
-	currentDisk, err := os.ReadFile(s.ConfigPath)
+	currentDisk, err := readConfigFile(s.ConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("discard: cannot read current config: %w", err)
 	}
@@ -814,7 +814,7 @@ func (s *PlannedRestartStore) DiscardSafe(liveServingVersion string) (restoredBy
 	}
 
 	// Load the backup bytes.
-	backupBytes, err := os.ReadFile(s.backupPath())
+	backupBytes, err := readConfigFile(s.backupPath())
 	if err != nil {
 		return nil, fmt.Errorf("discard: cannot read backup: %w", err)
 	}
@@ -910,7 +910,7 @@ func (s *PlannedRestartStore) Reconcile() error {
 		return nil
 	}
 
-	diskBytes, err := os.ReadFile(s.ConfigPath)
+	diskBytes, err := readConfigFile(s.ConfigPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("reconcile: read config: %w", err)
 	}
@@ -938,7 +938,7 @@ func (s *PlannedRestartStore) Reconcile() error {
 			s.pending = true
 			// Load base raw from backup so update diffs can be computed against
 			// the original serving config.
-			if base, rerr := os.ReadFile(s.backupPath()); rerr == nil {
+			if base, rerr := readConfigFile(s.backupPath()); rerr == nil {
 				s.baseRaw = base
 			}
 			s.stagedAt = marker.StagedAt
@@ -967,7 +967,7 @@ func (s *PlannedRestartStore) Reconcile() error {
 					return fmt.Errorf("reconcile: restore previous staged after update crash: %w", werr)
 				}
 				s.pending = true
-				if base, rerr := os.ReadFile(s.backupPath()); rerr == nil {
+				if base, rerr := readConfigFile(s.backupPath()); rerr == nil {
 					s.baseRaw = base
 				}
 				s.stagedAt = marker.StagedAt
