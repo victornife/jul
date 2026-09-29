@@ -186,6 +186,17 @@ func TestCompressNegotiatesLaterAcceptEncodingField(t *testing.T) {
 	}
 }
 
+func TestCompressMalformedAndConflictingWeightsDenyCoding(t *testing.T) {
+	for _, header := range []string{"gzip;q=oops", "gzip;q=2", "gzip;q=NaN", "gzip;q=0, gzip;q=1", "gzip;q=1, gzip;q=0", "gzip;foo"} {
+		t.Run(header, func(t *testing.T) {
+			q := parseAcceptEncoding(header)
+			if v, ok := clientQuality(q, "gzip"); !ok || v != 0 {
+				t.Fatalf("quality for %q = %v, %v; want denial", header, v, ok)
+			}
+		})
+	}
+}
+
 func TestCompressSkipsRange(t *testing.T) {
 	mw := gzipMiddleware(t, CompressionOptions{MinSize: 8})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

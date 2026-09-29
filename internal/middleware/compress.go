@@ -8,6 +8,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -415,16 +416,28 @@ func parseAcceptEncoding(header string) map[string]float64 {
 		q := 1.0
 		if i := strings.IndexByte(part, ';'); i >= 0 {
 			name = strings.TrimSpace(part[:i])
+			seenWeight := false
 			for _, p := range strings.Split(part[i+1:], ";") {
 				p = strings.TrimSpace(p)
-				if strings.HasPrefix(p, "q=") {
-					if v, err := strconv.ParseFloat(strings.TrimSpace(p[2:]), 64); err == nil {
-						q = v
-					}
+				if !strings.HasPrefix(p, "q=") || seenWeight {
+					q = 0
+					break
 				}
+				seenWeight = true
+				v, err := strconv.ParseFloat(strings.TrimSpace(p[2:]), 64)
+				if err != nil || math.IsNaN(v) || v < 0 || v > 1 {
+					q = 0
+					break
+				}
+				q = v
 			}
 		}
-		out[strings.ToLower(name)] = q
+		name = strings.ToLower(name)
+		if old, ok := out[name]; !ok || q < old {
+			// An explicit refusal or malformed duplicate must not be
+			// overridden by a later field line.
+			out[name] = q
+		}
 	}
 	return out
 }
