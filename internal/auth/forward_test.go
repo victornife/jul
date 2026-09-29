@@ -5,6 +5,7 @@ package auth
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -218,6 +219,25 @@ func TestForwardAuthReplacesClientForwardingClaims(t *testing.T) {
 	if got.Get("Forwarded") != "" || got.Get("X-Forwarded-For") != "203.0.113.7" ||
 		got.Get("X-Real-Ip") != "203.0.113.7" || got.Get("X-Forwarded-Proto") != "http" {
 		t.Fatalf("forward auth saw client claims: %v", got)
+	}
+}
+
+func TestForwardAuthUsesListenerTLSForProto(t *testing.T) {
+	var got string
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Forwarded-Proto")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+	fa := newForwardAuth(authServer.URL, nil, authServer.Client(), nil)
+	r := httptest.NewRequest(http.MethodGet, "http://app.example/private", nil)
+	r.TLS = &tls.ConnectionState{}
+	r.Header.Set("X-Forwarded-Proto", "http")
+	if _, err := fa.decide(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if got != "https" {
+		t.Fatalf("X-Forwarded-Proto = %q, want https from the listener", got)
 	}
 }
 
