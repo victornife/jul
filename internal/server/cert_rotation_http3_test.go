@@ -64,22 +64,60 @@ func getH3(t *testing.T, tr *http3.Transport, addr string) (*http.Response, erro
 func freeUDPTCPPort(t *testing.T) string {
 	t.Helper()
 	lc := &net.ListenConfig{}
+	return freeUDPTCPPortWithTCPProbe(t, lc.Listen)
+}
+
+func freeUDPTCPPortWithTCPProbe(t *testing.T, probe func(context.Context, string, string) (net.Listener, error)) string {
+	t.Helper()
+	lc := &net.ListenConfig{}
+	var lastTCPError error
 	for range 20 {
 		pc, err := lc.ListenPacket(context.Background(), "udp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer func() { _ = pc.Close() }()
 		addr := pc.LocalAddr().String()
-		ln, err := lc.Listen(context.Background(), "tcp", addr)
-		_ = pc.Close()
+		ln, err := probe(context.Background(), "tcp", addr)
 		if err != nil {
+			lastTCPError = err
 			continue
 		}
 		_ = ln.Close()
 		return addr
 	}
-	t.Fatal("no loopback port free on both UDP and TCP")
+	t.Fatalf("no loopback port free on both UDP and TCP: %v", lastTCPError)
 	return ""
+}
+
+func TestFreeUDPTCPPortRetainsRejectedCandidates(t *testing.T) {
+	var rejectedAddr string
+	var probes int
+	addr := freeUDPTCPPortWithTCPProbe(t, func(ctx context.Context, network, candidate string) (net.Listener, error) {
+		probes++
+		if probes == 1 {
+			rejectedAddr = candidate
+			return nil, errors.New("TCP candidate unavailable")
+		}
+		if candidate == rejectedAddr {
+			t.Fatal("retried the rejected UDP candidate")
+		}
+		if reserved, err := net.ListenPacket("udp", rejectedAddr); err == nil {
+			_ = reserved.Close()
+			t.Fatal("rejected UDP candidate was released before retrying")
+		}
+		return (&net.ListenConfig{}).Listen(ctx, network, candidate)
+	})
+	if probes != 2 {
+		t.Fatalf("TCP probes = %d, want 2", probes)
+	}
+	for _, candidate := range []string{rejectedAddr, addr} {
+		reserved, err := net.ListenPacket("udp", candidate)
+		if err != nil {
+			t.Fatalf("UDP reservation not released for %s: %v", candidate, err)
+		}
+		_ = reserved.Close()
+	}
 }
 
 // getH3Once issues exactly one bounded HTTP/3 GET, for an assertion that
