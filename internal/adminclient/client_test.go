@@ -221,6 +221,12 @@ func TestTokenFileFailures(t *testing.T) {
 	if _, _, err := readToken(f, strings.NewReader("")); err == nil {
 		t.Fatal("empty token accepted")
 	}
+	if err := os.WriteFile(f, []byte("token"+strings.Repeat(" ", 64<<10)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := readToken(f, strings.NewReader("")); err == nil {
+		t.Fatal("oversized token file accepted")
+	}
 }
 
 func TestNewTLSConfigurationFailures(t *testing.T) {

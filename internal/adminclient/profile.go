@@ -186,9 +186,20 @@ func readToken(filename string, stdin io.Reader) (string, []string, error) {
 		return "", nil, fmt.Errorf("read token file %q: %w", filename, err)
 	}
 	warnings := permissionWarnings(filename, info)
-	data, err := os.ReadFile(filename)
+	file, err := os.Open(filename)
 	if err != nil {
 		return "", nil, fmt.Errorf("read token file %q: %w", filename, err)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, (64<<10)+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return "", nil, fmt.Errorf("read token file %q: %w", filename, readErr)
+	}
+	if closeErr != nil {
+		return "", nil, fmt.Errorf("close token file %q: %w", filename, closeErr)
+	}
+	if len(data) > 64<<10 {
+		return "", nil, errors.New("token file exceeds 64 KiB")
 	}
 	token := strings.TrimSpace(string(data))
 	if token == "" {
