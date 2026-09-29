@@ -262,6 +262,75 @@ func TestSourceRecorderStatFailure(t *testing.T) {
 	}
 }
 
+// A stream may report a zero size even when it never ends. Both parser entry
+// points must stop at the byte limit and leave the policy identity unchanged.
+type oversizedRuleFS struct{ fstest.MapFS }
+
+type oversizedRuleFile struct{ fs.File }
+
+func (f oversizedRuleFile) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'x'
+	}
+	return len(p), nil
+}
+
+func (f oversizedRuleFS) Open(name string) (fs.File, error) {
+	file, err := f.MapFS.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return oversizedRuleFile{File: file}, nil
+}
+
+func TestSourceRecorderRejectsOversizedRuleStream(t *testing.T) {
+	for _, read := range []struct {
+		name string
+		read func(*sourceRecorder) error
+	}{
+		{"Open", func(r *sourceRecorder) error {
+			f, err := r.Open("rule.conf")
+			if err == nil {
+				_ = f.Close()
+			}
+			return err
+		}},
+		{"ReadFile", func(r *sourceRecorder) error {
+			_, err := r.ReadFile("rule.conf")
+			return err
+		}},
+	} {
+		t.Run(read.name, func(t *testing.T) {
+			rec := newSourceRecorder(oversizedRuleFS{fstest.MapFS{"rule.conf": {Data: nil}}})
+			if err := read.read(rec); err == nil || !strings.Contains(err.Error(), "exceeds") {
+				t.Fatalf("oversized stream error = %v", err)
+			}
+			if n, digest := rec.identity(); n != 0 || digest != "" {
+				t.Fatalf("rejected input recorded: %d %q", n, digest)
+			}
+		})
+	}
+}
+
+func TestOversizedDirectiveFileFailsPolicyBuild(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large.conf")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(MaxExternalRuleFileBytes + 1); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = New(context.Background(), config.WAFConfig{Enabled: true, DirectivesFiles: []string{path}}, Options{})
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversized policy build error = %v", err)
+	}
+}
+
 func TestRuleCounterClassification(t *testing.T) {
 	var c ruleCounter
 	for _, f := range []string{"", "_inline_", "@owasp_crs/REQUEST-901-INITIALIZATION.conf", "@coraza.conf-recommended", "/etc/jul/rules.conf"} {

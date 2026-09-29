@@ -193,6 +193,10 @@ SecRule REQUEST_HEADERS:User-Agent "@contains sqlmap" \
 """
 ```
 
+External files read by the rule parser (including files reached through
+`Include` or file-backed operators) are limited to 16 MiB each. A larger file
+fails startup or reload; on reload, the previous compiled policy keeps serving.
+
 > **Tip:** add the `log` action to inline rules you want surfaced in
 > `jul_waf_events_total` and the logs — only rules that log fire the event hook
 > (CRS rules log by default).
