@@ -1076,7 +1076,7 @@ type pendingRestartStatus struct {
 // loadMarkerLocked reads and decodes the marker file. Must be called with
 // s.mu held.
 func (s *PlannedRestartStore) loadMarkerLocked() (*PlannedRestartMarker, error) {
-	data, err := os.ReadFile(s.markerPath())
+	data, err := readStateMarker(s.markerPath())
 	if err != nil {
 		return nil, err
 	}
