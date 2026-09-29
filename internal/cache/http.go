@@ -149,18 +149,29 @@ func (w *cacheWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 // isEventStream reports whether the response is a Server-Sent Events stream.
 func isEventStream(h http.Header) bool {
-	ct := h.Get("Content-Type")
-	if i := strings.IndexByte(ct, ';'); i >= 0 {
-		ct = ct[:i]
+	for _, ct := range h.Values("Content-Type") {
+		if i := strings.IndexByte(ct, ';'); i >= 0 {
+			ct = ct[:i]
+		}
+		if strings.EqualFold(strings.TrimSpace(ct), "text/event-stream") {
+			return true
+		}
 	}
-	return strings.EqualFold(strings.TrimSpace(ct), "text/event-stream")
+	return false
 }
 
 // isUpgradeRequest reports whether r asks to switch protocols (RFC 9110 §7.8).
 // Both halves are required: an Upgrade header is only meaningful when the same
 // hop also lists "upgrade" in Connection.
 func isUpgradeRequest(r *http.Request) bool {
-	if r.Header.Get("Upgrade") == "" {
+	upgrade := false
+	for _, v := range r.Header.Values("Upgrade") {
+		if strings.TrimSpace(v) != "" {
+			upgrade = true
+			break
+		}
+	}
+	if !upgrade {
 		return false
 	}
 	for _, v := range r.Header.Values("Connection") {
@@ -197,6 +208,12 @@ func (r *recorder) Header() http.Header {
 
 func (r *recorder) WriteHeader(code int) {
 	if r.status != 0 {
+		return
+	}
+	// Informational responses before 101 are interim. Capture the final
+	// validation status instead of mistaking an early hint for the origin's
+	// answer and issuing an unnecessary second request.
+	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
 		return
 	}
 	r.status = code
@@ -264,28 +281,79 @@ func (w *statusWriter) Write(p []byte) (int, error) {
 // lookup so decision D05 (bypass, never substitute a stored full response, never
 // store a 206) is taken before any cache state is consulted.
 func isRangeRequest(r *http.Request) bool {
-	return r.Header.Get("Range") != "" || r.Header.Get("If-Range") != ""
+	// Any field presence opts the exchange out. Header.Get only sees the first
+	// field, so an empty first line could otherwise hide a later Range value.
+	return hasHeaderField(r.Header, "Range") || hasHeaderField(r.Header, "If-Range")
 }
 
 // notModified reports whether a conditional request can be answered with 304
 // from the cached entry.
 func notModified(r *http.Request, e *Entry) bool {
-	if inm := r.Header.Get("If-None-Match"); inm != "" && e.ETag != "" {
-		for _, tag := range parseList(inm) {
-			if tag == "*" || tag == e.ETag {
-				return true
-			}
-		}
-		return false
+	if inm := r.Header.Values("If-None-Match"); len(inm) != 0 {
+		// Presence takes precedence over If-Modified-Since, even when the
+		// field is empty or the stored representation has no ETag.
+		return matchesIfNoneMatch(inm, e.ETag)
 	}
-	if ims := r.Header.Get("If-Modified-Since"); ims != "" && e.LastModified != "" {
-		t1, err1 := http.ParseTime(ims)
+	if ims := r.Header.Values("If-Modified-Since"); len(ims) == 1 && e.LastModified != "" {
+		t1, err1 := http.ParseTime(ims[0])
 		t2, err2 := http.ParseTime(e.LastModified)
 		if err1 == nil && err2 == nil && !t2.After(t1) {
 			return true
 		}
 	}
 	return false
+}
+
+// matchesIfNoneMatch reads every field line, splitting only on commas outside
+// quoted entity tags. Weak comparison ignores the W/ prefix on either side.
+// A malformed list cannot justify returning 304 for a cached representation.
+func matchesIfNoneMatch(fields []string, stored string) bool {
+	if len(fields) == 1 && strings.TrimSpace(fields[0]) == "*" {
+		return true
+	}
+	want, valid := opaqueETag(stored)
+	if !valid {
+		return false
+	}
+	matched := false
+	for _, line := range fields {
+		start := 0
+		quoted := false
+		for i := 0; i <= len(line); i++ {
+			if i < len(line) && line[i] == '"' {
+				quoted = !quoted
+			}
+			if i < len(line) && (line[i] != ',' || quoted) {
+				continue
+			}
+			part := strings.TrimSpace(line[start:i])
+			if part != "" {
+				got, ok := opaqueETag(part)
+				if !ok {
+					return false
+				}
+				matched = matched || got == want
+			}
+			start = i + 1
+		}
+		if quoted {
+			return false
+		}
+	}
+	return matched
+}
+
+func opaqueETag(tag string) (string, bool) {
+	tag = strings.TrimPrefix(tag, "W/")
+	if len(tag) < 2 || tag[0] != '"' || tag[len(tag)-1] != '"' {
+		return "", false
+	}
+	for i := 1; i < len(tag)-1; i++ {
+		if tag[i] < '!' || tag[i] == '"' || tag[i] == 0x7f {
+			return "", false
+		}
+	}
+	return tag, true
 }
 
 // parseList splits a comma-separated header value, trimming whitespace.

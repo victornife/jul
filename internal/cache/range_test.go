@@ -197,6 +197,23 @@ func TestHeadRangeRequestBypasses(t *testing.T) {
 	}
 }
 
+func TestRangeFieldPresenceBypassesCachedRepresentation(t *testing.T) {
+	for _, field := range []string{"Range", "If-Range"} {
+		t.Run(field, func(t *testing.T) {
+			_, h := rangeCache(t, memCfg())
+			get(t, h, "http://x/f") // warm the full response
+			r := httptest.NewRequest(http.MethodGet, "http://x/f", nil)
+			r.Header.Add(field, "")
+			r.Header.Add(field, "bytes=0-3")
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, r)
+			if got := rec.Header().Get("X-Cache"); got != stateBypass {
+				t.Fatalf("X-Cache = %q, want BYPASS for repeated %s", got, field)
+			}
+		})
+	}
+}
+
 // TestNonRangeRequestsAreUnaffected is the regression guard: the bypass must key
 // off the range headers only.
 func TestNonRangeRequestsAreUnaffected(t *testing.T) {

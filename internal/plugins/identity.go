@@ -117,11 +117,30 @@ func ReadModule(pc config.PluginConfig) (Module, error) {
 }
 
 func readModuleFile(path string) ([]byte, error) {
+	// Reject known special files before opening: a FIFO can block in Open and
+	// a device can produce unbounded data during reload.
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, errors.New("module source must be a regular file")
+	}
+	if st.Size() > int64(moduleByteLimit) {
+		return nil, fmt.Errorf("module exceeds %d bytes", moduleByteLimit)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+	if st, err := f.Stat(); err != nil {
+		return nil, err
+	} else if !st.Mode().IsRegular() {
+		return nil, errors.New("module source must be a regular file")
+	} else if st.Size() > int64(moduleByteLimit) {
+		return nil, fmt.Errorf("module exceeds %d bytes", moduleByteLimit)
+	}
 	b, err := io.ReadAll(io.LimitReader(f, int64(moduleByteLimit)+1))
 	if err != nil {
 		return nil, err

@@ -53,7 +53,9 @@ func (m *memStore) get(key string) (*Entry, bool) {
 }
 
 func (m *memStore) set(key string, e *Entry) {
-	size := e.Size()
+	// A variant key includes request Vary values and can be much larger than
+	// the response body. The key is retained by the map/list too.
+	size := e.Size() + int64(len(key))
 	m.mu.Lock()
 
 	if el, ok := m.items[key]; ok {

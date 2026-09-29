@@ -421,6 +421,20 @@ func TestFreshnessPrecedence(t *testing.T) {
 			header: http.Header{"Expires": {"0"}, "Date": {date}},
 		},
 		{
+			name:    "earliest repeated Expires wins",
+			header:  http.Header{"Expires": {now.Add(time.Hour).Format(http.TimeFormat), now.Add(10 * time.Second).Format(http.TimeFormat)}},
+			wantTTL: 10 * time.Second, wantOK: true,
+		},
+		{
+			name:   "invalid later Expires cannot restore default freshness",
+			header: http.Header{"Expires": {now.Add(time.Hour).Format(http.TimeFormat), "invalid"}},
+		},
+		{
+			name:    "latest repeated Date shortens Expires lifetime",
+			header:  http.Header{"Expires": {now.Add(time.Hour).Format(http.TimeFormat)}, "Date": {now.Add(-time.Hour).Format(http.TimeFormat), date}},
+			wantTTL: time.Hour, wantOK: true,
+		},
+		{
 			name:    "no explicit freshness falls back to default_ttl",
 			header:  http.Header{},
 			wantTTL: 30 * time.Second, wantOK: true,
@@ -534,12 +548,35 @@ func TestInitialAgeCorrection(t *testing.T) {
 		{"a negative Age is ignored", http.Header{"Age": {"-5"}}, 0},
 		{"a malformed Age is ignored", http.Header{"Age": {"soon"}}, 0},
 		{"an unparseable Date is ignored", http.Header{"Date": {"whenever"}}, 0},
-		{"an overflowing Age is clamped", http.Header{"Age": {"99999999999999999999"}}, 0},
+		{"an overflowing Age is clamped", http.Header{"Age": {"99999999999999999999"}}, maxDeltaSeconds * time.Second},
+		{"later Age cannot be hidden by an empty first field", http.Header{"Age": {"", "90"}}, 90 * time.Second},
+		{"older Date wins across repeated fields", http.Header{"Date": {now.Format(http.TimeFormat), now.Add(-time.Minute).Format(http.TimeFormat)}}, time.Minute},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := initialAge(tc.header, now); got != tc.want {
 				t.Errorf("initialAge = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAmbiguousValidatorsAreNotStored(t *testing.T) {
+	for _, field := range []string{"ETag", "Last-Modified"} {
+		t.Run(field, func(t *testing.T) {
+			c, _ := conformanceCache(t, memCfg())
+			calls := 0
+			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls++
+				w.Header().Set("Cache-Control", "max-age=3600")
+				w.Header().Add(field, "first")
+				w.Header().Add(field, "second")
+				_, _ = w.Write([]byte("body"))
+			}))
+			get(t, h, "http://x/ambiguous")
+			get(t, h, "http://x/ambiguous")
+			if calls != 2 {
+				t.Fatalf("ambiguous %s reused from cache after %d origin calls", field, calls)
 			}
 		})
 	}

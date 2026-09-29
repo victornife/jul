@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"io/fs"
 	"regexp"
@@ -30,6 +31,11 @@ type sourceRecorder struct {
 	names map[string]struct{}
 	chain bytes.Buffer
 }
+
+// External rule files are read into memory to bind their digest to the bytes
+// Coraza compiles. Limit each read, including non-regular files with no useful
+// Stat size, so a bad input cannot make policy preparation grow without bound.
+const MaxExternalRuleFileBytes = 16 << 20
 
 func newSourceRecorder(inner fs.FS) *sourceRecorder {
 	return &sourceRecorder{inner: inner, names: map[string]struct{}{}}
@@ -70,22 +76,29 @@ func (r *sourceRecorder) Open(name string) (fs.File, error) {
 	if st.IsDir() {
 		return f, nil
 	}
-	data, err := io.ReadAll(f)
+	if st.Size() > MaxExternalRuleFileBytes {
+		_ = f.Close()
+		return nil, fmt.Errorf("waf: rule file %q exceeds %d bytes", name, MaxExternalRuleFileBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, MaxExternalRuleFileBytes+1))
 	_ = f.Close()
 	if err != nil {
 		return nil, err
+	}
+	if len(data) > MaxExternalRuleFileBytes {
+		return nil, fmt.Errorf("waf: rule file %q exceeds %d bytes", name, MaxExternalRuleFileBytes)
 	}
 	r.record(name, data)
 	return &memFile{Reader: bytes.NewReader(data), info: st}, nil
 }
 
 func (r *sourceRecorder) ReadFile(name string) ([]byte, error) {
-	data, err := fs.ReadFile(r.inner, name)
+	f, err := r.Open(name)
 	if err != nil {
 		return nil, err
 	}
-	r.record(name, data)
-	return data, nil
+	defer f.Close()
+	return io.ReadAll(f)
 }
 
 func (r *sourceRecorder) ReadDir(name string) ([]fs.DirEntry, error) {

@@ -15,10 +15,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/tetratelabs/wazero"
 
 	"jul/internal/config"
 	"jul/internal/egress"
@@ -41,7 +44,7 @@ func TestHostAllowed(t *testing.T) {
 }
 
 func TestIPBlocked(t *testing.T) {
-	blocked := []string{"127.0.0.1", "10.0.0.1", "192.168.1.1", "169.254.1.1", "100.64.0.1", "0.0.0.0", "::1"}
+	blocked := []string{"127.0.0.1", "10.0.0.1", "192.168.1.1", "169.254.1.1", "100.64.0.1", "0.0.0.0", "0.1.2.3", "198.18.0.1", "198.19.255.254", "240.0.0.1", "::1"}
 	for _, s := range blocked {
 		if !ipBlocked(net.ParseIP(s)) {
 			t.Errorf("ipBlocked(%s) = false, want true", s)
@@ -52,6 +55,18 @@ func TestIPBlocked(t *testing.T) {
 		if ipBlocked(net.ParseIP(s)) {
 			t.Errorf("ipBlocked(%s) = true, want false (public)", s)
 		}
+	}
+}
+
+func TestFetchBlocksSpecialUseDNSAnswerBeforeDial(t *testing.T) {
+	for _, ip := range []string{"0.1.2.3", "198.18.0.1", "240.0.0.1"} {
+		t.Run(ip, func(t *testing.T) {
+			md := &mockDialer{}
+			_, err := dialValidatedIPs(context.Background(), md, multiIPResolver{ips: []string{"8.8.8.8", ip}}, "tcp", "api.example.com", "443")
+			if !errors.Is(err, errFetchBlocked) || len(md.attempted) != 0 {
+				t.Fatalf("mixed DNS answer: err = %v, dials = %v", err, md.attempted)
+			}
+		})
 	}
 }
 
@@ -454,6 +469,48 @@ func TestFetchBodyReadErrorReturnsTransportError(t *testing.T) {
 	}
 	if inv.lastFetchTruncated {
 		t.Fatal("lastFetchTruncated true after body read error, want false")
+	}
+}
+
+func TestV1HostFetchAndRequestBodyFailures(t *testing.T) {
+	ctx := context.Background()
+	runtime := wazero.NewRuntime(ctx)
+	defer runtime.Close(ctx)
+	var output bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&output, nil))
+	p := &plugin{name: "legacy", capFetch: true, allowedHosts: []string{"fetch.test"}, fetchTimeout: time.Second, maxFetchResp: 1024, log: logger}
+	if err := registerJulHostModule(ctx, runtime, p); err != nil {
+		t.Fatal(err)
+	}
+	host := runtime.Module("jul")
+	call := func(name string, inv *invocation) {
+		t.Helper()
+		def := host.ExportedFunctionDefinitions()[name]
+		guest, err := runtime.Instantiate(ctx, callerModule("jul", name, def.ParamTypes(), def.ResultTypes()))
+		if err != nil {
+			t.Fatalf("instantiate %s: %v", name, err)
+		}
+		defer guest.Close(ctx)
+		if _, err := guest.ExportedFunction("call").Call(withInvocation(ctx, inv)); err != nil {
+			t.Fatalf("call %s: %v", name, err)
+		}
+	}
+
+	call("fetch", &invocation{r: httptest.NewRequest(http.MethodGet, "/", nil), log: logger})
+	if !strings.Contains(output.String(), "reason=ssrf") {
+		t.Fatalf("v1 fetch failure did not use bounded reason: %q", output.String())
+	}
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	r.Body = io.NopCloser(io.MultiReader(strings.NewReader("abc"), errorReader{}))
+	inv := &invocation{r: r, log: logger, maxReqBody: 8}
+	call("read_request_body", inv)
+	if inv.err == nil || !strings.Contains(inv.err.Error(), "read request body") {
+		t.Fatalf("v1 partial body read did not fail: %v", inv.err)
+	}
+	nilBody := &invocation{r: httptest.NewRequest(http.MethodGet, "/", nil)}
+	nilBody.r.Body = nil
+	if !nilBody.bufferRequestBody() || nilBody.err != nil {
+		t.Fatalf("nil body rejected: %v", nilBody.err)
 	}
 }
 func TestPluginCloseClosesIdleConnections(t *testing.T) {

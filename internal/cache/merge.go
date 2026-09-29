@@ -72,7 +72,7 @@ func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry
 	// 304 without Date or Age leaves the cache with no evidence about when the
 	// origin generated its answer, so the safe reading is "just now".
 	created := now
-	if h304.Get("Date") != "" || h304.Get("Age") != "" {
+	if hasHeaderField(h304, "Date") || hasHeaderField(h304, "Age") {
 		created = now.Add(-initialAge(merged, now))
 	}
 

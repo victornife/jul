@@ -213,6 +213,19 @@ func TestLocationAndContentLocationInvalidation(t *testing.T) {
 	}
 }
 
+func TestLaterLocationFieldInvalidatesSameOriginTarget(t *testing.T) {
+	f := newInvalidationFixture(t, memCfg())
+	f.warm(t, "http://x/other")
+	r := httptest.NewRequest(http.MethodPost, "http://x/doc", nil)
+	h := http.Header{}
+	h.Add("Location", "http://evil/other")
+	h.Add("Location", "/other")
+	f.cache.invalidateFor(r, h)
+	if f.cached("http://x/other") || f.cachedHead("http://x/other") {
+		t.Fatal("later same-origin Location left a stale representation")
+	}
+}
+
 // TestCrossOriginLocationCannotEvictAnotherHostsEntry states the security
 // property directly rather than through the shared fixture.
 func TestCrossOriginLocationCannotEvictAnotherHostsEntry(t *testing.T) {

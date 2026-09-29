@@ -161,6 +161,11 @@ func validatePlugins(plugins map[string]PluginConfig) []error {
 		if strings.TrimSpace(name) == "" {
 			errs = append(errs, errors.New("[plugins]: plugin name must not be empty"))
 		}
+		if strings.ContainsRune(name, '\x00') {
+			// The KV namespace is name + NUL + key. A NUL in a name
+			// would let two plugin namespaces overlap.
+			errs = append(errs, errors.New("[plugins]: plugin name must not contain NUL"))
+		}
 		switch strings.TrimSpace(p.Type) {
 		case "", "middleware", "handler":
 		default:

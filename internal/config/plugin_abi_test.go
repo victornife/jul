@@ -31,3 +31,10 @@ func TestValidatePluginsABI(t *testing.T) {
 		t.Fatal("EffectivePluginABI")
 	}
 }
+
+func TestValidatePluginsRejectsNamespaceDelimiterInName(t *testing.T) {
+	err := validatePlugins(map[string]PluginConfig{"a\x00b": {Inline: "AGFzbQEAAAA="}})
+	if len(err) != 1 || !strings.Contains(err[0].Error(), "must not contain NUL") {
+		t.Fatalf("ambiguous KV namespace: %v", err)
+	}
+}

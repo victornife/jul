@@ -4,6 +4,7 @@
 package cache
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +27,34 @@ func TestMemStoreStats(t *testing.T) {
 	bytes, maxBytes, entries, evictions := m.stats()
 	if entries != 1 || evictions != 1 || maxBytes != 400 || bytes <= 0 {
 		t.Fatalf("stats() after overflow = (bytes=%d, max=%d, entries=%d, evictions=%d), want one entry and one eviction", bytes, maxBytes, entries, evictions)
+	}
+}
+
+func TestEntrySizeAccountsForVaryMetadata(t *testing.T) {
+	e := &Entry{
+		Vary:       []string{"X-Tenant"},
+		VaryValues: map[string]string{"X-Tenant": "tenant-123"},
+		Variants:   []string{strings.Repeat("v", 2048)},
+	}
+	if e.Size() < int64(256+2048+len("X-Tenant")*2+len("tenant-123")) {
+		t.Fatalf("metadata missing from memory estimate: %d", e.Size())
+	}
+	m := newMemStore(1024, nil)
+	m.set("stub", e)
+	if _, ok := m.get("stub"); ok {
+		t.Fatal("oversized Vary stub survived a smaller memory budget")
+	}
+}
+
+func TestMemStoreCountsVariantKeyBytes(t *testing.T) {
+	m := newMemStore(1024, nil)
+	key := strings.Repeat("tenant", 200)
+	m.set(key, &Entry{Body: []byte("small")})
+	if _, ok := m.get(key); ok {
+		t.Fatal("large variant key exceeded the byte limit without eviction")
+	}
+	if bytes, _, entries, _ := m.stats(); bytes != 0 || entries != 0 {
+		t.Fatalf("unaccounted variant key: bytes=%d entries=%d", bytes, entries)
 	}
 }
 

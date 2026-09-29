@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -86,6 +87,32 @@ type invCtxKey struct{}
 
 func withInvocation(ctx context.Context, inv *invocation) context.Context {
 	return context.WithValue(ctx, invCtxKey{}, inv)
+}
+
+// bufferRequestBody preserves an all-or-nothing view for both ABIs. An I/O
+// error must fail the invocation; otherwise a partially read body could be
+// replayed downstream as a complete request.
+func (inv *invocation) bufferRequestBody() bool {
+	if inv.bodyBuffered {
+		return inv.err == nil
+	}
+	inv.bodyBuffered = true
+	if inv.r.Body == nil {
+		return true
+	}
+	data, err := io.ReadAll(io.LimitReader(inv.r.Body, int64(inv.maxReqBody)+1))
+	if err != nil {
+		inv.fail(fmt.Errorf("plugin: read request body: %w", err))
+		return false
+	}
+	if len(data) > inv.maxReqBody {
+		inv.fail(errBodyTooLarge)
+		return false
+	}
+	inv.body = data
+	inv.r.Body = io.NopCloser(bytes.NewReader(data))
+	inv.r.ContentLength = int64(len(data))
+	return true
 }
 
 func invocationFrom(ctx context.Context) *invocation {
@@ -239,21 +266,8 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 		if inv == nil {
 			return 0
 		}
-		if !inv.bodyBuffered {
-			inv.bodyBuffered = true
-			if inv.r.Body != nil {
-				// Read one byte past the cap to detect overflow; an oversize body
-				// fails the call rather than handing the guest a truncated view.
-				data, _ := io.ReadAll(io.LimitReader(inv.r.Body, int64(inv.maxReqBody)+1))
-				if len(data) > inv.maxReqBody {
-					inv.err = errBodyTooLarge
-					return 0
-				}
-				inv.body = data
-				// Restore the body so the next handler can read it in full.
-				inv.r.Body = io.NopCloser(bytes.NewReader(data))
-				inv.r.ContentLength = int64(len(data))
-			}
+		if !inv.bufferRequestBody() {
+			return 0
 		}
 		return writeInto(m, buf, limit, inv.body)
 	})
@@ -326,18 +340,9 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 		body, _ := readMem(m, bodyPtr, bodyLen)
 		status, respBody, err := p.doFetch(ctx, method, rawURL, body)
 		if err != nil {
-			inv.log.Warn("plugin: fetch denied", "name", p.name, "url", rawURL, "err", err)
-			switch {
-			case errors.Is(err, egress.ErrBlocked):
-				// Refused by the server-wide [egress] allow-list. Distinct from a
-				// plugin-local block so a guest can tell the two apart; no network
-				// detail is exposed to the guest.
-				return -5
-			case errors.Is(err, errFetchBlocked):
-				return -3
-			default:
-				return -4
-			}
+			code, reason := fetchFailure(err)
+			inv.log.Warn("plugin: fetch failed", "name", p.name, "reason", reason)
+			return code
 		}
 		writeInto(m, buf, limit, respBody)
 		return int32(status)
@@ -379,4 +384,17 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 
 	_, err := b.Instantiate(ctx)
 	return err
+}
+
+// fetchFailure uses closed reason labels. A guest URL or transport error can
+// carry userinfo and query credentials and must never enter an operator log.
+func fetchFailure(err error) (int32, string) {
+	switch {
+	case errors.Is(err, egress.ErrBlocked):
+		return -5, "egress"
+	case errors.Is(err, errFetchBlocked):
+		return -3, "ssrf"
+	default:
+		return -4, "transport"
+	}
 }

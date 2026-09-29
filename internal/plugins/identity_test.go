@@ -157,6 +157,31 @@ func TestReadModuleRejectsInvalidAndOversized(t *testing.T) {
 	}
 }
 
+func TestReadModuleRejectsNonRegularPath(t *testing.T) {
+	_, err := ReadModule(config.PluginConfig{Path: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("device as module source: %v", err)
+	}
+}
+
+func TestReadModuleRejectsSparseOversizeBeforeReading(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sparse.wasm")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(1 << 30); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadModule(config.PluginConfig{Path: path}); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("sparse oversized module: %v", err)
+	}
+}
+
 func TestSameModules(t *testing.T) {
 	a := testModuleBytes(t, "header-inject")
 	dir := t.TempDir()

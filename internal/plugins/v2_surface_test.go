@@ -6,8 +6,10 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -93,6 +95,32 @@ func TestV2RequestSurface(t *testing.T) {
 	}
 }
 
+func TestV2RequestBodyReadErrorFailsBeforeDownstream(t *testing.T) {
+	s := surfaceSet(t, nil)
+	called := false
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true })
+	r := httptest.NewRequest(http.MethodPost, "/p", nil)
+	r.Header.Set("X-Op", "req-surface")
+	r.Body = io.NopCloser(io.MultiReader(strings.NewReader("abc"), errorReader{}))
+	rec := serve(chainFor(s, next, "p"), r)
+	if rec.Code != http.StatusInternalServerError || called {
+		t.Fatalf("read failure status = %d, downstream called = %v", rec.Code, called)
+	}
+}
+
+func TestV2FetchFailureLogOmitsGuestURLAndTransportError(t *testing.T) {
+	s := surfaceSet(t, nil)
+	var out bytes.Buffer
+	s.plugins["p"].log = slog.New(slog.NewTextHandler(&out, nil))
+	r := httptest.NewRequest(http.MethodPost, "/p", strings.NewReader("abc"))
+	r.Header.Set("X-Op", "req-surface")
+	r.Header.Set("X-Fetch", "https://user:password@other.test/path?token=secret")
+	serve(chainFor(s, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), "p"), r)
+	if log := out.String(); strings.Contains(log, "password") || strings.Contains(log, "secret") || strings.Contains(log, "other.test") || !strings.Contains(log, "reason=ssrf") {
+		t.Fatalf("fetch failure log contains request data or lacks reason: %q", log)
+	}
+}
+
 func TestV2ResponseSurface(t *testing.T) {
 	m, _ := v2Manager(t, nil)
 	s := buildSet(t, m, map[string]config.PluginConfig{"p": v2cfg(func(pc *config.PluginConfig) { pc.KV = true })})
@@ -124,6 +152,8 @@ func callerModule(module, name string, params, results []api.ValueType) []byte {
 	out = append(out, wasmSection(1, [][]byte{ty(params, results), ty(nil, nil)})...)
 	out = append(out, wasmSection(2, [][]byte{append(append(wasmName(module), wasmName(name)...), 0x00, 0x00)})...)
 	out = append(out, wasmSection(3, [][]byte{leb(1)})...)
+	// Give host calls a real memory so zero-length guest ranges are valid.
+	out = append(out, wasmSection(5, [][]byte{{0x00, 0x01}})...)
 	out = append(out, wasmSection(7, [][]byte{append(wasmName("call"), 0x00, 0x01)})...)
 	return append(out, wasmSection(10, [][]byte{append(leb(len(body)), body...)})...)
 }

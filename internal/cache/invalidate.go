@@ -46,8 +46,10 @@ var invalidatedHeaders = []string{"Location", "Content-Location"}
 func (c *Cache) invalidateFor(r *http.Request, respHeader http.Header) {
 	c.invalidateURI(r.Host, r.URL.RequestURI())
 	for _, name := range invalidatedHeaders {
-		if host, requestURI, ok := sameOriginTarget(r, respHeader.Get(name)); ok {
-			c.invalidateURI(host, requestURI)
+		for _, value := range respHeader.Values(name) {
+			if host, requestURI, ok := sameOriginTarget(r, value); ok {
+				c.invalidateURI(host, requestURI)
+			}
 		}
 	}
 }
