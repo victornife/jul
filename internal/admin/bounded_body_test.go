@@ -4,10 +4,13 @@
 package admin
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func TestReadBoundedBodyRejectsValidPrefixWithOversizedSuffix(t *testing.T) {
@@ -22,5 +25,24 @@ func TestBoundedPatchJSONRejectsOversizedValidPrefix(t *testing.T) {
 	_, err := decodePatchBatch(r)
 	if err == nil {
 		t.Fatal("oversized patch accepted")
+	}
+}
+
+func TestReadBoundedBodyPropagatesReaderFailure(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/config/preview", nil)
+	want := errors.New("body read failed")
+	r.Body = io.NopCloser(iotest.ErrReader(want))
+	if _, err := readBoundedBody(r, 1<<20); !errors.Is(err, want) {
+		t.Fatalf("readBoundedBody error = %v, want %v", err, want)
+	}
+}
+
+func TestRawPreviewRejectsOversizedCandidateBeforeStateRead(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/config/preview", strings.NewReader("[cache]\n"+strings.Repeat(" ", 1<<20)))
+	r.Header.Set(rawPreviewBaseVersionHeader, "pinned-version")
+	w := httptest.NewRecorder()
+	(&Server{}).handleConfigPreview(w, r)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "Could not read the candidate") {
+		t.Fatalf("raw preview oversized body: status=%d body=%s", w.Code, w.Body.String())
 	}
 }
