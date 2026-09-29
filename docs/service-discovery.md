@@ -57,6 +57,10 @@ adds no third-party dependency.
 - **Keep last-good.** A failed resolve — or one that returns *zero* targets — is
   logged, counted, and **skipped**: the pool keeps its previous backend set. A
   provider blip or a transient empty response never black-holes traffic.
+- **Bounded provider replies.** Consul and Kubernetes responses above 16 MiB,
+  including replies with a valid JSON prefix, fail the refresh. Kubernetes
+  refreshes also stop after 100 EndpointSlice pages; a continuation token over
+  4096 bytes is rejected. The last-good backends stay in service.
 - **Optional seed.** With discovery enabled the static `servers` list is
   optional. If present it seeds the pool until the first successful resolve; a
   discovery pool may also start empty (picks return "no available backend" until
@@ -231,7 +235,7 @@ query parameters, or a fragment; malformed values fail discovery setup.
 
 When the mounted service-account token is used, the resolver rereads it for
 each API request so projected token rotation takes effect without a restart.
-An unreadable or empty previously mounted token fails that refresh and retains
+An unreadable, empty, or over-64-KiB previously mounted token fails that refresh and retains
 the last-good backends. An explicit `token` follows config secret reload rules.
 API redirects fail discovery rather than forwarding the bearer token to a
 different destination.
