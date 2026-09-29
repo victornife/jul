@@ -114,6 +114,23 @@ func TestCGIClassifiesTruncatedDeclaredResponse(t *testing.T) {
 		t.Fatalf("declared response overrun = %v, %q", err, rec.Body.String())
 	}
 }
+
+func TestUWSGIReplacesClientIdentityAssertions(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://edge.test/app", nil)
+	r.RemoteAddr = "192.0.2.9:1234"
+	for _, key := range []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Client-Cert", "Client-Cert", "Forwarded", "X-Real-Ip"} {
+		r.Header.Set(key, "attacker")
+	}
+	p := buildCGIParams(config.LocationConfig{}, r)
+	if p["HTTP_X_FORWARDED_FOR"] != "192.0.2.9" || p["HTTP_X_FORWARDED_HOST"] != "edge.test" || p["HTTP_X_FORWARDED_PROTO"] != "http" {
+		t.Fatalf("uWSGI identity did not come from listener: %v", p)
+	}
+	for _, key := range []string{"HTTP_CLIENT_CERT", "HTTP_X_FORWARDED_CLIENT_CERT", "HTTP_FORWARDED", "HTTP_X_REAL_IP"} {
+		if p[key] != "" {
+			t.Errorf("spoofed %s survived: %q", key, p[key])
+		}
+	}
+}
 func (*cgiDiscardWriter) WriteHeader(int)             {}
 func (*cgiDiscardWriter) Write(p []byte) (int, error) { return len(p), nil }
 

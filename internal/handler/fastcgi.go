@@ -571,20 +571,48 @@ func buildCGIParams(loc config.LocationConfig, r *http.Request) map[string]strin
 		key := "HTTP_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
 		p[key] = strings.Join(vals, ", ")
 	}
-	// The inbound chain is attacker input unless it came from a trusted proxy,
-	// and the application cannot tell the difference. Overwrite it with Jul's
-	// own trusted chain rather than laundering what arrived.
 	delete(p, "HTTP_PROXY") // httpoxy: a client "Proxy" header must not become HTTP_PROXY
-	p["HTTP_X_FORWARDED_FOR"] = forwardedChain(client, peer)
-	if p["HTTP_X_FORWARDED_FOR"] == "" {
-		delete(p, "HTTP_X_FORWARDED_FOR")
-	}
+	sanitizeCGIIdentityParams(p, r)
 
 	// fastcgi_params doubles as the explicit param override map for uWSGI.
 	for k, v := range loc.FastCGIParams {
 		p[k] = v
 	}
 	return p
+}
+
+// CGI backends commonly trust HTTP_* identity assertions. Rebuild those
+// fields from the listener's canonical view, never from client headers.
+func sanitizeCGIIdentityParams(p map[string]string, r *http.Request) {
+	for name := range p {
+		if strings.HasPrefix(name, "HTTP_X_FORWARDED_") {
+			delete(p, name)
+		}
+	}
+	for _, name := range []string{"HTTP_FORWARDED", "HTTP_X_REAL_IP", "HTTP_CLIENT_CERT", "HTTP_CLIENT_CERT_CHAIN", "HTTP_X_FORWARDED_CLIENT_CERT"} {
+		delete(p, name)
+	}
+	client, peer := forwardedAddrs(r)
+	if client != "" {
+		p["REMOTE_ADDR"] = client
+	} else if peer != "" {
+		p["REMOTE_ADDR"] = peer
+	}
+	if peer != "" {
+		p["JUL_PEER_ADDR"] = peer
+	}
+	if chain := forwardedChain(client, peer); chain != "" {
+		p["HTTP_X_FORWARDED_FOR"] = chain
+	}
+	p["HTTP_X_FORWARDED_HOST"] = r.Host
+	if r.TLS == nil {
+		p["HTTP_X_FORWARDED_PROTO"] = "http"
+	} else {
+		p["HTTP_X_FORWARDED_PROTO"] = "https"
+	}
+	if id := middleware.PeerCertIdentityFrom(r.Context()); id != nil && len(id.Raw) > 0 {
+		p["HTTP_CLIENT_CERT"] = certItem(id.Raw)
+	}
 }
 
 // writeCGIResponse parses a CGI-style response (optional HTTP status line, then
