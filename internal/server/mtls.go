@@ -257,7 +257,10 @@ func loadCRL(path string, caCerts []*x509.Certificate) (crlSet, error) {
 		return crlSet{}, err
 	}
 	der := raw
-	if block, _ := pem.Decode(raw); block != nil {
+	if block, rest := pem.Decode(raw); block != nil {
+		if block.Type != "X509 CRL" || len(bytes.TrimSpace(rest)) != 0 {
+			return crlSet{}, fmt.Errorf("CRL %s must contain exactly one X509 CRL block", path)
+		}
 		der = block.Bytes
 	}
 	crl, err := x509.ParseRevocationList(der)

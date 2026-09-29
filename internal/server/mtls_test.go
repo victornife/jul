@@ -319,6 +319,21 @@ func TestLoadCRLVerifiesSignature(t *testing.T) {
 	}
 }
 
+func TestLoadCRLRejectsTrailingPEMDocument(t *testing.T) {
+	ca := newCA(t)
+	path := ca.writeCRL(t, t.TempDir(), "revoked.crl", 1)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(raw, []byte("unexpected trailing data")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadCRL(path, []*x509.Certificate{ca.cert}); err == nil {
+		t.Fatal("CRL with an ignored trailing document accepted")
+	}
+}
+
 // TestCRLRevocationIsScopedToItsIssuer: serials are unique per issuer only, so
 // CA-A's CRL revoking serial 0x03 must not reject CA-B's certificate 0x03 (the
 // documented CA-rotation bundle holds both CAs).
