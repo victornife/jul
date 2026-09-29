@@ -280,7 +280,7 @@ func (cw *compressWriter) decide() {
 	if cw.decided {
 		return
 	}
-	if cw.r.Header.Get("Range") != "" ||
+	if len(cw.r.Header.Values("Range")) != 0 ||
 		cacheControlNoTransform(cw.r.Header) ||
 		cacheControlNoTransform(cw.Header()) {
 		cw.startPassthrough()

@@ -156,6 +156,21 @@ func TestCompressSkipsRange(t *testing.T) {
 	}
 }
 
+func TestCompressSkipsRepeatedRange(t *testing.T) {
+	mw := gzipMiddleware(t, CompressionOptions{MinSize: 8})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Add("Range", "")
+	req.Header.Add("Range", "bytes=0-10")
+	rec := serveCompress(mw, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, strings.Repeat("y", 1000))
+	}, req)
+	if got := rec.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("repeated Range response encoded as %q", got)
+	}
+}
+
 type flushRecorder struct {
 	*httptest.ResponseRecorder
 	flushes int
