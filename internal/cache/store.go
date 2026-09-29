@@ -121,6 +121,16 @@ func (e *Entry) Size() int64 {
 			n += int64(len(v))
 		}
 	}
+	for _, field := range e.Vary {
+		n += int64(len(field))
+	}
+	for name, value := range e.VaryValues {
+		n += int64(len(name) + len(value))
+	}
+	for _, key := range e.Variants {
+		n += int64(len(key))
+	}
+	n += int64(len(e.ETag) + len(e.LastModified))
 	return n
 }
 
