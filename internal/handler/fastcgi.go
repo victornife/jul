@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/yookoala/gofast"
+	"golang.org/x/net/http/httpguts"
 
 	"jul/internal/config"
 	"jul/internal/middleware"
@@ -665,7 +666,7 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 		}
 		key := strings.TrimSpace(trimmed[:idx])
 		val := strings.TrimSpace(trimmed[idx+1:])
-		if key == "" || strings.ContainsAny(key, " \t\x00") || strings.ContainsRune(val, '\x00') {
+		if !httpguts.ValidHeaderFieldName(key) || !httpguts.ValidHeaderFieldValue(val) {
 			return errors.New("uwsgi response has invalid header")
 		}
 		if strings.EqualFold(key, "Status") {

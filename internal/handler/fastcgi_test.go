@@ -57,6 +57,14 @@ func TestUWSGIRejectsOversizedVarBeforeFraming(t *testing.T) {
 		t.Fatalf("oversized uWSGI var result = %v", err)
 	}
 }
+
+func TestCGIRejectsInvalidHeaderTokensAndControls(t *testing.T) {
+	for _, raw := range []string{"Bad(Name: value\r\n\r\n", "X-Value: has\x01control\r\n\r\n"} {
+		if err := writeCGIResponse(bufio.NewReader(strings.NewReader(raw)), httptest.NewRecorder()); err == nil {
+			t.Errorf("malformed CGI field was accepted: %q", raw)
+		}
+	}
+}
 func (*cgiDiscardWriter) WriteHeader(int)             {}
 func (*cgiDiscardWriter) Write(p []byte) (int, error) { return len(p), nil }
 
