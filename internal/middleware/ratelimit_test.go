@@ -51,6 +51,16 @@ func TestLimiterCapsBucketsDuringKeyChurn(t *testing.T) {
 	}
 }
 
+func TestRateHeaderKeyFallsBackForAmbiguousFields(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "192.0.2.4:1234"
+	r.Header.Add("X-Tenant", "one")
+	r.Header.Add("X-Tenant", "two")
+	if got, want := RateKeyFunc("header:X-Tenant")(r), clientKey(r); got != want {
+		t.Fatalf("ambiguous tenant key = %q, want peer %q", got, want)
+	}
+}
+
 func TestRateLimiterAllowsBurstThenThrottles(t *testing.T) {
 	store := newTestStore(t)
 	lim := store.Scoped("test", 1, 5) // 1 rps, burst 5

@@ -230,8 +230,8 @@ func RateKeyFunc(spec string) KeyFunc {
 	case strings.HasPrefix(spec, "header:"):
 		name := http.CanonicalHeaderKey(spec[len("header:"):])
 		return func(r *http.Request) string {
-			if v := r.Header.Get(name); v != "" {
-				return v
+			if values := r.Header.Values(name); len(values) == 1 && values[0] != "" {
+				return values[0]
 			}
 			return clientKey(r)
 		}
