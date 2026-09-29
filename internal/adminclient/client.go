@@ -171,6 +171,13 @@ func New(cfg Config) (*Client, error) {
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = tlsConfig
+	if base.Scheme == "http" {
+		// Plaintext admin traffic is allowed only on loopback. Resolve and
+		// connect to the checked IPs ourselves so a changed localhost mapping
+		// or environment proxy cannot carry the bearer token off-host.
+		transport.Proxy = nil
+		transport.DialContext = loopbackDialContext
+	}
 	hc := &http.Client{
 		Transport: transport,
 		Timeout:   cfg.Timeout,
@@ -225,6 +232,45 @@ func isLoopbackHost(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func loopbackDialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	dialer := &net.Dialer{}
+	return dialLoopbackWith(ctx, network, address, net.DefaultResolver.LookupIPAddr, dialer.DialContext)
+}
+
+func dialLoopbackWith(ctx context.Context, network, address string,
+	lookup func(context.Context, string) ([]net.IPAddr, error),
+	dial func(context.Context, string, string) (net.Conn, error),
+) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || !isLoopbackHost(host) {
+		return nil, errors.New("plaintext admin dial must target loopback")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return dial(ctx, network, net.JoinHostPort(ip.String(), port))
+	}
+	resolved, err := lookup(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	if len(resolved) == 0 {
+		return nil, errors.New("localhost has no loopback address")
+	}
+	for _, address := range resolved {
+		if !address.IP.IsLoopback() {
+			return nil, errors.New("localhost resolved outside loopback")
+		}
+	}
+	var lastErr error
+	for _, address := range resolved {
+		conn, err := dial(ctx, network, net.JoinHostPort(address.IP.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
 
 // NewIdempotencyKey returns a URL/header-safe 32-character random key.

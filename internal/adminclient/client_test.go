@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -229,6 +230,23 @@ func TestTokenFileFailures(t *testing.T) {
 	}
 	if _, _, err := readToken(f, strings.NewReader("")); err == nil {
 		t.Fatal("oversized token file accepted")
+	}
+}
+
+func TestPlaintextAdminDialRefusesOffHostResolution(t *testing.T) {
+	dialed := false
+	lookup := func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}, {IP: net.ParseIP("198.51.100.7")}}, nil
+	}
+	dial := func(context.Context, string, string) (net.Conn, error) {
+		dialed = true
+		return nil, errors.New("unexpected dial")
+	}
+	if _, err := dialLoopbackWith(context.Background(), "tcp", "localhost:9090", lookup, dial); err == nil || dialed {
+		t.Fatalf("mixed localhost resolution: err=%v dialed=%v, want refusal", err, dialed)
+	}
+	if _, err := dialLoopbackWith(context.Background(), "tcp", "public.example:9090", lookup, dial); err == nil || dialed {
+		t.Fatalf("public dial: err=%v dialed=%v, want refusal", err, dialed)
 	}
 }
 
