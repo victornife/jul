@@ -46,6 +46,18 @@ func TestEntrySizeAccountsForVaryMetadata(t *testing.T) {
 	}
 }
 
+func TestMemStoreCountsVariantKeyBytes(t *testing.T) {
+	m := newMemStore(1024, nil)
+	key := strings.Repeat("tenant", 200)
+	m.set(key, &Entry{Body: []byte("small")})
+	if _, ok := m.get(key); ok {
+		t.Fatal("large variant key exceeded the byte limit without eviction")
+	}
+	if bytes, _, entries, _ := m.stats(); bytes != 0 || entries != 0 {
+		t.Fatalf("unaccounted variant key: bytes=%d entries=%d", bytes, entries)
+	}
+}
+
 // TestDiskStoreStats proves diskStore.stats() reports live occupancy and
 // counts an eviction forced by exceeding the byte cap.
 func TestDiskStoreStats(t *testing.T) {
