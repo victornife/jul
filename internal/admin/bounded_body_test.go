@@ -11,12 +11,24 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+
+	"jul/internal/config"
 )
 
 func TestReadBoundedBodyRejectsValidPrefixWithOversizedSuffix(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/api/config/adopt-external", strings.NewReader(`{"base_version":"v1"}`+strings.Repeat(" ", 1<<16)))
 	if _, err := readBoundedBody(r, 1<<16); err == nil {
 		t.Fatal("oversized valid JSON prefix accepted")
+	}
+}
+
+func TestRouteTestRejectsOversizedValidPrefix(t *testing.T) {
+	s := &Server{deps: Deps{LoadConfig: func() (*config.Config, error) { return routeTestCfg(), nil }}}
+	r := httptest.NewRequest(http.MethodPost, "/api/routes/test", strings.NewReader(`{"path":"/"}`+strings.Repeat(" ", 1<<16)))
+	w := httptest.NewRecorder()
+	s.handleRouteTest(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("oversized dry-run input accepted: %d %s", w.Code, w.Body.String())
 	}
 }
 
