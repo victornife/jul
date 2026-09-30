@@ -92,6 +92,21 @@ artifacts produced for the tagged SHA.
 
 ## Upgrading from v2.0.0 to proposed v2.1.0
 
+The candidate runtime freeze is `f036b063`, with exact-source CI and affected
+logging/reload validation recorded in [soak evidence](soak-evidence.md) and
+[#480](https://github.com/victornife/jul/issues/480). The earlier four-hour
+measurements on `3258f1a3` retain that identity and their found log defect;
+the post-fix impact review does not relabel them as another SHA's soak.
+Documentation-only changes before the immutable tag require an explicit delta
+review and exact-tag-source gates; package metadata/attestations bind the tag's
+actual source. No tag may be moved to repair a failed candidate.
+
+At this candidate-time checkpoint v2.1.0 remains unpublished. Actual release,
+artifact, checksum/SBOM/attestation and downloaded-package smoke evidence must
+be inspected before publication. Later web documentation updates will identify
+the real published tag and must not be described as content inside an earlier
+tagged archive. No Beta capability becomes GA by shipping.
+
 Run `jul check` with the target binary before replacing a running process.
 Rollback is the previous published archive, `v2.0.0`, started against a config
 that `v2.0.0`'s `jul check` accepts. Do not point a v2.0.0 binary at a config

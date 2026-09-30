@@ -1,10 +1,17 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.16 · Updated 2026-09-29
+> Version 2.17 · Updated 2026-09-30
 >
 > Proposed v2.1.0 is the selected next stable tag. Rows still marked `merged`
 > are in that candidate tree and were not in published v2.0.0. They are not
 > `released` until the tag is published, and they are not GA.
+
+The corrected runtime candidate is `f036b063`, with exact-main gates and
+impact-reviewed runtime evidence recorded under [release closure #480](https://github.com/victornife/jul/issues/480).
+The four-hour measurements on `3258f1a3` and the corrected one-hour
+logging/reload validation on `f036b063` are separate source-bound evidence,
+not one relabeled soak. Artifact verification and publication remain pending;
+no maturity or delivery row is promoted by these measurements.
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that

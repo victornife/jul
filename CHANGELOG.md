@@ -12,7 +12,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 Nothing since the v2.1.0 candidate notes below. Do not treat a later commit as
 part of that tag.
 
-## [2.1.0] - 2026-09-29
+## [2.1.0] - 2026-09-30
 
 Proposed stable minor after published `v2.0.0`. The SemVer choice is recorded
 in [compatibility.md](docs/compatibility.md#version-decision-on-2026-09-29-v210).

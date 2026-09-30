@@ -10,6 +10,11 @@ tree. `released`/`soaked` are in the published tag. `merged` rows are in this
 candidate and stay Beta until their own GA evidence exists. They are not
 described as published until the v2.1.0 tag is published.
 
+Candidate-time source and evidence boundaries are in
+[soak evidence](soak-evidence.md) and [release verification](release.md).
+Exact-main checks and affected runtime validation do not imply publication,
+GA promotion or closure of the partial-audit ledger.
+
 - **[Feature status and evidence](status.md)** — maintained human view of maturity
   and delivery, checked against
   [`feature-status.yaml`](feature-status.yaml).
