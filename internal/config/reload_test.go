@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 func TestWatchFileNotifiesOnChange(t *testing.T) {
@@ -42,32 +44,18 @@ func TestWatchFileNotifiesOnChange(t *testing.T) {
 func TestWatchFileDebounces(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.toml")
-	if err := os.WriteFile(path, []byte("a"), 0644); err != nil {
-		t.Fatalf("write temp config: %v", err)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 
-	// A generous debounce window relative to the writes below keeps this
-	// deterministic on slow/contended CI runners, where scheduling jitter
-	// between the writes and fsnotify's event delivery can otherwise exceed
-	// a tight debounce and legitimately produce more than one coalesced
-	// event.
-	// Full-tag CI runs this alongside the race and browser suites. fsnotify may
-	// deliver the final write event well after the write loop returns under
-	// runner contention; 300ms split one actual burst into two valid windows.
-	const debounce = time.Second
-	ch, err := WatchFile(ctx, path, debounce, nil)
-	if err != nil {
-		t.Fatalf("WatchFile: %v", err)
-	}
+	const debounce = 50 * time.Millisecond
+	events := make(chan fsnotify.Event)
+	ch := make(chan struct{}, 1)
+	go watchFileEvents(ctx, path, debounce, nil, events, make(chan error), ch)
 
-	// Trigger multiple rapid changes.
+	// The unbuffered event stream ensures each change reaches the debounce loop
+	// before the next is sent; OS filesystem notification latency is irrelevant.
 	for i := 0; i < 3; i++ {
-		if err := os.WriteFile(path, []byte(string(rune('b'+i))), 0644); err != nil {
-			t.Fatalf("update temp config: %v", err)
-		}
+		events <- fsnotify.Event{Name: path, Op: fsnotify.Write}
 	}
 
 	// Should still receive exactly one event.
