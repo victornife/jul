@@ -742,6 +742,11 @@ try_files = ["$uri", "$uri/", "/index.html"]
 | `allow_hidden` | bool | Serve dotfiles |
 | `cache_control` | string | `Cache-Control` header for served files |
 
+Content-Type comes from the file extension. Streaming-media extensions
+(`.m3u8`, `.mpd`, `.ts`, `.m4s`, `.mkv`, `.aac`) use Jul's own table, so they
+are correct in the distroless image too; see
+[Content-Type for static files](core-http.md#content-type-for-static-files).
+
 ### Reverse proxy
 
 Forward requests to an HTTP backend. This is the workhorse action for API

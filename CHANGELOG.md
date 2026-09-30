@@ -66,6 +66,14 @@ v2.1.0 tag or its packaged READMEs.
   throttled debug log. The docs no longer imply `disk_max_size` admits objects
   larger than `memory_max_size`.
 
+- **Streaming media gets correct Content-Types everywhere (#510).** Static
+  serving relied on the host MIME database for types Go does not build in, and
+  the distroless image has none, so HLS playlists were served as `text/plain`,
+  DASH manifests as `text/xml` and segments as `application/octet-stream`.
+  Jul now sets `.m3u8`, `.mpd`, `.ts`, `.m4s`, `.mkv` and `.aac` itself
+  (IANA/RFC types), ahead of the host database, which on Debian/Ubuntu maps
+  `.ts` to a Qt Linguist type. The Docker e2e asserts the shipped image.
+
 ## [2.1.0] - 2026-09-30
 
 Published stable minor after `v2.0.0`:

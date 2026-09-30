@@ -143,9 +143,38 @@ simplified NGINX model:
 | Hidden files | dotfiles blocked unless `allow_hidden` |
 | Range requests | served via `http.ServeContent` (partial content / `If-Range`) |
 | Caching validators | `ETag` = `"<mtime-unixnano>-<size>"`; conditional GETs honoured |
-| MIME types | `mime.TypeByExtension` |
+| MIME types | Jul's streaming-media table first (`.m3u8`, `.mpd`, `.ts`, `.m4s`, `.mkv`, `.aac`), then Go's built-in table and the host's MIME database (`mime.TypeByExtension`), then content sniffing. See [Content-Type for static files](#content-type-for-static-files) |
 | Precompressed assets | `.br` then `.gz` sidecars served when the client accepts them |
 | Error pages | per-status file (served) or URL (302 redirect) |
+
+### Content-Type for static files
+
+Go's built-in MIME table covers common web and media types (`.html`, `.css`,
+`.js`, `.mp4`, `.m4a`, `.mp3`, `.webm`, `.ogg`, `.wav`, `.vtt`, `.flac`, ...).
+For anything else it reads the host's MIME database (`/etc/mime.types` and
+similar on Unix, the registry on Windows). The distroless container image has
+no such database, so without help HLS playlists would be sniffed as
+`text/plain`, DASH manifests as `text/xml`, and segments as
+`application/octet-stream`.
+
+Jul therefore sets these types itself (#510):
+
+| Extension | Content-Type | Source |
+| --- | --- | --- |
+| `.m3u8` | `application/vnd.apple.mpegurl` | RFC 8216 §4 |
+| `.mpd` | `application/dash+xml` | ISO/IEC 23009-1, IANA |
+| `.ts` | `video/mp2t` | RFC 3555, IANA |
+| `.m4s` | `video/iso.segment` | IANA |
+| `.mkv` | `video/matroska` | RFC 9559 |
+| `.aac` | `audio/aac` | IANA |
+
+**Precedence.** For these six extensions Jul's table wins over the host
+database, so a container and a host serve the same file with the same type.
+This matters in practice: the Debian/Ubuntu `media-types` package maps `.ts` to
+`text/vnd.trolltech.linguist` (Qt translation sources), which strict HLS players
+reject. Every other extension uses Go's table, then the host database, then
+sniffing. Precompressed sidecars (`.br`/`.gz`) carry the type of the original
+file. There is no per-deployment override map yet.
 
 ### Listener-scoped server fields
 
