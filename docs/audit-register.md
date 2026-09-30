@@ -8,19 +8,21 @@ live issue tracker.
 
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
-| [2026-09-27 documentation review](audit/2026-09-27-documentation-review.md) | `36e0411a` at clean `main`; remediation on isolated branch | Current **partial** documentation review and findings/coverage ledger; no exhaustive certification or 10/10 claim | Verified release/status, migration and onboarding corrections made; semantic and platform coverage gaps remain explicit in its ledger |
-| [2026-09-29 high-risk continuation](audit/2026-09-29-high-risk-continuation.md) | PR #482 head `bd8f5b0`; stacked PR #495 at `731fced8` | Targeted security and runtime boundary review; nine branch workflows passed on the exact PR head | Authentication ambiguity, admin mutation admission, bounded dependency and file reads; remaining scopes and verification limits explicit |
-| [2026-09-29 cache/WAF/plugin continuation](audit/2026-09-29-cache-waf-plugin-continuation.md) | Stacked after PR #495 head `731fced8` | Merged via #496; tree matches `ed302aae` | Conditional/cache timing and occupancy, WAF compilation input/deadline, plugin fetch/module/request integrity; other ledger rows remain open |
-| [2026-09-29 final high-impact batch](audit/2026-09-29-final-high-impact-batch.md) | Stacked tip `5a592d40` | Merged via #497; integrated tree matches that tip at `23c68d6f` | CGI/uWSGI framing, short stream writes, bounds and host routing; not a full audit |
-| [2026-09-16 pre-soak readiness audit](audit/2026-09-16-pre-soak-readiness-audit.md) | `b1e2dfc5` plus PR #416 | Historical readiness evidence at its dated baseline; #421/#425 record the subsequent soak and stable release | P0 items BL-01..BL-07 and P1 items BL-08..BL-10/BL-13/BL-16/BL-24..BL-26 closed via PR #416 (merged `03fda9f8`); its remaining backlog table describes that baseline, not current issue state |
+| [2026-09-30 read-only product and technical audit](audit/jul-audit-report-2026-09-30.md) | Frozen candidate `3258f1a3`; delivery status appended against main `9bcc9333` on 2026-10-01 | Current post-release findings plus a dated implementation/PR status snapshot; not an exhaustive certification | Findings F-01–F-19 and original evidence remain pinned to their audited baseline; the addendum distinguishes merged work from green-but-pending PRs and open phase issues |
 
 ## Archived records
 
-Superseded or fully closed audits, preserved as historical evidence under
-[`audit/old/`](audit/old/):
+Earlier point-in-time audits are stored under [`audit/old/`](audit/old/). The
+archive location is organizational only: unresolved findings remain open and
+their current disposition belongs to the issue tracker and #62.
 
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
+| [2026-09-27 documentation review](audit/old/2026-09-27-documentation-review.md) | `36e0411a` at clean `main`; remediation on isolated branch | Historical **partial** documentation review and findings/coverage ledger; no exhaustive certification or 10/10 claim | D11/D12 and remaining semantic/platform review stay open; see the current report and #62 for issue sequencing |
+| [2026-09-29 high-risk continuation](audit/old/2026-09-29-high-risk-continuation.md) | PR #482 head `bd8f5b0`; stacked PR #495 at `731fced8` | Targeted security and runtime boundary review; nine branch workflows passed on the exact PR head | Authentication ambiguity, admin mutation admission, bounded dependency and file reads; remaining scopes and verification limits explicit |
+| [2026-09-29 cache/WAF/plugin continuation](audit/old/2026-09-29-cache-waf-plugin-continuation.md) | Stacked after PR #495 head `731fced8` | Merged via #496; tree matches `ed302aae` | Conditional/cache timing and occupancy, WAF compilation input/deadline, plugin fetch/module/request integrity; other ledger rows remain open |
+| [2026-09-29 final high-impact batch](audit/old/2026-09-29-final-high-impact-batch.md) | Stacked tip `5a592d40` | Merged via #497; integrated tree matches that tip at `23c68d6f` | CGI/uWSGI framing, short stream writes, bounds and host routing; not a full audit |
+| [2026-09-16 pre-soak readiness audit](audit/old/2026-09-16-pre-soak-readiness-audit.md) | `b1e2dfc5` plus PR #416 | Historical readiness evidence at its dated baseline; #421/#425 record the subsequent soak and stable release | P0 items BL-01..BL-07 and P1 items BL-08..BL-10/BL-13/BL-16/BL-24..BL-26 closed via PR #416 (merged `03fda9f8`); its remaining backlog table describes that baseline, not current issue state |
 | [2026-08-31 NGINX migration corpus closure](audit/old/2026-08-31-nginx-migration-corpus-closure.md) | PR #352 merge `ec098502` plus the #154 closure tranche | Bounded migration-corpus and selected-dimension E2E evidence at the time | Closure contract; exact-head CI and merge are recorded on #154 and its closure PR |
 | [2026-08-07 response-cache recertification](audit/old/2026-08-07-cache-recertification.md) | Post-#131/#132/#133 cache tree | Cache conformance and retained-GA evidence at the time | Complete; #107/#134 closed |
 | [2026-08-03 combined repository re-audit](audit/old/combined-audit-2026-08-03.md) | `66c71b2c...` | Dated programme-opening audit and historical finding source | Superseded for current issue state by #62 and later implementation evidence; not rewritten retrospectively |

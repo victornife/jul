@@ -401,7 +401,7 @@ uses the default. Results are analysed in [soak-evidence.md](soak-evidence.md).
 - [soak-evidence.md](soak-evidence.md) — dated run log and artifact links
 - [soak-artifacts/README.md](../soak-artifacts/README.md) — the evidence
   retention convention (JUL-AUD-018)
-- [docs/audit/2026-09-16-pre-soak-readiness-audit.md](audit/2026-09-16-pre-soak-readiness-audit.md) —
+- [Historical pre-soak audit](audit/old/2026-09-16-pre-soak-readiness-audit.md) —
   the audit that identified this document's prior drift from the actual
   harness (JUL-AUD-006) and the full proposed soak plan this page implements
 - [ADR 0005](adr/0005-soak-post-ga-gate.md) — why soak is a post-GA gate
