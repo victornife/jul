@@ -1,0 +1,109 @@
+# Ambiguous request-framing corpus (#513, BL-12).
+#
+# Each case is sent as raw bytes on a fresh connection to Jul, which proxies
+# to a recording origin. `reject` means every response is 4xx/5xx and the
+# origin saw nothing; `forward` lists exactly what the origin must receive.
+# Jul re-serializes every request it forwards, so the property under test is
+# that Jul either refuses an ambiguous message or settles on one
+# interpretation, never two. Expectations follow RFC 9112; a deviation that
+# is not a desync risk is allow-listed with a rationale in allowlist.yaml.
+
+cases:
+  # --- baselines -----------------------------------------------------------
+  - id: baseline-get
+    raw: "GET /ok HTTP/1.1\r\nHost: t\r\n\r\n"
+    expect: {forward: [{method: GET, path: /ok, body: ""}]}
+  - id: baseline-content-length
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nContent-Length: 5\r\n\r\nhello"
+    expect: {forward: [{method: POST, path: /p, body: hello}]}
+  - id: baseline-chunked
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+    expect: {forward: [{method: POST, path: /p, body: hello}]}
+  - id: baseline-pipelined
+    raw: "POST /a HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\nGET /b HTTP/1.1\r\nHost: t\r\n\r\n"
+    expect: {forward: [{method: POST, path: /a, body: ""}, {method: GET, path: /b, body: ""}]}
+
+  # --- Content-Length ambiguity (RFC 9112 §6.3) ----------------------------
+  - id: cl-conflicting-duplicates
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\nhello!"
+    expect: reject
+  - id: cl-conflicting-list
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nContent-Length: 5, 6\r\n\r\nhello!"
+    expect: reject
+  - id: cl-plus-sign
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nContent-Length: +5\r\n\r\nhello"
+    expect: reject
+  - id: cl-negative
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nContent-Length: -1\r\n\r\n"
+    expect: reject
+  - id: cl-hex
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nContent-Length: 0x5\r\n\r\nhello"
+    expect: reject
+
+  # --- Transfer-Encoding ambiguity (RFC 9112 §6.1, §6.3) --------------------
+  - id: te-and-cl-with-smuggled-tail
+    # TE overrides CL; the server MUST close the connection after responding,
+    # so the tail after the chunked terminator is never processed.
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nContent-Length: 40\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\nGET /smuggled HTTP/1.1\r\nHost: t\r\n\r\n"
+    expect: {forward: [{method: POST, path: /p, body: hello}], close: true}
+  - id: te-unknown-coding
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: xchunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+    expect: reject
+  - id: te-chunked-not-final
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked, identity\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+    expect: reject
+  - id: te-duplicate-header-lines
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+    expect: reject
+  - id: te-space-before-colon
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nTransfer-Encoding : chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+    expect: reject
+  - id: te-vertical-tab-value
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nTransfer-Encoding:\x0bchunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+    expect: reject
+  - id: te-in-http10
+    # RFC 9112 §6.1: the framing is faulty; process the message, then close.
+    # net/http drops Transfer-Encoding on HTTP/1.0 and reads no body.
+    raw: "POST /p HTTP/1.0\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+    expect: {forward: [{method: POST, path: /p, body: ""}], close: true}
+  - id: te-in-http10-keep-alive-smuggle
+    raw: "POST /p HTTP/1.0\r\nHost: t\r\nConnection: keep-alive\r\nTransfer-Encoding: chunked\r\n\r\nGET /smuggled HTTP/1.1\r\nHost: t\r\n\r\n"
+    expect: {forward: [{method: POST, path: /p, body: ""}], close: true}
+
+  # --- chunked body syntax (RFC 9112 §7.1) ----------------------------------
+  - id: chunk-size-not-hex
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nhello\r\n0\r\n\r\n"
+    expect: reject
+  - id: chunk-size-overflow
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffffff\r\nhello\r\n0\r\n\r\n"
+    expect: reject
+  - id: chunk-data-longer-than-size
+    raw: "POST /p HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nhello\r\n0\r\n\r\n"
+    expect: reject
+
+  # --- header and request-line syntax (RFC 9110 §5, RFC 9112 §2-3, §5) ------
+  - id: obs-fold
+    # RFC 9112 §5.2 allows rejecting obs-fold or replacing it with SP before
+    # interpreting or forwarding; net/http does the latter.
+    raw: "GET /fold HTTP/1.1\r\nHost: t\r\nX-Fold: a\r\n b\r\n\r\n"
+    expect: {forward: [{method: GET, path: /fold, body: ""}]}
+  - id: header-nul-byte
+    raw: "GET /nul HTTP/1.1\r\nHost: t\r\nX-Test: a\x00b\r\n\r\n"
+    expect: reject
+  - id: header-name-with-space
+    raw: "GET /sp HTTP/1.1\r\nHost: t\r\nX Test: a\r\n\r\n"
+    expect: reject
+  - id: missing-host-http11
+    raw: "GET /nohost HTTP/1.1\r\n\r\n"
+    expect: reject
+  - id: duplicate-host
+    raw: "GET /dup HTTP/1.1\r\nHost: t\r\nHost: u\r\n\r\n"
+    expect: reject
+  - id: request-line-double-space
+    raw: "GET  /x HTTP/1.1\r\nHost: t\r\n\r\n"
+    expect: reject
+  - id: bare-lf-line-endings
+    # RFC 9112 §2.2 lets a recipient accept a bare LF; Jul re-serializes, so
+    # accepting it cannot desync the origin.
+    raw: "GET /lf HTTP/1.1\nHost: t\n\n"
+    expect: {forward: [{method: GET, path: /lf, body: ""}]}
