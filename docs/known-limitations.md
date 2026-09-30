@@ -324,6 +324,12 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   because the status must be known before deciding whether to serve the stored
   body. An answer larger than `memory_max_size`, or one that turns out to be a
   stream, costs one extra origin request and is then streamed normally.
+- **Objects larger than `memory_max_size` are never cached, in either tier.**
+  Capture always happens in memory, so a large `disk_max_size` does not admit
+  bigger objects (#525). Such responses are streamed and counted in
+  `jul_cache_capture_skipped_total{reason="oversize"}`. In-flight captures
+  share one budget equal to `memory_max_size`; a miss that would exceed it is
+  streamed uncaptured and counted as `reason="budget"` (#505).
 - **Disk tier is best-effort.** A disk-write failure does not error the request;
   the entry serves from memory or the upstream.
 - **No distributed / shared cache.** Cache state is local to the single Jul.IA

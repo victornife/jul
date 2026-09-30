@@ -49,21 +49,24 @@ type Metrics struct {
 	// cacheRevalidations counts background cache revalidation outcomes. The
 	// label values come from a closed set of cache-package constants.
 	cacheRevalidations *prometheus.CounterVec
-	compressed         *prometheus.CounterVec
-	ratelimited        *prometheus.CounterVec
-	clientAddrDerived  *prometheus.CounterVec
-	authDecisions      *prometheus.CounterVec
-	upstreamUp         *prometheus.GaugeVec
-	upstreamBackends   *prometheus.GaugeVec
-	admissionRejected  *prometheus.CounterVec
-	retryAttempts      *prometheus.CounterVec
-	retryBudgetDenied  *prometheus.CounterVec
-	circuitTransitions *prometheus.CounterVec
-	affinityKeys       *prometheus.CounterVec
-	transportRetired   *prometheus.CounterVec
-	resilience         *resilienceCollector
-	cache              *cacheCollector
-	storage            *storageCollector
+	// cacheCaptureSkipped counts cacheable responses streamed without being
+	// captured for storage (#505), labeled by a closed reason set.
+	cacheCaptureSkipped *prometheus.CounterVec
+	compressed          *prometheus.CounterVec
+	ratelimited         *prometheus.CounterVec
+	clientAddrDerived   *prometheus.CounterVec
+	authDecisions       *prometheus.CounterVec
+	upstreamUp          *prometheus.GaugeVec
+	upstreamBackends    *prometheus.GaugeVec
+	admissionRejected   *prometheus.CounterVec
+	retryAttempts       *prometheus.CounterVec
+	retryBudgetDenied   *prometheus.CounterVec
+	circuitTransitions  *prometheus.CounterVec
+	affinityKeys        *prometheus.CounterVec
+	transportRetired    *prometheus.CounterVec
+	resilience          *resilienceCollector
+	cache               *cacheCollector
+	storage             *storageCollector
 	// upstreamCapacity is #431's separate, un-scraped capacity source; see
 	// SetUpstreamCapacitySource.
 	upstreamCapacity atomic.Pointer[UpstreamStatsSource]
@@ -247,6 +250,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_cache_revalidations_total",
 			Help: "Cache validation and revalidation decisions, labeled by bounded outcome (stored/not_modified/uncacheable/origin_error/canceled/panic/no_lease/deduplicated).",
 		}, []string{"outcome"}),
+		cacheCaptureSkipped: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_cache_capture_skipped_total",
+			Help: "Responses streamed without being captured for cache storage, labeled by reason (oversize/budget).",
+		}, []string{"reason"}),
 		compressed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_http_response_compressed_total",
 			Help: "Responses compressed by the edge, labeled by content coding.",
@@ -498,6 +505,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.httpResponseBytes,
 		m.cacheEvents,
 		m.cacheRevalidations,
+		m.cacheCaptureSkipped,
 		m.compressed,
 		m.ratelimited,
 		m.clientAddrDerived,
@@ -664,6 +672,14 @@ func (m *Metrics) ObserveCompression(encoding string) {
 // cache package cannot import observability directly).
 func (m *Metrics) ObserveCacheRevalidation(outcome string) {
 	m.cacheRevalidations.WithLabelValues(outcome).Inc()
+}
+
+// ObserveCacheCaptureSkipped records one response the cache streamed without
+// capturing it for storage. reason is one of the cache package's bounded
+// constants ("oversize", "budget"). It is wired into the cache as its
+// capture-skip observer.
+func (m *Metrics) ObserveCacheCaptureSkipped(reason string) {
+	m.cacheCaptureSkipped.WithLabelValues(reason).Inc()
 }
 
 // ObserveRateLimited records that a request was rejected by rate limiting. kind

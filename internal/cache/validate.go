@@ -67,7 +67,8 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		call.finish(nil, outcomeCanceled, context.Canceled)
 	}()
 
-	rec := &recorder{header: http.Header{}, limit: c.Policy().MaxEntryBytes}
+	rec := &recorder{header: http.Header{}, limit: c.Policy().MaxEntryBytes, acct: c.newCaptureAccount()}
+	defer rec.acct.release()
 	next.ServeHTTP(rec, conditionalRequest(r.Clone(vctx), stored))
 	now := c.clock()
 
