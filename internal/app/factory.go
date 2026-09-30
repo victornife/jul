@@ -784,6 +784,9 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 //	             and an attacker-chosen vhost cannot select its own trust
 //	             policy; and outside the observers, so metrics, access logging,
 //	             tracing and every per-location middleware read one identity.
+//	FramingGuard — closes the connection after an HTTP/1.x request whose
+//	             framing a front proxy could read differently (chunked, or
+//	             HTTP/1.0 with a body and no Content-Length), RFC 9112 §6.3.
 //	Tracing    — starts the server span and extracts W3C tracecontext just
 //	             inside RequestID, so the trace id is in context before the
 //	             observers record it. No-op unless built with the "otel" tag
@@ -804,6 +807,7 @@ func (f *HandlerFactory) globalChain(policy *clientaddr.Policy, compress middlew
 	mws := []middleware.Middleware{
 		middleware.RequestID(),
 		middleware.ClientAddress(policy, f.Log, f.Metrics.ObserveClientAddrDerivation),
+		middleware.FramingGuard(),
 		f.RT.Tracer.Middleware,
 		f.Metrics.Middleware,
 	}

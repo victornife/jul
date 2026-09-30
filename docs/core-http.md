@@ -634,7 +634,7 @@ go test -run '^$' -bench . -benchmem ./internal/router/ ./internal/upstream/ ./i
 | FastCGI `SCRIPT_NAME` traversal | 🟢 safe | `scriptNameFor` cleans to an absolute path with no `..` segment (`FuzzScriptName`) |
 | SSRF | 🟢 safe by design | `proxy_pass` is static config; no request input selects the upstream target |
 | Header injection / CRLF | 🟢 safe | Go `net/http` rejects embedded CR/LF; custom headers use simple variable substitution (no eval) |
-| Request smuggling | 🟢 safe | strict `net/http` request parsing |
+| Request smuggling | 🟢 safe | strict `net/http` request parsing; every forwarded request is re-serialized, so Jul never relays the client's framing. An HTTP/1.x request with a chunked body, or an HTTP/1.0 request with a body method and no `Content-Length`, closes its connection after the response (RFC 9112 §6.1, §6.3), so bytes a Content-Length-framing front proxy treated as body are never served as a second request |
 | DoS (large bodies) | mitigated | `client_max_body_size` → 413 (default unlimited; set per server/location) |
 | DoS (slow clients) | partial | `read_timeout` / `write_timeout` mitigate; default unset |
 
