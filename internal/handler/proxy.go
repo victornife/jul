@@ -311,6 +311,9 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	span.SetString("upstream.name", t.pool.Name())
 
 	replayable := isIdempotent(req.Method) && (req.Body == nil || req.GetBody != nil)
+	// A transport error caused by the client's own body (malformed framing, over
+	// client_max_body_size, cut off) is the client's failure, not the backend's.
+	inbound := upstream.WatchInboundBody(req)
 
 	var resp *http.Response
 	attempts := 0
@@ -393,7 +396,13 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		}
 		aspan.RecordError(err)
 		aspan.End()
+		err = inbound.Attribute(err)
 		t.noteFailure(b, err, req.Context(), actx)
+		var bodyErr *upstream.ClientBodyError
+		if errors.As(err, &bodyErr) {
+			// The body is consumed and was bad; another backend cannot help.
+			return upstream.AttemptResult{Err: err, Terminal: true}
+		}
 		// A deterministic backend-identity failure is the same failure against
 		// every backend, so retrying it is amplification with no chance of a
 		// different answer.
@@ -671,6 +680,10 @@ func proxyErrorStatus(err error, inbound context.Context) int {
 	// because four different reasons share 503 and the status alone cannot say
 	// which one this was.
 	middleware.SetUpstreamReason(inbound, string(reason))
+	var tooLarge *http.MaxBytesError
+	if reason == upstream.ReasonClientRequestBody && errors.As(err, &tooLarge) {
+		return http.StatusRequestEntityTooLarge
+	}
 	if status := reason.HTTPStatus(); status != upstream.StatusFromLastAttempt {
 		return status
 	}

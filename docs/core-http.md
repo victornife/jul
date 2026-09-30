@@ -197,6 +197,7 @@ not calling them" call for opposite responses.
 | `request_not_replayable` | last attempt's status | last attempt's code | Method, body or an already-started response forbade another attempt |
 | `client_cancelled` | 499 | `CANCELLED` | The inbound request context was cancelled — the client went away |
 | `client_deadline` | 504 | `DEADLINE_EXCEEDED` | The deadline supplied by the inbound caller elapsed; backend health remains neutral |
+| `client_request_body` | 400 (413 over `client_max_body_size`) | `INVALID_ARGUMENT` | The inbound request body could not be read while it was streamed to the backend (malformed chunked framing, over the size limit, or cut off by the client); backend health remains neutral and the request is not retried |
 
 Retry suppression never overwrites the status a backend actually produced:
 reporting 503 because a budget was spent would hide a 500 the client needs.

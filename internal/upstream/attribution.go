@@ -22,6 +22,9 @@ const (
 	OriginSuccess            FailureOrigin = "success"
 	OriginClientCancellation FailureOrigin = "client_cancellation"
 	OriginClientDeadline     FailureOrigin = "client_deadline"
+	// OriginClientRequest means the client's own request could not be read
+	// (a *ClientBodyError); it is never backend-health evidence.
+	OriginClientRequest      FailureOrigin = "client_request"
 	OriginJulTimeout         FailureOrigin = "jul_timeout"
 	OriginJulPolicy          FailureOrigin = "jul_policy"
 	OriginBackendTransport   FailureOrigin = "backend_transport"
@@ -156,6 +159,15 @@ func ClassifyAttemptError(err error, inbound, attempt context.Context) AttemptCl
 		return AttemptClassification{
 			origin: OriginJulTimeout,
 			reason: ReasonRetryDeadlineExhausted,
+			health: HealthNeutral,
+		}
+	}
+
+	var bodyErr *ClientBodyError
+	if errors.As(err, &bodyErr) {
+		return AttemptClassification{
+			origin: OriginClientRequest,
+			reason: ReasonClientRequestBody,
 			health: HealthNeutral,
 		}
 	}
