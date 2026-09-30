@@ -269,6 +269,24 @@ func TestBuildAccessSinksSharedFileLeaseLifetime(t *testing.T) {
 	}
 }
 
+func TestBuildAccessSinksCanonicalizationFailureUnwinds(test *testing.T) {
+	path := filepath.Join(test.TempDir(), "access.json")
+	want := errors.New("cannot resolve working directory")
+	original := accessFileAbs
+	accessFileAbs = func(string) (string, error) { return "", want }
+	test.Cleanup(func() { accessFileAbs = original })
+	sinks, closers, err := BuildAccessSinks(config.AccessLogConfig{Sinks: []string{"stdout", "file"}, File: path, Format: "json"}, newBase())
+	if !errors.Is(err, want) {
+		test.Fatalf("canonicalization error = %v, want %v", err, want)
+	}
+	if sinks != nil || closers != nil {
+		test.Fatal("failed candidate retained staged sinks or closers")
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		test.Fatalf("failed canonicalization touched the live file: %v", statErr)
+	}
+}
+
 func TestBuildAccessSinksUnknownSink(t *testing.T) {
 	sinks, closers, err := BuildAccessSinks(config.AccessLogConfig{Sinks: []string{"bogus"}}, newBase())
 	if err == nil {

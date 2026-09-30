@@ -119,8 +119,10 @@ var accessFiles = struct {
 	entries map[accessFileKey]*accessFileState
 }{entries: make(map[accessFileKey]*accessFileState)}
 
+var accessFileAbs = filepath.Abs
+
 func acquireAccessFile(cfg config.AccessLogConfig) (*accessFileLease, error) {
-	path, err := filepath.Abs(cfg.File)
+	path, err := accessFileAbs(cfg.File)
 	if err != nil {
 		return nil, fmt.Errorf("access_log file path: %w", err)
 	}
