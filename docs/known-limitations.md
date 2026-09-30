@@ -613,6 +613,26 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 
 ---
 
+## Deployment packaging ([deployment.md](deployment.md))
+
+Beta (`DEPLOY-PKG` in [status.md](status.md)): the unit, service and image
+layouts are not yet a semver contract, and no packaging-specific soak has run.
+
+- **No published container image** (#446). Build it from the repository
+  `Dockerfile`; the documented image names are local tags.
+- **The image is distroless: no shell and no curl.** Its `HEALTHCHECK` runs
+  `jul healthcheck` against the loopback admin listener, so a mounted config
+  must keep `[admin]` enabled or override the healthcheck; with admin TLS the
+  baked probe must be overridden.
+- **`jul-readonly.service` refuses Console apply** by design (`/etc/jul` is
+  read-only to the service). Configuration changes go through the provisioning
+  process and a reload or restart.
+- **The Windows installer only adds grants.** It does not remove inherited or
+  pre-existing access on an existing directory; review ACLs before storing
+  secrets there, or create the root with `new-secure-data-dir.ps1`.
+
+---
+
 ## See also
 
 - [docs/status.md](status.md) — full GA criteria matrix with per-feature

@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.18 · Updated 2026-09-30
+> Version 2.19 · Updated 2026-09-30
 >
 > Stable v2.1.0 is published. Its seven additive Beta rows now have `released`
 > delivery; maturity and all GA criteria are unchanged. This is a post-tag
@@ -135,7 +135,10 @@ not inherit an older GA row merely because it lives in the same package or guide
 | 8 | Fuzzing where parsing is involved |
 | 9 | Self-explanatory Console surface |
 
-Cell key: ✅ met · ☐ open · n/a not applicable (no custom parser).
+Cell key: ✅ met · ☐ open · n/a not applicable. For criterion 8, n/a means no
+custom parser; any other n/a is explained in the row's `notes` in
+[`feature-status.yaml`](feature-status.yaml). There is no Y1-06 row: the gRPC
+transcoding MVP was superseded by and promoted into Y2-01.
 
 > **Configuration reload transaction.** The reload path is now implemented as
 > a single `ReloadPlan` value (ADR 0011): validation, listener staging, handler
@@ -159,8 +162,8 @@ Released and soaked capabilities that satisfy all applicable GA criteria.
 | Active health checks (HTTP / TCP probes) | Y1-05 | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
 | Console (operations cockpit) | Y1-07 | `console` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [console.md](console.md) |
 | Zero-config + jul lint | Y1-08 | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [zeroconf.md](zeroconf.md) |
-| NGINX config importer | Y1-09 | `importer` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [nginx-importer.md](nginx-importer.md) |
-| OTel tracing + access-log sinks | Y1-10 | `otel` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | n/a | [otel.md](otel.md) |
+| NGINX config importer | Y1-09 | `importer` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [nginx-importer.md](nginx-importer.md) |
+| OTel tracing + access-log sinks | Y1-10 | `otel` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [otel.md](otel.md) |
 | HTTP/3 over QUIC | Y1-11 | `http3` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [http3.md](http3.md) |
 | gRPC ↔ JSON transcoding | Y2-01 | `grpc` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [grpc-transcoding.md](grpc-transcoding.md) |
 | WASM plugin system | Y2-02 | `wasmplugins` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [plugins.md](plugins.md) |
@@ -212,6 +215,7 @@ v2.0.0 or v2.1.0. Publication does not complete the unchecked GA criteria.
 | WASM plugin response phase (jul-abi/v2) | WASM-ABI2 | `wasmplugins` | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [abi.md](abi.md) |
 | Deterministic consistent-hash affinity | LB-AFFINITY | core · `stream` | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [upstreams.md](upstreams.md) |
 | Client-certificate policy and CRL hot reload | MTLS-HOT | core | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [mtls.md](mtls.md) |
+| Deployment packaging (systemd, Windows service, Docker, healthcheck) | DEPLOY-PKG | core | `released` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | n/a | [deployment.md](deployment.md) |
 
 ## Alpha
 
@@ -261,6 +265,7 @@ the [soak evidence log](soak-evidence.md).
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-09-30 | 2.19 | Manifest reconciliation (#512): every n/a criterion on a GA row is explained (criterion 8 = no custom parser; others in row notes); Y1-09 criterion 8 and Y1-10 criterion 9 corrected from n/a to met with their fuzz and Console evidence; shipped surfaces without a row get explicit relationships (PROXY-protocol ingest on CGC-IN; error pages, Request ID and `worker_threads` on core-http; audit log, history and rollback on Y1-07) or the new Beta DEPLOY-PKG row (systemd, Windows service, Docker image, `jul healthcheck`); the Y1-06 gap is explained. No maturity changes. | [feature-status.yaml](feature-status.yaml); [#512](https://github.com/victornife/jul/issues/512) |
 | 2026-09-30 | 2.18 | Reconciled published stable v2.1.0 at `0951090a`: seven shipped Beta entries move `merged` to `released`, with maturity and GA criteria unchanged. Actual package verification and execution limits are recorded; this documentation update is post-tag. | [feature-status.yaml](feature-status.yaml); [release.md](release.md#published-v210-verification); [#480](https://github.com/victornife/jul/issues/480) |
 | 2026-09-29 | 2.16 | Recorded the proposed v2.1.0 freeze. Post-v2.0.0 rows stay `merged` and Beta until the tag is published. #434 is no-go. | [feature-status.yaml](feature-status.yaml); [compatibility.md](compatibility.md) |
 | 2026-09-28 | 2.15 | Promoted Y1-08 and base Y1-09 to `GA` / `soaked` after two independent exact-head feature runs exceeded the ADR 0005 one-hour floor and their retained pre-run provenance and results were inspected. The decision applies to the exercised workloads, after v2.0.0; MIG-ASSESS stays Beta. | [feature-status.yaml](feature-status.yaml); [soak-evidence.md](soak-evidence.md) |
