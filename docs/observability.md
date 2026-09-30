@@ -418,13 +418,16 @@ is invalid and the error directs the operator to disable the block instead. The
 The legacy global/per-server destination fields are deprecated compatibility
 no-ops and produce lint warnings.
 
-Handler generations with the same absolute file path and rotation settings
-share one rotating writer through reference-counted leases. Retiring or aborting
-one generation does not close a writer still owned by another. This preserves
-complete records while old requests drain during reload. Changing rotation
-settings on the same path retains the separate
-[known overlap limitation](known-limitations.md); use a new file path for that
-policy transition, or restart instead of overlapping live writers.
+Handler generations logging to the same absolute file path share one rotating
+writer through reference-counted leases, whatever their rotation settings.
+Retiring or aborting one generation does not close a writer still owned by
+another, and only one handle ever appends to the file, so records stay complete
+and in the active file while old requests drain during reload, including across
+a size-triggered rotation. A changed `rotate_max_mb`/`rotate_keep` is adopted
+when the new generation writes its first record: a candidate that is prepared
+and aborted never writes, so it cannot change the serving policy or prune
+backups, and a draining older generation does not switch the policy back.
+Lowering `rotate_keep` prunes surplus backups at the next rotation (#502).
 
 ### Access-log fields
 

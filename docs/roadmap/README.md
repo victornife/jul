@@ -45,8 +45,8 @@ The durable current sequence is summarized in the active operating roadmap below
 The published v2.1.0 closure includes the integrated audit stack and the access-log
 ownership correction, with source-bound evidence and its post-fix impact review.
 The release and twelve-package verification completed the stage-10 release
-gate; they did not activate a new feature tranche. The bounded same-path rotation-policy follow-up is
-[#502](https://github.com/victornife/jul/issues/502); D11/D12 and the partial
+gate; they did not activate a new feature tranche. The bounded same-path rotation-policy follow-up,
+[#502](https://github.com/victornife/jul/issues/502), is fixed on `main` after the tag (unreleased); D11/D12 and the partial
 audit ledger remain separate work, even after a stable publication.
 
 ## Active operating roadmap

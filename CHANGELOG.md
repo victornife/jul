@@ -84,6 +84,14 @@ v2.1.0 tag or its packaged READMEs.
   `jul_plugin_instance_waits_total{plugin,result}` counter. The admin API and
   Console keep the field on edit (omitted-means-keep). `docs/abi.md` no longer
   calls the pool bounded without saying how.
+- **Access-log rotation-policy changes on the same path are safe (#502).**
+  Generations with different `rotate_max_mb`/`rotate_keep` for one file opened
+  independent writers, which could lose records or send them to a renamed
+  backup while an old generation drained across a rotation (a deterministic
+  test lost 834 of 3,201 records). Every generation now shares one writer per
+  path; the new policy is adopted at the new generation's first record, so an
+  aborted candidate never changes it and a draining generation never reverts
+  it. The new-path/restart workaround is no longer needed.
 - **Validation tightening: UDP stream backends must be unicast (#511).** A
   `[[stream]]` UDP relay accepts replies only from the address it dialed, so a
   multicast (`224.0.0.0/4`, `ff00::/8`) or broadcast (`255.255.255.255`)

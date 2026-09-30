@@ -73,18 +73,16 @@ reuse an older egress transport or discovery worker. The remaining restart-requi
 rows are deliberate structural/startup boundaries, not unfinished #94 work. See
 [hot-reload strategy](hot-reload-strategy.md).
 
-- **A same-path access-log rotation-setting change has a bounded generation
-  overlap risk.** Identical path/rotation policies share one leased writer,
-  so ordinary generation replacement does not create competing file offsets.
-  Changing `rotate_max_mb`/`rotate_keep` while `file` stays the same still uses
-  independent writers to avoid mutating live policy during old-request drain.
-  Those writers can target a renamed backup during rotation or interfere with
-  record boundaries while they overlap; do not assume no data loss. For a safe
-  policy transition, choose a new file path or restart rather than changing
-  rotation settings on the live path. Different destinations do not share this
-  overlap. This remaining policy-change boundary is not closed by the
-  identical-policy writer correction; follow-up is tracked in
-  [#502](https://github.com/victornife/jul/issues/502).
+- **A same-path access-log rotation-policy change applies at the new
+  generation's first record, and pruning waits for the next rotation.** All
+  generations logging to one file share a single writer (#501, #502), so a
+  reload that changes `rotate_max_mb`/`rotate_keep` never opens a competing
+  writer. The new policy takes effect when the new generation writes its first
+  access record; until then the old generation's records follow the old
+  policy, and afterwards a draining old generation uses the new one. Lowering
+  `rotate_keep` removes surplus backups at the next size-triggered rotation,
+  not at reload. Different destinations are independent, and a path switch
+  never prunes the old path.
 
 - **HTTP/3 Alt-Svc is a client-cached hint, not a live capability probe.**
   Once a client has seen `Alt-Svc: h3="..."; ma=<seconds>`, browsers may keep
