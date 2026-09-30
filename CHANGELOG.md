@@ -15,6 +15,17 @@ v2.1.0 tag or its packaged READMEs.
 
 ### Fixed
 
+- **Ambiguously framed HTTP/1.x requests close their connection (RFC 9112
+  §6.3).** A request carrying both `Transfer-Encoding: chunked` and
+  `Content-Length` kept the connection open, so bytes after the chunked
+  terminator were served as a second request; behind a front proxy that
+  frames by `Content-Length` that is request smuggling. The same held for an
+  HTTP/1.0 keep-alive request whose `Transfer-Encoding` net/http discards.
+  Jul now closes the connection after any chunked HTTP/1.x request and after
+  an HTTP/1.0 request with a body method and no `Content-Length`; ordinary
+  keep-alive and pipelining are unchanged. Found by the ambiguous-framing
+  corpus of the conformance lane (#513).
+
 - **On-the-fly compression weakens strong `ETag`s (#504).** A compressed body
   carried the origin's strong tag unchanged, so one strong validator named two
   byte sequences (RFC 9110 §8.8.1, §8.8.3.3). A resumed download (`Range` plus
