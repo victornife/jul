@@ -172,6 +172,7 @@ func exerciseAllMetrics(m *Metrics) {
 
 	m.ObserveCompression("gzip")
 	m.ObserveCacheRevalidation("stored")
+	m.ObserveCacheCaptureSkipped("budget")
 	m.ObserveRateLimited("ip")
 	m.ObserveClientAddrDerivation("xff", "accepted")
 	m.ObserveAuthDecision("jwt", "allow")

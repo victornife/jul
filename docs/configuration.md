@@ -1216,7 +1216,7 @@ stale_if_error = "30s"
 | Key | Type | Description |
 | --- | ---- | ----------- |
 | `enabled` | bool | Master switch |
-| `memory_max_size` | size | In-memory tier cap |
+| `memory_max_size` | size | In-memory tier cap. Also the largest cacheable object (in either tier) and the budget shared by all in-flight response captures; see [cache.md](cache.md#capture-memory) |
 | `disk_path` | string | Enables the disk overflow tier when set |
 | `disk_max_size` | size | Disk tier cap |
 | `default_ttl` | duration | Used when upstream gives no explicit freshness |
