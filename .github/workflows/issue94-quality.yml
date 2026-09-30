@@ -66,9 +66,9 @@ jobs:
           echo "HR-05 comparison base: $base"
       - name: Formatting
         run: |
-          changed="$(git diff --name-only "$BASE_SHA"...HEAD -- '*.go')"
-          if [ -n "$changed" ]; then
-            test -z "$(gofmt -d $changed)"
+          mapfile -d '' changed < <(git diff --diff-filter=ACMRT --name-only -z "$BASE_SHA"...HEAD -- '*.go')
+          if [ "${#changed[@]}" -gt 0 ]; then
+            test -z "$(gofmt -d "${changed[@]}")"
           fi
       - name: Targeted lean tests
         run: go test -count=1 ./internal/egress ./internal/auth ./internal/upstream ./internal/app
