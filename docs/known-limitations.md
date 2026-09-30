@@ -83,7 +83,8 @@ rows are deliberate structural/startup boundaries, not unfinished #94 work. See
   policy transition, choose a new file path or restart rather than changing
   rotation settings on the live path. Different destinations do not share this
   overlap. This remaining policy-change boundary is not closed by the
-  identical-policy writer correction.
+  identical-policy writer correction; follow-up is tracked in
+  [#502](https://github.com/victornife/jul/issues/502).
 
 - **HTTP/3 Alt-Svc is a client-cached hint, not a live capability probe.**
   Once a client has seen `Alt-Svc: h3="..."; ma=<seconds>`, browsers may keep
