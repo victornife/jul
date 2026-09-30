@@ -551,7 +551,7 @@ def main():
     ap.add_argument("--h2spec", default="h2spec")
     ap.add_argument("--h3spec", default="h3spec")
     ap.add_argument("--cache-tests", default="cache-tests", help="checkout of http-tests/cache-tests")
-    ap.add_argument("--autobahn-image", default="crossbario/autobahn-testsuite:0.8.2")
+    ap.add_argument("--autobahn-image", default="crossbario/autobahn-testsuite:25.10.1@sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074")
     args = ap.parse_args()
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
