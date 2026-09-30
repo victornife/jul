@@ -4,9 +4,13 @@
 package config
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,6 +75,51 @@ func TestWatchFileDebounces(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for watch notification")
+	}
+}
+
+func TestWatchFileEventsLogsErrors(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	path := filepath.Join(t.TempDir(), "config.toml")
+	events := make(chan fsnotify.Event)
+	errs := make(chan error)
+	ch := make(chan struct{}, 1)
+	var logOutput bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logOutput, nil))
+	go watchFileEvents(ctx, path, 50*time.Millisecond, logger, events, errs, ch)
+
+	errs <- errors.New("test watcher error")
+	events <- fsnotify.Event{Name: path, Op: fsnotify.Write}
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("watch loop stopped after a watcher error")
+	}
+	if !strings.Contains(logOutput.String(), "config watcher error") {
+		t.Fatalf("watcher error was not logged: %q", logOutput.String())
+	}
+}
+
+func TestWatchFileEventsStopsWhenInputChannelsClose(t *testing.T) {
+	for _, closeEvents := range []bool{true, false} {
+		events := make(chan fsnotify.Event)
+		errs := make(chan error)
+		if closeEvents {
+			close(events)
+		} else {
+			close(errs)
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			watchFileEvents(context.Background(), "config.toml", time.Second, nil, events, errs, make(chan struct{}, 1))
+		}()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("watch loop did not stop when an input channel closed")
+		}
 	}
 }
 
