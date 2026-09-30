@@ -70,7 +70,7 @@ Later checks are marked `skipped` when an earlier prerequisite is unavailable. O
 | `TLS_CERTIFICATES` | security | Certificate/key match, validity window, concrete configured-name coverage, and expiry horizon. |
 | `ADMIN_SECURITY` | security | Listener exposure and presence of a currently usable configured credential. |
 | `CONFIG_TOPOLOGY` | runtime | Counts and enabled-state metadata only. |
-| `SYSTEM_RUNTIME` | runtime | Product, version, commit, build profile, Go, platform, CPU, and capability metadata. |
+| `SYSTEM_RUNTIME` | runtime | Product, version, commit, build profile, Go, platform, CPU, and capability metadata; in builds with WASM plugins, the engine this doctor process would use (`wasm_engine`, `wasm_engine_reason`). |
 | `RUNTIME_PREFLIGHT` | network | Opt-in stateless runtime preflight; not a full startup rehearsal. |
 | `LISTENER_BIND` | network | Opt-in immediate-close local TCP/UDP bind probes. |
 

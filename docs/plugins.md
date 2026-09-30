@@ -381,6 +381,31 @@ the guest grows it and calls again. The SDK helpers (`readInto`, `KVGet`,
   forward the grants from an earlier generation, so a plugin that loses `kv` or
   `fetch` in a later activation is denied those host functions immediately.
 
+### WASM engine
+
+wazero runs guests with one of two engines, chosen once per process:
+
+| Engine | When | Characteristics |
+| --- | --- | --- |
+| `compiler` | amd64 (with SSE4.1) or arm64 on Linux, macOS, Windows, FreeBSD or NetBSD, **and** the process may map memory as executable | Modules are compiled ahead of time to native code in read+execute memory; fastest |
+| `interpreter` | Any other platform, or when executable memory is denied | Pure-Go interpretation; no generated native code; noticeably slower for compute-heavy guests |
+
+Executable memory is denied by W^X policies, most notably systemd's
+`MemoryDenyWriteExecute=yes`, which both shipped units set (see
+[deployment.md](deployment.md#plugins-and-memorydenywriteexecute)). Jul makes
+the same decision wazero would and then selects that engine explicitly, so the
+reported engine is the one in use:
+
+- the startup log line `wasm plugin engine` with `mode` and `reason`;
+- the Console Status row *WASM plugins* (`engine: …`) and `GET /api/plugins`
+  (`engine`);
+- `jul doctor` (`SYSTEM_RUNTIME` evidence `wasm_engine`). The engine is a
+  property of the process, so run doctor under the same sandbox as the service
+  (for example `systemd-run -p MemoryDenyWriteExecute=yes jul doctor ...`) or
+  read the running service's log or Console instead.
+
+Benchmarks in this guide were measured with the `compiler` engine.
+
 ## Observability
 
 Every invocation updates Prometheus metrics:
@@ -559,7 +584,7 @@ are addressed by design, configuration, or runtime containment:
 
 | Threat | Vector | Mitigation | Residual risk |
 | ------ | ------ | ---------- | ------------- |
-| Guest escape via memory corruption | Malformed `.wasm` or JIT bug | wazero is a pure-Go interpreter with no JIT/no cgo; the linear memory cap bounds blast radius; Go memory safety protects the host runtime | Unknown engine bug in wazero (defense-in-depth: keep wazero updated) |
+| Guest escape via memory corruption | Malformed `.wasm`, or a bug in wazero's code generator or interpreter | Where the platform allows it, wazero compiles each module ahead of time to native machine code in executable memory (the "compiler" engine); otherwise, and under W^X policies such as systemd `MemoryDenyWriteExecute=yes`, it interprets (see [WASM engine](#wasm-engine)). No cgo in either mode. The linear-memory cap bounds the blast radius, and Go memory safety protects the host runtime | Unknown bug in wazero's compiler or interpreter (defense in depth: keep wazero updated; the interpreter avoids generated native code) |
 | Infinite loop / CPU exhaustion | Guest spins without yielding | Per-invocation `timeout` (default 100 ms) enforced by context cancellation; guest torn down on overrun | Very short spike before cancellation (~timeout + scheduler jitter) |
 | SSRF via `fetch` | Guest calls allowed host that redirects to private or special-use IP | `dialValidatedIPs` blocks loopback/private/link-local/CGNAT/multicast, `0.0.0.0/8`, `240.0.0.0/4`, and `198.18.0.0/15` at dial time; redirect targets re-check allow-list | DNS rebinding to a *public* IP that later changes (low probability; TTL-dependent) |
 | KV DoS (unbounded growth) | Guest fills KV with unbounded keys/values | `kv_max_entries` (default 1024) and `kv_max_bytes` (default 1 MiB) enforced per plugin; `kv_set` returns "quota exceeded" | Admin misconfigures quotas to very large values |

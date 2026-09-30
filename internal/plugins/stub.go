@@ -26,6 +26,9 @@ import (
 // false here and true in the "wasm" build.
 const Compiled = false
 
+// EngineMode reports no engine: this build has no WASM runtime.
+func EngineMode() (mode, reason string) { return "", "" }
+
 // ABIJulV1 is the native Jul.IA ABI identifier (declared for API symmetry).
 const ABIJulV1 = config.PluginABIV1
 

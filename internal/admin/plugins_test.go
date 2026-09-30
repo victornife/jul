@@ -369,6 +369,7 @@ func TestHandlePluginsEndpoint(t *testing.T) {
 	srv := newTestServer(t, config.AdminConfig{}, Deps{
 		LoadConfig:      func() (*config.Config, error) { return cfg, nil },
 		PluginsCompiled: true,
+		PluginEngine:    "interpreter",
 	})
 	req := httptest.NewRequest("GET", "/api/plugins", nil)
 	rec := httptest.NewRecorder()
@@ -379,5 +380,8 @@ func TestHandlePluginsEndpoint(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, `"compiled":true`) || !strings.Contains(body, `"inject"`) {
 		t.Errorf("unexpected body: %s", body)
+	}
+	if !strings.Contains(body, `"engine":"interpreter"`) {
+		t.Errorf("plugins projection must report the process engine: %s", body)
 	}
 }

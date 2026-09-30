@@ -424,6 +424,10 @@ type Deps struct {
 	// but the apply preflight rejects them on a lean build.
 	PluginsCompiled bool
 
+	// PluginEngine is the wazero engine this process compiles plugins with
+	// ("compiler" or "interpreter"); empty when plugins are not compiled.
+	PluginEngine string
+
 	// StreamCompiled reports whether this binary includes the L4 stream proxy
 	// (the stream build tag). The Console v2 Streams panel (Phase 4i) surfaces it
 	// so the guided editor can warn that declarations validate but a lean binary

@@ -25,6 +25,7 @@ type Subsystems struct {
 	PoolReg          *upstream.Registry
 	LogTail          *observability.LogTail
 	PluginsCompiled  bool
+	PluginEngine     string
 	StreamCompiled   bool
 	WAFCompiled      bool
 	LastStreamReload *atomic.Pointer[string]
@@ -55,6 +56,7 @@ func BuildAdminDeps(productName, version string, src config.Source, subsystems S
 	deps.SubscribeLogs = subsystems.LogTail.Subscribe
 
 	deps.PluginsCompiled = subsystems.PluginsCompiled
+	deps.PluginEngine = subsystems.PluginEngine
 	deps.StreamCompiled = subsystems.StreamCompiled
 	deps.WAFCompiled = subsystems.WAFCompiled
 

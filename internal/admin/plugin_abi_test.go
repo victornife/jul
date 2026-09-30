@@ -82,3 +82,15 @@ func TestStatusPluginDetailCountsV2(t *testing.T) {
 		t.Fatalf("v1-only detail = %q", got)
 	}
 }
+
+func TestStatusPluginDetailNamesEngine(t *testing.T) {
+	if got := withPluginEngine("1 module", "interpreter"); got != "1 module; engine: interpreter" {
+		t.Fatalf("detail = %q", got)
+	}
+	if got := withPluginEngine("", "compiler"); got != "" {
+		t.Fatalf("no plugins must keep an empty detail, got %q", got)
+	}
+	if got := withPluginEngine("1 module", ""); got != "1 module" {
+		t.Fatalf("unknown engine must not change the detail, got %q", got)
+	}
+}

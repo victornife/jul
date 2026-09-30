@@ -235,6 +235,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		return 1
 	}
 	defer func() { _ = pluginMgr.Close() }()
+	pluginEngine, pluginEngineReason := plugins.EngineMode()
+	if plugins.Compiled {
+		log.Info("wasm plugin engine", "mode", pluginEngine, "reason", pluginEngineReason)
+	}
 
 	// genRes owns the generational teardown lifecycle of the handler tree.
 	genRes := NewGenerationResources(poolReg)
@@ -381,6 +385,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		PoolReg:          poolReg,
 		LogTail:          logTail,
 		PluginsCompiled:  plugins.Compiled,
+		PluginEngine:     pluginEngine,
 		StreamCompiled:   stream.Compiled,
 		WAFCompiled:      waf.Compiled,
 		LastStreamReload: &rt.LastStreamReload,
