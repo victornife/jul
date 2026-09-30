@@ -70,8 +70,9 @@ func freeUDPTCPPort(t *testing.T) string {
 func freeUDPTCPPortWithTCPProbe(t *testing.T, probe func(context.Context, string, string) (net.Listener, error)) string {
 	t.Helper()
 	lc := &net.ListenConfig{}
-	var lastTCPError error
-	for range 20 {
+	const attempts = 20
+	var lastBindError error
+	for range attempts {
 		pc, err := lc.ListenPacket(context.Background(), "udp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
@@ -80,13 +81,33 @@ func freeUDPTCPPortWithTCPProbe(t *testing.T, probe func(context.Context, string
 		addr := pc.LocalAddr().String()
 		ln, err := probe(context.Background(), "tcp", addr)
 		if err != nil {
-			lastTCPError = err
+			lastBindError = err
 			continue
 		}
 		_ = ln.Close()
 		return addr
 	}
-	t.Fatalf("no loopback port free on both UDP and TCP: %v", lastTCPError)
+
+	// UDP ephemeral ports can all land in a Windows TCP-excluded range. Pick a
+	// TCP port first, then reserve UDP on that same port before releasing TCP.
+	for range attempts {
+		ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+		if err != nil {
+			lastBindError = err
+			continue
+		}
+		addr := ln.Addr().String()
+		pc, err := lc.ListenPacket(context.Background(), "udp", addr)
+		if err != nil {
+			lastBindError = err
+			_ = ln.Close()
+			continue
+		}
+		_ = ln.Close()
+		defer func() { _ = pc.Close() }()
+		return addr
+	}
+	t.Fatalf("no loopback port free on both UDP and TCP: %v", lastBindError)
 	return ""
 }
 
@@ -127,6 +148,33 @@ func TestFreeUDPTCPPortRetainsRejectedCandidates(t *testing.T) {
 		}
 		_ = reserved.Close()
 	}
+}
+
+func TestFreeUDPTCPPortFallsBackAfterTCPExcludedEphemeralRange(t *testing.T) {
+	var candidates []string
+	addr := freeUDPTCPPortWithTCPProbe(t, func(_ context.Context, _, candidate string) (net.Listener, error) {
+		candidates = append(candidates, candidate)
+		return nil, errors.New("simulate TCP-excluded ephemeral port")
+	})
+	if len(candidates) != 20 {
+		t.Fatalf("ephemeral TCP probes = %d, want 20 before fallback", len(candidates))
+	}
+	for _, candidate := range candidates {
+		if candidate == addr {
+			t.Fatalf("fallback reused rejected ephemeral candidate %s", addr)
+		}
+	}
+
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("fallback TCP port %s was not released: %v", addr, err)
+	}
+	defer ln.Close()
+	pc, err := net.ListenPacket("udp", addr)
+	if err != nil {
+		t.Fatalf("fallback UDP port %s was not released: %v", addr, err)
+	}
+	_ = pc.Close()
 }
 
 // getH3Once issues exactly one bounded HTTP/3 GET, for an assertion that
