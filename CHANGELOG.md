@@ -85,6 +85,14 @@ v0.62.0 to v0.63.0 and `google.golang.org/grpc` v1.83.2 to v1.84.0.
 
 ### Fixed
 
+- **Access-log records survive overlapping handler generations with unchanged
+  file policy.** Independent rotating writers could overwrite part of a JSON
+  record when an old request logged after its replacement generation. File
+  sinks now share one immutable path/rotation-policy writer with idempotent
+  generation leases; the last owner closes it. A three-write regression
+  reproduces the corruption before the fix. Same-path rotation-policy changes
+  retain the explicitly documented overlap limitation.
+
 - **WAF documentation matched the engine; `jul lint` flags routes the WAF breaks.** `docs/waf.md` said a request body over `request_body_limit` passes uninspected. In fact Coraza rejects it with `413` (verified end to end), so with the 128 KiB default every larger upload on a WAF route fails. The docs now say so, and lint warns when the limit is below the route's `client_max_body_size`. Lint also warns on native gRPC routes covered by the WAF. The WAF reads the whole request body before forwarding, so client and bidirectional streams never reach the backend, and the Core Rule Set rejects `application/grpc` (rule 920420).
 
 - **Security hardening: FastCGI and uWSGI no longer pass a client `Proxy` header as `HTTP_PROXY` (httpoxy).** Request headers become `HTTP_*` CGI parameters, so a client could set the `HTTP_PROXY` an application or library might use for its own outbound requests (the CVE-2016-5385 class). The parameter is now dropped; an explicit `fastcgi_params.HTTP_PROXY` still applies. Affects v2.0.0 and earlier.

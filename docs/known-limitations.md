@@ -73,22 +73,17 @@ reuse an older egress transport or discovery worker. The remaining restart-requi
 rows are deliberate structural/startup boundaries, not unfinished #94 work. See
 [hot-reload strategy](hot-reload-strategy.md).
 
-- **A same-path access-log rotation-setting change has a narrow, bounded
-  overlap risk.** Changing `rotate_max_mb`/`rotate_keep` while `file` stays the
-  same builds a new, independent file writer for the new generation rather
-  than mutating the live one (mutating a live writer's fields while a request
-  in the previous, still-draining generation might concurrently write to it
-  would be a data race). If the previous generation's writer happens to
-  rotate the file (crossing its own size threshold) during the brief window
-  before its in-flight requests finish draining, the new generation's writer
-  — which already holds its own file handle opened at the same path — keeps
-  appending to what is now a renamed backup file rather than the path an
-  operator expects, until its own next process restart or file-path change.
-  No data is lost (the bytes exist in the backup file), and a `file`-only
-  path change (no rotation-setting change) is unaffected, since the old and
-  new generations then use different, unrelated files. Only the narrow
-  combination of a same-path rotation-setting change and a rotation actually
-  firing during the bounded drain window is affected.
+- **A same-path access-log rotation-setting change has a bounded generation
+  overlap risk.** Identical path/rotation policies share one leased writer,
+  so ordinary generation replacement does not create competing file offsets.
+  Changing `rotate_max_mb`/`rotate_keep` while `file` stays the same still uses
+  independent writers to avoid mutating live policy during old-request drain.
+  Those writers can target a renamed backup during rotation or interfere with
+  record boundaries while they overlap; do not assume no data loss. For a safe
+  policy transition, choose a new file path or restart rather than changing
+  rotation settings on the live path. Different destinations do not share this
+  overlap. This remaining policy-change boundary is not closed by the
+  identical-policy writer correction.
 
 - **HTTP/3 Alt-Svc is a client-cached hint, not a live capability probe.**
   Once a client has seen `Alt-Svc: h3="..."; ma=<seconds>`, browsers may keep
