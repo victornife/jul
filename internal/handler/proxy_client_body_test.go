@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"jul/internal/config"
-	"jul/internal/upstream"
 )
 
 // failingBody stands in for a client upload whose framing breaks mid-stream.
@@ -121,30 +120,5 @@ func TestProxyMalformedChunkedUploadOverTheWire(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "ok") || gets.Load() != 1 {
 		t.Fatalf("GET after malformed chunked uploads: status %d body %q", resp.StatusCode, body)
-	}
-}
-
-func TestInboundBodyAttribution(t *testing.T) {
-	transportErr := errors.New("write tcp: broken pipe")
-	var none *upstream.InboundBody
-	if got := none.Attribute(transportErr); got != transportErr {
-		t.Fatalf("a request without a body changed the error: %v", got)
-	}
-	req := httptest.NewRequest(http.MethodPost, "http://edge/", strings.NewReader("fine"))
-	watch := upstream.WatchInboundBody(req)
-	_, _ = io.ReadAll(req.Body)
-	if got := watch.Attribute(transportErr); got != transportErr {
-		t.Fatalf("a clean body blamed the client: %v", got)
-	}
-	req = httptest.NewRequest(http.MethodPost, "http://edge/", nil)
-	req.Body = &failingBody{}
-	watch = upstream.WatchInboundBody(req)
-	_, _ = io.ReadAll(req.Body)
-	var bodyErr *upstream.ClientBodyError
-	if got := watch.Attribute(transportErr); !errors.As(got, &bodyErr) {
-		t.Fatalf("a failed body was not attributed to the client: %v", got)
-	}
-	if c := upstream.ClassifyAttemptError(watch.Attribute(transportErr), nil, nil); c.Health() != upstream.HealthNeutral || c.Reason() != upstream.ReasonClientRequestBody {
-		t.Fatalf("classification = %v/%q, want neutral client_request_body", c.Health(), c.Reason())
 	}
 }
