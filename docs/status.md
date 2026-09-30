@@ -1,17 +1,19 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.17 · Updated 2026-09-30
+> Version 2.18 · Updated 2026-09-30
 >
-> Proposed v2.1.0 is the selected next stable tag. Rows still marked `merged`
-> are in that candidate tree and were not in published v2.0.0. They are not
-> `released` until the tag is published, and they are not GA.
+> Stable v2.1.0 is published. Its seven additive Beta rows now have `released`
+> delivery; maturity and all GA criteria are unchanged. This is a post-tag
+> publication-status update, not a change to the immutable packaged documents.
 
-The corrected runtime candidate is `f036b063`, with exact-main gates and
+The published source is `0951090a6fb7703769a15b4749be9664a9842c98`, with exact-main gates and
 impact-reviewed runtime evidence recorded under [release closure #480](https://github.com/victornife/jul/issues/480).
 The four-hour measurements on `3258f1a3` and the corrected one-hour
 logging/reload validation on `f036b063` are separate source-bound evidence,
-not one relabeled soak. Artifact verification and publication remain pending;
-no maturity or delivery row is promoted by these measurements.
+not one relabeled soak. [Release and package verification](release.md#published-v210-verification)
+record the twelve archives, signed attestations and six actual package smoke
+executions, including native execution limits. No GA criterion is completed
+by publication alone.
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
 > single editable manifest. This page is the human-readable rendering of that
@@ -57,10 +59,12 @@ not inherit an older GA row merely because it lives in the same package or guide
 
 ### Current product snapshot
 
-- **Published release:** stable `v2.0.0` is the current published release at
-  `d56f5ceaf7ddb8a3875cbe6e27c9540db4130f75`, cut after #420 and #421
-  (see `CHANGELOG.md` and the exact release evidence in
-  [#425](https://github.com/victornife/jul/issues/425)).
+- **Published release:** stable [`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0)
+  is the current published release at `0951090a6fb7703769a15b4749be9664a9842c98`.
+  [#480](https://github.com/victornife/jul/issues/480) records its scope,
+  source-bound runtime review, package verification and residuals.
+  Historical `v2.0.0` at `d56f5ceaf7ddb8a3875cbe6e27c9540db4130f75`
+  remains certified by [#425](https://github.com/victornife/jul/issues/425).
   `v2.0.0-rc.1` is an independently verified prerelease at
   `c9ab3a05af6a6088b2721de0a87995ce37d468cf` that predates the #420 WASM
   plugin-pool fix; it is immutable and was never retagged or promoted — stable
@@ -95,17 +99,16 @@ not inherit an older GA row merely because it lives in the same package or guide
   published in v2.0.0 with separate Beta maturity. The reduced remote
   diagnostics projection is tracked with the API/CLI rows.
 - **Post-release migration work:** #426/#365/#366/#367 completed bounded
-  translation and focused NGINX-vs-Jul evidence on `main` after the stable tag;
+  translation and focused NGINX-vs-Jul evidence after v2.0.0, now shipped in v2.1.0;
   #368 established the permanent migration-impact rule. The optional public/full
   corpus is #456 CANDIDATE/LATER. None of this is included in v2.0.0.
-- **Proposed v2.1.0 additions, still Beta / `merged`:** standard gRPC health
+- **Published v2.1.0 additions, still Beta / `released`:** standard gRPC health
   (#427), runtime resources and HTTP bandwidth (#431), storage headroom
   (#437) within OPS-RESOURCES, serving WAF policy visibility (#440), Console
   diagnostics guidance (#445), WASM response ABI v2 (#430), consistent-hash
   affinity (#432), and client-certificate policy hot reload (#486) have
-  separate rows below. They are in this candidate and were not in the v2.0.0
-  tag. Their maturity and delivery do not alter existing GA rows. Delivery
-  becomes `released` only after the tag is published.
+  separate rows below. They shipped in v2.1.0 and were not in the v2.0.0
+  tag. Their maturity and delivery do not alter existing GA rows.
 - **WASM plugin-pool memory fix (#420) and final soak (#421):** the final
   pre-stable soak found a real unbounded memory-growth defect in the pooled
   WASM instance runtime; [#420](https://github.com/victornife/jul/pull/420)
@@ -186,8 +189,7 @@ long-running post-GA soak gate.
 
 Usable capabilities whose contract, release, soak, or integrated evidence is
 not yet at the GA bar. Rows marked `released` shipped as Beta in published
-v2.0.0. Rows marked `merged` are in the proposed v2.1.0 tree and were not in
-that tag. Publication does not complete the unchecked GA criteria.
+v2.0.0 or v2.1.0. Publication does not complete the unchecked GA criteria.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
@@ -203,13 +205,13 @@ that tag. Publication does not complete the unchecked GA criteria.
 | Remote automation CLI | AUTO-CLI | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [remote-cli.md](remote-cli.md) |
 | Selected runtime policy hot reload | HR-SELECTED | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [hot-reload-strategy.md](hot-reload-strategy.md) |
 | HTTP proxy over Unix-domain upstreams | HTTP-UNIX | core | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [unix-http-upstreams.md](unix-http-upstreams.md) |
-| Standard gRPC Health Checking Protocol active probes | GRPC-HC | core · `grpc` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
-| Runtime resources, capacity headroom, and HTTP bandwidth | OPS-RESOURCES | core · `console` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [observability.md](observability.md) |
-| Serving WAF policy and provenance visibility | WAF-PROVENANCE | `waf` · `console` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [waf.md](waf.md) |
-| Resource-pressure diagnostics guidance in Console | OPS-DIAG-UX | core · `console` | `merged` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [diagnostics.md](diagnostics.md) |
-| WASM plugin response phase (jul-abi/v2) | WASM-ABI2 | `wasmplugins` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [abi.md](abi.md) |
-| Deterministic consistent-hash affinity | LB-AFFINITY | core · `stream` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [upstreams.md](upstreams.md) |
-| Client-certificate policy and CRL hot reload | MTLS-HOT | core | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [mtls.md](mtls.md) |
+| Standard gRPC Health Checking Protocol active probes | GRPC-HC | core · `grpc` | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [health.md](health.md) |
+| Runtime resources, capacity headroom, and HTTP bandwidth | OPS-RESOURCES | core · `console` | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [observability.md](observability.md) |
+| Serving WAF policy and provenance visibility | WAF-PROVENANCE | `waf` · `console` | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [waf.md](waf.md) |
+| Resource-pressure diagnostics guidance in Console | OPS-DIAG-UX | core · `console` | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [diagnostics.md](diagnostics.md) |
+| WASM plugin response phase (jul-abi/v2) | WASM-ABI2 | `wasmplugins` | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [abi.md](abi.md) |
+| Deterministic consistent-hash affinity | LB-AFFINITY | core · `stream` | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [upstreams.md](upstreams.md) |
+| Client-certificate policy and CRL hot reload | MTLS-HOT | core | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [mtls.md](mtls.md) |
 
 ## Alpha
 
@@ -259,6 +261,7 @@ the [soak evidence log](soak-evidence.md).
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-09-30 | 2.18 | Reconciled published stable v2.1.0 at `0951090a`: seven shipped Beta entries move `merged` to `released`, with maturity and GA criteria unchanged. Actual package verification and execution limits are recorded; this documentation update is post-tag. | [feature-status.yaml](feature-status.yaml); [release.md](release.md#published-v210-verification); [#480](https://github.com/victornife/jul/issues/480) |
 | 2026-09-29 | 2.16 | Recorded the proposed v2.1.0 freeze. Post-v2.0.0 rows stay `merged` and Beta until the tag is published. #434 is no-go. | [feature-status.yaml](feature-status.yaml); [compatibility.md](compatibility.md) |
 | 2026-09-28 | 2.15 | Promoted Y1-08 and base Y1-09 to `GA` / `soaked` after two independent exact-head feature runs exceeded the ADR 0005 one-hour floor and their retained pre-run provenance and results were inspected. The decision applies to the exercised workloads, after v2.0.0; MIG-ASSESS stays Beta. | [feature-status.yaml](feature-status.yaml); [soak-evidence.md](soak-evidence.md) |
 | 2026-09-27 | 2.14 | Corrected two unsupported `soaked` classifications: Y1-08 and Y1-09 are stable-released GA — soak pending while their five-minute smoke evidence is distinguished from ADR 0005's long-running criterion. Stable v2.0.0 availability is unchanged. | [feature-status.yaml](feature-status.yaml); [soak-evidence.md](soak-evidence.md); [ADR 0005](adr/0005-soak-post-ga-gate.md) |

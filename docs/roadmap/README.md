@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.17 · Updated 2026-09-30
+> Version 2.18 · Updated 2026-09-30
 >
 > This roadmap owns the **durable portfolio sequence**. It deliberately does
 > not duplicate volatile READY/NEXT/blocked issue state. The current issue-level
@@ -35,17 +35,17 @@ separate decisions rather than implicit completion requirements.
 
 ## Current execution sequence
 
-After the proposed v2.1.0 closure, the durable sequence is: keep #434, #456
+After stable v2.1.0 publication, the durable sequence is: keep #434, #456
 and the other unactivated candidates deferred; do not start another feature
 tranche from release housekeeping; let #62 record live execution. This page
 does not replace that tracker.
 
 The durable current sequence is summarized in the active operating roadmap below. Exact issue-level status remains in #62.
 
-The v2.1.0 closure includes the integrated audit stack and the access-log
+The published v2.1.0 closure includes the integrated audit stack and the access-log
 ownership correction, with source-bound evidence and its post-fix impact review.
-Final package verification/publication is still the stage-10 gate, not a new
-feature tranche. The bounded same-path rotation-policy follow-up is
+The release and twelve-package verification completed the stage-10 release
+gate; they did not activate a new feature tranche. The bounded same-path rotation-policy follow-up is
 [#502](https://github.com/victornife/jul/issues/502); D11/D12 and the partial
 audit ledger remain separate work, even after a stable publication.
 
@@ -61,9 +61,9 @@ audit ledger remain separate work, even after a stable publication.
 | **5 — Generic resilience** | Admission, queue/connection bounds, retry budget/deadline/backoff, circuit state and bounded operations evidence | #287/#144 closed; published in v2.0.0 as Beta. Further feature-specific GA evidence remains a separate decision |
 | **6 — Configuration authority and automation** | Managed/file-owned authority, generated contracts, supported external API, thin remote CLI | #150/#151 closed; authority, versioned external API and remote CLI published in v2.0.0 as separately tracked Beta capabilities |
 | **7 — Selected runtime dynamics** | Value-ranked runtime changes and truthful restart boundaries | Bounded tranche complete (#88); selected changes published as Beta. Further hot reload requires an explicit value trigger |
-| **8 — Migration and diagnostics** | NGINX assessment, evidence, support bundle and `jul doctor` | Base assessment/diagnostics published in v2.0.0 as Beta. #426/#365/#366/#367, the #368 migration-impact rule, #422 and Wave 6 are in the proposed v2.1.0 tree. Optional full corpus remains #456 CANDIDATE/LATER. #434 is no-go for this release. [#480](https://github.com/victornife/jul/issues/480) owns exact-SHA certification. |
+| **8 — Migration and diagnostics** | NGINX assessment, evidence, support bundle and `jul doctor` | Base assessment/diagnostics published in v2.0.0 as Beta. #426/#365/#366/#367, the #368 migration-impact rule, #422 and Wave 6 shipped in v2.1.0. Optional full corpus remains #456 CANDIDATE/LATER. #434 is no-go for this release. [#480](https://github.com/victornife/jul/issues/480) records exact-SHA certification. |
 | **9 — One bounded experiment** | AI Gateway or another explicitly approved category | #162 remains deferred under #113; no experiment activated by the v2.0.0 release |
-| **10 — Integrated closure** | Exact-SHA verification, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Completed for stable v2.0.0 (#425/#421). Proposed v2.1.0 repeats that closure under #480; it is not complete until the tag is published from the frozen SHA |
+| **10 — Integrated closure** | Exact-SHA verification, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Stable v2.1.0 published from frozen 0951090a; final-source gates, source-bound post-fix runtime review and actual package verification recorded under #480. Older v2.0.0 certification remains under #425/#421. Residual audit work and #502 are separate, not closed by publication |
 
 For exact issue state, child decomposition, active pull requests and sequencing,
 read #62. This table changes only when the durable portfolio boundary or stage
@@ -100,7 +100,7 @@ outcome changes.
   and fixing four defects. This does not retroactively change the v2.0.0 gate.
 - Wave 6 completed #437 Jul-owned storage headroom, #440 serving WAF policy
   visibility and #445 guidance toward existing diagnostic tools. Those Beta
-  rows are in the proposed v2.1.0 tree and do not change the v2.0.0 tag or
+  rows shipped in v2.1.0 and do not change the v2.0.0 tag or
   become GA by shipping.
 - **#434 decision (2026-09-29): no-go.** No concrete SNI+ALPN routing workload
   and no Phase-0 parser/fuzz/benchmark evidence were produced. The candidate
@@ -109,14 +109,18 @@ outcome changes.
 
 ## Published stable checkpoint
 
+Stable [`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0)
+was published 2026-09-30 at `0951090a6fb7703769a15b4749be9664a9842c98`.
+[Release closure #480](https://github.com/victornife/jul/issues/480) and
+[release verification](../release.md#published-v210-verification) record its
+final-source gates, runtime impact review, twelve archives and execution limits.
+This web-documentation update is post-tag; it is not inside those archives.
+
 Stable [`v2.0.0`](https://github.com/victornife/jul/releases/tag/v2.0.0)
 was published 2026-09-21 at
 `d56f5ceaf7ddb8a3875cbe6e27c9540db4130f75`, after the #420 WASM fix
 and #421 post-fix soak. Exact release evidence is recorded in
 [#425](https://github.com/victornife/jul/issues/425).
-
-Proposed v2.1.0 is a separate tag from v2.0.0. Until that tag is published,
-v2.0.0 remains the latest published stable release.
 
 `v2.0.0-rc.1` remains an immutable historical prerelease at
 `c9ab3a05af6a6088b2721de0a87995ce37d468cf`;

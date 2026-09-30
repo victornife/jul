@@ -29,14 +29,18 @@ Superseded or fully closed audits, preserved as historical evidence under
 
 ## Current programme disposition
 
-- The proposed v2.1.0 runtime closure includes the source-bound four-hour
+- Stable [v2.1.0](https://github.com/victornife/jul/releases/tag/v2.1.0),
+  published 2026-09-30 at `0951090a6fb7703769a15b4749be9664a9842c98`, includes the source-bound four-hour
   measurements and the #501 access-log ownership correction, followed by
   affected logging/reload/rotation revalidation. See
   [soak evidence](soak-evidence.md) and [#480](https://github.com/victornife/jul/issues/480)
   for exact source boundaries, measurements, retained failures and final gates.
   The remaining same-path rotation-policy boundary is
   [#502](https://github.com/victornife/jul/issues/502), not silently closed.
-  This record does not assert publication or an exhaustive audit.
+  [Actual package verification](release.md#published-v210-verification) records
+  twelve archives, signed attestations and native execution limits. These
+  publication-status edits are post-tag, not inside the release archives.
+  This is release closure, not an exhaustive audit.
 - Cache correctness/recertification, closed-world lifecycle authority and
   structured configuration Phase 5 are complete.
 - ADRs 0016–0019 are accepted. Canonical client identity, backend trust,
@@ -61,7 +65,7 @@ Superseded or fully closed audits, preserved as historical evidence under
   rows. Internal Console routes do not inherit the external API contract.
   The bounded AI experiment remains a later portfolio decision.
 - Wave 6 (#437 storage headroom, #440 WAF policy visibility and #445
-  diagnostics guidance) is in the proposed v2.1.0 tree. These Beta/merged
+  diagnostics guidance) shipped in v2.1.0. These Beta/released
   additions do not inherit the stable v2.0.0 release or base-feature GA.
 - The 2026-09-27 documentation ledger's **D11** and **D12** remain open.
   D11 is unfinished review of examples, config leaves and platform

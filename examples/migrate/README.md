@@ -12,9 +12,11 @@ configuration into Jul.IA TOML.
 > generated for review, but the command exits 3 (`manual_action_required`).
 
 Published v2.0.0 includes the base importer and Beta assessment/include support.
-The proposed v2.1.0 tree adds bounded stream, protocol and affinity translations
-and focused migration E2E evidence; those additions are not yet published and
-do not promise universal NGINX equivalence. See the
+[Published v2.1.0](https://github.com/victornife/jul/releases/tag/v2.1.0)
+adds bounded stream, protocol and affinity translations and focused migration
+E2E evidence in its `full` artifacts (or a source build with `importer`). These
+Beta additions do not promise universal NGINX equivalence. This README update
+is post-tag, not a replacement for the packaged candidate-time README. See the
 [status matrix](../../docs/status.md) for delivery and maturity.
 
 - [`nginx.conf`](nginx.conf) — the source NGINX configuration.

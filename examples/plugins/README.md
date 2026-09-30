@@ -4,9 +4,11 @@ Runnable [Jul.IA WebAssembly plugins](../../docs/plugins.md) and the guest SDK
 they build on. This directory is its own Go module (`juliaplugins`) so the main
 server module never compiles the `wasip1`-only guest code during `go build ./...`.
 
-Published v2.0.0 supports `jul-abi/v1`. The opt-in `jul-abi/v2` examples below
-require the proposed v2.1.0 tree, which is not yet published; the v2 response
-phase remains Beta and v1 guests remain supported. See the
+Published [v2.1.0](https://github.com/victornife/jul/releases/tag/v2.1.0)
+supports the opt-in `jul-abi/v2` examples below in its `full` artifacts (or a
+source build with `wasmplugins`). The v2 response phase remains Beta;
+`jul-abi/v1` remains the default and v1 guests remain supported. This README
+update is post-tag, not a replacement for the packaged candidate-time README. See the
 [status matrix](../../docs/status.md) and [ABI contract](../../docs/abi.md).
 
 To run these in a server you need a binary built with the plugins runtime:

@@ -60,15 +60,19 @@ NGINX who want a gentler on-ramp.
 
 ## Current direction
 
-Jul.IA published the bounded standalone gateway as stable v2.0.0.
-This tree is the proposed v2.1.0 candidate: Waves 1–6 and the audit fixes are
-included, still at their own maturity, and not yet a published GitHub Release.
+Jul.IA published the bounded standalone gateway as stable
+[`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0) on 2026-09-30,
+from immutable source `0951090a6fb7703769a15b4749be9664a9842c98`.
+Waves 1–6 and the audit fixes are included, still at their own maturity.
 #434 is no-go for this release and stays CANDIDATE/LATER. Certification is
 [release closure #480](https://github.com/victornife/jul/issues/480).
-The corrected runtime candidate has exact-source validation and a documented
+The corrected runtime source has exact-source validation and a documented
 post-fix evidence review; see [soak evidence](docs/soak-evidence.md) and
-[release verification](docs/release.md). Package verification and publication
-are separate gates. The remaining [access-log policy overlap](https://github.com/victornife/jul/issues/502)
+[release verification](docs/release.md). The twelve release archives, signed
+attestations and six downloaded-package smoke executions were verified, with
+unexecuted platforms reported explicitly. These web-documentation updates are
+post-tag, not changes to the tagged archives. The remaining
+[access-log policy overlap](https://github.com/victornife/jul/issues/502)
 and partial-audit limits remain explicit; this is not a full-audit claim.
 Additional features do not inherit the GA status of older capabilities. Fleet, hosted
 cloud, GraphQL composition and AI remain optional horizons or bounded
@@ -89,11 +93,11 @@ human view and evidence matrix are in [`docs/status.md`](docs/status.md).
 | --- | --- |
 | **GA · soaked** | Core HTTP, released TLS/ACME and mTLS, authentication, cache, compression, rate limiting, health checks, service discovery, released gRPC/L4/WASM/WAF/observability capabilities, Console, secrets, reload transaction, trusted client address, backend TLS trust, zero-config/lint and the base single-file NGINX importer. The last two have [scoped post-release soak evidence](docs/soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features). |
 | **Beta · released in v2.0.0** | Auxiliary egress policy, method/header/query routing, response-header policy and CORS, upstream admission/retry/circuit controls, configuration authority/generated contracts, NGINX assessment/provenance/include traversal, diagnostics, admin TLS, external API/CLI, selected hot reload and Unix HTTP upstreams |
-| **Beta · in the proposed v2.1.0 tree, not yet published** | gRPC Health/Check probes, resource and storage headroom, serving WAF policy visibility, Console diagnostics guidance, WASM ABI v2 response phase, consistent-hash affinity, client-certificate policy hot reload, and the post-v2.0.0 NGINX translation/E2E evidence |
+| **Beta · released in v2.1.0** | gRPC Health/Check probes, resource and storage headroom, serving WAF policy visibility, Console diagnostics guidance, WASM ABI v2 response phase, consistent-hash affinity, client-certificate policy hot reload, and the post-v2.0.0 NGINX translation/E2E evidence |
 
 Published stable
-[`v2.0.0`](https://github.com/victornife/jul/releases/tag/v2.0.0)
-remains the latest GitHub Release until v2.1.0 is published. The older
+[`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0)
+is the latest GitHub Release. The older
 [`v2.0.0-rc.1` checkpoint](docs/release-candidates/v2.0.0-rc.1.md) remains a
 separate prerelease. A Beta capability does not become GA because it is
 included in a stable tag. Check the [status matrix](docs/status.md) for each
@@ -117,8 +121,8 @@ a `full` release artifact to enable all optional capabilities.
 | **Static files** | Document root serving, index files, `try_files`, optional directory listing, hidden-file control, `Cache-Control` headers |
 | **Reverse proxy** | `proxy_pass` to a concrete URL or a named upstream; named upstreams may use `unix:/path.sock` backends for plaintext HTTP; per-location connect/read/send timeouts; custom upstream headers with variable expansion |
 | **WebSocket & SSE** | Transparent passthrough of `Connection: Upgrade` (HTTP `101`) connections — text and binary frames spliced bidirectionally (Apollo GraphQL subscriptions, Socket.IO) — and `text/event-stream` / chunked responses streamed per write, never buffered (Node/Python SSE) |
-| **Load balancing** | `round_robin`, `weighted_round_robin`, `least_conn`, and deterministic `consistent_hash` affinity (client IP, header or cookie key) across an upstream pool. `consistent_hash` is Beta and is in the proposed v2.1.0 tree, not in published v2.0.0 |
-| **Health & failover** | Released passive/active health checking and Beta resilience controls: bounded admission and pending work, per-backend capacity, retry attempts/deadline/backoff/budget, and an explicit closed/open/half-open circuit model. The gRPC Health/Check probe is Beta and is in the proposed v2.1.0 tree, not in published v2.0.0. See [upstreams.md](docs/upstreams.md) and [health.md](docs/health.md). |
+| **Load balancing** | `round_robin`, `weighted_round_robin`, `least_conn`, and deterministic `consistent_hash` affinity (client IP, header or cookie key) across an upstream pool. `consistent_hash` is Beta, released in v2.1.0 |
+| **Health & failover** | Released passive/active health checking and Beta resilience controls: bounded admission and pending work, per-backend capacity, retry attempts/deadline/backoff/budget, and an explicit closed/open/half-open circuit model. The gRPC Health/Check probe is Beta, released in v2.1.0. See [upstreams.md](docs/upstreams.md) and [health.md](docs/health.md). |
 | **Service discovery** | Resolve an upstream's backends dynamically and refresh the pool live without a reload (`[upstreams.discovery]`): **DNS** A/AAAA and **DNS SRV** in every build, plus **Consul** and **Kubernetes** EndpointSlices behind the `consul`/`kubernetes` build tags — failed or empty resolves keep the last-good backends |
 | **Backend trust** | One normalized `backend_tls` policy for private/system roots, backend client certificates, SNI/verified names, minimum TLS and peer identities across HTTP, native gRPC, transcoding/reflection and active health probes. GA (#409). |
 | **Upstream resilience** | Pool-scoped admission and retry budget state, location-overridable stateless controls, bounded queueing, protocol-aware lifetime accounting, and one per-backend circuit state machine reused by HTTP, gRPC, FastCGI/uWSGI and L4 TCP. Integrated closure remains tracked separately. |
@@ -467,7 +471,7 @@ and [migration assessment](docs/nginx-assessment.md); the [migration corpus](doc
 records the tested scenarios and remaining differences.
 
 Published v2.0.0 includes the base importer and the Beta assessment/provenance/include
-surface. The proposed v2.1.0 tree adds the later bounded stream, protocol and
+surface. Published v2.1.0 adds the later bounded stream, protocol and
 affinity translations and focused NGINX-versus-Jul tests. Those translations
 remain approximated or blocking where the guides say so; they are not universal
 equivalence. Use the [status matrix](docs/status.md) and the installed binary's
