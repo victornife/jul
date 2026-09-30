@@ -201,7 +201,7 @@ func Validate(c *Config) error {
 		if c.Admin.Token != "" && strings.TrimSpace(c.Admin.Token) == "" {
 			errs = append(errs, errors.New("[admin] token must not be whitespace only"))
 		}
-		if !isLoopbackListen(c.Admin.Listen) && c.Admin.Token == "" && !c.Admin.RBAC.Enabled {
+		if !IsLoopbackListen(c.Admin.Listen) && c.Admin.Token == "" && !c.Admin.RBAC.Enabled {
 			errs = append(errs, errors.New("[admin] off-loopback listener requires a token or enabled RBAC; TLS alone does not authenticate API callers"))
 		}
 		if c.Admin.PluginUploadEnabled != nil && !*c.Admin.PluginUploadEnabled {
@@ -219,6 +219,7 @@ func Validate(c *Config) error {
 	errs = append(errs, validateTracing(c.Observability.Tracing)...)
 	errs = append(errs, validateAccessLog(c.Observability.AccessLog)...)
 	errs = append(errs, validateStreams(c.Streams, upstreamNames)...)
+	errs = append(errs, validateUDPStreamBackends(c)...)
 	errs = append(errs, validateStreamResilience(c)...)
 	errs = append(errs, validateStreamHash(c)...)
 

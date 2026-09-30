@@ -235,9 +235,11 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   `[[servers]]` block sharing a `listen` must declare the same effective policy.
   This is deliberate: identity is derived before the `Host` header is read, so a
   per-vhost policy could be selected by the attacker.
-- **No `X-Real-IP`, no CIDR shorthands, no PROXY protocol on HTTP listeners.**
+- **No `X-Real-IP` and no CIDR shorthands.**
   A single-address header cannot be evaluated against a trust boundary, and
-  shorthands such as `private` or `rfc1918` encourage over-broad trust.
+  shorthands such as `private` or `rfc1918` encourage over-broad trust. (Inbound
+  PROXY protocol on HTTP listeners *is* supported: `proxy_protocol = "in"`; see
+  [configuration.md](configuration.md#proxy-protocol-on-an-http-listener).)
 - **No chain projection.** The identity carries the canonical client, the direct
   peer, and bounded source/result enums — not the full asserted chain.
 - **Outbound forwarding is deliberately lossy.** Jul emits

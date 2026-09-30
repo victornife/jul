@@ -261,6 +261,13 @@ Rules worth knowing before you start (all detailed in [abi.md](abi.md)):
   response once it completes; declared streams (SSE, gRPC, …), `HEAD`/`204`/`304`,
   `206`, encoded and oversized bodies are presented headers-only with a
   `BodyState` saying why.
+- **Keep body subscriptions off large media and download routes.** Each
+  subscribed response holds up to `max_response_body` of host memory and
+  reaches the client only when complete, so on video, audio or file-download
+  routes it adds memory per concurrent request and removes progressive
+  delivery; bodies above the cap are presented headers-only anyway. Attach
+  body-transform plugins to the API or HTML locations that need them, and use a
+  headers-only subscription (or no plugin) on media locations.
 - `sdk.Reject` discards the response (status set with `SetStatus` if 4xx/5xx,
   else `502`); a trap or timeout discards it with `500`.
 

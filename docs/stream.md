@@ -172,6 +172,27 @@ present inside the protocol's 108-byte maximum.
 5. **No HTTP-specific features in stream.** Rate limiting, WAF, compression,
 auth, and caching apply only to `[[servers]]` HTTP traffic, not `[[stream]]`
 L4 traffic.
+6. **UDP backends must be unicast.** The relay keeps one connected socket per
+client and accepts only replies from the address it dialed. Multicast
+(`224.0.0.0/4`, `ff00::/8`) and broadcast (`255.255.255.255`) backends are
+rejected by `jul check` and reload; a hostname or discovered backend that
+resolves to one at runtime is skipped and logged as a dial failure (#511).
+
+### FAQ: SSDP, DLNA and UPnP discovery across networks
+
+Discovery protocols such as SSDP (UPnP, DLNA, Chromecast/DIAL) send a multicast
+query and collect unicast replies from each device. Jul cannot carry that
+across subnets, VPNs or Docker bridges, and relaying it is out of scope: an
+SSDP relay was considered and rejected, and UPnP eventing refuses subscribers
+from another segment anyway (UPnP Device Architecture 2.0 §4.1.1). Instead:
+
+- enable an SSDP relay or IGMP proxy on the router between the segments;
+- run the controller container with host or macvlan networking so it is on the
+  devices' network;
+- or place the controller on the same network as the devices.
+
+Once a device is discovered, its unicast control and media traffic (HTTP, RTSP)
+can be proxied by Jul like any other backend.
 
 ## Threat model
 

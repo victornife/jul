@@ -84,6 +84,25 @@ v2.1.0 tag or its packaged READMEs.
   `jul_plugin_instance_waits_total{plugin,result}` counter. The admin API and
   Console keep the field on edit (omitted-means-keep). `docs/abi.md` no longer
   calls the pool bounded without saying how.
+- **Validation tightening: UDP stream backends must be unicast (#511).** A
+  `[[stream]]` UDP relay accepts replies only from the address it dialed, so a
+  multicast (`224.0.0.0/4`, `ff00::/8`) or broadcast (`255.255.255.255`)
+  backend could never deliver a reply. `jul check` and reload now reject such
+  literal backends, and a hostname or discovered backend that resolves to one
+  is refused at dial time and logged. A configuration that declared one was
+  already non-functional.
+- **Operator-safety hygiene (#511).** `jul run` prints a notice when it binds
+  beyond loopback (the default changes to `127.0.0.1:8080` only in the next
+  major). New `jul lint` warnings: a non-loopback listener with no read, write
+  or proxy inactivity timeout, and `[compression] enabled = true` with an
+  explicit `encoders = []` (defaulted to gzip). The NGINX importer pairs
+  `client_max_body_size` with a WAF body-limit note. The unused
+  `middleware.Timeout` (a buffering `http.TimeoutHandler`) is removed. Docs no
+  longer claim there is no PROXY protocol on HTTP listeners, that an
+  unauthenticated off-loopback admin listener is only a warning, or that
+  `client_max_body_size` is unlimited by default (it is 1 MiB); they gain
+  recommended limits for internet-facing listeners, a UDP multicast/SSDP FAQ,
+  and guidance to keep v2 body subscriptions off media routes.
 
 ## [2.1.0] - 2026-09-30
 

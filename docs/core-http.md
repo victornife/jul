@@ -378,7 +378,8 @@ Each backend has a circuit breaker: after `max_fails` (default 3) consecutive
 failures it is taken out of rotation for `fail_timeout` (default 10s), then
 tested by at most `circuit_half_open_probes` requests (default 1) before it is
 returned to full traffic. There is **no** `ip_hash` / `random` strategy and no
-outlier ejection.
+outlier ejection. For client-IP affinity use `strategy = "consistent_hash"`
+with the `client_ip` hash key ([upstreams.md](upstreams.md#consistent-hash-affinity)).
 
 ## Core middleware
 
@@ -430,7 +431,6 @@ preflights without credentials); it is still rate-limited and WAF-checked. See
 | Location recover | same as above | a panic after route selection still carries the location's policy headers |
 | CORS preflight terminator | `cors.enabled = true` | decide-then-guard 204 for an approved preflight |
 | Body limit | always | `client_max_body_size`: an oversized declared `Content-Length` is rejected with 413 before the body is read; an unknown length trips via `MaxBytesReader` → 413 |
-| Timeout | when configured | `http.TimeoutHandler` → 503 |
 | Access log | when a sink is set | structured `slog` access records |
 | Rate limit | when enabled | 32-shard token bucket |
 | Compression | `compression` build tag | response compression |
@@ -666,19 +666,40 @@ go test -run '^$' -bench . -benchmem ./internal/router/ ./internal/upstream/ ./i
 | SSRF | 🟢 safe by design | `proxy_pass` is static config; no request input selects the upstream target |
 | Header injection / CRLF | 🟢 safe | Go `net/http` rejects embedded CR/LF; custom headers use simple variable substitution (no eval) |
 | Request smuggling | 🟢 safe | strict `net/http` request parsing; every forwarded request is re-serialized, so Jul never relays the client's framing. An HTTP/1.x request with a chunked body, or an HTTP/1.0 request with a body method and no `Content-Length`, closes its connection after the response (RFC 9112 §6.1, §6.3), so bytes a Content-Length-framing front proxy treated as body are never served as a second request |
-| DoS (large bodies) | mitigated | `client_max_body_size` → 413 (default unlimited; set per server/location) |
-| DoS (slow clients) | partial | `read_timeout` / `write_timeout` mitigate; default unset |
+| DoS (large bodies) | mitigated | `client_max_body_size` → 413 (default 1 MiB per server; override per location) |
+| DoS (slow clients) | partial | `read_header_timeout` (default 10s) bounds headers; `read_timeout` / `write_timeout` and `proxy_read_timeout` / `proxy_send_timeout` are unset by default. See [recommended limits](#recommended-limits-for-internet-facing-listeners) |
+
+### Recommended limits for internet-facing listeners
+
+Several bounds are off by default so that SSE, WebSocket and large transfers
+are never severed. On a listener reachable from other hosts, choose them
+explicitly:
+
+| Setting | Scope | Default | Suggested starting point |
+| --- | --- | --- | --- |
+| `proxy_read_timeout` / `proxy_send_timeout` | location | unbounded | `60s`. These are **inactivity** bounds, so a steadily streaming response or upload is never cut |
+| `read_timeout` | server | unbounded | `60s` where no route accepts long uploads; it caps reading the **whole** request, body included |
+| `write_timeout` | server | unbounded | leave unset if any route streams (SSE, downloads, WebSocket); otherwise `60s`. It caps the **whole** response |
+| `client_max_body_size` | server / location | 1 MiB | the largest body each route must accept; pair it with `waf.request_body_limit` on WAF routes |
+| `read_header_timeout` | server | 10s | keep |
+| `idle_timeout` | server | 60s | keep |
+
+`jul lint` warns when a non-loopback listener sets none of `read_timeout`,
+`write_timeout`, `proxy_read_timeout` or `proxy_send_timeout` (#511).
 
 ## Limits
 
 - **No SCGI** (FastCGI and uWSGI only).
-- **No `ip_hash` / `random`** load-balancing strategies.
+- **No `ip_hash` / `random`** load-balancing strategies. Client-IP affinity is
+  `strategy = "consistent_hash"` with the `client_ip` hash key
+  ([upstreams.md](upstreams.md#consistent-hash-affinity)).
 - **No `try_files` at the FastCGI level** (`try_files` is static-only).
 - **No outlier ejection** — the circuit breaker is consecutive-failure based, so a
   backend failing intermittently while its peers succeed is not ejected.
 - **No per-backend rate limiting** (rate limiting is per-listener).
 - `read_timeout` / `write_timeout` are **unset by default** (no slow-client
-  protection until configured).
+  protection until configured; `jul lint` warns on exposed listeners, see
+  [recommended limits](#recommended-limits-for-internet-facing-listeners)).
 - An unmatched request with no `/` fallback returns **501**, by design.
 
 ## GA status
