@@ -16,8 +16,6 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/middleware"
-
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 func sampleRecord() middleware.AccessRecord {
@@ -173,12 +171,119 @@ func TestBuildAccessSinksFileRotationConfig(t *testing.T) {
 	if len(closers) != 1 {
 		t.Fatalf("got %d closers, want 1", len(closers))
 	}
-	lj, ok := closers[0].(*lumberjack.Logger)
+	lease, ok := closers[0].(*accessFileLease)
 	if !ok {
-		t.Fatalf("file closer is %T, want *lumberjack.Logger", closers[0])
+		t.Fatalf("file closer is %T, want *accessFileLease", closers[0])
 	}
+	lj := lease.state.writer
 	if lj.Filename != path || lj.MaxSize != 25 || lj.MaxBackups != 4 || !lj.LocalTime {
 		t.Errorf("rotation config not mapped: %+v", lj)
+	}
+}
+
+func TestBuildAccessSinksSamePathGenerationsPreserveJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "access.json")
+	cfg := config.AccessLogConfig{Sinks: []string{"file"}, File: path, Format: "json", RotateMaxMB: 1, RotateKeep: 2}
+	oldSinks, oldClosers, err := BuildAccessSinks(cfg, newBase())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for _, closer := range oldClosers {
+			_ = closer.Close()
+		}
+	}()
+	oldSinks[0].Log(sampleRecord())
+	newSinks, newClosers, err := BuildAccessSinks(cfg, newBase())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for _, closer := range newClosers {
+			_ = closer.Close()
+		}
+	}()
+	newRecord := sampleRecord()
+	newRecord.RequestID = "new-generation-" + strings.Repeat("x", 512)
+	newSinks[0].Log(newRecord)
+	oldSinks[0].Log(sampleRecord())
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
+	if len(lines) != 3 {
+		t.Fatalf("access records = %d, want 3", len(lines))
+	}
+	for index, line := range lines {
+		var record map[string]any
+		if err := json.Unmarshal(line, &record); err != nil {
+			t.Fatalf("record %d corrupted across generations: %v (%q)", index, err, line)
+		}
+	}
+}
+
+func TestBuildAccessSinksSharedFileLeaseLifetime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "access.json")
+	cfg := config.AccessLogConfig{Sinks: []string{"file"}, File: path, Format: "json", RotateMaxMB: 1}
+	_, oldClosers, err := BuildAccessSinks(cfg, newBase())
+	if err != nil {
+		t.Fatal(err)
+	}
+	newSinks, newClosers, err := BuildAccessSinks(cfg, newBase())
+	if err != nil {
+		_ = oldClosers[0].Close()
+		t.Fatal(err)
+	}
+	defer func() { _ = oldClosers[0].Close(); _ = newClosers[0].Close() }()
+	oldLease := oldClosers[0].(*accessFileLease)
+	newLease := newClosers[0].(*accessFileLease)
+	if oldLease.state != newLease.state || oldLease.state.refs != 2 {
+		t.Fatal("same file policy did not share a two-owner backing writer")
+	}
+	if err := oldLease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := oldLease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if newLease.state.refs != 1 {
+		t.Fatalf("remaining references = %d, want 1", newLease.state.refs)
+	}
+	newSinks[0].Log(sampleRecord())
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(bytes.TrimSpace(data)) {
+		t.Fatalf("new generation lost its writer after old close: %q", data)
+	}
+	if err := newLease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	accessFiles.Lock()
+	_, retained := accessFiles.entries[newLease.key]
+	accessFiles.Unlock()
+	if retained {
+		t.Fatal("last owner did not release the backing writer")
+	}
+}
+
+func TestBuildAccessSinksCanonicalizationFailureUnwinds(test *testing.T) {
+	path := filepath.Join(test.TempDir(), "access.json")
+	want := errors.New("cannot resolve working directory")
+	original := accessFileAbs
+	accessFileAbs = func(string) (string, error) { return "", want }
+	test.Cleanup(func() { accessFileAbs = original })
+	sinks, closers, err := BuildAccessSinks(config.AccessLogConfig{Sinks: []string{"stdout", "file"}, File: path, Format: "json"}, newBase())
+	if !errors.Is(err, want) {
+		test.Fatalf("canonicalization error = %v, want %v", err, want)
+	}
+	if sinks != nil || closers != nil {
+		test.Fatal("failed candidate retained staged sinks or closers")
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		test.Fatalf("failed canonicalization touched the live file: %v", statErr)
 	}
 }
 

@@ -415,6 +415,14 @@ is invalid and the error directs the operator to disable the block instead. The
 The legacy global/per-server destination fields are deprecated compatibility
 no-ops and produce lint warnings.
 
+Handler generations with the same absolute file path and rotation settings
+share one rotating writer through reference-counted leases. Retiring or aborting
+one generation does not close a writer still owned by another. This preserves
+complete records while old requests drain during reload. Changing rotation
+settings on the same path retains the separate
+[known overlap limitation](known-limitations.md); use a new file path for that
+policy transition, or restart instead of overlapping live writers.
+
 ### Access-log fields
 
 Each access record carries:

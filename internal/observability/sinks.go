@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -72,25 +73,13 @@ func BuildAccessSinks(cfg config.AccessLogConfig, base *slog.Logger) (sinks []mi
 				err = fmt.Errorf("access_log file sink: %w", werr)
 				return
 			}
-			// A fresh *lumberjack.Logger is built for every call, even when the
-			// path is unchanged from the previous generation (#98): mutating a
-			// live writer's exported fields (e.g. on a rotation-setting change)
-			// while the previous, still-draining generation might concurrently
-			// write to it would be a data race. This is safe for a changed path
-			// (different generations then own different files) and safe for a
-			// same-path change that does not alter rotation settings. The one
-			// documented residual: a same-path rotation-setting change whose old
-			// generation happens to rotate during the brief drain overlap can
-			// leave the new generation's writer appending to the just-rotated
-			// backup file rather than the live path — see docs/known-limitations.md.
-			lj := &lumberjack.Logger{
-				Filename:   cfg.File,
-				MaxSize:    cfg.RotateMaxMB,
-				MaxBackups: cfg.RotateKeep,
-				LocalTime:  true,
+			lease, acquireErr := acquireAccessFile(cfg)
+			if acquireErr != nil {
+				err = acquireErr
+				return
 			}
-			sinks = append(sinks, middleware.NewSlogSink(slog.New(accessHandler(&failureReportingWriter{w: lj, log: base, sink: "file", health: &AccessLogFileWriteHealth}, cfg.Format))))
-			closers = append(closers, lj)
+			sinks = append(sinks, middleware.NewSlogSink(slog.New(accessHandler(&failureReportingWriter{w: lease.state.writer, log: base, sink: "file", health: &AccessLogFileWriteHealth}, cfg.Format))))
+			closers = append(closers, lease)
 		case "syslog":
 			w, serr := newSyslogWriter()
 			if serr != nil {
@@ -105,6 +94,63 @@ func BuildAccessSinks(cfg config.AccessLogConfig, base *slog.Logger) (sinks []mi
 		}
 	}
 	return sinks, closers, nil
+}
+
+type accessFileKey struct {
+	path       string
+	maxSize    int
+	maxBackups int
+}
+
+type accessFileState struct {
+	writer *lumberjack.Logger
+	refs   int
+}
+
+type accessFileLease struct {
+	key       accessFileKey
+	state     *accessFileState
+	closeOnce sync.Once
+	closeErr  error
+}
+
+var accessFiles = struct {
+	sync.Mutex
+	entries map[accessFileKey]*accessFileState
+}{entries: make(map[accessFileKey]*accessFileState)}
+
+var accessFileAbs = filepath.Abs
+
+func acquireAccessFile(cfg config.AccessLogConfig) (*accessFileLease, error) {
+	path, err := accessFileAbs(cfg.File)
+	if err != nil {
+		return nil, fmt.Errorf("access_log file path: %w", err)
+	}
+	key := accessFileKey{path: path, maxSize: cfg.RotateMaxMB, maxBackups: cfg.RotateKeep}
+	accessFiles.Lock()
+	defer accessFiles.Unlock()
+	state := accessFiles.entries[key]
+	if state == nil {
+		state = &accessFileState{writer: &lumberjack.Logger{
+			Filename: path, MaxSize: cfg.RotateMaxMB, MaxBackups: cfg.RotateKeep, LocalTime: true,
+		}}
+		accessFiles.entries[key] = state
+	}
+	state.refs++
+	return &accessFileLease{key: key, state: state}, nil
+}
+
+func (lease *accessFileLease) Close() error {
+	lease.closeOnce.Do(func() {
+		accessFiles.Lock()
+		defer accessFiles.Unlock()
+		lease.state.refs--
+		if lease.state.refs == 0 {
+			delete(accessFiles.entries, lease.key)
+			lease.closeErr = lease.state.writer.Close()
+		}
+	})
+	return lease.closeErr
 }
 
 // accessWriteFailureLogInterval is the minimum spacing of access-log write

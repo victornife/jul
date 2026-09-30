@@ -26,6 +26,12 @@ v0.62.0 to v0.63.0 and `google.golang.org/grpc` v1.83.2 to v1.84.0.
 
 ### Security
 
+- **Console build-tool dependency hardening.** The existing brace-expansion
+  override now requires 5.0.12, covering GHSA-qhr7-859c-m2p7,
+  GHSA-6j4f-fj2g-mc7p and GHSA-q2hr-2g5m-vwhr reported by the live CI audit.
+  This is an ESLint/minimatch transitive build dependency, not a new server
+  capability or a change to the audit threshold.
+
 - **Pre-release audit stack (#482, #495, #496, #497).** Integrated on `main`
   with the same tree as `5a592d40`. Operators upgrading from v2.0.0 should
   expect these corrections, not new feature flags: an off-loopback admin
@@ -84,6 +90,14 @@ v0.62.0 to v0.63.0 and `google.golang.org/grpc` v1.83.2 to v1.84.0.
 - **Runtime resource ownership model (#428).** New authoritative [resource-ownership.md](docs/resource-ownership.md) records, for every major runtime resource family, its owner, scope, logical identity, replacement fingerprint, liveness override and Prepare/Publish/Abort/Retire/drain/close semantics, the deliberate process and restart boundaries, and the #414/#415/#420/#427 regressions that pin them. It links to — never duplicates — the generated lifecycle table. `internal/lifecycletest` adds a small shared test vocabulary (explicit-close `Resource` fake, bounded goroutine/FD quiescence check) used by new churn/quiescence and shutdown-during-reload tests. `internal/app/config_apply.go` is split by responsibility into baseline/CAS/drift, planned-restart staging, managed-apply ledger, and restoration/terminal-result files around the unchanged single coordinator (pure moves, no behavior change).
 
 ### Fixed
+
+- **Access-log records survive overlapping handler generations with unchanged
+  file policy.** Independent rotating writers could overwrite part of a JSON
+  record when an old request logged after its replacement generation. File
+  sinks now share one immutable path/rotation-policy writer with idempotent
+  generation leases; the last owner closes it. A three-write regression
+  reproduces the corruption before the fix. Same-path rotation-policy changes
+  retain the explicitly documented overlap limitation.
 
 - **WAF documentation matched the engine; `jul lint` flags routes the WAF breaks.** `docs/waf.md` said a request body over `request_body_limit` passes uninspected. In fact Coraza rejects it with `413` (verified end to end), so with the 128 KiB default every larger upload on a WAF route fails. The docs now say so, and lint warns when the limit is below the route's `client_max_body_size`. Lint also warns on native gRPC routes covered by the WAF. The WAF reads the whole request body before forwarding, so client and bidirectional streams never reach the backend, and the Core Rule Set rejects `application/grpc` (rule 920420).
 
