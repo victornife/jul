@@ -50,6 +50,8 @@ response to a client that cannot decompress it.
 | Client sends `Accept-Encoding: br` but build lacks `brotli` tag | Pass-through (startup would have errored) | ✅ startup validation |
 | Response already has `Content-Encoding` | No double-compression | ✅ `TestCompressNoDoubleEncode` |
 | Request has `Range` header | No compression (pass-through) | ✅ `TestCompressSkipsRange` |
+| Compressed response carries a strong `ETag` | Tag re-emitted weak (`W/"…"`); weak or absent tags unchanged | ✅ `TestCompressionWeakensStrongETag` |
+| Resume with `If-Range` holding the compressed representation's tag | Full `200` (never identity bytes spliced onto a coded partial) | ✅ `TestCompressedETagCannotSatisfyIfRange` |
 | Request has `Cache-Control: no-transform` | No compression; original representation preserved | ✅ `TestCompressionRespectsCacheControlNoTransform` |
 | Response has `Cache-Control: no-transform` | No compression; original representation preserved | ✅ `TestCompressionRespectsCacheControlNoTransform` |
 | Response smaller than `min_size` | Pass-through | ✅ `TestCompressMinSize` |
@@ -82,6 +84,25 @@ the same resource may be transformable for a different request or response.
 
 The middleware buffers the first `min_size` bytes before deciding, so very small
 responses are not penalised by compression overhead.
+
+### Validators (`ETag`)
+
+A compressed body is a different byte sequence from the identity body the
+handler or upstream produced, so a strong `ETag` cannot name both (RFC 9110
+§8.8.1 and §8.8.3.3). When Jul compresses on the fly, a strong `ETag` is
+re-emitted as weak (`"abc"` becomes `W/"abc"`); weak and absent tags are left
+unchanged, and uncompressed responses keep their original tag. This matches
+NGINX (1.7.3 and later).
+
+- `If-None-Match` uses weak comparison, so revalidation still returns `304`.
+- `If-Range` requires a strong match, so a download resumed with the weak tag
+  receives the full `200` body instead of identity bytes appended to a
+  compressed partial file.
+- A `304` carries the handler's tag unchanged because it has no body to
+  compress (NGINX behaves the same way).
+
+Precompressed sidecars are separate files with their own tags and are not
+affected.
 
 ## Precompressed sidecars
 
