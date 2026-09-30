@@ -87,6 +87,7 @@ are never reset and previously recorded host-labeled series are not deleted.
 | `jul_acme_renewals_total` | Counter | — | Released `v1.32.0` | ACME certificate renewals observed (expiry advanced for a domain). |
 | `jul_auth_decisions_total` | Counter | `method`, `result` | Released `v1.32.0` | Access-control decisions, labeled by method (cidr/basic/jwt/forward) and result (allow/deny). |
 | `jul_cache_bytes` | Gauge | `tier` | Released `v2.0.0` | Current bytes occupied by a cache tier, labeled by tier (`memory`/`disk`). Read at scrape time, not pushed from the request path. |
+| `jul_cache_capture_skipped_total` | Counter | `reason` | Merged / release pending | Cacheable responses streamed to the client without being captured for storage, labeled by reason: `oversize` (the body is, or declares a `Content-Length`, larger than `memory_max_size`) or `budget` (in-flight captures already hold `memory_max_size` bytes). Such a response is served normally and not cached (#505). |
 | `jul_cache_entries` | Gauge | `tier` | Released `v2.0.0` | Current entry count in a cache tier, labeled by tier (`memory`/`disk`). |
 | `jul_cache_events_total` | Counter | `state` | Released `v1.32.0` | Response cache outcomes, labeled by state (HIT/MISS/STALE/BYPASS). |
 | `jul_cache_evictions_total` | Counter | `tier` | Released `v2.0.0` | Cumulative LRU-capacity evictions from a cache tier since startup, labeled by tier (`memory`/`disk`). Explicit invalidation is not an eviction and is not counted here. |

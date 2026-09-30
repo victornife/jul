@@ -130,7 +130,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// metrics registry. The cache cannot import observability, so the seam is a
 	// plain callback installed here, before any traffic is served.
 	responseCache.SetRevalidationObserver(metrics.ObserveCacheRevalidation)
-
+	responseCache.SetCaptureSkipObserver(metrics.ObserveCacheCaptureSkipped)
 	// The live cache-occupancy gauges are read at scrape time rather than
 	// pushed from the request path, for the same reason the upstream
 	// resilience gauges are (JUL-AUD-005).

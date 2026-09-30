@@ -8,8 +8,91 @@ import (
 	"bytes"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync/atomic"
 )
+
+// Reasons a response was streamed without being captured for storage, reported
+// through the cache's capture-skip observer (jul_cache_capture_skipped_total).
+const (
+	// captureSkipOversize: the body is, or declares itself, larger than the
+	// per-entry capture limit (memory_max_size).
+	captureSkipOversize = "oversize"
+	// captureSkipBudget: capturing it would exceed the bytes all in-flight
+	// captures may hold at once.
+	captureSkipBudget = "budget"
+)
+
+// captureBudget bounds the bytes every in-flight capture (miss tees and
+// validation recorders) buffers at once, so concurrent misses cannot multiply
+// the per-entry limit. Its ceiling is the per-entry limit itself: stored
+// entries plus in-flight captures stay within twice memory_max_size.
+type captureBudget struct{ inflight atomic.Int64 }
+
+func (b *captureBudget) reserve(n, limit int64) bool {
+	for {
+		cur := b.inflight.Load()
+		if cur+n > limit {
+			return false
+		}
+		if b.inflight.CompareAndSwap(cur, cur+n) {
+			return true
+		}
+	}
+}
+
+func (b *captureBudget) release(n int64) {
+	if n > 0 {
+		b.inflight.Add(-n)
+	}
+}
+
+// captureAccount is one capture's share of the budget. A nil budget (writers
+// built directly in tests) means unbounded.
+type captureAccount struct {
+	budget   *captureBudget
+	reserved int64
+	onSkip   func(reason string)
+}
+
+func (a *captureAccount) grow(n int, limit int64) bool {
+	if a.budget == nil {
+		return true
+	}
+	if !a.budget.reserve(int64(n), limit) {
+		return false
+	}
+	a.reserved += int64(n)
+	return true
+}
+
+func (a *captureAccount) release() {
+	if a.budget != nil {
+		a.budget.release(a.reserved)
+	}
+	a.reserved = 0
+}
+
+func (a *captureAccount) skip(reason string) {
+	a.release()
+	if a.onSkip != nil {
+		a.onSkip(reason)
+	}
+}
+
+// declaredLength returns a single valid Content-Length, or -1.
+func declaredLength(h http.Header) int64 {
+	values := h.Values("Content-Length")
+	if len(values) != 1 {
+		return -1
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(values[0]), 10, 64)
+	if err != nil || n < 0 {
+		return -1
+	}
+	return n
+}
 
 // cacheWriter streams the response to the client while buffering up to limit
 // bytes for storage. If the body exceeds the limit, buffering stops and tooBig
@@ -26,6 +109,7 @@ type cacheWriter struct {
 	buf         bytes.Buffer
 	limit       int64
 	tooBig      bool
+	acct        captureAccount
 	// noStore marks a response that can never be stored whatever its headers
 	// say: the connection was hijacked, the status is a protocol switch, or the
 	// body is a live event stream.
@@ -54,7 +138,16 @@ type cacheWriter struct {
 // bytes that will only be discarded.
 func (w *cacheWriter) dropCapture() {
 	w.noStore = true
-	w.buf.Reset()
+	w.buf = bytes.Buffer{}
+	w.acct.release()
+}
+
+// abandonCapture stops buffering a response that will not be stored and frees
+// its buffer now, not when the (possibly long) response finally ends.
+func (w *cacheWriter) abandonCapture(reason string) {
+	w.tooBig = true
+	w.buf = bytes.Buffer{}
+	w.acct.skip(reason)
 }
 
 // storable reports whether the captured response may be considered for storage.
@@ -91,6 +184,8 @@ func (w *cacheWriter) WriteHeader(code int) {
 	// is discarded at the size limit.
 	if code < http.StatusOK || isEventStream(w.Header()) {
 		w.dropCapture()
+	} else if !w.noStore && declaredLength(w.Header()) > w.limit {
+		w.abandonCapture(captureSkipOversize)
 	}
 	w.ResponseWriter.WriteHeader(code)
 }
@@ -103,10 +198,12 @@ func (w *cacheWriter) Write(p []byte) (int, error) {
 		w.WriteHeader(http.StatusOK)
 	}
 	if !w.tooBig && !w.noStore {
-		if int64(w.buf.Len()+len(p)) > w.limit {
-			w.tooBig = true
-			w.buf.Reset()
-		} else {
+		switch {
+		case int64(w.buf.Len()+len(p)) > w.limit:
+			w.abandonCapture(captureSkipOversize)
+		case !w.acct.grow(len(p), w.limit):
+			w.abandonCapture(captureSkipBudget)
+		default:
 			w.buf.Write(p)
 		}
 	}
@@ -200,6 +297,7 @@ type recorder struct {
 	body   bytes.Buffer
 	limit  int64
 	tooBig bool
+	acct   captureAccount
 	// noStore marks a response that can never be stored whatever its headers
 	// say: an interim/protocol-switch status, or a live event stream.
 	noStore bool
@@ -228,8 +326,18 @@ func (r *recorder) WriteHeader(code int) {
 	// before being discarded.
 	if code < http.StatusOK || isEventStream(r.Header()) {
 		r.noStore = true
-		r.body.Reset()
+		r.body = bytes.Buffer{}
+		r.acct.release()
+	} else if declaredLength(r.Header()) > r.limit {
+		r.abandon(captureSkipOversize)
 	}
+}
+
+// abandon stops buffering a response that cannot be stored and frees the body.
+func (r *recorder) abandon(reason string) {
+	r.tooBig = true
+	r.body = bytes.Buffer{}
+	r.acct.skip(reason)
 }
 
 func (r *recorder) Write(p []byte) (int, error) {
@@ -237,10 +345,12 @@ func (r *recorder) Write(p []byte) (int, error) {
 		r.WriteHeader(http.StatusOK)
 	}
 	if !r.tooBig && !r.noStore {
-		if int64(r.body.Len()+len(p)) > r.limit {
-			r.tooBig = true
-			r.body.Reset()
-		} else {
+		switch {
+		case int64(r.body.Len()+len(p)) > r.limit:
+			r.abandon(captureSkipOversize)
+		case !r.acct.grow(len(p), r.limit):
+			r.abandon(captureSkipBudget)
+		default:
 			r.body.Write(p)
 		}
 	}

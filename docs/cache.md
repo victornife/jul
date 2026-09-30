@@ -580,7 +580,8 @@ at all.
 | Any other `1xx` (e.g. `103 Early Hints`) | n/a | Not evaluated for storage at all: it passes through untouched, without latching the writer, so the real final status that follows it is judged entirely on its own merits (#331). |
 | Anything written after a successful hijack | no | The connection has left HTTP; the wrapper also refuses further writes with `http.ErrHijacked`. |
 | `Content-Type: text/event-stream` | no | An event stream never ends. Capture stops at the first byte, so an open SSE connection accumulates nothing. |
-| A body larger than `memory_max_size` | no | Existing size bound; capture is discarded when the limit is passed. |
+| A body larger than `memory_max_size` | no | The per-entry capture limit. A declared `Content-Length` above it abandons capture before the first byte; a body that crosses it frees its capture buffer at that point. Counted as `jul_cache_capture_skipped_total{reason="oversize"}`. |
+| A miss that arrives while in-flight captures already hold `memory_max_size` bytes | no | The capture budget below. Streamed to the client uncaptured and counted as `reason="budget"`. |
 
 ### Which response headers are stored
 
@@ -723,7 +724,31 @@ over budget:
 - The **disk tier** evicts whole files to stay within `disk_max_size`, removing the
   backing file as it goes.
 
-An entry larger than a tier's cap is simply not stored in that tier.
+An entry larger than a tier's cap is not stored in that tier. Every entry is
+first captured in memory, so **`memory_max_size` is also the largest object
+either tier can hold**: a larger `disk_max_size` does not admit bigger objects
+(decoupling them is tracked in #525).
+
+### Capture memory
+
+A cacheable miss is streamed to the client while a copy is captured for
+storage. Two bounds keep that copy from multiplying memory use (#505):
+
+- **Per response: `memory_max_size`.** A response that declares a larger
+  `Content-Length` is never captured. One without a length that grows past the
+  limit has its capture buffer released at that point, not when the transfer
+  ends.
+- **Across all in-flight captures: `memory_max_size` again.** Miss captures and
+  validation buffers share one byte budget equal to `memory_max_size`. A
+  response that would exceed it is streamed uncaptured and not stored. The
+  budget is returned when each response completes or is canceled.
+
+Stored entries plus in-flight captures therefore stay within twice
+`memory_max_size`. Both outcomes are counted in
+`jul_cache_capture_skipped_total{reason="oversize"|"budget"}` and logged at
+debug level, throttled to one line per ten seconds. A steady `budget` count
+means many large cacheable misses overlap: raise `memory_max_size` or lower
+what those routes cache.
 
 ## Known limitations
 
@@ -747,9 +772,11 @@ Product limitations — deliberate scope, not defects:
    no shared cache (e.g. Redis) across multiple instances; each node warms
    independently.
 
-4. **Silent oversized-entry drop.** A response body larger than `memory_max_size`
-   (or `disk_max_size`) is streamed to the client but not cached. There is no
-   log or metric emitted for this; operators must size tiers generously.
+4. **Oversized objects are never cached.** A response body larger than
+   `memory_max_size` is streamed to the client but not cached, whatever
+   `disk_max_size` is: every entry is captured in memory first (#525 tracks
+   disk-streamed capture). Each such response increments
+   `jul_cache_capture_skipped_total{reason="oversize"}`.
 
 Intentionally conservative behavior — correct, but stricter than the letter of
 the standard:

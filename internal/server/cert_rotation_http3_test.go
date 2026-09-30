@@ -90,10 +90,17 @@ func freeUDPTCPPortWithTCPProbe(t *testing.T, probe func(context.Context, string
 	return ""
 }
 
+// acceptedProbe is a TCP probe result that owns no socket.
+type acceptedProbe struct{}
+
+func (acceptedProbe) Accept() (net.Conn, error) { return nil, net.ErrClosed }
+func (acceptedProbe) Close() error              { return nil }
+func (acceptedProbe) Addr() net.Addr            { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)} }
+
 func TestFreeUDPTCPPortRetainsRejectedCandidates(t *testing.T) {
 	var rejectedAddr string
 	var probes int
-	addr := freeUDPTCPPortWithTCPProbe(t, func(ctx context.Context, network, candidate string) (net.Listener, error) {
+	addr := freeUDPTCPPortWithTCPProbe(t, func(_ context.Context, _, candidate string) (net.Listener, error) {
 		probes++
 		if probes == 1 {
 			rejectedAddr = candidate
@@ -106,7 +113,9 @@ func TestFreeUDPTCPPortRetainsRejectedCandidates(t *testing.T) {
 			_ = reserved.Close()
 			t.Fatal("rejected UDP candidate was released before retrying")
 		}
-		return (&net.ListenConfig{}).Listen(ctx, network, candidate)
+		// A real TCP bind here can fail when a concurrently running package
+		// holds that loopback port, which made the probe count flaky.
+		return acceptedProbe{}, nil
 	})
 	if probes != 2 {
 		t.Fatalf("TCP probes = %d, want 2", probes)

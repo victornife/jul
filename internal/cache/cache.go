@@ -16,6 +16,7 @@ import (
 
 	"jul/internal/background"
 	"jul/internal/config"
+	"jul/internal/logthrottle"
 	"jul/internal/respwriter"
 	"jul/internal/tracing"
 )
@@ -55,6 +56,15 @@ type Cache struct {
 	// decision. It is installed by the composition root so the cache does not
 	// depend on the observability package.
 	observe func(outcome string)
+
+	// capture bounds the bytes all in-flight captures hold at once (#505);
+	// onCaptureSkip, when set, receives one bounded reason per response that
+	// was streamed without being captured.
+	capture       captureBudget
+	onCaptureSkip func(reason string)
+	// captureSkipLog bounds the debug line: the sizes and concurrency that
+	// trigger a skip are chosen by clients and origins.
+	captureSkipLog logthrottle.Limiter
 
 	// now is the clock seam. Production leaves it nil and reads time.Now;
 	// tests install a deterministic clock so freshness, Age and stale-window
@@ -144,6 +154,33 @@ func (c *Cache) SetRevalidationObserver(fn func(outcome string)) {
 func (c *Cache) observeRevalidation(outcome revalidateOutcome) {
 	if c.observe != nil {
 		c.observe(string(outcome))
+	}
+}
+
+// SetCaptureSkipObserver installs a bounded counter for responses streamed
+// without being captured for storage. fn receives only the package's reason
+// constants ("oversize", "budget"). Call it once at startup, before the cache
+// serves traffic.
+func (c *Cache) SetCaptureSkipObserver(fn func(reason string)) {
+	if c == nil {
+		return
+	}
+	c.onCaptureSkip = fn
+}
+
+// newCaptureAccount binds one capture to the cache-wide in-flight budget.
+func (c *Cache) newCaptureAccount() captureAccount {
+	return captureAccount{budget: &c.capture, onSkip: c.captureSkipped}
+}
+
+func (c *Cache) captureSkipped(reason string) {
+	if c.onCaptureSkip != nil {
+		c.onCaptureSkip(reason)
+	}
+	if c.captureSkipLog.Allow(diskWriteFailureLogInterval) {
+		c.log.Debug("cache: response streamed without capture; not stored",
+			"reason", reason, "limit_bytes", c.Policy().MaxEntryBytes,
+			"inflight_capture_bytes", c.capture.inflight.Load())
 	}
 }
 
@@ -515,7 +552,8 @@ func (c *Cache) serveUnsafe(w http.ResponseWriter, r *http.Request, next http.Ha
 // wrapper, so enabling the cache neither removes nor invents an optional
 // ResponseWriter interface.
 func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.Handler, now time.Time) {
-	cw := &cacheWriter{ResponseWriter: w, limit: c.Policy().MaxEntryBytes}
+	cw := &cacheWriter{ResponseWriter: w, limit: c.Policy().MaxEntryBytes, acct: c.newCaptureAccount()}
+	defer cw.acct.release()
 	w.Header().Set("X-Cache", stateMiss)
 	// Captured after X-Cache is set, so that field cancels out of the stored
 	// entry the same way any other outer-layer pre-set field does (#332),
@@ -629,7 +667,8 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req *http.Reque
 		call.finish(nil, outcomeCanceled, context.Canceled)
 	}()
 
-	rec := &recorder{header: http.Header{}, limit: c.Policy().MaxEntryBytes}
+	rec := &recorder{header: http.Header{}, limit: c.Policy().MaxEntryBytes, acct: c.newCaptureAccount()}
+	defer rec.acct.release()
 	next.ServeHTTP(rec, req)
 	now := c.clock()
 

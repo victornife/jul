@@ -43,6 +43,18 @@ v2.1.0 tag or its packaged READMEs.
   digest to the `go.mod` toolchain, CI fails if they drift, and the docs build
   the image locally and describe its build profile.
 
+- **Response-cache capture memory is bounded (#505).** A cacheable miss was
+  buffered for storage up to `memory_max_size` (default 64 MiB) per response,
+  and an oversized body kept that buffer until the download ended, so
+  concurrent large misses multiplied memory use. Now a declared
+  `Content-Length` above the limit is never captured, an overflowing buffer is
+  released at once, and all in-flight captures (misses and validations) share a
+  budget equal to `memory_max_size`; a response that would exceed it is
+  streamed uncaptured. New counter
+  `jul_cache_capture_skipped_total{reason="oversize"|"budget"}` plus a
+  throttled debug log. The docs no longer imply `disk_max_size` admits objects
+  larger than `memory_max_size`.
+
 ## [2.1.0] - 2026-09-30
 
 Published stable minor after `v2.0.0`:
