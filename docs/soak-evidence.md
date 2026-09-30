@@ -28,13 +28,17 @@ requests to configured routes. Its duration cannot establish zero-config/lint
 workloads and dated qualifying runs. The historical v1.28.0 table below used
 “soaked” for a short release smoke and does not override this requirement.
 
-## Predeclared v2.1.0 integrated soak (not yet a result)
+## Predeclared v2.1.0 integrated soak contract
 
 This section is the pass/fail contract for the one RC-equivalent real-binary
 soak of the frozen v2.1.0 candidate. It is not evidence that the run passed.
 Results, if any, are a later dated entry tied to the exact SHA that was run.
 The 2026-09-28 one-hour runs cover only zero-config/base-importer scope at
 `9ab87c1`. They do not certify this candidate.
+
+The contract below is preserved as declared; the dated
+[2026-09-30 results and post-fix review](#2026-09-30-v210-source-bound-runtime-evidence)
+separate completed measurements, defects, and corrected affected evidence.
 
 | Item | Predeclared value |
 | --- | --- |
@@ -47,6 +51,47 @@ The 2026-09-28 one-hour runs cover only zero-config/base-importer scope at
 | Pass | Single process for the full window; clean-path `-current` and stream loads report no unexplained 5xx; fault-window 503s are expected while backends are down; goroutine and RSS trends do not track cumulative requests after warm-up; apply-churn does not leave the process on a failed candidate; no unplanned restart |
 | Fail | Crash, unbounded RSS/FD/goroutine growth, a clean-path error budget breach, or a reload that serves the rejected candidate |
 | Performance baseline | CI `tcp-hot-path-benchmark` compares `BenchmarkProxyRoundTrip` with the previous main commit and fails above +5%. That is the release performance gate. It is not a v2.0.0-to-v2.1.0 laboratory study. |
+
+## 2026-09-30 v2.1.0 source-bound runtime evidence
+
+[Release closure #480](https://github.com/victornife/jul/issues/480) owns the
+exact-SHA run links, manifests, checksums, package verification and final
+decision. These are candidate-time records, not a publication or GA promotion.
+
+| Evidence | Exact source | Result and scope |
+| --- | --- | --- |
+| Interrupted host attempt | `3258f1a392715ee8cfb2a0e557885930f326acd6` | Environment-invalidated: Windows Modern Standby produced three recording gaps totaling about 6h55m while process time advanced only about 35m. Retained, not passed or stitched into another run. |
+| Integrated real-binary workload | `3258f1a392715ee8cfb2a0e557885930f326acd6` | 4h10m retained metrics, 1,501 successful scrapes with no errors/gaps; scheduled 14,415s overlapping current/stream/RBAC/apply/fault traffic. Fixed resource/latency/workload measurements passed, but one malformed JSON access record was found in the retained rotated window. Overall qualification remained false; the defect was reproduced and corrected in #501. |
+| Corrected affected logging/reload run | `f036b0630ba1235eadb26cde41ba78fcffa7b355` | Predeclared 3,615s affected workload, 70m retained recording, 421 clean scrapes, 60 successful applies, 2,166 RBAC checks without violations, 76,332,106 successful stream rounds. Full retained archive: 17,572,575 valid JSON records across 1,213 rotations, zero malformed records or unexplained failure examples. Static rotation policy was unchanged across generations. |
+| Focused supplemental probes | `f036b0630ba1235eadb26cde41ba78fcffa7b355` | Short real-binary WASM v1/v2 response-header coexistence, header affinity, gRPC active-health exclusion/recovery and WAF failed-candidate/same-path publication checks. Scoped assertions, not dedicated long feature soaks. |
+
+The integrated run's last-two-hour active-window RSS slope was +0.53%/h and
+post-warmup peak growth 33.5 MiB, within its fixed limits; FDs returned 14 to 14.
+Its current-mix p95/p99 were 4/7ms, with no unexplained client transport errors.
+Fault-shared 5xx were attributed using the declared backend injections, retained
+counters and server log; the rotated access window was not a complete request
+archive. Nothing here forgives an arbitrary error or conceals the found defect.
+
+The corrected run's current-mix p95/p99 were 4/6ms. A separate final endpoint
+scrape observed FD 15 while the recorder remained active; that raw comparison
+is preserved. All seven samples in the final quiescent minute observed FD 14,
+zero active requests and no live traffic connections, meeting the unchanged
+5% criterion. The interpretation is based on the complete quiet window, not a
+raised limit or a favorable minimum. Post-warmup memory/goroutine limits passed.
+
+The #501 delta changed file-writer sharing/lifetime, plus a build-time
+brace-expansion security floor and test coverage. It did not change
+proxy/auth/cache/WAF/plugin/discovery/CGI/gRPC/L4 protocols or stable config/API
+contracts. Under the recorded post-fix impact review, logging integrity,
+rotation and reload lifetime were repeated on the corrected source; old
+four-hour measurements remain bound to `3258f1a3`, not renamed as a four-hour
+`f036b063` run. Final tag/source metadata and any later documentation-only
+delta are recorded separately in #480.
+
+Different rotation policies sharing one path remain
+[#502](https://github.com/victornife/jul/issues/502), with new-path/restart
+workaround. D11/D12 and unreviewed ledger surfaces remain explicit. Package,
+attestation and publication gates are separate from runtime evidence.
 
 ## Where soak evidence is produced
 

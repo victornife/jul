@@ -65,6 +65,11 @@ This tree is the proposed v2.1.0 candidate: Waves 1–6 and the audit fixes are
 included, still at their own maturity, and not yet a published GitHub Release.
 #434 is no-go for this release and stays CANDIDATE/LATER. Certification is
 [release closure #480](https://github.com/victornife/jul/issues/480).
+The corrected runtime candidate has exact-source validation and a documented
+post-fix evidence review; see [soak evidence](docs/soak-evidence.md) and
+[release verification](docs/release.md). Package verification and publication
+are separate gates. The remaining [access-log policy overlap](https://github.com/victornife/jul/issues/502)
+and partial-audit limits remain explicit; this is not a full-audit claim.
 Additional features do not inherit the GA status of older capabilities. Fleet, hosted
 cloud, GraphQL composition and AI remain optional horizons or bounded
 experiments; none is required for the single-node product to remain useful. See the

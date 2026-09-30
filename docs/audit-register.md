@@ -29,6 +29,14 @@ Superseded or fully closed audits, preserved as historical evidence under
 
 ## Current programme disposition
 
+- The proposed v2.1.0 runtime closure includes the source-bound four-hour
+  measurements and the #501 access-log ownership correction, followed by
+  affected logging/reload/rotation revalidation. See
+  [soak evidence](soak-evidence.md) and [#480](https://github.com/victornife/jul/issues/480)
+  for exact source boundaries, measurements, retained failures and final gates.
+  The remaining same-path rotation-policy boundary is
+  [#502](https://github.com/victornife/jul/issues/502), not silently closed.
+  This record does not assert publication or an exhaustive audit.
 - Cache correctness/recertification, closed-world lifecycle authority and
   structured configuration Phase 5 are complete.
 - ADRs 0016–0019 are accepted. Canonical client identity, backend trust,

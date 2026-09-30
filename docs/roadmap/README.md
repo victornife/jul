@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.16 · Updated 2026-09-29
+> Version 2.17 · Updated 2026-09-30
 >
 > This roadmap owns the **durable portfolio sequence**. It deliberately does
 > not duplicate volatile READY/NEXT/blocked issue state. The current issue-level
@@ -41,6 +41,13 @@ tranche from release housekeeping; let #62 record live execution. This page
 does not replace that tracker.
 
 The durable current sequence is summarized in the active operating roadmap below. Exact issue-level status remains in #62.
+
+The v2.1.0 closure includes the integrated audit stack and the access-log
+ownership correction, with source-bound evidence and its post-fix impact review.
+Final package verification/publication is still the stage-10 gate, not a new
+feature tranche. The bounded same-path rotation-policy follow-up is
+[#502](https://github.com/victornife/jul/issues/502); D11/D12 and the partial
+audit ledger remain separate work, even after a stable publication.
 
 ## Active operating roadmap
 

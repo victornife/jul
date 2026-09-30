@@ -13,12 +13,14 @@
 # it its own entry or an explicit relationship. A GA row must be released and
 # soaked under ADR 0003/0005. Volatile issue sequencing belongs in #62, not here.
 #
-# Updated 2026-09-29 for the proposed v2.1.0 freeze.
+# Updated 2026-09-30 for the corrected proposed v2.1.0 candidate.
 # Delivery stays merged for post-v2.0.0 rows until that tag is actually
 # published. Do not read this file as a GA promotion.
+# Runtime and affected logging evidence retain their exact source identities;
+# docs/soak-evidence.md and #480 record the post-fix impact review and limits.
 
 version: 2
-updated: '2026-09-29'
+updated: '2026-09-30'
 features:
 - id: Y1-01
   name: TLS + automatic HTTPS (ACME)
