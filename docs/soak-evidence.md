@@ -56,7 +56,8 @@ separate completed measurements, defects, and corrected affected evidence.
 
 [Release closure #480](https://github.com/victornife/jul/issues/480) owns the
 exact-SHA run links, manifests, checksums, package verification and final
-decision. These are candidate-time records, not a publication or GA promotion.
+decision. The runtime records below retain their candidate source identities;
+later publication does not rename them or promote a feature to GA.
 
 | Evidence | Exact source | Result and scope |
 | --- | --- | --- |
@@ -92,6 +93,28 @@ Different rotation policies sharing one path remain
 [#502](https://github.com/victornife/jul/issues/502), with new-path/restart
 workaround. D11/D12 and unreviewed ledger surfaces remain explicit. Package,
 attestation and publication gates are separate from runtime evidence.
+
+## 2026-09-30 v2.1.0 publication and package verification
+
+Stable [`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0)
+was published at `0951090a6fb7703769a15b4749be9664a9842c98`, after 59 successful
+final-source checks across 16 workflows and successful
+[release workflow 36744401880](https://github.com/victornife/jul/actions/runs/36744401880).
+All twelve downloaded package identities, aggregate checksums, bundled SBOMs
+and 24 signed provenance/SBOM attestations were verified. Six actual package
+smoke executions passed; macOS/Linux amd64 downloaded-package execution and
+physical Windows amd64-host execution were not performed and are not claimed.
+See [the verification record and exact limits](release.md#published-v210-verification).
+
+The pre-tag documentation delta from `f036b063` to `0951090a` did not alter
+runtime code. This publication-status update is a later web-documentation
+commit, outside the immutable archives. Old-source four-hour measurements and
+the corrected one-hour affected validation remain separate under the recorded
+impact review; no new four-hour consolidated post-fix soak is claimed.
+Detailed manifests, raw metrics, outcomes, analyses and checksummed archives
+remain retained locally. Large raw archives are not release assets; the
+durable summaries here and in #480 identify their source-bound results and
+exceptions. Stable publication does not complete feature-specific GA criteria.
 
 ## Where soak evidence is produced
 

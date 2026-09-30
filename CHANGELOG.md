@@ -9,12 +9,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
-Nothing since the v2.1.0 candidate notes below. Do not treat a later commit as
-part of that tag.
+Post-publication documentation and delivery-status reconciliation only; these
+updates are not part of the immutable v2.1.0 tag or its packaged READMEs.
 
 ## [2.1.0] - 2026-09-30
 
-Proposed stable minor after published `v2.0.0`. The SemVer choice is recorded
+Published stable minor after `v2.0.0`:
+[`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0), source
+`0951090a6fb7703769a15b4749be9664a9842c98`. The SemVer choice is recorded
 in [compatibility.md](docs/compatibility.md#version-decision-on-2026-09-29-v210).
 It is a MINOR because the delta adds optional capabilities and corrects
 behavior that contradicted documented contracts. It is not v3.0.0: no

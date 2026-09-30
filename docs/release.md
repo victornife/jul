@@ -90,7 +90,45 @@ starting point: before publication they must be reconciled with `CHANGELOG.md`,
 the current security/status/known-limitations documents, and the actual
 artifacts produced for the tagged SHA.
 
-## Upgrading from v2.0.0 to proposed v2.1.0
+## Published v2.1.0 verification
+
+Stable [`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0)
+was published **2026-09-30T16:58:24Z**, from immutable source
+`0951090a6fb7703769a15b4749be9664a9842c98`.
+[Final-source CI](https://github.com/victornife/jul/actions/runs/36742333911)
+and the other applicable exact-main workflows completed successfully: 59
+check runs across 16 workflows. The supported
+[release workflow](https://github.com/victornife/jul/actions/runs/36744401880)
+passed its tag preflight, build/test gate, five-minute release smoke and all
+twelve OS/architecture/profile builds before creating the reviewed draft.
+
+All twelve downloaded archives passed aggregate `SHA256SUMS`, embedded
+source/platform/clean-tree metadata and bundled SPDX validation. Each binary's
+keyless build-provenance and SBOM attestations were verified against this
+repository, release workflow, exact source/tag and non-self-hosted runner policy
+(24 checks). Individual `.sha256` files are also provided. The published
+[package verification record](https://github.com/victornife/jul/releases/download/v2.1.0/package-verification.json)
+records results and execution limits.
+
+Actual downloaded-package smoke passed Linux arm64 lean/full and Windows
+arm64/amd64 lean/full: version/capabilities, config check/lint, static/proxy
+startup, authenticated admin health/readiness/metrics, and full WAF/Console
+startup. Windows amd64 ran under Windows x64 execution support on an arm64
+host, not a physical amd64 host. Downloaded macOS and Linux amd64 archives
+were not executed on that host; their package identity/checksums/SBOM/signed
+attestations were verified and exact-source native platform CI passed.
+No unrun package execution is called a pass.
+
+[Runtime evidence](soak-evidence.md#2026-09-30-v210-source-bound-runtime-evidence)
+preserves the failed old-source log-integrity result and the corrected affected
+validation under the recorded impact review. Large raw evidence archives remain
+checksummed and retained locally, not attached to the release; the published
+summaries and #480 retain their source identities and limitations. These web
+documentation updates are post-tag commits, not changes to `0951090a` or its
+packaged READMEs. Publication changes eligible delivery to `released`, not
+Beta maturity or any GA criterion.
+
+## Upgrading from v2.0.0 to v2.1.0
 
 The candidate runtime freeze is `f036b063`, with exact-source CI and affected
 logging/reload validation recorded in [soak evidence](soak-evidence.md) and
@@ -101,11 +139,11 @@ Documentation-only changes before the immutable tag require an explicit delta
 review and exact-tag-source gates; package metadata/attestations bind the tag's
 actual source. No tag may be moved to repair a failed candidate.
 
-At this candidate-time checkpoint v2.1.0 remains unpublished. Actual release,
-artifact, checksum/SBOM/attestation and downloaded-package smoke evidence must
-be inspected before publication. Later web documentation updates will identify
-the real published tag and must not be described as content inside an earlier
-tagged archive. No Beta capability becomes GA by shipping.
+The tag's documentation-only delta from `f036b063` was reviewed before
+publication; its runtime tree was unchanged and exact-tag-source gates passed.
+The [published verification](#published-v210-verification) identifies the
+actual tag, artifacts and native execution limits. No Beta capability becomes
+GA by shipping.
 
 Run `jul check` with the target binary before replacing a running process.
 Rollback is the previous published archive, `v2.0.0`, started against a config

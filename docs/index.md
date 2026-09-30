@@ -5,15 +5,15 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 
 ## Start with product truth
 
-The capability table distinguishes published v2.0.0 from the proposed v2.1.0
-tree. `released`/`soaked` are in the published tag. `merged` rows are in this
-candidate and stay Beta until their own GA evidence exists. They are not
-described as published until the v2.1.0 tag is published.
+Stable [`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0) was
+published on 2026-09-30 at `0951090a6fb7703769a15b4749be9664a9842c98`.
+The capability table records shipped delivery; Beta capabilities stay Beta
+until their own GA evidence exists. Publication does not satisfy open criteria.
 
-Candidate-time source and evidence boundaries are in
+Source-bound runtime and downloaded-package verification are in
 [soak evidence](soak-evidence.md) and [release verification](release.md).
-Exact-main checks and affected runtime validation do not imply publication,
-GA promotion or closure of the partial-audit ledger.
+These publication-status updates are post-tag web documentation, not changes
+inside the immutable release archives. They do not close the partial-audit ledger.
 
 - **[Feature status and evidence](status.md)** — maintained human view of maturity
   and delivery, checked against
@@ -93,14 +93,14 @@ GA promotion or closure of the partial-audit ledger.
 | HTTP/3 over QUIC | [http3.md](http3.md) | `GA` / `soaked` |
 | gRPC ↔ JSON transcoding | [grpc-transcoding.md](grpc-transcoding.md) | `GA` / `soaked` |
 | WASM plugin system | [plugins.md](plugins.md) | `GA` / `soaked` |
-| WASM plugin response phase (jul-abi/v2) | [abi.md](abi.md) | `Beta` / `merged` |
-| Deterministic consistent-hash affinity | [upstreams.md](upstreams.md#consistent-hash-affinity) | `Beta` / `merged` |
+| WASM plugin response phase (jul-abi/v2) | [abi.md](abi.md) | `Beta` / `released` |
+| Deterministic consistent-hash affinity | [upstreams.md](upstreams.md#consistent-hash-affinity) | `Beta` / `released` |
 | L4 stream proxy | [stream.md](stream.md) | `GA` / `soaked` |
 | Native gRPC passthrough + h2c | [grpc-proxy.md](grpc-proxy.md) | `GA` / `soaked` |
 | Service discovery / dynamic upstreams | [service-discovery.md](service-discovery.md) | `GA` / `soaked` |
 | Web application firewall (WAF) | [waf.md](waf.md) | `GA` / `soaked` |
 | mTLS client auth | [mtls.md](mtls.md) | `GA` / `soaked` |
-| Client-certificate policy and CRL hot reload | [mtls.md](mtls.md) | `Beta` / `merged` |
+| Client-certificate policy and CRL hot reload | [mtls.md](mtls.md) | `Beta` / `released` |
 | Secrets references + log redaction | [secrets.md](secrets.md) | `GA` / `soaked` |
 | Response cache (memory + disk) | [cache.md](cache.md) | `GA` / `soaked` |
 | Core HTTP (static / proxy / FastCGI / vhosts / routing) | [core-http.md](core-http.md) | `GA` / `soaked` |
@@ -119,10 +119,10 @@ GA promotion or closure of the partial-audit ledger.
 | Remote automation CLI | [remote-cli.md](remote-cli.md) | `Beta` / `released` |
 | Selected runtime policy hot reload | [hot-reload-strategy.md](hot-reload-strategy.md) | `Beta` / `released` |
 | HTTP proxy over Unix-domain upstreams | [unix-http-upstreams.md](unix-http-upstreams.md) | `Beta` / `released` |
-| Standard gRPC Health Checking Protocol active probes | [health.md](health.md) | `Beta` / `merged` |
-| Runtime resources, capacity headroom, and HTTP bandwidth | [observability.md](observability.md) | `Beta` / `merged` |
-| Serving WAF policy and provenance visibility | [waf.md](waf.md) | `Beta` / `merged` |
-| Resource-pressure diagnostics guidance in Console | [diagnostics.md](diagnostics.md) | `Beta` / `merged` |
+| Standard gRPC Health Checking Protocol active probes | [health.md](health.md) | `Beta` / `released` |
+| Runtime resources, capacity headroom, and HTTP bandwidth | [observability.md](observability.md) | `Beta` / `released` |
+| Serving WAF policy and provenance visibility | [waf.md](waf.md) | `Beta` / `released` |
+| Resource-pressure diagnostics guidance in Console | [diagnostics.md](diagnostics.md) | `Beta` / `released` |
 
 Some capabilities share a canonical guide because they compose one subsystem.
 The status manifest still gives each additive capability its own maturity and

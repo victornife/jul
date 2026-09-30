@@ -13,9 +13,9 @@
 # it its own entry or an explicit relationship. A GA row must be released and
 # soaked under ADR 0003/0005. Volatile issue sequencing belongs in #62, not here.
 #
-# Updated 2026-09-30 for the corrected proposed v2.1.0 candidate.
-# Delivery stays merged for post-v2.0.0 rows until that tag is actually
-# published. Do not read this file as a GA promotion.
+# Updated 2026-09-30 after stable v2.1.0 publication at 0951090a.
+# Shipped post-v2.0.0 rows are released; maturity and GA criteria are unchanged.
+# This post-tag manifest update does not modify the immutable release archives.
 # Runtime and affected logging evidence retain their exact source identities;
 # docs/soak-evidence.md and #480 record the post-fix impact review and limits.
 
@@ -698,7 +698,7 @@ features:
   - core
   - grpc
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: health.md
   criteria:
     1: true
@@ -712,7 +712,7 @@ features:
     9: true
   notes: 'health_check.type = "grpc" (#427) issues a standard grpc.health.v1.Health/Check probe reusing the pool''s
     resolved backend_tls trust policy exactly as live gRPC traffic, feeding the existing active-health threshold state
-    machine (no parallel health registry, no new metric labels). In the proposed v2.1.0 tree (PR #458), not in published v2.0.0;
+    machine (no parallel health registry, no new metric labels). Published in stable v2.1.0 (PR #458), not in v2.0.0;
     no dedicated soak has been run (not required for this tranche per the programme authority). Requires the "grpc"
     build tag; a lean build rejects the configuration clearly rather than silently falling back to TCP/HTTP.'
 - id: OPS-RESOURCES
@@ -721,7 +721,7 @@ features:
   - core
   - console
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: observability.md
   criteria:
     1: true
@@ -737,8 +737,8 @@ features:
     distinct from Go heap, goroutines, open/max FDs) from the standard Prometheus collectors already registered, plus
     a new unlabeled jul_http_response_bytes_total counter (post-compression HTTP response-body bytes) and a bounded
     upstream/cache capacity-pressure summary. A field the platform cannot report is "unavailable", never a fabricated
-    0 or percentage; aggregate/per-resource denominators are never mixed. Merged on main (PR #459), not yet in a
-    tagged release; no dedicated soak has been run (not required for this tranche per the programme authority).
+    0 or percentage; aggregate/per-resource denominators are never mixed. Published in stable v2.1.0 (PR #459);
+    no dedicated soak has been run (not required for this tranche per the programme authority).
     #437 extends the same view with advisory headroom for Jul-owned storage only (cache, access/audit log,
     managed config/history, plugin uploads, ACME cache) and the closed-label jul_storage_bytes gauge; no mount
     enumeration and no path/mount/device in any API or label. Focused bounded disk-pressure evidence, no soak.'
@@ -748,7 +748,7 @@ features:
   - waf
   - console
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: waf.md
   criteria:
     1: true
@@ -764,15 +764,15 @@ features:
     waf_effective and the Console Serving WAF policy card (#440) report the serving generation''s compiled policies
     (mode, embedded CRS version from the rule set signature, paranoia, body settings, rule counts by source class,
     route coverage) and a sha256 content digest of the exact rule/data-file bytes compiled. Recorded at Prepare and
-    published with the generation. No paths, rule text or new metrics; no feed/updater/editor. Merged on main, not
-    yet in a tagged release; no dedicated soak (visibility only).'
+    published with the generation. No paths, rule text or new metrics; no feed/updater/editor. Published in stable
+    v2.1.0; no dedicated soak (visibility only).'
 - id: OPS-DIAG-UX
   name: Resource-pressure diagnostics guidance in Console
   tags:
   - core
   - console
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: diagnostics.md
   criteria:
     1: true
@@ -788,13 +788,13 @@ features:
     readings to the existing gated pprof endpoint, jul doctor, support bundles and Operations. Guidance, not
     diagnosis; a pprof command is shown only when admin_runtime.pprof_enabled and admin:manage allow it, with a
     token placeholder. No capture job, artifact store, upload or background profiling. Builds on OPS-RESOURCES
-    (including #437 storage headroom) and OPS-DIAG. In the proposed v2.1.0 tree, not in published v2.0.0; no soak (UI guidance only).'
+    (including #437 storage headroom) and OPS-DIAG. Published in stable v2.1.0, not in v2.0.0; no soak (UI guidance only).'
 - id: WASM-ABI2
   name: WASM plugin response phase (jul-abi/v2)
   tags:
   - wasmplugins
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: abi.md
   criteria:
     1: true
@@ -809,8 +809,8 @@ features:
   notes: 'jul-abi/v2 (#430, ADR 0020) adds an opt-in, per-request subscribed response phase next to the unchanged
     jul-abi/v1: status/header access and mutation, a bounded buffered body (max_response_body) with a closed
     body-state enum, bounded replacement and reject, placed inside the location WAF and outside the cache. Golden-
-    pinned (abi-v2.golden), prebuilt v2 fixtures, v2 SDK and examples built and run in CI. Merged on main, not yet
-    in a tagged release; no dedicated soak has been run (focused churn/quiescence and fuzz evidence only). The GA
+    pinned (abi-v2.golden), prebuilt v2 fixtures, v2 SDK and examples built and run in CI. Published in stable v2.1.0;
+    no dedicated soak has been run (focused churn/quiescence and fuzz evidence only). The GA
     WASM plugin system row (Y2-02) covers jul-abi/v1 and does not extend to this entry.'
 - id: LB-AFFINITY
   name: Deterministic consistent-hash affinity
@@ -818,7 +818,7 @@ features:
   - core
   - stream
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: upstreams.md
   criteria:
     1: true
@@ -834,13 +834,13 @@ features:
     of a closed key source (client_ip, one header, one cookie) over the health/circuit/capacity-eligible set,
     explicit hash.fallback for keyless requests, retries walk the rendezvous order, stream routes client_ip only
     (TCP per connection, UDP per session). NGINX ip_hash/hash map as approximated, arbitrary hash keys blocking;
-    real NGINX-vs-Jul E2E fixture. In the proposed v2.1.0 tree, not in published v2.0.0; no dedicated soak.'
+    real NGINX-vs-Jul E2E fixture. Published in stable v2.1.0, not in v2.0.0; no dedicated soak.'
 - id: MTLS-HOT
   name: Client-certificate policy and CRL hot reload
   tags:
   - core
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: mtls.md
   criteria:
     1: true
@@ -856,4 +856,4 @@ features:
     Publish for new TCP TLS and HTTP/3 handshakes (#486); in-place CA/CRL rewrites reload, a broken file rejects the
     reload. Revocation also applies to resumed TLS sessions and is scoped to the CRL issuer;
     jul_mtls_crl_next_update_timestamp_seconds exposes CRL expiry. admin.tls.client_auth stays restart-bound. Does
-    not change the GA Y2-07 row. In the proposed v2.1.0 tree, not in published v2.0.0; no dedicated soak.'
+    not change the GA Y2-07 row. Published in stable v2.1.0, not in v2.0.0; no dedicated soak.'
