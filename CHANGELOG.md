@@ -9,8 +9,19 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
-Post-publication documentation and delivery-status reconciliation only; these
-updates are not part of the immutable v2.1.0 tag or its packaged READMEs.
+Post-publication documentation and delivery-status reconciliation, plus the
+post-v2.1.0 audit remediation below. None of this is part of the immutable
+v2.1.0 tag or its packaged READMEs.
+
+### Fixed
+
+- **On-the-fly compression weakens strong `ETag`s (#504).** A compressed body
+  carried the origin's strong tag unchanged, so one strong validator named two
+  byte sequences (RFC 9110 §8.8.1, §8.8.3.3). A resumed download (`Range` plus
+  `If-Range`) could receive identity bytes and append them to a gzip partial
+  file. Compressed responses now carry `W/"<tag>"`, as NGINX has since 1.7.3:
+  `If-None-Match` still revalidates, and `If-Range` falls back to a full `200`.
+  Weak, absent and uncompressed tags are unchanged.
 
 ## [2.1.0] - 2026-09-30
 

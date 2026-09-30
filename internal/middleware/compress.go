@@ -316,11 +316,33 @@ func (cw *compressWriter) startCompress(ep *encoderPool) {
 	h.Set("Content-Encoding", ep.name)
 	h.Del("Content-Length")
 	h.Del("Accept-Ranges")
+	weakenETag(h)
 	cw.flushHeader()
 	cw.enc = ep.get(cw.ResponseWriter)
 	if cw.c.onCompress != nil {
 		cw.c.onCompress(ep.name)
 	}
+}
+
+// weakenETag marks a strong validator weak once the body is re-encoded: the
+// same tag now names two byte sequences, which RFC 9110 §8.8.1 defines as weak
+// and §8.8.3.3 forbids for a strong tag (nginx has done this since 1.7.3). A
+// weak tag keeps If-None-Match revalidation working and makes If-Range fail
+// safe, so a resumed download never splices identity bytes onto coded ones.
+func weakenETag(h http.Header) {
+	values := h.Values("ETag")
+	if len(values) == 0 {
+		return
+	}
+	weakened := make([]string, len(values))
+	for i, v := range values {
+		if v == "" || strings.HasPrefix(v, "W/") {
+			weakened[i] = v
+			continue
+		}
+		weakened[i] = "W/" + v
+	}
+	h["Etag"] = weakened
 }
 
 func (cw *compressWriter) startPassthrough() {

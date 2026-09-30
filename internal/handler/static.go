@@ -172,9 +172,10 @@ func (h *staticHandler) serveFile(w http.ResponseWriter, r *http.Request, rel st
 		return true
 	}
 
-	// Weak validators derived from size and mtime. http.ServeContent honors
+	// Strong validators derived from size and mtime. http.ServeContent honors
 	// If-None-Match / If-Range against the ETag and If-Modified-Since against
-	// the modtime, and implements Range requests.
+	// the modtime, and implements Range requests. On-the-fly compression
+	// weakens this tag for its coded representation (middleware.weakenETag).
 	etag := fmt.Sprintf(`"%x-%x"`, info.ModTime().UnixNano(), info.Size())
 	w.Header().Set("ETag", etag)
 	if h.cacheControl != "" {
