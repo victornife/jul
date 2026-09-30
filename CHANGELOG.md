@@ -26,6 +26,12 @@ v0.62.0 to v0.63.0 and `google.golang.org/grpc` v1.83.2 to v1.84.0.
 
 ### Security
 
+- **Console build-tool dependency hardening.** The existing brace-expansion
+  override now requires 5.0.12, covering GHSA-qhr7-859c-m2p7,
+  GHSA-6j4f-fj2g-mc7p and GHSA-q2hr-2g5m-vwhr reported by the live CI audit.
+  This is an ESLint/minimatch transitive build dependency, not a new server
+  capability or a change to the audit threshold.
+
 - **Pre-release audit stack (#482, #495, #496, #497).** Integrated on `main`
   with the same tree as `5a592d40`. Operators upgrading from v2.0.0 should
   expect these corrections, not new feature flags: an off-loopback admin
