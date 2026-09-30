@@ -408,7 +408,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		{Group: "Observability", Name: "Access log", Active: accessLogEnabled, Detail: accessLogDetail},
 		{Group: "Observability", Name: "Backend dial-failure accounting", Active: s.deps.Metrics != nil, Detail: "counted and rate-limited per backend pool; see jul_stream_backend_dial_failures_total / jul_http_backend_dial_failures_total"},
 
-		{Group: "Extensibility", Name: "WASM plugins", Active: len(c.Plugins) > 0, Detail: pluginDetail(len(c.Plugins), pluginV2Count(c.Plugins), pluginLocs)},
+		{Group: "Extensibility", Name: "WASM plugins", Active: len(c.Plugins) > 0, Detail: withPluginEngine(pluginDetail(len(c.Plugins), pluginV2Count(c.Plugins), pluginLocs), s.deps.PluginEngine)},
 	}
 }
 
@@ -486,4 +486,12 @@ func pluginDetail(declared, v2, locs int) string {
 		d += "; " + countUnit(locs, "location")
 	}
 	return d
+}
+
+// withPluginEngine appends the process's WASM engine to a non-empty detail.
+func withPluginEngine(detail, engine string) string {
+	if detail == "" || engine == "" {
+		return detail
+	}
+	return detail + "; engine: " + engine
 }

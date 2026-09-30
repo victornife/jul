@@ -14,6 +14,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/diagnostics"
+	"jul/internal/plugins"
 )
 
 func TestAdminHasUsableCredential(t *testing.T) {
@@ -129,5 +130,20 @@ func TestSystemRuntimeIncludesBuildIdentity(t *testing.T) {
 	result := (&session{options: Options{Product: "Jul.IA", Version: "test", Commit: "abcdef", BuildProfile: "full"}}).systemRuntimeCheck(context.Background())
 	if result.Evidence["commit"] != "abcdef" || result.Evidence["build_profile"] != "full" {
 		t.Fatalf("runtime identity = %#v", result.Evidence)
+	}
+}
+
+func TestSystemRuntimeReportsWASMEngine(t *testing.T) {
+	t.Parallel()
+	result := (&session{options: Options{Product: "Jul.IA"}}).systemRuntimeCheck(context.Background())
+	mode, reason := plugins.EngineMode()
+	if mode == "" {
+		if _, ok := result.Evidence["wasm_engine"]; ok {
+			t.Fatalf("a build without plugins must not report an engine: %#v", result.Evidence)
+		}
+		return
+	}
+	if result.Evidence["wasm_engine"] != mode || result.Evidence["wasm_engine_reason"] != reason {
+		t.Fatalf("engine evidence = %#v, want %q (%q)", result.Evidence, mode, reason)
 	}
 }

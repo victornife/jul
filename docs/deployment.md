@@ -193,6 +193,21 @@ the runner's non-loopback address with a trusted temporary TLS certificate and
 checks that tokenless requests are denied. This is a disposable single-host
 TLS exercise; production certificates and network policy require separate verification.
 
+### Plugins and MemoryDenyWriteExecute
+
+Both units set `MemoryDenyWriteExecute=yes`, a W^X policy that forbids making
+writable memory executable. The WASM plugin runtime therefore cannot use
+wazero's native-code compiler under these units and runs plugins in its
+interpreter, which is noticeably slower for compute-heavy guests. The service
+logs `wasm plugin engine mode=interpreter` at startup, and the Console Status
+row *WASM plugins* shows the engine (see
+[plugins.md](plugins.md#wasm-engine)).
+
+Keep the setting unless plugin CPU cost matters more than the hardening. If it
+does, a drop-in with `MemoryDenyWriteExecute=no` re-enables the compiler; that
+also re-enables executable memory for the whole process, so treat it as a
+deliberate security trade-off.
+
 ### Verify the units
 
 ```sh
@@ -204,17 +219,36 @@ systemd-analyze verify deploy/systemd/jul-readonly.service
 
 The [Dockerfile](../Dockerfile) builds a static binary into a distroless
 `nonroot` image and declares the four writable paths as volumes, owned by the
-nonroot user:
+nonroot user. No official container image is published yet (publication is
+tracked in [#446](https://github.com/victornife/jul/issues/446)), so build the
+image from a checkout of the release tag you want:
 
 ```sh
+docker build -t jul:local .
 docker run --rm \
   -p 8080:8080 -p 8443:8443 \
   -v jul-config:/etc/jul \
   -v jul-state:/var/lib/jul \
   -v jul-cache:/var/cache/jul \
   -v jul-log:/var/log/jul \
-  ghcr.io/victornife/jul:latest
+  jul:local
 ```
+
+- **Build profile.** The image default is `BUILD_TAGS="console"`: the lean
+  core plus the admin Console. It is neither of the two released archive
+  profiles. Build those explicitly when you need parity with a release archive:
+
+  ```sh
+  # lean (no optional features)
+  docker build -t jul:lean --build-arg BUILD_TAGS="" .
+  # full (every optional feature, as in the *_full release archives)
+  docker build -t jul:full --build-arg BUILD_TAGS="brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" .
+  ```
+
+  `jul capabilities` inside the container reports which features were compiled.
+- **Same toolchain as the releases.** The build stage uses the Go version in
+  `go.mod`, which is also what the release workflow builds with. The Docker
+  deployment CI job fails if the two diverge.
 
 - **Reproducible base images.** Both build stages pin their base image by tag
   **and** `@sha256` digest, so a rebuild always resolves the same bytes;

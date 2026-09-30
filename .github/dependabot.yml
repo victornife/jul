@@ -27,3 +27,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # The golang build stage follows go.mod; toolchain moves start there.
+      - dependency-name: golang
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor

@@ -20,6 +20,7 @@ import (
 	"jul/internal/app"
 	"jul/internal/config"
 	"jul/internal/diagnostics"
+	"jul/internal/plugins"
 )
 
 const diagnosticsDocs = "docs/diagnostics.md"
@@ -349,22 +350,29 @@ func (s *session) topologyCheck(context.Context) diagnostics.Result {
 }
 
 func (s *session) systemRuntimeCheck(context.Context) diagnostics.Result {
+	evidence := map[string]any{
+		"product":       s.options.Product,
+		"version":       s.options.Version,
+		"commit":        s.options.Commit,
+		"build_profile": s.options.BuildProfile,
+		"go_version":    runtime.Version(),
+		"goos":          runtime.GOOS,
+		"goarch":        runtime.GOARCH,
+		"num_cpu":       runtime.NumCPU(),
+		"gomaxprocs":    runtime.GOMAXPROCS(0),
+		"capabilities":  cloneCapabilities(s.options.Capabilities),
+	}
+	// The engine is decided per process: run doctor under the service's
+	// sandbox (e.g. systemd-run -p MemoryDenyWriteExecute=yes) to match it.
+	if mode, reason := plugins.EngineMode(); mode != "" {
+		evidence["wasm_engine"] = mode
+		evidence["wasm_engine_reason"] = reason
+	}
 	return diagnostics.Result{
 		Status:   diagnostics.StatusPass,
 		Severity: diagnostics.SeverityInfo,
 		Message:  "captured safe process and build runtime metadata",
-		Evidence: map[string]any{
-			"product":       s.options.Product,
-			"version":       s.options.Version,
-			"commit":        s.options.Commit,
-			"build_profile": s.options.BuildProfile,
-			"go_version":    runtime.Version(),
-			"goos":          runtime.GOOS,
-			"goarch":        runtime.GOARCH,
-			"num_cpu":       runtime.NumCPU(),
-			"gomaxprocs":    runtime.GOMAXPROCS(0),
-			"capabilities":  cloneCapabilities(s.options.Capabilities),
-		},
+		Evidence: evidence,
 	}
 }
 

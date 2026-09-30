@@ -414,6 +414,10 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 - **QUIC path MTU discovery.** Some networks drop oversized UDP packets; QUIC
   PMTUD mitigates this, but a few firewall configurations may block or
   rate-limit QUIC traffic, causing clients to fall back to TCP.
+- **`read_header_timeout` does not apply to HTTP/3.** quic-go exposes no
+  per-stream header deadline. `max_header_bytes`, `idle_timeout` and
+  `[rate_limit].max_conns` do apply (see
+  [http3.md](http3.md#listener-limits-on-http3)).
 
 ---
 
@@ -503,9 +507,13 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   they load the same `.wasm` file.
 - **No streaming bodies.** The host buffers the full request body before passing
   it to the guest; very large bodies increase per-request memory pressure.
-- **WASM binary must be pre-compiled.** There is no JIT — modules are compiled
-  at startup, not on first use. A malformed WASM binary will prevent the server
-  from starting.
+- **WASM binary must be pre-compiled.** Modules are compiled when a
+  configuration is activated, not on first use, and a malformed WASM binary
+  prevents that configuration from starting. Depending on platform and sandbox,
+  wazero either compiles modules ahead of time to native code or interprets
+  them; under systemd `MemoryDenyWriteExecute=yes` (the shipped units) plugins
+  run in the slower interpreter. The active engine is reported (see
+  [plugins.md](plugins.md#wasm-engine)).
 - **Fetch capability requires allow-list.** Plugins with `fetch = true` can only
   call hosts in `allowed_hosts`; unconstrained outbound fetch is not available.
 

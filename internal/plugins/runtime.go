@@ -357,8 +357,9 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 
 	// Use the caller-supplied context so the reload deadline bounds WASM
 	// compilation. WithCloseOnContextDone ensures the runtime is torn down
-	// if the reload is cancelled before compilation finishes (M-01).
-	rtCfg := wazero.NewRuntimeConfig().
+	// if the reload is cancelled before compilation finishes (M-01). The
+	// engine is chosen explicitly (EngineMode) so it can be reported.
+	rtCfg := newRuntimeConfig().
 		WithCompilationCache(m.cache).
 		WithMemoryLimitPages(pages).
 		WithCloseOnContextDone(true)

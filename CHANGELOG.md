@@ -23,6 +23,26 @@ v2.1.0 tag or its packaged READMEs.
   `If-None-Match` still revalidates, and `If-Range` falls back to a full `200`.
   Weak, absent and uncompressed tags are unchanged.
 
+- **HTTP/3 honours the listener limits (#507).** The QUIC listener ignored
+  `max_header_bytes`, `idle_timeout` and `max_conns`, so HTTP/3 clients could
+  send larger header blocks, hold idle connections indefinitely and exceed the
+  connection cap that TCP enforced. All three now apply to HTTP/3 (including
+  hot-reloaded `max_conns`), and 0-RTT is disabled explicitly rather than by
+  library default. `read_header_timeout` has no HTTP/3 equivalent; this is now
+  a documented limitation.
+- **The WASM engine is reported truthfully (#508).** The docs and threat model
+  said plugins ran on a pure interpreter, but wazero selects its compiler on
+  amd64/arm64. Jul now picks the engine explicitly: the compiler where the CPU
+  and the kernel allow executable memory, else the interpreter (for example
+  under systemd `MemoryDenyWriteExecute=yes`). The chosen engine and reason
+  appear in the startup log, `GET /api/plugins` (`engine`), the status detail
+  and `jul doctor` (`SYSTEM_RUNTIME`).
+- **Container build matches the supported toolchain (#509).** The Dockerfile
+  built with Go 1.27 while `go.mod` pins 1.26.6, and the docs pointed at a
+  published image that does not exist (#446). The builder is now pinned by
+  digest to the `go.mod` toolchain, CI fails if they drift, and the docs build
+  the image locally and describe its build profile.
+
 ## [2.1.0] - 2026-09-30
 
 Published stable minor after `v2.0.0`:

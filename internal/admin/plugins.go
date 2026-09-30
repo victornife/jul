@@ -253,7 +253,10 @@ func pluginReferences(c *config.Config, name string) []string {
 }
 
 type PluginsProjection struct {
-	Compiled        bool               `json:"compiled"`
+	Compiled bool `json:"compiled"`
+	// Engine is the wazero engine of the serving process ("compiler" or
+	// "interpreter"); absent when plugins are not compiled.
+	Engine          string             `json:"engine,omitempty"`
 	UploadEnabled   bool               `json:"upload_enabled"`
 	UploadMaxSizeMB int                `json:"upload_max_size_mb"`
 	Plugins         []PluginProjection `json:"plugins"`
@@ -424,6 +427,9 @@ func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 	snap := s.requestAdminSnapshot(r)
 	s.withConfig(func(c *config.Config, w http.ResponseWriter) {
 		out := projectPlugins(c, s.deps.PluginsCompiled)
+		if out.Compiled {
+			out.Engine = s.deps.PluginEngine
+		}
 		if s.deps.PluginModules != nil {
 			attachPluginModules(&out, s.deps.PluginModules())
 		}
