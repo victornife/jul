@@ -9,7 +9,7 @@
 # --- build stage ------------------------------------------------------------
 # The Go version must equal go.mod's `go` directive, the toolchain the release
 # workflow builds with; the Docker deployment CI job fails if they diverge.
-FROM golang:1.26.6-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83 AS build
+FROM golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS build
 
 WORKDIR /src
 
