@@ -110,6 +110,7 @@ plugins = ["header-inject"]             # middleware for every location here
 | `fetch_timeout` / `max_fetch_response` | Per-call deadline and response-size cap for `fetch` (defaults 5s / 1 MiB) |
 | `max_request_body` / `max_response_body` | Body buffering caps (defaults 1 MiB / 8 MiB); overflow fails the call, never truncates. For v2, `max_response_body` also bounds the response-phase body and its replacement (at most `1g`) |
 | `max_invocations` | Retire a pooled instance after this many calls (default 1000) |
+| `max_instances` | Cap on live module instances, idle and in use (default 64). A call that finds them all busy waits up to one `timeout`, then the request fails with `503` and `Retry-After: 1`. See [Sizing](#sizing-instances-and-memory) |
 | `sha256` | Optional pin: the exact module bytes' SHA-256 (64 hex digits; a `sha256:` prefix is accepted). See [Module content identity](#module-content-identity-and-pinning) |
 
 The Console's guided plugin editor edits the module source, `type`, `abi`,
@@ -118,7 +119,7 @@ you change it, and the change is part of the review diff. Every other field abov
 `sha256` pin and the `max_*`, `kv_max_*` and `fetch_timeout` limits — is
 *omitted-means-keep* in its `plugin_set` payload: an edit that does not send a
 field keeps the configured value, an explicit value replaces it, and an explicit
-`""` (or `0` for `kv_max_entries`/`max_invocations`) restores the default.
+`""` (or `0` for `kv_max_entries`/`max_invocations`/`max_instances`) restores the default.
 `GET /api/plugins` reports the explicitly configured limits as `limits`.
 
 Validation rules:
@@ -360,6 +361,10 @@ the guest grows it and calls again. The SDK helpers (`readInto`, `KVGet`,
   overruns is torn down and the request fails with `500`.
 - **Panics** in the guest are contained; the instance is discarded, the request
   fails with `500`, and the server keeps running.
+- **Instances** are capped at `max_instances` per plugin (default 64), counting
+  idle and in-use instances. Request concurrency above the cap waits up to one
+  `timeout` for an instance, then fails with `503` and `Retry-After: 1`; it is
+  not counted as a panic.
 - **No ambient authority.** Guests get no file system, no network, and no host
   clock beyond the deadline. The only granted capabilities are:
   - **`kv`** — a per-plugin namespaced key/value store shared across that
@@ -421,9 +426,33 @@ Every invocation updates Prometheus metrics:
 - `jul_plugin_response_duration_seconds{plugin}` — `handle_response` latency;
 - `jul_plugin_response_body_unavailable_total{plugin,reason}` — body
   subscriptions presented without a body (`none`, `too_large`, `streaming`,
-  `encoded`, `partial`, `upgraded`).
+  `encoded`, `partial`, `upgraded`);
+- `jul_plugin_instances{plugin}` — live module instances (idle and in use),
+  read at scrape time;
+- `jul_plugin_instance_waits_total{plugin,result}` — calls that found every
+  allowed instance busy: `acquired` after waiting, or `rejected` with `503`.
 
 Guest `log` output is emitted on the server log with the plugin name attached.
+
+### Sizing instances and memory
+
+A plugin holds at most `max_instances` module instances. Each can grow to
+`memory_limit` of linear memory, and a request holds one only for the duration
+of a guest call, not the whole request. Worst-case guest memory per plugin is
+therefore:
+
+```text
+max_instances × memory_limit          (default 64 × 16 MiB = 1 GiB)
+```
+
+Host-side buffers are separate and follow request concurrency: up to
+`max_request_body` per request in the request phase and, for a `jul-abi/v2`
+body subscription, up to `max_response_body` per subscribed response.
+
+Size `max_instances` to peak concurrent guest calls, roughly request rate ×
+call latency, with headroom. `jul_plugin_instance_waits_total{result="rejected"}`
+rising means the cap is too low for the traffic; lower it (or `memory_limit`)
+when the memory product above is more than the host can spare.
 
 ## Uploading modules (Console API)
 
@@ -586,6 +615,7 @@ are addressed by design, configuration, or runtime containment:
 | ------ | ------ | ---------- | ------------- |
 | Guest escape via memory corruption | Malformed `.wasm`, or a bug in wazero's code generator or interpreter | Where the platform allows it, wazero compiles each module ahead of time to native machine code in executable memory (the "compiler" engine); otherwise, and under W^X policies such as systemd `MemoryDenyWriteExecute=yes`, it interprets (see [WASM engine](#wasm-engine)). No cgo in either mode. The linear-memory cap bounds the blast radius, and Go memory safety protects the host runtime | Unknown bug in wazero's compiler or interpreter (defense in depth: keep wazero updated; the interpreter avoids generated native code) |
 | Infinite loop / CPU exhaustion | Guest spins without yielding | Per-invocation `timeout` (default 100 ms) enforced by context cancellation; guest torn down on overrun | Very short spike before cancellation (~timeout + scheduler jitter) |
+| Memory or CPU exhaustion by concurrency | Many concurrent requests on a plugin route, each instantiating a module | `max_instances` (default 64) caps live instances per plugin; excess calls wait one `timeout`, then get `503` and are counted in `jul_plugin_instance_waits_total` (#506) | Operator sets `max_instances × memory_limit` above what the host can hold |
 | SSRF via `fetch` | Guest calls allowed host that redirects to private or special-use IP | `dialValidatedIPs` blocks loopback/private/link-local/CGNAT/multicast, `0.0.0.0/8`, `240.0.0.0/4`, and `198.18.0.0/15` at dial time; redirect targets re-check allow-list | DNS rebinding to a *public* IP that later changes (low probability; TTL-dependent) |
 | KV DoS (unbounded growth) | Guest fills KV with unbounded keys/values | `kv_max_entries` (default 1024) and `kv_max_bytes` (default 1 MiB) enforced per plugin; `kv_set` returns "quota exceeded" | Admin misconfigures quotas to very large values |
 | Admin uploads malicious module | Attacker with admin token uploads crafted `.wasm` | Admin endpoint requires bearer token; upload disabled by default; filename hardened; path-traversal defense; module still sandboxed | Compromised admin token (rotate tokens, restrict admin to loopback/mTLS) |

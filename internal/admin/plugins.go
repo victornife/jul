@@ -42,6 +42,7 @@ type pluginDef struct {
 	KVMaxEntries     *int    `json:"kv_max_entries,omitempty"`
 	KVMaxBytes       *string `json:"kv_max_bytes,omitempty"`
 	MaxInvocations   *int    `json:"max_invocations,omitempty"`
+	MaxInstances     *int    `json:"max_instances,omitempty"`
 	// ABI follows the same rule: an editor that does not send it can never
 	// change a plugin's ABI; "" restores the jul-abi/v1 default.
 	ABI *string `json:"abi,omitempty"`
@@ -106,7 +107,10 @@ func applyKeptLimits(pc *config.PluginConfig, in pluginDef, existing config.Plug
 	if pc.KVMaxBytes, err = keepSize(in.KVMaxBytes, existing.KVMaxBytes, "kv_max_bytes"); err != nil {
 		return err
 	}
-	pc.MaxInvocations, err = keepCount(in.MaxInvocations, existing.MaxInvocations, "max_invocations")
+	if pc.MaxInvocations, err = keepCount(in.MaxInvocations, existing.MaxInvocations, "max_invocations"); err != nil {
+		return err
+	}
+	pc.MaxInstances, err = keepCount(in.MaxInstances, existing.MaxInstances, "max_instances")
 	return err
 }
 
@@ -303,10 +307,11 @@ type PluginLimits struct {
 	KVMaxEntries     int    `json:"kv_max_entries,omitempty"`
 	KVMaxBytes       string `json:"kv_max_bytes,omitempty"`
 	MaxInvocations   int    `json:"max_invocations,omitempty"`
+	MaxInstances     int    `json:"max_instances,omitempty"`
 }
 
 func projectLimits(p config.PluginConfig) *PluginLimits {
-	l := PluginLimits{KVMaxEntries: p.KVMaxEntries, MaxInvocations: p.MaxInvocations}
+	l := PluginLimits{KVMaxEntries: p.KVMaxEntries, MaxInvocations: p.MaxInvocations, MaxInstances: p.MaxInstances}
 	if p.MaxRequestBody.Bytes() > 0 {
 		l.MaxRequestBody = sizeStr(p.MaxRequestBody)
 	}

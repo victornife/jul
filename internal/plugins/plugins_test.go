@@ -99,13 +99,13 @@ func TestPooledInstanceRetiresAfterMaxInvocations(t *testing.T) {
 	})
 	p := s.plugins["hi"]
 
-	pm1, err := p.acquire()
+	pm1, err := p.acquire(context.Background())
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
 	p.release(pm1) // 1st call served; below the cap, goes back to the pool.
 
-	pm2, err := p.acquire()
+	pm2, err := p.acquire(context.Background())
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestPooledInstanceRetiresAfterMaxInvocations(t *testing.T) {
 	}
 	p.release(pm2) // 2nd call served; hits the cap, must be closed rather than pooled.
 
-	pm3, err := p.acquire()
+	pm3, err := p.acquire(context.Background())
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}

@@ -425,6 +425,7 @@ func pluginEntries() []Entry {
 		"plugins.*.kv_max_bytes",
 		"plugins.*.kv_max_entries",
 		"plugins.*.max_fetch_response",
+		"plugins.*.max_instances",
 		"plugins.*.max_invocations",
 		"plugins.*.max_request_body",
 		"plugins.*.max_response_body",

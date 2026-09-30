@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
 	"jul/internal/config"
+	"jul/internal/logthrottle"
 )
 
 // wasmPageSize is the WebAssembly linear-memory page size (64 KiB).
@@ -50,6 +52,26 @@ const defaultMaxInstanceInvocations = 1000
 
 const poolCapacity = 64
 
+// defaultMaxInstances bounds the live module instances (idle plus in use) of
+// one plugin when max_instances is unset (#506). Each may hold up to
+// memory_limit of linear memory, so the default caps a plugin at
+// 64 × memory_limit (1 GiB with the 16 MiB default).
+const defaultMaxInstances = 64
+
+// instanceLimitLogInterval throttles the warning logged when callers are
+// turned away at the instance cap; request concurrency is client-chosen.
+const instanceLimitLogInterval = 10 * time.Second
+
+// errInstanceLimit reports that every instance max_instances allows was busy
+// for the whole bounded wait. Callers answer 503 with Retry-After.
+var errInstanceLimit = errors.New("plugin instance limit reached")
+
+// Outcomes of a call that found every allowed instance busy and had to wait.
+const (
+	instanceWaitAcquired = "acquired"
+	instanceWaitRejected = "rejected"
+)
+
 // pooledModule pairs a pooled WASM module instance with its lifetime call
 // count so acquire/release can retire it once maxInstanceInvocations is hit.
 type pooledModule struct {
@@ -74,6 +96,10 @@ type Options struct {
 	// OnResponseBodyUnavailable, when set, is called when a body subscription
 	// is presented without a body, with the closed reason label.
 	OnResponseBodyUnavailable func(plugin, reason string)
+	// OnInstanceWait, when set, is called once for each call that found every
+	// instance max_instances allows in use, with result "acquired" or
+	// "rejected" (#506).
+	OnInstanceWait func(plugin, result string)
 	// KV overrides the key/value backing store. Defaults to an in-memory store.
 	KV KVStore
 	// EgressWrap, when set, wraps a plugin fetch dialer with the global egress
@@ -103,6 +129,11 @@ type Manager struct {
 	onPanic   func(string)
 	onRespInv func(string, string, time.Duration)
 	onNoBody  func(string, string)
+	onWait    func(string, string)
+	// live holds every compiled plugin not yet closed, across generations, so
+	// InstanceStats can report live instances at scrape time.
+	liveMu sync.Mutex
+	live   map[*plugin]struct{}
 	// egressWrap composes the global egress guard beneath each plugin's fetch
 	// SSRF guard; nil when egress is disabled.
 	egressWrap func(base DialFunc) DialFunc
@@ -134,6 +165,10 @@ func NewManager(opts Options) (*Manager, error) {
 	if onNoBody == nil {
 		onNoBody = func(string, string) {}
 	}
+	onWait := opts.OnInstanceWait
+	if onWait == nil {
+		onWait = func(string, string) {}
+	}
 	return &Manager{
 		log:        opts.Logger,
 		cache:      wazero.NewCompilationCache(),
@@ -143,8 +178,49 @@ func NewManager(opts Options) (*Manager, error) {
 		onPanic:    onPanic,
 		onRespInv:  onRespInv,
 		onNoBody:   onNoBody,
+		onWait:     onWait,
+		live:       make(map[*plugin]struct{}),
 		egressWrap: opts.EgressWrap,
 	}, nil
+}
+
+// InstanceStats is one plugin's live module-instance count, summed over every
+// generation still holding the plugin (a draining one included).
+type InstanceStats struct {
+	Plugin string
+	Live   int
+}
+
+// InstanceStats reports live instances per plugin name, sorted by name. It is
+// read at scrape time.
+func (m *Manager) InstanceStats() []InstanceStats {
+	if m == nil {
+		return nil
+	}
+	m.liveMu.Lock()
+	by := make(map[string]int)
+	for p := range m.live {
+		by[p.name] += len(p.slots)
+	}
+	m.liveMu.Unlock()
+	out := make([]InstanceStats, 0, len(by))
+	for name, n := range by {
+		out = append(out, InstanceStats{Plugin: name, Live: n})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Plugin < out[j].Plugin })
+	return out
+}
+
+func (m *Manager) track(p *plugin) {
+	m.liveMu.Lock()
+	m.live[p] = struct{}{}
+	m.liveMu.Unlock()
+}
+
+func (m *Manager) forget(p *plugin) {
+	m.liveMu.Lock()
+	delete(m.live, p)
+	m.liveMu.Unlock()
 }
 
 // kvLedger is the quota accounting for one plugin KV namespace.
@@ -218,10 +294,13 @@ func (m *Manager) BuildWithEgress(ctx context.Context, cfg map[string]config.Plu
 type plugin struct {
 	name string
 	// identity is the content identity of the exact bytes compiled below.
-	identity  ModuleIdentity
-	runtime   wazero.Runtime
-	compiled  wazero.CompiledModule
-	pool      chan *pooledModule // fixed-capacity; see poolCapacity
+	identity ModuleIdentity
+	runtime  wazero.Runtime
+	compiled wazero.CompiledModule
+	pool     chan *pooledModule // fixed-capacity; see poolCapacity
+	// slots holds one token per live instance (idle or in use); its capacity
+	// is max_instances (#506).
+	slots     chan struct{}
 	timeout   time.Duration
 	isHandler bool
 	// abi is the configured (and negotiated) ABI; hasResponse reports that a
@@ -268,6 +347,11 @@ type plugin struct {
 	onPanic   func(string)
 	onRespInv func(string, string, time.Duration)
 	onNoBody  func(string, string)
+	onWait    func(string, string)
+	// limitLog throttles the instance-cap warning.
+	limitLog logthrottle.Limiter
+	// mgr tracks this plugin for InstanceStats until close.
+	mgr *Manager
 }
 
 // afterModuleRead is a test seam between the single module read and
@@ -320,8 +404,14 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		onPanic:      m.onPanic,
 		onRespInv:    m.onRespInv,
 		onNoBody:     m.onNoBody,
+		onWait:       m.onWait,
 		egressWrap:   egressWrap,
 	}
+	maxInstances := pc.MaxInstances
+	if maxInstances <= 0 {
+		maxInstances = defaultMaxInstances
+	}
+	p.slots = make(chan struct{}, maxInstances)
 	if p.fetchTimeout <= 0 {
 		p.fetchTimeout = 5 * time.Second
 	}
@@ -402,8 +492,11 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 	if err != nil {
 		return closeOnErr(fmt.Errorf("instantiate module: %w", err))
 	}
+	p.slots <- struct{}{}
 	p.pool <- &pooledModule{mod: mod}
 
+	p.mgr = m
+	m.track(p)
 	return p, nil
 }
 
@@ -428,19 +521,66 @@ func (p *plugin) instantiate(ctx context.Context) (api.Module, error) {
 	return p.runtime.InstantiateModule(ctx, p.compiled, cfg)
 }
 
-func (p *plugin) acquire() (*pooledModule, error) {
+// acquire returns an idle instance, or instantiates one while fewer than
+// max_instances are live. At the cap it waits up to one call timeout (or until
+// ctx ends) for an instance to come back or be retired, then fails with
+// errInstanceLimit (#506).
+func (p *plugin) acquire(ctx context.Context) (*pooledModule, error) {
 	select {
 	case pm := <-p.pool:
 		return pm, nil
 	default:
 	}
+	select {
+	case p.slots <- struct{}{}:
+		return p.newInstance()
+	default:
+	}
+	wait := time.NewTimer(p.timeout)
+	defer wait.Stop()
+	select {
+	case pm := <-p.pool:
+		p.onWait(p.name, instanceWaitAcquired)
+		return pm, nil
+	case p.slots <- struct{}{}:
+		p.onWait(p.name, instanceWaitAcquired)
+		return p.newInstance()
+	case <-ctx.Done():
+	case <-wait.C:
+	}
+	p.onWait(p.name, instanceWaitRejected)
+	if p.limitLog.Allow(instanceLimitLogInterval) {
+		p.log.Warn("plugin instance limit reached; request rejected", "plugin", p.name, "max_instances", cap(p.slots))
+	}
+	return nil, errInstanceLimit
+}
+
+// newInstance instantiates a module for a slot the caller already holds,
+// returning the slot if instantiation fails.
+func (p *plugin) newInstance() (*pooledModule, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), instantiateTimeout)
 	defer cancel()
 	mod, err := p.instantiate(ctx)
 	if err != nil {
+		p.freeSlot()
 		return nil, err
 	}
 	return &pooledModule{mod: mod}, nil
+}
+
+// discard closes an instance and frees its slot. Every instance ends here or
+// in the runtime's Close.
+func (p *plugin) discard(mod api.Module) {
+	_ = mod.Close(context.Background())
+	p.freeSlot()
+}
+
+// freeSlot never blocks, so a slot can never be leaked into a deadlock.
+func (p *plugin) freeSlot() {
+	select {
+	case <-p.slots:
+	default:
+	}
 }
 
 // release returns pm to the pool for reuse, unless it has served its lifetime
@@ -456,7 +596,7 @@ func (p *plugin) release(pm *pooledModule) {
 		default:
 		}
 	}
-	_ = pm.mod.Close(context.Background())
+	p.discard(pm.mod)
 }
 
 // kvSet stores a value under an already-namespaced key, enforcing the plugin's
@@ -498,7 +638,7 @@ const (
 // the instance is discarded, not pooled, because a failed module may be in an
 // undefined state. valid, when non-nil, rejects reserved result values.
 func (p *plugin) call(parent context.Context, export string, inv *invocation, valid func(uint32) bool) (res uint32, dur time.Duration, outcome callOutcome, err error) {
-	pm, err := p.acquire()
+	pm, err := p.acquire(parent)
 	if err != nil {
 		return 0, 0, callAcquireFailed, err
 	}
@@ -513,7 +653,7 @@ func (p *plugin) call(parent context.Context, export string, inv *invocation, va
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("plugin %q panicked: %v", p.name, rec)
-			_ = mod.Close(context.Background())
+			p.discard(mod)
 			res, dur, outcome = 0, time.Since(start), callTrapped
 		}
 	}()
@@ -521,7 +661,7 @@ func (p *plugin) call(parent context.Context, export string, inv *invocation, va
 	results, callErr := fn.Call(ctx)
 	dur = time.Since(start)
 	if callErr != nil {
-		_ = mod.Close(context.Background())
+		p.discard(mod)
 		return 0, dur, callTrapped, callErr
 	}
 
@@ -529,12 +669,12 @@ func (p *plugin) call(parent context.Context, export string, inv *invocation, va
 	// overflow); treat that as a contained failure so the caller returns 500
 	// instead of serving a truncated request/response.
 	if inv.err != nil {
-		_ = mod.Close(context.Background())
+		p.discard(mod)
 		return 0, dur, callHostError, inv.err
 	}
 	res = uint32(results[0])
 	if valid != nil && !valid(res) {
-		_ = mod.Close(context.Background())
+		p.discard(mod)
 		return 0, dur, callHostError, errBadResult
 	}
 
@@ -556,7 +696,9 @@ func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.R
 	action, dur, outcome, err := p.call(parent, exportHandleRequest, inv, valid)
 	switch outcome {
 	case callAcquireFailed:
-		p.onPanic(p.name)
+		if !errors.Is(err, errInstanceLimit) {
+			p.onPanic(p.name)
+		}
 		return 0, nil, err
 	case callTrapped:
 		p.onPanic(p.name)
@@ -587,7 +729,9 @@ func (p *plugin) invokeResponse(parent context.Context, r *http.Request, view *r
 	res, dur, outcome, err := p.call(parent, exportHandleResponse, inv, valid)
 	switch outcome {
 	case callAcquireFailed:
-		p.onPanic(p.name)
+		if !errors.Is(err, errInstanceLimit) {
+			p.onPanic(p.name)
+		}
 		p.onRespInv(p.name, "error", 0)
 		return 0, err
 	case callTrapped:
@@ -611,6 +755,9 @@ func (p *plugin) invokeResponse(parent context.Context, r *http.Request, view *r
 func (p *plugin) close() {
 	if p == nil {
 		return
+	}
+	if p.mgr != nil {
+		p.mgr.forget(p)
 	}
 	if p.client != nil {
 		p.client.CloseIdleConnections()

@@ -229,6 +229,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		OnPanic:                   metrics.ObservePluginPanic,
 		OnResponseInvocation:      metrics.ObservePluginResponseInvocation,
 		OnResponseBodyUnavailable: metrics.ObservePluginResponseBodyUnavailable,
+		OnInstanceWait:            metrics.ObservePluginInstanceWait,
 	})
 	if err != nil {
 		log.Error("failed to initialize plugin manager", "error", err)
@@ -239,6 +240,14 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	if plugins.Compiled {
 		log.Info("wasm plugin engine", "mode", pluginEngine, "reason", pluginEngineReason)
 	}
+	metrics.SetPluginInstanceSource(func() []observability.PluginInstanceStats {
+		stats := pluginMgr.InstanceStats()
+		out := make([]observability.PluginInstanceStats, len(stats))
+		for i, s := range stats {
+			out[i] = observability.PluginInstanceStats{Plugin: s.Plugin, Live: s.Live}
+		}
+		return out
+	})
 
 	// genRes owns the generational teardown lifecycle of the handler tree.
 	genRes := NewGenerationResources(poolReg)

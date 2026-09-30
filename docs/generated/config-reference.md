@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 311 configurable leaves.
+Coverage: 312 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -1121,6 +1121,22 @@ MaxFetchResponse caps a fetch response body.
 | Default | 1m |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero applies the documented plugin default |
+| Active when | always |
+
+## `plugins.*.max_instances` {#plugins-x-max_instances}
+
+MaxInstances caps the plugin's live module instances, idle and in use.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `plugins` |
+| Why | the plugin set is rebuilt and re-instantiated on each successful reload |
+| Requires | `wasm_plugins` |
+| Default | 64 |
+| Constraint | non-negative |
+| Zero/empty semantics | omitted/zero defaults to 64 |
 | Active when | always |
 
 ## `plugins.*.max_invocations` {#plugins-x-max_invocations}

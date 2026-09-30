@@ -74,6 +74,17 @@ v2.1.0 tag or its packaged READMEs.
   (IANA/RFC types), ahead of the host database, which on Debian/Ubuntu maps
   `.ts` to a Qt Linguist type. The Docker e2e asserts the shipped image.
 
+- **WASM plugin instances are capped per plugin (#506).** The instance pool
+  bounded only idle instances; under concurrency every call instantiated a new
+  module, so memory grew with request concurrency (each up to `memory_limit`).
+  New `plugins.<name>.max_instances` (default 64, hot-reloadable) caps live
+  instances; a call that finds them all busy waits one `timeout`, then fails
+  with `503` and `Retry-After: 1` rather than a panic-counted `500`. New
+  `jul_plugin_instances{plugin}` gauge and
+  `jul_plugin_instance_waits_total{plugin,result}` counter. The admin API and
+  Console keep the field on edit (omitted-means-keep). `docs/abi.md` no longer
+  calls the pool bounded without saying how.
+
 ## [2.1.0] - 2026-09-30
 
 Published stable minor after `v2.0.0`:

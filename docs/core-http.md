@@ -503,6 +503,8 @@ Labels fall into three classes by what bounds them:
 | `jul_plugin_invocations_total` | `plugin`, `result` | configured plugins × `continue`/`stop`/`error` |
 | `jul_plugin_duration_seconds` | `plugin` | configured plugins |
 | `jul_plugin_panics_total` | `plugin` | configured plugins |
+| `jul_plugin_instances` | `plugin` | configured plugins |
+| `jul_plugin_instance_waits_total` | `plugin`, `result` | configured plugins × `acquired`/`rejected` |
 | `jul_plugin_response_invocations_total` | `plugin`, `result` | configured plugins × `continue`/`reject`/`error` |
 | `jul_plugin_response_duration_seconds` | `plugin` | configured plugins |
 | `jul_plugin_response_body_unavailable_total` | `plugin`, `reason` | configured plugins × `none`/`too_large`/`streaming`/`encoded`/`partial`/`upgraded` |

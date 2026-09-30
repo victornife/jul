@@ -513,6 +513,11 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   they load the same `.wasm` file.
 - **No streaming bodies.** The host buffers the full request body before passing
   it to the guest; very large bodies increase per-request memory pressure.
+- **Plugin concurrency is capped per plugin.** At most `max_instances` module
+  instances (default 64) exist per plugin; a call that finds them all busy
+  waits one `timeout`, then its request fails with `503` and `Retry-After: 1`
+  (#506). Guest memory is bounded by `max_instances × memory_limit`; host body
+  buffers still follow request concurrency.
 - **WASM binary must be pre-compiled.** Modules are compiled when a
   configuration is activated, not on first use, and a malformed WASM binary
   prevents that configuration from starting. Depending on platform and sandbox,
