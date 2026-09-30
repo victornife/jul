@@ -30,6 +30,8 @@ type h3Conn struct {
 	server *http3.Server
 	ln     *quic.EarlyListener
 	udp    *net.UDPConn
+	// gate caps concurrently served QUIC connections (max_conns).
+	gate *h3ConnGate
 
 	onConn func(int64)
 	// onExit is invoked at most once by acceptLoop, with the error that ended
@@ -51,11 +53,15 @@ type h3Conn struct {
 // reason other than Close. Must be called before Activate.
 func (c *h3Conn) SetOnExit(f func(error)) { c.onExit = f }
 
+// SetConnLimit publishes the max_conns cap for QUIC connections.
+func (c *h3Conn) SetConnLimit(limit int) { c.gate.setLimit(limit) }
+
 // Close gracefully drains in-flight HTTP/3 requests (bounded by ctx, which the
 // server lifecycle derives from the configured shutdown_timeout), stops
 // accepting new QUIC connections, and releases the UDP socket.
 func (c *h3Conn) Close(ctx context.Context) error {
 	c.closing.Store(true)      // acceptLoop's Accept error below is expected; suppress onExit.
+	c.gate.close()             // release an accepted connection waiting for admission
 	_ = c.server.Shutdown(ctx) // GOAWAY + drain; marks the server closed
 	err := c.ln.Close()        // unblock acceptLoop
 	_ = c.udp.Close()          // release the socket
@@ -102,6 +108,14 @@ func newStagedHTTP3(addr string, getCert func(*tls.ClientHelloInfo) (*tls.Certif
 // preserved, including GetCertificate, ClientAuth, ClientCAs,
 // VerifyPeerCertificate and VerifyConnection.
 func newStagedHTTP3WithTLS(addr string, tlsTemplate *tls.Config, handler http.Handler, onConn func(int64), log *slog.Logger) (h3Listener, error) {
+	return newStagedHTTP3WithLimits(addr, tlsTemplate, handler, onConn, log, h3Limits{})
+}
+
+// newStagedHTTP3WithLimits is newStagedHTTP3WithTLS plus the sibling TCP
+// listener's limits: max_header_bytes, idle_timeout and max_conns apply to
+// QUIC as well. 0-RTT stays disabled (explicitly, not by library default), so
+// replayable early data never reaches a handler.
+func newStagedHTTP3WithLimits(addr string, tlsTemplate *tls.Config, handler http.Handler, onConn func(int64), log *slog.Logger, limits h3Limits) (h3Listener, error) {
 	if tlsTemplate == nil {
 		return nil, errors.New("http3 requires a TLS configuration")
 	}
@@ -136,16 +150,24 @@ func newStagedHTTP3WithTLS(addr string, tlsTemplate *tls.Config, handler http.Ha
 	}
 	tlsConf := http3.ConfigureTLSConfig(h3TLS)
 
-	ln, err := quic.ListenEarly(udpConn, tlsConf, nil)
+	ln, err := quic.ListenEarly(udpConn, tlsConf, &quic.Config{
+		Allow0RTT:      false,
+		MaxIdleTimeout: limits.idleTimeout,
+	})
 	if err != nil {
 		_ = udpConn.Close()
 		return nil, fmt.Errorf("listen quic: %w", err)
 	}
 
 	inst := &h3Conn{
-		server: &http3.Server{Handler: handler},
+		server: &http3.Server{
+			Handler:        handler,
+			MaxHeaderBytes: limits.maxHeaderBytes,
+			IdleTimeout:    limits.idleTimeout,
+		},
 		ln:     ln,
 		udp:    udpConn,
+		gate:   newH3ConnGate(limits.connLimit),
 		onConn: onConn,
 		log:    log,
 	}
@@ -168,10 +190,17 @@ func (c *h3Conn) acceptLoop(onConn func(int64), log *slog.Logger) {
 			}
 			return // listener closed
 		}
+		// Like the TCP limiter: an accepted connection waits for a slot while
+		// quic-go queues (then refuses) further handshakes.
+		if !c.gate.acquire() {
+			_ = conn.CloseWithError(h3ErrorNoError, "listener closing")
+			return
+		}
 		if onConn != nil {
 			onConn(1)
 		}
 		go func() {
+			defer c.gate.release()
 			if onConn != nil {
 				defer onConn(-1)
 			}

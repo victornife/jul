@@ -103,6 +103,22 @@ Jul cannot force an immediate re-check. See
 | `enabled` | `false` | boolean |
 | `alt_svc_max_age` | `86400` (24h) | positive integer, seconds |
 
+### Listener limits on HTTP/3
+
+The QUIC listener shares its address with a TCP listener and honours that
+listener's limits:
+
+| Setting | Effect on HTTP/3 |
+| --- | --- |
+| `max_header_bytes` | Bounds a request's HEADERS frame (`http3.Server.MaxHeaderBytes`). |
+| `idle_timeout` | Closes a connection idle at the QUIC layer (`MaxIdleTimeout`, negotiated down to the client's value if lower) and at the HTTP/3 layer. |
+| `[rate_limit].max_conns` | Caps concurrently served QUIC connections per listener, counted separately from TCP. Like the TCP cap, an extra connection waits for a slot; beyond quic-go's accept queue (32) further handshakes are refused. Hot-reloadable. |
+| `read_header_timeout` | Not applied. quic-go has no per-stream header deadline; a stalled handshake is bounded by the QUIC handshake idle timeout (5 s) and an idle connection by `idle_timeout`. |
+| `read_timeout` / `write_timeout` | Not applied (both are off by default on TCP too). |
+
+0-RTT is disabled explicitly: early data is never accepted, so it cannot be
+replayed into a handler.
+
 ## TLS and mutual-TLS parity
 
 HTTP/3 is created from a clone of the fully prepared TLS policy used by the
@@ -178,13 +194,11 @@ or high-RTT paths, not raw throughput on localhost.
 HTTP/3 shifts the transport from TCP to UDP and from TLS 1.2 to TLS 1.3, which
 changes the attack surface:
 
-1. **0-RTT replay vulnerability.** QUIC supports 0-RTT resumption for
-   reconnecting clients. Jul.IA delegates QUIC handshake semantics to quic-go,
-   which enables 0-RTT by default. A replayed 0-RTT packet may reach the
-   handler twice, causing duplicate side effects for non-idempotent requests.
-   Counter-measures: configure upstreams to be idempotent where possible; do
-   not rely on HTTP/3 for critical mutation endpoints without additional
-   idempotency keys; monitor for duplicate trace ids.
+1. **0-RTT replay.** QUIC can accept 0-RTT early data from resuming clients,
+   and replayed early data can reach a handler twice. Jul.IA disables 0-RTT
+   explicitly (`quic.Config.Allow0RTT = false`, which is also quic-go's
+   default), so early data is rejected and clients fall back to a full
+   1-RTT handshake. Enabling 0-RTT would need idempotency controls first.
 
 2. **UDP amplification / reflection.** QUIC's handshake packets are larger than
    the initiating client hello, creating a potential amplification vector for
@@ -198,9 +212,11 @@ changes the attack surface:
    (shared across all connections on the same listener port) plus state in the
    quic-go connection manager. A SYN-flood equivalent for QUIC (INIT packets
    without completing the handshake) can exhaust connection table memory.
-   Counter-measures: the kernel UDP socket backlog provides basic backpressure;
-   deploy behind a CDN or load balancer that terminates QUIC and proxies over
-   TCP to Jul.IA for untrusted traffic.
+   Counter-measures: `[rate_limit].max_conns` caps concurrently served QUIC
+   connections and quic-go refuses handshakes beyond its accept queue; the
+   kernel UDP socket backlog provides basic backpressure; deploy behind a CDN
+   or load balancer that terminates QUIC and proxies over TCP to Jul.IA for
+   untrusted traffic.
 
 4. **Shared TLS policy affects both paths.** HTTP/3 reuses the complete listener
    TLS policy, including certificate selection and server-level mTLS. A

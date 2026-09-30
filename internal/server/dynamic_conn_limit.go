@@ -157,5 +157,8 @@ func (s *Server) updateConnectionLimits(cfg *config.Config) {
 		if entry != nil && entry.connLimiter != nil {
 			entry.connLimiter.SetLimit(limit)
 		}
+		if entry != nil && entry.h3 != nil {
+			entry.h3.SetConnLimit(limit)
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"jul/internal/config"
 )
@@ -36,6 +37,23 @@ type h3Listener interface {
 	// Must be called before Activate to avoid a race with the accept loop
 	// starting; the single serial reload loop already guarantees that order.
 	SetOnExit(func(error))
+
+	// SetConnLimit publishes the [rate_limit].max_conns cap for QUIC
+	// connections on this listener; 0 is unlimited. Admitted connections are
+	// never closed by a lower cap.
+	SetConnLimit(int)
+}
+
+// h3Limits carries the listener limits that also bound the HTTP/3 listener on
+// the same address. Zero values keep the quic-go defaults.
+type h3Limits struct {
+	// maxHeaderBytes bounds a request's HEADERS frame (max_header_bytes).
+	maxHeaderBytes int
+	// idleTimeout closes connections idle at the QUIC and HTTP/3 layers
+	// (idle_timeout).
+	idleTimeout time.Duration
+	// connLimit caps concurrently served QUIC connections (max_conns).
+	connLimit int
 }
 
 // CheckHTTP3 reports whether the configuration can be served by this binary with

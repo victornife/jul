@@ -34,3 +34,9 @@ func newStagedHTTP3(_ string, _ func(*tls.ClientHelloInfo) (*tls.Certificate, er
 func newStagedHTTP3WithTLS(_ string, _ *tls.Config, _ http.Handler, _ func(int64), _ *slog.Logger) (h3Listener, error) {
 	return nil, errors.New("http3 requires a build with -tags http3")
 }
+
+// newStagedHTTP3WithLimits is the no-HTTP/3 stub for the production listener
+// path, which also passes the listener limits.
+func newStagedHTTP3WithLimits(_ string, _ *tls.Config, _ http.Handler, _ func(int64), _ *slog.Logger, _ h3Limits) (h3Listener, error) {
+	return nil, errors.New("http3 requires a build with -tags http3")
+}

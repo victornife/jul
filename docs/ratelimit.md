@@ -108,7 +108,9 @@ stays bounded under churny key spaces such as per-IP limiting.
 `max_conns` caps concurrent TCP connections per listener independently of the
 rate limiter.  When the cap is reached, new connections are accepted by the
 kernel but not served until a slot frees.  Because the cap is listener-global,
-it cannot be overridden per-location (validation rejects that).
+it cannot be overridden per-location (validation rejects that).  A listener
+with HTTP/3 enabled applies the same cap to its QUIC connections, counted
+separately from TCP (see [http3.md](http3.md#listener-limits-on-http3)).
 
 Use cases:
 

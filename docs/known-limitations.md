@@ -414,6 +414,10 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 - **QUIC path MTU discovery.** Some networks drop oversized UDP packets; QUIC
   PMTUD mitigates this, but a few firewall configurations may block or
   rate-limit QUIC traffic, causing clients to fall back to TCP.
+- **`read_header_timeout` does not apply to HTTP/3.** quic-go exposes no
+  per-stream header deadline. `max_header_bytes`, `idle_timeout` and
+  `[rate_limit].max_conns` do apply (see
+  [http3.md](http3.md#listener-limits-on-http3)).
 
 ---
 

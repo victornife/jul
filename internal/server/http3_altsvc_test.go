@@ -243,6 +243,7 @@ type fakeH3Listener struct {
 func (f *fakeH3Listener) Activate() error             { return f.activateErr }
 func (f *fakeH3Listener) Close(context.Context) error { return nil }
 func (f *fakeH3Listener) SetOnExit(fn func(error))    { f.onExit = fn }
+func (f *fakeH3Listener) SetConnLimit(int)            {}
 
 func newLoopbackListener(t *testing.T) net.Listener {
 	t.Helper()
