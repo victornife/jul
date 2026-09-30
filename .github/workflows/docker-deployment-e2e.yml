@@ -46,6 +46,15 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Dockerfile Go toolchain matches go.mod
+        run: |
+          want=$(awk '$1 == "go" { print $2; exit }' go.mod)
+          got=$(sed -n 's/^FROM golang:\([0-9][0-9.]*\)-alpine.*/\1/p' Dockerfile | head -n1)
+          echo "go.mod: ${want}  Dockerfile: ${got}"
+          if [ -z "$got" ] || [ "$got" != "$want" ]; then
+            echo "::error file=Dockerfile::build stage golang:${got:-?} must equal go.mod go ${want}"
+            exit 1
+          fi
       - name: Record Docker runtime
         run: docker version
       - name: Build and exercise the Docker deployment
