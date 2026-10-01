@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -227,5 +228,39 @@ func TestDoReleasesSuccessfulNonRetainedAttempt(t *testing.T) {
 	}
 	if got := p.Backends()[0].Inflight(); got != 0 {
 		t.Fatalf("successful non-retained attempt left in-flight=%d", got)
+	}
+}
+
+// A response that owes no content carries no length expectation, so its empty
+// body is not a truncation (#534). A body-bearing response keeps its length.
+func TestOwedBodyLength(t *testing.T) {
+	get := &http.Request{Method: http.MethodGet}
+	head := &http.Request{Method: http.MethodHead}
+	for _, tc := range []struct {
+		name string
+		resp *http.Response
+		want int64
+	}{
+		{"GET 200", &http.Response{Request: get, StatusCode: 200, ContentLength: 21}, 21},
+		{"GET unknown length", &http.Response{Request: get, StatusCode: 200, ContentLength: -1}, -1},
+		{"HEAD 200", &http.Response{Request: head, StatusCode: 200, ContentLength: 21}, -1},
+		{"HEAD 404", &http.Response{Request: head, StatusCode: 404, ContentLength: 460}, -1},
+		{"204", &http.Response{Request: get, StatusCode: 204, ContentLength: 5}, -1},
+		{"304", &http.Response{Request: get, StatusCode: 304, ContentLength: 21}, -1},
+		{"101", &http.Response{Request: get, StatusCode: 101, ContentLength: 0}, -1},
+		{"no request", &http.Response{StatusCode: 200, ContentLength: 7}, 7},
+	} {
+		if got := OwedBodyLength(tc.resp); got != tc.want {
+			t.Errorf("%s: OwedBodyLength = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+
+	// A real truncation is still reported for a body-bearing response.
+	var got error
+	b := WrapAttemptBody(io.NopCloser(strings.NewReader("short")), OwedBodyLength(&http.Response{Request: get, StatusCode: 200, ContentLength: 21}),
+		context.Background(), context.Background(), func(_ AttemptClassification, err error) { got = err })
+	_, err := io.ReadAll(b)
+	if !errors.Is(err, io.ErrUnexpectedEOF) || !errors.Is(got, io.ErrUnexpectedEOF) {
+		t.Fatalf("truncated GET: read err %v, completion err %v; want io.ErrUnexpectedEOF", err, got)
 	}
 }

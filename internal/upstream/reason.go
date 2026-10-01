@@ -65,6 +65,11 @@ const (
 	// expired. It is distinct from a Jul-owned retry deadline because only the
 	// latter is an edge policy decision; neither is backend-health evidence.
 	ReasonClientDeadline Reason = "client_deadline"
+	// ReasonClientRequestBody means the inbound request body could not be read:
+	// malformed framing, over client_max_body_size, or cut off by the client.
+	// The client is answered 400 (413 when over the size limit); backend health
+	// is untouched and the request is not retried.
+	ReasonClientRequestBody Reason = "client_request_body"
 )
 
 // StatusClientClosedRequest is nginx's 499. It is not an IANA status and is only
@@ -83,6 +88,7 @@ const StatusFromLastAttempt = 0
 // codes package so a typo cannot survive.
 const (
 	GRPCCodeCancelled        uint32 = 1
+	GRPCCodeInvalidArgument  uint32 = 3
 	GRPCCodeDeadlineExceeded uint32 = 4
 	GRPCCodeUnavailable      uint32 = 14
 
@@ -113,6 +119,7 @@ var reasonTable = []struct {
 	{ReasonRequestNotReplayable, StatusFromLastAttempt, grpcCodeFromLastAttempt},
 	{ReasonClientCancelled, StatusClientClosedRequest, GRPCCodeCancelled},
 	{ReasonClientDeadline, http.StatusGatewayTimeout, GRPCCodeDeadlineExceeded},
+	{ReasonClientRequestBody, http.StatusBadRequest, GRPCCodeInvalidArgument},
 }
 
 // Reasons returns every Reason, in taxonomy order. Callers that must enumerate
@@ -196,6 +203,10 @@ func ReasonFor(err error, inbound context.Context) Reason {
 		case errors.Is(inbound.Err(), context.DeadlineExceeded):
 			return ReasonClientDeadline
 		}
+	}
+	var bodyErr *ClientBodyError
+	if errors.As(err, &bodyErr) {
+		return ReasonClientRequestBody
 	}
 	if tlsIdentityFailure(err) {
 		return ReasonUpstreamTLSIdentity

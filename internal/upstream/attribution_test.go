@@ -8,11 +8,15 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"jul/internal/config"
@@ -33,6 +37,114 @@ type deadlineOnlyContext struct {
 }
 
 func (c deadlineOnlyContext) Deadline() (time.Time, bool) { return c.deadline, true }
+
+func TestWatchInboundBodyAbsent(t *testing.T) {
+	for _, body := range []io.ReadCloser{nil, http.NoBody} {
+		req := &http.Request{Body: body}
+		if got := WatchInboundBody(req); got != nil || req.Body != body {
+			t.Fatalf("absent body was replaced: watcher=%v body=%v", got, req.Body)
+		}
+	}
+}
+
+func TestInboundBodyCleanRead(t *testing.T) {
+	transportErr := errors.New("write tcp: broken pipe")
+	var absent *InboundBody
+	if got := absent.Attribute(transportErr); got != transportErr {
+		t.Fatalf("absent watcher changed the transport error: %v", got)
+	}
+
+	body := io.NopCloser(strings.NewReader("fine"))
+	req := &http.Request{Body: body}
+	watch := WatchInboundBody(req)
+	if watch == nil || req.Body != watch || watch.ReadCloser != body {
+		t.Fatal("request body was not wrapped around the original reader")
+	}
+	if got := watch.Attribute(transportErr); got != transportErr {
+		t.Fatalf("unread body changed the transport error: %v", got)
+	}
+	data, err := io.ReadAll(req.Body)
+	if err != nil || string(data) != "fine" {
+		t.Fatalf("read = %q, %v, want fine without error", data, err)
+	}
+	if got := watch.Attribute(transportErr); got != transportErr {
+		t.Fatalf("clean body or EOF blamed the client: %v", got)
+	}
+	if got := watch.Attribute(nil); got != nil {
+		t.Fatalf("successful transport acquired an error: %v", got)
+	}
+	if err := req.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInboundBodyAttribution(t *testing.T) {
+	for _, cause := range []error{errors.New("invalid byte in chunk length"), &http.MaxBytesError{Limit: 1024}} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			req := &http.Request{Body: io.NopCloser(iotest.ErrReader(cause))}
+			watch := WatchInboundBody(req)
+			if _, err := io.ReadAll(req.Body); err != cause {
+				t.Fatalf("read error = %v, want %v", err, cause)
+			}
+			transportErr := errors.New("write tcp: broken pipe")
+			attributed := watch.Attribute(transportErr)
+			var bodyErr *ClientBodyError
+			if !errors.As(attributed, &bodyErr) || bodyErr.Err != cause {
+				t.Fatalf("attributed error = %v, want client body cause %v", attributed, cause)
+			}
+			if !errors.Is(attributed, cause) || attributed.Error() != "read inbound request body: "+cause.Error() {
+				t.Fatalf("client body error lost its cause or message: %v", attributed)
+			}
+			wrapped := fmt.Errorf("transport attempt: %w", attributed)
+			classification := ClassifyAttemptError(wrapped, nil, nil)
+			if classification.Origin() != OriginClientRequest || classification.Health() != HealthNeutral || classification.Reason() != ReasonClientRequestBody {
+				t.Fatalf("classification = {%q %q %d}, want client_request/client_request_body/neutral", classification.Origin(), classification.Reason(), classification.Health())
+			}
+			if got := ReasonFor(wrapped, nil); got != ReasonClientRequestBody {
+				t.Fatalf("reason = %q, want client_request_body", got)
+			}
+			if got := watch.Attribute(nil); got != nil {
+				t.Fatalf("body failure invented a successful transport error: %v", got)
+			}
+		})
+	}
+}
+
+func TestInboundBodyRetainsFirstError(t *testing.T) {
+	first := errors.New("first body failure")
+	second := errors.New("second body failure")
+	req := &http.Request{Body: io.NopCloser(iotest.ErrReader(first))}
+	watch := WatchInboundBody(req)
+	buffer := make([]byte, 4)
+	if _, err := watch.Read(buffer); err != first {
+		t.Fatalf("first read = %v", err)
+	}
+	watch.ReadCloser = io.NopCloser(iotest.ErrReader(second))
+	if _, err := watch.Read(buffer); err != second {
+		t.Fatalf("second read = %v", err)
+	}
+	watch.ReadCloser = io.NopCloser(strings.NewReader(""))
+	if _, err := watch.Read(buffer); err != io.EOF {
+		t.Fatalf("final read = %v, want EOF", err)
+	}
+	attributed := watch.Attribute(errors.New("transport failed"))
+	if !errors.Is(attributed, first) || errors.Is(attributed, second) {
+		t.Fatalf("later reads replaced the first failure: %v", attributed)
+	}
+}
+
+func TestInboundBodyCancellationPrecedence(t *testing.T) {
+	cause := &ClientBodyError{Err: errors.New("client upload failed")}
+	client, cancel := context.WithCancel(context.Background())
+	cancel()
+	classification := ClassifyAttemptError(cause, client, nil)
+	if classification.Origin() != OriginClientCancellation || classification.Health() != HealthNeutral || classification.Reason() != ReasonClientCancelled {
+		t.Fatalf("cancelled upload classification = {%q %q %d}", classification.Origin(), classification.Reason(), classification.Health())
+	}
+	if got := ReasonFor(cause, client); got != ReasonClientCancelled {
+		t.Fatalf("cancelled upload reason = %q, want client_cancelled", got)
+	}
+}
 
 func TestAttemptFailureAttributionMatrix(t *testing.T) {
 	clientCancelled, cancelClient := context.WithCancel(context.Background())

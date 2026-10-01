@@ -42,52 +42,52 @@ func WatchFile(ctx context.Context, path string, debounce time.Duration, log *sl
 
 	go func() {
 		defer w.Close()
-		var timer *time.Timer
-		var timerC <-chan time.Time
-
-		emit := func() {
-			select {
-			case out <- struct{}{}:
-			default:
-			}
-		}
-
-		for {
-			select {
-			case <-ctx.Done():
-				if timer != nil {
-					timer.Stop()
-				}
-				return
-			case ev, ok := <-w.Events:
-				if !ok {
-					return
-				}
-				// Only react to changes affecting our config file.
-				if filepath.Clean(ev.Name) != abs {
-					continue
-				}
-				if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
-					continue
-				}
-				if timer == nil {
-					timer = time.NewTimer(debounce)
-					timerC = timer.C
-				} else {
-					timer.Reset(debounce)
-				}
-			case <-timerC:
-				emit()
-			case err, ok := <-w.Errors:
-				if !ok {
-					return
-				}
-				if log != nil {
-					log.Warn("config watcher error", "error", err)
-				}
-			}
-		}
+		watchFileEvents(ctx, abs, debounce, log, w.Events, w.Errors, out)
 	}()
 
 	return out, nil
+}
+
+func watchFileEvents(ctx context.Context, path string, debounce time.Duration, log *slog.Logger, events <-chan fsnotify.Event, errs <-chan error, out chan<- struct{}) {
+	var timer *time.Timer
+	var timerC <-chan time.Time
+
+	emit := func() {
+		select {
+		case out <- struct{}{}:
+		default:
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			if timer != nil {
+				timer.Stop()
+			}
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			if filepath.Clean(ev.Name) != path || ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
+				continue
+			}
+			if timer == nil {
+				timer = time.NewTimer(debounce)
+				timerC = timer.C
+			} else {
+				timer.Reset(debounce)
+			}
+		case <-timerC:
+			emit()
+		case err, ok := <-errs:
+			if !ok {
+				return
+			}
+			if log != nil {
+				log.Warn("config watcher error", "error", err)
+			}
+		}
+	}
 }
