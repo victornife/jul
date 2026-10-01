@@ -6,6 +6,7 @@
 package server
 
 import (
+	"context"
 	"sync"
 
 	"github.com/quic-go/quic-go"
@@ -23,10 +24,13 @@ type h3ConnGate struct {
 	limit  int
 	active int
 	closed bool
+	idle   chan struct{}
 }
 
 func newH3ConnGate(limit int) *h3ConnGate {
-	g := &h3ConnGate{}
+	idle := make(chan struct{})
+	close(idle)
+	g := &h3ConnGate{idle: idle}
 	g.cond = sync.NewCond(&g.mu)
 	g.setLimit(limit)
 	return g
@@ -52,6 +56,9 @@ func (g *h3ConnGate) acquire() bool {
 	if g.closed {
 		return false
 	}
+	if g.active == 0 {
+		g.idle = make(chan struct{})
+	}
 	g.active++
 	return true
 }
@@ -60,9 +67,29 @@ func (g *h3ConnGate) release() {
 	g.mu.Lock()
 	if g.active > 0 {
 		g.active--
+		if g.active == 0 {
+			close(g.idle)
+		}
 	}
 	g.cond.Broadcast()
 	g.mu.Unlock()
+}
+
+func (g *h3ConnGate) waitIdle(ctx context.Context) error {
+	g.mu.Lock()
+	if g.active == 0 {
+		g.mu.Unlock()
+		return nil
+	}
+	idle := g.idle
+	g.mu.Unlock()
+
+	select {
+	case <-idle:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (g *h3ConnGate) close() {
