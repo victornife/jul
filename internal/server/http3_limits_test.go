@@ -104,6 +104,25 @@ func TestHTTP3ConnGateBlocksAtLimitAndReleases(t *testing.T) {
 	}
 }
 
+func TestHTTP3ConnGateWaitIdle(t *testing.T) {
+	g := newH3ConnGate(0)
+	if !g.acquire() {
+		t.Fatal("acquire must succeed")
+	}
+	g.close()
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := g.waitIdle(canceled); err != context.Canceled {
+		t.Fatalf("waitIdle with active connection error = %v, want context.Canceled", err)
+	}
+
+	g.release()
+	if err := g.waitIdle(context.Background()); err != nil {
+		t.Fatalf("waitIdle after release: %v", err)
+	}
+}
+
 func TestHTTP3HonoursMaxHeaderBytes(t *testing.T) {
 	f := startLimitedHTTP3(t, okHandler(), h3Limits{maxHeaderBytes: 4 << 10})
 	client, _ := f.client(t, 5*time.Second)

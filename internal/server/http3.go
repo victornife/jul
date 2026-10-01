@@ -60,12 +60,13 @@ func (c *h3Conn) SetConnLimit(limit int) { c.gate.setLimit(limit) }
 // server lifecycle derives from the configured shutdown_timeout), stops
 // accepting new QUIC connections, and releases the UDP socket.
 func (c *h3Conn) Close(ctx context.Context) error {
-	c.closing.Store(true)      // acceptLoop's Accept error below is expected; suppress onExit.
-	c.gate.close()             // release an accepted connection waiting for admission
-	_ = c.server.Shutdown(ctx) // GOAWAY + drain; marks the server closed
-	err := c.ln.Close()        // unblock acceptLoop
-	_ = c.udp.Close()          // release the socket
-	return err
+	c.closing.Store(true)                 // acceptLoop's Accept error below is expected; suppress onExit.
+	c.gate.close()                        // release an accepted connection waiting for admission
+	shutdownErr := c.server.Shutdown(ctx) // GOAWAY + drain; marks the server closed
+	listenerErr := c.ln.Close()           // unblock acceptLoop
+	udpErr := c.udp.Close()               // release the socket
+	gateErr := c.gate.waitIdle(ctx)       // include callbacks for accepted connections
+	return errors.Join(shutdownErr, listenerErr, udpErr, gateErr)
 }
 
 // Activate starts accepting QUIC connections and serving HTTP/3. It is safe to
