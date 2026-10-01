@@ -56,7 +56,18 @@ type Options struct {
 	// build's response-phase hooks.
 	OnResponseInvocation      func(plugin, result string, d time.Duration)
 	OnResponseBodyUnavailable func(plugin, reason string)
+	// OnInstanceWait mirrors the compiled build's instance-cap hook.
+	OnInstanceWait func(plugin, result string)
 }
+
+// InstanceStats mirrors the compiled build's live-instance report.
+type InstanceStats struct {
+	Plugin string
+	Live   int
+}
+
+// InstanceStats reports nothing in the lean build.
+func (*Manager) InstanceStats() []InstanceStats { return nil }
 
 // Manager is a no-op plugin manager in the lean build.
 type Manager struct{}

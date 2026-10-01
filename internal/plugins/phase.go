@@ -8,6 +8,7 @@ package plugins
 import (
 	"bufio"
 	"context"
+	"errors"
 	"mime"
 	"net"
 	"net/http"
@@ -293,6 +294,9 @@ func (l *responseLayer) decide(state uint32, body []byte) (*responseView, bool) 
 	switch {
 	case err != nil:
 		l.final, l.failed = http.StatusInternalServerError, true
+		if errors.Is(err, errInstanceLimit) {
+			l.final = http.StatusServiceUnavailable
+		}
 	case res == responseReject:
 		l.final = http.StatusBadGateway
 		if view.statusSet && view.status >= 400 && view.status <= 599 {
@@ -332,6 +336,9 @@ func (l *responseLayer) writeFinal() {
 		body = []byte("plugin error\n")
 		h.Set("Content-Type", "text/plain; charset=utf-8")
 		h.Set("X-Content-Type-Options", "nosniff")
+		if l.final == http.StatusServiceUnavailable {
+			h.Set("Retry-After", "1")
+		}
 	}
 	h.Set("Content-Length", strconv.Itoa(len(body)))
 	l.parent.WriteHeader(l.final)

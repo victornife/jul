@@ -5789,6 +5789,10 @@
                     "max_fetch_response": {
                       "type": "string"
                     },
+                    "max_instances": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
                     "max_invocations": {
                       "type": "integer",
                       "format": "int64"

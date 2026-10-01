@@ -557,6 +557,15 @@ func (l *listener) dialBackend(pool *upstream.Pool, network string, timeout time
 			return nil, upstream.Attempt{}, err
 		}
 		conn, derr := net.DialTimeout(network, b.Address, timeout)
+		if derr == nil && network == "udp" {
+			// A hostname or discovered backend can resolve to a group address
+			// that validation could not see. Connecting a UDP socket sends
+			// nothing, so refuse it here before any datagram is relayed (#511).
+			if ua, ok := conn.RemoteAddr().(*net.UDPAddr); ok && config.IsGroupAddress(ua.IP) {
+				_ = conn.Close()
+				conn, derr = nil, fmt.Errorf("stream: UDP backend %s resolved to multicast or broadcast address %s; skipped", b.Address, ua.IP)
+			}
+		}
 		if derr != nil {
 			if tried == nil {
 				tried = make(map[upstream.BackendIdentity]struct{}, attempts)

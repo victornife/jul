@@ -742,6 +742,11 @@ try_files = ["$uri", "$uri/", "/index.html"]
 | `allow_hidden` | bool | Serve dotfiles |
 | `cache_control` | string | `Cache-Control` header for served files |
 
+Content-Type comes from the file extension. Streaming-media extensions
+(`.m3u8`, `.mpd`, `.ts`, `.m4s`, `.mkv`, `.aac`) use Jul's own table, so they
+are correct in the distroless image too; see
+[Content-Type for static files](core-http.md#content-type-for-static-files).
+
 ### Reverse proxy
 
 Forward requests to an HTTP backend. This is the workhorse action for API
@@ -1767,6 +1772,10 @@ kv = true
 | `timeout` | Deadline for a single invocation; guest is torn down on overrun (default 100ms) |
 | `kv` | Grant the key/value store host functions (namespaced per plugin) |
 | `fetch` / `allowed_hosts` | Grant guarded outbound HTTP to the listed hosts |
+| `max_instances` | Cap on live module instances per plugin (default 64); calls beyond it wait one `timeout`, then get `503` |
+
+The full key list, including body, fetch, KV and pool limits, is in
+[plugins.md](plugins.md#configuration).
 
 Attach a plugin to traffic by referencing its name. Server- and location-level
 `plugins = [...]` lists run as **middleware** (outermost first); a location

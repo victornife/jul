@@ -55,6 +55,38 @@ def expect(status, got, body):
     assert got == status, f"HTTP {got}, expected {status}: {body[:500]!r}"
 
 
+def head_content_type(url):
+    req = urllib.request.Request(url, method="HEAD")
+    with urllib.request.urlopen(req, timeout=5) as response:
+        return response.status, response.headers.get("Content-Type")
+
+
+# The distroless image has no system MIME database, so these streaming types
+# come from Jul's own table (#510). Sample bodies would otherwise sniff as
+# text/plain, text/xml or application/octet-stream.
+STREAMING_SAMPLES = {
+    "live.m3u8": (b"#EXTM3U\n#EXT-X-VERSION:3\n", "application/vnd.apple.mpegurl"),
+    "manifest.mpd": (b'<?xml version="1.0"?><MPD xmlns="urn:mpeg:dash:schema:mpd:2011"/>', "application/dash+xml"),
+    "seg0.ts": (b"\x47\x40\x00\x10" + bytes(184), "video/mp2t"),
+    "seg1.m4s": (b"\x00\x00\x00\x18styp" + bytes(16), "video/iso.segment"),
+    "movie.mkv": (b"\x1a\x45\xdf\xa3" + bytes(28), "video/matroska"),
+    "audio.aac": (b"\xff\xf1\x50\x80" + bytes(28), "audio/aac"),
+}
+
+
+def check_streaming_types(container, base_url, tmp):
+    media = tmp / "media"
+    media.mkdir()
+    for name, (content, _) in STREAMING_SAMPLES.items():
+        (media / name).write_bytes(content)
+        (media / name).chmod(0o644)
+    media.chmod(0o755)
+    docker("cp", str(media), container + ":/var/www/media")
+    for name, (_, want) in STREAMING_SAMPLES.items():
+        status, got = head_content_type(f"{base_url}/media/{name}")
+        assert status == 200 and got == want, f"{name}: HTTP {status} Content-Type {got!r}, want {want!r}"
+
+
 def wait_ready(container, traffic_url, admin_url=None):
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
@@ -101,6 +133,8 @@ def main():
         assert b"Jul" in body, "baked placeholder site not served"
         docker("exec", containers[0], "/usr/local/bin/jul", "check", "--config", "/etc/jul/server.toml")
         print("PASS: default image, named-volume config, healthcheck and placeholder site")
+        check_streaming_types(containers[0], f"http://127.0.0.1:{published}", tmp)
+        print("PASS: streaming media Content-Types without a system MIME database")
 
         # Host networking permits a loopback-only admin listener. Use a separate
         # ephemeral managed config whose directory is writable by uid 65532.

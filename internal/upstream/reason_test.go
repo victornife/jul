@@ -34,6 +34,7 @@ func TestReasonMappingIsExhaustive(t *testing.T) {
 		ReasonRequestNotReplayable:   {StatusFromLastAttempt, 0},
 		ReasonClientCancelled:        {StatusClientClosedRequest, GRPCCodeCancelled},
 		ReasonClientDeadline:         {http.StatusGatewayTimeout, GRPCCodeDeadlineExceeded},
+		ReasonClientRequestBody:      {http.StatusBadRequest, GRPCCodeInvalidArgument},
 	}
 
 	reasons := Reasons()

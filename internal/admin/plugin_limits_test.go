@@ -26,6 +26,7 @@ func limitedPlugin() config.PluginConfig {
 		KVMaxEntries:     77,
 		KVMaxBytes:       config.Size(3 << 20),
 		MaxInvocations:   250,
+		MaxInstances:     12,
 		SHA256:           strings.Repeat("e", 64),
 	}
 }
@@ -44,7 +45,7 @@ func TestBuildPluginPreservesOmittedLimits(t *testing.T) {
 	if got.MaxRequestBody != want.MaxRequestBody || got.MaxResponseBody != want.MaxResponseBody ||
 		got.FetchTimeout != want.FetchTimeout || got.MaxFetchResponse != want.MaxFetchResponse ||
 		got.KVMaxEntries != want.KVMaxEntries || got.KVMaxBytes != want.KVMaxBytes ||
-		got.MaxInvocations != want.MaxInvocations || got.SHA256 != want.SHA256 || got.Type != "handler" {
+		got.MaxInvocations != want.MaxInvocations || got.MaxInstances != want.MaxInstances || got.SHA256 != want.SHA256 || got.Type != "handler" {
 		t.Fatalf("limits not preserved:\n got %+v\nwant %+v", got, want)
 	}
 }
@@ -73,6 +74,8 @@ func TestBuildPluginLimitFields(t *testing.T) {
 			func(p config.PluginConfig) int64 { return p.KVMaxBytes.Bytes() }, 2 << 10},
 		{"max_invocations", func(d *pluginDef) { d.MaxInvocations = intp(10) }, func(d *pluginDef) { d.MaxInvocations = intp(0) },
 			func(p config.PluginConfig) int64 { return int64(p.MaxInvocations) }, 10},
+		{"max_instances", func(d *pluginDef) { d.MaxInstances = intp(4) }, func(d *pluginDef) { d.MaxInstances = intp(0) },
+			func(p config.PluginConfig) int64 { return int64(p.MaxInstances) }, 4},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,6 +107,7 @@ func TestBuildPluginRejectsInvalidLimits(t *testing.T) {
 		"negative dur":   {FetchTimeout: strp("-1s")},
 		"negative count": {MaxInvocations: intp(-1)},
 		"negative kv":    {KVMaxEntries: intp(-2)},
+		"negative inst":  {MaxInstances: intp(-1)},
 		"response body":  {MaxResponseBody: strp("x")},
 		"fetch response": {MaxFetchResponse: strp("x")},
 	} {
@@ -161,7 +165,7 @@ func TestProjectPluginLimits(t *testing.T) {
 		t.Fatal("configured limits not projected")
 	}
 	want := PluginLimits{MaxRequestBody: "2m", MaxResponseBody: "4m", FetchTimeout: "3s", MaxFetchResponse: "512k",
-		KVMaxEntries: 77, KVMaxBytes: "3m", MaxInvocations: 250}
+		KVMaxEntries: 77, KVMaxBytes: "3m", MaxInvocations: 250, MaxInstances: 12}
 	if *inject.Limits != want {
 		t.Fatalf("limits = %+v, want %+v", *inject.Limits, want)
 	}

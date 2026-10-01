@@ -262,7 +262,7 @@ func TestBuildAccessSinksSharedFileLeaseLifetime(t *testing.T) {
 		t.Fatal(err)
 	}
 	accessFiles.Lock()
-	_, retained := accessFiles.entries[newLease.key]
+	_, retained := accessFiles.entries[newLease.path]
 	accessFiles.Unlock()
 	if retained {
 		t.Fatal("last owner did not release the backing writer")

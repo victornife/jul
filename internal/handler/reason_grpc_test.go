@@ -30,6 +30,9 @@ func TestReasonGRPCCodesMatchTheCodesPackage(t *testing.T) {
 	if got := codes.Code(upstream.GRPCCodeCancelled); got != codes.Canceled {
 		t.Errorf("GRPCCodeCancelled = %d (%s), want %d (%s)", upstream.GRPCCodeCancelled, got, codes.Canceled, codes.Canceled)
 	}
+	if got := codes.Code(upstream.GRPCCodeInvalidArgument); got != codes.InvalidArgument {
+		t.Errorf("GRPCCodeInvalidArgument = %d (%s), want %d (%s)", upstream.GRPCCodeInvalidArgument, got, codes.InvalidArgument, codes.InvalidArgument)
+	}
 }
 
 // TestOverloadIsNotResourceExhausted pins the consequence the taxonomy calls

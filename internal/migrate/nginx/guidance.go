@@ -65,6 +65,13 @@ var guidanceCatalog = map[string]AssessmentGuidance{
 		Docs:        "nginx-assessment#important-blocking-and-approximate-cases",
 		Blocking:    true,
 	},
+	"GUIDE_BODY_LIMIT_WAF": {
+		Code:        "GUIDE_BODY_LIMIT_WAF",
+		Title:       "Pair the body limit with the WAF body limit",
+		Action:      "If the route is WAF-protected in Jul, set waf.request_body_limit at least as large as client_max_body_size; jul lint warns when it is smaller.",
+		Consequence: "The WAF buffers request bodies up to request_body_limit (128 KiB by default) and rejects larger ones with 413, so uploads NGINX accepted can fail.",
+		Docs:        "waf#request-and-response-bodies",
+	},
 	"GUIDE_UPSTREAM_AFFINITY": {
 		Code:        "GUIDE_UPSTREAM_AFFINITY",
 		Title:       "Review upstream affinity at cutover",

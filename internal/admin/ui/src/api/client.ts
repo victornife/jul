@@ -1153,6 +1153,7 @@ export const PluginProjectionSchema = z.object({
       kv_max_entries: z.number().int().optional(),
       kv_max_bytes: z.string().optional(),
       max_invocations: z.number().int().optional(),
+      max_instances: z.number().int().optional(),
     })
     .optional(),
   // abi is the declaration's effective ABI (#430). response_phase reports that
@@ -1735,6 +1736,7 @@ export type PluginDefPatch = {
   kv_max_entries?: number;
   kv_max_bytes?: string;
   max_invocations?: number;
+  max_instances?: number;
   // abi is sent only when the operator explicitly changes it; omitted keeps
   // the plugin's current ABI (#430).
   abi?: PluginABI;

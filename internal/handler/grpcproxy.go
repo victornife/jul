@@ -157,7 +157,7 @@ func (t *grpcBalancingTransport) RoundTrip(req *http.Request) (*http.Response, e
 	if resp.Body == nil {
 		resp.Body = http.NoBody
 	}
-	resp.Body = upstream.WrapAttemptBody(resp.Body, resp.ContentLength, req.Context(), req.Context(),
+	resp.Body = upstream.WrapAttemptBody(resp.Body, upstream.OwedBodyLength(resp), req.Context(), req.Context(),
 		func(classification upstream.AttemptClassification, _ error) {
 			t.pool.RecordAttempt(b, classification)
 			t.pool.Release(b.Backend)

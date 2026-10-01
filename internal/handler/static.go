@@ -6,7 +6,6 @@ package handler
 import (
 	"fmt"
 	"html"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -181,6 +180,13 @@ func (h *staticHandler) serveFile(w http.ResponseWriter, r *http.Request, rel st
 	if h.cacheControl != "" {
 		w.Header().Set("Cache-Control", h.cacheControl)
 	}
+	// ServeContent consults only Go's and the system's tables; set streaming
+	// media types explicitly so they do not depend on the host (#510).
+	if _, set := w.Header()["Content-Type"]; !set {
+		if ctype, ok := streamingMediaTypes[strings.ToLower(path.Ext(rel))]; ok {
+			w.Header().Set("Content-Type", ctype)
+		}
+	}
 	http.ServeContent(w, r, rel, info.ModTime(), f)
 	return true
 }
@@ -220,7 +226,7 @@ func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Reques
 	hdr := w.Header()
 	// Set Content-Type from the original resource so the compressed bytes are
 	// not content-sniffed. Fall back to octet-stream for unknown extensions.
-	ctype := mime.TypeByExtension(path.Ext(rel))
+	ctype := contentTypeByExtension(path.Ext(rel))
 	if ctype == "" {
 		ctype = "application/octet-stream"
 	}

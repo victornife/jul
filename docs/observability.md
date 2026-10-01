@@ -122,6 +122,8 @@ are never reset and previously recorded host-labeled series are not deleted.
 | `jul_mtls_crl_next_update_timestamp_seconds` | Gauge | `listen` | Merged, release pending | Earliest NextUpdate of the client-certificate revocation lists enforced on a TLS listener, as a Unix timestamp, labeled by listen address. Absent when the listener has no CRL; 0 when the CRL sets no NextUpdate. Jul keeps enforcing a CRL past this time, so alert on time() > this value. |
 | `jul_mtls_handshakes_total` | Counter | `result` | Released `v1.32.0` | Mutual-TLS handshakes presenting a CA-verified client certificate, labeled by result (verified/rejected). Certificates failing CA-chain verification are rejected by the TLS stack before this counter; a missing certificate denied per location is counted as a 403 in jul_http_requests_total. |
 | `jul_plugin_duration_seconds` | Histogram | `plugin` | Released `v1.32.0` | WASM plugin invocation latency in seconds, labeled by plugin name. |
+| `jul_plugin_instance_waits_total` | Counter | `plugin`, `result` | Merged / release pending | WASM plugin calls that found every instance `max_instances` allows in use, labeled by plugin name and result (`acquired` after waiting, or `rejected` with 503 after one call timeout). A rising `rejected` rate means the cap is too low for the traffic (#506). |
+| `jul_plugin_instances` | Gauge | `plugin` | Merged / release pending | Live WASM module instances (idle and in use), labeled by plugin name. Never exceeds `max_instances` per generation; read at scrape time. |
 | `jul_plugin_invocations_total` | Counter | `plugin`, `result` | Released `v1.32.0` | WASM plugin invocations, labeled by plugin name and result (continue/stop/error). |
 | `jul_plugin_panics_total` | Counter | `plugin` | Released `v1.32.0` | WASM plugin traps/panics contained by the host, labeled by plugin name. |
 | `jul_plugin_response_body_unavailable_total` | Counter | `plugin`, `reason` | Merged / release pending | jul-abi/v2 body subscriptions presented without a body, labeled by plugin name and closed reason (none/too_large/streaming/encoded/partial/upgraded). |
@@ -416,13 +418,16 @@ is invalid and the error directs the operator to disable the block instead. The
 The legacy global/per-server destination fields are deprecated compatibility
 no-ops and produce lint warnings.
 
-Handler generations with the same absolute file path and rotation settings
-share one rotating writer through reference-counted leases. Retiring or aborting
-one generation does not close a writer still owned by another. This preserves
-complete records while old requests drain during reload. Changing rotation
-settings on the same path retains the separate
-[known overlap limitation](known-limitations.md); use a new file path for that
-policy transition, or restart instead of overlapping live writers.
+Handler generations logging to the same absolute file path share one rotating
+writer through reference-counted leases, whatever their rotation settings.
+Retiring or aborting one generation does not close a writer still owned by
+another, and only one handle ever appends to the file, so records stay complete
+and in the active file while old requests drain during reload, including across
+a size-triggered rotation. A changed `rotate_max_mb`/`rotate_keep` is adopted
+when the new generation writes its first record: a candidate that is prepared
+and aborted never writes, so it cannot change the serving policy or prune
+backups, and a draining older generation does not switch the policy back.
+Lowering `rotate_keep` prunes surplus backups at the next rotation (#502).
 
 ### Access-log fields
 

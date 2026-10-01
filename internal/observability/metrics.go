@@ -85,8 +85,13 @@ type Metrics struct {
 	pluginRespInvokes  *prometheus.CounterVec
 	pluginRespDuration *prometheus.HistogramVec
 	pluginRespNoBody   *prometheus.CounterVec
-	listenerConns      prometheus.Gauge
-	http3Conns         prometheus.Gauge
+	// pluginInstanceWaits counts calls that found every instance a plugin's
+	// max_instances allows in use (#506); pluginInstances is the scrape-time
+	// live-instance gauge.
+	pluginInstanceWaits *prometheus.CounterVec
+	pluginInstances     *pluginInstanceCollector
+	listenerConns       prometheus.Gauge
+	http3Conns          prometheus.Gauge
 	// http3AltSvcTransitions counts HTTP/3 Alt-Svc advertisement changes,
 	// labeled by the bounded destination state ("advertise"/"clear"). No
 	// address, port, or max-age value is ever a label (#161).
@@ -368,6 +373,11 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_plugin_response_body_unavailable_total",
 			Help: "jul-abi/v2 body subscriptions presented without a body, labeled by plugin name and closed reason (none/too_large/streaming/encoded/partial/upgraded).",
 		}, []string{"plugin", "reason"}),
+		pluginInstanceWaits: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_plugin_instance_waits_total",
+			Help: "WASM plugin calls that found every instance max_instances allows in use, labeled by plugin name and result (acquired/rejected). A rejected call answers 503.",
+		}, []string{"plugin", "result"}),
+		pluginInstances: newPluginInstanceCollector(),
 		listenerConns: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "jul_listener_conns",
 			Help: "Current concurrent connections across all listeners.",
@@ -524,6 +534,8 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.pluginRespInvokes,
 		m.pluginRespDuration,
 		m.pluginRespNoBody,
+		m.pluginInstanceWaits,
+		m.pluginInstances,
 		m.listenerConns,
 		m.http3Conns,
 		m.http3AltSvcTransitions,
@@ -898,6 +910,12 @@ func (m *Metrics) ObservePluginResponseInvocation(plugin, result string, latency
 // without a body, by plugin name and the closed reason label.
 func (m *Metrics) ObservePluginResponseBodyUnavailable(plugin, reason string) {
 	m.pluginRespNoBody.WithLabelValues(plugin, reason).Inc()
+}
+
+// ObservePluginInstanceWait records a plugin call that had to wait at the
+// max_instances cap; result is "acquired" or "rejected" (#506).
+func (m *Metrics) ObservePluginInstanceWait(plugin, result string) {
+	m.pluginInstanceWaits.WithLabelValues(plugin, result).Inc()
 }
 
 // ObserveCertExpiry records a certificate's leaf expiry for domain and counts a

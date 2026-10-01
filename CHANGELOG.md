@@ -13,6 +13,14 @@ Post-publication documentation and delivery-status reconciliation, plus the
 post-v2.1.0 audit remediation below. None of this is part of the immutable
 v2.1.0 tag or its packaged READMEs.
 
+### Added
+
+- **Scheduled protocol conformance lane (#513).** A weekly, non-blocking
+  workflow runs h2spec, h3spec, Autobahn|Testsuite, `http-tests/cache-tests`
+  and an ambiguous-framing corpus against the full-profile binary, with an
+  allow-list that requires a rationale and an issue for every known
+  deviation. See `docs/security-testing.md`.
+
 ### Fixed
 
 - **Ambiguously framed HTTP/1.x requests close their connection (RFC 9112
@@ -25,6 +33,24 @@ v2.1.0 tag or its packaged READMEs.
   an HTTP/1.0 request with a body method and no `Content-Length`; ordinary
   keep-alive and pipelining are unchanged. Found by the ambiguous-framing
   corpus of the conformance lane (#513).
+
+- **`HEAD` through the reverse proxy works again and no longer marks backends
+  down (#534).** Since v2.0.0 the proxy treated a HEAD response's empty body as
+  a truncation of its `Content-Length`, so every proxied HEAD failed (empty
+  reply on HTTP/1.1, `RST_STREAM` on HTTP/2) and counted as a backend failure;
+  `max_fails` HEADs took a healthy backend out of rotation. Responses that
+  carry no content (HEAD, 1xx, 204, 304) no longer owe a body length, in the
+  HTTP proxy, the native gRPC proxy and forward-auth. Found by the h2spec
+  baseline for the conformance lane (#513).
+
+- **A bad client request body no longer counts against the backend.** When
+  the body streamed to a backend could not be read (malformed chunked framing,
+  over `client_max_body_size`, or cut off by the client), the proxy recorded a
+  backend transport failure and answered `502`, so `max_fails` such requests
+  took a healthy backend out of rotation. The attempt is now attributed to the
+  client (new reason `client_request_body`): `400`, or `413` over the size
+  limit as documented, backend health untouched, no retry. Found by the
+  ambiguous-framing corpus of the conformance lane (#513).
 
 - **On-the-fly compression weakens strong `ETag`s (#504).** A compressed body
   carried the origin's strong tag unchanged, so one strong validator named two
@@ -65,6 +91,52 @@ v2.1.0 tag or its packaged READMEs.
   `jul_cache_capture_skipped_total{reason="oversize"|"budget"}` plus a
   throttled debug log. The docs no longer imply `disk_max_size` admits objects
   larger than `memory_max_size`.
+
+- **Streaming media gets correct Content-Types everywhere (#510).** Static
+  serving relied on the host MIME database for types Go does not build in, and
+  the distroless image has none, so HLS playlists were served as `text/plain`,
+  DASH manifests as `text/xml` and segments as `application/octet-stream`.
+  Jul now sets `.m3u8`, `.mpd`, `.ts`, `.m4s`, `.mkv` and `.aac` itself
+  (IANA/RFC types), ahead of the host database, which on Debian/Ubuntu maps
+  `.ts` to a Qt Linguist type. The Docker e2e asserts the shipped image.
+
+- **WASM plugin instances are capped per plugin (#506).** The instance pool
+  bounded only idle instances; under concurrency every call instantiated a new
+  module, so memory grew with request concurrency (each up to `memory_limit`).
+  New `plugins.<name>.max_instances` (default 64, hot-reloadable) caps live
+  instances; a call that finds them all busy waits one `timeout`, then fails
+  with `503` and `Retry-After: 1` rather than a panic-counted `500`. New
+  `jul_plugin_instances{plugin}` gauge and
+  `jul_plugin_instance_waits_total{plugin,result}` counter. The admin API and
+  Console keep the field on edit (omitted-means-keep). `docs/abi.md` no longer
+  calls the pool bounded without saying how.
+- **Access-log rotation-policy changes on the same path are safe (#502).**
+  Generations with different `rotate_max_mb`/`rotate_keep` for one file opened
+  independent writers, which could lose records or send them to a renamed
+  backup while an old generation drained across a rotation (a deterministic
+  test lost 834 of 3,201 records). Every generation now shares one writer per
+  path; the new policy is adopted at the new generation's first record, so an
+  aborted candidate never changes it and a draining generation never reverts
+  it. The new-path/restart workaround is no longer needed.
+- **Validation tightening: UDP stream backends must be unicast (#511).** A
+  `[[stream]]` UDP relay accepts replies only from the address it dialed, so a
+  multicast (`224.0.0.0/4`, `ff00::/8`) or broadcast (`255.255.255.255`)
+  backend could never deliver a reply. `jul check` and reload now reject such
+  literal backends, and a hostname or discovered backend that resolves to one
+  is refused at dial time and logged. A configuration that declared one was
+  already non-functional.
+- **Operator-safety hygiene (#511).** `jul run` prints a notice when it binds
+  beyond loopback (the default changes to `127.0.0.1:8080` only in the next
+  major). New `jul lint` warnings: a non-loopback listener with no read, write
+  or proxy inactivity timeout, and `[compression] enabled = true` with an
+  explicit `encoders = []` (defaulted to gzip). The NGINX importer pairs
+  `client_max_body_size` with a WAF body-limit note. The unused
+  `middleware.Timeout` (a buffering `http.TimeoutHandler`) is removed. Docs no
+  longer claim there is no PROXY protocol on HTTP listeners, that an
+  unauthenticated off-loopback admin listener is only a warning, or that
+  `client_max_body_size` is unlimited by default (it is 1 MiB); they gain
+  recommended limits for internet-facing listeners, a UDP multicast/SSDP FAQ,
+  and guidance to keep v2 body subscriptions off media routes.
 
 ## [2.1.0] - 2026-09-30
 

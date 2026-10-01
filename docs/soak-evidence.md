@@ -89,10 +89,11 @@ four-hour measurements remain bound to `3258f1a3`, not renamed as a four-hour
 `f036b063` run. Final tag/source metadata and any later documentation-only
 delta are recorded separately in #480.
 
-Different rotation policies sharing one path remain
-[#502](https://github.com/victornife/jul/issues/502), with new-path/restart
-workaround. D11/D12 and unreviewed ledger surfaces remain explicit. Package,
-attestation and publication gates are separate from runtime evidence.
+Different rotation policies sharing one path remained
+[#502](https://github.com/victornife/jul/issues/502) at v2.1.0, with a
+new-path/restart workaround; it is fixed on `main` after the tag (one writer per
+path, unreleased). D11/D12 and unreviewed ledger surfaces remain explicit.
+Package, attestation and publication gates are separate from runtime evidence.
 
 ## 2026-09-30 v2.1.0 publication and package verification
 

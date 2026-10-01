@@ -6,6 +6,7 @@
 package plugins
 
 import (
+	"errors"
 	"net/http"
 
 	"jul/internal/middleware"
@@ -61,7 +62,7 @@ func (s *Set) Middleware(name string) middleware.Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			action, inv, err := p.invoke(r.Context(), w, r)
 			if err != nil {
-				http.Error(w, "plugin error", http.StatusInternalServerError)
+				writePluginError(w, err)
 				return
 			}
 			if action == 1 { // Continue
@@ -111,9 +112,20 @@ func (s *Set) Handler(name string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, inv, err := p.invoke(r.Context(), w, r)
 		if err != nil {
-			http.Error(w, "plugin error", http.StatusInternalServerError)
+			writePluginError(w, err)
 			return
 		}
 		inv.flush()
 	})
+}
+
+// writePluginError answers a failed plugin call: 503 with Retry-After when
+// every instance max_instances allows stayed busy (#506), else 500.
+func writePluginError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errInstanceLimit) {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "plugin busy", http.StatusServiceUnavailable)
+		return
+	}
+	http.Error(w, "plugin error", http.StatusInternalServerError)
 }
