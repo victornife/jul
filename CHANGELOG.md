@@ -35,6 +35,15 @@ v2.1.0 tag or its packaged READMEs.
   HTTP proxy, the native gRPC proxy and forward-auth. Found by the h2spec
   baseline for the conformance lane (#513).
 
+- **A bad client request body no longer counts against the backend.** When
+  the body streamed to a backend could not be read (malformed chunked framing,
+  over `client_max_body_size`, or cut off by the client), the proxy recorded a
+  backend transport failure and answered `502`, so `max_fails` such requests
+  took a healthy backend out of rotation. The attempt is now attributed to the
+  client (new reason `client_request_body`): `400`, or `413` over the size
+  limit as documented, backend health untouched, no retry. Found by the
+  ambiguous-framing corpus of the conformance lane (#513).
+
 - **On-the-fly compression weakens strong `ETag`s (#504).** A compressed body
   carried the origin's strong tag unchanged, so one strong validator named two
   byte sequences (RFC 9110 §8.8.1, §8.8.3.3). A resumed download (`Range` plus
