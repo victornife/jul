@@ -97,6 +97,51 @@ func validateStreams(streams []StreamServer, upstreamNames map[string]int) []err
 	return errs
 }
 
+// IsGroupAddress reports whether ip is a multicast or limited-broadcast
+// destination: 224.0.0.0/4, 255.255.255.255 or ff00::/8.
+func IsGroupAddress(ip net.IP) bool {
+	return ip.IsMulticast() || ip.Equal(net.IPv4bcast)
+}
+
+// validateUDPStreamBackends rejects multicast and broadcast destinations on UDP
+// streams (#511). The relay keeps one connected socket per client, so only
+// replies from the dialed address are delivered. Group members answer from
+// their own unicast addresses, so every reply would be dropped silently.
+// Hostnames resolve at dial time; the relay refuses a group address there.
+func validateUDPStreamBackends(c *Config) []error {
+	upstreams := make(map[string]UpstreamConfig, len(c.Upstreams))
+	for _, up := range c.Upstreams {
+		upstreams[up.Name] = up
+	}
+	var errs []error
+	for i, st := range c.Streams {
+		if !strings.EqualFold(strings.TrimSpace(st.Protocol), "udp") {
+			continue
+		}
+		target := strings.TrimSpace(st.ProxyPass)
+		addrs := []string{target}
+		if up, ok := upstreams[target]; ok {
+			addrs = addrs[:0]
+			for _, s := range up.Servers {
+				addrs = append(addrs, s.Address)
+			}
+		}
+		for _, addr := range addrs {
+			host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+			if err != nil {
+				continue // reported by validateStreamTarget / upstream validation
+			}
+			if zone := strings.IndexByte(host, '%'); zone >= 0 {
+				host = host[:zone]
+			}
+			if ip := net.ParseIP(host); ip != nil && IsGroupAddress(ip) {
+				errs = append(errs, fmt.Errorf("stream[%d]: UDP backend %q is a multicast or broadcast address; the relay only accepts replies from the address it dialed, so group members' unicast replies would never be delivered (see docs/stream.md)", i, addr))
+			}
+		}
+	}
+	return errs
+}
+
 // validateStreamTrustedProxies checks the trusted-proxy set that governs an
 // inbound PROXY header.
 //

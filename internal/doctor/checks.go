@@ -306,7 +306,7 @@ func (s *session) adminSecurityCheck(context.Context) diagnostics.Result {
 			Evidence: map[string]any{"authority": metadata.Authority, "enabled": false},
 		}
 	}
-	loopback := isLoopbackListen(s.cfg.Admin.Listen)
+	loopback := IsLoopbackListen(s.cfg.Admin.Listen)
 	status := diagnostics.StatusPass
 	severity := diagnostics.SeverityInfo
 	message := "admin listener is loopback-bound and has an authentication mechanism"
@@ -682,7 +682,7 @@ func mergeServerNames(existing, additional []string) []string {
 	return out
 }
 
-func isLoopbackListen(address string) bool {
+func IsLoopbackListen(address string) bool {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
 		return false

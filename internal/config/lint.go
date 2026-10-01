@@ -191,6 +191,7 @@ func Lint(c *Config) []Diagnostic {
 	}
 
 	diags = append(diags, lintWAFFit(c)...)
+	diags = append(diags, lintExposedWithoutTimeouts(c)...)
 	diags = append(diags, lintBackendTLS(c)...)
 	diags = append(diags, lintResilience(c)...)
 	diags = append(diags, lintDiscoveryTrust(c)...)
@@ -198,7 +199,7 @@ func Lint(c *Config) []Diagnostic {
 
 	// An admin listener reachable off-loopback without a shared token or
 	// named-principal RBAC is unauthenticated remote control of the server.
-	if c.Admin.Enabled && c.Admin.Token == "" && !c.Admin.RBAC.Enabled && !isLoopbackListen(c.Admin.Listen) {
+	if c.Admin.Enabled && c.Admin.Token == "" && !c.Admin.RBAC.Enabled && !IsLoopbackListen(c.Admin.Listen) {
 		diags = append(diags, Diagnostic{
 			Severity: SeverityWarning,
 			Field:    "[admin]",
@@ -211,7 +212,7 @@ func Lint(c *Config) []Diagnostic {
 	// credential and every configuration write over an unencrypted channel.
 	// TLS-terminating it (#336) is the supported way to expose it off-loopback;
 	// the finding does not fire once [admin.tls] is enabled.
-	if c.Admin.Enabled && !isLoopbackListen(c.Admin.Listen) && (c.Admin.TLS == nil || !c.Admin.TLS.Enabled) {
+	if c.Admin.Enabled && !IsLoopbackListen(c.Admin.Listen) && (c.Admin.TLS == nil || !c.Admin.TLS.Enabled) {
 		diags = append(diags, Diagnostic{
 			Severity: SeverityWarning,
 			Field:    "[admin]",
@@ -299,9 +300,9 @@ func Lint(c *Config) []Diagnostic {
 	return diags
 }
 
-// isLoopbackListen reports whether a listen address binds only the loopback
+// IsLoopbackListen reports whether a listen address binds only the loopback
 // interface. An empty host or a wildcard (0.0.0.0/::) is treated as exposed.
-func isLoopbackListen(addr string) bool {
+func IsLoopbackListen(addr string) bool {
 	host := addr
 	if h, _, err := net.SplitHostPort(addr); err == nil {
 		host = h

@@ -142,6 +142,9 @@ func cmdLint(args []string) int {
 	// configuration that disables backend verification should not reach
 	// production by accident. -quiet suppresses warnings only, as its help says.
 	diags := config.Lint(cfg)
+	if raw, err := src.ReadRaw(); err == nil {
+		diags = append(diags, config.LintSource(raw)...)
+	}
 	// ADR 0019 §11.3: managed mode requires a writable, non-symlinked config
 	// path. This is a property of the machine, not the configuration document,
 	// so it is checked here (where the real path is known) rather than inside
@@ -364,10 +367,20 @@ func cmdRun(args []string) int {
 		fmt.Fprintf(stderr, "error: synthesized configuration is invalid: %v\n", err)
 		return 1
 	}
+	noticeExposedListen(stderr, *listen)
 
 	ctx, reloadSig, stop := signals.Listen(context.Background())
 	defer stop()
 	return app.Serve(ctx, reloadSig, memorySource{name: name, cfg: cfg}, cfg, productName, version)
+}
+
+// noticeExposedListen prints one line when `jul run` binds beyond loopback:
+// the zero-config profile has no TLS and no admin authentication (#511). The
+// default stays :8080 until the next major version.
+func noticeExposedListen(w io.Writer, listen string) {
+	if !config.IsLoopbackListen(listen) {
+		fmt.Fprintf(w, "notice: listening on %s, reachable from other hosts, with no TLS; pass --listen 127.0.0.1:8080 to stay local\n", listen)
+	}
 }
 
 // serve starts the composition root with the given context, reload signal,

@@ -6,6 +6,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func lintMessages(diags []Diagnostic) string {
@@ -160,9 +161,10 @@ func TestLintCompressionDisabled(t *testing.T) {
 func TestLintCleanConfigHasNoWarnings(t *testing.T) {
 	c := &Config{
 		Servers: []ServerConfig{{
-			Listen:    ":443",
-			TLS:       &TLSConfig{Enabled: true, Cert: "c", Key: "k", MinVersion: "1.3"},
-			Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}},
+			Listen:      ":443",
+			TLS:         &TLSConfig{Enabled: true, Cert: "c", Key: "k", MinVersion: "1.3"},
+			ReadTimeout: Duration(60 * time.Second),
+			Locations:   []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, Root: "/srv"}},
 		}},
 		Compression: CompressionConfig{Enabled: Bool(true)},
 		Admin:       AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: "${env:JUL_ADMIN_TOKEN}"},
@@ -202,8 +204,8 @@ func TestIsLoopbackListen(t *testing.T) {
 		"127.0.0.1":      true,
 	}
 	for addr, want := range cases {
-		if got := isLoopbackListen(addr); got != want {
-			t.Errorf("isLoopbackListen(%q) = %v, want %v", addr, got, want)
+		if got := IsLoopbackListen(addr); got != want {
+			t.Errorf("IsLoopbackListen(%q) = %v, want %v", addr, got, want)
 		}
 	}
 }

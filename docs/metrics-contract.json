@@ -344,6 +344,25 @@
       "state": "released_v1.32.0"
     },
     {
+      "name": "jul_plugin_instance_waits_total",
+      "type": "counter",
+      "help": "WASM plugin calls that found every instance max_instances allows in use, labeled by plugin name and result (acquired/rejected). A rejected call answers 503.",
+      "labels": [
+        "plugin",
+        "result"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_plugin_instances",
+      "type": "gauge",
+      "help": "Live WASM module instances (idle and in use), labeled by plugin name. Bounded per plugin by max_instances.",
+      "labels": [
+        "plugin"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_plugin_invocations_total",
       "type": "counter",
       "help": "WASM plugin invocations, labeled by plugin name and result (continue/stop/error).",

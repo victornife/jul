@@ -133,7 +133,7 @@ func TestAssessmentV2GuidanceSelection(t *testing.T) {
 		{name: "auth", result: AssessmentResult{Class: AssessmentBlocking, Code: "NGX_AUTH_BASIC"}, want: "GUIDE_AUTH_MANUAL"},
 		{name: "deny", result: AssessmentResult{Class: AssessmentBlocking, Directive: "deny"}, want: "GUIDE_AUTH_MANUAL"},
 		{name: "limits", result: AssessmentResult{Class: AssessmentBlocking, Code: "NGX_LIMIT_REQ"}, want: "GUIDE_LIMITS_MANUAL"},
-		{name: "body limit", result: AssessmentResult{Class: AssessmentBlocking, Directive: "client_max_body_size"}, want: "GUIDE_LIMITS_MANUAL"},
+		{name: "body limit", result: AssessmentResult{Class: AssessmentBlocking, Directive: "client_max_body_size"}, want: "GUIDE_LIMITS_MANUAL,GUIDE_BODY_LIMIT_WAF"},
 		{name: "location", result: AssessmentResult{Class: AssessmentApproximated, Code: "NGX_LOCATION_MATCH"}, want: "GUIDE_LOCATION_REVIEW"},
 		{name: "rewrite", result: AssessmentResult{Class: AssessmentBlocking, Code: "NGX_REWRITE_FLAG"}, want: "GUIDE_LOCATION_REVIEW"},
 		{name: "fallback", result: AssessmentResult{Class: AssessmentBlocking, Code: "NGX_UNKNOWN"}, want: "GUIDE_MANUAL_REVIEW"},
@@ -147,7 +147,7 @@ func TestAssessmentV2GuidanceSelection(t *testing.T) {
 				}
 				return
 			}
-			if len(codes) != 1 || codes[0] != tc.want {
+			if strings.Join(codes, ",") != tc.want {
 				t.Fatalf("guidance = %#v, want %q", codes, tc.want)
 			}
 		})

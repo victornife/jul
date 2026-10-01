@@ -33,9 +33,12 @@ jul run --proxy 127.0.0.1:3000 --listen :8080
 
 Both modes enable compression and standard timeouts. Static mode looks for
 `index.html`; proxy mode needs a reachable backend. The default listener binds
-`:8080` without TLS or admin authentication. Treat these shortcuts as local
-starting points and choose an appropriate listener, TLS and deployment policy
-before exposing them to untrusted networks.
+`:8080` without TLS or admin authentication, and `jul run` prints a one-line
+stderr notice whenever the listener is not loopback. Treat these shortcuts as
+local starting points and choose an appropriate listener, TLS and deployment
+policy before exposing them to untrusted networks. The next major version is
+intended to default to `127.0.0.1:8080`
+([compatibility.md](compatibility.md#announced-default-changes-for-the-next-major)).
 
 ### Synthesizers
 
@@ -90,31 +93,30 @@ The implementation in `internal/config/lint*.go` and the filesystem checks in
 | Area | Examples of findings | Severity | Evidence |
 | --- | --- | --- | --- |
 | Route and response policy | Provably shadowed locations, risky header predicates, CORS/response-header interactions, directory listing, missing managed route ID | warning, error for forwarded-header routing, or info for route ID | `lint_match.go`, `lint_cors.go`, `lint_route_id_test.go` |
-| Listener and admin | Conflicting listener-scoped settings, missing TLS minimum, off-loopback admin without token or TLS | warning | `lint.go`, `listener_scope_test.go` |
+| Listener and admin | Conflicting listener-scoped settings, missing TLS minimum, off-loopback admin without TLS | warning (an off-loopback admin listener without a token or enabled RBAC is a validation **error**, not a lint finding) | `lint.go`, `listener_scope_test.go` |
 | Client and backend trust | Broad trusted-proxy ranges, unverified backend or discovery TLS, union trust without peer identity | warning or error for disabled peer verification | `lint.go`, `backendtls_test.go`, `discovery_trust_test.go` |
-| Secrets and operational defaults | Literal admin/RBAC/Consul/Kubernetes tokens, disabled compression, ignored legacy log destinations | warning | `lint.go`, `lint_test.go` |
+| Secrets and operational defaults | Literal admin/RBAC/Consul/Kubernetes tokens, disabled compression, `enabled = true` with an explicit `encoders = []` (defaulted to gzip), ignored legacy log destinations | warning | `lint.go`, `lint_limits.go`, `lint_test.go`, `lint_limits_test.go` |
+| Exposure bounds | A non-loopback listener with no `read_timeout`, `write_timeout`, `proxy_read_timeout` or `proxy_send_timeout`; a WAF route whose `request_body_limit` is below its `client_max_body_size` (bodies in between get 413) | warning | `lint_limits.go`, `lint.go` (`lintWAFFit`), `lint_limits_test.go`, `lint_test.go` |
 | Upstream resilience and filesystem | Admission sizing or multiplexed connection bounds; managed config path and file-owned artifact checks | warning or error depending on path condition | `lint_resilience.go`, `cmd/jul/cli.go`, `internal/app` |
 
 Lint is advisory except for its error-severity findings. A clean lint result
 does not prove that a deployment is secure or that backends are reachable.
 
-## Benchmarks
+## Related tool: `jul fmt`
 
-> **Related tool: `jul fmt`**
->
-> `jul fmt [-config <file>] [-w] [-diff]` rewrites a config in canonical TOML.
-> Use it alongside `jul lint` in your workflow:
->
-> ```bash
-> jul fmt -config server.toml -w     # format in place
-> jul fmt -config server.toml -diff  # show diff, exit 1 if changes needed (CI mode)
-> ```
->
-> `-diff` is useful as a CI gate: it exits 0 when the file is already canonical
-> and 1 when `fmt -w` would change it, so you can enforce formatting in
-> pre-commit or PR checks without modifying files. See
-> [docs/getting-started.md](getting-started.md#validate-and-format-configs) for
-> a full walkthrough.
+`jul fmt [-config <file>] [-w] [-diff]` rewrites a config in canonical TOML.
+Use it alongside `jul lint` in your workflow:
+
+```bash
+jul fmt -config server.toml -w     # format in place
+jul fmt -config server.toml -diff  # show diff, exit 1 if changes needed (CI mode)
+```
+
+`-diff` is useful as a CI gate: it exits 0 when the file is already canonical
+and 1 when `fmt -w` would change it, so you can enforce formatting in
+pre-commit or PR checks without modifying files. See
+[docs/getting-started.md](getting-started.md#validate-and-format-configs) for
+a full walkthrough.
 
 ## Benchmarks
 
@@ -135,7 +137,7 @@ A typical config lints in **< 1 ms**, including parse + validate + lint.
 | Threat | Risk | Mitigation |
 | --- | --- | --- |
 | **Literal secrets in VCS** | Admin, RBAC, Consul, or K8s tokens committed to repo | Lint flags literals in these fields without printing their values; run `jul lint -strict` in CI if warnings should fail the gate |
-| **Admin API exposed to internet** | An off-loopback admin listener without a token grants unauthenticated control | The admin listener checks warn on missing authentication and TLS; use loopback or authenticated TLS |
+| **Admin API exposed to internet** | An off-loopback admin listener without a token grants unauthenticated control | Validation **rejects** an off-loopback admin listener without a token or enabled RBAC (`jul check` and reload fail); lint warns when an off-loopback admin listener has no TLS. Use loopback or authenticated TLS |
 | **Unspecified TLS minimum** | Operators may assume a stronger protocol floor than the runtime default | The TLS minimum-version check suggests explicitly choosing `1.3` or `1.2` |
 | **Information disclosure** | `directory_listing` exposes directory contents | The route check warns when it is enabled |
 | **Unreachable route** | An earlier location provably subsumes a later one | The route matcher lint warns on provable shadowing, including predicates |

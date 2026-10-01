@@ -54,13 +54,14 @@ func TestProjectPluginABI(t *testing.T) {
 
 func TestDiffPluginABIAndInvocations(t *testing.T) {
 	var d ConfigDiff
-	diffPluginFields("p", config.PluginConfig{Path: "p.wasm"}, config.PluginConfig{Path: "p.wasm", ABI: config.PluginABIV2, MaxInvocations: 5}, &d)
-	var abi, inv bool
+	diffPluginFields("p", config.PluginConfig{Path: "p.wasm"}, config.PluginConfig{Path: "p.wasm", ABI: config.PluginABIV2, MaxInvocations: 5, MaxInstances: 9}, &d)
+	var abi, inv, instances bool
 	for _, e := range allDiffEntries(d) {
 		abi = abi || (e.Before == config.PluginABIV1 && e.After == config.PluginABIV2)
 		inv = inv || (e.Before == "0" && e.After == "5")
+		instances = instances || (e.Detail == "Change plugin max instances for p" && e.Before == "0" && e.After == "9")
 	}
-	if !abi || !inv {
+	if !abi || !inv || !instances {
 		t.Fatalf("diff = %+v", d)
 	}
 	if len(d.Warnings) == 0 || !strings.Contains(d.Warnings[0], "jul-abi/v2") {

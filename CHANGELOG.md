@@ -92,6 +92,52 @@ v2.1.0 tag or its packaged READMEs.
   throttled debug log. The docs no longer imply `disk_max_size` admits objects
   larger than `memory_max_size`.
 
+- **Streaming media gets correct Content-Types everywhere (#510).** Static
+  serving relied on the host MIME database for types Go does not build in, and
+  the distroless image has none, so HLS playlists were served as `text/plain`,
+  DASH manifests as `text/xml` and segments as `application/octet-stream`.
+  Jul now sets `.m3u8`, `.mpd`, `.ts`, `.m4s`, `.mkv` and `.aac` itself
+  (IANA/RFC types), ahead of the host database, which on Debian/Ubuntu maps
+  `.ts` to a Qt Linguist type. The Docker e2e asserts the shipped image.
+
+- **WASM plugin instances are capped per plugin (#506).** The instance pool
+  bounded only idle instances; under concurrency every call instantiated a new
+  module, so memory grew with request concurrency (each up to `memory_limit`).
+  New `plugins.<name>.max_instances` (default 64, hot-reloadable) caps live
+  instances; a call that finds them all busy waits one `timeout`, then fails
+  with `503` and `Retry-After: 1` rather than a panic-counted `500`. New
+  `jul_plugin_instances{plugin}` gauge and
+  `jul_plugin_instance_waits_total{plugin,result}` counter. The admin API and
+  Console keep the field on edit (omitted-means-keep). `docs/abi.md` no longer
+  calls the pool bounded without saying how.
+- **Access-log rotation-policy changes on the same path are safe (#502).**
+  Generations with different `rotate_max_mb`/`rotate_keep` for one file opened
+  independent writers, which could lose records or send them to a renamed
+  backup while an old generation drained across a rotation (a deterministic
+  test lost 834 of 3,201 records). Every generation now shares one writer per
+  path; the new policy is adopted at the new generation's first record, so an
+  aborted candidate never changes it and a draining generation never reverts
+  it. The new-path/restart workaround is no longer needed.
+- **Validation tightening: UDP stream backends must be unicast (#511).** A
+  `[[stream]]` UDP relay accepts replies only from the address it dialed, so a
+  multicast (`224.0.0.0/4`, `ff00::/8`) or broadcast (`255.255.255.255`)
+  backend could never deliver a reply. `jul check` and reload now reject such
+  literal backends, and a hostname or discovered backend that resolves to one
+  is refused at dial time and logged. A configuration that declared one was
+  already non-functional.
+- **Operator-safety hygiene (#511).** `jul run` prints a notice when it binds
+  beyond loopback (the default changes to `127.0.0.1:8080` only in the next
+  major). New `jul lint` warnings: a non-loopback listener with no read, write
+  or proxy inactivity timeout, and `[compression] enabled = true` with an
+  explicit `encoders = []` (defaulted to gzip). The NGINX importer pairs
+  `client_max_body_size` with a WAF body-limit note. The unused
+  `middleware.Timeout` (a buffering `http.TimeoutHandler`) is removed. Docs no
+  longer claim there is no PROXY protocol on HTTP listeners, that an
+  unauthenticated off-loopback admin listener is only a warning, or that
+  `client_max_body_size` is unlimited by default (it is 1 MiB); they gain
+  recommended limits for internet-facing listeners, a UDP multicast/SSDP FAQ,
+  and guidance to keep v2 body subscriptions off media routes.
+
 ## [2.1.0] - 2026-09-30
 
 Published stable minor after `v2.0.0`:

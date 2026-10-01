@@ -402,6 +402,9 @@ func diffPluginFields(name string, b, a config.PluginConfig, d *ConfigDiff) {
 	if b.MaxInvocations != a.MaxInvocations {
 		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: fmt.Sprintf("%d", b.MaxInvocations), After: fmt.Sprintf("%d", a.MaxInvocations), Detail: "Change plugin max invocations for " + name}, "plugin "+name+" max_invocations")
 	}
+	if b.MaxInstances != a.MaxInstances {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Before: fmt.Sprintf("%d", b.MaxInstances), After: fmt.Sprintf("%d", a.MaxInstances), Detail: "Change plugin max instances for " + name}, "plugin "+name+" max_instances")
+	}
 }
 
 // pluginSource renders a plugin's module source for a diff: "inline" for an
