@@ -141,6 +141,9 @@ Validation:
 - Each encoder in `encoders` must be compiled into the build (or startup fails).
 - `level` must be in the configured 0–11 range; `0` selects the encoder default.
 - `min_size` must be ≥ 0.
+- `enabled = true` with an explicit `encoders = []` is **not** "no encoders": it
+  is defaulted to `["gzip"]`, like an omitted list. `jul lint` warns about the
+  explicit empty list (#511). To turn compression off, set `enabled = false`.
 
 ## Structured sparse updates
 

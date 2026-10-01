@@ -261,7 +261,7 @@ func TestAdminSecurityMatrix(t *testing.T) {
 			}
 		})
 	}
-	if !isLoopbackListen("[::1]:2019") || !isLoopbackListen("localhost:2019") || isLoopbackListen(":2019") || isLoopbackListen("bad") {
+	if !IsLoopbackListen("[::1]:2019") || !IsLoopbackListen("localhost:2019") || IsLoopbackListen(":2019") || IsLoopbackListen("bad") {
 		t.Fatal("loopback classification mismatch")
 	}
 }

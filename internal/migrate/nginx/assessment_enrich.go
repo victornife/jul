@@ -397,7 +397,9 @@ func guidanceCodesForResult(result AssessmentResult) []string {
 		return []string{"GUIDE_HEADER_POLICY_MANUAL"}
 	case strings.Contains(code, "AUTH") || directive == "allow" || directive == "deny":
 		return []string{"GUIDE_AUTH_MANUAL"}
-	case strings.Contains(code, "LIMIT") || directive == "client_max_body_size" || directive == "limit_req" || directive == "limit_conn":
+	case directive == "client_max_body_size":
+		return []string{"GUIDE_LIMITS_MANUAL", "GUIDE_BODY_LIMIT_WAF"}
+	case strings.Contains(code, "LIMIT") || directive == "limit_req" || directive == "limit_conn":
 		return []string{"GUIDE_LIMITS_MANUAL"}
 	case strings.Contains(code, "LOCATION") || strings.Contains(code, "REWRITE") || directive == "alias":
 		return []string{"GUIDE_LOCATION_REVIEW"}

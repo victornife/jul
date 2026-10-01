@@ -204,6 +204,10 @@ func exerciseAllMetrics(m *Metrics) {
 			{Tier: "disk", Bytes: 2048, MaxBytes: 16384, Entries: 2, Evictions: 0},
 		}
 	})
+	m.ObservePluginInstanceWait("hi", "rejected")
+	m.SetPluginInstanceSource(func() []PluginInstanceStats {
+		return []PluginInstanceStats{{Plugin: "hi", Live: 2}}
+	})
 	avail, total := 1024.0, 4096.0
 	m.SetStorageSource(func() []StorageHeadroom {
 		return []StorageHeadroom{{Category: "cache", State: "ok", AvailableBytes: &avail, TotalBytes: &total}}

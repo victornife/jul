@@ -78,7 +78,7 @@ func BuildAccessSinks(cfg config.AccessLogConfig, base *slog.Logger) (sinks []mi
 				err = acquireErr
 				return
 			}
-			sinks = append(sinks, middleware.NewSlogSink(slog.New(accessHandler(&failureReportingWriter{w: lease.state.writer, log: base, sink: "file", health: &AccessLogFileWriteHealth}, cfg.Format))))
+			sinks = append(sinks, middleware.NewSlogSink(slog.New(accessHandler(&failureReportingWriter{w: lease, log: base, sink: "file", health: &AccessLogFileWriteHealth}, cfg.Format))))
 			closers = append(closers, lease)
 		case "syslog":
 			w, serr := newSyslogWriter()
@@ -96,28 +96,54 @@ func BuildAccessSinks(cfg config.AccessLogConfig, base *slog.Logger) (sinks []mi
 	return sinks, closers, nil
 }
 
-type accessFileKey struct {
-	path       string
+// accessFilePolicy is the rotation policy of one access-log generation.
+type accessFilePolicy struct {
 	maxSize    int
 	maxBackups int
 }
 
+// accessFileState is the one writer for an access-log path, shared by every
+// generation that logs there (#501, #502). Two writers on one path would keep
+// separate offsets and rotation state and overwrite each other's records, so
+// a rotation-policy change does not open a second writer: the newest
+// generation's policy is adopted by replacing the writer under mu, on that
+// generation's first record. A generation cannot write before it is published,
+// so a prepared-then-aborted candidate never changes the serving policy or
+// prunes backups, and an older generation draining after a newer one has
+// written keeps using the newer policy rather than switching back.
 type accessFileState struct {
-	writer *lumberjack.Logger
-	refs   int
+	path string
+	mu   sync.Mutex
+	// writer, policy and policySeq are guarded by mu. Every writer call goes
+	// through mu, and the policy is changed by replacing the writer, never by
+	// mutating a live one: lumberjack's background pruning reads MaxBackups
+	// without its own lock.
+	writer    *lumberjack.Logger
+	policy    accessFilePolicy
+	policySeq uint64
+	refs      int // guarded by accessFiles
 }
 
+func newAccessFileWriter(path string, p accessFilePolicy) *lumberjack.Logger {
+	return &lumberjack.Logger{Filename: path, MaxSize: p.maxSize, MaxBackups: p.maxBackups, LocalTime: true}
+}
+
+// accessFileLease is one generation's handle on the shared writer. seq orders
+// generations: a lease acquired later belongs to a newer candidate.
 type accessFileLease struct {
-	key       accessFileKey
+	path      string
 	state     *accessFileState
+	policy    accessFilePolicy
+	seq       uint64
 	closeOnce sync.Once
 	closeErr  error
 }
 
 var accessFiles = struct {
 	sync.Mutex
-	entries map[accessFileKey]*accessFileState
-}{entries: make(map[accessFileKey]*accessFileState)}
+	entries map[string]*accessFileState
+	seq     uint64
+}{entries: make(map[string]*accessFileState)}
 
 var accessFileAbs = filepath.Abs
 
@@ -126,18 +152,38 @@ func acquireAccessFile(cfg config.AccessLogConfig) (*accessFileLease, error) {
 	if err != nil {
 		return nil, fmt.Errorf("access_log file path: %w", err)
 	}
-	key := accessFileKey{path: path, maxSize: cfg.RotateMaxMB, maxBackups: cfg.RotateKeep}
+	policy := accessFilePolicy{maxSize: cfg.RotateMaxMB, maxBackups: cfg.RotateKeep}
 	accessFiles.Lock()
 	defer accessFiles.Unlock()
-	state := accessFiles.entries[key]
+	accessFiles.seq++
+	state := accessFiles.entries[path]
 	if state == nil {
-		state = &accessFileState{writer: &lumberjack.Logger{
-			Filename: path, MaxSize: cfg.RotateMaxMB, MaxBackups: cfg.RotateKeep, LocalTime: true,
-		}}
-		accessFiles.entries[key] = state
+		// Creating the writer opens nothing: lumberjack opens the file on the
+		// first record.
+		state = &accessFileState{path: path, writer: newAccessFileWriter(path, policy), policy: policy}
+		accessFiles.entries[path] = state
 	}
 	state.refs++
-	return &accessFileLease{key: key, state: state}, nil
+	return &accessFileLease{path: path, state: state, policy: policy, seq: accessFiles.seq}, nil
+}
+
+// Write appends one record through the shared writer. The first record of a
+// generation newer than the one that set the current policy adopts its policy.
+func (lease *accessFileLease) Write(p []byte) (int, error) {
+	st := lease.state
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if lease.seq > st.policySeq {
+		if lease.policy != st.policy {
+			// Close before reopening so only one handle ever appends; the
+			// replacement reopens the same file and continues its size count.
+			_ = st.writer.Close()
+			st.writer = newAccessFileWriter(st.path, lease.policy)
+			st.policy = lease.policy
+		}
+		st.policySeq = lease.seq
+	}
+	return st.writer.Write(p)
 }
 
 func (lease *accessFileLease) Close() error {
@@ -146,8 +192,10 @@ func (lease *accessFileLease) Close() error {
 		defer accessFiles.Unlock()
 		lease.state.refs--
 		if lease.state.refs == 0 {
-			delete(accessFiles.entries, lease.key)
+			delete(accessFiles.entries, lease.path)
+			lease.state.mu.Lock()
 			lease.closeErr = lease.state.writer.Close()
+			lease.state.mu.Unlock()
 		}
 	})
 	return lease.closeErr

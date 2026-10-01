@@ -123,6 +123,7 @@ inside the immutable release archives. They do not close the partial-audit ledge
 | Runtime resources, capacity headroom, and HTTP bandwidth | [observability.md](observability.md) | `Beta` / `released` |
 | Serving WAF policy and provenance visibility | [waf.md](waf.md) | `Beta` / `released` |
 | Resource-pressure diagnostics guidance in Console | [diagnostics.md](diagnostics.md) | `Beta` / `released` |
+| Deployment packaging (systemd, Windows service, Docker, healthcheck) | [deployment.md](deployment.md) | `Beta` / `released` |
 
 Some capabilities share a canonical guide because they compose one subsystem.
 The status manifest still gives each additive capability its own maturity and

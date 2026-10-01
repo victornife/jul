@@ -220,6 +220,9 @@ func validatePlugins(plugins map[string]PluginConfig) []error {
 		if p.KVMaxEntries < 0 {
 			errs = append(errs, fmt.Errorf("%s: kv_max_entries must not be negative", where))
 		}
+		if p.MaxInstances < 0 {
+			errs = append(errs, fmt.Errorf("%s: max_instances must not be negative", where))
+		}
 		if p.KVMaxBytes.Bytes() < 0 {
 			errs = append(errs, fmt.Errorf("%s: kv_max_bytes must not be negative", where))
 		}

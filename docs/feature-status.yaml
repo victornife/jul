@@ -13,6 +13,14 @@
 # it its own entry or an explicit relationship. A GA row must be released and
 # soaked under ADR 0003/0005. Volatile issue sequencing belongs in #62, not here.
 #
+# There is no Y1-06 row by design: Y1-06 was the gRPC transcoding MVP
+# (docs/specs/year-1.md), superseded by and promoted into Y2-01 (gRPC <-> JSON
+# transcoding, docs/specs/year-2.md). Its maturity is Y2-01's.
+#
+# A null criterion means not applicable. For criterion 8 that is "no custom
+# parser" (parsing is done by the standard library or a vetted dependency);
+# any other null carries its rationale in the row's notes.
+#
 # Updated 2026-09-30 after stable v2.1.0 publication at 0951090a.
 # Shipped post-v2.0.0 rows are released; maturity and GA criteria are unchanged.
 # This post-tag manifest update does not modify the immutable release archives.
@@ -126,7 +134,7 @@ features:
     8: null
     9: true
   notes: 'Single-operator GA. Named-principal RBAC (roles, scoped revocable tokens, per-principal audit attribution, Console
-    permission gating) delivered as opt-in [admin.rbac] (Phase 3 / #73); external identity (OIDC/SSO) remains Y3-02 horizon.'
+    permission gating) delivered as opt-in [admin.rbac] (Phase 3 / #73); external identity (OIDC/SSO) remains Y3-02 horizon. Relationship (#512): the admin audit log, configuration history and rollback are part of this row''s Console/admin surface; managed configuration authority and drift adoption are the separate AUTO-AUTH row.'
   delivery: soaked
 - id: Y1-08
   name: Zero-config + jul lint
@@ -159,8 +167,9 @@ features:
     5: true
     6: true
     7: true
-    8: null
+    8: true
     9: true
+  notes: 'Criterion 8: the NGINX parser and translator are fuzzed (FuzzParseDirective, FuzzTranslate, FuzzParseNginxHashKey in internal/migrate/nginx); the earlier null was a recording error, not a scope change (#512).'
   delivery: soaked
 - id: Y1-10
   name: OTel tracing + access-log sinks
@@ -177,7 +186,8 @@ features:
     6: true
     7: true
     8: null
-    9: null
+    9: true
+  notes: 'Criterion 8 n/a: W3C trace context is parsed by the OpenTelemetry propagator and access-log sinks only write. Criterion 9: the Console Traffic controls panel edits tracing and access-log sinks (TracingEditor, AccessLogEditor) and Status reports both; the earlier null was a recording error (#512). Request IDs that correlate access records with traces are the core-http Request ID middleware.'
   delivery: soaked
 - id: Y1-11
   name: HTTP/3 over QUIC
@@ -374,6 +384,7 @@ features:
     7: true
     8: true
     9: true
+  notes: 'Relationships (#512): per-status error pages (internal/handler/errorpages.go), the always-on Request ID middleware and the worker_threads process setting (GOMAXPROCS) are part of this row: they are in docs/core-http.md and docs/configuration.md and on the path of every soaked request. Deployment packaging is the separate DEPLOY-PKG row.'
   delivery: soaked
 - id: reload-tx
   name: Configuration reload transaction
@@ -422,7 +433,7 @@ features:
     criterion 8 is FuzzDerive and FuzzParsePrefix in internal/clientaddr; criterion 9 is the Security panel listener editor
     and the Trusted client address status row.
 
-    '
+     Relationship (#512): inbound PROXY protocol on HTTP listeners (servers[].proxy_protocol = "in", #136) is a Boundary A input to this derivation and part of this row''s documented contract and conformance matrix; its parser (internal/proxyproto, shared with the stream proxy) is fuzzed by FuzzReadHeader. No soak has enabled inbound PROXY on an HTTP listener (the #421 soak did not, and burn-in-stream.toml only emits PROXY outbound), so criterion 5 is open for this path.'
   delivery: soaked
 - id: UT-BE
   name: Backend TLS trust (backend_tls)
@@ -552,7 +563,7 @@ features:
     8: null
     9: null
   notes: 'JSON Schema, machine metadata, generated factual reference and durable route identity are merged through #149. The
-    later generated external OpenAPI contract is tracked separately under AUTO-API.'
+    later generated external OpenAPI contract is tracked separately under AUTO-API. Criterion 9 n/a: the JSON Schema, metadata and generated reference are artifacts for editors and automation, not an operator workflow; the operator-facing part, durable route IDs, is shown and edited in the Console Routes panel (#512).'
 - id: MIG-ASSESS
   name: NGINX migration assessment, provenance, and includes
   tags:
@@ -591,7 +602,7 @@ features:
     9: null
   notes: 'Local `jul doctor` and operator-triggered support bundles are merged through #155/#156. They are versioned,
     bounded, secret-safe and network-free by default. The later reduced remote diagnostics projection does not promote this
-    local capability and is tracked with AUTO-API/AUTO-CLI.'
+    local capability and is tracked with AUTO-API/AUTO-CLI. Criterion 9 n/a: jul doctor and support bundles are local, network-free host tools by design; Console diagnostics guidance is the separate OPS-DIAG-UX row (#512).'
 - id: ADMIN-TLS
   name: Admin listener TLS and client authentication
   tags:
@@ -651,7 +662,7 @@ features:
     9: null
   notes: 'The thin remote CLI over the supported /api/v1 contract, including credential precedence, machine output and
     stable exit classes, is merged through #394. It never falls back to internal Console routes. Published in stable v2.0.0 as Beta; feature-specific GA
-    certification and soak remain open.'
+    certification and soak remain open. Criterion 9 n/a: this is the command-line client for automation over /api/v1; the Console is the interactive counterpart (#512).'
 - id: HR-SELECTED
   name: Selected runtime policy hot reload
   tags:
@@ -857,3 +868,28 @@ features:
     reload. Revocation also applies to resumed TLS sessions and is scoped to the CRL issuer;
     jul_mtls_crl_next_update_timestamp_seconds exposes CRL expiry. admin.tls.client_auth stays restart-bound. Does
     not change the GA Y2-07 row. Published in stable v2.1.0, not in v2.0.0; no dedicated soak.'
+- id: DEPLOY-PKG
+  name: Deployment packaging (systemd, Windows service, Docker, healthcheck)
+  tags:
+  - core
+  maturity: Beta
+  delivery: released
+  doc: deployment.md
+  criteria:
+    1: true
+    2: null
+    3: true
+    4: false
+    5: false
+    6: true
+    7: true
+    8: null
+    9: null
+  notes: 'Recorded by #512 so these shipped surfaces no longer carry implicit maturity: deploy/systemd (jul.service,
+    jul-readonly.service), the Windows service host (cmd/jul/service_windows.go, deploy/windows/install-service.ps1), the Dockerfile and deploy/docker profile,
+    and jul healthcheck. Criterion 1 is the systemd-deployment-e2e, windows-service-e2e and docker-deployment-e2e
+    workflows; 3 is the Deployment packaging section of known-limitations.md; 6 is the unit files, scripts and
+    Dockerfile with docs/deployment.md; 7 is the hardening guidance there and in SECURITY.md. Criterion 2 n/a (no
+    performance surface), 8 n/a (no parser), 9 n/a (host packaging, not a Console surface). 4 is open: unit, image
+    and service layouts are not yet under a semver contract; 5 is open: no packaging-specific soak. No container
+    image is published (#446).'

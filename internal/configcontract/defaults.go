@@ -70,6 +70,7 @@ var DefaultOverrides = map[string]string{
 	"plugins.*.max_fetch_response": "1m",
 	"plugins.*.kv_max_entries":     "1024",
 	"plugins.*.kv_max_bytes":       "1m",
+	"plugins.*.max_instances":      "64",
 
 	"upstreams.*.strategy":                            "round_robin",
 	"upstreams.*.resilience.circuit_half_open_probes": "1",

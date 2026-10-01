@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 366,
-    "schema_leaves": 311,
+    "schema_paths": 367,
+    "schema_leaves": 312,
     "resources": 9
   },
   "capability_build_tags": {
@@ -1315,6 +1315,26 @@
       "default": "1m",
       "description": "MaxFetchResponse caps a fetch response body",
       "anchor": "plugins-x-max_fetch_response"
+    },
+    "plugins.*.max_instances": {
+      "kind": "scalar",
+      "scalar": "integer",
+      "go_type": "int",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "plugins",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the plugin set is rebuilt and re-instantiated on each successful reload",
+      "capabilities": [
+        "wasm_plugins"
+      ],
+      "value_kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 64",
+      "active_when": "always",
+      "default": 64,
+      "description": "MaxInstances caps the plugin's live module instances, idle and in use",
+      "anchor": "plugins-x-max_instances"
     },
     "plugins.*.max_invocations": {
       "kind": "scalar",

@@ -45,6 +45,7 @@ enabled = true
 
 [[servers]]
 listen = ":8080"
+read_timeout = "60s"
   [[servers.locations]]
   match = { type = "prefix", path = "/" }
   root = "/srv"
@@ -391,6 +392,25 @@ func TestCmdRunRequiresTarget(t *testing.T) {
 	}
 	if code, _, errOut := capture(t, func() int { return cmdRun([]string{"--serve", "x", "--proxy", "y"}) }); code != 2 {
 		t.Errorf("cmdRun() with both flags exit = %d, want 2: %s", code, errOut)
+	}
+}
+
+// `jul run` warns once on stderr when it binds beyond loopback (#511).
+func TestNoticeExposedListen(t *testing.T) {
+	for listen, want := range map[string]bool{
+		":8080":          true,
+		"0.0.0.0:8080":   true,
+		"[::]:8080":      true,
+		"192.0.2.10:80":  true,
+		"127.0.0.1:8080": false,
+		"[::1]:8080":     false,
+		"localhost:8080": false,
+	} {
+		var b strings.Builder
+		noticeExposedListen(&b, listen)
+		if got := strings.HasPrefix(b.String(), "notice: listening on "+listen); got != want {
+			t.Errorf("listen %q: notice %q, want printed=%v", listen, b.String(), want)
+		}
 	}
 }
 

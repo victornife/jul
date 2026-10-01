@@ -256,12 +256,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 366,
-    "schema_leaves": 311,
-    "registry_entries": 311,
+    "schema_paths": 367,
+    "schema_leaves": 312,
+    "registry_entries": 312,
     "startup_consumed": 28,
     "by_class": {
-      "hot_reload": 269,
+      "hot_reload": 270,
       "ignored_deprecated": 4,
       "new_listener_only": 7,
       "restart_required": 28,
@@ -1338,6 +1338,19 @@
     },
     {
       "path": "plugins.*.max_fetch_response",
+      "class": "hot_reload",
+      "subsystem": "plugins",
+      "reason": "the plugin set is rebuilt and re-instantiated on each successful reload",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "plugins.*.max_instances",
       "class": "hot_reload",
       "subsystem": "plugins",
       "reason": "the plugin set is rebuilt and re-instantiated on each successful reload",

@@ -719,6 +719,14 @@
       "active_when": "always"
     },
     {
+      "go_field": "PluginConfig.MaxInstances",
+      "path": "plugins.<name>.max_instances",
+      "kind": "integer",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero defaults to 64",
+      "active_when": "always"
+    },
+    {
       "go_field": "PluginConfig.MaxInvocations",
       "path": "plugins.<name>.max_invocations",
       "kind": "integer",

@@ -73,18 +73,16 @@ reuse an older egress transport or discovery worker. The remaining restart-requi
 rows are deliberate structural/startup boundaries, not unfinished #94 work. See
 [hot-reload strategy](hot-reload-strategy.md).
 
-- **A same-path access-log rotation-setting change has a bounded generation
-  overlap risk.** Identical path/rotation policies share one leased writer,
-  so ordinary generation replacement does not create competing file offsets.
-  Changing `rotate_max_mb`/`rotate_keep` while `file` stays the same still uses
-  independent writers to avoid mutating live policy during old-request drain.
-  Those writers can target a renamed backup during rotation or interfere with
-  record boundaries while they overlap; do not assume no data loss. For a safe
-  policy transition, choose a new file path or restart rather than changing
-  rotation settings on the live path. Different destinations do not share this
-  overlap. This remaining policy-change boundary is not closed by the
-  identical-policy writer correction; follow-up is tracked in
-  [#502](https://github.com/victornife/jul/issues/502).
+- **A same-path access-log rotation-policy change applies at the new
+  generation's first record, and pruning waits for the next rotation.** All
+  generations logging to one file share a single writer (#501, #502), so a
+  reload that changes `rotate_max_mb`/`rotate_keep` never opens a competing
+  writer. The new policy takes effect when the new generation writes its first
+  access record; until then the old generation's records follow the old
+  policy, and afterwards a draining old generation uses the new one. Lowering
+  `rotate_keep` removes surplus backups at the next size-triggered rotation,
+  not at reload. Different destinations are independent, and a path switch
+  never prunes the old path.
 
 - **HTTP/3 Alt-Svc is a client-cached hint, not a live capability probe.**
   Once a client has seen `Alt-Svc: h3="..."; ma=<seconds>`, browsers may keep
@@ -235,9 +233,11 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   `[[servers]]` block sharing a `listen` must declare the same effective policy.
   This is deliberate: identity is derived before the `Host` header is read, so a
   per-vhost policy could be selected by the attacker.
-- **No `X-Real-IP`, no CIDR shorthands, no PROXY protocol on HTTP listeners.**
+- **No `X-Real-IP` and no CIDR shorthands.**
   A single-address header cannot be evaluated against a trust boundary, and
-  shorthands such as `private` or `rfc1918` encourage over-broad trust.
+  shorthands such as `private` or `rfc1918` encourage over-broad trust. (Inbound
+  PROXY protocol on HTTP listeners *is* supported: `proxy_protocol = "in"`; see
+  [configuration.md](configuration.md#proxy-protocol-on-an-http-listener).)
 - **No chain projection.** The identity carries the canonical client, the direct
   peer, and bounded source/result enums — not the full asserted chain.
 - **Outbound forwarding is deliberately lossy.** Jul emits
@@ -513,6 +513,11 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   they load the same `.wasm` file.
 - **No streaming bodies.** The host buffers the full request body before passing
   it to the guest; very large bodies increase per-request memory pressure.
+- **Plugin concurrency is capped per plugin.** At most `max_instances` module
+  instances (default 64) exist per plugin; a call that finds them all busy
+  waits one `timeout`, then its request fails with `503` and `Retry-After: 1`
+  (#506). Guest memory is bounded by `max_instances × memory_limit`; host body
+  buffers still follow request concurrency.
 - **WASM binary must be pre-compiled.** Modules are compiled when a
   configuration is activated, not on first use, and a malformed WASM binary
   prevents that configuration from starting. Depending on platform and sandbox,
@@ -603,6 +608,26 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 - **No distributed rate limiting or cache.** Rate-limit buckets and response
   cache are per-process. A multi-node setup requires an external shared store
   (demand-gated Year 3).
+
+---
+
+## Deployment packaging ([deployment.md](deployment.md))
+
+Beta (`DEPLOY-PKG` in [status.md](status.md)): the unit, service and image
+layouts are not yet a semver contract, and no packaging-specific soak has run.
+
+- **No published container image** (#446). Build it from the repository
+  `Dockerfile`; the documented image names are local tags.
+- **The image is distroless: no shell and no curl.** Its `HEALTHCHECK` runs
+  `jul healthcheck` against the loopback admin listener, so a mounted config
+  must keep `[admin]` enabled or override the healthcheck; with admin TLS the
+  baked probe must be overridden.
+- **`jul-readonly.service` refuses Console apply** by design (`/etc/jul` is
+  read-only to the service). Configuration changes go through the provisioning
+  process and a reload or restart.
+- **The Windows installer only adds grants.** It does not remove inherited or
+  pre-existing access on an existing directory; review ACLs before storing
+  secrets there, or create the root with `new-secure-data-dir.ps1`.
 
 ---
 

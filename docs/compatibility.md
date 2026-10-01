@@ -365,6 +365,15 @@ A stable contract is removed only after a deprecation period:
    announced.
 3. It is removed no earlier than the next **MAJOR** release.
 
+### Announced default changes for the next MAJOR
+
+- **`jul run` default listener (#511).** `jul run --serve`/`--proxy` binds
+  `:8080` (all interfaces) when `--listen` is omitted, and since #511 prints a
+  one-line stderr notice whenever the listener is not loopback. The next MAJOR
+  release is intended to change the default to `127.0.0.1:8080`. Scripts that
+  rely on remote reachability should pass `--listen :8080` explicitly now. The
+  default does not change in a MINOR release.
+
 ## Maturity and stability
 
 | Maturity | Config/API stability |

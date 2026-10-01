@@ -276,7 +276,7 @@ failure is counted (`jul_plugin_panics_total` for traps/timeouts,
 | Per-phase deadline | `timeout` per invocation (default 100 ms) |
 | Request state | 4096 bytes |
 | Added header bytes | 64 KiB per invocation |
-| Instances | the bounded pool (#420); none held between phases |
+| Instances | at most `max_instances` live per plugin (default 64, idle and in use); a call that finds them all busy waits one `timeout`, then fails with `503` (#506). None held between phases |
 
 Host memory for a body subscription is at most `max_response_body` per
 subscribed response per plugin, released when the response is written;
