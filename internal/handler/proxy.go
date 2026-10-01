@@ -373,7 +373,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 			if r.Body == nil {
 				r.Body = http.NoBody
 			}
-			r.Body = upstream.WrapAttemptBody(r.Body, r.ContentLength, req.Context(), actx,
+			r.Body = upstream.WrapAttemptBody(r.Body, upstream.OwedBodyLength(r), req.Context(), actx,
 				func(classification upstream.AttemptClassification, bodyErr error) {
 					switch classification.Health() {
 					case upstream.HealthFailure:
