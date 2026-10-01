@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -72,19 +73,26 @@ func freeUDPTCPPortWithTCPProbe(t *testing.T, probe func(context.Context, string
 	lc := &net.ListenConfig{}
 	const attempts = 20
 	var lastBindError error
+	rejected := make(map[string]struct{}, attempts)
 	for range attempts {
 		pc, err := lc.ListenPacket(context.Background(), "udp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer func() { _ = pc.Close() }()
 		addr := pc.LocalAddr().String()
+		if _, wasRejected := rejected[addr]; wasRejected {
+			_ = pc.Close()
+			continue
+		}
 		ln, err := probe(context.Background(), "tcp", addr)
 		if err != nil {
 			lastBindError = err
+			rejected[addr] = struct{}{}
+			_ = pc.Close()
 			continue
 		}
 		_ = ln.Close()
+		_ = pc.Close()
 		return addr
 	}
 
@@ -97,6 +105,10 @@ func freeUDPTCPPortWithTCPProbe(t *testing.T, probe func(context.Context, string
 			continue
 		}
 		addr := ln.Addr().String()
+		if _, wasRejected := rejected[addr]; wasRejected {
+			_ = ln.Close()
+			continue
+		}
 		pc, err := lc.ListenPacket(context.Background(), "udp", addr)
 		if err != nil {
 			lastBindError = err
@@ -107,6 +119,30 @@ func freeUDPTCPPortWithTCPProbe(t *testing.T, probe func(context.Context, string
 		defer func() { _ = pc.Close() }()
 		return addr
 	}
+
+	// Windows may exclude every TCP ephemeral candidate from UDP. Scan a
+	// non-ephemeral range and require both protocols to bind the same port.
+	for port := 20000; port <= 32767; port++ {
+		addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+		if _, wasRejected := rejected[addr]; wasRejected {
+			continue
+		}
+		ln, err := lc.Listen(context.Background(), "tcp", addr)
+		if err != nil {
+			lastBindError = err
+			continue
+		}
+		pc, err := lc.ListenPacket(context.Background(), "udp", addr)
+		if err != nil {
+			lastBindError = err
+			_ = ln.Close()
+			continue
+		}
+		_ = ln.Close()
+		defer func() { _ = pc.Close() }()
+		return addr
+	}
+
 	t.Fatalf("no loopback port free on both UDP and TCP: %v", lastBindError)
 	return ""
 }
@@ -118,7 +154,7 @@ func (acceptedProbe) Accept() (net.Conn, error) { return nil, net.ErrClosed }
 func (acceptedProbe) Close() error              { return nil }
 func (acceptedProbe) Addr() net.Addr            { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)} }
 
-func TestFreeUDPTCPPortRetainsRejectedCandidates(t *testing.T) {
+func TestFreeUDPTCPPortReleasesRejectedCandidates(t *testing.T) {
 	var rejectedAddr string
 	var probes int
 	addr := freeUDPTCPPortWithTCPProbe(t, func(_ context.Context, _, candidate string) (net.Listener, error) {
@@ -130,10 +166,11 @@ func TestFreeUDPTCPPortRetainsRejectedCandidates(t *testing.T) {
 		if candidate == rejectedAddr {
 			t.Fatal("retried the rejected UDP candidate")
 		}
-		if reserved, err := net.ListenPacket("udp", rejectedAddr); err == nil {
-			_ = reserved.Close()
-			t.Fatal("rejected UDP candidate was released before retrying")
+		reserved, err := net.ListenPacket("udp", rejectedAddr)
+		if err != nil {
+			t.Fatalf("rejected UDP candidate is still reserved: %v", err)
 		}
+		_ = reserved.Close()
 		// A real TCP bind here can fail when a concurrently running package
 		// holds that loopback port, which made the probe count flaky.
 		return acceptedProbe{}, nil
