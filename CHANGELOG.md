@@ -13,6 +13,14 @@ Post-publication documentation and delivery-status reconciliation, plus the
 post-v2.1.0 audit remediation below. None of this is part of the immutable
 v2.1.0 tag or its packaged READMEs.
 
+### Added
+
+- **Scheduled protocol conformance lane (#513).** A weekly, non-blocking
+  workflow runs h2spec, h3spec, Autobahn|Testsuite, `http-tests/cache-tests`
+  and an ambiguous-framing corpus against the full-profile binary, with an
+  allow-list that requires a rationale and an issue for every known
+  deviation. See `docs/security-testing.md`.
+
 ### Fixed
 
 - **Ambiguously framed HTTP/1.x requests close their connection (RFC 9112

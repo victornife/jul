@@ -1,0 +1,95 @@
+name: Conformance
+
+# Scheduled protocol conformance lane (#513). Non-blocking: it runs weekly and
+# on demand, never as a pull-request gate. Each suite starts the full-profile
+# binary with its own configuration, runs one external tool or corpus, uploads
+# its report, and fails only on a case that is neither passing nor listed in
+# testdata/conformance/allowlist.yaml (with a rationale and an issue).
+#
+# HTTP/3 tool decision: h3spec (kazu-yamamoto) ships a Linux binary and
+# exercises QUIC transport and HTTP/3 framing errors against a live server, so
+# it is used directly rather than a reduced smoke test. Revisit making any
+# suite a required gate after four consecutive green weekly runs.
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FULL_TAGS: brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf
+  H2SPEC_TAG: v2.6.0
+  H3SPEC_TAG: v0.1.13
+  CACHE_TESTS_COMMIT: d644cf4bf487763646aac19d2c8b846daa0f604d
+  AUTOBAHN_IMAGE: crossbario/autobahn-testsuite:25.10.1@sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074
+
+jobs:
+  suite:
+    name: ${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [h2spec, h3, autobahn, cache, framing]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Python dependencies
+        run: pip install pyyaml
+      - name: Build the full-profile binary
+        run: go build -tags "$FULL_TAGS" -o "$RUNNER_TEMP/jul" ./cmd/jul
+
+      - name: Build h2spec
+        if: matrix.suite == 'h2spec'
+        run: |
+          git clone --quiet --depth 1 --branch "$H2SPEC_TAG" https://github.com/summerwind/h2spec "$RUNNER_TEMP/h2spec-src"
+          (cd "$RUNNER_TEMP/h2spec-src" && go build -o "$RUNNER_TEMP/h2spec" ./cmd/h2spec)
+      - name: Fetch h3spec
+        if: matrix.suite == 'h3'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/h3spec" "https://github.com/kazu-yamamoto/h3spec/releases/download/$H3SPEC_TAG/h3spec-linux-x86_64"
+          chmod +x "$RUNNER_TEMP/h3spec"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        if: matrix.suite == 'cache'
+        with:
+          node-version: "22"
+      - name: Fetch http-tests/cache-tests
+        if: matrix.suite == 'cache'
+        run: |
+          git clone --quiet https://github.com/http-tests/cache-tests "$RUNNER_TEMP/cache-tests"
+          git -C "$RUNNER_TEMP/cache-tests" checkout --quiet "$CACHE_TESTS_COMMIT"
+          (cd "$RUNNER_TEMP/cache-tests" && npm ci --no-audit --no-fund)
+      - name: Pull Autobahn|Testsuite
+        if: matrix.suite == 'autobahn'
+        run: docker pull "$AUTOBAHN_IMAGE"
+
+      - name: Run ${{ matrix.suite }}
+        run: >-
+          python scripts/conformance/run.py "${{ matrix.suite }}"
+          --jul "$RUNNER_TEMP/jul"
+          --out "$RUNNER_TEMP/report"
+          --h2spec "$RUNNER_TEMP/h2spec"
+          --h3spec "$RUNNER_TEMP/h3spec"
+          --cache-tests "$RUNNER_TEMP/cache-tests"
+          --autobahn-image "$AUTOBAHN_IMAGE"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: conformance-${{ matrix.suite }}
+          path: ${{ runner.temp }}/report
+          if-no-files-found: warn
+          retention-days: 30

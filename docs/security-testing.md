@@ -143,3 +143,41 @@ Dedicated package floors do not replace:
 Security confidence comes from the combined evidence. Coverage is only one
 regression signal, and a green percentage is never evidence that an untested
 security contract is correct.
+
+## Protocol conformance lane
+
+The [`conformance`](../.github/workflows/conformance.yml) workflow (#513)
+checks Jul against external protocol suites instead of hand-written
+expectations. It runs weekly and on `workflow_dispatch`, and it is **not** a
+pull-request gate. Each suite starts the full-profile binary with its own
+configuration, uploads its report as an artifact, and fails only on a case
+that is neither passing nor listed in
+[`testdata/conformance/allowlist.yaml`](../testdata/conformance/allowlist.yaml)
+with a rationale and an issue. An allow-listed case that starts passing is
+reported as stale.
+
+| Suite | Tool | Target |
+| --- | --- | --- |
+| `h2spec` | h2spec 2.6.0, built from its tag | HTTP/2 over TLS and h2c, static and proxied paths |
+| `h3` | h3spec 0.1.13 | HTTP/3 and QUIC on a TLS listener with `http3.enabled` |
+| `autobahn` | Autobahn\|Testsuite 0.8.2 (fuzzing client) | WebSocket through the reverse proxy to an echo server |
+| `cache` | `http-tests/cache-tests` at a pinned commit | a cache-enabled proxy location; only `required` cases gate, `optimal` and `check` results are informational |
+| `cache` (custom) | two checks | validators across content codings: a compressed response carries a weak `ETag`, and `If-Range` with it returns a full `200` (#504) |
+| `framing` | [`testdata/conformance/framing.yaml`](../testdata/conformance/framing.yaml) | ambiguous HTTP/1.x framing: conflicting `Content-Length`, `Transfer-Encoding` variants, chunk syntax, obs-fold, bare LF, `Host` rules. Each case must be rejected (no complete request reaches the origin) or forwarded exactly as listed |
+
+Run a suite locally with the tool it needs:
+
+```sh
+go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o /tmp/jul ./cmd/jul
+python3 scripts/conformance/run.py framing --jul /tmp/jul --out /tmp/conformance
+python3 scripts/conformance/run.py h2spec --jul /tmp/jul --out /tmp/conformance --h2spec /path/to/h2spec
+```
+
+The first local baselines (2026-09-30) found four Jul defects, all fixed:
+`HEAD` through the proxy failed and marked the backend down (#534); a
+malformed or oversized client body was counted as a backend failure;
+a request with both `Transfer-Encoding` and `Content-Length`, or HTTP/1.0 with
+`Transfer-Encoding`, kept the connection open so a trailing request was served
+(RFC 9112 §6.3). The remaining deviations are the five HTTP/2 frame-level
+cases inherited from Go's `net/http` (#539) and the HTTP caching cases listed
+in #540.
