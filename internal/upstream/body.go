@@ -7,9 +7,26 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"sync"
 	"sync/atomic"
 )
+
+// OwedBodyLength is the body length a backend must deliver for resp before
+// WrapAttemptBody may call the attempt successful, or -1 when no length is
+// owed. A response to HEAD and a 1xx, 204 or 304 response carry no content
+// whatever Content-Length says (RFC 9110 §8.6, §9.3.2, §15.3.5,
+// §15.4.5); treating their empty body as truncated failed every proxied HEAD
+// and counted it against the backend (#534).
+func OwedBodyLength(resp *http.Response) int64 {
+	if resp.Request != nil && resp.Request.Method == http.MethodHead {
+		return -1
+	}
+	if resp.StatusCode < 200 || resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusNotModified {
+		return -1
+	}
+	return resp.ContentLength
+}
 
 // WrapAttemptBody delays an attempt's health verdict until its response body
 // reaches a real outcome. A complete body is success, an inbound or Jul-owned

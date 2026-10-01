@@ -26,6 +26,15 @@ v2.1.0 tag or its packaged READMEs.
   keep-alive and pipelining are unchanged. Found by the ambiguous-framing
   corpus of the conformance lane (#513).
 
+- **`HEAD` through the reverse proxy works again and no longer marks backends
+  down (#534).** Since v2.0.0 the proxy treated a HEAD response's empty body as
+  a truncation of its `Content-Length`, so every proxied HEAD failed (empty
+  reply on HTTP/1.1, `RST_STREAM` on HTTP/2) and counted as a backend failure;
+  `max_fails` HEADs took a healthy backend out of rotation. Responses that
+  carry no content (HEAD, 1xx, 204, 304) no longer owe a body length, in the
+  HTTP proxy, the native gRPC proxy and forward-auth. Found by the h2spec
+  baseline for the conformance lane (#513).
+
 - **On-the-fly compression weakens strong `ETag`s (#504).** A compressed body
   carried the origin's strong tag unchanged, so one strong validator named two
   byte sequences (RFC 9110 §8.8.1, §8.8.3.3). A resumed download (`Range` plus
