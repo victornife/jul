@@ -9,7 +9,7 @@
 >
 > **Scope note.** This is an assessment record, not a live issue tracker and not a
 > status authority. Feature maturity and delivery remain owned by
-> [`feature-status.yaml`](../feature-status.yaml) and [`status.md`](../status.md);
+> [`feature-status.yaml`](../../feature-status.yaml) and [`status.md`](../../status.md);
 > volatile issue sequencing remains owned by
 > [#62](https://github.com/victornife/jul/issues/62).
 

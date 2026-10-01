@@ -9,7 +9,7 @@ auditable later, not just a claim in `docs/soak-evidence.md`.
 
 ADR 0005 makes a long-running soak a release gate. A gate whose evidence is
 not reproducible is a claim, not a gate — see
-`docs/audit/2026-09-16-pre-soak-readiness-audit.md` (JUL-AUD-018). Loose
+`docs/audit/old/2026-09-16-pre-soak-readiness-audit.md` (JUL-AUD-018). Loose
 `.log` files with no SHA, config copy or environment record cannot answer
 "what exactly was running when this passed?" a year later; a manifest can.
 
