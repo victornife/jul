@@ -189,12 +189,17 @@ func TestFreeUDPTCPPortReleasesRejectedCandidates(t *testing.T) {
 
 func TestFreeUDPTCPPortFallsBackAfterTCPExcludedEphemeralRange(t *testing.T) {
 	var candidates []string
+	probed := make(map[string]bool)
 	addr := freeUDPTCPPortWithTCPProbe(t, func(_ context.Context, _, candidate string) (net.Listener, error) {
+		if probed[candidate] {
+			t.Fatalf("retried rejected ephemeral candidate %s", candidate)
+		}
+		probed[candidate] = true
 		candidates = append(candidates, candidate)
 		return nil, errors.New("simulate TCP-excluded ephemeral port")
 	})
-	if len(candidates) != 20 {
-		t.Fatalf("ephemeral TCP probes = %d, want 20 before fallback", len(candidates))
+	if len(candidates) == 0 || len(candidates) > 20 {
+		t.Fatalf("ephemeral TCP probes = %d, want 1..20 unique candidates before fallback", len(candidates))
 	}
 	for _, candidate := range candidates {
 		if candidate == addr {

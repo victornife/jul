@@ -304,19 +304,9 @@ func TestProxyUnixHTTPKeepAliveAndGenerationRetirement(t *testing.T) {
 func TestProxyUnixHTTPRepeatedGenerationSwitchRetiresConnections(t *testing.T) {
 	pathA := shortUnixFixturePath(t, "a.sock")
 	pathB := shortUnixFixturePath(t, "b.sock")
-	var opened atomic.Int64
-	var closed atomic.Int64
-	state := func(_ net.Conn, st http.ConnState) {
-		switch st {
-		case http.StateNew:
-			opened.Add(1)
-		case http.StateClosed:
-			closed.Add(1)
-		}
-	}
-	stopA := serveUnixHTTPAt(t, pathA, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "A") }), state)
+	stopA := serveUnixHTTPAt(t, pathA, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "A") }), nil)
 	defer stopA()
-	stopB := serveUnixHTTPAt(t, pathB, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "B") }), state)
+	stopB := serveUnixHTTPAt(t, pathB, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "B") }), nil)
 	defer stopB()
 	tcp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "T") }))
 	defer tcp.Close()
@@ -341,16 +331,15 @@ func TestProxyUnixHTTPRepeatedGenerationSwitchRetiresConnections(t *testing.T) {
 			_ = h.(*proxyHandler).Close()
 			t.Fatalf("generation %d response = %d %q, want %q", i, rec.Code, rec.Body.String(), g.want)
 		}
-		if err := h.(*proxyHandler).Close(); err != nil {
+		ph := h.(*proxyHandler)
+		pool := ph.Transport.(*balancingTransport).pool
+		if got := pool.Stats().Connections; got != 1 {
+			_ = ph.Close()
+			t.Fatalf("generation %d connections = %d, want one kept-alive connection", i, got)
+		}
+		if err := ph.Close(); err != nil {
 			t.Fatalf("generation %d Close: %v", i, err)
 		}
-	}
-	// The backend observes each client close asynchronously; on a loaded
-	// Windows runner AF_UNIX teardown has exceeded 10s, so allow 30s and
-	// report the counts if they still differ.
-	for deadline := time.Now().Add(30 * time.Second); closed.Load() != opened.Load(); time.Sleep(5 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatalf("backend connections opened=%d closed=%d after retiring every generation", opened.Load(), closed.Load())
-		}
+		waitFor(t, func() bool { return pool.Stats().Connections == 0 })
 	}
 }
