@@ -4,9 +4,228 @@
 package admin
 
 import (
+	"crypto/tls"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"jul/internal/adminapi"
+	"jul/internal/config"
+	"jul/internal/rbac"
 )
+
+func TestCatalogOwnsMuxRegistrations(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registrations := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || (selector.Sel.Name != "Handle" && selector.Sel.Name != "HandleFunc") {
+				return true
+			}
+			registrations++
+			if name != "routes.go" || selector.Sel.Name != "Handle" || len(call.Args) != 2 {
+				t.Errorf("%s: register admin routes only through Catalog in routes.go", name)
+				return true
+			}
+			receiver, receiverOK := selector.X.(*ast.Ident)
+			pattern, patternOK := call.Args[0].(*ast.SelectorExpr)
+			handler, handlerOK := call.Args[1].(*ast.Ident)
+			if !receiverOK || receiver.Name != "mux" || !patternOK || pattern.Sel.Name != "Pattern" || !handlerOK || handler.Name != "h" {
+				t.Errorf("%s: registration must remain mux.Handle(spec.Pattern, h)", name)
+				return true
+			}
+			spec, specOK := pattern.X.(*ast.Ident)
+			if !specOK || spec.Name != "spec" {
+				t.Errorf("%s: route pattern must come from the Catalog entry", name)
+			}
+			return true
+		})
+	}
+	if registrations != 1 {
+		t.Errorf("got %d mux registrations, want the single Catalog registration", registrations)
+	}
+}
+
+func TestRouteTransportPolicyInventory(t *testing.T) {
+	policies := map[string]string{
+		"/healthz":                                "probe_exempt",
+		"/readyz":                                 "probe_exempt",
+		"/":                                       "tls_or_loopback",
+		"/api/v1/status":                          "tls_or_loopback",
+		"/api/v1/capabilities":                    "tls_or_loopback",
+		"/api/v1/config":                          "tls_or_loopback",
+		"/api/v1/config/pending-restart":          "tls_or_loopback",
+		"/api/v1/config/applies/{apply_id}":       "tls_or_loopback",
+		"/api/v1/config/history":                  "tls_or_loopback",
+		"/api/v1/routes":                          "tls_or_loopback",
+		"/api/v1/routes/{route_id}":               "tls_or_loopback",
+		"/api/v1/upstreams":                       "tls_or_loopback",
+		"/api/v1/upstreams/{name}":                "tls_or_loopback",
+		"/api/v1/listeners":                       "tls_or_loopback",
+		"/api/v1/listeners/{addr}/client_address": "tls_or_loopback",
+		"/api/v1/streams":                         "tls_or_loopback",
+		"/api/v1/config/export":                   "tls_or_loopback",
+		"/api/v1/config/history/{id}/diff":        "tls_or_loopback",
+		"/api/v1/config/validate":                 "tls_or_loopback",
+		"/api/v1/config/plan":                     "tls_or_loopback",
+		"/api/v1/routes/test":                     "tls_or_loopback",
+		"/api/v1/config/patch":                    "tls_or_loopback",
+		"/api/v1/config/apply":                    "tls_or_loopback",
+		"/api/v1/config/patch/apply":              "tls_or_loopback",
+		"/api/v1/config/rollback":                 "tls_or_loopback",
+		"/api/v1/config/adopt-external/preview":   "tls_or_loopback",
+		"/api/v1/config/adopt-external":           "tls_or_loopback",
+		"/api/v1/config/pending-restart/discard":  "tls_or_loopback",
+		"/api/admin/me":                           "tls_or_loopback",
+		"/metrics":                                "tls_or_loopback",
+		"/api/stats":                              "tls_or_loopback",
+		"/api/status":                             "tls_or_loopback",
+		"/api/runtime/overview":                   "tls_or_loopback",
+		"/api/routes":                             "tls_or_loopback",
+		"/api/apps":                               "tls_or_loopback",
+		"/api/upstreams":                          "tls_or_loopback",
+		"/api/upstreams/{name}/resilience":        "tls_or_loopback",
+		"/api/certs":                              "tls_or_loopback",
+		"/api/tls":                                "tls_or_loopback",
+		"/api/security":                           "tls_or_loopback",
+		"/api/traffic-controls":                   "tls_or_loopback",
+		"/api/plugins":                            "tls_or_loopback",
+		"/api/streams":                            "tls_or_loopback",
+		"/api/mtls":                               "tls_or_loopback",
+		"/api/search":                             "tls_or_loopback",
+		"/api/events":                             "tls_or_loopback",
+		"/api/config":                             "tls_or_loopback",
+		"/api/config/raw":                         "tls_or_loopback",
+		"/api/config/settings":                    "tls_or_loopback",
+		"/api/config/pending-restart":             "tls_or_loopback",
+		"/api/config/authority/refresh":           "tls_or_loopback",
+		"/api/config/applies/{id}":                "tls_or_loopback",
+		"/api/config/history":                     "tls_or_loopback",
+		"/api/config/history/{id}":                "tls_or_loopback",
+		"/api/config/history/{id}/diff":           "tls_or_loopback",
+		"/api/config/validate":                    "tls_or_loopback",
+		"/api/config/preview":                     "tls_or_loopback",
+		"/api/config/diff":                        "tls_or_loopback",
+		"/api/config/patch":                       "tls_or_loopback",
+		"/api/config/patch/preview":               "tls_or_loopback",
+		"/api/config/patch/candidate":             "tls_or_loopback",
+		"/api/routes/test":                        "tls_or_loopback",
+		"/api/wizard":                             "tls_or_loopback",
+		"/api/wizard/generate":                    "tls_or_loopback",
+		"/api/transcode/descriptor-upload":        "tls_or_loopback",
+		"/api/config/apply":                       "tls_or_loopback",
+		"/api/config/patch/apply":                 "tls_or_loopback",
+		"/api/listeners":                          "tls_or_loopback",
+		"/api/listeners/{addr}/client_address":    "tls_or_loopback",
+		"/api/config/pending-restart/discard":     "tls_or_loopback",
+		"/api/config/adopt-external/preview":      "tls_or_loopback",
+		"/api/config/adopt-external":              "tls_or_loopback",
+		"/api/history":                            "tls_or_loopback",
+		"/api/history/get":                        "tls_or_loopback",
+		"/api/history/rollback":                   "tls_or_loopback",
+		"/api/config/rollback":                    "tls_or_loopback",
+		"/api/plugins/upload":                     "tls_or_loopback",
+		"/api/observability/requests":             "tls_or_loopback",
+		"/api/observability/failing-routes":       "tls_or_loopback",
+		"/api/observability/timeline":             "tls_or_loopback",
+		"/api/observability/upstream-history":     "tls_or_loopback",
+		"/api/observability/cert-history":         "tls_or_loopback",
+		"/api/observability/logs":                 "tls_or_loopback",
+		"/api/observability/logs/stream":          "tls_or_loopback",
+		"/api/admin/health":                       "tls_or_loopback",
+		"/api/admin/client-errors":                "tls_or_loopback",
+		"/api/audit":                              "tls_or_loopback",
+		"/api/audit/export":                       "tls_or_loopback",
+		"/cache/purge":                            "tls_or_loopback",
+		"/reload":                                 "tls_or_loopback",
+		"/debug/pprof/":                           "tls_or_loopback",
+	}
+	server := newTestServer(t, config.AdminConfig{Listen: "0.0.0.0:9090", Token: "secret-token"}, Deps{Ready: func() bool { return true }})
+	policy, err := rbac.Build(true, "admin", map[string][]string{"none": {}}, []rbac.PrincipalDef{
+		{Name: "admin", Role: rbac.RoleAdmin, Token: "admin-token-unused-by-this-test"},
+		{Name: "no-permissions", Role: "none", Token: "no-permissions-token"},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.UpdatePolicy(policy)
+	handler := server.routes()
+	for _, spec := range Catalog {
+		policy, declared := policies[spec.Pattern]
+		if !declared {
+			t.Errorf("route %q has no explicit transport policy", spec.Pattern)
+			continue
+		}
+		delete(policies, spec.Pattern)
+		if policy != "tls_or_loopback" && policy != "probe_exempt" {
+			t.Errorf("route %q has invalid transport policy %q", spec.Pattern, policy)
+			continue
+		}
+		if transportExemptPaths[spec.Pattern] != (policy == "probe_exempt") {
+			t.Errorf("route %q: transport exemption disagrees with policy %q", spec.Pattern, policy)
+		}
+		for _, method := range spec.Methods {
+			t.Run(method+" "+spec.Pattern, func(t *testing.T) {
+				request := withLocalAddr(httptest.NewRequest(method, spec.Pattern, nil), "203.0.113.7:9090")
+				recorder := httptest.NewRecorder()
+				handler.ServeHTTP(recorder, request)
+				if policy == "probe_exempt" {
+					if recorder.Code != http.StatusOK {
+						t.Fatalf("public probe status = %d, want 200", recorder.Code)
+					}
+					return
+				}
+				if recorder.Code != http.StatusForbidden || decodeEnvelope(t, recorder).Error.Code != adminapi.CodeInsecureTransport {
+					t.Fatalf("insecure request escaped transport gate: status = %d", recorder.Code)
+				}
+				if spec.Public {
+					return
+				}
+				request.TLS = &tls.ConnectionState{HandshakeComplete: true, Version: tls.VersionTLS13}
+				recorder = httptest.NewRecorder()
+				handler.ServeHTTP(recorder, request)
+				if recorder.Code != http.StatusUnauthorized {
+					t.Fatalf("secure unauthenticated request status = %d, want 401", recorder.Code)
+				}
+				request.Header.Set("Authorization", "Bearer no-permissions-token")
+				recorder = httptest.NewRecorder()
+				handler.ServeHTTP(recorder, request)
+				want := http.StatusForbidden
+				if spec.Authenticated {
+					want = http.StatusOK
+				}
+				if recorder.Code != want {
+					t.Fatalf("identity without permissions: status = %d, want %d", recorder.Code, want)
+				}
+			})
+		}
+	}
+	for pattern := range policies {
+		t.Errorf("transport policy names unregistered route %q", pattern)
+	}
+}
 
 // TestClassificationInventoryIsExactlyTheInternalRoutes is the fail-closed
 // guard ADR 0019 §24 asks for. It holds the classification inventory and the

@@ -21,6 +21,21 @@ The existing main CI coverage job retains its separate package floors for
 `internal/config`, `internal/server`, `internal/auth`, and `internal/admin`.
 Those general critical-package floors are not duplicated here.
 
+## Admin route-policy drift guard
+
+The dedicated lean/full negative-test lanes also run the admin `TestCatalog*`
+guards and `TestRouteTransportPolicyInventory` (#514). The initialized route
+catalog must declare exactly one authorization mode, known permissions and
+complete per-method grants. Every route needs an explicit transport-policy
+inventory entry; only the two probes are exempt. Each declared method is
+checked through the real middleware for insecure transport, missing credentials
+and a valid RBAC identity without grants. A source-level guard rejects
+out-of-catalog `Handle`/`HandleFunc` registrations.
+
+These tests do not change the dedicated package coverage floors or certify the
+entire admin/Console codebase. Scope and remaining review are recorded in the
+[dated security review installment](audit/2026-10-06-admin-security-review.md).
+
 ## Recorded full-tag baseline and floors
 
 The initial baselines were measured from the exact full-tag coverage artifact for
@@ -92,10 +107,14 @@ The equivalent commands are:
 
 ```bash
 go test -count=1 ./internal/rbac ./internal/waf ./internal/plugins
+go test -count=1 -run '^(TestRouteTransportPolicyInventory|TestCatalog)' ./internal/admin
 
 go test -count=1 \
   -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" \
   ./internal/rbac ./internal/waf ./internal/plugins
+go test -count=1 \
+  -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" \
+  -run '^(TestRouteTransportPolicyInventory|TestCatalog)' ./internal/admin
 
 go test -count=1 -covermode=atomic -coverprofile=security-cover.out \
   -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" \

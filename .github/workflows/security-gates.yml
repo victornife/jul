@@ -44,6 +44,7 @@ jobs:
             args+=(-tags "${{ matrix.tags }}")
           fi
           go test "${args[@]}" ./internal/rbac ./internal/waf ./internal/plugins
+            go test "${args[@]}" -run '^(TestRouteTransportPolicyInventory|TestCatalog)' ./internal/admin
 
   package-coverage:
     name: security package coverage

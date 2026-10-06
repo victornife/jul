@@ -8,9 +8,11 @@ trap 'rm -f "$cover"' EXIT
 
 printf '%s\n' '== security negative tests: lean'
 go test -count=1 ./internal/rbac ./internal/waf ./internal/plugins
+go test -count=1 -run '^(TestRouteTransportPolicyInventory|TestCatalog)' ./internal/admin
 
 printf '%s\n' '== security negative tests: full tags'
 go test -count=1 -tags "$FULL_TAGS" ./internal/rbac ./internal/waf ./internal/plugins
+go test -count=1 -tags "$FULL_TAGS" -run '^(TestRouteTransportPolicyInventory|TestCatalog)' ./internal/admin
 
 printf '%s\n' '== security package coverage: full tags'
 go test -count=1 -covermode=atomic -coverprofile="$cover" \
