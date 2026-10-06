@@ -21,3 +21,4 @@ overrides:
   # browserslist is a build-time transitive dep of autoprefixer. Force the
   # patched floor for GHSA-c83g-rgw3-j3cx / GHSA-73wf-gq98-2v4g.
   browserslist@<=4.28.6: ">=4.28.7"
+  source-map-js@<1.2.2: 1.2.2

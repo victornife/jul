@@ -28,6 +28,13 @@ v2.1.0 tag or its packaged READMEs.
   allow-list that requires a rationale and an issue for every known
   deviation. See `docs/security-testing.md`.
 
+### Security
+
+- **Console build-tool dependency patched.** Pin transitive `source-map-js`
+  to 1.2.2 for GHSA-68fv-2mgg-jv7q (CVE-2026-93749), preventing indexed
+  source-map offsets from causing event-loop denial of service. The console
+  dependency audit and coverage gates remain unchanged.
+
 ### Fixed
 
 - **RFC 9111 freshness metadata (#540).** Invalid or repeated `Expires`
