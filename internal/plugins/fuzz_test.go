@@ -8,8 +8,6 @@ package plugins
 import (
 	"bytes"
 	"context"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -29,11 +27,7 @@ import (
 //  2. The response status is valid HTTP (100-599) or 500 on error.
 //  3. The guest does not write state past an invocation (generational safety).
 func FuzzPluginInvoke(f *testing.F) {
-	m, err := NewManager(Options{Logger: discardLogger()})
-	if err != nil {
-		f.Fatalf("NewManager: %v", err)
-	}
-	defer m.Close()
+	m := testManager(f)
 
 	s, err := m.Build(context.Background(), map[string]config.PluginConfig{
 		"test": {
@@ -118,8 +112,4 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
-}
-
-func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

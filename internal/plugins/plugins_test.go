@@ -18,19 +18,51 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tetratelabs/wazero"
+
 	"jul/internal/config"
 )
 
 const testdataDir = "../../testdata/plugins/"
 
-func testManager(t *testing.T) *Manager {
+func testManager(t testing.TB) *Manager {
 	t.Helper()
 	m, err := NewManager(Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
+	if err := m.cache.Close(context.Background()); err != nil {
+		t.Fatalf("close private compilation cache: %v", err)
+	}
+	m.cache, err = wazero.NewCompilationCacheWithDir(testCompilationCacheDir)
+	if err != nil {
+		t.Fatalf("create test compilation cache: %v", err)
+	}
 	t.Cleanup(func() { _ = m.Close() })
 	return m
+}
+
+func TestManagersReuseCompilationCacheWithoutSharingState(t *testing.T) {
+	first := testManager(t)
+	second := testManager(t)
+	if first.cache == second.cache || first.kv == second.kv {
+		t.Fatal("test managers must retain independent cache ownership and KV state")
+	}
+	cfg := map[string]config.PluginConfig{"hi": pcfg("header-inject")}
+	firstSet := buildSet(t, first, cfg)
+	if err := firstSet.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	secondSet := buildSet(t, second, cfg)
+	next, called := okNext()
+	recorder := httptest.NewRecorder()
+	secondSet.Middleware("hi")(next).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	if !*called || recorder.Code != http.StatusOK || recorder.Header().Get("X-Plugin") != "header-inject" {
+		t.Fatalf("closing the first manager disrupted the second: status = %d, headers = %v", recorder.Code, recorder.Header())
+	}
 }
 
 func buildSet(t *testing.T, m *Manager, cfg map[string]config.PluginConfig) *Set {

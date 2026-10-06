@@ -57,6 +57,13 @@ The refusal carries only `"required": "tls_or_loopback"`. It is returned before
 authentication, so anything it disclosed would be disclosed to an anonymous
 caller; the listen address is a configuration value and is deliberately absent.
 
+The dedicated lean/full security lanes check every registered route against an
+explicit transport-policy inventory and the catalog's permission declarations.
+New routes without declarations fail the guard; direct registrations outside
+the catalog fail a source-level check. See the
+[route-policy review installment](audit/2026-10-06-admin-security-review.md)
+for evidence and the remaining #514 line-level review boundary.
+
 **Three supported remedies:**
 
 - **Terminate the listener with [`[admin.tls]`](configuration.md#admintls)** (#336).

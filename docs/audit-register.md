@@ -8,6 +8,7 @@ live issue tracker.
 
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
+| [2026-10-06 admin route-policy foundation](audit/2026-10-06-admin-security-review.md) | Post-#548 `1b449614` | Targeted #514 boundary review and CI-enforced permission/transport inventory | Partial installment; full admin/Console line-level review and #514 remain open; no maturity or release certification |
 | [2026-09-30 read-only product and technical audit](audit/jul-audit-report-2026-09-30.md) | Frozen candidate `3258f1a3`; delivery status appended against main `9bcc9333` on 2026-10-01 | Current post-release findings plus a dated implementation/PR status snapshot; not an exhaustive certification | Findings F-01–F-19 and original evidence remain pinned to their audited baseline; the addendum distinguishes merged work from green-but-pending PRs and open phase issues |
 
 ## Archived records
@@ -37,8 +38,10 @@ their current disposition belongs to the issue tracker and #62.
   affected logging/reload/rotation revalidation. See
   [soak evidence](soak-evidence.md) and [#480](https://github.com/victornife/jul/issues/480)
   for exact source boundaries, measurements, retained failures and final gates.
-  The remaining same-path rotation-policy boundary is
-  [#502](https://github.com/victornife/jul/issues/502), not silently closed.
+  The same-path rotation-policy boundary that remained at release was fixed
+  after publication by [#537](https://github.com/victornife/jul/pull/537);
+  [#502](https://github.com/victornife/jul/issues/502) is completed and closed.
+  This correction does not relabel the immutable release's behavior or soak.
   [Actual package verification](release.md#published-v210-verification) records
   twelve archives, signed attestations and native execution limits. These
   publication-status edits are post-tag, not inside the release archives.

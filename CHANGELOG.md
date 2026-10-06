@@ -30,6 +30,13 @@ v2.1.0 tag or its packaged READMEs.
 
 ### Security
 
+- **Admin route-policy drift guard (#514).** Dedicated lean/full security
+  lanes now require explicit permission and transport declarations for every
+  registered admin route, check negative requests through the real middleware,
+  and reject out-of-catalog registrations. A dated partial review records the
+  evidence and remaining line-level scope; no runtime behavior or maturity
+  changes, and #514 is not closed by this installment.
+
 - **Console build-tool dependency patched.** Pin transitive `source-map-js`
   to 1.2.2 for GHSA-68fv-2mgg-jv7q (CVE-2026-93749), preventing indexed
   source-map offsets from causing event-loop denial of service. The console

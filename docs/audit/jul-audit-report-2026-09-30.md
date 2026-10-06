@@ -10,7 +10,28 @@
 | Report location | Original working copy: `/home/victornf/jul-audit-20260930/jul-audit-report-2026-09-30.md`; publication target: `docs/audit/jul-audit-report-2026-09-30.md` |
 | Post-audit baseline note | After the report was written, `main` moved to `f036b063` (PR #501: access-log writer sharing, a dependency security floor, docs). A read-only diff (8 files: `internal/observability/sinks.go` + test, CHANGELOG, three docs, Console lockfiles) shows no change to any file behind F-01–F-19, except `docs/known-limitations.md` line shifts: the cited L242 is now L238 and L510 is now L506. All findings still apply at `f036b063`. The Y1-10 access-log sink change itself was not re-reviewed. |
 
-## Delivery status addendum — 2026-10-01
+## Delivery status addendum — 2026-10-06
+
+Current source baseline: post-#548 `main` at
+`1b449614bcbb7b22d8ddf466c1c9f432c5d49ea6`. This supersedes the
+2026-10-01 delivery snapshot below, not the original audit evidence.
+
+- #537 is merged; #502/#506/#510/#511/#512 are completed and closed. The
+  same-path access-log rotation-policy overlap limitation described at the
+  released audit baseline is fixed on current main, not in the immutable tag.
+- #535/#536 and #543 are merged; #513 owns the conformance foundation.
+- #548 is merged; #540 is completed and closed. #539 remains open only for
+  upstream Go HTTP/2/h2spec residual tracking, not a Jul implementation blocker.
+- #514 has a [route-policy foundation review installment](2026-10-06-admin-security-review.md).
+  It remains open: the new CI guard and targeted boundary evidence do not
+  certify the complete admin/Console line-level scope.
+- #518/#521/#519/#523/#524/#520 are the activated subsequent tranche, not
+  completed by this status reconciliation. Current execution belongs to #62.
+
+No feature maturity, release, soak, conformance allowance or historical audit
+confidence is changed by this addendum.
+
+## Delivery status addendum — 2026-10-01 (historical)
 
 This addendum updates implementation and issue/PR status only; it does not revise the audit's 2026-09-30 evidence, frozen `3258f1a3` baseline, or confidence claims. The report's original READ-ONLY statement describes the audit session; this addendum was prepared separately for publication.
 
