@@ -334,6 +334,19 @@ passed; statement coverage is 67.41%, above the unchanged 58% CI floor.
 This dependency-only follow-up was explicitly requested after the original
 tranche; it introduces no UI behavior or Go production statements.
 
+The subsequent Windows full-tag job 112310873732 (run 37475834215) timed out
+in `TestRealGRPCStreamingDeadlinesAreHealthNeutral/inbound_client_deadline`.
+Its unconditional backend-entry barrier could wait forever when the 20 ms
+deadline expired during connection setup. An already-expired request reproduced
+the same blocked line deterministically on Linux. The test now bounds handler
+completion and covers both ordinary and pre-entry expiry, retaining backend
+availability, zero failures and zero in-flight assertions. No runtime deadline
+or health policy changed. Verification: 20 Linux repeats, 10 focused race
+repeats, full-tag owning-package/lint checks, 100 native Windows repetitions
+and three full-tag Windows package runs. Windows Go 1.26.8 amd64 executed on
+a Windows ARM64 host; an isolated NTFS checkout avoided unsupported WSL UNC
+module locking. Exact-head remote CI must still verify the hosted environment.
+
 ## 18. Files changed
 
 Production: cache policy/date/Age and freshness selection only; NGINX assessment
