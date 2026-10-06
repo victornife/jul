@@ -192,7 +192,7 @@ Cache-tests is pinned to `d644cf4bf487763646aac19d2c8b846daa0f604d`
 (package version 0.4.5). There are **160 upstream required cases**, not 162:
 the runner adds two Jul validator checks. Required cases improved from
 **144/160 to 155/160**; including the custom checks, **146/162 to 157/162**.
-The baseline and three post-change runs each reported one separate
+The baseline and four post-change runs each reported one separate
 `conditional-etag-vary-headers: [Setup, retry]` signal. Both final runs had
 zero unexpected failures and zero stale entries after allow-list cleanup.
 
@@ -242,6 +242,6 @@ wildcard entries now become stale when every matched target passes.
 
 `FuzzCachePolicy` completed 228,181 executions in the local 30-second smoke
 without panic or bounds violations. Changed production statement coverage is
-100.00% (70/70) using `scripts/strip_moved_lines.py` and the full-tag coverage
-profile; repository coverage is 87.8325% before and 87.8348% after. No coverage
+100.00% (74/74) using `scripts/strip_moved_lines.py` and the full-tag coverage
+profile; repository coverage is 87.8325% before and 87.8333% after. No coverage
 floor, Codecov threshold or meaningful code exclusion was changed.

@@ -53,7 +53,9 @@ numeric suffix garbage, signs, negatives and decimals.
 The old path let permissive Go parsing admit malformed hour/whitespace and
 selected the earliest repeated date. The new parser accepts exact IMF-fixdate,
 RFC850 and asctime representations, compares spelling case-insensitively,
-uses UTC and corrects RFC850 years more than 50 years in the future. Input is
+uses an explicit UTC sliding 50-year window rather than Go's fixed 1969 pivot.
+Future year 2069 and leap-boundary local-zone conversions are independently
+tested. Input is
 bounded to 33 bytes. Invalid/empty/zero/impossible/non-GMT/repeated values
 cannot produce freshness. max-age/s-maxage precedence and Date-based clock
 skew remain intact. `TestStrictExpires`, `TestFreshnessPrecedence` and
@@ -109,8 +111,8 @@ runner after:    157 / 162 (includes 2 custom validator checks)
 ```
 
 Both final full runs: five listed failures, zero unexpected, zero stale.
-One setup retry is separately reported in each of four runs (baseline plus
-three post-change runs). Required residuals:
+One setup retry is separately reported in each of five runs (baseline plus
+four post-change runs). Required residuals:
 
 | Case | Owner | Reason |
 | --- | --- | --- |
@@ -226,7 +228,7 @@ selection before SF parsing. The same fuzz path exercises strict Age and dates.
 
 ## 14. Coverage
 
-**Changed/added production statement coverage: 100.00% (70/70).**
+**Changed/added production statement coverage: 100.00% (74/74).**
 
 Measurement uses `git diff --unified=0 <starting SHA> -- '*.go'` filtered by
 `python3 scripts/strip_moved_lines.py`, intersecting added/modified production
@@ -246,8 +248,8 @@ not cross-package execution inflated by coverpkg.
 
 | Full-tag scope | Before | After |
 | --- | ---: | ---: |
-| Repository | 31,141/35,455 = 87.8325% | 31,191/35,511 = 87.8348% |
-| Cache | 999/1,061 = 94.1565% | 1,044/1,104 = 94.5652% |
+| Repository | 31,141/35,455 = 87.8325% | 31,194/35,515 = 87.8333% |
+| Cache | 999/1,061 = 94.1565% | 1,048/1,108 = 94.5848% |
 | Handler | 909/1,005 = 90.4478% | 909/1,005 = 90.4478% |
 | Server | 1,678/1,898 = 88.4089% | 1,679/1,898 = 88.4615% |
 | NGINX importer | 2,259/2,480 = 91.0887% | 2,259/2,480 = 91.0887% |
@@ -302,7 +304,7 @@ Passed local commands (full tag set as above):
 - Focused freshness, target policy, real-origin, invalid framing and H2 tests;
   real-origin/H2 matrices repeated three times.
 - `python3 scripts/conformance/test_run.py` (four tests).
-- Full external cache: one baseline, three post-change; final two both 155/160.
+- Full external cache: one baseline, four post-change; final three all 155/160.
 - Full external h2spec: baseline and two post-change Jul runs; standalone
   stdlib, 16 KiB experiment, xnet and newer Go 1.27.1.
 - `python3 scripts/conformance/run.py framing ...` (27/27).
@@ -321,12 +323,25 @@ lint. Initial npm ci failure was a reproduced upstream setup issue and fixed in
 the lane. No gate was bypassed. Remote PR checks are separate; consult the PR's
 exact head status, not this local record, before merge.
 
+The user-requested investigation of CI job 112262017393 (run 37461526492)
+identified a separate console **dependency audit**, not a test failure:
+source-map-js 1.2.1 was affected by GHSA-68fv-2mgg-jv7q / CVE-2026-93749.
+The same local audit reproduced one high-severity finding. A narrowly scoped
+workspace override pins patched 1.2.2 and updates only its lockfile resolution
+and references. The unchanged moderate-level audit then reported no known
+vulnerabilities. Frozen install, console build/typecheck/lint and all 820 tests
+passed; statement coverage is 67.41%, above the unchanged 58% CI floor.
+This dependency-only follow-up was explicitly requested after the original
+tranche; it introduces no UI behavior or Go production statements.
+
 ## 18. Files changed
 
 Production: cache policy/date/Age and freshness selection only; NGINX assessment
 guidance strings; small SF dependency. Tests/reproducer: section 12. Harness:
 explicit cache/H2 totals, wildcard staleness, npm setup, paired migration gate.
 Docs/evidence: section 15, allow-list cleanup and corpus category evidence.
+The separately requested CI fix changes only the console workspace dependency
+override/lockfile and the corresponding changelog/evidence.
 No listener runtime, auth, lifecycle, config, metrics, frontend or generated
 authority changes. Temporary task/worktree helpers are not deliverables.
 

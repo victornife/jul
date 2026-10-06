@@ -31,8 +31,13 @@ func parseCacheDate(value string, now time.Time) (time.Time, bool) {
 	}
 	for _, layout := range []string{http.TimeFormat, "Monday, 02-Jan-06 15:04:05 GMT", time.ANSIC} {
 		candidate := parsed
-		if layout == "Monday, 02-Jan-06 15:04:05 GMT" && candidate.Year() > now.Year()+50 {
-			candidate = candidate.AddDate(-100, 0, 0)
+		if layout == "Monday, 02-Jan-06 15:04:05 GMT" {
+			limit := now.UTC().AddDate(50, 0, 0)
+			year := limit.Year()/100*100 + candidate.Year()%100
+			candidate = candidate.AddDate(year-candidate.Year(), 0, 0)
+			if candidate.After(limit) {
+				candidate = candidate.AddDate(-100, 0, 0)
+			}
 		}
 		if strings.EqualFold(candidate.UTC().Format(layout), value) {
 			return candidate.UTC(), true

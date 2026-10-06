@@ -59,6 +59,18 @@ func TestStrictExpires(t *testing.T) {
 	if !valid || parsed.Year() != 1968 {
 		t.Fatalf("RFC850 >50-year correction: %v/%v", parsed, valid)
 	}
+	future := time.Date(2069, 1, 1, 12, 0, 0, 0, time.UTC)
+	parsed, valid = parseCacheDate(future.Format("Monday, 02-Jan-06 15:04:05 GMT"), now)
+	if !valid || !parsed.Equal(future) {
+		t.Fatalf("RFC850 within-50-year date crossed Go's fixed pivot: %v/%v", parsed, valid)
+	}
+	leapBoundary := time.Date(2024, 2, 28, 12, 0, 0, 0, time.UTC)
+	for _, zone := range []*time.Location{time.UTC, time.FixedZone("ahead", 14*60*60), time.FixedZone("behind", -12*60*60)} {
+		parsed, valid = parseCacheDate("Friday, 01-Mar-74 00:00:00 GMT", leapBoundary.In(zone))
+		if !valid || parsed.Year() != 1974 {
+			t.Fatalf("RFC850 local timezone changed century (%s): %v/%v", zone, parsed, valid)
+		}
+	}
 }
 
 func TestStrictAge(t *testing.T) {
