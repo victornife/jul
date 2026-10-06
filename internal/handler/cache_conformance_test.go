@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 )
@@ -214,6 +215,7 @@ func TestRealAuthenticatedIdentityIsolation(t *testing.T) {
 		// A careless origin: it marks a user-specific response cacheable
 		// without saying private. The shared cache must still not leak it.
 		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Header().Set("CDN-Cache-Control", "max-age=3600")
 		who := "anonymous"
 		if a := r.Header.Get("Authorization"); a != "" {
 			who = strings.TrimPrefix(a, "Bearer ")
@@ -238,6 +240,107 @@ func TestRealAuthenticatedIdentityIsolation(t *testing.T) {
 	_, alice2 := do(t, client, http.MethodGet, front.URL+"/me", "Authorization", "Bearer alice")
 	if alice2 != "data-for-alice" {
 		t.Fatalf("LEAK: alice received the cached anonymous response %q", alice2)
+	}
+}
+
+func TestRealTargetedCachePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name, generic string
+		target        []string
+		state         string
+	}{
+		{"override no-store", "no-store", []string{"max-age=600"}, "HIT"},
+		{"override no-cache", "no-cache", []string{"max-age=600"}, "HIT"},
+		{"targeted no-store", "max-age=600", []string{"no-store"}, "MISS"},
+		{"targeted private", "max-age=600", []string{"private"}, "MISS"},
+		{"targeted no-cache", "max-age=600", []string{"no-cache"}, "REVALIDATED"},
+		{"targeted must-revalidate", "no-store", []string{"max-age=600, must-revalidate"}, "HIT"},
+		{"targeted expiry", "max-age=600", []string{"max-age=0"}, "MISS"},
+		{"invalid fallback", "max-age=600", []string{"max-age=600,"}, "HIT"},
+		{"invalid restrictive fallback", "no-store", []string{"max-age=600,"}, "MISS"},
+		{"empty fallback", "max-age=600", []string{""}, "HIT"},
+		{"unknown extension selects", "no-store", []string{"none"}, "HIT"},
+		{"multiple lines", "no-store", []string{"max-age=600", "must-revalidate"}, "HIT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			front, _ := cachedProxyFront(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Cache-Control", tc.generic)
+				for _, value := range tc.target {
+					w.Header().Add("cDn-cAcHe-cOnTrOl", value)
+				}
+				w.Header().Set("Surrogate-Control", "no-store")
+				w.Header().Set("Expires", time.Now().Add(24*time.Hour).UTC().Format(http.TimeFormat))
+				w.Header().Set("ETag", `"v1"`)
+				if r.Header.Get("If-None-Match") == `"v1"` {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+				_, _ = w.Write([]byte("payload"))
+			}))
+			first, _ := do(t, front.Client(), "GET", front.URL+"/doc")
+			second, body := do(t, front.Client(), "GET", front.URL+"/doc")
+			if first.Header.Get("X-Cache") != "MISS" || second.Header.Get("X-Cache") != tc.state || body != "payload" {
+				t.Fatalf("states=%s/%s body=%q", first.Header.Get("X-Cache"), second.Header.Get("X-Cache"), body)
+			}
+			if strings.Join(second.Header.Values("CDN-Cache-Control"), ",") != strings.Join(tc.target, ",") || second.Header.Get("Surrogate-Control") != "no-store" {
+				t.Fatal("policy consumption changed downstream forwarding")
+			}
+			wantCalls := int32(2)
+			if tc.state == "HIT" {
+				wantCalls = 1
+			}
+			if calls.Load() != wantCalls {
+				t.Fatalf("origin calls=%d want=%d", calls.Load(), wantCalls)
+			}
+		})
+	}
+}
+
+func TestRealTargetedVaryIsolation(t *testing.T) {
+	var calls atomic.Int32
+	front, _ := cachedProxyFront(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("CDN-Cache-Control", "max-age=600")
+		w.Header().Set("Vary", "Accept")
+		_, _ = io.WriteString(w, r.Header.Get("Accept"))
+	}))
+	for _, accept := range []string{"application/json", "application/xml", "application/json", "application/xml"} {
+		response, body := do(t, front.Client(), "GET", front.URL+"/variant", "Accept", accept)
+		if body != accept {
+			t.Fatalf("poisoned variant: accept=%q body=%q", accept, body)
+		}
+		if calls.Load() == 2 && response.Header.Get("X-Cache") == "HIT" && response.Header.Get("CDN-Cache-Control") != "max-age=600" {
+			t.Fatal("targeted policy lost on variant hit")
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("variant origin calls=%d want=2", calls.Load())
+	}
+}
+
+func TestRealCacheRejectsInvalidOriginTransferEncoding(t *testing.T) {
+	var calls atomic.Int32
+	front, _ := cachedProxyFront(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		connection, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("origin hijack: %v", err)
+			return
+		}
+		defer connection.Close()
+		_, _ = io.WriteString(connection, "HTTP/1.1 200 OK\r\nCache-Control: max-age=600\r\nCDN-Cache-Control: max-age=600\r\nTransfer-Encoding: invalid\r\nConnection: close\r\n\r\nbody")
+	}))
+	for attempt := 0; attempt < 2; attempt++ {
+		response, _ := do(t, front.Client(), "GET", front.URL+"/invalid-framing")
+		if response.StatusCode != http.StatusBadGateway || response.Header.Get("X-Cache") == "HIT" {
+			t.Fatalf("invalid origin framing: status=%d state=%s", response.StatusCode, response.Header.Get("X-Cache"))
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatal("ambiguously framed origin response was stored")
 	}
 }
 

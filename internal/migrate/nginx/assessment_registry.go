@@ -110,11 +110,11 @@ var capabilityRegistry = map[capabilityKey]capability{
 	// cache-control directive) stays blocking - see cache_translate.go.
 	{ContextHTTP, "proxy_cache_path"}:                  supported("NGX_HTTP_CACHE_PATH", RiskPerformance, "cache zone declaration is translated", []string{"cache.enabled", "cache.disk_path", "cache.disk_max_size"}),
 	{ContextLocation, "proxy_cache"}:                   supported("NGX_LOCATION_CACHE", RiskSecurity, "cache enablement is translated", []string{"servers[].locations[].cache"}),
-	{ContextLocation, "proxy_cache_valid"}:             approximated("NGX_LOCATION_CACHE_VALID", RiskPerformance, "proxy_cache_valid maps to [cache].default_ttl, which Jul applies only as a fallback when the upstream gives no explicit Cache-Control/Expires freshness"),
+	{ContextLocation, "proxy_cache_valid"}:             approximated("NGX_LOCATION_CACHE_VALID", RiskPerformance, "proxy_cache_valid maps to [cache].default_ttl; Jul selects valid CDN-Cache-Control over Cache-Control/Expires, unlike standard NGINX proxy caching, and does not interpret X-Accel-Expires; review origin policies before migration"),
 	{ContextLocation, "proxy_cache_bypass"}:            blocking("NGX_LOCATION_CACHE_BYPASS", RiskSecurity, "expression-driven cache bypass conditions are not translated"),
 	{ContextLocation, "proxy_no_cache"}:                blocking("NGX_LOCATION_CACHE_NO_CACHE", RiskSecurity, "expression-driven cache-skip conditions are not translated"),
 	{ContextLocation, "proxy_cache_key"}:               blocking("NGX_LOCATION_CACHE_KEY", RiskSecurity, "a custom cache key expression is not translated; Jul's key is always method + host + URI"),
-	{ContextLocation, "proxy_ignore_headers"}:          blocking("NGX_LOCATION_CACHE_IGNORE_HEADERS", RiskSecurity, "Jul always honors upstream Cache-Control/Expires; a policy to ignore them is not translated"),
+	{ContextLocation, "proxy_ignore_headers"}:          blocking("NGX_LOCATION_CACHE_IGNORE_HEADERS", RiskSecurity, "Jul honors CDN-Cache-Control when valid, otherwise Cache-Control/Expires; a policy to ignore origin cache control is not translated"),
 	{ContextLocation, "proxy_cache_min_uses"}:          ignored("NGX_LOCATION_CACHE_MIN_USES", RiskPerformance, "Jul has no minimum-uses gate before caching a response"),
 	{ContextLocation, "proxy_cache_lock"}:              ignored("NGX_LOCATION_CACHE_LOCK", RiskPerformance, "Jul has no equivalent same-key fetch-serialization toggle"),
 	{ContextLocation, "proxy_cache_lock_age"}:          ignored("NGX_LOCATION_CACHE_LOCK", RiskPerformance, "Jul has no equivalent same-key fetch-serialization toggle"),

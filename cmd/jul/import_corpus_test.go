@@ -368,6 +368,26 @@ func corpusBackendHandler(id string) http.Handler {
 			return
 		}
 		w.Header().Set("Cache-Control", "max-age=60")
+		switch r.URL.Path {
+		case "/targeted-overrides-no-store", "/targeted-unknown":
+			w.Header().Set("Cache-Control", "no-store")
+			policy := "max-age=600"
+			if r.URL.Path == "/targeted-unknown" {
+				policy = "none"
+			}
+			w.Header().Set("CDN-Cache-Control", policy)
+		case "/targeted-no-store":
+			w.Header().Set("CDN-Cache-Control", "no-store")
+		case "/targeted-max-zero":
+			w.Header().Del("Cache-Control")
+			w.Header().Set("Expires", time.Now().Add(time.Hour).UTC().Format(http.TimeFormat))
+			w.Header().Set("CDN-Cache-Control", "max-age=0")
+		case "/targeted-generic-expires":
+			w.Header().Del("Cache-Control")
+			w.Header().Set("Expires", time.Now().Add(time.Hour).UTC().Format(http.TimeFormat))
+		case "/targeted-x-accel-zero":
+			w.Header().Set("X-Accel-Expires", "0")
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, strings.Repeat("corpus-backend-payload ", 100))
 	})

@@ -430,6 +430,36 @@ a different quantity than Jul's `memory_max_size` (the actual response-data
 cache), so it is deliberately not translated into that field; only `max_size=`
 (the disk-tier data cap) maps to `disk_max_size`.
 
+### Origin cache policy differences
+
+Cache-policy migration is **approximated**, not general NGINX cache equivalence.
+The single-zone cache-enablement mapping remains supported; the existing
+`NGX_LOCATION_CACHE_VALID` approximation explains policy differences, and
+`NGX_LOCATION_CACHE_IGNORE_HEADERS` remains blocking.
+
+Standard NGINX proxy caching processes origin `Cache-Control`/`Expires` and
+gives `X-Accel-Expires` priority; `X-Accel-Expires: 0` disables storage. It does
+not consume arbitrary origin `CDN-Cache-Control` as policy. Jul selects valid
+non-empty RFC 9213 `CDN-Cache-Control` over **both** generic fields, and does
+not consume `X-Accel-Expires`. Generic `no-store` plus targeted `max-age=600`
+is not stored by NGINX but can be stored by Jul; generic `max-age=600` plus
+targeted `no-store` has the inverse result. Unknown valid targeted extensions
+still select policy; malformed or empty fields fall back to generic policy.
+
+Before cutover, inspect representative origin headers and explicitly choose
+policy for each cache class. Put `no-store`/`private` in the targeted field too
+when both must be restricted; do not assume a previously passive CDN field is
+still passive. Port `X-Accel-Expires` to intentional standard origin policy,
+not to an importer-invented alias. `Surrogate-Control` remains forwarding-only.
+NGINX's `expires` directive generates downstream `Expires`/`Cache-Control`;
+it is not an origin targeted-policy selector and its importer work remains
+independently scoped to #523. Range/fragment/slice work remains #442's decision.
+
+`TestNGINXCorpusTargetedCacheDifference` uses the existing `cache-runtime`
+candidate, real Jul, and pinned NGINX 1.28.3 with a synthetic local origin.
+`make nginx-migration-e2e` executes six paired stateful comparisons, including
+generic `Expires` agreement and `X-Accel-Expires` divergence.
+
 ## Known limitations
 
 1. **Traversal is explicit, not automatic.** A default import remains

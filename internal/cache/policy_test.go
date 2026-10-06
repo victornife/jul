@@ -9,7 +9,103 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"jul/internal/config"
 )
+
+func TestStrictExpires(t *testing.T) {
+	now := time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC)
+	c, _ := conformanceCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Minute)})
+	cases := []struct {
+		name   string
+		values []string
+		want   time.Duration
+	}{
+		{"IMF", []string{"Thu, 06 Aug 2026 12:01:00 GMT"}, time.Minute},
+		{"RFC850", []string{"Thursday, 06-Aug-26 12:01:00 GMT"}, time.Minute},
+		{"asctime", []string{"Thu Aug  6 12:01:00 2026"}, time.Minute},
+		{"case", []string{"thu, 06 aug 2026 12:01:00 gmt"}, time.Minute},
+		{"one digit hour", []string{"Thu, 06 Aug 2026 9:01:00 GMT"}, 0},
+		{"spaces", []string{"Thu,  06 Aug 2026 12:01:00 GMT"}, 0},
+		{"tab", []string{"Thu,\t06 Aug 2026 12:01:00 GMT"}, 0},
+		{"zone", []string{"Thu, 06 Aug 2026 12:01:00 PST"}, 0},
+		{"impossible", []string{"Thu, 31 Feb 2026 12:01:00 GMT"}, 0},
+		{"garbage", []string{"not a date"}, 0},
+		{"zero", []string{"0"}, 0},
+		{"empty", []string{""}, 0},
+		{"boundary", []string{now.Format(http.TimeFormat)}, 0},
+		{"repeated", []string{"Thu, 06 Aug 2026 12:01:00 GMT", "Thu, 06 Aug 2026 12:02:00 GMT"}, 0},
+		{"valid invalid", []string{"Thu, 06 Aug 2026 12:01:00 GMT", "0"}, 0},
+		{"invalid valid", []string{"0", "Thu, 06 Aug 2026 12:01:00 GMT"}, 0},
+		{"long", []string{strings.Repeat("x", 10000)}, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			header := http.Header{"Expires": tc.values}
+			ttl, _, ok := c.freshness(200, header, parseResponsePolicy(header), now)
+			if ttl != tc.want || ok != (tc.want > 0) {
+				t.Fatalf("freshness = %v/%v, want %v/%v", ttl, ok, tc.want, tc.want > 0)
+			}
+			for _, directive := range []string{"max-age=60", "s-maxage=60"} {
+				header.Set("Cache-Control", directive)
+				ttl, _, ok = c.freshness(200, header, parseResponsePolicy(header), now)
+				if ttl != time.Minute || !ok {
+					t.Fatalf("%s must override Expires: %v/%v", directive, ttl, ok)
+				}
+			}
+		})
+	}
+	parsed, valid := parseCacheDate("Wednesday, 06-Nov-68 08:49:37 GMT", time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
+	if !valid || parsed.Year() != 1968 {
+		t.Fatalf("RFC850 >50-year correction: %v/%v", parsed, valid)
+	}
+}
+
+func TestStrictAge(t *testing.T) {
+	cases := []struct {
+		values  []string
+		seconds int64
+	}{
+		{nil, 0}, {[]string{""}, 0}, {[]string{"0"}, 0}, {[]string{"123"}, 123},
+		{[]string{"123", "999"}, 123}, {[]string{"123", "junk"}, 123},
+		{[]string{"junk", "123"}, 0}, {[]string{"123, 999"}, 123},
+		{[]string{"junk, 123"}, 0}, {[]string{",123"}, 0},
+		{[]string{"123junk"}, 0}, {[]string{"junk123"}, 0},
+		{[]string{"+123"}, 0}, {[]string{"-123"}, 0}, {[]string{"1.5"}, 0},
+		{[]string{" \t123\t "}, 123}, {[]string{"\n123"}, 0},
+		{[]string{"999999999999999999999999"}, maxDeltaSeconds},
+		{[]string{strings.Repeat("9", 10000)}, maxDeltaSeconds},
+		{[]string{strings.Repeat("9", 10000) + "x"}, 0},
+	}
+	now := time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC)
+	for _, tc := range cases {
+		if got := parseAge(tc.values); got != time.Duration(tc.seconds)*time.Second {
+			t.Errorf("parseAge(%q) = %v, want %ds", tc.values, got, tc.seconds)
+		}
+		header := http.Header{"Age": tc.values, "Date": {now.Add(-30 * time.Second).Format(http.TimeFormat)}}
+		if got := initialAge(header, now); got != time.Duration(max(tc.seconds, 30))*time.Second {
+			t.Errorf("initialAge(%q) = %v", tc.values, got)
+		}
+	}
+}
+
+func TestAgeFreshBoundary(t *testing.T) {
+	c, clk := conformanceCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Minute)})
+	request := httptest.NewRequest("GET", "http://x/", nil)
+	header := http.Header{"Cache-Control": {"max-age=60"}, "Age": {"30, 999"}}
+	entry := c.buildEntry(request, 200, header, []byte("body"), clk.now())
+	if entry == nil || !entry.ExpiresAt.Equal(clk.now().Add(30*time.Second)) {
+		t.Fatal("Age did not reduce the remaining lifetime")
+	}
+	clk.advance(30*time.Second - time.Nanosecond)
+	if !entry.Fresh(clk.now()) {
+		t.Fatal("entry became stale before its boundary")
+	}
+	clk.advance(time.Nanosecond)
+	if entry.Fresh(clk.now()) {
+		t.Fatal("entry remained fresh at its exact boundary")
+	}
+}
 
 func ccHeader(values ...string) http.Header {
 	h := http.Header{}
@@ -17,6 +113,147 @@ func ccHeader(values ...string) http.Header {
 		h.Add("Cache-Control", v)
 	}
 	return h
+}
+
+func TestTargetedCacheControl(t *testing.T) {
+	cases := []struct {
+		name                            string
+		values                          []string
+		selected                        bool
+		maxAge                          time.Duration
+		hasMax                          bool
+		noStore, private, noCache, must bool
+	}{
+		{name: "absent"},
+		{name: "empty", values: []string{""}},
+		{name: "whitespace", values: []string{"   "}},
+		{name: "max age", values: []string{"max-age=600"}, selected: true, hasMax: true, maxAge: 600 * time.Second},
+		{name: "parameters", values: []string{"max-age=600;ignored=(bad)"}},
+		{name: "valid parameters", values: []string{"max-age=600;ignored=token"}, selected: true, hasMax: true, maxAge: 600 * time.Second},
+		{name: "multiple", values: []string{"max-age=600", "must-revalidate"}, selected: true, hasMax: true, maxAge: 600 * time.Second, must: true},
+		{name: "last duplicate", values: []string{"max-age=0", "max-age=60"}, selected: true, hasMax: true, maxAge: time.Minute},
+		{name: "duplicate no store", values: []string{"no-store, no-store=?0"}, selected: true},
+		{name: "no store", values: []string{"no-store"}, selected: true, noStore: true},
+		{name: "private", values: []string{"private"}, selected: true, private: true},
+		{name: "qualified private", values: []string{`private="X-Secret"`}, selected: true, private: true},
+		{name: "no cache", values: []string{"no-cache"}, selected: true, noCache: true},
+		{name: "qualified no cache", values: []string{`no-cache="X-A, X-B"`}, selected: true, noCache: true},
+		{name: "unknown", values: []string{"none"}, selected: true},
+		{name: "unknown list", values: []string{`unknown=(1 "text" token);x=?1`}, selected: true},
+		{name: "unknown binary", values: []string{"unknown=:aGVsbG8=:"}, selected: true},
+		{name: "wrong type", values: []string{`max-age="600"`}, selected: true},
+		{name: "decimal", values: []string{"max-age=600.5"}, selected: true},
+		{name: "token", values: []string{"max-age=forever"}, selected: true},
+		{name: "false", values: []string{"no-store=?0"}, selected: true},
+		{name: "list not directive", values: []string{"no-store=(1 2)"}, selected: true},
+		{name: "negative", values: []string{"max-age=-60"}, selected: true, hasMax: true},
+		{name: "large integer", values: []string{"max-age=999999999999999"}, selected: true, hasMax: true, maxAge: maxDeltaSeconds * time.Second},
+		{name: "integer overflow", values: []string{"max-age=9999999999999999"}},
+		{name: "partial must fail", values: []string{"max-age=600, no-store="}},
+		{name: "trailing comma", values: []string{"max-age=600,"}},
+		{name: "upper key invalid", values: []string{"Max-Age=600"}},
+		{name: "invalid escaping", values: []string{`unknown="a\q"`}},
+		{name: "invalid byte", values: []string{"unknown=\xff"}},
+		{name: "too long", values: []string{"unknown=" + strings.Repeat("x", 16<<10)}},
+		{name: "many fields", values: make([]string, 129)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			header := http.Header{"Cdn-Cache-Control": tc.values, "Cache-Control": {"no-store"}}
+			p := parseResponsePolicy(header)
+			if p.Targeted != tc.selected || p.HasMaxAge != tc.hasMax || p.MaxAge != tc.maxAge ||
+				p.NoStore != (tc.noStore || !tc.selected) || p.Private != tc.private || p.NoCache != tc.noCache || p.MustRevalidate != tc.must {
+				t.Fatalf("policy = %+v", p)
+			}
+		})
+	}
+	header := http.Header{"Cdn-Cache-Control": {"s-maxage=60, max-age=600, stale-while-revalidate=5, stale-if-error=10, proxy-revalidate, public"}}
+	p := parseResponsePolicy(header)
+	if !p.Targeted || p.SMaxAge != time.Minute || !p.HasSMaxAge || p.SWR != 5*time.Second || !p.HasSWR || p.SIE != 10*time.Second || !p.HasSIE || !p.Public || !p.ProxyRevalidate {
+		t.Fatalf("extension policy = %+v", p)
+	}
+}
+
+func TestTargetedFreshnessPrecedence(t *testing.T) {
+	c, clk := conformanceCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Minute)})
+	for _, tc := range []struct {
+		generic, targeted string
+		want              time.Duration
+		stored            bool
+	}{
+		{"no-store", "max-age=600", 600 * time.Second, true},
+		{"no-cache", "max-age=600", 600 * time.Second, true},
+		{"max-age=600", "no-store", 0, false},
+		{"max-age=600", "private", 0, false},
+		{"max-age=600", "max-age=0", 0, false},
+		{"no-store", "none", time.Minute, true},
+		{"max-age=600", "max-age=", 600 * time.Second, true},
+		{"max-age=600", "", 600 * time.Second, true},
+	} {
+		header := http.Header{"Cache-Control": {tc.generic}, "Expires": {clk.now().Add(24 * time.Hour).Format(http.TimeFormat)}}
+		header.Set("cDn-cAcHe-cOnTrOl", tc.targeted)
+		ttl, _, ok := c.freshness(200, header, parseResponsePolicy(header), clk.now())
+		if ttl != tc.want || ok != tc.stored {
+			t.Errorf("generic=%q targeted=%q: %v/%v", tc.generic, tc.targeted, ttl, ok)
+		}
+	}
+}
+
+func TestTargetedEntryContracts(t *testing.T) {
+	c, clk := conformanceCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Minute), StaleWhileRevalidate: config.Duration(time.Minute), StaleIfError: config.Duration(time.Minute)})
+	request := httptest.NewRequest("GET", "http://x/", nil)
+	for _, tc := range []struct {
+		directive   string
+		stale, auth bool
+		errorWindow time.Duration
+	}{
+		{"max-age=30, stale-while-revalidate=5, stale-if-error=10", true, false, 10 * time.Second},
+		{"max-age=30, must-revalidate, stale-while-revalidate=5, stale-if-error=10", false, false, 0},
+		{"max-age=30, proxy-revalidate, stale-if-error=10", false, false, 0},
+		{"max-age=30, no-cache, stale-if-error=10", false, false, 10 * time.Second},
+		{"max-age=30, public, stale-if-error=0", true, true, 0},
+		{"s-maxage=30, stale-if-error=10", false, true, 0},
+	} {
+		header := http.Header{"Cache-Control": {"no-store"}, "Cdn-Cache-Control": {tc.directive}, "ETag": {`"v1"`}}
+		entry := c.buildEntry(request, 200, header, []byte("body"), clk.now())
+		if entry == nil {
+			t.Fatalf("targeted entry not stored: %s", tc.directive)
+		}
+		decision := reuseDecision(entry, request, requestPolicy{}, clk.now().Add(31*time.Second))
+		if (decision == reuseStale) != tc.stale || c.staleOnErrorWindow(entry) != tc.errorWindow {
+			t.Errorf("%s: decision=%v SIE=%v", tc.directive, decision, c.staleOnErrorWindow(entry))
+		}
+		request.Header.Set("Authorization", "Bearer user")
+		if got := c.buildEntry(request, 200, header, nil, clk.now()); (got != nil) != tc.auth {
+			t.Errorf("auth storage %s", tc.directive)
+		}
+		request.Header.Del("Authorization")
+		for _, restrictive := range []string{"no-store", "private"} {
+			_, action := c.merge304(entry, http.Header{"Cdn-Cache-Control": {restrictive}}, clk.now())
+			if action != mergeDiscard {
+				t.Errorf("304 %s did not discard", restrictive)
+			}
+		}
+	}
+}
+
+func FuzzCachePolicy(f *testing.F) {
+	for _, value := range []string{"", "max-age=600", "max-age=600, no-store=", "unknown=(1 2)", `no-cache="X-A, X-B"`, `unknown="a\\b"`, "no-store, no-store=?0", "max-age=999999999999999", strings.Repeat("x", 20<<10), "\xff\x00", "Age: 1, 2"} {
+		f.Add(value, value)
+	}
+	f.Fuzz(func(t *testing.T, first, second string) {
+		header := http.Header{"Cache-Control": {"no-store"}, "Cdn-Cache-Control": {first, second}}
+		p := parseResponsePolicy(header)
+		if !p.Targeted && !p.NoStore {
+			t.Fatal("invalid target bypassed generic no-store")
+		}
+		for _, duration := range []time.Duration{p.MaxAge, p.SMaxAge, p.SWR, p.SIE, parseAge([]string{first, second})} {
+			if duration < 0 || duration > maxDeltaSeconds*time.Second {
+				t.Fatal("unbounded duration")
+			}
+		}
+		_, _ = parseCacheDate(first, time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC))
+	})
 }
 
 // TestParseCacheControlDirectiveMatrix pins the parser against the whole shape
@@ -421,9 +658,8 @@ func TestFreshnessPrecedence(t *testing.T) {
 			header: http.Header{"Expires": {"0"}, "Date": {date}},
 		},
 		{
-			name:    "earliest repeated Expires wins",
-			header:  http.Header{"Expires": {now.Add(time.Hour).Format(http.TimeFormat), now.Add(10 * time.Second).Format(http.TimeFormat)}},
-			wantTTL: 10 * time.Second, wantOK: true,
+			name:   "repeated Expires is already expired",
+			header: http.Header{"Expires": {now.Add(time.Hour).Format(http.TimeFormat), now.Add(10 * time.Second).Format(http.TimeFormat)}},
 		},
 		{
 			name:   "invalid later Expires cannot restore default freshness",
@@ -476,7 +712,7 @@ func TestFreshnessStaleWindowIsZeroWhenRevalidationIsMandatory(t *testing.T) {
 	now := time.Now()
 	c := newPolicyCache(CachePolicy{DefaultTTL: time.Minute, StaleWhileRevalidate: time.Minute})
 
-	for _, cc := range []string{"must-revalidate", "proxy-revalidate", "no-cache"} {
+	for _, cc := range []string{"must-revalidate", "proxy-revalidate", "no-cache", "s-maxage=60"} {
 		h := ccHeader(cc + ", max-age=60")
 		_, swr, ok := c.freshness(http.StatusOK, h, parseResponsePolicy(h), now)
 		if !ok {
@@ -549,7 +785,7 @@ func TestInitialAgeCorrection(t *testing.T) {
 		{"a malformed Age is ignored", http.Header{"Age": {"soon"}}, 0},
 		{"an unparseable Date is ignored", http.Header{"Date": {"whenever"}}, 0},
 		{"an overflowing Age is clamped", http.Header{"Age": {"99999999999999999999"}}, maxDeltaSeconds * time.Second},
-		{"later Age cannot be hidden by an empty first field", http.Header{"Age": {"", "90"}}, 90 * time.Second},
+		{"invalid first Age is ignored along with later members", http.Header{"Age": {"", "90"}}, 0},
 		{"older Date wins across repeated fields", http.Header{"Date": {now.Format(http.TimeFormat), now.Add(-time.Minute).Format(http.TimeFormat)}}, time.Minute},
 	}
 	for _, tc := range cases {

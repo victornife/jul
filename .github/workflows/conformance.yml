@@ -71,7 +71,7 @@ jobs:
         run: |
           git clone --quiet https://github.com/http-tests/cache-tests "$RUNNER_TEMP/cache-tests"
           git -C "$RUNNER_TEMP/cache-tests" checkout --quiet "$CACHE_TESTS_COMMIT"
-          (cd "$RUNNER_TEMP/cache-tests" && npm ci --no-audit --no-fund)
+          (cd "$RUNNER_TEMP/cache-tests" && npm install --package-lock=false --ignore-scripts --no-audit --no-fund)
       - name: Pull Autobahn|Testsuite
         if: matrix.suite == 'autobahn'
         run: docker pull "$AUTOBAHN_IMAGE"

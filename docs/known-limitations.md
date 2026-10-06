@@ -145,6 +145,21 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 
 ---
 
+## HTTP/2 conformance
+
+Jul is not advertised as fully h2spec-conformant. #539 remains the tracking
+owner for the exact residual cases. With Go 1.26.8, invalid h2c prefaces end
+without a GOAWAY; duplicate SETTINGS are rejected before mutation; prohibited
+connection headers and invalid `TE` get Go-generated `400` responses rather
+than protocol stream errors, before Jul's handler/backend runs. The latter
+two are tracked upstream in [golang/go#26321](https://github.com/golang/go/issues/26321).
+The oversized-HEADERS h2spec case assumes a smaller frame limit than Go
+advertises; frames actually exceeding the advertised limit are rejected.
+Configured header bounds remain enforced, including compressed oversized
+header-list rejection. No protocol fork or simulated handler-level frame error
+is used. Recheck Go upgrades and remove exact stale allow-list entries; see
+[conformance evidence](security-testing.md#protocol-conformance-lane).
+
 ## Response headers and CORS ([configuration.md](configuration.md#response-headers-and-cors))
 
 - **The Boolean/ordering model is deliberately small.** `[[servers.locations.response_headers]]`
@@ -299,7 +314,17 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
   bypasses the cache and reaches the origin (`X-Cache: BYPASS`), and no `206` is
   ever stored. Range workloads get no cache benefit. Serving single byte ranges
   from complete cached representations is a recorded future enhancement, not an
-  accidental gap.
+  accidental gap; #442 owns its evidence-gated decision, with #521/#525 remaining
+  independent evidence/prerequisite work.
+- **`Surrogate-Control` is not cache policy.** Jul neither aliases it to
+  `CDN-Cache-Control` nor translates it to generic `Cache-Control`; normal
+  forwarding and sanitation still apply. RFC 9213 support is limited to
+  `CDN-Cache-Control`, with no custom Jul targeted field. See the
+  [targeted policy contract](cache.md#targeted-cdn-cache-control).
+- **Origin cache policy can differ after NGINX migration.** Jul consumes valid
+  `CDN-Cache-Control`; standard NGINX proxy caching does not. Conversely Jul
+  does not consume `X-Accel-Expires`. Review origin headers before cutover; see
+  [migration guidance](nginx-importer.md#origin-cache-policy-differences).
 - **`Set-Cookie` responses are never stored**, whatever their `Cache-Control`
   says. An origin cannot currently opt a cookie-bearing response into shared
   caching.

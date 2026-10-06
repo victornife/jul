@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dunglas/httpsfv"
 )
 
 // maxDeltaSeconds bounds every delta-seconds directive. RFC 9111 §1.2.2 requires
@@ -15,6 +17,45 @@ import (
 // value it can represent; clamping here keeps the arithmetic inside
 // time.Duration (which overflows at ~292 years) instead of wrapping negative.
 const maxDeltaSeconds = 100 * 365 * 24 * 60 * 60
+
+func parseCacheDate(value string, now time.Time) (time.Time, bool) {
+	if len(value) > 33 {
+		return time.Time{}, false
+	}
+	if len(value) >= 3 && strings.EqualFold(value[len(value)-3:], "GMT") {
+		value = value[:len(value)-3] + "GMT"
+	}
+	parsed, err := http.ParseTime(value)
+	if err != nil {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{http.TimeFormat, "Monday, 02-Jan-06 15:04:05 GMT", time.ANSIC} {
+		candidate := parsed
+		if layout == "Monday, 02-Jan-06 15:04:05 GMT" && candidate.Year() > now.Year()+50 {
+			candidate = candidate.AddDate(-100, 0, 0)
+		}
+		if strings.EqualFold(candidate.UTC().Format(layout), value) {
+			return candidate.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+func parseAge(values []string) time.Duration {
+	if len(values) == 0 {
+		return 0
+	}
+	first, _, _ := strings.Cut(values[0], ",")
+	first = strings.Trim(first, " \t")
+	var seconds int64
+	for _, digit := range []byte(first) {
+		if digit < '0' || digit > '9' {
+			return 0
+		}
+		seconds = min(seconds*10+int64(digit-'0'), int64(maxDeltaSeconds))
+	}
+	return time.Duration(seconds) * time.Second
+}
 
 // cacheControl is a parsed Cache-Control field value.
 //
@@ -201,6 +242,7 @@ func pragmaNoCache(h http.Header) bool {
 // point: reconstructing "may this be reused?" from a lossy header subset on every
 // hit is how the pre-#132 cache lost track of no-cache and must-revalidate.
 type responsePolicy struct {
+	Targeted        bool
 	NoStore         bool
 	Private         bool
 	Public          bool
@@ -219,11 +261,12 @@ type responsePolicy struct {
 }
 
 func parseResponsePolicy(h http.Header) responsePolicy {
-	cc := parseCacheControl(h, "Cache-Control")
+	cc, targeted := selectResponseCacheControl(h)
 	p := responsePolicy{
-		NoStore: cc.has("no-store"),
-		Private: cc.has("private"),
-		Public:  cc.has("public"),
+		Targeted: targeted,
+		NoStore:  cc.has("no-store"),
+		Private:  cc.has("private"),
+		Public:   cc.has("public"),
 		// A field-qualified no-cache="Header-Name" is treated as an unqualified
 		// no-cache: selective header replacement on reuse is a separate design
 		// (#132 scope §2), and validating the whole representation is the
@@ -239,11 +282,58 @@ func parseResponsePolicy(h http.Header) responsePolicy {
 	return p
 }
 
+func selectResponseCacheControl(h http.Header) (cacheControl, bool) {
+	for _, field := range []string{"CDN-Cache-Control"} {
+		if cc, valid := parseTargetedCacheControl(h.Values(field)); valid {
+			return cc, true
+		}
+	}
+	return parseCacheControl(h, "Cache-Control"), false
+}
+
+func parseTargetedCacheControl(values []string) (cacheControl, bool) {
+	const maxTargetedBytes = 16 << 10
+	cc := cacheControl{flags: map[string]bool{}, secs: map[string]time.Duration{}}
+	if len(values) == 0 || len(values) > 128 {
+		return cc, false
+	}
+	size := 2 * (len(values) - 1)
+	for _, value := range values {
+		if len(value) > maxTargetedBytes-size {
+			return cc, false
+		}
+		size += len(value)
+	}
+	dictionary, err := httpsfv.UnmarshalDictionary(values)
+	if err != nil || len(dictionary.Names()) == 0 {
+		return cc, false
+	}
+	for _, name := range dictionary.Names() {
+		member, _ := dictionary.Get(name)
+		item, valid := member.(httpsfv.Item)
+		if !valid {
+			continue
+		}
+		switch name {
+		case "max-age", "s-maxage", "stale-while-revalidate", "stale-if-error":
+			if seconds, valid := item.Value.(int64); valid {
+				cc.secs[name] = time.Duration(min(max(seconds, 0), int64(maxDeltaSeconds))) * time.Second
+			}
+		case "no-cache", "private":
+			_, qualified := item.Value.(string)
+			cc.flags[name] = item.Value == true || qualified
+		case "no-store", "must-revalidate", "proxy-revalidate", "public":
+			cc.flags[name] = item.Value == true
+		}
+	}
+	return cc, true
+}
+
 // revalidationRequired reports whether the origin forbids serving this response
 // once it is stale without contacting the origin first (RFC 9111 §5.2.2.2 and
 // §5.2.2.8). proxy-revalidate binds shared caches specifically, which Jul is.
 func (p responsePolicy) revalidationRequired() bool {
-	return p.MustRevalidate || p.ProxyRevalidate
+	return p.MustRevalidate || p.ProxyRevalidate || p.HasSMaxAge
 }
 
 // sharedAuthReuse reports whether a stored response may satisfy a request that

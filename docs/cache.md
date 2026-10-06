@@ -21,6 +21,7 @@ benchmarks below were refreshed against the corrected implementation.
 - [Cache key and Vary](#cache-key-and-vary)
 - [Cache result values](#cache-result-values)
 - [Shared-cache contract](#shared-cache-contract)
+- [Targeted CDN cache control](#targeted-cdn-cache-control)
 - [Freshness and stale-while-revalidate](#freshness-and-stale-while-revalidate)
 - [Background revalidation lifecycle](#background-revalidation-lifecycle)
 - [Entry immutability](#entry-immutability)
@@ -152,7 +153,7 @@ test in `internal/cache` (unit and policy matrices) or `internal/handler`
 | `no-store` | no | — |
 | `private` | no | Jul is a shared cache; a private response belongs to one user agent |
 | `public` | yes | Normal, and explicitly shareable with authenticated requests |
-| `s-maxage=N` | yes | Freshness lifetime `N`; outranks `max-age` and `Expires` |
+| `s-maxage=N` | yes | Freshness lifetime `N`; outranks `max-age` and `Expires`; requires validation once stale, even when SWR/SIE is configured |
 | `max-age=N` | yes | Freshness lifetime `N`; outranks `Expires` |
 | `no-cache` | **yes** | Stored, but **every** reuse requires successful synchronous validation. Storing it is the point: a `304` still saves the body |
 | `no-cache="Header"` | yes | Treated as unqualified `no-cache`. Selective header replacement is a separate design; validating the whole representation is its conservative superset |
@@ -180,12 +181,100 @@ test in `internal/cache` (unit and policy matrices) or `internal/handler`
 
 ### Age and freshness
 
+`Expires` accepts IMF-fixdate and historical RFC850/asctime HTTP-date forms,
+with exact format validation after parsing. One-digit hours, extra spaces,
+non-GMT zones, impossible dates, empty values, `0`, and multiple field lines
+cannot become fresh. Spelling is compared case-insensitively; historical
+two-digit years more than 50 years in the future use the preceding century.
+Parsing is bounded to 33 bytes and uses UTC, never the host's local timezone.
+`max-age` and shared `s-maxage` still outrank invalid `Expires`.
+
+`Age` follows RFC 9111 section 5.1: select the first member before a comma in
+the first field line, trim only optional SP/HTAB, and discard later members and
+lines. The selected value must contain only decimal digits. Invalid values,
+signs, negative values, decimals and numeric garbage are ignored, not partially
+parsed; `Date` still contributes apparent age. Valid overflowing integers
+saturate at the same approximately 100-year arithmetic bound as cache
+delta-seconds and never wrap. Thus `Age: 7200, 0` is old, while `Age: 0` followed
+by `Age: 7200` uses zero. Freshness ends at the exact lifetime boundary.
+
 Freshness is measured from when the **origin** generated the representation, not
 from when Jul received it: `Date` and `Age` are folded into RFC 9111 §4.2.3
 corrected initial age. A response that already spent two minutes in an upstream
 cache is therefore served for its remaining lifetime, not for a fresh full one.
 A `Date` in the future or a negative `Age` never makes an entry look younger than
 the moment it arrived.
+
+### Targeted CDN cache control
+
+Jul implements RFC 9213 with the fixed target list `[CDN-Cache-Control]`.
+There is no extra configuration switch, custom `Jul-CDN-Cache-Control` field,
+or inference from arbitrary `*-Cache-Control` names. Selection occurs for every
+origin response and again when a `304` updates its stored metadata.
+
+A valid, non-empty Structured Fields dictionary replaces **both** generic
+`Cache-Control` and `Expires` for Jul's cache policy. They are not merged.
+Absent, empty or syntactically invalid targeted fields fall back to the normal
+generic policy. The parser is separate from generic cache-control parsing:
+`github.com/dunglas/httpsfv` v1.1.2 implements Structured Fields, including
+combined field lines, quoting, parameters, and duplicate-member handling.
+Jul limits combined input (including separators) to 16 KiB and 128 field
+lines before invoking it. Inputs above those bounds are invalid for selection.
+
+```http
+Cache-Control: no-store
+CDN-Cache-Control: max-age=600
+```
+
+Jul applies a 600-second freshness lifetime. Generic `no-store` still reaches
+downstream caches, which need not implement targeted policy. The inverse
+prevents Jul from storing the response:
+
+```http
+Cache-Control: max-age=600
+CDN-Cache-Control: no-store
+```
+
+Targeted `max-age=0` also overrides future `Expires`; targeted `max-age=600`
+overrides generic `no-cache`. Request `no-store` remains BYPASS: response policy
+never changes request policy or middleware ordering.
+
+| Targeted directive | Value and behavior |
+| --- | --- |
+| `max-age`, `s-maxage` | Structured integer; existing freshness precedence and bounds; negative integers resolve conservatively to zero; `s-maxage` requires validation once stale |
+| `no-store` | Boolean true (including a bare member); never stored |
+| `private` | Boolean true or field-name string; conservatively never shared |
+| `no-cache` | Boolean true or field-name string; every reuse validates the complete representation |
+| `must-revalidate`, `proxy-revalidate` | Boolean true; forbid stale SWR/SIE reuse |
+| `public` | Boolean true; explicit shared-cache/authenticated-publication permission |
+| `stale-while-revalidate`, `stale-if-error` | Structured integers; existing bounded windows and revalidation precedence |
+| Unknown extension | Ignored, but the valid non-empty targeted field remains selected |
+
+Parameters are ignored. Values of the wrong inferred directive type are not
+coerced or consumed: `max-age="600"` and `max-age=600.5` are not integer
+lifetimes, but their syntactically valid dictionary remains selected. Duplicate
+dictionary members use Structured Fields' **last member wins** rule, unlike
+generic cache-control's conservative minimum-duration rule. Numbers exceeding
+the Structured Fields 15-digit integer range invalidate the field and invoke
+generic fallback; valid large integers saturate at Jul's duration bound.
+
+`CDN-Cache-Control: none` selects targeted policy although `none` is unknown,
+as in RFC 9213's example. Without targeted freshness, Jul uses `default_ttl`,
+not generic `Expires` or `max-age`. Origins must put privacy restrictions in
+the selected targeted field as well as any generic field when both cache
+classes must be restricted. Cookie-authenticated personalized responses must
+not rely solely on generic `private` when permissive targeted policy is present.
+
+Authorization, Set-Cookie, status, capture-budget, Vary, memory/disk and
+generation-lifetime boundaries remain in force. Targeted `max-age` alone does
+not authorize publishing an authenticated response. Targeted fields are stored
+and forwarded normally on misses, hits and validation; consuming policy does
+not strip them or reset `Age`/`Date`.
+
+`Surrogate-Control` is **not** an alias, not translated to `Cache-Control`,
+and not consumed by Jul's cache. Ordinary forwarding and hop-by-hop sanitation
+apply, including removal when nominated by `Connection`. Invalid origin
+transfer framing remains a proxy error (`502`), never a cached representation.
 
 ### Mandatory synchronous validation
 
@@ -226,7 +315,7 @@ client.
 
 Precedence is the origin's, then Jul's:
 
-1. `must-revalidate` / `proxy-revalidate` forbid stale reuse outright. Neither
+1. `must-revalidate` / `proxy-revalidate` / `s-maxage` forbid stale reuse outright. Neither
    `[cache] stale_if_error` nor an explicit `stale-if-error` overrides it.
 2. An explicit response `stale-if-error=N` replaces the global setting for that
    entry — longer, shorter, or an explicit `0` that disables it.
@@ -349,6 +438,8 @@ the complete audit record is [the 2026-08-07 cache recertification](audit/old/20
 
 | Behaviour | Contract | Executable evidence |
 | --- | --- | --- |
+| Strict expiry and age | Invalid/repeated `Expires` is expired; first `Age` member only; bounds and exact transitions | `TestStrictExpires`, `TestStrictAge`, `TestAgeFreshBoundary`, `TestMerge304IgnoresInvalidFirstAge` (`internal/cache`) |
+| RFC 9213 selection | Targeted dictionary replaces generic policy/Expires; malformed fallback, extensions, duplicates, auth and 304 restrictions; forwarding unchanged | `TestTargetedCacheControl`, `TestTargetedFreshnessPrecedence`, `TestTargetedEntryContracts`, `FuzzCachePolicy` (`internal/cache`); `TestRealTargetedCachePolicy`, `TestRealAuthenticatedIdentityIsolation` (`internal/handler`) |
 | Key construction | `METHOD\nhost.lower\nREQUEST_URI`; credentials and cookies never enter the key | `TestKeyConstruction`, `TestCredentialsNeverEnterTheCacheKey` (`internal/cache`) |
 | GET/HEAD, unsafe and other methods | GET/HEAD may cache; successful unsafe methods invalidate GET+HEAD; OPTIONS/TRACE/CONNECT do not invalidate | `TestSuccessfulUnsafeMethodsInvalidateTheTarget`, `TestSafeMethodsNeverInvalidate`, `TestInvalidationStatusRules`, `TestHeadRangeRequestBypasses` |
 | Cacheable statuses | Only the documented status allow-list is stored; 1xx/101 and origin errors are not | `TestCacheableStatusSet`, `TestProtocolSwitchResponseNeverStored`, `TestResponseDirectiveStorage` |

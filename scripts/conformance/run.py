@@ -111,22 +111,26 @@ def static_backend(www):
 # --- verdicts --------------------------------------------------------------
 
 
-def judge(suite, results, out):
+def judge(suite, results, out, evidence=None):
     """results maps case id -> (passed: bool, detail: str)."""
     listed = {e["id"]: e for e in (yaml.safe_load((DATA / "allowlist.yaml").read_text()) or {}).get(suite, [])}
     for entry in listed.values():
         for field in ("id", "rationale", "issue"):
             if not entry.get(field):
                 raise SystemExit(f"allowlist {suite}: entry {entry!r} lacks {field}")
-    unexpected, allowed, stale = [], [], []
+    unexpected, allowed = [], []
+    matched, failing = set(), set()
     for case, (passed, detail) in sorted(results.items()):
         entry = listed.get(case) or next((e for key, e in listed.items() if key.endswith("*") and case.startswith(key[:-1])), None)
+        if entry is not None:
+            matched.add(entry["id"])
+            if not passed:
+                failing.add(entry["id"])
         if not passed and entry is None:
             unexpected.append((case, detail))
         elif not passed:
             allowed.append((case, entry["issue"]))
-        elif case in listed:
-            stale.append(case)
+    stale = sorted(matched - failing)
     report = {
         "suite": suite,
         "total": len(results),
@@ -135,6 +139,8 @@ def judge(suite, results, out):
         "unexpected_failures": [{"id": c, "detail": d} for c, d in unexpected],
         "stale_allowlist_entries": stale,
     }
+    if evidence is not None:
+        report.update(evidence)
     (out / f"{suite}-verdict.json").write_text(json.dumps(report, indent=2))
     print(f"{suite}: {report['passed']}/{report['total']} passed, "
           f"{len(allowed)} allow-listed, {len(unexpected)} unexpected, {len(stale)} stale allowlist entries")
@@ -179,7 +185,7 @@ listen = "127.0.0.1:{tls}"
 listen = "127.0.0.1:{h2c}"
 h2c = true
 {locations}"""
-        results = {}
+        results, counts = {}, {}
         with run_jul(args.jul, config, out, "h2spec", [tls, h2c]):
             targets = {
                 "tls-static": ["-t", "-k", "-p", str(tls), "-P", "/"],
@@ -188,6 +194,7 @@ h2c = true
                 "h2c-proxy": ["-p", str(h2c), "-P", "/proxy/"],
             }
             for target, flags in targets.items():
+                counts[target] = {"passed": 0, "total": 0}
                 report = out / f"h2spec-{target}.xml"
                 with open(out / f"h2spec-{target}.txt", "w") as text:
                     subprocess.run([args.h2spec, "-h", "127.0.0.1", "-o", "5", "-j", str(report), *flags],
@@ -196,7 +203,9 @@ h2c = true
                     failure = tc.find("failure") if tc.find("failure") is not None else tc.find("error")
                     case = f"{tc.get('package')}: {tc.get('classname')} [{target}]"
                     results[case] = (failure is None, (failure.text or "").strip()[:300] if failure is not None else "")
-    return judge("h2spec", results, out)
+                    counts[target]["total"] += 1
+                    counts[target]["passed"] += int(failure is None)
+    return judge("h2spec", results, out, {"targets": counts})
 
 
 # --- ambiguous framing corpus ------------------------------------------------
@@ -401,8 +410,17 @@ listen = "127.0.0.1:{port}"
     (out / "cache-tests-informational.json").write_text(json.dumps(informational, indent=2))
     print(f"cache-tests optimal/check (informational): "
           f"{sum(1 for v in informational.values() if v['passed'])}/{len(informational)} passed")
+    evidence = {
+        "required_total": len(results),
+        "required_passed": sum(passed for passed, _ in results.values()),
+        "required_failures": [case for case, (passed, _) in sorted(results.items()) if not passed],
+        "setup_retries": [case for case, value in json.loads(run.stdout).items()
+                          if isinstance(value, list) and value[:2] == ["Setup", "retry"]],
+    }
+    print(f"cache-tests required: {evidence['required_passed']}/{evidence['required_total']} passed; "
+          f"{len(evidence['setup_retries'])} setup retries")
     results.update(validators_across_codings(args, out))
-    return judge("cache", results, out)
+    return judge("cache", results, out, evidence)
 
 
 def validators_across_codings(args, out):
