@@ -122,6 +122,8 @@ def judge(suite, results, out, evidence=None):
     matched, failing = set(), set()
     for case, (passed, detail) in sorted(results.items()):
         entry = listed.get(case) or next((e for key, e in listed.items() if key.endswith("*") and case.startswith(key[:-1])), None)
+        if suite == "cache" and passed and f"{case} [setup-retry]" in listed:
+            matched.add(f"{case} [setup-retry]")
         if entry is not None:
             matched.add(entry["id"])
             if not passed:
@@ -344,6 +346,11 @@ listen = "127.0.0.1:{port}"
 # --- HTTP caching (http-tests/cache-tests) -----------------------------------
 
 
+def cache_case_id(case, value):
+    suffix = " [setup-retry]" if value == ["Setup", "retry"] else ""
+    return f"cache-tests {case}{suffix}"
+
+
 def cache_test_kinds(tests):
     """Map every cache-tests id to its kind: required, optimal or check."""
     script = ("import suites from '" + (tests / "tests" / "index.mjs").as_uri() + "';"
@@ -404,7 +411,7 @@ listen = "127.0.0.1:{port}"
         kind = kinds.get(case, "required")
         entry = (value is True, json.dumps(value)[:300])
         if kind == "required":
-            results[f"cache-tests {case}"] = entry
+            results[cache_case_id(case, value)] = entry
         else:
             informational[case] = {"kind": kind, "passed": entry[0], "detail": entry[1]}
     (out / "cache-tests-informational.json").write_text(json.dumps(informational, indent=2))
@@ -415,7 +422,7 @@ listen = "127.0.0.1:{port}"
         "required_passed": sum(passed for passed, _ in results.values()),
         "required_failures": [case for case, (passed, _) in sorted(results.items()) if not passed],
         "setup_retries": [case for case, value in json.loads(run.stdout).items()
-                          if isinstance(value, list) and value[:2] == ["Setup", "retry"]],
+                          if value == ["Setup", "retry"]],
     }
     print(f"cache-tests required: {evidence['required_passed']}/{evidence['required_total']} passed; "
           f"{len(evidence['setup_retries'])} setup retries")

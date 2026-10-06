@@ -57,11 +57,12 @@ cache:
       Deliberate; the test origin sends an invalid Transfer-Encoding value and
       Jul refuses to guess the body framing (502) rather than store it.
     issue: https://github.com/victornife/jul/issues/540
-  - id: cache-tests conditional-etag-vary-headers
+  - id: cache-tests conditional-etag-vary-headers [setup-retry]
     rationale: >-
-      Pinned cache-tests d644cf4b reports [Setup, retry] before the actual
-      assertion, reproduced before and after remediation. Jul-owned real
-      conditional/Vary tests pass. Remove only after consistent successful setup.
+      Only the exact [Setup, retry] result from pinned cache-tests d644cf4b is
+      suppressed, before the actual assertion. An assertion failure retains the
+      unsuffixed case ID and fails the lane. Jul-owned conditional/Vary tests
+      pass; remove after consistent successful setup and case execution.
     issue: https://github.com/victornife/jul/issues/540
 
 # Populated from the first scheduled runs (no local runner for these tools).

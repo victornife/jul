@@ -192,7 +192,7 @@ Cache-tests is pinned to `d644cf4bf487763646aac19d2c8b846daa0f604d`
 (package version 0.4.5). There are **160 upstream required cases**, not 162:
 the runner adds two Jul validator checks. Required cases improved from
 **144/160 to 155/160**; including the custom checks, **146/162 to 157/162**.
-The baseline and four post-change runs each reported one separate
+The baseline and five post-change runs each reported one separate
 `conditional-etag-vary-headers: [Setup, retry]` signal. Both final runs had
 zero unexpected failures and zero stale entries after allow-list cleanup.
 
@@ -202,7 +202,13 @@ zero unexpected failures and zero stale entries after allow-list cleanup.
 | `partial-use-stored-headers` | #442 | No complete-object or fragment range serving |
 | `headers-store-Set-Cookie` | #540 | Deliberately never shared; conservative security contract |
 | `headers-store-Transfer-Encoding` | #540 | Invalid origin framing rejected with 502, never guessed/stored |
-| `conditional-etag-vary-headers` | #540 | Reproducible setup retry before the actual assertion; Jul-owned conditional/Vary tests pass |
+| `conditional-etag-vary-headers [setup-retry]` | #540 | Only exact `["Setup", "retry"]` is suppressed; any assertion failure uses the unsuffixed ID and fails the lane |
+
+`test_cache_setup_retry_does_not_suppress_assertion_failures` proves the
+reason-specific exception, including rejection of longer look-alike results.
+Successful ordinary execution reports the retry entry as stale without adding
+a synthetic case or changing the required totals. These reporter tests run
+in the existing Python CI regression job.
 
 H2spec source is tag v2.6.0, commit `70ac2294010887f48b18e2d64f5cccd48421fad1`,
 with 146 cases per target. Building the tag without linker version injection

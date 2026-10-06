@@ -41,7 +41,7 @@ local gates pass. Merge still requires green remote PR checks and review;
 | Range | partial-use-headers, partial-use-stored-headers | Deliberate Jul behavior | Preserve complete bypass and bytes/validators | #442 |
 | Cookies | headers-store-Set-Cookie | Deliberate Jul behavior | Keep never-store rule | #540 documented contract |
 | Framing | headers-store-Transfer-Encoding | Deliberate Jul behavior | Keep invalid origin framing rejection | #540 documented contract |
-| Conditional setup | conditional-etag-vary-headers | External test/setup issue: [Setup, retry] | Preserve precise entry after four reproductions | #540 harness tracker |
+| Conditional setup | conditional-etag-vary-headers | External test/setup issue: [Setup, retry] | Suppress only exact result through `[setup-retry]` ID; assertions fail the lane | #540 harness tracker |
 | Tool setup | npm ci at pinned cache source | External setup issue: no lockfile | No-lock, scripts-disabled npm install | Fixed lane setup |
 
 The Age "suffix" case actually sends `7200, 0`, not `123junk`; the old issue
@@ -111,8 +111,8 @@ runner after:    157 / 162 (includes 2 custom validator checks)
 ```
 
 Both final full runs: five listed failures, zero unexpected, zero stale.
-One setup retry is separately reported in each of five runs (baseline plus
-four post-change runs). Required residuals:
+One setup retry is separately reported in each of six runs (baseline plus
+five post-change runs). Required residuals:
 
 | Case | Owner | Reason |
 | --- | --- | --- |
@@ -120,7 +120,7 @@ four post-change runs). Required residuals:
 | partial-use-stored-headers | #442 | No stored complete-object range serving |
 | headers-store-Set-Cookie | #540 | Never share per-client cookie state |
 | headers-store-Transfer-Encoding | #540 | Reject invalid origin framing with 502 |
-| conditional-etag-vary-headers | #540 | [Setup, retry], before actual assertion |
+| conditional-etag-vary-headers [setup-retry] | #540 | Only exact `["Setup", "retry"]`; actual assertions retain the unsuffixed ID and fail the lane |
 
 Optimal/check cases are informational and not included in the required count.
 
@@ -207,7 +207,7 @@ cache class. No general #523 work is absorbed.
 | internal/server/h2c_test.go | Real Jul raw-frame safety/peer isolation |
 | cmd/jul/corpus_runtime_test.go | Six real NGINX/Jul stateful cache-policy comparisons |
 | cmd/jul/import_corpus_test.go | Existing synthetic origin extended for those cases |
-| scripts/conformance/test_run.py | Exact/wildcard stale reporting, unexpected failures and unexercised entries |
+| scripts/conformance/test_run.py | Exact/wildcard stale reporting, reason-specific retries versus assertions, unexpected failures and unexercised entries |
 | testdata/conformance/h2stdlib/main.go | Standalone stdlib/xnet/upgraded-Go ownership reproducer, not runtime code |
 
 Existing range, memory/disk, SWR/SIE, authenticated reuse, middleware, security,
@@ -303,8 +303,8 @@ Passed local commands (full tag set as above):
 - Unchanged `go test -count=1 -coverprofile=... ./internal/cache ./internal/handler ./internal/server`.
 - Focused freshness, target policy, real-origin, invalid framing and H2 tests;
   real-origin/H2 matrices repeated three times.
-- `python3 scripts/conformance/test_run.py` (four tests).
-- Full external cache: one baseline, four post-change; final three all 155/160.
+- `python3 scripts/conformance/test_run.py` (six tests; also run in the Python CI regression job).
+- Full external cache: one baseline, five post-change; final four all 155/160, including the reason-specific review follow-up.
 - Full external h2spec: baseline and two post-change Jul runs; standalone
   stdlib, 16 KiB experiment, xnet and newer Go 1.27.1.
 - `python3 scripts/conformance/run.py framing ...` (27/27).
