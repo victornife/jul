@@ -297,38 +297,43 @@ func TestRealGRPCStreamingDeadlinesAreHealthNeutral(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Run("Jul attempt deadline", func(t *testing.T) {
-		addr, started, _ := startBlockingStreamServer(t, fd)
-		tr, pool := newStreamTranscoderAt(t, addr, 1, upstream.RetryOverride{Deadline: 20 * time.Millisecond})
-		done := make(chan struct{})
-		go func() {
-			tr.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/down", strings.NewReader(`{"value":"x"}`)))
-			close(done)
-		}()
-		<-started
-		<-done
-		backend := pool.Backends()[0]
-		if !backend.Available() || backend.FailCount() != 0 || backend.Inflight() != 0 {
-			t.Fatalf("Jul deadline changed backend health: state=%q fails=%d inflight=%d", backend.State(), backend.FailCount(), backend.Inflight())
-		}
-	})
-
-	t.Run("inbound client deadline", func(t *testing.T) {
-		addr, started, _ := startBlockingStreamServer(t, fd)
-		tr, pool := newStreamTranscoderAt(t, addr, 1, upstream.RetryOverride{})
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-		defer cancel()
-		req := httptest.NewRequest(http.MethodPost, "/v1/down", strings.NewReader(`{"value":"x"}`)).WithContext(ctx)
-		done := make(chan struct{})
-		go func() {
-			tr.ServeHTTP(httptest.NewRecorder(), req)
-			close(done)
-		}()
-		<-started
-		<-done
-		backend := pool.Backends()[0]
-		if !backend.Available() || backend.FailCount() != 0 || backend.Inflight() != 0 {
-			t.Fatalf("client deadline changed backend health: state=%q fails=%d inflight=%d", backend.State(), backend.FailCount(), backend.Inflight())
-		}
-	})
+	for _, tc := range []struct {
+		name            string
+		attemptDeadline time.Duration
+		clientDeadline  time.Duration
+	}{
+		{name: "Jul attempt deadline", attemptDeadline: 20 * time.Millisecond},
+		{name: "Jul attempt deadline before backend entry", attemptDeadline: time.Nanosecond},
+		{name: "inbound client deadline", clientDeadline: 20 * time.Millisecond},
+		{name: "inbound client deadline before backend entry", clientDeadline: -time.Nanosecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			addr, _, _ := startBlockingStreamServer(t, fd)
+			tr, pool := newStreamTranscoderAt(t, addr, 1, upstream.RetryOverride{Deadline: tc.attemptDeadline})
+			ctx := context.Background()
+			if tc.clientDeadline != 0 {
+				deadlineCtx, cancel := context.WithTimeout(ctx, tc.clientDeadline)
+				defer cancel()
+				ctx = deadlineCtx
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/down", strings.NewReader(`{"value":"x"}`)).WithContext(ctx)
+			done := make(chan struct{})
+			go func() {
+				tr.ServeHTTP(httptest.NewRecorder(), req)
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("deadline did not terminate the streaming request")
+			}
+			if tc.clientDeadline < 0 && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				t.Fatalf("request returned without its expected deadline: %v", ctx.Err())
+			}
+			backend := pool.Backends()[0]
+			if !backend.Available() || backend.FailCount() != 0 || backend.Inflight() != 0 {
+				t.Fatalf("deadline changed backend health: state=%q fails=%d inflight=%d", backend.State(), backend.FailCount(), backend.Inflight())
+			}
+		})
+	}
 }

@@ -68,11 +68,11 @@ func TestMerge304PreservesTheRepresentation(t *testing.T) {
 	}
 }
 
-func TestMerge304UsesLaterAgeField(t *testing.T) {
+func TestMerge304IgnoresInvalidFirstAge(t *testing.T) {
 	c, stored, now := mergeFixture(t)
 	h := canonical(http.Header{"Date": {"", now.Format(http.TimeFormat)}, "Age": {"", "120"}})
 	refreshed, action := c.merge304(stored, h, now)
-	if action != mergeReplace || now.Sub(refreshed.CreatedAt) != 2*time.Minute {
+	if action != mergeReplace || !refreshed.CreatedAt.Equal(now) {
 		t.Fatalf("repeated timing fields: action=%v created=%v", action, refreshed.CreatedAt)
 	}
 }

@@ -800,19 +800,8 @@ func initialAge(h http.Header, now time.Time) time.Duration {
 		}
 	}
 	age := apparent
-	for _, value := range h.Values("Age") {
-		v := strings.TrimSpace(value)
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
-			if n > maxDeltaSeconds {
-				n = maxDeltaSeconds
-			}
-			if d := time.Duration(n) * time.Second; d > age {
-				age = d
-			}
-		} else if err != nil && strings.Trim(v, "0123456789") == "" && len(v) > 0 {
-			// A syntactically valid but overflowing Age is maximally old.
-			age = maxDeltaSeconds * time.Second
-		}
+	if value := parseAge(h.Values("Age")); value > age {
+		age = value
 	}
 	return age
 }
@@ -890,18 +879,14 @@ func (c *Cache) freshness(status int, h http.Header, p responsePolicy, now time.
 		ttl = p.SMaxAge
 	case p.HasMaxAge:
 		ttl = p.MaxAge
-	default:
+	case !p.Targeted:
 		if expires := h.Values("Expires"); len(expires) > 0 {
-			var earliest time.Time
-			for _, exp := range expires {
-				t, err := http.ParseTime(exp)
-				if err != nil {
-					// An invalid field must not hide behind a valid one.
-					return 0, 0, false
-				}
-				if earliest.IsZero() || t.Before(earliest) {
-					earliest = t
-				}
+			if len(expires) != 1 {
+				return 0, 0, false
+			}
+			expiry, valid := parseCacheDate(expires[0], now)
+			if !valid {
+				return 0, 0, false
 			}
 			// Expires is absolute, so it is measured against the origin's own
 			// Date when there is one; using Jul's clock instead would fold
@@ -913,7 +898,7 @@ func (c *Cache) freshness(status int, h http.Header, p responsePolicy, now time.
 					base, foundDate = d, true
 				}
 			}
-			ttl = earliest.Sub(base)
+			ttl = expiry.Sub(base)
 		}
 	}
 	if ttl <= 0 && !p.NoCache {

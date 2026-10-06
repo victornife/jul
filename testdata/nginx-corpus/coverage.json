@@ -15,7 +15,8 @@
         "NGX_LOCATION_CACHE",
         "NGX_LOCATION_CACHE_VALID",
         "issue #365 real-Jul gzip engagement + decoded-content E2E",
-        "issue #365 real-Jul stateful cache MISS/HIT/BYPASS E2E"
+        "issue #365 real-Jul stateful cache MISS/HIT/BYPASS E2E",
+        "issue #540 pinned real-NGINX-vs-Jul targeted origin policy and X-Accel-Expires difference E2E"
       ],
       "rationale": "The corpus proves direct gzip classification, a real-backend Jul gzip engagement/decoded-content E2E (#365), and the bounded proxy_cache_path/proxy_cache -> Jul [cache] translation: exactly one declared cache zone referenced consistently by every proxy_cache in the file translates onto Jul's single process-wide cache (cache-runtime, with a real MISS/HIT/no-store-BYPASS E2E), while an undeclared or multi-zone reference is rejected as a synthetic NGX_CACHE_ZONE_CONFLICT rather than silently guessed (security-cache-boundaries).",
       "deferred_dimensions": [

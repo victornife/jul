@@ -327,12 +327,17 @@ for fixture_spec in "${FIXTURE_SPECS[@]}"; do
 	run_fixture "${fixture_id}" "${container_port}"
 done
 
+NGINX_CACHE_REFERENCE_IMAGE="${NGINX_IMAGE}" REQUIRE_NGINX_E2E=1 \
+	go test -tags importer ./cmd/jul -run '^TestNGINXCorpusTargetedCacheDifference$' -count=1 -v
+
 cat >"${ARTIFACT_DIR}/result.txt" <<'EOF_RESULT'
 reference_passed: core-multifile-return
 reference_passed: routing-cors-policy
 reference_passed: unix-http-upstream
 reference_passed: routing-precedence-runtime
 reference_passed: upstream-hash-affinity-runtime
+expected_difference: cache-runtime/CDN-Cache-Control NGX_LOCATION_CACHE_VALID
+expected_difference: cache-runtime/X-Accel-Expires NGX_LOCATION_CACHE_VALID
 expected_difference: core-multifile-return/relative-redirect NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT
 expected_difference: routing-cors-policy/limit-except-post NGX_LOCATION_LIMIT_EXCEPT
 expected_difference: routing-precedence-runtime/method-predicate-excluded-falls-through NGX_LOCATION_LIMIT_EXCEPT

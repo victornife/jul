@@ -15,13 +15,38 @@ v2.1.0 tag or its packaged READMEs.
 
 ### Added
 
+- **RFC 9213 `CDN-Cache-Control` (#540).** Valid, non-empty Structured Fields
+  policy controls Jul's shared cache instead of generic `Cache-Control` and
+  `Expires`; malformed or empty fields fall back. No custom Jul header or
+  `Surrogate-Control` alias is introduced. Forwarding, auth, Set-Cookie, Vary,
+  range BYPASS and cache lifecycle boundaries are retained. NGINX migration
+  documents and tests the resulting origin-policy difference.
+
 - **Scheduled protocol conformance lane (#513).** A weekly, non-blocking
   workflow runs h2spec, h3spec, Autobahn|Testsuite, `http-tests/cache-tests`
   and an ambiguous-framing corpus against the full-profile binary, with an
   allow-list that requires a rationale and an issue for every known
   deviation. See `docs/security-testing.md`.
 
+### Security
+
+- **Console build-tool dependency patched.** Pin transitive `source-map-js`
+  to 1.2.2 for GHSA-68fv-2mgg-jv7q (CVE-2026-93749), preventing indexed
+  source-map offsets from causing event-loop denial of service. The console
+  dependency audit and coverage gates remain unchanged.
+
 ### Fixed
+
+- **RFC 9111 freshness metadata (#540).** Invalid or repeated `Expires`
+  cannot become fresh through permissive date parsing. `Age` uses the first
+  list member/field line, accepts only unsigned decimal digits, ignores
+  malformed values, and saturates overflow. `s-maxage` enforces validation
+  after expiry rather than letting configured stale windows override it.
+- **Conformance evidence (#539/#540).** Wildcard allow-list entries become
+  stale when all covered targets pass. Reports distinguish upstream required
+  cache cases from Jul's custom checks. HTTP/2 residual explanations now
+  distinguish Go's fail-closed `400`/SETTINGS behavior from an h2spec frame-size
+  assumption; no HTTP/2 runtime architecture change is made.
 
 - **Ambiguously framed HTTP/1.x requests close their connection (RFC 9112
   §6.3).** A request carrying both `Transfer-Encoding: chunked` and

@@ -34,6 +34,24 @@ match its separately declared expectation exactly.
 The final acceptance record is
 [NGINX migration corpus closure](audit/old/2026-08-31-nginx-migration-corpus-closure.md).
 
+## Origin cache policy evidence (#540)
+
+The existing `cache-runtime` fixture now also owns
+`TestNGINXCorpusTargetedCacheDifference` in `cmd/jul/corpus_runtime_test.go`.
+It compares real Jul with pinned NGINX 1.28.3 using a synthetic origin and an
+unprivileged, read-only, network-disabled container. Six stateful cases prove
+CDN policy override/no-store/zero/unknown differences, generic `Expires`
+agreement, and `X-Accel-Expires` divergence. These policy differences remain
+**approximated** under `NGX_LOCATION_CACHE_VALID`; the fixture's supported
+single-zone enablement mapping and candidate are unchanged.
+
+The sequential assertions live beside the existing MISS/HIT/BYPASS test,
+not in the single-response scenario model. `make nginx-migration-e2e` now runs
+the paired policy test as well as the existing reference fixtures. No third
+party image, proprietary traffic, external origin, new importer mapping, range
+cache or `expires` directive implementation is introduced. See
+[operator guidance](nginx-importer.md#origin-cache-policy-differences).
+
 ## Bounded NGINX stream and HTTP PROXY-protocol identity evidence (#426)
 
 Issue #426 adds a bounded first tranche of NGINX `stream` (L4) translation plus

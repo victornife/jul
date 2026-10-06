@@ -9,52 +9,40 @@
 h2spec:
   - id: "http2/3.5: Sends invalid connection preface [h2c-*"
     rationale: >-
-      net/http's cleartext HTTP/2 path closes the connection without a GOAWAY
-      frame; the TLS targets pass. Frame-level errors are not reachable from a
-      handler.
+      Go 1.26.8's stdlib prior-knowledge h2c sniffing rejects the invalid
+      preface without GOAWAY; h2spec reports unexpected EOF, while TLS passes.
+      Standalone reproduction confirms the protocol boundary; recheck Go upgrades.
     issue: https://github.com/victornife/jul/issues/539
   - id: "http2/4.2: Sends a large size HEADERS frame that exceeds the SETTINGS_MAX_FRAME_SIZE [*"
     rationale: >-
-      net/http serves the request instead of a FRAME_SIZE_ERROR connection
-      error; header size is still bounded by max_header_bytes.
+      External h2spec 2.6.0 assumption: five fixed 4000-byte dummy header values
+      form a frame below Go 1.26.8's advertised 1 MiB maximum, but the case
+      expects FRAME_SIZE_ERROR. A frame actually exceeding the advertised limit
+      is rejected; configured decoded header bounds remain effective.
     issue: https://github.com/victornife/jul/issues/539
   - id: "http2/6.5.3: Sends multiple values of SETTINGS_INITIAL_WINDOW_SIZE [*"
     rationale: >-
-      net/http closes the connection instead of applying the values in order;
-      an availability cost to that peer only.
+      Go 1.26.8 http2serverConn.processSettings rejects duplicate settings before
+      applying any value (settings_big_or_dups), with PROTOCOL_ERROR GOAWAY.
+      Standalone stdlib/x/net reproduce it; only that peer is affected and new
+      peers remain usable. No supported configuration changes this behavior.
     issue: https://github.com/victornife/jul/issues/539
   - id: "http2/8.1.2.2: Sends a HEADERS frame that contains the connection-specific header field [*"
     rationale: >-
-      net/http serves the request instead of a PROTOCOL_ERROR stream error;
-      the proxy strips hop-by-hop fields, so they never reach a backend.
+      Go 1.26.8 http2checkValidHTTP2RequestHeaders installs http2new400Handler:
+      HTTP 400 instead of PROTOCOL_ERROR, before Jul middleware/backend runs.
+      Standalone stdlib/x/net reproduce it. Upstream golang/go#26321 remains open.
     issue: https://github.com/victornife/jul/issues/539
   - id: "http2/8.1.2.2: Sends a HEADERS frame that contains the TE header field with any value other than \"trailers\" [*"
     rationale: >-
-      net/http serves the request instead of a PROTOCOL_ERROR stream error;
-      TE is hop-by-hop and is not forwarded.
+      Go 1.26.8 rejects prohibited TE with a Go-generated HTTP 400 before Jul's
+      handler/backend, instead of the required protocol stream error. Same on
+      standalone stdlib/x/net. Upstream https://github.com/golang/go/issues/26321.
     issue: https://github.com/victornife/jul/issues/539
 
 framing: []
 
 cache:
-  - id: cache-tests freshness-expires-invalid-1-digit-hour
-    rationale: Invalid Expires dates are treated as fresh instead of expired (RFC 9111 §5.3); defect to fix.
-    issue: https://github.com/victornife/jul/issues/540
-  - id: cache-tests freshness-expires-invalid-multiple-spaces
-    rationale: Invalid Expires dates are treated as fresh instead of expired (RFC 9111 §5.3); defect to fix.
-    issue: https://github.com/victornife/jul/issues/540
-  - id: cache-tests freshness-expires-invalid-multiple-lines
-    rationale: Multiple Expires lines are not treated as invalid (RFC 9111 §5.3); defect to fix.
-    issue: https://github.com/victornife/jul/issues/540
-  - id: cache-tests age-parse-prefix-twoline
-    rationale: Age edge-case parsing (RFC 9111 §5.1); defect to fix.
-    issue: https://github.com/victornife/jul/issues/540
-  - id: cache-tests age-parse-suffix
-    rationale: An Age value with a non-numeric suffix is accepted instead of invalid (RFC 9111 §5.1); defect to fix.
-    issue: https://github.com/victornife/jul/issues/540
-  - id: cache-tests cdn-*
-    rationale: CDN-Cache-Control (RFC 9213) is not implemented; Cache-Control applies. Decision pending.
-    issue: https://github.com/victornife/jul/issues/540
   - id: cache-tests partial-use-headers
     rationale: Cached byte ranges are not served (decision D05); Range bypasses the cache.
     issue: https://github.com/victornife/jul/issues/442
@@ -69,8 +57,12 @@ cache:
       Deliberate; the test origin sends an invalid Transfer-Encoding value and
       Jul refuses to guess the body framing (502) rather than store it.
     issue: https://github.com/victornife/jul/issues/540
-  - id: cache-tests conditional-etag-vary-headers
-    rationale: cache-tests reports a setup retry; re-evaluated over weekly runs.
+  - id: cache-tests conditional-etag-vary-headers [setup-retry]
+    rationale: >-
+      Only the exact [Setup, retry] result from pinned cache-tests d644cf4b is
+      suppressed, before the actual assertion. An assertion failure retains the
+      unsuffixed case ID and fails the lane. Jul-owned conditional/Vary tests
+      pass; remove after consistent successful setup and case execution.
     issue: https://github.com/victornife/jul/issues/540
 
 # Populated from the first scheduled runs (no local runner for these tools).

@@ -23,7 +23,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -660,6 +662,122 @@ func TestNGINXCorpusCacheRealE2E(t *testing.T) {
 	}
 	if fourthBody != want {
 		t.Fatalf("post-bypass request body mismatch: got %d bytes, want %d bytes matching the stored entry", len(fourthBody), len(want))
+	}
+}
+
+func TestNGINXCorpusTargetedCacheDifference(t *testing.T) {
+	if os.Getenv("REQUIRE_NGINX_E2E") != "1" {
+		t.Skip("run make nginx-migration-e2e for pinned real-NGINX evidence")
+	}
+	if runtime.GOOS != "linux" {
+		t.Fatal("isolated NGINX Unix-socket comparison requires Linux")
+	}
+	image := os.Getenv("NGINX_CACHE_REFERENCE_IMAGE")
+	if !strings.Contains(image, "@sha256:") {
+		t.Fatal("a digest-pinned NGINX_CACHE_REFERENCE_IMAGE is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0755); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", filepath.Join(directory, "origin.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(directory, "origin.sock"), 0777); err != nil {
+		t.Fatal(err)
+	}
+	origin := &http.Server{Handler: corpusBackendHandler("targeted-origin")}
+	go func() { _ = origin.Serve(listener) }()
+	defer origin.Close()
+	source := `pid /tmp/nginx.pid;
+events {}
+http {
+  access_log off;
+  proxy_cache_path /tmp/cache keys_zone=policy:1m max_size=8m;
+  server {
+    listen 8080;
+    location / {
+      proxy_cache policy;
+      proxy_cache_valid 200 10m;
+      proxy_pass http://unix:/origin/origin.sock:;
+      add_header X-Cache $upstream_cache_status always;
+    }
+  }
+}`
+	configPath := filepath.Join(directory, "nginx.conf")
+	if err := os.WriteFile(configPath, []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+	output, err := exec.CommandContext(ctx, "docker", "run", "--detach", "--network", "none", "--read-only", "--user", "101:101", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0700", "--tmpfs", "/var/cache/nginx:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0700", "--volume", directory+":/origin:ro", "--volume", configPath+":/etc/nginx/nginx.conf:ro", "--entrypoint", "nginx", image, "-g", "daemon off;").CombinedOutput()
+	if err != nil {
+		t.Fatalf("start NGINX: %v %s", err, output)
+	}
+	container := strings.TrimSpace(string(output))
+	t.Cleanup(func() {
+		cleanupCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stop()
+		if output, err := exec.CommandContext(cleanupCtx, "docker", "rm", "-f", container).CombinedOutput(); err != nil {
+			t.Errorf("remove NGINX: %v %s", err, output)
+		}
+	})
+	nginxGet := func(path string) ([]byte, error) {
+		return exec.CommandContext(ctx, "docker", "exec", container, "wget", "-S", "-O", "-", "http://127.0.0.1:8080"+path).CombinedOutput()
+	}
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if output, err = nginxGet("/"); err == nil {
+			break
+		}
+		select {
+		case <-deadline.C:
+			logs, _ := exec.CommandContext(ctx, "docker", "logs", container).CombinedOutput()
+			t.Fatalf("NGINX readiness: %v %s\n%s", err, output, logs)
+		case <-ticker.C:
+		}
+	}
+	cfg := loadCorpusRuntimeCandidate(t, "cache-runtime")
+	cfg.Cache.DiskPath = t.TempDir()
+	baseURL, cleanup := startRealJulForCorpus(t, "cache-runtime", cfg)
+	defer cleanup()
+	client := &http.Client{Timeout: 2 * time.Second}
+	defer client.CloseIdleConnections()
+	for _, tc := range []struct{ path, nginx, jul string }{
+		{"/targeted-overrides-no-store", "MISS", "HIT"},
+		{"/targeted-no-store", "HIT", "MISS"},
+		{"/targeted-max-zero", "HIT", "MISS"},
+		{"/targeted-unknown", "MISS", "HIT"},
+		{"/targeted-generic-expires", "HIT", "HIT"},
+		{"/targeted-x-accel-zero", "MISS", "HIT"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			for attempt := 0; attempt < 2; attempt++ {
+				response, err := client.Get(baseURL + tc.path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, readErr := io.ReadAll(response.Body)
+				_ = response.Body.Close()
+				if readErr != nil || !bytes.Contains(body, []byte("corpus-backend-payload")) {
+					t.Fatalf("Jul payload: %v %s", readErr, body)
+				}
+				if attempt == 1 && response.Header.Get("X-Cache") != tc.jul {
+					t.Fatalf("Jul state=%s want=%s", response.Header.Get("X-Cache"), tc.jul)
+				}
+				output, err := nginxGet(tc.path)
+				if err != nil || !bytes.Contains(output, []byte("corpus-backend-payload")) {
+					t.Fatalf("NGINX payload: %v %s", err, output)
+				}
+				if attempt == 1 && !bytes.Contains(output, []byte("X-Cache: "+tc.nginx)) {
+					t.Fatalf("NGINX want=%s: %s", tc.nginx, output)
+				}
+			}
+		})
 	}
 }
 
