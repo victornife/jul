@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"jul/internal/config"
@@ -121,32 +122,45 @@ func TestSendTimeoutBoundsInformationalHeaders(t *testing.T) {
 }
 
 func TestSendTimeoutAllowsPartialProgressWithinOneWrite(t *testing.T) {
-	result := make(chan error, 1)
-	client, _, _ := sendTimeoutPipeServer(t, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		_, err := writer.Write([]byte(strings.Repeat("x", 32*1024)))
-		result <- err
-	}))
-	go func() {
-		ticker := time.NewTicker(20 * time.Millisecond)
-		defer ticker.Stop()
-		buffer := make([]byte, 1024)
-		for range ticker.C {
-			if _, err := client.Read(buffer); err != nil {
-				return
+	synctest.Test(t, func(t *testing.T) {
+		result := make(chan error, 1)
+		stopReading := make(chan struct{})
+		defer close(stopReading)
+		started := time.Now()
+		client, _, _ := sendTimeoutPipeServer(t, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			_, err := writer.Write([]byte(strings.Repeat("x", 32*1024)))
+			result <- err
+		}))
+		go func() {
+			ticker := time.NewTicker(20 * time.Millisecond)
+			defer ticker.Stop()
+			buffer := make([]byte, 1024)
+			for {
+				select {
+				case <-stopReading:
+					return
+				case <-ticker.C:
+				}
+				if _, err := client.Read(buffer); err != nil {
+					return
+				}
 			}
+		}()
+		select {
+		case err := <-result:
+			if err != nil && !errors.Is(err, net.ErrClosed) {
+				t.Fatalf("steady 20ms reader was cut inside one Write: %v", err)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if time.Since(started) <= 100*time.Millisecond {
+				t.Fatal("large-write probe did not outlast its inactivity interval")
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("progressing response failed to complete")
 		}
-	}()
-	select {
-	case err := <-result:
-		if err != nil && !errors.Is(err, net.ErrClosed) {
-			t.Fatalf("steady 20ms reader was cut inside one Write: %v", err)
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("progressing response failed to complete")
-	}
+	})
 }
 
 func sendTimeoutTestServer(t *testing.T, protocol string, timeout time.Duration, handler http.Handler) (*httptest.Server, *http.Client) {
