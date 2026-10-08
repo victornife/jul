@@ -94,6 +94,7 @@ func fullConfig() *config.Config {
 			ReadHeaderTimeout: config.Duration(time.Second),
 			ReadTimeout:       config.Duration(5 * time.Second),
 			WriteTimeout:      config.Duration(5 * time.Second),
+			SendTimeout:       config.Duration(5 * time.Second),
 			IdleTimeout:       config.Duration(120 * time.Second),
 			MaxHeaderBytes:    config.Size(1024),
 			H2C:               true,
@@ -163,6 +164,7 @@ func fullConfig() *config.Config {
 				ProxyConnectTimeout: config.Duration(time.Second),
 				ProxyReadTimeout:    config.Duration(5 * time.Second),
 				ProxySendTimeout:    config.Duration(5 * time.Second),
+				SendTimeout:         durationPtr(5 * time.Second),
 				ProxyRetries:        2,
 				GRPC:                true,
 				BackendTLS: &config.BackendTLSConfig{

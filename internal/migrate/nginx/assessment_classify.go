@@ -137,6 +137,18 @@ func classifyDirective(context AssessmentContext, d ngx.IDirective, facts walkFa
 			return classifyLocationDuration("proxy_read_timeout", "NGX_LOCATION_PROXY_READ_TIMEOUT", params)
 		case context == ContextLocation && name == "proxy_send_timeout":
 			return classifyLocationDuration("proxy_send_timeout", "NGX_LOCATION_PROXY_SEND_TIMEOUT", params)
+		case (context == ContextServer || context == ContextLocation) && name == "send_timeout":
+			code := "NGX_SERVER_SEND_TIMEOUT"
+			if context == ContextLocation {
+				code = "NGX_LOCATION_SEND_TIMEOUT"
+			}
+			if len(params) != 1 {
+				return blocking(code, RiskAvailability, "send_timeout requires one non-negative duration")
+			}
+			if duration, ok := parseNginxDuration(params[0]); !ok || duration < 0 {
+				return blocking(code, RiskAvailability, "send_timeout is not a representable non-negative duration")
+			}
+			return capabilityRegistry[capabilityKey{context, name}]
 		case context == ContextLocation && name == "proxy_next_upstream_tries":
 			return classifyProxyNextUpstreamTries(params)
 		case context == ContextLocation && name == "return":

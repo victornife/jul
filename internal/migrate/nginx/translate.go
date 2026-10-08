@@ -184,6 +184,14 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 				tls.MinVersion = mv
 				hasTLS = true
 			}
+		case "send_timeout":
+			if len(cp) == 1 {
+				if duration, ok := parseNginxDuration(cp[0]); ok && duration >= 0 {
+					s.SendTimeout = duration
+					break
+				}
+			}
+			t.report.skip(c, "send_timeout is not a representable non-negative duration")
 		case "ssl_verify_client":
 			if len(cp) > 0 {
 				clientAuthMode = strings.ToLower(strings.TrimSpace(cp[0]))
@@ -328,6 +336,14 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 					t.report.skip(c, "proxy_send_timeout is not a representable duration")
 				}
 			}
+		case "send_timeout":
+			if len(cp) == 1 {
+				if duration, ok := parseNginxDuration(cp[0]); ok && duration >= 0 {
+					loc.SendTimeout = &duration
+					break
+				}
+			}
+			t.report.skip(c, "send_timeout is not a representable non-negative duration")
 		case "proxy_next_upstream_tries":
 			if len(cp) > 0 {
 				// nginx counts the first attempt plus retries as "tries" (0

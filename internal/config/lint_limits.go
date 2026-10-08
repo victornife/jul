@@ -18,12 +18,12 @@ import (
 func lintExposedWithoutTimeouts(c *Config) []Diagnostic {
 	var diags []Diagnostic
 	for i, srv := range c.Servers {
-		if IsLoopbackListen(srv.Listen) || srv.ReadTimeout > 0 || srv.WriteTimeout > 0 {
+		if IsLoopbackListen(srv.Listen) || srv.ReadTimeout > 0 || srv.WriteTimeout > 0 || srv.SendTimeout > 0 {
 			continue
 		}
 		bounded := false
 		for _, loc := range srv.Locations {
-			if loc.ProxyReadTimeout > 0 || loc.ProxySendTimeout > 0 {
+			if loc.ProxyReadTimeout > 0 || loc.ProxySendTimeout > 0 || (loc.SendTimeout != nil && *loc.SendTimeout > 0) {
 				bounded = true
 				break
 			}
@@ -34,8 +34,8 @@ func lintExposedWithoutTimeouts(c *Config) []Diagnostic {
 		diags = append(diags, Diagnostic{
 			Severity: SeverityWarning,
 			Field:    fmt.Sprintf("servers[%d] (listen %q)", i, srv.Listen),
-			Message:  "listener is reachable from other hosts and sets no read_timeout, write_timeout, proxy_read_timeout or proxy_send_timeout; a slow client or stalled backend can hold a connection indefinitely",
-			Hint:     "set proxy_read_timeout/proxy_send_timeout on proxied locations (inactivity bounds, safe for streams) and read_timeout where no route takes long uploads; see docs/core-http.md#recommended-limits-for-internet-facing-listeners",
+			Message:  "listener is reachable from other hosts and sets no read_timeout, write_timeout, send_timeout, proxy_read_timeout or proxy_send_timeout; a slow client or stalled backend can hold a connection indefinitely",
+			Hint:     "set send_timeout for stalled downstream writes, proxy_read_timeout/proxy_send_timeout on proxied locations (inactivity bounds, safe for streams), and read_timeout where no route takes long uploads; see docs/core-http.md#recommended-limits-for-internet-facing-listeners",
 		})
 	}
 	return diags

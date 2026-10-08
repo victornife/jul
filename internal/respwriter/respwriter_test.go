@@ -12,7 +12,128 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+	err       error
+}
+
+func (writer *deadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	writer.deadlines = append(writer.deadlines, deadline)
+	return writer.err
+}
+
+func TestSendTimeoutRefreshesWritesAndFlushes(t *testing.T) {
+	under := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	nested := Wrap(under, under)
+	writer := WithSendTimeout(nested, time.Second, time.Time{})
+	before := time.Now()
+	if _, err := writer.Write([]byte("first")); err != nil {
+		t.Fatal(err)
+	}
+	writer.(http.Flusher).Flush()
+	if _, err := io.Copy(writer, strings.NewReader("second")); err != nil {
+		t.Fatal(err)
+	}
+	if len(under.deadlines) != 6 || under.Body.String() != "firstsecond" || !under.Flushed {
+		t.Fatalf("deadlines=%v body=%q flushed=%v", under.deadlines, under.Body.String(), under.Flushed)
+	}
+	for index, deadline := range under.deadlines {
+		if index%2 == 1 {
+			if !deadline.IsZero() {
+				t.Fatal("completed output left its inactivity deadline armed")
+			}
+			continue
+		}
+		if deadline.Before(before.Add(time.Second)) || deadline.After(time.Now().Add(time.Second)) {
+			t.Fatalf("deadline outside refreshed interval: %v", deadline)
+		}
+	}
+	if !under.deadlines[4].After(under.deadlines[0]) {
+		t.Fatal("later writes did not refresh the deadline")
+	}
+}
+
+func TestSendTimeoutPreservesAbsoluteDeadline(t *testing.T) {
+	under := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	absolute := time.Now().Add(time.Second)
+	writer := WithSendTimeout(under, time.Hour, absolute)
+	if _, err := writer.Write([]byte("body")); err != nil {
+		t.Fatal(err)
+	}
+	if len(under.deadlines) != 2 || !under.deadlines[0].Equal(absolute) || !under.deadlines[1].Equal(absolute) {
+		t.Fatalf("deadlines=%v, want fixed %v", under.deadlines, absolute)
+	}
+}
+
+func TestSendTimeoutDisabledAndUnsupported(t *testing.T) {
+	under := httptest.NewRecorder()
+	if WithSendTimeout(under, 0, time.Time{}) != under {
+		t.Fatal("disabled timeout changed the writer")
+	}
+	writer := WithSendTimeout(under, time.Second, time.Time{})
+	if _, err := writer.Write([]byte("body")); err != nil {
+		t.Fatal(err)
+	}
+	writer.(http.Flusher).Flush()
+	if under.Body.String() != "body" || !under.Flushed {
+		t.Fatal("unsupported deadline writer lost its response")
+	}
+}
+
+func TestSendTimeoutDeadlineFailureDoesNotWriteOrFlush(t *testing.T) {
+	failure := errors.New("deadline rejected")
+	under := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder(), err: failure}
+	writer := WithSendTimeout(under, time.Second, time.Time{})
+	if count, err := writer.Write([]byte("body")); count != 0 || !errors.Is(err, failure) {
+		t.Fatalf("write=%d,%v", count, err)
+	}
+	writer.(http.Flusher).Flush()
+	if err := http.NewResponseController(writer).Flush(); !errors.Is(err, failure) {
+		t.Fatalf("controller flush=%v, want deadline error", err)
+	}
+	if under.Body.Len() != 0 || under.Flushed {
+		t.Fatal("failed deadline allowed output")
+	}
+}
+
+type sendFailureWriter struct {
+	*deadlineRecorder
+	failure error
+}
+
+func (writer *sendFailureWriter) Write([]byte) (int, error) { return 0, writer.failure }
+func (writer *sendFailureWriter) FlushError() error         { return writer.failure }
+
+func TestSendTimeoutPreservesOutputErrors(t *testing.T) {
+	failure := errors.New("transport failed")
+	under := &sendFailureWriter{deadlineRecorder: &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}, failure: failure}
+	writer := WithSendTimeout(under, time.Second, time.Time{})
+	if _, err := writer.Write([]byte("body")); !errors.Is(err, failure) {
+		t.Fatalf("write=%v", err)
+	}
+	if err := http.NewResponseController(writer).Flush(); !errors.Is(err, failure) {
+		t.Fatalf("flush=%v", err)
+	}
+}
+
+type sendHijackWriter struct{ *deadlineRecorder }
+
+func (writer *sendHijackWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) { return nil, nil, nil }
+
+func TestSendTimeoutLeavesHijackedConnectionAlone(t *testing.T) {
+	under := &sendHijackWriter{deadlineRecorder: &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}}
+	writer := WithSendTimeout(under, time.Second, time.Time{})
+	if _, _, err := http.NewResponseController(writer).Hijack(); err != nil {
+		t.Fatal(err)
+	}
+	if err := http.NewResponseController(writer).Flush(); err != nil || len(under.deadlines) != 0 {
+		t.Fatalf("post-hijack flush set deadlines: err=%v deadlines=%v", err, under.deadlines)
+	}
+}
 
 // caps is the capability set of a writer, used both to build a fake underlying
 // writer and to assert what the wrapper exposes.
@@ -388,7 +509,7 @@ func TestNestedWrapPreservesCapabilities(t *testing.T) {
 			var seen calls
 			under := newUnderlying(c, rec, &seen)
 
-			outer := Wrap(passthrough{under}, under)
+			outer := WithSendTimeout(Wrap(passthrough{under}, under), time.Second, time.Time{})
 			middle := Wrap(passthrough{outer}, outer)
 			inner := Wrap(passthrough{middle}, middle)
 

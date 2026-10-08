@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 312 configurable leaves.
+Coverage: 314 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -2551,6 +2551,21 @@ RouteID is an optional, durable identifier for this location (ADR 0019 §4).
 | Zero/empty semantics | omitted means no durable identity; the revision-scoped selector (listen, server_names, match_type, path, match_ordinal) plus base_version remains fully functional |
 | Active when | always |
 
+## `servers.*.locations.*.send_timeout` {#servers-x-locations-x-send_timeout}
+
+SendTimeout overrides the server downstream write-inactivity timeout; omitted inherits and zero disables.
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `listener_timeouts` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Constraint | non-negative when present |
+| Zero/empty semantics | omitted inherits the server value; explicit zero disables downstream write inactivity deadlines |
+| Active when | always |
+
 ## `servers.*.locations.*.try_files` {#servers-x-locations-x-try_files}
 
 TryFiles lists candidate paths tried in order before falling back to the location's action.
@@ -2790,6 +2805,21 @@ RedirectHTTPS, when set on an HTTP server block, issues a redirect to the equiva
 | Allowed values | `0`, `301`, `308` |
 | Constraint | 0, 301, or 308 |
 | Zero/empty semantics | 0 disables redirect |
+| Active when | always |
+
+## `servers.*.send_timeout` {#servers-x-send_timeout}
+
+SendTimeout bounds stalled downstream writes; zero disables the inactivity deadline.
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `listener_timeouts` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Constraint | non-negative |
+| Zero/empty semantics | omitted/zero disables downstream write inactivity deadlines |
 | Active when | always |
 
 ## `servers.*.server_names` {#servers-x-server_names}

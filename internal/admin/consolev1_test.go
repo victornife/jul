@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 )
@@ -132,6 +133,7 @@ func TestStatusAPI(t *testing.T) {
 			TLS:           &config.TLSConfig{Enabled: true, ClientAuth: &config.ClientAuthConfig{Mode: "require", CAFile: "ca.pem"}},
 			HTTP3:         &config.HTTP3Config{Enabled: true},
 			ClientAddress: &config.ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}},
+			SendTimeout:   config.Duration(time.Minute),
 			Locations: []config.LocationConfig{
 				{Root: "./public", Cache: true},
 				{ProxyPass: "http://127.0.0.1:9000", Auth: &config.AuthConfig{}, RequireClientCert: true},
@@ -172,6 +174,7 @@ func TestStatusAPI(t *testing.T) {
 	}
 	wantActive := []string{
 		"Virtual hosts", "Static file serving", "Reverse proxy", "Response cache",
+		"Downstream send timeout",
 		"Compression", "Rate limiting", "TLS", "Mutual TLS (client certs)",
 		"Access control (auth)", "Trusted client address", "HTTP/3 (QUIC)",
 		"gRPC transcoding", "Upstream pools", "Active health checks", "Service discovery",
@@ -191,6 +194,41 @@ func TestStatusAPI(t *testing.T) {
 		if active[name] {
 			t.Errorf("capability %q = active, want inactive", name)
 		}
+	}
+}
+
+func TestStatusAPISendTimeoutScopes(t *testing.T) {
+	positive := config.Duration(time.Second)
+	zero := config.Duration(0)
+	for _, test := range []struct {
+		name   string
+		server config.ServerConfig
+		active bool
+	}{
+		{"disabled", config.ServerConfig{}, false},
+		{"location enabled", config.ServerConfig{Locations: []config.LocationConfig{{SendTimeout: &positive}}}, true},
+		{"location disabled", config.ServerConfig{Locations: []config.LocationConfig{{SendTimeout: &zero}}}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newTestServer(t, config.AdminConfig{}, Deps{LoadConfig: func() (*config.Config, error) {
+				return &config.Config{Servers: []config.ServerConfig{test.server}}, nil
+			}})
+			response := httptest.NewRecorder()
+			server.routes().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+			var rows []FeatureStatus
+			if err := json.Unmarshal(response.Body.Bytes(), &rows); err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range rows {
+				if row.Name == "Downstream send timeout" {
+					if row.Active != test.active {
+						t.Fatalf("active=%v, want %v", row.Active, test.active)
+					}
+					return
+				}
+			}
+			t.Fatal("send timeout missing from Console Status")
+		})
 	}
 }
 

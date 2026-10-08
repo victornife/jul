@@ -76,12 +76,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 367
-  schema_leaves: 312
-  registry_entries: 312
+  schema_paths: 369
+  schema_leaves: 314
+  registry_entries: 314
   startup_consumed: 28
   by_class:
-    hot_reload: 270
+    hot_reload: 272
     restart_required: 28
     new_listener_only: 7
     ignored_deprecated: 4
@@ -904,6 +904,10 @@ fields:
     class: hot_reload
     subsystem: routing
     reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.send_timeout"
+    class: hot_reload
+    subsystem: listener_timeouts
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
   - path: "servers.*.locations.*.try_files"
     class: hot_reload
     subsystem: try_files
@@ -981,6 +985,10 @@ fields:
   - path: "servers.*.redirect_https"
     class: hot_reload
     subsystem: server_redirect
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.send_timeout"
+    class: hot_reload
+    subsystem: listener_timeouts
     reason: "the handler tree is rebuilt from the effective config on each successful reload"
   - path: "servers.*.server_names"
     class: hot_reload

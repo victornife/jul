@@ -449,6 +449,13 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
   per-stream header deadline. `max_header_bytes`, `idle_timeout` and
   `[rate_limit].max_conns` do apply (see
   [http3.md](http3.md#listener-limits-on-http3)).
+- **Downstream `send_timeout` is an output-operation bound, not a byte-rate or
+  response-lifetime policy.** It covers pending writes/flushes on HTTP/1.1,
+  TLS HTTP/2, h2c and HTTP/3, and defaults off. Quiet application gaps do not
+  trigger it; handler computation, upstream stalls and hijacked WebSocket
+  frames require their own existing controls. An enabled absolute
+  `write_timeout` still limits long responses. See
+  [downstream write inactivity](core-http.md#downstream-write-inactivity).
 
 ---
 

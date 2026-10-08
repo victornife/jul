@@ -25,6 +25,38 @@ func assessString(t *testing.T, source string) (*Assessment, *Report) {
 	return a, rep
 }
 
+func TestAssessSendTimeoutValuesAndScopes(t *testing.T) {
+	for _, scope := range []string{"server", "location"} {
+		for _, value := range []string{"30s", "0", "nope", "-1s", "", "1s 2s"} {
+			t.Run(scope+"/"+value, func(t *testing.T) {
+				directive := "send_timeout " + value + ";"
+				serverDirective, locationDirective := directive, ""
+				if scope == "location" {
+					serverDirective, locationDirective = "", directive
+				}
+				assessment, _ := assessString(t, "http { server { listen 80; "+serverDirective+" location / { proxy_pass http://backend; "+locationDirective+" } } }")
+				found := false
+				for _, result := range assessment.Results {
+					if result.Directive != "send_timeout" {
+						continue
+					}
+					found = true
+					want := AssessmentBlocking
+					if value == "30s" || value == "0" {
+						want = AssessmentSupported
+					}
+					if result.Class != want {
+						t.Fatalf("class=%s, want %s", result.Class, want)
+					}
+				}
+				if !found {
+					t.Fatal("missing send_timeout assessment")
+				}
+			})
+		}
+	}
+}
+
 func TestAssessmentVisitsEveryDirectiveOnce(t *testing.T) {
 	a, _ := assessString(t, `
 worker_processes 1;

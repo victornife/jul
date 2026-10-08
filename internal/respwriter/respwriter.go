@@ -23,10 +23,83 @@ package respwriter
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"net"
 	"net/http"
+	"time"
 )
+
+func WithSendTimeout(under http.ResponseWriter, timeout time.Duration, absoluteDeadline time.Time) http.ResponseWriter {
+	if timeout <= 0 {
+		return under
+	}
+	inner := &sendTimeoutWriter{ResponseWriter: under, controller: http.NewResponseController(under), timeout: timeout, absoluteDeadline: absoluteDeadline}
+	return Wrap(inner, under)
+}
+
+type sendTimeoutWriter struct {
+	http.ResponseWriter
+	controller       *http.ResponseController
+	timeout          time.Duration
+	absoluteDeadline time.Time
+	hijacked         bool
+}
+
+func (writer *sendTimeoutWriter) refreshDeadline() error {
+	deadline := time.Now().Add(writer.timeout)
+	if !writer.absoluteDeadline.IsZero() && writer.absoluteDeadline.Before(deadline) {
+		deadline = writer.absoluteDeadline
+	}
+	return writer.setDeadline(deadline)
+}
+
+func (writer *sendTimeoutWriter) setDeadline(deadline time.Time) error {
+	err := writer.controller.SetWriteDeadline(deadline)
+	if errors.Is(err, http.ErrNotSupported) {
+		return nil
+	}
+	return err
+}
+
+func (writer *sendTimeoutWriter) Write(body []byte) (int, error) {
+	if err := writer.refreshDeadline(); err != nil {
+		return 0, err
+	}
+	written, err := writer.ResponseWriter.Write(body)
+	restoreErr := writer.setDeadline(writer.absoluteDeadline)
+	if err != nil {
+		return written, err
+	}
+	return written, restoreErr
+}
+
+func (writer *sendTimeoutWriter) Flush() {
+	_ = writer.FlushError()
+}
+
+func (writer *sendTimeoutWriter) FlushError() error {
+	if writer.hijacked {
+		return nil
+	}
+	if err := writer.refreshDeadline(); err != nil {
+		return err
+	}
+	err := writer.controller.Flush()
+	restoreErr := writer.setDeadline(writer.absoluteDeadline)
+	if err != nil {
+		return err
+	}
+	return restoreErr
+}
+
+func (writer *sendTimeoutWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	connection, buffer, err := writer.controller.Hijack()
+	if err == nil {
+		writer.hijacked = true
+	}
+	return connection, buffer, err
+}
 
 // Wrap returns a writer that serves Header, Write and WriteHeader from inner,
 // exposes Unwrap so http.ResponseController can reach under, and implements
@@ -78,13 +151,18 @@ type core struct {
 func (c core) Unwrap() http.ResponseWriter { return c.under }
 
 func (c core) flush() {
+	_ = c.flushError()
+}
+
+func (c core) flushError() error {
+	if f, ok := c.ResponseWriter.(interface{ FlushError() error }); ok {
+		return f.FlushError()
+	}
 	if f, ok := c.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
-		return
+		return nil
 	}
-	if f, ok := c.under.(http.Flusher); ok {
-		f.Flush()
-	}
+	return http.NewResponseController(c.under).Flush()
 }
 
 func (c core) hijack() (net.Conn, *bufio.ReadWriter, error) {
@@ -149,6 +227,15 @@ func (w wFR) Flush()   { w.flush() }
 func (w wFHR) Flush()  { w.flush() }
 func (w wFPR) Flush()  { w.flush() }
 func (w wFHPR) Flush() { w.flush() }
+
+func (w wF) FlushError() error    { return w.flushError() }
+func (w wFH) FlushError() error   { return w.flushError() }
+func (w wFP) FlushError() error   { return w.flushError() }
+func (w wFHP) FlushError() error  { return w.flushError() }
+func (w wFR) FlushError() error   { return w.flushError() }
+func (w wFHR) FlushError() error  { return w.flushError() }
+func (w wFPR) FlushError() error  { return w.flushError() }
+func (w wFHPR) FlushError() error { return w.flushError() }
 
 func (w wH) Hijack() (net.Conn, *bufio.ReadWriter, error)    { return w.hijack() }
 func (w wFH) Hijack() (net.Conn, *bufio.ReadWriter, error)   { return w.hijack() }

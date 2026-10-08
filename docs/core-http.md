@@ -679,6 +679,7 @@ explicitly:
 | Setting | Scope | Default | Suggested starting point |
 | --- | --- | --- | --- |
 | `proxy_read_timeout` / `proxy_send_timeout` | location | unbounded | `60s`. These are **inactivity** bounds, so a steadily streaming response or upload is never cut |
+| `send_timeout` | server / location | off (`0`) | `60s` to bound stalled downstream writes without a whole-response cap; location omission inherits and explicit zero disables |
 | `read_timeout` | server | unbounded | `60s` where no route accepts long uploads; it caps reading the **whole** request, body included |
 | `write_timeout` | server | unbounded | leave unset if any route streams (SSE, downloads, WebSocket); otherwise `60s`. It caps the **whole** response |
 | `client_max_body_size` | server / location | 1 MiB | the largest body each route must accept; pair it with `waf.request_body_limit` on WAF routes |
@@ -686,7 +687,38 @@ explicitly:
 | `idle_timeout` | server | 60s | keep |
 
 `jul lint` warns when a non-loopback listener sets none of `read_timeout`,
-`write_timeout`, `proxy_read_timeout` or `proxy_send_timeout` (#511).
+`write_timeout`, `send_timeout`, `proxy_read_timeout` or `proxy_send_timeout`
+(#511/#518).
+
+### Downstream write inactivity
+
+The additive capability is Beta / implemented; it does not inherit Core HTTP's
+existing GA/soak evidence. [Runnable configuration](../testdata/send-timeout.toml)
+shows a server default, location override and explicit disable. The Console
+Status overview reports whether defaults or overrides are configured.
+
+`send_timeout` arms a deadline before each downstream write or flush and
+removes the inactivity deadline after the operation completes. A blocked
+operation fails when it cannot complete within the interval. Successful writes
+and flushes get a fresh interval; there is no total response-duration cap and
+a quiet SSE/application gap with no pending write does not itself time out.
+Buffered output is flushed under the same policy when the handler completes.
+
+The selected virtual host supplies the server default. A location's omitted
+`send_timeout` inherits it; `send_timeout = "0s"` explicitly disables the
+inactivity bound. Both settings rebuild handlers on reload: an admitted request
+keeps its existing generation's value, and new requests use the replacement.
+HTTP/1.1 uses the connection's write deadline; TLS HTTP/2, h2c and HTTP/3 use
+the response stream's deadline. Compression, cache and plugin response writers
+retain controller traversal and flush behavior.
+
+`write_timeout` is unchanged and remains an absolute response cap. When it is
+also configured, inactivity refreshes are capped by that listener's resolved
+write timeout from request handling entry, and the absolute deadline is
+restored between operations. Leave it unset for responses that intentionally
+outlive an absolute cap. `send_timeout` is not bandwidth shaping, a byte-rate
+guarantee, a handler-computation timeout, or a WebSocket frame timeout. Hijacked
+WebSockets retain their existing idle/TCP behavior.
 
 ## Limits
 

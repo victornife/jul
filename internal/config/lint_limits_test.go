@@ -10,7 +10,7 @@ import (
 )
 
 func TestLintExposedWithoutTimeouts(t *testing.T) {
-	const msg = "sets no read_timeout, write_timeout, proxy_read_timeout or proxy_send_timeout"
+	const msg = "sets no read_timeout, write_timeout, send_timeout, proxy_read_timeout or proxy_send_timeout"
 	proxy := func(read, send time.Duration) LocationConfig {
 		return LocationConfig{
 			Match:            MatchConfig{Type: "prefix", Path: "/"},
@@ -30,6 +30,7 @@ func TestLintExposedWithoutTimeouts(t *testing.T) {
 		{"loopback", ServerConfig{Listen: "127.0.0.1:80", Locations: []LocationConfig{proxy(0, 0)}}, false},
 		{"read_timeout set", ServerConfig{Listen: ":80", ReadTimeout: Duration(time.Minute), Locations: []LocationConfig{proxy(0, 0)}}, false},
 		{"write_timeout set", ServerConfig{Listen: ":80", WriteTimeout: Duration(time.Minute), Locations: []LocationConfig{proxy(0, 0)}}, false},
+		{"send_timeout set", ServerConfig{Listen: ":80", SendTimeout: Duration(time.Minute), Locations: []LocationConfig{proxy(0, 0)}}, false},
 		{"proxy_read_timeout set", ServerConfig{Listen: ":80", Locations: []LocationConfig{proxy(30*time.Second, 0)}}, false},
 		{"proxy_send_timeout set", ServerConfig{Listen: ":80", Locations: []LocationConfig{proxy(0, 30*time.Second)}}, false},
 	} {
