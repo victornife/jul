@@ -30,6 +30,13 @@ v2.1.0 tag or its packaged READMEs.
 
 ### Security
 
+- **Admin-plane hardening and review continuation (#514).** Scoped readback,
+  content-free diagnostic projections and no-clobber metadata editing are
+  strengthened; shared JSON responses prohibit storage. Accepted upload and
+  cache-purge operations have principal-attributed, content-free audit events.
+  The Console gains checked action/transport inventories. Private disclosure
+  records remain separate; this installment does not certify the full audit.
+
 - **Admin route-policy drift guard (#514).** Dedicated lean/full security
   lanes now require explicit permission and transport declarations for every
   registered admin route, check negative requests through the real middleware,
@@ -43,6 +50,11 @@ v2.1.0 tag or its packaged READMEs.
   dependency audit and coverage gates remain unchanged.
 
 ### Fixed
+
+- **Admin profiler request-generation policy (#514).** The profiler enabled
+  gate uses the same captured admin generation as authentication and admission.
+  New requests see policy updates; already admitted requests keep their
+  original policy. The `admin:manage` requirement is unchanged.
 
 - **RFC 9111 freshness metadata (#540).** Invalid or repeated `Expires`
   cannot become fresh through permissive date parsing. `Age` uses the first

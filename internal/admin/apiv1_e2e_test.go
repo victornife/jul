@@ -4,16 +4,101 @@
 package admin
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"jul/internal/adminapi"
 	"jul/internal/config"
+	"jul/internal/rbac"
 )
+
+func TestScopedConfigurationDiagnosticRedaction(t *testing.T) {
+	const canary = "review-canary-514-8cf5afbad174"
+	const token = "review-writer-token-fixture-514"
+	t.Setenv("JUL_REVIEW_CANARY_514", canary)
+	policy, err := rbac.Build(true, rbac.RoleAdmin, map[string][]string{"review-writer": {"config:write"}}, []rbac.PrincipalDef{
+		{Name: "root", Role: rbac.RoleAdmin, Token: "review-admin-token-unused-514"},
+		{Name: "writer", Role: "review-writer", Token: token},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := policy.Authenticate("Bearer "+token, time.Now())
+	if err != nil || !identity.Has(rbac.ConfigWrite) || identity.Has(rbac.ConfigRaw) || identity.Has(rbac.ConfigApply) {
+		t.Fatal("test identity must have only config:write")
+	}
+	server, admin := realServer(t, config.AdminConfig{RBAC: config.AdminRBACConfig{Enabled: true}}, Deps{})
+	admin.UpdatePolicy(policy)
+	const candidate = `[[servers]]
+listen = "127.0.0.1:8081"
+[[servers.locations]]
+match = {type = "prefix", path = "/"}
+proxy_pass = "http://127.0.0.1:8082"
+[servers.locations.auth.jwt]
+jwks_url = "${env:JUL_REVIEW_CANARY_514}"
+issuer = "https://issuer.example/"
+audience = "review"
+`
+	for _, path := range []string{"/api/v1/config/validate", "/api/config/validate"} {
+		t.Run(path, func(t *testing.T) {
+			request, err := http.NewRequest(http.MethodPost, server.URL+path, bytes.NewBufferString(candidate))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer "+token)
+			request.Header.Set("Content-Type", "application/toml")
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+				t.Fatal("test did not reach the authenticated validation boundary")
+			}
+			if strings.Contains(string(body), canary) {
+				t.Fatal("diagnostic projection contains a resolved value")
+			}
+		})
+	}
+}
+
+func TestScopedParameterReadbackRequiresRawGrant(t *testing.T) {
+	const canary = "projection-canary-fixture-514-71cd985f"
+	const token = "projection-reader-token-fixture-514"
+	cfg := &config.Config{Plugins: map[string]config.PluginConfig{
+		"example": {Path: "unused-fixture.wasm", Config: map[string]string{"api_key": canary}},
+	}}
+	policy, err := rbac.Build(true, rbac.RoleAdmin, map[string][]string{"status-only": {"status:read"}}, []rbac.PrincipalDef{
+		{Name: "root", Role: rbac.RoleAdmin, Token: "projection-admin-unused-514"},
+		{Name: "reader", Role: "status-only", Token: token},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, admin := realServer(t, config.AdminConfig{}, Deps{LoadConfig: func() (*config.Config, error) { return cfg, nil }})
+	admin.UpdatePolicy(policy)
+	response, body := doGet(t, server.Client(), server.URL+"/api/plugins", token)
+	if response.StatusCode != http.StatusOK || strings.Contains(string(body), canary) {
+		t.Fatal("restricted parameter readback failed")
+	}
+	response, body = doGet(t, server.Client(), server.URL+"/api/plugins", "projection-admin-unused-514")
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), canary) {
+		t.Fatal("raw-authorized caller did not receive the expected projection")
+	}
+	if cfg.Plugins["example"].Config["api_key"] != canary {
+		t.Fatal("restricted projection mutated the source configuration")
+	}
+}
 
 // realServer starts the admin mux on a real loopback listener and returns its
 // base URL. It exercises the whole stack a remote client meets — connection,

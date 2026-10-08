@@ -15,10 +15,71 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"jul/internal/config"
+	"jul/internal/rbac"
 	"log/slog"
 )
+
+func TestPluginUploadAuditUsesAuthenticatedPrincipal(t *testing.T) {
+	const token = "upload-audit-scoped-token-fixture-514"
+	server := New(config.AdminConfig{
+		Enabled: true, Listen: "127.0.0.1:0", PluginUploadEnabled: config.Bool(true),
+		PluginUploadMaxSize: 1, PluginUploadDir: t.TempDir(),
+	}, testLogger(t), Deps{})
+	policy, err := rbac.Build(true, rbac.RoleAdmin, map[string][]string{"upload-only": {"plugins:upload"}}, []rbac.PrincipalDef{
+		{Name: "root", Role: rbac.RoleAdmin, Token: "unused-upload-audit-admin-token-514"},
+		{Name: "uploader", Role: "upload-only", Token: token},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := policy.Authenticate("Bearer "+token, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.UpdatePolicy(policy)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("wasm", "audit-upload.wasm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte{0, 97, 115, 109, 1, 0, 0, 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/plugins/upload", &body)
+	request.RemoteAddr = "127.0.0.1:4321"
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("X-Forwarded-For", "203.0.113.99")
+	request.Header.Set("X-Principal", "root")
+	recorder := httptest.NewRecorder()
+	server.routes().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("upload status = %d, want 200", recorder.Code)
+	}
+	events := server.audit.snapshot("plugin.upload", "success", 0)
+	if len(events) != 1 {
+		t.Fatalf("upload audit events = %d, want 1", len(events))
+	}
+	event := events[0]
+	if event.Actor != "uploader" || event.TokenID != identity.TokenID || event.SourceIP != "127.0.0.1" {
+		t.Fatalf("upload audit attribution = %+v", event)
+	}
+	if event.Resource != "plugins" || event.ResourceID != "" || event.Selector != "" {
+		t.Fatalf("upload audit metadata = %+v", event)
+	}
+	for _, value := range []string{token, "audit-upload.wasm", server.currentAdminConfig().PluginUploadDir} {
+		if strings.Contains(event.Detail, value) {
+			t.Fatal("upload audit detail contains request content or a storage identifier")
+		}
+	}
+}
 
 func TestHandlePluginUpload(t *testing.T) {
 	tmpDir := t.TempDir()

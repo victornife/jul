@@ -18,8 +18,76 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/observability"
+	"jul/internal/rbac"
 	"jul/internal/server"
 )
+
+func TestCachePurgeAuditUsesAuthenticatedPrincipal(t *testing.T) {
+	const token = "cache-purge-audit-scoped-token-fixture-514"
+	const key = "confidential-cache-key-fixture-514"
+	for _, test := range []struct {
+		name     string
+		path     string
+		disabled bool
+	}{
+		{name: "all", path: "/cache/purge"},
+		{name: "one", path: "/cache/purge?key=" + key},
+		{name: "disabled", path: "/cache/purge", disabled: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mock := &fakePurger{}
+			var purger Purger
+			if !test.disabled {
+				purger = mock
+			}
+			admin := newTestServer(t, config.AdminConfig{}, Deps{Cache: purger})
+			policy, err := rbac.Build(true, rbac.RoleAdmin, map[string][]string{"purge-only": {"cache:purge"}}, []rbac.PrincipalDef{
+				{Name: "root", Role: rbac.RoleAdmin, Token: "unused-cache-audit-admin-token-514"},
+				{Name: "cache-operator", Role: "purge-only", Token: token},
+			}, "", time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity, err := policy.Authenticate("Bearer "+token, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			admin.UpdatePolicy(policy)
+			request := httptest.NewRequest(http.MethodPost, test.path, nil)
+			request.RemoteAddr = "127.0.0.1:4321"
+			request.Header.Set("Authorization", "Bearer "+token)
+			request.Header.Set("X-Forwarded-For", "203.0.113.99")
+			recorder := httptest.NewRecorder()
+			admin.routes().ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("purge status = %d, want 200", recorder.Code)
+			}
+			events := admin.audit.snapshot("cache.purge", "success", 0)
+			if test.disabled {
+				if len(events) != 0 {
+					t.Fatal("disabled cache reported a purge audit event")
+				}
+				return
+			}
+			if len(events) != 1 {
+				t.Fatalf("purge audit events = %d, want 1", len(events))
+			}
+			event := events[0]
+			if event.Actor != "cache-operator" || event.TokenID != identity.TokenID || event.SourceIP != "127.0.0.1" || event.Resource != "cache" {
+				t.Fatalf("purge audit attribution = %+v", event)
+			}
+			if strings.Contains(event.Detail, key) || strings.Contains(event.Detail, token) || event.ResourceID != "" || event.Selector != "" {
+				t.Fatal("purge audit contains request content")
+			}
+			if test.name == "all" && mock.purged.Load() != 1 {
+				t.Fatal("whole-cache purge was not performed")
+			}
+			if test.name == "one" && mock.deleted.Load() != key {
+				t.Fatal("keyed purge was not performed")
+			}
+		})
+	}
+}
 
 // fakePurger records purge operations for assertions.
 type fakePurger struct {
@@ -51,6 +119,22 @@ func newTestServer(t *testing.T, cfg config.AdminConfig, deps Deps) *Server {
 func TestNewDisabledReturnsNil(t *testing.T) {
 	if New(config.AdminConfig{Enabled: false}, nil, Deps{}) != nil {
 		t.Fatal("expected nil server when admin disabled")
+	}
+}
+
+func TestJSONResponsesAreNeverStored(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusAccepted, http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusInternalServerError} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			recorder.Header().Set("Cache-Control", "public, max-age=300")
+			writeJSON(recorder, status, map[string]bool{"ok": status < 400})
+			if recorder.Code != status || recorder.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("JSON response contract changed: status = %d, content type = %q", recorder.Code, recorder.Header().Get("Content-Type"))
+			}
+			if recorder.Header().Get("Cache-Control") != "no-store" {
+				t.Fatal("admin JSON response permits storage")
+			}
+		})
 	}
 }
 

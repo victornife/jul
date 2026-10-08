@@ -861,7 +861,7 @@ var Catalog = []RouteSpec{
 		Permission: rbac.AdminManage,
 		Handler: func(s *Server) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if !pprofEnabled(s.currentAdminConfig()) {
+				if !pprofEnabled(s.requestAdminSnapshot(r).cfg) {
 					http.NotFound(w, r)
 					return
 				}

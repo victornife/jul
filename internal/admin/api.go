@@ -287,7 +287,7 @@ func (s *Server) handleConfigValidate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, validationErrorResponse{
 			OK:      false,
 			Message: "The draft configuration contains errors.",
-			Errors:  humanizeErr(err.Error()),
+			Errors:  secretSafeRawValidationErrors(err),
 		})
 		return
 	}
