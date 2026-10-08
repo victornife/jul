@@ -973,10 +973,12 @@ func (s *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
 	}
 	if key := r.URL.Query().Get("key"); key != "" {
 		s.deps.Cache.Delete(key)
+		s.recordAudit(r, "cache.purge", "cache", "success", "single-entry purge requested")
 		writeJSON(w, http.StatusOK, map[string]string{"status": "purged", "key": key})
 		return
 	}
 	s.deps.Cache.Purge()
+	s.recordAudit(r, "cache.purge", "cache", "success", "whole-cache purge completed")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "purged"})
 }
 
@@ -1557,6 +1559,7 @@ func (s *Server) currentWriteState(requireRaw bool) (CurrentWriteState, error) {
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }

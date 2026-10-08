@@ -36,6 +36,14 @@ These tests do not change the dedicated package coverage floors or certify the
 entire admin/Console codebase. Scope and remaining review are recorded in the
 [dated security review installment](audit/2026-10-06-admin-security-review.md).
 
+The Console client tests additionally check the explicit write-action inventory
+and standard direct-transport ownership using the TypeScript parser. The
+continuation includes scoped readback, no-clobber metadata editing, attributable
+upload/purge events, request-generation policy and JSON no-store regressions.
+See the [continuation record](audit/2026-10-08-admin-security-continuation.md).
+These are regression guards, not exhaustive certification or permission to
+publish a private advisory.
+
 ## Recorded full-tag baseline and floors
 
 The initial baselines were measured from the exact full-tag coverage artifact for

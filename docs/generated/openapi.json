@@ -5809,6 +5809,9 @@
                     "path": {
                       "type": "string"
                     },
+                    "preserve_config": {
+                      "type": "boolean"
+                    },
                     "sha256": {
                       "type": "string"
                     },

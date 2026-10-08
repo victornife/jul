@@ -9,7 +9,58 @@ import (
 	"testing"
 
 	"jul/internal/config"
+	"jul/internal/rbac"
 )
+
+func TestPprofPolicyUsesCapturedRequestGeneration(t *testing.T) {
+	for _, initial := range []bool{false, true} {
+		name := "disabled_request_then_enabled"
+		if initial {
+			name = "enabled_request_then_disabled"
+		}
+		t.Run(name, func(t *testing.T) {
+			cfg := config.AdminConfig{Listen: "127.0.0.1:0", Token: snapLegacyTok, PprofEnabled: config.Bool(initial)}
+			server := newTestServer(t, cfg, Deps{})
+			var profiler http.Handler
+			for _, spec := range Catalog {
+				if spec.Pattern == "/debug/pprof/" {
+					profiler = spec.Handler(server)
+					break
+				}
+			}
+			if profiler == nil {
+				t.Fatal("profiler route missing from Catalog")
+			}
+			handler := server.captureAdminRuntimeSnapshot(server.requirePermission(rbac.AdminManage, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				updated := server.currentAdminConfig()
+				updated.PprofEnabled = config.Bool(!initial)
+				server.UpdateLiveAdminConfig(updated)
+				profiler.ServeHTTP(w, r)
+			})))
+			request := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+			request.Header.Set("Authorization", "Bearer "+snapLegacyTok)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			want := http.StatusNotFound
+			if initial {
+				want = http.StatusOK
+			}
+			if recorder.Code != want {
+				t.Fatalf("captured profiler policy: status = %d, want %d", recorder.Code, want)
+			}
+			recorder = httptest.NewRecorder()
+			server.routes().ServeHTTP(recorder, request)
+			if initial {
+				want = http.StatusNotFound
+			} else {
+				want = http.StatusOK
+			}
+			if recorder.Code != want {
+				t.Fatalf("new request profiler policy: status = %d, want %d", recorder.Code, want)
+			}
+		})
+	}
+}
 
 // pprof_enabled follows the admin runtime generation, and the profiler route
 // keeps its own gate: disabled means 404 even for an authorized caller (#445).

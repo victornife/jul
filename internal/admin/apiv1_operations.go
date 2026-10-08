@@ -280,7 +280,7 @@ func (s *Server) handleV1ClientAddressWrite(w http.ResponseWriter, r *http.Reque
 }
 
 func v1Findings(err error) []adminapi.Finding {
-	issues := humanizeErr(err.Error())
+	issues := secretSafeRawValidationErrors(err)
 	if len(issues) == 0 {
 		return []adminapi.Finding{{Code: "candidate_validation", Path: "config", Summary: "The candidate is invalid.", Severity: "error"}}
 	}

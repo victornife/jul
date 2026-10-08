@@ -101,6 +101,34 @@ func TestIssue81RawValidationErrorsDoNotEchoCandidateValues(t *testing.T) {
 	}
 }
 
+func TestSafeValidationPreservesFixedClassification(t *testing.T) {
+	const marker = "CONFIGURED_VALUE_MUST_NOT_ESCAPE"
+	for _, test := range []struct {
+		message string
+		code    string
+		path    string
+	}{
+		{"servers[0].client_address.trusted_proxies[0]: host bits in " + marker, "noncanonical_cidr", "servers[0].client_address.trusted_proxies[0]"},
+		{"invalid proxy_pass " + marker, "bad_proxy_pass", "config"},
+		{"requested encoder " + marker + " is not compiled in this build", "unsupported_build_capability", "config"},
+		{"servers[0].locations[0]: invalid value " + marker, "candidate_validation", "servers[0].locations[0]"},
+	} {
+		t.Run(test.code, func(t *testing.T) {
+			issues := secretSafeRawValidationErrors(errors.New(test.message))
+			if len(issues) != 1 || issues[0].Code != test.code || issues[0].Path != test.path {
+				t.Fatalf("unexpected safe classification: %#v", issues)
+			}
+			encoded, err := json.Marshal(issues)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(encoded), marker) || issues[0].Summary == "" || issues[0].Detail == "" {
+				t.Fatal("safe classification lost guidance or disclosed a configured value")
+			}
+		})
+	}
+}
+
 func TestIssue81MalformedRawCandidateReturnsBoundedSentinel(t *testing.T) {
 	before, err := config.Parse([]byte(`
 [[servers]]

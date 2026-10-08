@@ -1130,6 +1130,7 @@ export const PluginProjectionSchema = z.object({
   path: z.string().optional(),
   type: z.string(), // "middleware" | "handler"
   config: z.record(z.string(), z.string()).optional(),
+  config_visible: z.boolean().optional(),
   memory_limit: z.string().optional(),
   timeout: z.string().optional(),
   kv: z.boolean(),
@@ -1722,6 +1723,7 @@ export type PluginDefPatch = {
   path?: string;
   type?: "middleware" | "handler";
   config?: Record<string, string>;
+  preserve_config?: boolean;
   memory_limit?: string;
   timeout?: string;
   kv?: boolean;

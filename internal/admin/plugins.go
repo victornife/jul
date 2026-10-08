@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"jul/internal/config"
+	"jul/internal/rbac"
 )
 
 // pluginDef is the plugin_set payload: the guided editor's view of a single
@@ -20,15 +21,16 @@ import (
 // apply, and the validated SaveConfig re-parse enforces the rest (the path
 // exists, the type is valid, fetch needs allowed_hosts).
 type pluginDef struct {
-	Source       string            `json:"source,omitempty"`
-	Path         string            `json:"path,omitempty"`
-	Type         string            `json:"type,omitempty"`
-	Config       map[string]string `json:"config,omitempty"`
-	MemoryLimit  string            `json:"memory_limit,omitempty"`
-	Timeout      string            `json:"timeout,omitempty"`
-	KV           bool              `json:"kv,omitempty"`
-	Fetch        bool              `json:"fetch,omitempty"`
-	AllowedHosts []string          `json:"allowed_hosts,omitempty"`
+	Source         string            `json:"source,omitempty"`
+	Path           string            `json:"path,omitempty"`
+	Type           string            `json:"type,omitempty"`
+	Config         map[string]string `json:"config,omitempty"`
+	PreserveConfig bool              `json:"preserve_config,omitempty"`
+	MemoryLimit    string            `json:"memory_limit,omitempty"`
+	Timeout        string            `json:"timeout,omitempty"`
+	KV             bool              `json:"kv,omitempty"`
+	Fetch          bool              `json:"fetch,omitempty"`
+	AllowedHosts   []string          `json:"allowed_hosts,omitempty"`
 	// SHA256 sets the module pin; omitted keeps the existing pin so an editor
 	// unaware of pins can never silently drop one, and "" clears it.
 	SHA256 *string `json:"sha256,omitempty"`
@@ -122,6 +124,12 @@ func buildPlugin(in pluginDef, existing config.PluginConfig) (config.PluginConfi
 		return config.PluginConfig{}, "", fmt.Errorf("plugin_set: type must be %q or %q", "middleware", "handler")
 	}
 	pc := config.PluginConfig{Type: typ, Config: trimConfigMap(in.Config), KV: in.KV, Fetch: in.Fetch, AllowedHosts: normalizeStringSlice(in.AllowedHosts)}
+	if in.PreserveConfig {
+		if in.Config != nil {
+			return config.PluginConfig{}, "", fmt.Errorf("plugin_set: preserve_config cannot be combined with config")
+		}
+		pc.Config = existing.Config
+	}
 	switch strings.TrimSpace(in.Source) {
 	case "", "path":
 		p := strings.TrimSpace(in.Path)
@@ -267,17 +275,18 @@ type PluginsProjection struct {
 }
 
 type PluginProjection struct {
-	Name         string             `json:"name"`
-	Source       string             `json:"source"`
-	Path         string             `json:"path,omitempty"`
-	Type         string             `json:"type"`
-	Config       map[string]string  `json:"config,omitempty"`
-	MemoryLimit  string             `json:"memory_limit,omitempty"`
-	Timeout      string             `json:"timeout,omitempty"`
-	KV           bool               `json:"kv"`
-	Fetch        bool               `json:"fetch"`
-	AllowedHosts []string           `json:"allowed_hosts,omitempty"`
-	Attachments  []PluginAttachment `json:"attachments,omitempty"`
+	Name          string             `json:"name"`
+	Source        string             `json:"source"`
+	Path          string             `json:"path,omitempty"`
+	Type          string             `json:"type"`
+	Config        map[string]string  `json:"config,omitempty"`
+	ConfigVisible bool               `json:"config_visible"`
+	MemoryLimit   string             `json:"memory_limit,omitempty"`
+	Timeout       string             `json:"timeout,omitempty"`
+	KV            bool               `json:"kv"`
+	Fetch         bool               `json:"fetch"`
+	AllowedHosts  []string           `json:"allowed_hosts,omitempty"`
+	Attachments   []PluginAttachment `json:"attachments,omitempty"`
 	// Pinned reports whether the declaration sets a sha256 pin.
 	Pinned bool `json:"pinned"`
 	// Digest is the sha256 of the module bytes the serving generation
@@ -437,6 +446,13 @@ func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.deps.PluginModules != nil {
 			attachPluginModules(&out, s.deps.PluginModules())
+		}
+		identity, _ := rbacIdentityFromRequest(r)
+		for index := range out.Plugins {
+			out.Plugins[index].ConfigVisible = identity.Has(rbac.ConfigRaw)
+			if !out.Plugins[index].ConfigVisible {
+				out.Plugins[index].Config = nil
+			}
 		}
 		out.UploadEnabled = pluginUploadEnabled(snap.cfg) && snap.cfg.PluginUploadMaxSize > 0
 		out.UploadMaxSizeMB = 0

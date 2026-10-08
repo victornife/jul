@@ -161,6 +161,7 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dest := filepath.Join(dir, name)
+	s.recordAudit(r, "plugin.upload", "plugins", "success", "module stored")
 	s.log.Info("plugin uploaded", "name", name, "size", len(data))
 	s.hub.Broadcast(Event{
 		Type: "plugin_uploaded",

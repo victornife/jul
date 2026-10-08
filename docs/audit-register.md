@@ -8,6 +8,7 @@ live issue tracker.
 
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
+| [2026-10-08 admin security continuation](audit/2026-10-08-admin-security-continuation.md) | Post-#549 `33e946d0`; remediation #550 | Maintainer-accepted risk-focused #514 checklist, route/Console inventories, corrections and private finding dispositions | Scoped review complete; final exact-head CI and merge evidence required for closure; no every-line, advisory-publication or release certification |
 | [2026-10-06 admin route-policy foundation](audit/2026-10-06-admin-security-review.md) | Post-#548 `1b449614` | Targeted #514 boundary review and CI-enforced permission/transport inventory | Partial installment; full admin/Console line-level review and #514 remain open; no maturity or release certification |
 | [2026-09-30 read-only product and technical audit](audit/jul-audit-report-2026-09-30.md) | Frozen candidate `3258f1a3`; delivery status appended against main `9bcc9333` on 2026-10-01 | Current post-release findings plus a dated implementation/PR status snapshot; not an exhaustive certification | Findings F-01–F-19 and original evidence remain pinned to their audited baseline; the addendum distinguishes merged work from green-but-pending PRs and open phase issues |
 

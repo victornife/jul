@@ -43,6 +43,24 @@ func humanizeErr(raw string) []validationError {
 		err   validationError
 	}{
 		{
+			token: "not compiled in this build",
+			err: validationError{
+				Code:     "unsupported_build_capability",
+				Summary:  "A requested capability is not compiled in this build.",
+				Detail:   "Use a build with the required capability or remove the unsupported setting.",
+				Severity: "error",
+			},
+		},
+		{
+			token: "host bits",
+			err: validationError{
+				Code:     "noncanonical_cidr",
+				Summary:  "A network prefix contains host bits.",
+				Detail:   "Use a canonical CIDR network prefix with host bits cleared.",
+				Severity: "error",
+			},
+		},
+		{
 			token: "no upstream named",
 			err: validationError{
 				Code:     "unknown_upstream",

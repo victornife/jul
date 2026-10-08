@@ -23,6 +23,7 @@ export interface PluginDraft {
   fetch: boolean;
   allowedHosts: string; // comma- or newline-separated
   config: string; // "key = value" lines
+  configEditable: boolean;
 }
 
 // emptyPluginDraft seeds the create form: a new plugin must reference a module
@@ -41,6 +42,7 @@ export function emptyPluginDraft(): PluginDraft {
     fetch: false,
     allowedHosts: "",
     config: "",
+    configEditable: true,
   };
 }
 
@@ -49,7 +51,7 @@ export function emptyPluginDraft(): PluginDraft {
 // console never transmits).
 export function seedPluginDraft(p: PluginProjection): PluginDraft {
   const cfg = p.config ?? {};
-  const configLines = Object.keys(cfg)
+  const configLines = p.config_visible === false ? "" : Object.keys(cfg)
     .sort()
     .map((k) => `${k} = ${cfg[k] ?? ""}`)
     .join("\n");
@@ -66,6 +68,7 @@ export function seedPluginDraft(p: PluginProjection): PluginDraft {
     fetch: p.fetch,
     allowedHosts: (p.allowed_hosts ?? []).join(", "),
     config: configLines,
+    configEditable: p.config_visible !== false,
   };
 }
 
@@ -121,8 +124,12 @@ export function pluginDraftToPatch(draft: PluginDraft): PluginDefPatch {
   if (draft.fetch) patch.fetch = true;
   const hosts = parseList(draft.allowedHosts);
   if (hosts.length > 0) patch.allowed_hosts = hosts;
-  const cfg = parseConfigMap(draft.config);
-  if (Object.keys(cfg).length > 0) patch.config = cfg;
+  if (!draft.configEditable) {
+    patch.preserve_config = true;
+  } else {
+    const cfg = parseConfigMap(draft.config);
+    if (Object.keys(cfg).length > 0) patch.config = cfg;
+  }
   return patch;
 }
 

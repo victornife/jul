@@ -25,6 +25,11 @@ The live admin server owns one immutable snapshot containing authentication/RBAC
 
 The outer admin handler captures the snapshot exactly once when a request enters the mux and stores that pointer in request context. Secure transport is checked before any credential use. Route admission, authentication, authorization, Console dispatch, upload policy and safe runtime projections then reuse the same captured snapshot.
 
+The profiler enabled gate also uses that captured configuration. Changing
+`admin.pprof_enabled` affects fresh requests, not a profiler request already
+admitted under the preceding generation. `admin:manage` is still required;
+generation consistency does not grant an additional permission.
+
 Consequences:
 
 - a request captured before Publish completes under generation A;

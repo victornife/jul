@@ -50,6 +50,11 @@ func secretSafeRawValidationErrors(err error) []validationError {
 		if path == "" {
 			path = "config"
 		}
+		if issue.Code != "unknown" {
+			issue.Path = path
+			out = append(out, issue)
+			continue
+		}
 		out = append(out, validationError{
 			Code:     "candidate_validation",
 			Path:     path,

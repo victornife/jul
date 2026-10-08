@@ -34,6 +34,7 @@ import {
   toABI,
 } from "@/lib/plugins.ts";
 import { PluginsPanel } from "@/features/plugins/PluginsPanel.tsx";
+import { PluginEditorDrawer } from "@/features/plugins/PluginEditorDrawer.tsx";
 
 // ── schema ────────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,32 @@ describe("PluginsProjectionSchema", () => {
 // ── lib helpers ───────────────────────────────────────────────────────────────
 
 describe("plugins lib", () => {
+  it("disables the hidden parameter field in the rendered editor", () => {
+    const projection: PluginProjection = {
+      name: "hidden", source: "path", path: "hidden.wasm", type: "middleware",
+      kv: false, fetch: false, abi: "jul-abi/v1", response_phase: false,
+      config_visible: false,
+    };
+    render(<PluginEditorDrawer existing={projection} onClose={vi.fn()} />, { wrapper: Wrapper });
+    expect(screen.getByRole("textbox", { name: /^Config/ })).toBeDisabled();
+    expect(screen.getByText("Stored values are hidden; metadata edits preserve them.")).toBeInTheDocument();
+  });
+
+  it("preserves hidden parameters without submitting an invented replacement", () => {
+    const projection: PluginProjection = {
+      name: "hidden", source: "path", path: "hidden.wasm", type: "middleware",
+      kv: false, fetch: false, abi: "jul-abi/v1", response_phase: false,
+      config_visible: false, config: { ignored: "synthetic-fixture" },
+    };
+    const draft = seedPluginDraft(projection);
+    expect(draft.config).toBe("");
+    expect(draft.configEditable).toBe(false);
+    const patch = pluginDraftToPatch({ ...draft, config: "invented = replacement" });
+    expect(patch.preserve_config).toBe(true);
+    expect(patch.config).toBeUndefined();
+    expect(emptyPluginDraft().configEditable).toBe(true);
+  });
+
   it("parseList splits comma and newline separated values", () => {
     expect(parseList("a, b\n c ,,")).toEqual(["a", "b", "c"]);
   });

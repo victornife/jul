@@ -9,6 +9,8 @@
  * nonce reader.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as ts from "typescript";
+import clientSource from "@/api/client.ts?raw";
 import {
   authToken,
   validateConfig,
@@ -33,6 +35,96 @@ import {
 
 type FetchMock = ReturnType<typeof vi.fn>;
 const realFetch = globalThis.fetch;
+
+describe("reviewed Console write inventory", () => {
+  it("keeps direct Console transports inside the reviewed client", () => {
+    const sources = import.meta.glob<string>("../**/*.{ts,tsx}", {
+      eager: true,
+      query: "?raw",
+      import: "default",
+    });
+    const outsideClient: string[] = [];
+    for (const [path, text] of Object.entries(sources)) {
+      if (path.includes("/test/") || /\.test\.tsx?$/.test(path) || path === "../api/client.ts") continue;
+      const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true,
+        path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+      function visit(node: ts.Node): void {
+        if (ts.isCallExpression(node)) {
+          const target = node.expression;
+          if (
+            (ts.isIdentifier(target) && target.text === "fetch") ||
+            (ts.isPropertyAccessExpression(target) && target.name.text === "fetch")
+          ) outsideClient.push(path);
+        }
+        if (
+          ts.isNewExpression(node) && ts.isIdentifier(node.expression) &&
+          ["EventSource", "XMLHttpRequest"].includes(node.expression.text)
+        ) outsideClient.push(path);
+        ts.forEachChild(node, visit);
+      }
+      visit(source);
+    }
+    expect(outsideClient).toEqual([]);
+  });
+
+  it("requires every explicit client write to have an action declaration", () => {
+    const source = ts.createSourceFile(
+      "client.ts",
+      clientSource,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    const writes: Record<string, string[]> = {};
+    function visit(node: ts.Node, owner = "<module>"): void {
+      if (ts.isFunctionDeclaration(node)) owner = node.name?.text ?? "<anonymous>";
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        (node.expression.text === "fetch" || node.expression.text === "api")
+      ) {
+        const options = node.arguments[1];
+        if (options !== undefined && ts.isObjectLiteralExpression(options)) {
+          const method = options.properties.find(
+            (property): property is ts.PropertyAssignment =>
+              ts.isPropertyAssignment(property) && property.name.getText(source) === "method",
+          );
+          if (method !== undefined) {
+            expect(ts.isStringLiteral(method.initializer), `${owner}: review non-literal request method`).toBe(true);
+            if (ts.isStringLiteral(method.initializer)) {
+              const value = method.initializer.text;
+              if (!["GET", "HEAD", "OPTIONS"].includes(value)) {
+                (writes[owner] ??= []).push(value);
+              }
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, (child) => { visit(child, owner); });
+    }
+    visit(source);
+    expect(writes).toEqual({
+      testRoute: ["POST"],
+      purgeCache: ["POST"],
+      rollback: ["POST"],
+      discardPendingRestart: ["POST"],
+      diffConfig: ["POST"],
+      previewRawConfig: ["POST"],
+      patchConfig: ["POST"],
+      patchConfigBatch: ["POST"],
+      fetchPatchCandidate: ["POST"],
+      validateConfig: ["POST"],
+      applyConfig: ["POST"],
+      applyPatchBatch: ["POST"],
+      generateConfig: ["POST"],
+      generateConfigPatches: ["POST"],
+      reportClientError: ["POST"],
+      uploadPluginWasm: ["POST"],
+      uploadTranscodeDescriptor: ["POST"],
+      patchListenerClientAddress: ["PATCH"],
+    });
+  });
+});
 
 function mockFetch(impl: (url: string, init?: RequestInit) => Response): FetchMock {
   const fn = vi.fn((url: string, init?: RequestInit) => Promise.resolve(impl(url, init)));

@@ -64,6 +64,13 @@ the catalog fail a source-level check. See the
 [route-policy review installment](audit/2026-10-06-admin-security-review.md)
 for evidence and the remaining #514 line-level review boundary.
 
+Shared admin JSON responses use `Cache-Control: no-store`, including internal
+Console responses and error projections. Configuration validation findings
+retain structural field locations and content-free guidance; they are not a
+raw configuration readback. The
+[2026-10-08 continuation](audit/2026-10-08-admin-security-continuation.md)
+records the new regression evidence and remaining review work.
+
 **Three supported remedies:**
 
 - **Terminate the listener with [`[admin.tls]`](configuration.md#admintls)** (#336).

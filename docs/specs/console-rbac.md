@@ -272,119 +272,32 @@ Rules:
 - No role can grant more than the catalog defines; there is no "inherit" keyword
   in Phase 1–2 (compose explicitly). Wildcards (`config:*`, `*`) are the shorthand.
 
-## Exhaustive permission matrix
+## Current permission authority
 
-Every admin route, its method(s), the required permission, and which predefined
-roles satisfy it. `—` = unauthenticated by design. `✓`/`·` = granted / not
-granted. Sourced from `internal/admin/routes.go`.
+The earlier planning matrix duplicated route metadata and became stale as the
+internal Console API evolved. The current exhaustive authority is
+[`Catalog`](../../internal/admin/route_catalog.go), extended by
+[`v1WriteCatalog`](../../internal/admin/route_catalog_v1_write.go), with
+predefined grants in [`internal/rbac/role.go`](../../internal/rbac/role.go).
+Catalog guard tests require an explicit authorization mode and known,
+complete method permissions; the dedicated security lane checks transport and
+negative authorization through the actual middleware.
 
-**Unauthenticated (liveness/readiness + static shell):**
+Use the [external admin API guide](../admin-api.md) and its generated OpenAPI
+for supported external operations. Internal Console routes are not a second
+public compatibility contract. The
+[2026-10-08 review continuation](../audit/2026-10-08-admin-security-continuation.md)
+records the current Console action inventory and its evidence boundary.
 
-| Route | Method | Required | Rationale |
-| --- | --- | --- | --- |
-| `/healthz` | GET | — | Process liveness probe. |
-| `/readyz` | GET | — | Readiness probe. |
-| `/`, `/config`, `/ui`, SPA assets | GET | — | Static shell/assets carry no secrets; the data APIs below are protected. The shell is unusable without a token. |
+In particular, raw current configuration and raw history require their
+distinct raw-readback permissions; `config:read` is not a grant to retrieve
+those bytes. An already-authorized rollback-only principal may retrieve only
+its own rollback result unless it also holds a broader result-read grant.
+Object-level `admin:manage` and `config:trust` checks still apply to relevant
+configuration transitions, independently of the route's base permission.
 
-**Read (state & configuration view):**
-
-| Route | Method | Required | viewer | operator | admin | auditor |
-| --- | --- | --- | :--: | :--: | :--: | :--: |
-| `/metrics` | GET | `metrics:read` | ✓ | ✓ | ✓ | · |
-| `/api/stats` | GET | `status:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/status` | GET | `status:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/runtime/overview` | GET | `status:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/admin/me` | GET | authenticated (any valid credential; no specific permission) | ✓ | ✓ | ✓ | ✓ |
-| `/api/certs` | GET | `status:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/config` | GET | `config:read` | ✓ | ✓ | ✓ | · |
-| `/api/config/raw` | GET | `config:read` | ✓ | ✓ | ✓ | · |
-| `/api/config/settings` | GET | `config:read` | ✓ | ✓ | ✓ | · |
-| `/api/upstreams` | GET | `config:read` | ✓ | ✓ | ✓ | · |
-| `/api/routes` | GET | `config:read` | ✓ | ✓ | ✓ | · |
-| `/api/apps` | GET | `config:read` | ✓ | ✓ | ✓ | · |
-| `/api/tls` | GET | `config:read` | ✓ | ✓ | ✓ | · |
-| `/api/mtls` | GET | `config:read` | ✓ | ✓ | ✓ | · |
-| `/api/security` | GET | `config:read` | ✓ | ✓ | ✓ | · |
-| `/api/traffic-controls` | GET | `config:read` | ✓ | ✓ | ✓ | · |
-| `/api/streams` | GET | `config:read` | ✓ | ✓ | ✓ | · |
-| `/api/plugins` | GET | `config:read` | ✓ | ✓ | ✓ | · |
-| `/api/wizard` | GET | `config:read` | ✓ | ✓ | ✓ | · |
-| `/api/history` | GET | `history:read` | ✓ | ✓ | ✓ | · |
-| `/api/history/get` | GET | `history:read` | ✓ | ✓ | ✓ | · |
-| `/api/config/history` | GET | `history:read` | ✓ | ✓ | ✓ | · |
-| `/api/config/history/{id}` | GET | `history:read` | ✓ | ✓ | ✓ | · |
-| `/api/config/history/{id}/diff` | GET | `history:rollback` | · | ✓ | ✓ | · |
-| `/api/config/applies/{id}` | GET | `status:read` **or** `config:apply` **or** `history:rollback` (own rollbacks only) | ✓ | ✓ | ✓ | ✓ |
-| `/api/observability/requests` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/observability/failing-routes` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/observability/timeline` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/observability/upstream-history` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/observability/cert-history` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/observability/logs` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/observability/logs/stream` | GET (SSE) | `observability:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/events` | GET (SSE) | `observability:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/search` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/admin/health` | GET | `observability:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/admin/client-errors` | POST | `observability:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/audit` | GET | `audit:read` | ✓ | ✓ | ✓ | ✓ |
-| `/api/audit/export` | GET | `audit:export` | · | ✓ | ✓ | ✓ |
-
-**Write — author/preview (no persistence):**
-
-| Route | Method | Required | viewer | operator | admin | auditor |
-| --- | --- | --- | :--: | :--: | :--: | :--: |
-| `/api/config/validate` | POST | `config:write` | · | ✓ | ✓ | · |
-| `/api/config/diff` | POST | `config:write` | · | ✓ | ✓ | · |
-| `/api/config/patch` | POST | `config:write` | · | ✓ | ✓ | · |
-| `/api/routes/test` | POST | `config:write` | · | ✓ | ✓ | · |
-| `/api/wizard/generate` | POST | `config:write` | · | ✓ | ✓ | · |
-| `/api/transcode/descriptor-upload` | POST | `config:write` | · | ✓ | ✓ | · |
-
-**Write — persist / operate (mutating):**
-
-| Route | Method | Required | viewer | operator | admin | auditor |
-| --- | --- | --- | :--: | :--: | :--: | :--: |
-| `/api/config/settings` | POST | `config:apply` | · | ✓ | ✓ | · |
-| `/api/config/apply` | POST | `config:apply` | · | ✓ | ✓ | · |
-| `/api/config/patch/apply` | POST | `config:apply` | · | ✓ | ✓ | · |
-| `/api/history/rollback` | POST | `history:rollback` | · | ✓ | ✓ | · |
-| `/api/config/rollback` | POST | `history:rollback` | · | ✓ | ✓ | · |
-| `/reload` | POST | `reload:trigger` | · | ✓ | ✓ | · |
-| `/cache/purge` | POST | `cache:purge` | · | ✓ | ✓ | · |
-| `/api/plugins/upload` | POST | `plugins:upload` | · | ✓ | ✓ | · |
-
-**Admin surface (highest trust):**
-
-| Route | Method | Required | viewer | operator | admin | auditor |
-| --- | --- | --- | :--: | :--: | :--: | :--: |
-| `/debug/pprof/…` | GET | `admin:manage` | · | · | ✓ | · |
-| `/api/admin/rbac/principals` *(future — not yet mounted)* | GET/POST/DELETE | `admin:manage` | · | · | ✓ | · |
-| `/api/admin/rbac/roles` *(future — not yet mounted)* | GET/POST/DELETE | `admin:manage` | · | · | ✓ | · |
-| `/api/admin/rbac/tokens` *(future — not yet mounted)* | GET/POST/DELETE | `admin:manage` | · | · | ✓ | · |
-
-Method-sensitive endpoints (`/api/config/settings`) require `config:read` on GET
-and `config:apply` on POST. The matrix lists the write requirement on its own row.
-
-The exact-ID managed-apply result endpoint (`/api/config/applies/{id}`) is
-authorized by **any-of** `status:read` **or** `config:apply` **or**
-`history:rollback`: a principal privileged enough to *apply* configuration may
-read the secret-free result of its own managed-apply transaction without also
-holding `status:read`. A rollback-only least-privilege role (e.g. a recovery or
-support role granting `history:rollback` but neither `status:read` nor
-`config:apply`) is likewise admitted so it can retrieve the terminal result of
-the rollback it just submitted; such a principal is scoped by the handler to
-records whose operation is a rollback **and** whose owner token matches its own,
-so it can never read the result of an unrelated apply or patch transaction. The
-projection never exposes actor, source IP, or token digest — those remain
-audit-API only.
-
-The rollback preview endpoint (`GET /api/config/history/{id}/diff`) is gated by
-`history:rollback` rather than `config:write`, so a least-privilege rollback-only
-role can review exactly what rolling back to a snapshot would change before it
-confirms. The server reads the snapshot itself and diffs it against the running
-config; unlike the generic `POST /api/config/diff` it accepts no request body,
-so a rollback-only caller can never submit an arbitrary candidate configuration
-through it.
+Interactive principal, role and token-management endpoints are future scope,
+not mounted routes. Their earlier design rows are not delivery evidence.
 
 ## Current-identity endpoint and Console gating
 

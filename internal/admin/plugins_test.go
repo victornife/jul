@@ -90,6 +90,32 @@ func TestApplyPatchPluginSetPathRequired(t *testing.T) {
 	}
 }
 
+func TestPluginMetadataEditPreservesHiddenParameters(t *testing.T) {
+	const canary = "hidden-parameter-fixture-514-768fd4"
+	cfg := pluginPatchConfig()
+	existing := cfg.Plugins["inject"]
+	existing.Config = map[string]string{"api_key": canary}
+	cfg.Plugins["inject"] = existing
+	_, err := applyPatch(cfg, patchRequest{
+		Op: "plugin_set", PluginName: "inject",
+		PluginDef: &pluginDef{Source: "path", Path: "updated.wasm", Type: "middleware", PreserveConfig: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Plugins["inject"].Path != "updated.wasm" || cfg.Plugins["inject"].Config["api_key"] != canary {
+		t.Fatal("metadata edit did not preserve hidden parameters")
+	}
+	_, _, err = buildPlugin(pluginDef{Source: "path", Path: "updated.wasm", PreserveConfig: true, Config: map[string]string{"api_key": "replacement"}}, existing)
+	if err == nil {
+		t.Fatal("ambiguous preserve plus replacement request accepted")
+	}
+	cleared, _, err := buildPlugin(pluginDef{Source: "path", Path: "updated.wasm", Config: map[string]string{}}, existing)
+	if err != nil || len(cleared.Config) != 0 {
+		t.Fatal("explicit clear no longer works")
+	}
+}
+
 func TestApplyPatchPluginSetInlinePreserved(t *testing.T) {
 	c := pluginPatchConfig()
 	c.Plugins["embedded"] = config.PluginConfig{Inline: "QUJD", Type: "middleware"}

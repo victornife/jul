@@ -122,6 +122,15 @@ field keeps the configured value, an explicit value replaces it, and an explicit
 `""` (or `0` for `kv_max_entries`/`max_invocations`/`max_instances`) restores the default.
 `GET /api/plugins` reports the explicitly configured limits as `limits`.
 
+Opaque plugin parameters are shown only to a principal with `config:raw`.
+Other permitted readers receive the metadata projection with
+`config_visible = false`; the guided parameter field is disabled. A metadata
+edit sends `preserve_config = true` so stored parameters remain unchanged.
+That flag cannot be combined with a replacement `config` map. Privileged
+parameter editing and newly authored declarations retain their normal path.
+This is an internal Console API contract, not a new TOML configuration key or
+a change to the guest ABI.
+
 Validation rules:
 
 - exactly one of `path` or `inline` must be set;

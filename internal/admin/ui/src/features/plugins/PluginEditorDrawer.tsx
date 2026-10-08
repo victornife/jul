@@ -57,6 +57,7 @@ function TextArea({
   rows,
   hint,
   onChange,
+  disabled,
 }: {
   readonly label: string;
   readonly value: string;
@@ -64,12 +65,14 @@ function TextArea({
   readonly rows?: number;
   readonly hint?: string;
   readonly onChange: (v: string) => void;
+  readonly disabled?: boolean;
 }) {
   return (
     <label className="block space-y-1">
       <span className="text-sm font-medium text-jul-text">{label}</span>
       <textarea
         value={value}
+        disabled={disabled}
         placeholder={placeholder}
         rows={rows ?? 3}
         onChange={(e) => { onChange(e.target.value); }}
@@ -290,7 +293,10 @@ export function PluginEditorDrawer({
           value={draft.config}
           placeholder={"key = value\nheader = X-Trace"}
           rows={4}
-          hint="One key = value pair per line, passed to the plugin as its [plugins.NAME.config] table."
+          hint={draft.configEditable
+            ? "One key = value pair per line, passed to the plugin as its [plugins.NAME.config] table."
+            : "Stored values are hidden; metadata edits preserve them."}
+          disabled={!draft.configEditable}
           onChange={(v) => { set("config", v); }}
         />
 
