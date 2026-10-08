@@ -4,9 +4,13 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -119,6 +123,94 @@ func TestStopConfigWatcherWithoutWatcher(t *testing.T) {
 	stopConfigWatcher(cancel, nil)
 	if ctx.Err() != context.Canceled {
 		t.Fatal("watcher context was not canceled")
+	}
+}
+
+func TestWatchConfigCancellationDrainsNotificationsBeforeClosingDigests(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		notifications := make(chan struct{})
+		digests := make(chan [32]byte, 1)
+		go watchConfigEvents(ctx, "server.toml", nil, notifications, digests)
+		synctest.Wait()
+		select {
+		case <-digests:
+			t.Fatal("digest channel closed before watcher shutdown completed")
+		default:
+		}
+		notifications <- struct{}{}
+		synctest.Wait()
+		select {
+		case <-digests:
+			t.Fatal("digest channel closed after draining but before watcher shutdown completed")
+		default:
+		}
+		close(notifications)
+		synctest.Wait()
+		if _, open := <-digests; open {
+			t.Fatal("digest channel stayed open after watcher shutdown completed")
+		}
+	})
+}
+
+func TestWatchConfigEventsClosesAfterSourceStops(t *testing.T) {
+	for _, testCase := range []struct {
+		name          string
+		notify        bool
+		readable      bool
+		logErrors     bool
+		cancelPublish bool
+	}{
+		{name: "closed source"},
+		{name: "unreadable file", notify: true},
+		{name: "unreadable file logs error", notify: true, logErrors: true},
+		{name: "updated file", notify: true, readable: true},
+		{name: "canceled publish", notify: true, readable: true, cancelPublish: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "server.toml")
+			data := []byte("updated config")
+			if testCase.readable {
+				if err := os.WriteFile(path, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			notifications := make(chan struct{}, 1)
+			if testCase.notify {
+				notifications <- struct{}{}
+			}
+			close(notifications)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			watcherContext := context.Context(ctx)
+			capacity := 1
+			if testCase.cancelPublish {
+				watcherContext = cancelAfterErrCheck{Context: ctx, cancel: cancel}
+				capacity = 0
+			}
+			digests := make(chan [32]byte, capacity)
+			var logOutput bytes.Buffer
+			var logger *slog.Logger
+			if testCase.logErrors {
+				logger = slog.New(slog.NewTextHandler(&logOutput, nil))
+			}
+			watchConfigEvents(watcherContext, path, logger, notifications, digests)
+			if testCase.readable && !testCase.cancelPublish {
+				if digest, open := <-digests; !open || digest != sha256.Sum256(data) {
+					t.Fatalf("unexpected config digest: %v, open=%v", digest, open)
+				}
+			}
+			if _, open := <-digests; open {
+				t.Fatal("digest channel stayed open or emitted an unexpected digest")
+			}
+			if testCase.logErrors && !strings.Contains(logOutput.String(), "failed to read file for digest") {
+				t.Fatalf("read failure was not logged: %q", logOutput.String())
+			}
+			if testCase.cancelPublish && ctx.Err() != context.Canceled {
+				t.Fatal("publish did not observe cancellation")
+			}
+		})
 	}
 }
 

@@ -1292,34 +1292,36 @@ func watchConfig(ctx context.Context, path string, log *slog.Logger) <-chan [32]
 	}
 
 	out := make(chan [32]byte, 1)
-	go func() {
-		defer func() {
-			for range ch {
-			}
-			close(out)
-		}()
-		for {
-			select {
-			case <-ctx.Done():
+	go watchConfigEvents(ctx, path, log, ch, out)
+	return out
+}
+
+func watchConfigEvents(ctx context.Context, path string, log *slog.Logger, notifications <-chan struct{}, out chan [32]byte) {
+	defer func() {
+		for range notifications {
+		}
+		close(out)
+	}()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-notifications:
+			if !ok {
 				return
-			case _, ok := <-ch:
-				if !ok {
-					return
+			}
+			data, err := readConfigFile(path)
+			if err != nil {
+				if log != nil {
+					log.Warn("config watcher: failed to read file for digest", "path", path, "error", err)
 				}
-				data, err := readConfigFile(path)
-				if err != nil {
-					if log != nil {
-						log.Warn("config watcher: failed to read file for digest", "path", path, "error", err)
-					}
-					continue
-				}
-				if !sendLatestConfigDigest(ctx, out, sha256.Sum256(data)) {
-					return
-				}
+				continue
+			}
+			if !sendLatestConfigDigest(ctx, out, sha256.Sum256(data)) {
+				return
 			}
 		}
-	}()
-	return out
+	}
 }
 
 func stopConfigWatcher(cancel context.CancelFunc, notifications <-chan [32]byte) {
