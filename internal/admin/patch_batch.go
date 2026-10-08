@@ -306,7 +306,7 @@ func executePatchBatch(
 		if errors.Is(validateErr, context.Canceled) || errors.Is(validateErr, context.DeadlineExceeded) {
 			return out, &patchCandidateError{Err: validateErr}
 		}
-		validationErrors = append(validationErrors, humanizeErr(validateErr.Error())...)
+		validationErrors = append(validationErrors, secretSafeRawValidationErrors(validateErr)...)
 	}
 
 	classification, err := lifecycle.Classify(beforeEffective, candidate.Effective, baseline.Live)

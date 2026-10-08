@@ -5,7 +5,7 @@
 | Date | 2026-10-08 |
 | Source baseline | Post-#549 main `33e946d0526cac9ed3f5e92bba1e1f0be1e12cfb` |
 | Review owner | [#514](https://github.com/victornife/jul/issues/514), reopened after premature automatic closure |
-| Disposition | In progress; focused source publication approved, not completion |
+| Disposition | Risk-focused review complete in the reviewed boundaries; closure requires final exact-head CI and merge evidence |
 | Previous installment | [2026-10-06 route-policy foundation](2026-10-06-admin-security-review.md) |
 
 ## Scope and evidence boundary
@@ -17,9 +17,16 @@ was reopened; no checklist or feature maturity is promoted by that correction.
 This continuation inspected the mutation authorization/attribution pipeline,
 the shared authority gate, v1 adapters, request-generation policy selection,
 and selected Console request construction and validation/error boundaries.
-The remaining production inventory is approximately 28,401 Go lines and
+The production inventory is approximately 28,401 Go lines and
 32,005 Console TypeScript lines, before the current continuation edits. A file
 inventory is not line-review evidence, and no exhaustive certification is made.
+
+On 2026-10-08 the maintainer accepted a risk-focused close-out after the final
+confirmed residual correction, rather than an every-line certification. The
+verdicts below cover the inspected enforcement and data-handling boundaries,
+their negative tests, and the confirmed findings. They do not certify every
+source line or eliminate the documented limitations. Exact-head hosted CI and
+merge evidence belong to #514 and the current #62 execution snapshot.
 
 ## Request-generation consistency
 
@@ -54,8 +61,28 @@ request, automatic merge or release certification. Affected-version assessment
 and the private disclosure records remain separate from the public evidence.
 
 No public vulnerability issue, exploit description, advisory publication,
-CVE request or speculative follow-up was made. This concern remains a reason
-that #514 cannot be reported complete.
+CVE request or speculative follow-up was made. The source corrections and
+regressions are included in #550, including the final shared-boundary
+consistency correction. The advisories remain draft; affected-version,
+release and disclosure decisions are separate work, not silently completed
+by closing the review. Restricted finding links are recorded on #514.
+
+## Checklist verdicts
+
+| Original checklist area | Scoped verdict | Named evidence and limits |
+| --- | --- | --- |
+| Route inventory | Pass in declared route boundary | The 91-pattern inventory, `TestRouteTransportPolicyInventory`, `TestCatalogOwnsMuxRegistrations`, catalog permission/method tests, and origin/transport tests enforce declarations. Only the two probes are transport-exempt; inner transition checks remain additional requirements. |
+| Authentication | Reviewed; existing limits retained | `auth_snapshot_test.go`, `internal/rbac/security_negative_test.go`, and the checked typed client cover policy replacement, scoped identities and bearer-header transport. Console tokens remain in session storage; this is not protection against same-origin script compromise. Legacy shared-token identities retain their documented broad authority. |
+| Authorization and attribution | Pass in reviewed mutation boundary after corrections | The Console action ledger below, catalog-derived wrappers, authority/ownership and trust checks, `TestPluginUploadAuditUsesAuthenticatedPrincipal`, and `TestCachePurgeAuditUsesAuthenticatedPrincipal`. Route grants do not replace inner apply/adoption/baseline checks. |
+| Plugin upload | Reviewed; bounded handling and publication policy retained | `plugin_upload_test.go`, runtime upload-generation tests and `admin_runtime_issue157_concurrency_test.go` cover limits, confined storage and reload interaction. Module content identity remains the #429 contract; storing a module is not authorization to execute it. |
+| Support bundles and diagnostics | Pass in reviewed data boundary after corrections | `TestScopedConfigurationDiagnosticRedaction`, `TestScopedPatchAssessmentDiagnosticRedaction`, `TestScopedParameterReadbackRequiresRawGrant`, `TestSafeValidationPreservesFixedClassification`, `TestCollectorErrorsRedactPathsURLsAndSecrets`, and `TestFinalExtractedArchiveSecretScan`. Unknown findings are content-free; recognized classifications retain fixed guidance. Private finding dispositions are separate from publication. |
+| pprof | Pass in request-generation boundary after correction | Catalog requires both the profiler flag and `admin:manage`; `TestPprofPolicyUsesCapturedRequestGeneration` tests both policy transitions. Already-pinned requests keep their admitted generation. |
+| Admission and rate limiting | Reviewed; existing HR-07A contract retained | `TestAdminRouteCatalogueLimitClassificationMatrix`, `issue158_transition_test.go` and existing admission/lease tests cover declared classes and runtime transitions. No limit floor or admission class was weakened. |
+| Browser hardening | Pass with documented legacy-page limitation | Console CSP/frame policy tests, origin guard tests, `TestJSONResponsesAreNeverStored`, and typed-client transport guards. The legacy page's inline-script policy remains weaker than the SPA; structural guards do not prove safety of arbitrary dynamic code. |
+| Shared access-log sinks | Reviewed; #502 correction retained | `TestAccessFilePolicyChangeSharesOneWriter` and `TestAccessFilePolicyChangeRotationDuringDrain` exercise shared-owner rotation and generation drain. #502 is complete via #537; immutable v2.1.0 release behavior and earlier soak evidence are not relabeled. |
+
+These are risk-focused verdicts, not independent two-human certification or a
+claim that every possible error, platform or malicious-code path was tested.
 
 ## Console action and transport inventory
 
@@ -122,7 +149,7 @@ existing cacheable header. Streaming and non-JSON responses retain their own
 contracts and are not claimed covered by that writer test.
 
 Combined current public changed/added Go production coverage:
-**33/33 statements = 100%**, by the existing HR-07C scorer with no exclusions or
+**41/41 statements = 100%**, by the existing HR-07C scorer with no exclusions or
 move filtering. Full-tag owning admin tests pass; the touched Console client
 and plugin/editor files pass 59 tests, lint and typecheck. The private candidate
 frontend coverage gate passed 822 tests with unchanged thresholds before the
@@ -133,7 +160,7 @@ not a relabeled exact-head CI or a completed exhaustive review.
 
 ## Focused remediation verification
 
-The combined source passed `make ci-fast`, `make ci-pr`,
+The pre-residual combined source passed `make ci-fast`, `make ci-pr`,
 `make generated-check`, `make console-check`, `python3 scripts/docs-check.py`,
 `python3 scripts/test_docs_check.py` and `python3 scripts/test_semantic_drift.py`.
 `ci-pr` includes full-tag lint/tests/build, vet, configuration-example checks
@@ -141,19 +168,30 @@ and unchanged security-package floors. The final public Console source suite
 passed 824 tests across 75 files; docs passed 1,921 checks. Govulncheck reported
 no reachable vulnerability and one non-reachable required-module vulnerability.
 
-These are final-source local checks, not fabricated exact-head hosted results.
-Hosted CI, reviewer confirmation and merge evidence remain necessary. No race,
+The final residual source passed the two private sibling regressions, the
+public scoped assessment regression, fixed-classification/value-free tests,
+the invalid-client-address and lean build-capability policy tests, and both
+lean and full-tag owning admin packages.
+The complete PR coverage was remeasured as 41/41 statements using the existing
+HR-07C scorer. The other full local gates above are historical source-bound
+results, not reruns on this final correction. Normal hooks and fresh hosted CI
+provide the remaining gates; redundant local race/fuzz/security/Console runs
+are intentionally not claimed.
+
+Hosted CI, maintainer confirmation and merge evidence remain necessary. No race,
 conformance, advisory-publication, release or exhaustive-audit completion is
 inferred from a local baseline gate.
 
-## Remaining acceptance work
+## Closure conditions and retained limits
 
-- Review and merge the approved bounded remediation; retain the private
-  affected-version/disclosure decisions and do not imply a published advisory.
-- Complete the remaining admin/Console action, data-projection, error-path,
-  upload/content-identity, support/redaction and shared-sink review ledger.
-- Record final checklist verdicts with named tests and exact-head CI evidence.
-- Merge completion evidence before requesting issue closure.
+- Merge #550 only after the final head's hosted checks pass; record its exact
+  head and merge SHA on #514 and #62 before closing #514.
+- This record supplies all nine scoped checklist verdicts. #549 remains a
+  historical partial installment, not retrospective exhaustive certification.
+- Keep both private advisories unpublished and retain affected-version,
+  release and disclosure decisions in their restricted records.
+- Every-line review is not claimed. Known browser/legacy and structural-guard
+  limits remain explicit; no speculative implementation issue is activated.
 - Keep #517/#527 and all other unactivated candidates deferred. The later
   activated Wave 1/2 implementation issues have not been advanced by this
   continuation or private reporting step.

@@ -100,6 +100,48 @@ func TestScopedParameterReadbackRequiresRawGrant(t *testing.T) {
 	}
 }
 
+func TestScopedPatchAssessmentDiagnosticRedaction(t *testing.T) {
+	const canary = "sibling-diagnostic-canary-514-3f91"
+	const token = "sibling-preview-writer-token-fixture-514"
+	t.Setenv("JUL_SIBLING_REVIEW_CANARY_514", canary)
+	baseline := config.ProxyTarget("http://127.0.0.1:8082", "127.0.0.1:8081")
+	policy, err := rbac.Build(true, rbac.RoleAdmin, map[string][]string{"write-only": {"config:write"}}, []rbac.PrincipalDef{
+		{Name: "root", Role: rbac.RoleAdmin, Token: "unused-sibling-review-admin-token-514"},
+		{Name: "writer", Role: "write-only", Token: token},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, admin := realServer(t, config.AdminConfig{}, Deps{LoadConfig: func() (*config.Config, error) { return baseline, nil }})
+	admin.UpdatePolicy(policy)
+	const body = `{"ops":[{"op":"location_set_auth","listen":"127.0.0.1:8081","match_type":"prefix","path":"/","auth":{"method":"jwt","jwt_jwks_url":"${env:JUL_SIBLING_REVIEW_CANARY_514}","jwt_issuer":"https://issuer.example/","jwt_audience":"review"}}]}`
+	for _, path := range []string{"/api/config/patch/preview", "/api/v1/config/patch"} {
+		t.Run(path, func(t *testing.T) {
+			request, err := http.NewRequest(http.MethodPost, server.URL+path, strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer "+token)
+			request.Header.Set("Content-Type", "application/json")
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			content, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("assessment status = %d, want 200", response.StatusCode)
+			}
+			if strings.Contains(string(content), canary) {
+				t.Fatal("assessment diagnostic contains a resolved value")
+			}
+		})
+	}
+}
+
 // realServer starts the admin mux on a real loopback listener and returns its
 // base URL. It exercises the whole stack a remote client meets — connection,
 // transport gate, authentication, routing, encoding — rather than a handler
