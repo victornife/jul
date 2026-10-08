@@ -288,6 +288,12 @@ jobs:
     name: coverage gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # contents: read is the workflow default, repeated here because a job-level
+    # block replaces it; id-token: write lets the Qlty upload authenticate with
+    # OIDC instead of a stored token.
+    permissions:
+      contents: read
+      id-token: write
     env:
       # Statement-coverage floor for the full opt-in tag set. The current merged
       # total sits comfortably above this; the gate guards against large
@@ -301,6 +307,20 @@ jobs:
           cache: true
       - name: go test -coverprofile
         run: go test -tags "${{ env.FULL_TAGS }}" -coverprofile=cover.out ./...
+      # Publish before the floor gates so a failed gate still reports the real
+      # numbers to Qlty. This is 1 of the 2 parts Qlty merges for the commit;
+      # the `console` job publishes the frontend part. Pull requests from forks
+      # get no OIDC token, so the upload is skipped there (the field is unset on
+      # push, so pushes to main still publish).
+      - name: publish coverage to Qlty
+        if: github.event.pull_request.head.repo.fork != true
+        uses: qltysh/qlty-action/coverage@v2
+        with:
+          oidc: true
+          files: cover.out
+          # go test records paths prefixed with the module name (`jul/...`).
+          strip-prefix: jul
+          total-parts-count: 2
       - name: enforce coverage floor
         shell: bash
         run: |
@@ -696,6 +716,12 @@ jobs:
     name: console v2 (audit + coverage)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # contents: read is the workflow default, repeated here because a job-level
+    # block replaces it; id-token: write lets the Qlty upload authenticate with
+    # OIDC instead of a stored token.
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: internal/admin/ui
@@ -732,7 +758,9 @@ jobs:
           # for the floor check. vitest text coverage table (space-split fields):
           #   All files | <stmts> | <branch> | <funcs> | <lines> |
           #   $1=All  $2=files  $3=|  $4=<stmts%>
-          pnpm run test:coverage 2>&1 | tee coverage-output.txt
+          # The explicit reporters override vitest.config.ts: `text` keeps the
+          # table this gate parses, `lcov` writes coverage/lcov.info for Qlty.
+          pnpm run test:coverage -- --coverage.reporter=text --coverage.reporter=lcov 2>&1 | tee coverage-output.txt
           total=$(awk '/All files/ {print $4}' coverage-output.txt)
           echo "Console statement coverage: ${total}% (floor: ${COVERAGE_FLOOR}%)"
           if awk -v t="$total" -v f="$COVERAGE_FLOOR" 'BEGIN { exit (t >= f) ? 0 : 1 }'; then
@@ -741,6 +769,17 @@ jobs:
             echo "ERROR: coverage ${total}% is below the ${COVERAGE_FLOOR}% floor."
             exit 1
           fi
+      # Part 2 of 2 (the Go `coverage` job publishes part 1). `uses:` steps
+      # ignore defaults.run.working-directory, so the path is repo-relative,
+      # while vitest records paths relative to its own root — hence add-prefix.
+      - name: publish coverage to Qlty
+        if: github.event.pull_request.head.repo.fork != true
+        uses: qltysh/qlty-action/coverage@v2
+        with:
+          oidc: true
+          files: internal/admin/ui/coverage/lcov.info
+          add-prefix: internal/admin/ui
+          total-parts-count: 2
       - name: upload coverage output
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
