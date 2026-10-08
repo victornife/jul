@@ -45,6 +45,32 @@ func TestWatchFileNotifiesOnChange(t *testing.T) {
 	}
 }
 
+func TestWatchFileCancellationClosesNotifications(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("a"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	notifications, err := WatchFile(ctx, path, time.Millisecond, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	timeout := time.NewTimer(time.Second)
+	defer timeout.Stop()
+	for {
+		select {
+		case _, open := <-notifications:
+			if !open {
+				return
+			}
+		case <-timeout.C:
+			t.Fatal("watcher notifications did not close after cancellation")
+		}
+	}
+}
+
 func TestWatchFileDebounces(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.toml")

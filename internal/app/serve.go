@@ -335,6 +335,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	tomlSrc, hasConfigPath := src.(*config.TOMLSource)
 	if hasConfigPath {
 		fileWatch = watchConfig(ctx, tomlSrc.Path, log)
+		defer stopConfigWatcher(cancel, fileWatch)
 	}
 
 	// Authority is resolved once, here, before any writer is wired (ADR 0019
@@ -1292,7 +1293,11 @@ func watchConfig(ctx context.Context, path string, log *slog.Logger) <-chan [32]
 
 	out := make(chan [32]byte, 1)
 	go func() {
-		defer close(out)
+		defer func() {
+			for range ch {
+			}
+			close(out)
+		}()
 		for {
 			select {
 			case <-ctx.Done():
@@ -1315,6 +1320,14 @@ func watchConfig(ctx context.Context, path string, log *slog.Logger) <-chan [32]
 		}
 	}()
 	return out
+}
+
+func stopConfigWatcher(cancel context.CancelFunc, notifications <-chan [32]byte) {
+	cancel()
+	if notifications != nil {
+		for range notifications {
+		}
+	}
 }
 
 // A burst of file events may fill the one-element notification channel. Keep

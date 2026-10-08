@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
+	"time"
 )
 
 func TestManagedConfigReadUsesStartupSizeBound(t *testing.T) {
@@ -78,5 +80,70 @@ func TestConfigDigestSendStopsWhenCancellationRacesInitialCheck(t *testing.T) {
 	out := make(chan [32]byte) // no receiver: only cancellation can release the send
 	if sendLatestConfigDigest(cancelAfterErrCheck{Context: ctx, cancel: cancel}, out, [32]byte{1}) {
 		t.Fatal("digest was published after watcher cancellation")
+	}
+}
+
+func TestStopConfigWatcherWaitsForShutdown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		notifications := make(chan [32]byte, 1)
+		notifications <- [32]byte{1}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			stopConfigWatcher(cancel, notifications)
+		}()
+		synctest.Wait()
+		if ctx.Err() != context.Canceled {
+			t.Fatal("watcher context was not canceled")
+		}
+		select {
+		case <-done:
+			t.Fatal("watcher stop returned before shutdown completed")
+		default:
+		}
+		close(notifications)
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			t.Fatal("watcher stop did not return after shutdown completed")
+		}
+	})
+}
+
+func TestStopConfigWatcherWithoutWatcher(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopConfigWatcher(cancel, nil)
+	if ctx.Err() != context.Canceled {
+		t.Fatal("watcher context was not canceled")
+	}
+}
+
+func TestWatchConfigCancellationClosesDigests(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.toml")
+	if err := os.WriteFile(path, []byte("a"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	digests := watchConfig(ctx, path, nil)
+	if digests == nil {
+		t.Fatal("config watcher did not start")
+	}
+	cancel()
+	timeout := time.NewTimer(time.Second)
+	defer timeout.Stop()
+	for {
+		select {
+		case _, open := <-digests:
+			if !open {
+				return
+			}
+		case <-timeout.C:
+			t.Fatal("config watcher digests did not close after cancellation")
+		}
 	}
 }
