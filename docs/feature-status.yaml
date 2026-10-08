@@ -403,7 +403,7 @@ features:
     8: null
     9: true
   notes: 'Additive #518 capability; does not inherit Core HTTP GA or old soak evidence. Criterion 8 uses existing duration parsing. Runnable example: testdata/send-timeout.toml; Console Status reports configured defaults and overrides without values. Release, benchmark and soak certification remain separate.'
-  delivery: implemented
+  delivery: merged
 - id: reload-tx
   name: Configuration reload transaction
   tags:

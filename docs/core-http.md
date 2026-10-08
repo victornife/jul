@@ -692,7 +692,7 @@ explicitly:
 
 ### Downstream write inactivity
 
-The additive capability is Beta / implemented; it does not inherit Core HTTP's
+The additive capability is Beta / merged; it does not inherit Core HTTP's
 existing GA/soak evidence. [Runnable configuration](../testdata/send-timeout.toml)
 shows a server default, location override and explicit disable. The Console
 Status overview reports whether defaults or overrides are configured.
