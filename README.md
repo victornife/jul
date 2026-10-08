@@ -11,7 +11,7 @@
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/victornife/jul#license)
 [![Codecov](https://codecov.io/gh/victornife/jul/graph/badge.svg?branch=main)](https://codecov.io/gh/victornife/jul)
 [![Snyk security](https://snyk.io/test/github/victornife/jul/badge.svg)](https://snyk.io/test/github/victornife/jul)
-[![Qlty maintainability: setup required](https://img.shields.io/badge/Qlty-setup%20required-lightgrey)](CONTRIBUTING.md#repository-health-badges)
+[![Maintainability](https://qlty.sh/gh/victornife/projects/jul/maintainability.svg)](https://qlty.sh/gh/victornife/projects/jul)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/victornife/jul)
 
 **Jul.IA** is a self-contained edge and protocol gateway written in Go and

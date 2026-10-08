@@ -117,7 +117,7 @@ The README uses maintained services for the badge categories in the
 | Snyk | Public repository security badge; a `monitored` label is not a zero-vulnerability claim. |
 | Codecov | Existing coverage badge, unchanged. |
 | LGTM | CodeQL workflow status. LGTM shut down in December 2022. |
-| Code Climate | Qlty maintainability, pending the setup below. |
+| Code Climate | Qlty maintainability rating. |
 | Thundra Foresight | Existing Tests & CI workflow status, not Foresight-specific metrics. |
 
 The CodeQL badge tracks the existing GitHub-managed default setup workflow.
@@ -127,19 +127,11 @@ new repository secrets, or an advanced-setup requirement. The badge reports
 workflow completion, not an alert count or proof that the repository has no
 vulnerabilities. It is not evidence of explicit lean/full build-tag coverage.
 
-Qlty requires maintainer onboarding; its project badge returned HTTP 404 when
-this integration was prepared, so the README explicitly shows `setup required`.
-To activate the measured maintainability badge:
-
-1. [Sign in to Qlty and install its GitHub app](https://docs.qlty.sh/cloud/quickstart)
-   with access to `victornife/jul` only.
-2. Add `jul` as a project and let its initial default-branch analysis complete.
-3. In the project's **Settings > Badges**, verify the public SVG returns a
-   rating, then replace the README's setup badge with:
-
-   ```markdown
-   [![Maintainability](https://qlty.sh/gh/victornife/projects/jul/maintainability.svg)](https://qlty.sh/gh/victornife/projects/jul)
-   ```
+Qlty's GitHub app is connected to `victornife/jul`; the README displays its
+measured [maintainability rating](https://qlty.sh/gh/victornife/projects/jul).
+Badge snippets are available in the project's **Settings > Badges**. To
+configure Qlty for another repository, follow the
+[setup guide](https://docs.qlty.sh/cloud/quickstart).
 
 No Qlty coverage uploader is needed; Codecov remains the coverage provider.
 See [Qlty's badge documentation](https://docs.qlty.sh/coverage/status-badges).
