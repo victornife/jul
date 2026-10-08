@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -27,34 +28,37 @@ func (writer *deadlineRecorder) SetWriteDeadline(deadline time.Time) error {
 }
 
 func TestSendTimeoutRefreshesWritesAndFlushes(t *testing.T) {
-	under := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
-	nested := Wrap(under, under)
-	writer := WithSendTimeout(nested, time.Second, time.Time{})
-	before := time.Now()
-	if _, err := writer.Write([]byte("first")); err != nil {
-		t.Fatal(err)
-	}
-	writer.(http.Flusher).Flush()
-	if _, err := io.Copy(writer, strings.NewReader("second")); err != nil {
-		t.Fatal(err)
-	}
-	if len(under.deadlines) != 6 || under.Body.String() != "firstsecond" || !under.Flushed {
-		t.Fatalf("deadlines=%v body=%q flushed=%v", under.deadlines, under.Body.String(), under.Flushed)
-	}
-	for index, deadline := range under.deadlines {
-		if index%2 == 1 {
-			if !deadline.IsZero() {
-				t.Fatal("completed output left its inactivity deadline armed")
+	synctest.Test(t, func(t *testing.T) {
+		under := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+		nested := Wrap(under, under)
+		writer := WithSendTimeout(nested, time.Second, time.Time{})
+		before := time.Now()
+		if _, err := writer.Write([]byte("first")); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(250 * time.Millisecond)
+		writer.(http.Flusher).Flush()
+		time.Sleep(250 * time.Millisecond)
+		if _, err := io.Copy(writer, strings.NewReader("second")); err != nil {
+			t.Fatal(err)
+		}
+		want := []time.Time{
+			before.Add(time.Second), {},
+			before.Add(1250 * time.Millisecond), {},
+			before.Add(1500 * time.Millisecond), {},
+		}
+		if len(under.deadlines) != len(want) || under.Body.String() != "firstsecond" || !under.Flushed {
+			t.Fatalf("deadlines=%v body=%q flushed=%v", under.deadlines, under.Body.String(), under.Flushed)
+		}
+		for index, deadline := range under.deadlines {
+			if !deadline.Equal(want[index]) {
+				t.Fatalf("deadline[%d]=%v, want %v", index, deadline, want[index])
 			}
-			continue
 		}
-		if deadline.Before(before.Add(time.Second)) || deadline.After(time.Now().Add(time.Second)) {
-			t.Fatalf("deadline outside refreshed interval: %v", deadline)
+		if !under.deadlines[4].After(under.deadlines[0]) {
+			t.Fatal("later writes did not refresh the deadline")
 		}
-	}
-	if !under.deadlines[4].After(under.deadlines[0]) {
-		t.Fatal("later writes did not refresh the deadline")
-	}
+	})
 }
 
 func TestSendTimeoutPreservesAbsoluteDeadline(t *testing.T) {
