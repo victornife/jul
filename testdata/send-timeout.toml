@@ -1,0 +1,17 @@
+[[servers]]
+listen = "127.0.0.1:8080"
+send_timeout = "60s"
+
+[[servers.locations]]
+match = { type = "prefix", path = "/stream" }
+proxy_pass = "http://127.0.0.1:8081"
+send_timeout = "30s"
+
+[[servers.locations]]
+match = { type = "prefix", path = "/unbounded" }
+proxy_pass = "http://127.0.0.1:8081"
+send_timeout = "0s"
+
+[[servers.locations]]
+match = { type = "prefix", path = "/" }
+return = 200

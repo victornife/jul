@@ -881,6 +881,7 @@ http {
       proxy_connect_timeout 2s;
       proxy_read_timeout 5s;
       proxy_send_timeout 7s;
+	send_timeout 9s;
     }
   }
 }`)
@@ -894,6 +895,17 @@ http {
 	if l.ProxySendTimeout.Std() != 7*time.Second {
 		t.Errorf("ProxySendTimeout: got %s want 7s", l.ProxySendTimeout.Std())
 	}
+	if l.SendTimeout == nil || l.SendTimeout.Std() != 9*time.Second {
+		t.Fatalf("SendTimeout: got %v want 9s", l.SendTimeout)
+	}
+}
+
+func TestTranslateServerSendTimeoutAndExplicitDisable(t *testing.T) {
+	cfg, report := translate(t, `http { server { listen 80; send_timeout 30s; location / { proxy_pass http://backend; send_timeout 0; } } }`)
+	server := onlyServer(t, cfg)
+	if server.SendTimeout.Std() != 30*time.Second || server.Locations[0].SendTimeout == nil || *server.Locations[0].SendTimeout != 0 || len(report.Skipped) != 0 {
+		t.Fatalf("timeout inheritance or explicit disable lost: server=%v location=%v skipped=%v", server.SendTimeout, server.Locations[0].SendTimeout, report.Skipped)
+	}
 }
 
 func TestTranslateLocationProxyTimeoutsMalformedAreSkipped(t *testing.T) {
@@ -904,6 +916,7 @@ func TestTranslateLocationProxyTimeoutsMalformedAreSkipped(t *testing.T) {
 		{"proxy_connect_timeout", "proxy_connect_timeout is not a representable duration"},
 		{"proxy_read_timeout", "proxy_read_timeout is not a representable duration"},
 		{"proxy_send_timeout", "proxy_send_timeout is not a representable duration"},
+		{"send_timeout", "send_timeout is not a representable non-negative duration"},
 	} {
 		t.Run(tt.directive, func(t *testing.T) {
 			_, rep := translate(t, `

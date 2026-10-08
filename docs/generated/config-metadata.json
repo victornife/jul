@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 367,
-    "schema_leaves": 312,
+    "schema_paths": 369,
+    "schema_leaves": 314,
     "resources": 9
   },
   "capability_build_tags": {
@@ -2989,6 +2989,22 @@
       "description": "RouteID is an optional, durable identifier for this location (ADR 0019 §4)",
       "anchor": "servers-x-locations-x-route_id"
     },
+    "servers.*.locations.*.send_timeout": {
+      "kind": "scalar",
+      "scalar": "duration",
+      "go_type": "*Duration",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "listener_timeouts",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "duration",
+      "constraint": "non-negative when present",
+      "zero_semantics": "omitted inherits the server value; explicit zero disables downstream write inactivity deadlines",
+      "active_when": "always",
+      "description": "SendTimeout overrides the server downstream write-inactivity timeout; omitted inherits and zero disables",
+      "anchor": "servers-x-locations-x-send_timeout"
+    },
     "servers.*.locations.*.try_files": {
       "kind": "list",
       "scalar": "string",
@@ -3284,6 +3300,22 @@
       ],
       "description": "RedirectHTTPS, when set on an HTTP server block, issues a redirect to the equivalent HTTPS URL",
       "anchor": "servers-x-redirect_https"
+    },
+    "servers.*.send_timeout": {
+      "kind": "scalar",
+      "scalar": "duration",
+      "go_type": "Duration",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "listener_timeouts",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero disables downstream write inactivity deadlines",
+      "active_when": "always",
+      "description": "SendTimeout bounds stalled downstream writes; zero disables the inactivity deadline",
+      "anchor": "servers-x-send_timeout"
     },
     "servers.*.server_names": {
       "kind": "list",

@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"time"
 
 	"jul/internal/config"
 	"jul/internal/middleware"
+	"jul/internal/respwriter"
 )
 
 // Builder constructs the http.Handler for a location's action. The router seeds
@@ -31,9 +33,11 @@ type locationRoute struct {
 	re        *regexp.Regexp
 	// predicates is the location's compiled method/header/query predicate set,
 	// or nil when it constrains nothing beyond its path (ADR 0018 §2-§5).
-	predicates *compiledPredicates
-	rewrites   []compiledRewrite
-	handler    http.Handler
+	predicates          *compiledPredicates
+	rewrites            []compiledRewrite
+	handler             http.Handler
+	sendTimeout         time.Duration
+	overrideSendTimeout bool
 	// index is the location's position in its server block's declaration order,
 	// which is the only tie-breaker in selection and the coordinate the typed
 	// patch API and the route-test surface address a location by.
@@ -51,6 +55,8 @@ type serverRoute struct {
 	regexLocations  []*locationRoute
 	rootLocations   []*locationRoute
 	redirectHTTPS   int // status code (301/308) to redirect HTTP->HTTPS, or 0
+	sendTimeout     time.Duration
+	writeTimeout    time.Duration
 	// index is the server block's position in config.Config.Servers, so a
 	// selection can be reported back in the operator's own coordinates.
 	index int
@@ -124,6 +130,9 @@ func New(cfg *config.Config, builders map[string]Builder, fallback Builder, locM
 			ar = &addrRouter{}
 			r.byAddr[srv.Listen] = ar
 		}
+		if ar.def != nil {
+			sr.writeTimeout = ar.def.writeTimeout
+		}
 		ar.servers = append(ar.servers, sr)
 		if ar.def == nil {
 			ar.def = sr
@@ -133,11 +142,15 @@ func New(cfg *config.Config, builders map[string]Builder, fallback Builder, locM
 }
 
 func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback Builder, locModifier LocationModifier, log *slog.Logger) (*serverRoute, error) {
-	sr := &serverRoute{names: srv.ServerNames, redirectHTTPS: srv.RedirectHTTPS}
+	sr := &serverRoute{names: srv.ServerNames, redirectHTTPS: srv.RedirectHTTPS, sendTimeout: srv.SendTimeout.Std(), writeTimeout: srv.WriteTimeout.Std()}
 
 	bodyLimit := srv.ClientMaxBodySize.Bytes()
 	for i, loc := range srv.Locations {
 		lr := &locationRoute{matchType: loc.Match.Type, path: loc.Match.Path, index: i}
+		if loc.SendTimeout != nil {
+			lr.sendTimeout = loc.SendTimeout.Std()
+			lr.overrideSendTimeout = true
+		}
 
 		if loc.Match.Type == "regex" {
 			re, err := regexp.Compile(loc.Match.Path)
@@ -261,15 +274,35 @@ func (r *Router) For(addr string) http.Handler {
 			http.NotFound(w, req)
 			return
 		}
+		var absoluteDeadline time.Time
+		if srv.writeTimeout > 0 {
+			absoluteDeadline = time.Now().Add(srv.writeTimeout)
+		}
 		if srv.redirectHTTPS != 0 && req.TLS == nil {
+			w = respwriter.WithRequestSendTimeout(w, req, srv.sendTimeout, absoluteDeadline)
+			if srv.sendTimeout > 0 {
+				defer respwriter.FinishRequestSendTimeout(w, req, srv.sendTimeout, absoluteDeadline)
+			}
 			redirectToHTTPS(w, req, srv.redirectHTTPS)
 			return
 		}
 		canonicalizeRequest(req)
 		loc := srv.selectLocation(req)
 		if loc == nil {
+			w = respwriter.WithRequestSendTimeout(w, req, srv.sendTimeout, absoluteDeadline)
+			if srv.sendTimeout > 0 {
+				defer respwriter.FinishRequestSendTimeout(w, req, srv.sendTimeout, absoluteDeadline)
+			}
 			http.NotFound(w, req)
 			return
+		}
+		sendTimeout := srv.sendTimeout
+		if loc.overrideSendTimeout {
+			sendTimeout = loc.sendTimeout
+		}
+		w = respwriter.WithRequestSendTimeout(w, req, sendTimeout, absoluteDeadline)
+		if sendTimeout > 0 {
+			defer respwriter.FinishRequestSendTimeout(w, req, sendTimeout, absoluteDeadline)
 		}
 		if applyRewrites(loc.rewrites, w, req) {
 			return

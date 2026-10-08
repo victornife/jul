@@ -1505,6 +1505,12 @@
                   "type": "string",
                   "x-jul-constraint": "1 to 64 bytes; lowercase ASCII [a-z0-9_-]; first byte alphanumeric; present-and-empty invalid; globally unique across the configuration"
                 },
+                "send_timeout": {
+                  "description": "SendTimeout overrides the server downstream write-inactivity timeout; omitted inherits and zero disables",
+                  "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+                  "type": "string",
+                  "x-jul-constraint": "non-negative when present"
+                },
                 "try_files": {
                   "description": "TryFiles lists candidate paths tried in order before falling back to the location's action",
                   "items": {
@@ -1652,6 +1658,12 @@
             ],
             "type": "integer",
             "x-jul-constraint": "0, 301, or 308"
+          },
+          "send_timeout": {
+            "description": "SendTimeout bounds stalled downstream writes; zero disables the inactivity deadline",
+            "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+            "type": "string",
+            "x-jul-constraint": "non-negative"
           },
           "server_names": {
             "description": "ServerNames lists the virtual-host names this server block matches, used for routing and TLS certificate selection",

@@ -22,7 +22,34 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/respwriter"
 )
+
+type sendTimeoutCapture struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (writer *sendTimeoutCapture) SetWriteDeadline(deadline time.Time) error {
+	writer.deadlines = append(writer.deadlines, deadline)
+	return nil
+}
+
+func TestSendTimeoutThroughPluginResponseLayer(t *testing.T) {
+	under := &sendTimeoutCapture{ResponseRecorder: httptest.NewRecorder()}
+	parent := respwriter.WithSendTimeout(under, time.Second, time.Time{})
+	layer := &responseLayer{parent: parent, state: layerPassthrough}
+	writer := respwriter.Wrap(layer, parent)
+	if _, err := io.WriteString(writer, "plugin response"); err != nil {
+		t.Fatal(err)
+	}
+	if err := http.NewResponseController(writer).Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if len(under.deadlines) != 4 || !under.Flushed || !under.deadlines[3].IsZero() {
+		t.Fatalf("plugin writer lost deadline delegation: deadlines=%v flushed=%v", under.deadlines, under.Flushed)
+	}
+}
 
 // respHooks records the response-phase metric hooks.
 type respHooks struct {

@@ -167,6 +167,7 @@ the Jul request path.
 | `rewrite` | ✅ | Pattern, replacement, and recognized flags are preserved. |
 | `limit_except` | ⚠️ | Only the narrow denial form maps to `match.methods`; excluded requests may become a 404 rather than NGINX's 403. |
 | `proxy_connect_timeout`, `proxy_read_timeout`, `proxy_send_timeout` | ✅ | Direct duration mappings, verified end to end (`timeout-runtime`): a stalling backend is actually cut off at the configured bound and Jul returns 504. |
+| Explicit server/location `send_timeout` | ⚠️ | HTTP/1.1 maps to connection byte-progress inactivity; HTTP/2 TLS/h2c and HTTP/3 retain per-stream operation bounds and may cut one large progressing write. This protocol approximation is explicit in assessment/corpus. Location zero disables inheritance; omitted NGINX defaults and HTTP-level inheritance are not synthesized. |
 | `proxy_next_upstream_tries` | ✅ (bound \u2265 2) / \u274c (0 or 1) | An explicit bound of 2 or more maps to `resilience.retry_attempts = tries - 1`. nginx's `0` (unlimited) and `1` (no retry) cannot be distinguished from Jul's `retry_attempts = 0`, which means "inherit the pool default", so both stay blocking rather than silently becoming an inherited value the source never asked for. |
 | `add_header` | ⚠️ | Static `NAME VALUE always;` maps to response-header/CORS policy. Missing `always` or variable values are blocking. |
 | `if` | ❌ | Never guessed or silently converted. |

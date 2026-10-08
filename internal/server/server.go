@@ -23,6 +23,7 @@ import (
 	"jul/internal/lifecycle"
 	"jul/internal/logthrottle"
 	"jul/internal/redact"
+	"jul/internal/respwriter"
 	"jul/internal/upstream"
 )
 
@@ -762,6 +763,7 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		ln = &proxyProtoListener{Listener: ln, trusted: policy, log: s.log}
 	}
 
+	ln = respwriter.WithSendTimeoutListener(ln)
 	entry := &listenerEntry{addr: addr, connLimiter: connLimiter}
 
 	bindings, minVer, tlsOK := tlsBindingsForAddr(cfg.Servers, addr)
@@ -841,6 +843,7 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		IdleTimeout:       cv.idleTimeout(addr),
 		MaxHeaderBytes:    cv.maxHeaderBytes(addr),
 		ErrorLog:          logthrottle.ServerErrorLog(),
+		ConnContext:       respwriter.SendTimeoutContext,
 	}
 	// On a plaintext listener, optionally accept cleartext HTTP/2 (h2c) so
 	// native gRPC clients can connect without TLS. TLS listeners already
@@ -848,8 +851,11 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 	if !tlsOK && cv.h2cEnabledForAddr(addr) {
 		enableH2C(httpd)
 	}
-	if s.ConnStateHook != nil {
-		httpd.ConnState = s.ConnStateHook
+	httpd.ConnState = func(connection net.Conn, state http.ConnState) {
+		respwriter.SendTimeoutConnState(connection, state)
+		if s.ConnStateHook != nil {
+			s.ConnStateHook(connection, state)
+		}
 	}
 	entry.httpd = httpd
 	entry.ln = ln

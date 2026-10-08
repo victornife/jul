@@ -267,6 +267,7 @@ write_timeout = "60s"
 | `max_header_bytes` | size | Maximum request header size (default 1 MiB) |
 | `read_header_timeout` | duration | Time allowed to read request headers |
 | `read_timeout` / `write_timeout` | duration | Hard request/response caps (off by default so SSE/WebSocket/large transfers are not severed) |
+| `send_timeout` | duration | HTTP/1.1 connection-write inactivity bound; HTTP/2/3 per-stream operation bound. `0` (default) disables it. Hot-reloadable per virtual host, with an optional location override |
 | `idle_timeout` | duration | Keep-alive idle timeout |
 | `access_log` / `error_log` | string | Deprecated compatibility fields; accepted and linted but ignored. Use the global `[observability.access_log]` block and the process logger instead. |
 | `error_pages` | table | Map of status code → file path or redirect URL |
@@ -275,6 +276,12 @@ write_timeout = "60s"
 | `client_address` | table | Trusted-proxy policy for deriving the canonical client address (see [Client address and trusted proxies](#client-address-and-trusted-proxies)) |
 
 ### Fields resolved once per listen address
+
+`send_timeout` is not a socket setting: the matched virtual host selects its
+value, and a location may override it. Omitted location values inherit;
+explicit `send_timeout = "0s"` disables the inactivity bound. Negative values
+are rejected. See [downstream write inactivity](core-http.md#downstream-write-inactivity)
+for protocol behavior and the separate absolute `write_timeout` cap.
 
 Several `[[servers]]` fields describe the **socket**, not the virtual host, so
 when two blocks share a `listen` value the listener resolves them once:

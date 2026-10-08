@@ -15,7 +15,38 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/respwriter"
 )
+
+type sendTimeoutCapture struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (writer *sendTimeoutCapture) SetWriteDeadline(deadline time.Time) error {
+	writer.deadlines = append(writer.deadlines, deadline)
+	return nil
+}
+
+func TestSendTimeoutThroughCacheMissAndHit(t *testing.T) {
+	cache := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
+	var calls int
+	handler := cache.Handler(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		calls++
+		writer.Header().Set("Cache-Control", "max-age=60")
+		_, _ = io.WriteString(writer, "cached body")
+	}))
+	for attempt := 0; attempt < 2; attempt++ {
+		writer := &sendTimeoutCapture{ResponseRecorder: httptest.NewRecorder()}
+		handler.ServeHTTP(respwriter.WithSendTimeout(writer, time.Second, time.Time{}), httptest.NewRequest(http.MethodGet, "http://example.test/cache", nil))
+		if writer.Body.String() != "cached body" || len(writer.deadlines) < 2 || !writer.deadlines[len(writer.deadlines)-1].IsZero() {
+			t.Fatalf("attempt %d lost body or deadlines: body=%q deadlines=%v", attempt, writer.Body.String(), writer.deadlines)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("origin calls=%d, want one miss followed by a hit", calls)
+	}
+}
 
 // hijackableWriter is an HTTP/1.1-shaped writer: it can flush and it can hand
 // over the connection.

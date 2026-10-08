@@ -86,6 +86,8 @@ func TestValidateRejectsInvalidHTTPAndBackendScalars(t *testing.T) {
 		{"read header", func(c *Config) { c.Servers[0].ReadHeaderTimeout = -1 }, `servers[0].read_header_timeout`},
 		{"read", func(c *Config) { c.Servers[0].ReadTimeout = -1 }, `servers[0].read_timeout`},
 		{"write", func(c *Config) { c.Servers[0].WriteTimeout = -1 }, `servers[0].write_timeout`},
+		{"send", func(c *Config) { c.Servers[0].SendTimeout = -1 }, `servers[0].send_timeout`},
+		{"location send", func(c *Config) { value := Duration(-1); c.Servers[0].Locations[0].SendTimeout = &value }, `servers[0].locations[0].send_timeout`},
 		{"idle", func(c *Config) { c.Servers[0].IdleTimeout = -1 }, `servers[0].idle_timeout`},
 		{"redirect status", func(c *Config) { c.Servers[0].RedirectHTTPS = 302 }, `servers[0].redirect_https`},
 		{"proxy connect", func(c *Config) { c.Servers[0].Locations[0].ProxyConnectTimeout = -1 }, `proxy_connect_timeout`},

@@ -256,12 +256,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 367,
-    "schema_leaves": 312,
-    "registry_entries": 312,
+    "schema_paths": 369,
+    "schema_leaves": 314,
+    "registry_entries": 314,
     "startup_consumed": 28,
     "by_class": {
-      "hot_reload": 270,
+      "hot_reload": 272,
       "ignored_deprecated": 4,
       "new_listener_only": 7,
       "restart_required": 28,
@@ -2767,6 +2767,19 @@
       "secret_digested": false
     },
     {
+      "path": "servers.*.locations.*.send_timeout",
+      "class": "hot_reload",
+      "subsystem": "listener_timeouts",
+      "reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
       "path": "servers.*.locations.*.try_files",
       "class": "hot_reload",
       "subsystem": "try_files",
@@ -2991,6 +3004,19 @@
       "path": "servers.*.redirect_https",
       "class": "hot_reload",
       "subsystem": "server_redirect",
+      "reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "servers.*.send_timeout",
+      "class": "hot_reload",
+      "subsystem": "listener_timeouts",
       "reason": "the handler tree is rebuilt from the effective config on each successful reload",
       "startup_consumed": false,
       "address_keyed": false,

@@ -5,6 +5,7 @@ package respwriter
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -12,7 +13,297 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 )
+
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+	err       error
+}
+
+func (writer *deadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	writer.deadlines = append(writer.deadlines, deadline)
+	return writer.err
+}
+
+func TestSendTimeoutConnectionKeepsAbsoluteCap(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	connection := WithSendTimeoutConnection(server).(*sendTimeoutConnection)
+	connection.timeout = 100 * time.Millisecond
+	absolute := time.Now().Add(150 * time.Millisecond)
+	if err := connection.SetWriteDeadline(absolute); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+		buffer := make([]byte, 128)
+		for range ticker.C {
+			if _, err := client.Read(buffer); err != nil {
+				return
+			}
+		}
+	}()
+	count, err := connection.Write(make([]byte, 32*1024))
+	var networkError net.Error
+	if !errors.As(err, &networkError) || !networkError.Timeout() || count == 0 || count == 32*1024 {
+		t.Fatalf("absolute cap lost during progress: count=%d err=%v", count, err)
+	}
+	if time.Since(absolute) > time.Second {
+		t.Fatal("absolute cap was extended")
+	}
+}
+
+func TestSendTimeoutConnectionStateAndExplicitDisable(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	connection := WithSendTimeoutConnection(server).(*sendTimeoutConnection)
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	request = request.WithContext(SendTimeoutContext(context.Background(), connection))
+	writer := httptest.NewRecorder()
+	if got := WithRequestSendTimeout(writer, request, time.Second, time.Time{}); got != writer || connection.timeout != time.Second {
+		t.Fatal("HTTP1 policy not installed on connection")
+	}
+	WithRequestSendTimeout(writer, request, 0, time.Time{})
+	if connection.timeout != 0 {
+		t.Fatal("explicit disable retained previous request policy")
+	}
+	for _, state := range []http.ConnState{http.StateIdle, http.StateHijacked, http.StateClosed} {
+		connection.timeout = time.Second
+		SendTimeoutConnState(connection, state)
+		if connection.timeout != 0 {
+			t.Fatalf("state %v retained timeout", state)
+		}
+	}
+	connection.timeout = time.Second
+	SendTimeoutConnState(connection, http.StateActive)
+	if connection.timeout != time.Second {
+		t.Fatal("active request lost its policy")
+	}
+}
+
+type timeoutTransportProbe struct {
+	net.Conn
+	count         int
+	err           error
+	deadlineError error
+}
+
+func (connection *timeoutTransportProbe) Write(body []byte) (int, error) {
+	if connection.count < 0 {
+		return len(body), connection.err
+	}
+	return connection.count, connection.err
+}
+
+func (connection *timeoutTransportProbe) SetWriteDeadline(time.Time) error {
+	return connection.deadlineError
+}
+func (connection *timeoutTransportProbe) NetConn() net.Conn { return connection.Conn }
+
+func TestSendTimeoutConnectionTransportBoundaries(t *testing.T) {
+	failure := errors.New("transport failed")
+	for _, test := range []struct {
+		name    string
+		probe   *timeoutTransportProbe
+		timeout time.Duration
+		want    error
+	}{
+		{"disabled", &timeoutTransportProbe{count: -1}, 0, nil},
+		{"success", &timeoutTransportProbe{count: -1}, time.Second, nil},
+		{"tiny interval", &timeoutTransportProbe{count: -1}, time.Nanosecond, nil},
+		{"setter failure", &timeoutTransportProbe{count: -1, deadlineError: failure}, time.Second, failure},
+		{"write failure", &timeoutTransportProbe{err: failure}, time.Second, failure},
+		{"zero progress", &timeoutTransportProbe{}, time.Second, io.ErrNoProgress},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			connection := WithSendTimeoutConnection(test.probe).(*sendTimeoutConnection)
+			connection.timeout = test.timeout
+			count, err := connection.Write([]byte("body"))
+			if !errors.Is(err, test.want) {
+				t.Fatalf("write=%d,%v want %v", count, err, test.want)
+			}
+			if test.want == nil && count != len("body") {
+				t.Fatalf("count=%d", count)
+			}
+		})
+	}
+	tracked := WithSendTimeoutConnection(&timeoutTransportProbe{count: -1})
+	ctx := SendTimeoutContext(context.Background(), &timeoutTransportProbe{Conn: tracked})
+	if ctx.Value(sendTimeoutContextKey{}) != tracked {
+		t.Fatal("connection traversal lost policy owner")
+	}
+	if SendTimeoutContext(context.Background(), &timeoutTransportProbe{Conn: &deadlineOnlyConnection{}}).Value(sendTimeoutContextKey{}) != nil {
+		t.Fatal("unknown connection acquired policy")
+	}
+}
+
+type deadlineOnlyConnection struct{ net.Conn }
+
+type timeoutProbeListener struct {
+	net.Listener
+	connection net.Conn
+	err        error
+}
+
+func (listener timeoutProbeListener) Accept() (net.Conn, error) {
+	return listener.connection, listener.err
+}
+
+func TestSendTimeoutListenerAccept(t *testing.T) {
+	probe := &timeoutTransportProbe{count: -1}
+	connection, err := WithSendTimeoutListener(timeoutProbeListener{connection: probe}).Accept()
+	if err != nil || connection.(*sendTimeoutConnection).Conn != probe {
+		t.Fatalf("accept=%v,%v", connection, err)
+	}
+	failure := errors.New("accept failed")
+	if _, err := WithSendTimeoutListener(timeoutProbeListener{err: failure}).Accept(); !errors.Is(err, failure) {
+		t.Fatal(err)
+	}
+}
+
+func TestSendTimeoutHeadersAndFinalization(t *testing.T) {
+	for _, failure := range []error{nil, errors.New("deadline failed")} {
+		under := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder(), err: failure}
+		writer := WithSendTimeout(under, time.Second, time.Time{})
+		writer.WriteHeader(http.StatusEarlyHints)
+		if failure == nil && len(under.deadlines) != 2 {
+			t.Fatalf("header deadlines=%v", under.deadlines)
+		}
+		if failure != nil && len(under.deadlines) != 1 {
+			t.Fatalf("failed header reached output: %v", under.deadlines)
+		}
+		absolute := time.Now().Add(time.Second)
+		FinishRequestSendTimeout(writer, httptest.NewRequest(http.MethodGet, "http://example.test/", nil), time.Hour, absolute)
+		if failure == nil && !under.deadlines[len(under.deadlines)-1].Equal(absolute) {
+			t.Fatal("final absolute deadline lost")
+		}
+	}
+	under := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	FinishSendTimeout(WithSendTimeout(under, time.Second, time.Time{}), time.Second, time.Time{})
+	tracked := WithSendTimeoutConnection(&timeoutTransportProbe{count: -1})
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/", nil).WithContext(SendTimeoutContext(context.Background(), tracked))
+	FinishRequestSendTimeout(httptest.NewRecorder(), request, time.Second, time.Time{})
+	request.ProtoMajor = 2
+	WithRequestSendTimeout(httptest.NewRecorder(), request, time.Second, time.Time{})
+}
+
+func TestSendTimeoutRefreshesWritesAndFlushes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		under := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+		nested := Wrap(under, under)
+		writer := WithSendTimeout(nested, time.Second, time.Time{})
+		before := time.Now()
+		if _, err := writer.Write([]byte("first")); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(250 * time.Millisecond)
+		writer.(http.Flusher).Flush()
+		time.Sleep(250 * time.Millisecond)
+		if _, err := io.Copy(writer, strings.NewReader("second")); err != nil {
+			t.Fatal(err)
+		}
+		want := []time.Time{
+			before.Add(time.Second), {},
+			before.Add(1250 * time.Millisecond), {},
+			before.Add(1500 * time.Millisecond), {},
+		}
+		if len(under.deadlines) != len(want) || under.Body.String() != "firstsecond" || !under.Flushed {
+			t.Fatalf("deadlines=%v body=%q flushed=%v", under.deadlines, under.Body.String(), under.Flushed)
+		}
+		for index, deadline := range under.deadlines {
+			if !deadline.Equal(want[index]) {
+				t.Fatalf("deadline[%d]=%v, want %v", index, deadline, want[index])
+			}
+		}
+		if !under.deadlines[4].After(under.deadlines[0]) {
+			t.Fatal("later writes did not refresh the deadline")
+		}
+	})
+}
+
+func TestSendTimeoutPreservesAbsoluteDeadline(t *testing.T) {
+	under := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	absolute := time.Now().Add(time.Second)
+	writer := WithSendTimeout(under, time.Hour, absolute)
+	if _, err := writer.Write([]byte("body")); err != nil {
+		t.Fatal(err)
+	}
+	if len(under.deadlines) != 2 || !under.deadlines[0].Equal(absolute) || !under.deadlines[1].Equal(absolute) {
+		t.Fatalf("deadlines=%v, want fixed %v", under.deadlines, absolute)
+	}
+}
+
+func TestSendTimeoutDisabledAndUnsupported(t *testing.T) {
+	under := httptest.NewRecorder()
+	if WithSendTimeout(under, 0, time.Time{}) != under {
+		t.Fatal("disabled timeout changed the writer")
+	}
+	writer := WithSendTimeout(under, time.Second, time.Time{})
+	if _, err := writer.Write([]byte("body")); err != nil {
+		t.Fatal(err)
+	}
+	writer.(http.Flusher).Flush()
+	if under.Body.String() != "body" || !under.Flushed {
+		t.Fatal("unsupported deadline writer lost its response")
+	}
+}
+
+func TestSendTimeoutDeadlineFailureDoesNotWriteOrFlush(t *testing.T) {
+	failure := errors.New("deadline rejected")
+	under := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder(), err: failure}
+	writer := WithSendTimeout(under, time.Second, time.Time{})
+	if count, err := writer.Write([]byte("body")); count != 0 || !errors.Is(err, failure) {
+		t.Fatalf("write=%d,%v", count, err)
+	}
+	writer.(http.Flusher).Flush()
+	if err := http.NewResponseController(writer).Flush(); !errors.Is(err, failure) {
+		t.Fatalf("controller flush=%v, want deadline error", err)
+	}
+	if under.Body.Len() != 0 || under.Flushed {
+		t.Fatal("failed deadline allowed output")
+	}
+}
+
+type sendFailureWriter struct {
+	*deadlineRecorder
+	failure error
+}
+
+func (writer *sendFailureWriter) Write([]byte) (int, error) { return 0, writer.failure }
+func (writer *sendFailureWriter) FlushError() error         { return writer.failure }
+
+func TestSendTimeoutPreservesOutputErrors(t *testing.T) {
+	failure := errors.New("transport failed")
+	under := &sendFailureWriter{deadlineRecorder: &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}, failure: failure}
+	writer := WithSendTimeout(under, time.Second, time.Time{})
+	if _, err := writer.Write([]byte("body")); !errors.Is(err, failure) {
+		t.Fatalf("write=%v", err)
+	}
+	if err := http.NewResponseController(writer).Flush(); !errors.Is(err, failure) {
+		t.Fatalf("flush=%v", err)
+	}
+}
+
+type sendHijackWriter struct{ *deadlineRecorder }
+
+func (writer *sendHijackWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) { return nil, nil, nil }
+
+func TestSendTimeoutLeavesHijackedConnectionAlone(t *testing.T) {
+	under := &sendHijackWriter{deadlineRecorder: &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}}
+	writer := WithSendTimeout(under, time.Second, time.Time{})
+	if _, _, err := http.NewResponseController(writer).Hijack(); err != nil {
+		t.Fatal(err)
+	}
+	if err := http.NewResponseController(writer).Flush(); !errors.Is(err, http.ErrHijacked) || len(under.deadlines) != 0 {
+		t.Fatalf("post-hijack flush set deadlines: err=%v deadlines=%v", err, under.deadlines)
+	}
+}
 
 // caps is the capability set of a writer, used both to build a fake underlying
 // writer and to assert what the wrapper exposes.
@@ -388,7 +679,7 @@ func TestNestedWrapPreservesCapabilities(t *testing.T) {
 			var seen calls
 			under := newUnderlying(c, rec, &seen)
 
-			outer := Wrap(passthrough{under}, under)
+			outer := WithSendTimeout(Wrap(passthrough{under}, under), time.Second, time.Time{})
 			middle := Wrap(passthrough{outer}, outer)
 			inner := Wrap(passthrough{middle}, middle)
 

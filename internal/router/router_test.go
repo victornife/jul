@@ -4,14 +4,390 @@
 package router
 
 import (
+	"bufio"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"jul/internal/config"
+	"jul/internal/respwriter"
 )
+
+type timeoutPipeListener struct {
+	connection net.Conn
+	accepted   bool
+	closed     chan struct{}
+	closeOnce  sync.Once
+}
+
+func (listener *timeoutPipeListener) Accept() (net.Conn, error) {
+	if !listener.accepted {
+		listener.accepted = true
+		return listener.connection, nil
+	}
+	<-listener.closed
+	return nil, net.ErrClosed
+}
+
+func (listener *timeoutPipeListener) Close() error {
+	listener.closeOnce.Do(func() { close(listener.closed) })
+	return nil
+}
+
+func (listener *timeoutPipeListener) Addr() net.Addr { return listener.connection.LocalAddr() }
+
+type timeoutPipeConnection struct {
+	net.Conn
+	writes chan error
+}
+
+func (connection *timeoutPipeConnection) NetConn() net.Conn { return connection.Conn }
+
+func (connection *timeoutPipeConnection) Write(body []byte) (int, error) {
+	count, err := connection.Conn.Write(body)
+	connection.writes <- err
+	return count, err
+}
+
+func sendTimeoutPipeServer(t *testing.T, handler http.Handler) (net.Conn, *bufio.Reader, <-chan error) {
+	t.Helper()
+	serverConnection, client := net.Pipe()
+	connection := &timeoutPipeConnection{Conn: respwriter.WithSendTimeoutConnection(serverConnection), writes: make(chan error, 32)}
+	listener := &timeoutPipeListener{connection: connection, closed: make(chan struct{})}
+	configuration := &config.Config{Servers: []config.ServerConfig{{Listen: "pipe", SendTimeout: config.Duration(100 * time.Millisecond), Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Root: "."}}}}}
+	router, err := New(configuration, map[string]Builder{ActionStatic: func(config.ServerConfig, config.LocationConfig) (http.Handler, error) { return handler, nil }}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: router.For("pipe"), ConnContext: respwriter.SendTimeoutContext, ConnState: respwriter.SendTimeoutConnState}
+	done := make(chan struct{})
+	go func() { defer close(done); _ = server.Serve(listener) }()
+	t.Cleanup(func() { _ = client.Close(); _ = server.Close(); <-done })
+	go func() {
+		_, _ = io.WriteString(client, "GET / HTTP/1.1\r\nHost: example.test\r\nConnection: close\r\n\r\n")
+	}()
+	return client, bufio.NewReader(client), connection.writes
+}
+
+func TestSendTimeoutBoundsFinalTrailers(t *testing.T) {
+	client, reader, writes := sendTimeoutPipeServer(t, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Trailer", "X-Final")
+		_, _ = io.WriteString(writer, "first\n")
+		writer.Header().Set("X-Final", "done")
+	}))
+	response, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	first := make([]byte, len("first\n"))
+	if _, err := io.ReadFull(response.Body, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-writes; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-writes:
+		if err == nil {
+			t.Fatal("final trailers completed while the client stopped reading")
+		}
+	case <-time.After(time.Second):
+		_ = client.Close()
+		t.Fatal("final chunk/trailers escaped the configured inactivity timeout")
+	}
+}
+
+func TestSendTimeoutBoundsInformationalHeaders(t *testing.T) {
+	_, _, writes := sendTimeoutPipeServer(t, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Link", "</style.css>; rel=preload")
+		writer.WriteHeader(http.StatusEarlyHints)
+	}))
+	select {
+	case err := <-writes:
+		if err == nil {
+			t.Fatal("informational headers completed while the client did not read")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("103 headers escaped the configured inactivity timeout")
+	}
+}
+
+func TestSendTimeoutAllowsPartialProgressWithinOneWrite(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		result := make(chan error, 1)
+		stopReading := make(chan struct{})
+		defer close(stopReading)
+		started := time.Now()
+		client, _, _ := sendTimeoutPipeServer(t, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			_, err := writer.Write([]byte(strings.Repeat("x", 32*1024)))
+			result <- err
+		}))
+		go func() {
+			ticker := time.NewTicker(20 * time.Millisecond)
+			defer ticker.Stop()
+			buffer := make([]byte, 1024)
+			for {
+				select {
+				case <-stopReading:
+					return
+				case <-ticker.C:
+				}
+				if _, err := client.Read(buffer); err != nil {
+					return
+				}
+			}
+		}()
+		select {
+		case err := <-result:
+			if err != nil && !errors.Is(err, net.ErrClosed) {
+				t.Fatalf("steady 20ms reader was cut inside one Write: %v", err)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if time.Since(started) <= 100*time.Millisecond {
+				t.Fatal("large-write probe did not outlast its inactivity interval")
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("progressing response failed to complete")
+		}
+	})
+}
+
+func sendTimeoutTestServer(t *testing.T, protocol string, timeout time.Duration, handler http.Handler) (*httptest.Server, *http.Client) {
+	t.Helper()
+	configuration := &config.Config{Servers: []config.ServerConfig{{
+		Listen: "test", SendTimeout: config.Duration(timeout),
+		Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Root: "."}},
+	}}}
+	router, err := New(configuration, map[string]Builder{ActionStatic: func(config.ServerConfig, config.LocationConfig) (http.Handler, error) { return handler, nil }}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(router.For("test"))
+	server.Listener = respwriter.WithSendTimeoutListener(server.Listener)
+	server.Config.ConnContext = respwriter.SendTimeoutContext
+	server.Config.ConnState = respwriter.SendTimeoutConnState
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetHTTP2(protocol == "h2")
+	protocols.SetUnencryptedHTTP2(protocol == "h2c")
+	server.Config.Protocols = protocols
+	if protocol == "h2" {
+		server.EnableHTTP2 = true
+		server.StartTLS()
+	} else {
+		server.Start()
+	}
+	t.Cleanup(server.Close)
+	client := server.Client()
+	client.Timeout = 10 * time.Second
+	if protocol == "h2c" {
+		clientProtocols := new(http.Protocols)
+		clientProtocols.SetUnencryptedHTTP2(true)
+		transport := &http.Transport{Protocols: clientProtocols}
+		t.Cleanup(transport.CloseIdleConnections)
+		client = &http.Client{Transport: transport, Timeout: 10 * time.Second}
+	}
+	return server, client
+}
+
+func TestSendTimeoutStopsStalledReadersAcrossProtocols(t *testing.T) {
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		t.Run(protocol, func(t *testing.T) {
+			result := make(chan error, 1)
+			server, client := sendTimeoutTestServer(t, protocol, 300*time.Millisecond, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				controller := http.NewResponseController(writer)
+				writer.WriteHeader(http.StatusOK)
+				if err := controller.Flush(); err != nil {
+					result <- err
+					return
+				}
+				chunk := []byte(strings.Repeat("x", 32*1024))
+				for request.Context().Err() == nil {
+					if _, err := writer.Write(chunk); err != nil {
+						result <- err
+						return
+					}
+					if err := controller.Flush(); err != nil {
+						result <- err
+						return
+					}
+				}
+				result <- request.Context().Err()
+			}))
+			response, err := client.Get(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			if (protocol == "http1" && response.ProtoMajor != 1) || (protocol != "http1" && response.ProtoMajor != 2) {
+				t.Fatalf("unexpected protocol: %s", response.Proto)
+			}
+			select {
+			case err := <-result:
+				if err == nil {
+					t.Fatal("stalled reader ended without a write failure")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("stalled reader was not stopped by the inactivity deadline")
+			}
+		})
+	}
+}
+
+func TestSendTimeoutAllowsProgressingStreamsAcrossProtocols(t *testing.T) {
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		t.Run(protocol, func(t *testing.T) {
+			server, client := sendTimeoutTestServer(t, protocol, 400*time.Millisecond, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.Header().Set("Content-Type", "text/event-stream")
+				controller := http.NewResponseController(writer)
+				ticker := time.NewTicker(100 * time.Millisecond)
+				defer ticker.Stop()
+				for event := 0; event < 10; event++ {
+					select {
+					case <-request.Context().Done():
+						return
+					case <-ticker.C:
+					}
+					if _, err := fmt.Fprintf(writer, "data: %d\n\n", event); err != nil {
+						return
+					}
+					if err := controller.Flush(); err != nil {
+						return
+					}
+				}
+			}))
+			response, err := client.Get(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || strings.Count(string(body), "data:") != 10 {
+				t.Fatalf("progressing stream was cut: events=%d err=%v", strings.Count(string(body), "data:"), err)
+			}
+		})
+	}
+}
+
+func TestSendTimeoutDoesNotExpireBetweenWrites(t *testing.T) {
+	for _, protocol := range []string{"http1", "h2", "h2c"} {
+		t.Run(protocol, func(t *testing.T) {
+			server, client := sendTimeoutTestServer(t, protocol, 100*time.Millisecond, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.Header().Set("Content-Type", "text/event-stream")
+				controller := http.NewResponseController(writer)
+				if _, err := io.WriteString(writer, "first\n"); err != nil {
+					return
+				}
+				if err := controller.Flush(); err != nil {
+					return
+				}
+				select {
+				case <-request.Context().Done():
+					return
+				case <-time.After(300 * time.Millisecond):
+				}
+				_, _ = io.WriteString(writer, "second\n")
+				_ = controller.Flush()
+			}))
+			response, err := client.Get(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || string(body) != "first\nsecond\n" {
+				t.Fatalf("non-writing gap cut the stream: body=%q err=%v", body, err)
+			}
+		})
+	}
+}
+
+type timeoutResponseRecorder struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (writer *timeoutResponseRecorder) SetWriteDeadline(deadline time.Time) error {
+	writer.deadlines = append(writer.deadlines, deadline)
+	return nil
+}
+
+func TestSendTimeoutSelectionAndGeneration(t *testing.T) {
+	zero := config.Duration(0)
+	override := config.Duration(2 * time.Second)
+	cfg := &config.Config{Servers: []config.ServerConfig{{
+		Listen: "127.0.0.1:80", SendTimeout: config.Duration(time.Second),
+		Locations: []config.LocationConfig{
+			{Match: config.MatchConfig{Type: "exact", Path: "/inherit"}, Root: "."},
+			{Match: config.MatchConfig{Type: "exact", Path: "/override"}, Root: ".", SendTimeout: &override},
+			{Match: config.MatchConfig{Type: "exact", Path: "/disabled"}, Root: ".", SendTimeout: &zero},
+		},
+	}, {
+		Listen: "127.0.0.1:80", ServerNames: []string{"other.example"}, SendTimeout: config.Duration(3 * time.Second),
+		Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Root: "."}},
+	}}}
+	original := testRouter(t, cfg)
+	cfg.Servers[0].SendTimeout = config.Duration(4 * time.Second)
+	replacement := testRouter(t, cfg)
+	for _, test := range []struct {
+		name   string
+		router *Router
+		host   string
+		path   string
+		want   time.Duration
+	}{
+		{"inherit", original, "default.example", "/inherit", time.Second},
+		{"override", original, "default.example", "/override", 2 * time.Second},
+		{"disabled", original, "default.example", "/disabled", 0},
+		{"unmatched", original, "default.example", "/missing", time.Second},
+		{"vhost", original, "other.example", "/", 3 * time.Second},
+		{"replacement", replacement, "default.example", "/inherit", 4 * time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			writer := &timeoutResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
+			before := time.Now()
+			test.router.For("127.0.0.1:80").ServeHTTP(writer, httptest.NewRequest(http.MethodGet, "http://"+test.host+test.path, nil))
+			if test.want == 0 {
+				if len(writer.deadlines) != 0 {
+					t.Fatalf("disabled timeout set deadlines: %v", writer.deadlines)
+				}
+				return
+			}
+			if len(writer.deadlines) == 0 || writer.deadlines[0].Before(before.Add(test.want)) || writer.deadlines[0].After(time.Now().Add(test.want)) {
+				t.Fatalf("deadlines=%v, want interval %v", writer.deadlines, test.want)
+			}
+		})
+	}
+}
+
+func TestSendTimeoutKeepsListenerAbsoluteDeadlineAcrossVhosts(t *testing.T) {
+	cfg := &config.Config{Servers: []config.ServerConfig{
+		{Listen: "test", WriteTimeout: config.Duration(time.Second), Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Root: "."}}},
+		{Listen: "test", ServerNames: []string{"other.example"}, SendTimeout: config.Duration(time.Hour), Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Root: "."}}},
+	}}
+	writer := &timeoutResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
+	before := time.Now()
+	testRouter(t, cfg).For("test").ServeHTTP(writer, httptest.NewRequest(http.MethodGet, "http://other.example/", nil))
+	if len(writer.deadlines) == 0 {
+		t.Fatal("no deadlines set")
+	}
+	for _, deadline := range writer.deadlines {
+		if deadline.IsZero() || deadline.Before(before.Add(time.Second)) || deadline.After(time.Now().Add(time.Second)) {
+			t.Fatalf("listener absolute deadline lost: %v", deadline)
+		}
+	}
+}
 
 // echoBuilder returns a handler that writes a tag identifying the matched
 // location path, so tests can assert which route was selected.

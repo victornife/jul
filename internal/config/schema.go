@@ -266,6 +266,7 @@ type ServerConfig struct {
 	ReadHeaderTimeout Duration `toml:"read_header_timeout"`
 	ReadTimeout       Duration `toml:"read_timeout"`
 	WriteTimeout      Duration `toml:"write_timeout"`
+	SendTimeout       Duration `toml:"send_timeout,omitempty"`
 	IdleTimeout       Duration `toml:"idle_timeout"`
 	// MaxHeaderBytes caps the size of request headers (default 1 MiB).
 	MaxHeaderBytes Size `toml:"max_header_bytes"`
@@ -530,7 +531,8 @@ type LocationConfig struct {
 	Cache bool `toml:"cache"`
 
 	// ClientMaxBodySize overrides the server default for this location.
-	ClientMaxBodySize Size `toml:"client_max_body_size"`
+	ClientMaxBodySize Size      `toml:"client_max_body_size"`
+	SendTimeout       *Duration `toml:"send_timeout,omitempty"`
 
 	// RateLimit, when set, overrides the global [rate_limit] policy for this
 	// location (rate/burst/key). MaxConns is ignored here, since connection

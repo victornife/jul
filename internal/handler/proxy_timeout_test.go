@@ -14,7 +14,47 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/middleware"
+	"jul/internal/respwriter"
 )
+
+func TestDownstreamSendTimeoutAllowsCompressedProxyStream(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/plain")
+		ticker := time.NewTicker(60 * time.Millisecond)
+		defer ticker.Stop()
+		for chunk := 0; chunk < 10; chunk++ {
+			select {
+			case <-request.Context().Done():
+				return
+			case <-ticker.C:
+			}
+			_, _ = io.WriteString(writer, "progress\n")
+			_ = http.NewResponseController(writer).Flush()
+		}
+	}))
+	defer backend.Close()
+	proxy := newProxy(t, config.LocationConfig{ProxyPass: backend.URL}, nil)
+	compression, err := middleware.NewCompression(middleware.CompressionOptions{Encoders: []string{"gzip"}, Types: []string{"text/plain"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	front := httptest.NewServer(compression(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		bounded := respwriter.WithSendTimeout(writer, 250*time.Millisecond, time.Time{})
+		proxy.ServeHTTP(bounded, request)
+		_ = http.NewResponseController(bounded).Flush()
+	})))
+	defer front.Close()
+	response, err := front.Client().Get(front.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || len(body) != 10*len("progress\n") || !response.Uncompressed {
+		t.Fatalf("compressed progressing proxy stream cut or not compressed: bytes=%d err=%v uncompressed=%v", len(body), err, response.Uncompressed)
+	}
+}
 
 // TestTimeoutConnReadDeadline proves the read side arms an inactivity deadline:
 // a peer that never writes makes Read fail with a timeout (not block forever).

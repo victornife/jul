@@ -614,6 +614,14 @@
       "active_when": "always"
     },
     {
+      "go_field": "LocationConfig.SendTimeout",
+      "path": "servers[].locations[].send_timeout",
+      "kind": "duration",
+      "constraint": "non-negative when present",
+      "zero_semantics": "omitted inherits the server value; explicit zero disables downstream write inactivity deadlines",
+      "active_when": "always"
+    },
+    {
       "go_field": "LocationResilienceConfig.MaxConnectionsPerBackend",
       "path": "servers[].locations[].resilience.max_connections_per_backend",
       "kind": "integer",
@@ -1037,6 +1045,14 @@
         301,
         308
       ]
+    },
+    {
+      "go_field": "ServerConfig.SendTimeout",
+      "path": "servers[].send_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted/zero disables downstream write inactivity deadlines",
+      "active_when": "always"
     },
     {
       "go_field": "ServerConfig.WriteTimeout",

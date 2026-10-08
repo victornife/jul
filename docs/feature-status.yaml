@@ -28,7 +28,7 @@
 # docs/soak-evidence.md and #480 record the post-fix impact review and limits.
 
 version: 2
-updated: '2026-09-30'
+updated: '2026-10-08'
 features:
 - id: Y1-01
   name: TLS + automatic HTTPS (ACME)
@@ -386,6 +386,24 @@ features:
     9: true
   notes: 'Relationships (#512): per-status error pages (internal/handler/errorpages.go), the always-on Request ID middleware and the worker_threads process setting (GOMAXPROCS) are part of this row: they are in docs/core-http.md and docs/configuration.md and on the path of every soaked request. Deployment packaging is the separate DEPLOY-PKG row.'
   delivery: soaked
+- id: SEND-TIMEOUT
+  name: Downstream write-inactivity timeout
+  tags:
+  - core
+  maturity: Beta
+  doc: core-http.md
+  criteria:
+    1: true
+    2: false
+    3: false
+    4: false
+    5: false
+    6: true
+    7: true
+    8: null
+    9: true
+  notes: 'Additive #518 capability; does not inherit Core HTTP GA or old soak evidence. Criterion 8 uses existing duration parsing. Runnable example: testdata/send-timeout.toml; Console Status reports configured defaults and overrides without values. Release, benchmark and soak certification remain separate.'
+  delivery: implemented
 - id: reload-tx
   name: Configuration reload transaction
   tags:

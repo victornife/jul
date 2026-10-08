@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 367 |
-| Schema leaves (configurable values) | 312 |
-| Registry entries | 312 |
+| Schema paths (containers included) | 369 |
+| Schema leaves (configurable values) | 314 |
+| Registry entries | 314 |
 | Startup-consumed entries | 28 |
-| Class `hot_reload` | 270 |
+| Class `hot_reload` | 272 |
 | Class `restart_required` | 28 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -309,6 +309,7 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.rewrites.*.replacement` | `hot_reload` | `rewrites` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.root` | `hot_reload` | `root` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.route_id` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.send_timeout` | `hot_reload` | `listener_timeouts` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.try_files` | `hot_reload` | `try_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.uwsgi_pass` | `hot_reload` | `uwsgi` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.waf.block_status` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |
@@ -327,6 +328,7 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.read_header_timeout` | `new_listener_only` | `listener_timeouts` | cond. | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
 | `servers.*.read_timeout` | `new_listener_only` | `listener_timeouts` | cond. | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
 | `servers.*.redirect_https` | `hot_reload` | `server_redirect` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.send_timeout` | `hot_reload` | `listener_timeouts` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.server_names` | `hot_reload` | `server_names` | — | virtual-host routing uses the rebuilt handler tree; when the block terminates TLS the name set is also part of the listener's certificate identity and is compared by the bind-time gate |
 | `servers.*.tls.acme.ca` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | `servers.*.tls.acme.cache_dir` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |

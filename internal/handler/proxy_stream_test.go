@@ -16,6 +16,7 @@ import (
 	"golang.org/x/net/websocket"
 
 	"jul/internal/config"
+	"jul/internal/respwriter"
 )
 
 // TestProxyWebSocketPassthrough is the WebSocket conformance test: it proves an
@@ -39,7 +40,12 @@ func TestProxyWebSocketPassthrough(t *testing.T) {
 
 	// Front: the bare reverse-proxy handler served over a real (hijackable)
 	// HTTP server, so the 101 Switching Protocols upgrade is spliced for real.
-	front := httptest.NewServer(newProxy(t, config.LocationConfig{ProxyPass: backend.URL}, nil))
+	proxy := newProxy(t, config.LocationConfig{ProxyPass: backend.URL}, nil)
+	front := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		bounded := respwriter.WithSendTimeout(writer, 100*time.Millisecond, time.Time{})
+		proxy.ServeHTTP(bounded, request)
+		_ = http.NewResponseController(bounded).Flush()
+	}))
 	defer front.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(front.URL, "http")

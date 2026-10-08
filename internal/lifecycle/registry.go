@@ -479,6 +479,7 @@ func serverEntries() []Entry {
 		newListener("servers.*.read_header_timeout", SubListenerTimes, reasonBindFrozen),
 		newListener("servers.*.read_timeout", SubListenerTimes, reasonBindFrozen),
 		newListener("servers.*.write_timeout", SubListenerTimes, reasonBindFrozen),
+		hot("servers.*.send_timeout", SubListenerTimes, reasonHandlerRebuild),
 		newListener("servers.*.max_header_bytes", SubListenerLimits, reasonBindFrozen),
 	)
 	return out
@@ -607,6 +608,7 @@ func locationEntries() []Entry {
 	out = append(out,
 		hot(loc+"cache", SubCache, "whether a location may serve from the cache is decided by the rebuilt handler tree; the backend itself is startup-owned"),
 		hot(loc+"client_max_body_size", SubServerLimits, reasonHandlerRebuild),
+		hot(loc+"send_timeout", SubListenerTimes, reasonHandlerRebuild),
 		hot(loc+"deny", SubAccessControl, reasonHandlerRebuild),
 		hot(loc+"fastcgi_params.*", SubFastCGI, reasonHandlerRebuild),
 		hot(loc+"fastcgi_pass", SubFastCGI, reasonHandlerRebuild),

@@ -158,6 +158,7 @@ func validateServerValues(c ServerConfig, where string) []error {
 		{where + ".read_header_timeout", c.ReadHeaderTimeout},
 		{where + ".read_timeout", c.ReadTimeout},
 		{where + ".write_timeout", c.WriteTimeout},
+		{where + ".send_timeout", c.SendTimeout},
 		{where + ".idle_timeout", c.IdleTimeout},
 	}
 	for _, check := range checks {
@@ -184,6 +185,11 @@ func validateServerValues(c ServerConfig, where string) []error {
 
 func validateLocationValues(c LocationConfig, where string) []error {
 	var errs []error
+	if c.SendTimeout != nil {
+		if err := validateNonNegativeDuration(where+".send_timeout", *c.SendTimeout); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	for _, check := range []struct {
 		path  string
 		value Duration

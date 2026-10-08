@@ -105,6 +105,8 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		h2cServers           int
 		trustedListeners     int
 		trustedRanges        int
+		sendTimeoutServers   int
+		sendTimeoutLocations int
 		openTrust            bool
 		staticLocs           int
 		backendTLSPools      int
@@ -124,6 +126,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 	trustedAddrs := map[string]bool{}
 	for i := range c.Servers {
 		srv := &c.Servers[i]
+		if srv.SendTimeout > 0 {
+			sendTimeoutServers++
+		}
 		if srv.TLS != nil && srv.TLS.Enabled {
 			tlsServers++
 			if srv.TLS.ClientAuth.Active() {
@@ -154,6 +159,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		}
 		for j := range srv.Locations {
 			loc := &srv.Locations[j]
+			if loc.SendTimeout != nil && *loc.SendTimeout > 0 {
+				sendTimeoutLocations++
+			}
 			totalLocs++
 			switch {
 			case loc.GRPCTranscode != nil:
@@ -374,6 +382,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 
 	return []FeatureStatus{
 		{Group: "Traffic", Name: "Virtual hosts", Active: len(c.Servers) > 0, Detail: vhostDetail},
+		{Group: "Traffic", Name: "Downstream send timeout", Active: sendTimeoutServers+sendTimeoutLocations > 0, Detail: countUnit(sendTimeoutServers, "server default") + "; " + countUnit(sendTimeoutLocations, "location override")},
 		{Group: "Traffic", Name: "Static file serving", Active: staticLocs > 0, Detail: countDetailIf(staticLocs, "location")},
 		{Group: "Traffic", Name: "Reverse proxy", Active: proxyLocs > 0, Detail: countDetailIf(proxyLocs, "location")},
 		{Group: "Traffic", Name: "FastCGI / uWSGI", Active: fastcgiLocs > 0, Detail: countDetailIf(fastcgiLocs, "location")},

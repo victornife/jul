@@ -85,7 +85,7 @@
   "classes": [
     {
       "name": "approximated",
-      "count": 11
+      "count": 13
     },
     {
       "name": "blocking",
@@ -107,7 +107,7 @@
   "risks": [
     {
       "name": "availability",
-      "count": 87
+      "count": 89
     },
     {
       "name": "observability",
@@ -252,6 +252,10 @@
       "count": 1
     },
     {
+      "name": "NGX_LOCATION_SEND_TIMEOUT",
+      "count": 1
+    },
+    {
       "name": "NGX_LOCATION_UWSGI",
       "count": 1
     },
@@ -338,6 +342,10 @@
     {
       "name": "NGX_SERVER_NAME",
       "count": 25
+    },
+    {
+      "name": "NGX_SERVER_SEND_TIMEOUT",
+      "count": 1
     },
     {
       "name": "NGX_SERVER_TLS_CERT",

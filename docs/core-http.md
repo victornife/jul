@@ -679,6 +679,7 @@ explicitly:
 | Setting | Scope | Default | Suggested starting point |
 | --- | --- | --- | --- |
 | `proxy_read_timeout` / `proxy_send_timeout` | location | unbounded | `60s`. These are **inactivity** bounds, so a steadily streaming response or upload is never cut |
+| `send_timeout` | server / location | off (`0`) | `60s` to bound stalled downstream writes without a whole-response cap; location omission inherits and explicit zero disables |
 | `read_timeout` | server | unbounded | `60s` where no route accepts long uploads; it caps reading the **whole** request, body included |
 | `write_timeout` | server | unbounded | leave unset if any route streams (SSE, downloads, WebSocket); otherwise `60s`. It caps the **whole** response |
 | `client_max_body_size` | server / location | 1 MiB | the largest body each route must accept; pair it with `waf.request_body_limit` on WAF routes |
@@ -686,7 +687,48 @@ explicitly:
 | `idle_timeout` | server | 60s | keep |
 
 `jul lint` warns when a non-loopback listener sets none of `read_timeout`,
-`write_timeout`, `proxy_read_timeout` or `proxy_send_timeout` (#511).
+`write_timeout`, `send_timeout`, `proxy_read_timeout` or `proxy_send_timeout`
+(#511/#518).
+
+### Downstream write inactivity
+
+The additive capability is Beta / implemented; it does not inherit Core HTTP's
+existing GA/soak evidence. [Runnable configuration](../testdata/send-timeout.toml)
+shows a server default, location override and explicit disable. The Console
+Status overview reports whether defaults or overrides are configured.
+
+On HTTP/1.1, `send_timeout` tracks partial byte progress at the underlying
+connection, before TLS. A progressing write refreshes the inactivity interval
+even when one response-body `Write` has not completed. Internal progress checks
+are bounded by one eighth of the configured interval, capped at 25ms; no-progress
+expiry uses the configured interval rather than a whole-body write lifetime.
+Informational headers, final chunks and trailers use the same connection policy.
+A quiet application gap with no pending output does not itself time out.
+
+TLS HTTP/2, h2c and HTTP/3 expose only per-stream **operation deadlines** through
+the supported response-controller APIs. On these protocols a single large or
+flow-controlled write can time out despite partial progress inside it. There is
+no cross-protocol byte-progress guarantee: this limitation was explicitly
+accepted for #518 rather than hidden by passing progressing-small-event tests.
+Successful writes/flushes receive a fresh interval, and server-owned finalization
+remains bounded. No shared connection-progress timer substitutes for HTTP/2/3
+stream isolation.
+
+The selected virtual host supplies the server default. A location's omitted
+`send_timeout` inherits it; `send_timeout = "0s"` explicitly disables the
+inactivity bound. Both settings rebuild handlers on reload: an admitted request
+keeps its existing generation's value, and new requests use the replacement.
+HTTP/1.1 uses connection-progress tracking; TLS HTTP/2, h2c and HTTP/3 use
+the response stream's operation deadline. Compression, cache and plugin response writers
+retain controller traversal and flush behavior.
+
+`write_timeout` is unchanged and remains an absolute response cap. When it is
+also configured, HTTP/1.1 progress never extends the actual listener deadline;
+HTTP/2/3 refreshes are capped by the resolved write timeout from request handling
+entry. The absolute deadline is restored between operations. Leave it unset for responses that intentionally
+outlive an absolute cap. `send_timeout` is not bandwidth shaping, a byte-rate
+guarantee, a handler-computation timeout, or a WebSocket frame timeout. Hijacked
+WebSockets retain their existing idle/TCP behavior.
 
 ## Limits
 

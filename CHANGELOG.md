@@ -15,6 +15,16 @@ v2.1.0 tag or its packaged READMEs.
 
 ### Added
 
+- **Downstream write-inactivity timeout (#518).** Optional server and location
+  `send_timeout` bounds stalled output without imposing a response lifetime.
+  HTTP/1.1 tracks partial connection progress, including informational headers
+  and final chunks/trailers; HTTP/2/3 retain documented per-stream operation
+  bounds that may expire during a single large progressing write.
+  Location omission inherits; explicit zero disables. It is handler-rebuilt
+  on reload and covers HTTP/1.1, HTTP/2 TLS/h2c and HTTP/3. Absolute
+  `write_timeout` remains a separate cap; hijacked WebSockets are excluded.
+  Explicit server/location NGINX settings translate with corpus coverage.
+
 - **RFC 9213 `CDN-Cache-Control` (#540).** Valid, non-empty Structured Fields
   policy controls Jul's shared cache instead of generic `Cache-Control` and
   `Expires`; malformed or empty fields fall back. No custom Jul header or
