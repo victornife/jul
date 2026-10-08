@@ -279,9 +279,9 @@ func (r *Router) For(addr string) http.Handler {
 			absoluteDeadline = time.Now().Add(srv.writeTimeout)
 		}
 		if srv.redirectHTTPS != 0 && req.TLS == nil {
-			w = respwriter.WithSendTimeout(w, srv.sendTimeout, absoluteDeadline)
+			w = respwriter.WithRequestSendTimeout(w, req, srv.sendTimeout, absoluteDeadline)
 			if srv.sendTimeout > 0 {
-				defer func() { _ = http.NewResponseController(w).Flush() }()
+				defer respwriter.FinishRequestSendTimeout(w, req, srv.sendTimeout, absoluteDeadline)
 			}
 			redirectToHTTPS(w, req, srv.redirectHTTPS)
 			return
@@ -289,9 +289,9 @@ func (r *Router) For(addr string) http.Handler {
 		canonicalizeRequest(req)
 		loc := srv.selectLocation(req)
 		if loc == nil {
-			w = respwriter.WithSendTimeout(w, srv.sendTimeout, absoluteDeadline)
+			w = respwriter.WithRequestSendTimeout(w, req, srv.sendTimeout, absoluteDeadline)
 			if srv.sendTimeout > 0 {
-				defer func() { _ = http.NewResponseController(w).Flush() }()
+				defer respwriter.FinishRequestSendTimeout(w, req, srv.sendTimeout, absoluteDeadline)
 			}
 			http.NotFound(w, req)
 			return
@@ -300,9 +300,9 @@ func (r *Router) For(addr string) http.Handler {
 		if loc.overrideSendTimeout {
 			sendTimeout = loc.sendTimeout
 		}
-		w = respwriter.WithSendTimeout(w, sendTimeout, absoluteDeadline)
+		w = respwriter.WithRequestSendTimeout(w, req, sendTimeout, absoluteDeadline)
 		if sendTimeout > 0 {
-			defer func() { _ = http.NewResponseController(w).Flush() }()
+			defer respwriter.FinishRequestSendTimeout(w, req, sendTimeout, absoluteDeadline)
 		}
 		if applyRewrites(loc.rewrites, w, req) {
 			return

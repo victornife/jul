@@ -267,7 +267,7 @@ write_timeout = "60s"
 | `max_header_bytes` | size | Maximum request header size (default 1 MiB) |
 | `read_header_timeout` | duration | Time allowed to read request headers |
 | `read_timeout` / `write_timeout` | duration | Hard request/response caps (off by default so SSE/WebSocket/large transfers are not severed) |
-| `send_timeout` | duration | Downstream write/flush inactivity bound; `0` (default) disables it. Hot-reloadable per virtual host, with an optional location override |
+| `send_timeout` | duration | HTTP/1.1 connection-write inactivity bound; HTTP/2/3 per-stream operation bound. `0` (default) disables it. Hot-reloadable per virtual host, with an optional location override |
 | `idle_timeout` | duration | Keep-alive idle timeout |
 | `access_log` / `error_log` | string | Deprecated compatibility fields; accepted and linted but ignored. Use the global `[observability.access_log]` block and the process logger instead. |
 | `error_pages` | table | Map of status code → file path or redirect URL |

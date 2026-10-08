@@ -84,7 +84,7 @@
       {
         "source": "nginx.conf",
         "code": "NGX_SERVER_SEND_TIMEOUT",
-        "class": "supported",
+        "class": "approximated",
         "risk": "availability",
         "context": "server",
         "directive": "send_timeout"
@@ -124,7 +124,7 @@
       {
         "source": "nginx.conf",
         "code": "NGX_LOCATION_SEND_TIMEOUT",
-        "class": "supported",
+        "class": "approximated",
         "risk": "availability",
         "context": "location",
         "directive": "send_timeout"

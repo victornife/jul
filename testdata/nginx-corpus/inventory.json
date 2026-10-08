@@ -85,7 +85,7 @@
   "classes": [
     {
       "name": "approximated",
-      "count": 11
+      "count": 13
     },
     {
       "name": "blocking",
@@ -101,7 +101,7 @@
     },
     {
       "name": "supported",
-      "count": 352
+      "count": 350
     }
   ],
   "risks": [

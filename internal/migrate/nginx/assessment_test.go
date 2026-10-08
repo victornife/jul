@@ -43,7 +43,7 @@ func TestAssessSendTimeoutValuesAndScopes(t *testing.T) {
 					found = true
 					want := AssessmentBlocking
 					if value == "30s" || value == "0" {
-						want = AssessmentSupported
+						want = AssessmentApproximated
 					}
 					if result.Class != want {
 						t.Fatalf("class=%s, want %s", result.Class, want)

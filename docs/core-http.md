@@ -697,25 +697,35 @@ existing GA/soak evidence. [Runnable configuration](../testdata/send-timeout.tom
 shows a server default, location override and explicit disable. The Console
 Status overview reports whether defaults or overrides are configured.
 
-`send_timeout` arms a deadline before each downstream write or flush and
-removes the inactivity deadline after the operation completes. A blocked
-operation fails when it cannot complete within the interval. Successful writes
-and flushes get a fresh interval; there is no total response-duration cap and
-a quiet SSE/application gap with no pending write does not itself time out.
-Buffered output is flushed under the same policy when the handler completes.
+On HTTP/1.1, `send_timeout` tracks partial byte progress at the underlying
+connection, before TLS. A progressing write refreshes the inactivity interval
+even when one response-body `Write` has not completed. Internal progress checks
+are bounded by one eighth of the configured interval, capped at 25ms; no-progress
+expiry uses the configured interval rather than a whole-body write lifetime.
+Informational headers, final chunks and trailers use the same connection policy.
+A quiet application gap with no pending output does not itself time out.
+
+TLS HTTP/2, h2c and HTTP/3 expose only per-stream **operation deadlines** through
+the supported response-controller APIs. On these protocols a single large or
+flow-controlled write can time out despite partial progress inside it. There is
+no cross-protocol byte-progress guarantee: this limitation was explicitly
+accepted for #518 rather than hidden by passing progressing-small-event tests.
+Successful writes/flushes receive a fresh interval, and server-owned finalization
+remains bounded. No shared connection-progress timer substitutes for HTTP/2/3
+stream isolation.
 
 The selected virtual host supplies the server default. A location's omitted
 `send_timeout` inherits it; `send_timeout = "0s"` explicitly disables the
 inactivity bound. Both settings rebuild handlers on reload: an admitted request
 keeps its existing generation's value, and new requests use the replacement.
-HTTP/1.1 uses the connection's write deadline; TLS HTTP/2, h2c and HTTP/3 use
-the response stream's deadline. Compression, cache and plugin response writers
+HTTP/1.1 uses connection-progress tracking; TLS HTTP/2, h2c and HTTP/3 use
+the response stream's operation deadline. Compression, cache and plugin response writers
 retain controller traversal and flush behavior.
 
 `write_timeout` is unchanged and remains an absolute response cap. When it is
-also configured, inactivity refreshes are capped by that listener's resolved
-write timeout from request handling entry, and the absolute deadline is
-restored between operations. Leave it unset for responses that intentionally
+also configured, HTTP/1.1 progress never extends the actual listener deadline;
+HTTP/2/3 refreshes are capped by the resolved write timeout from request handling
+entry. The absolute deadline is restored between operations. Leave it unset for responses that intentionally
 outlive an absolute cap. `send_timeout` is not bandwidth shaping, a byte-rate
 guarantee, a handler-computation timeout, or a WebSocket frame timeout. Hijacked
 WebSockets retain their existing idle/TCP behavior.

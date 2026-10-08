@@ -4,16 +4,150 @@
 package router
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/respwriter"
 )
+
+type timeoutPipeListener struct {
+	connection net.Conn
+	accepted   bool
+	closed     chan struct{}
+	closeOnce  sync.Once
+}
+
+func (listener *timeoutPipeListener) Accept() (net.Conn, error) {
+	if !listener.accepted {
+		listener.accepted = true
+		return listener.connection, nil
+	}
+	<-listener.closed
+	return nil, net.ErrClosed
+}
+
+func (listener *timeoutPipeListener) Close() error {
+	listener.closeOnce.Do(func() { close(listener.closed) })
+	return nil
+}
+
+func (listener *timeoutPipeListener) Addr() net.Addr { return listener.connection.LocalAddr() }
+
+type timeoutPipeConnection struct {
+	net.Conn
+	writes chan error
+}
+
+func (connection *timeoutPipeConnection) NetConn() net.Conn { return connection.Conn }
+
+func (connection *timeoutPipeConnection) Write(body []byte) (int, error) {
+	count, err := connection.Conn.Write(body)
+	connection.writes <- err
+	return count, err
+}
+
+func sendTimeoutPipeServer(t *testing.T, handler http.Handler) (net.Conn, *bufio.Reader, <-chan error) {
+	t.Helper()
+	serverConnection, client := net.Pipe()
+	connection := &timeoutPipeConnection{Conn: respwriter.WithSendTimeoutConnection(serverConnection), writes: make(chan error, 32)}
+	listener := &timeoutPipeListener{connection: connection, closed: make(chan struct{})}
+	configuration := &config.Config{Servers: []config.ServerConfig{{Listen: "pipe", SendTimeout: config.Duration(100 * time.Millisecond), Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Root: "."}}}}}
+	router, err := New(configuration, map[string]Builder{ActionStatic: func(config.ServerConfig, config.LocationConfig) (http.Handler, error) { return handler, nil }}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: router.For("pipe"), ConnContext: respwriter.SendTimeoutContext, ConnState: respwriter.SendTimeoutConnState}
+	done := make(chan struct{})
+	go func() { defer close(done); _ = server.Serve(listener) }()
+	t.Cleanup(func() { _ = client.Close(); _ = server.Close(); <-done })
+	go func() {
+		_, _ = io.WriteString(client, "GET / HTTP/1.1\r\nHost: example.test\r\nConnection: close\r\n\r\n")
+	}()
+	return client, bufio.NewReader(client), connection.writes
+}
+
+func TestSendTimeoutBoundsFinalTrailers(t *testing.T) {
+	client, reader, writes := sendTimeoutPipeServer(t, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Trailer", "X-Final")
+		_, _ = io.WriteString(writer, "first\n")
+		writer.Header().Set("X-Final", "done")
+	}))
+	response, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	first := make([]byte, len("first\n"))
+	if _, err := io.ReadFull(response.Body, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-writes; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-writes:
+		if err == nil {
+			t.Fatal("final trailers completed while the client stopped reading")
+		}
+	case <-time.After(time.Second):
+		_ = client.Close()
+		t.Fatal("final chunk/trailers escaped the configured inactivity timeout")
+	}
+}
+
+func TestSendTimeoutBoundsInformationalHeaders(t *testing.T) {
+	_, _, writes := sendTimeoutPipeServer(t, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Link", "</style.css>; rel=preload")
+		writer.WriteHeader(http.StatusEarlyHints)
+	}))
+	select {
+	case err := <-writes:
+		if err == nil {
+			t.Fatal("informational headers completed while the client did not read")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("103 headers escaped the configured inactivity timeout")
+	}
+}
+
+func TestSendTimeoutAllowsPartialProgressWithinOneWrite(t *testing.T) {
+	result := make(chan error, 1)
+	client, _, _ := sendTimeoutPipeServer(t, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, err := writer.Write([]byte(strings.Repeat("x", 32*1024)))
+		result <- err
+	}))
+	go func() {
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+		buffer := make([]byte, 1024)
+		for range ticker.C {
+			if _, err := client.Read(buffer); err != nil {
+				return
+			}
+		}
+	}()
+	select {
+	case err := <-result:
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("steady 20ms reader was cut inside one Write: %v", err)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("progressing response failed to complete")
+	}
+}
 
 func sendTimeoutTestServer(t *testing.T, protocol string, timeout time.Duration, handler http.Handler) (*httptest.Server, *http.Client) {
 	t.Helper()
@@ -26,6 +160,9 @@ func sendTimeoutTestServer(t *testing.T, protocol string, timeout time.Duration,
 		t.Fatal(err)
 	}
 	server := httptest.NewUnstartedServer(router.For("test"))
+	server.Listener = respwriter.WithSendTimeoutListener(server.Listener)
+	server.Config.ConnContext = respwriter.SendTimeoutContext
+	server.Config.ConnState = respwriter.SendTimeoutConnState
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
 	protocols.SetHTTP2(protocol == "h2")

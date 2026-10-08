@@ -6,6 +6,7 @@ The exact assessment contract, candidate disposition, categories, origin, and li
 
 The #518 extension also checks explicit server-level `send_timeout 30s` and
 location-level `send_timeout 10s` translation, including assessment and candidate
-ownership. Runtime downstream behavior is separately covered by the router's
+ownership. Assessment records the HTTP/2/3 per-operation approximation rather
+than claiming cross-protocol byte-progress equivalence. Runtime downstream behavior is separately covered by the router's
 stalled-reader, progressing-stream and quiet-gap protocol tests; the older
 backend-timeout E2E is not relabeled as downstream-timeout evidence.

@@ -101,8 +101,8 @@ var capabilityRegistry = map[capabilityKey]capability{
 	{ContextLocation, "proxy_connect_timeout"}:     supported("NGX_LOCATION_PROXY_CONNECT_TIMEOUT", RiskAvailability, "connection establishment timeout is translated", []string{"servers[].locations[].proxy_connect_timeout"}),
 	{ContextLocation, "proxy_read_timeout"}:        supported("NGX_LOCATION_PROXY_READ_TIMEOUT", RiskAvailability, "upstream read-inactivity timeout is translated", []string{"servers[].locations[].proxy_read_timeout"}),
 	{ContextLocation, "proxy_send_timeout"}:        supported("NGX_LOCATION_PROXY_SEND_TIMEOUT", RiskAvailability, "upstream write-inactivity timeout is translated", []string{"servers[].locations[].proxy_send_timeout"}),
-	{ContextServer, "send_timeout"}:                supported("NGX_SERVER_SEND_TIMEOUT", RiskAvailability, "explicit downstream write-inactivity timeout is translated", []string{"servers[].send_timeout"}),
-	{ContextLocation, "send_timeout"}:              supported("NGX_LOCATION_SEND_TIMEOUT", RiskAvailability, "explicit downstream write-inactivity timeout override is translated", []string{"servers[].locations[].send_timeout"}),
+	{ContextServer, "send_timeout"}:                approximated("NGX_SERVER_SEND_TIMEOUT", RiskAvailability, "translated with HTTP/1.1 byte-progress inactivity; HTTP/2/3 have per-stream operation bounds"),
+	{ContextLocation, "send_timeout"}:              approximated("NGX_LOCATION_SEND_TIMEOUT", RiskAvailability, "translated override with HTTP/1.1 byte-progress inactivity; HTTP/2/3 have per-stream operation bounds"),
 	{ContextLocation, "proxy_next_upstream_tries"}: approximated("NGX_LOCATION_RETRY_ATTEMPTS", RiskAvailability, "an explicit bound of 2 or more tries is translated to retry_attempts (tries-1); 0 (unlimited) or 1 (no retry) cannot be distinguished from Jul's own \"inherit the pool default\" sentinel and stay blocking"),
 
 	// Bounded proxy_cache subset: a single proxy_cache_path zone declared at
