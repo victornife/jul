@@ -107,6 +107,39 @@ detected. If a finding is known (e.g., a transitive dependency with a disclosed
 but non-reachable vulnerability in your configuration), document the exception
 in an issue comment and link the issue in your PR description.
 
+### Repository health badges
+
+The README uses maintained services for the badge categories in the
+[2022 badge article](https://medium.com/@i.egilmez/top-5-badges-that-will-show-your-github-repository-is-well-tested-trusted-4edd3bd132b3):
+
+| Article service | Repository badge |
+| --- | --- |
+| Snyk | Public repository security badge; a `monitored` label is not a zero-vulnerability claim. |
+| Codecov | Existing coverage badge, unchanged. |
+| LGTM | CodeQL workflow status. LGTM shut down in December 2022. |
+| Code Climate | Qlty maintainability rating. |
+| Thundra Foresight | Existing Tests & CI workflow status, not Foresight-specific metrics. |
+
+The CodeQL badge tracks the existing GitHub-managed default setup workflow.
+Its languages and query suite are managed in the repository's code scanning
+settings; this badge integration does not change them or add a custom workflow,
+new repository secrets, or an advanced-setup requirement. The badge reports
+workflow completion, not an alert count or proof that the repository has no
+vulnerabilities. It is not evidence of explicit lean/full build-tag coverage.
+
+Qlty's GitHub app is connected to `victornife/jul`; the README displays its
+measured [maintainability rating](https://qlty.sh/gh/victornife/projects/jul).
+Badge snippets are available in the project's **Settings > Badges**. To
+configure Qlty for another repository, follow the
+[setup guide](https://docs.qlty.sh/cloud/quickstart).
+
+No Qlty coverage uploader is needed; Codecov remains the coverage provider.
+See [Qlty's badge documentation](https://docs.qlty.sh/coverage/status-badges).
+The Tests & CI badge reflects the existing workflow's aggregate outcome,
+including its lean/full test lanes. It does not expose passed/failed/skipped
+counts, successful-test percentages, or setup/teardown utilization; those
+Foresight metrics are not collected by this integration.
+
 ## Coding standards
 
 - Go style follows `gofmt` and `golangci-lint`.

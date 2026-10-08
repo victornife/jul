@@ -61,6 +61,11 @@ v2.1.0 tag or its packaged READMEs.
 
 ### Fixed
 
+- **Configuration watcher shutdown.** `Serve` now cancels and joins its
+  file-backed configuration watcher before returning. Notification channels
+  close after the backend event stream ends, so watcher teardown cannot
+  outlive the owning runtime and overlap subsequent filesystem work.
+
 - **Admin profiler request-generation policy (#514).** The profiler enabled
   gate uses the same captured admin generation as authentication and admission.
   New requests see policy updates; already admitted requests keep their

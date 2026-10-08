@@ -5,10 +5,13 @@
 </p>
 
 [![Status](https://img.shields.io/badge/status-active-brightgreen.svg)](https://github.com/victornife/jul)
-[![CI](https://github.com/victornife/jul/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/victornife/jul/actions/workflows/ci.yml)
+[![Tests & CI](https://github.com/victornife/jul/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/victornife/jul/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/victornife/jul/actions/workflows/github-code-scanning/codeql/badge.svg?branch=main)](https://github.com/victornife/jul/actions/workflows/github-code-scanning/codeql)
 [![Go Version](https://img.shields.io/badge/go-1.26-blue.svg)](https://github.com/victornife/jul/blob/main/go.mod)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/victornife/jul#license)
 [![Codecov](https://codecov.io/gh/victornife/jul/graph/badge.svg?branch=main)](https://codecov.io/gh/victornife/jul)
+[![Snyk security](https://snyk.io/test/github/victornife/jul/badge.svg)](https://snyk.io/test/github/victornife/jul)
+[![Maintainability](https://qlty.sh/gh/victornife/projects/jul/maintainability.svg)](https://qlty.sh/gh/victornife/projects/jul)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/victornife/jul)
 
 **Jul.IA** is a self-contained edge and protocol gateway written in Go and

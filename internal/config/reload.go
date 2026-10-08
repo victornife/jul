@@ -15,7 +15,8 @@ import (
 // WatchFile watches the configuration file for changes and emits a debounced
 // signal on the returned channel. It watches the parent directory (not the file
 // directly) so that atomic-rename saves common in editors are detected. The
-// watcher stops when ctx is cancelled.
+// watcher stops when ctx is cancelled and closes the returned channel after
+// its event reader has stopped.
 //
 // Events are coalesced within debounce so a burst of writes triggers a single
 // reload.
@@ -41,7 +42,12 @@ func WatchFile(ctx context.Context, path string, debounce time.Duration, log *sl
 	}
 
 	go func() {
-		defer w.Close()
+		defer func() {
+			_ = w.Close()
+			for range w.Events {
+			}
+			close(out)
+		}()
 		watchFileEvents(ctx, abs, debounce, log, w.Events, w.Errors, out)
 	}()
 
