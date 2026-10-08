@@ -104,7 +104,7 @@ inside the immutable release archives. They do not close the partial-audit ledge
 | Secrets references + log redaction | [secrets.md](secrets.md) | `GA` / `soaked` |
 | Response cache (memory + disk) | [cache.md](cache.md) | `GA` / `soaked` |
 | Core HTTP (static / proxy / FastCGI / vhosts / routing) | [core-http.md](core-http.md) | `GA` / `soaked` |
-| Downstream write-inactivity timeout | [core-http.md](core-http.md#downstream-write-inactivity) | `Beta` / `implemented` |
+| Downstream write-inactivity timeout | [core-http.md](core-http.md#downstream-write-inactivity) | `Beta` / `merged` |
 | Configuration reload transaction | [reload-semantics.md](reload-semantics.md) | `GA` / `soaked` |
 | Trusted client address (client_address) | [configuration.md](configuration.md) | `GA` / `soaked` |
 | Backend TLS trust (backend_tls) | [upstreams.md](upstreams.md) | `GA` / `soaked` |
