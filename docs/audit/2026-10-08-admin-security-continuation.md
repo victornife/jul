@@ -39,8 +39,8 @@ NGINX migration classification: **not applicable**, admin-plane policy only.
 Focused changed/added Go production coverage: **3/3 statements = 100%**, measured
 with the repository's HR-07C block-intersection scorer on the owning regression
 profile. No statement exclusion or move filtering was used. Documentation
-checks passed during development; exact-head CI and full readiness gates are
-not claimed for this uncommitted continuation.
+checks passed during development. The final-source baseline checks below are
+separate from exact-head hosted CI and reviewer/merge evidence.
 
 ## Private security disposition
 
@@ -128,7 +128,7 @@ and plugin/editor files pass 59 tests, lint and typecheck. The private candidate
 frontend coverage gate passed 822 tests with unchanged thresholds before the
 authorized source transfer. API contracts were regenerated from the owning
 source; all generated authorities verify unchanged or correctly regenerated.
-This evidence is local and uncommitted,
+This evidence is measured on the local branch source,
 not a relabeled exact-head CI or a completed exhaustive review.
 
 ## Focused remediation verification
