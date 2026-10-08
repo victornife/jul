@@ -114,8 +114,13 @@ func TestReloadSubsystemsInitializedToNotRun(t *testing.T) {
 	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }() //nolint:errcheck
 	waitDialable(t, addr)
 
-	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
-	time.Sleep(50 * time.Millisecond)
+	resultCh := make(chan ReloadResult, 1)
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP, Result: resultCh}
+	select {
+	case <-resultCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for rejected reload result")
+	}
 
 	li := srv.LastReload()
 	if li == nil {
@@ -154,8 +159,13 @@ func TestReloadRecordsSuccessAndDuration(t *testing.T) {
 	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }() //nolint:errcheck
 	waitDialable(t, addr)
 
-	reload <- ReloadRequest{Source: ReloadSourceSIGHUP}
-	time.Sleep(50 * time.Millisecond)
+	resultCh := make(chan ReloadResult, 1)
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP, Result: resultCh}
+	select {
+	case <-resultCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for successful reload result")
+	}
 
 	li := srv.LastReload()
 	if li == nil {
