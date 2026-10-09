@@ -430,8 +430,10 @@ operator-controlled backend/load-balancer termination or process shutdown may
 be required. Closing one HTTP/2 stream does not re-handshake its shared TLS
 connection. No maximum connection age or graceful upgraded-session drain is
 implemented by #519. The existing retirement metric is wired, but its `forced`
-mode counts resource retirement rather than proving all streams were cut;
-Console additions remain deferred. HTTP `send_timeout` bounds stalled output, not quiet
+mode counts resource retirement rather than proving all streams were cut.
+The Console **Status** view shows graceful/forced totals since process start;
+see [retirement observability](observability.md#handler-generation-retirement).
+HTTP `send_timeout` bounds stalled output, not quiet
 time between events or total stream lifetime, and does not apply after hijack.
 HTTP/2 retains the documented per-operation rather than intra-write progress
 bound. L4 sessions have their separate shutdown owner and timeout policy.
