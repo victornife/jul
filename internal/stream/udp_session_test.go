@@ -38,6 +38,60 @@ func (m *udpMetrics) hooks() Hooks {
 	}
 }
 
+func TestLongLivedUDPSessionReloadAndShutdown(t *testing.T) {
+	backend, stop := udpEcho(t)
+	defer stop()
+	address := freeUDPAddr(t)
+	var sessions, opened atomic.Int64
+	server := newTestServer(t, Hooks{OnConnDelta: func(_ string, delta int64) {
+		sessions.Add(delta)
+		if delta > 0 {
+			opened.Add(delta)
+		}
+	}})
+	configuration := []config.StreamServer{{Listen: address, Protocol: "udp", ProxyPass: backend, IdleTimeout: config.Duration(time.Hour)}}
+	if err := server.Reload(configuration, nil); err != nil {
+		t.Fatal(err)
+	}
+	client, err := net.Dial("udp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	echo := func(message string) {
+		t.Helper()
+		if err := client.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := client.Write([]byte(message)); err != nil {
+			t.Fatal(err)
+		}
+		payload := make([]byte, 64)
+		count, err := client.Read(payload)
+		if err != nil || string(payload[:count]) != message {
+			t.Fatalf("datagram=%q err=%v, want %q", payload[:count], err, message)
+		}
+	}
+	echo("before")
+	if !eventually(func() bool { return sessions.Load() == 1 }) {
+		t.Fatal("initial UDP session not accounted")
+	}
+	configuration[0].IdleTimeout = config.Duration(2 * time.Hour)
+	if err := server.Reload(configuration, nil); err != nil {
+		t.Fatal(err)
+	}
+	echo("after reload")
+	if sessions.Load() != 1 || opened.Load() != 1 {
+		t.Fatalf("reload replaced the established session: active=%d opened=%d", sessions.Load(), opened.Load())
+	}
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !eventually(func() bool { return sessions.Load() == 0 }) {
+		t.Fatal("UDP session survived server shutdown")
+	}
+}
+
 // TestAdmitUDPLocked exercises the cap/eviction decision in isolation: below the
 // cap admit unconditionally; at the cap reclaim the least-recently-seen session
 // only if it is already idle past idle_timeout; otherwise reject. Pending dials

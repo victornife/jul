@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"jul/internal/config"
@@ -18,6 +19,62 @@ import (
 	"jul/internal/redact"
 	"jul/internal/upstream"
 )
+
+func TestLongLivedHTTPForcedRetirementDoesNotCancelRequest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		server := leaseTestServer(time.Second)
+		entered, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		retired := make(chan struct{})
+		var requestError error
+		old := newHandlerGen(context.Background(), time.Second, map[string]http.Handler{
+			":80": http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				close(entered)
+				<-release
+				requestError = request.Context().Err()
+				_, _ = io.WriteString(writer, "old generation completed")
+			}),
+		}, nil, 1)
+		server.handlers.Store(old)
+		response := httptest.NewRecorder()
+		go func() {
+			server.dynamicHandler(":80").ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+			close(finished)
+		}()
+		<-entered
+		server.handlers.Store(newHandlerGen(context.Background(), time.Second, nil, nil, 2))
+		server.retireGen(old, func() { close(retired) }, nil, nil)
+		synctest.Wait()
+		select {
+		case <-retired:
+			t.Fatal("resources retired before grace elapsed")
+		default:
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		select {
+		case <-retired:
+		default:
+			t.Fatal("active generation resources not forcibly retired at grace")
+		}
+		if got := old.inflight.Load(); got != 1 {
+			t.Fatalf("in-flight requests after forced retirement=%d, want 1", got)
+		}
+		close(release)
+		<-finished
+		server.wg.Wait()
+		if requestError != nil {
+			t.Fatalf("retirement canceled the HTTP request: %v", requestError)
+		}
+		if got := response.Body.String(); got != "old generation completed" {
+			t.Fatalf("response=%q", got)
+		}
+		select {
+		case <-old.drained:
+		default:
+			t.Fatal("generation did not drain after request completed")
+		}
+	})
+}
 
 // TestRedactionGenerationRegistryUnionAndRetire verifies the per-generation
 // redaction registry used by Publish: secrets are masked while any active

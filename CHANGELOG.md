@@ -15,11 +15,21 @@ v2.1.0 tag or its packaged READMEs.
 
 ### Added
 
+- **Long-lived connection lifecycle evidence (#519).** Document the named-test
+  reload, forced-retirement, shutdown, mTLS/CRL and `send_timeout` matrix for
+  HTTP/1, HTTP/2, WebSocket, SSE, native/transcoded gRPC and L4. Real-client
+  tests distinguish retained proxy streams from owned transcoder cancellation,
+  and prove that a revoked client's established TLS stream can continue while
+  new handshakes are rejected. Optional connection-age, shutdown-notifier and
+  forced-retirement metric additions are explicitly deferred; runtime policy
+  and maturity are unchanged.
+
 - **Opt-in route HTTP metrics and chart (#521).** Startup `route_label` adds
   durable route IDs to request, latency and response-byte families, preserving
   default schemas. Enabled host labels are configuration-bounded. Publication
   prunes retired series while lifetime Console totals stay independent. Status
-  and selected-route RED/bytes charts are included. Beta, not yet merged/released.
+  and selected-route RED/bytes charts are included. Beta, merged on main;
+  release publication remains pending.
 
 - **Downstream write-inactivity timeout (#518).** Optional server and location
   `send_timeout` bounds stalled output without imposing a response lifetime.

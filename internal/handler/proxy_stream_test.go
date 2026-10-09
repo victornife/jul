@@ -6,18 +6,245 @@ package handler
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"golang.org/x/net/websocket"
 
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/respwriter"
+	"jul/internal/server"
+	"jul/internal/upstream"
 )
+
+type longLivedServer struct {
+	address string
+	grace   time.Duration
+	retired chan struct{}
+	reloads chan server.ReloadRequest
+	stop    func()
+}
+
+func newLongLivedServer(t *testing.T, handler http.Handler, grace ...time.Duration) *longLivedServer {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close()
+	cfg := config.ProxyTarget("http://127.0.0.1:9001", address)
+	cfg.Global.ShutdownTimeout = config.Duration(100 * time.Millisecond)
+	if len(grace) != 0 {
+		cfg.Global.ShutdownTimeout = config.Duration(grace[0])
+	}
+	cfg.Servers[0].H2C = true
+	candidate, err := config.NewCandidate(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := &longLivedServer{address: address, grace: cfg.Global.ShutdownTimeout.Std(), retired: make(chan struct{}), reloads: make(chan server.ReloadRequest)}
+	var generation uint64
+	var retireOnce sync.Once
+	factory := func(context.Context, *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		generation++
+		var retire func()
+		if generation > 1 {
+			retire = func() {
+				retireOnce.Do(func() {
+					if closer, ok := handler.(io.Closer); ok {
+						if err := closer.Close(); err != nil {
+							t.Errorf("retire handler: %v", err)
+						}
+					}
+					close(fixture.retired)
+				})
+			}
+		}
+		return map[string]http.Handler{address: handler}, generation, func() (upstream.SnapshotMap, func()) { return nil, retire }, func() {}, nil
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := server.New(candidate.Effective, candidate.Raw, lifecycle.ComputeFingerprint(candidate.Effective), log, factory, config.NewTOMLSource(""), func(context.Context, *config.Config) error { return nil })
+	ready := make(chan struct{})
+	srv.OnInitialGenerationReady = func() { close(ready) }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, fixture.reloads, candidate.Redaction) }()
+	var stopOnce sync.Once
+	fixture.stop = func() {
+		stopOnce.Do(func() {
+			cancel()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Errorf("server shutdown: %v", err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Error("server shutdown did not return")
+			}
+		})
+	}
+	t.Cleanup(fixture.stop)
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatalf("server start: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("server did not become ready")
+	}
+	return fixture
+}
+
+func (fixture *longLivedServer) reload(t *testing.T) {
+	t.Helper()
+	cfg := config.ProxyTarget("http://127.0.0.1:9001", fixture.address)
+	cfg.Global.ShutdownTimeout = config.Duration(fixture.grace)
+	cfg.Global.LogLevel = "debug"
+	cfg.Servers[0].H2C = true
+	candidate, err := config.NewCandidate(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan server.ReloadResult, 1)
+	fixture.reloads <- server.ReloadRequest{Source: server.ReloadSourceAdmin, Candidate: candidate, Result: result}
+	select {
+	case reload := <-result:
+		if reload.Outcome != server.ReloadAppliedLive {
+			t.Fatalf("reload=%+v", reload)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("reload did not finish")
+	}
+}
+
+func (fixture *longLivedServer) waitRetired(t *testing.T) {
+	t.Helper()
+	select {
+	case <-fixture.retired:
+	case <-time.After(10 * time.Second):
+		t.Fatal("old generation resources did not retire")
+	}
+}
+
+func TestLongLivedWebSocketReloadAndShutdown(t *testing.T) {
+	for _, phase := range []string{"reload_and_forced_retirement", "shutdown"} {
+		t.Run(phase, func(t *testing.T) {
+			backend := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
+				for {
+					var message []byte
+					if err := websocket.Message.Receive(connection, &message); err != nil {
+						return
+					}
+					if err := websocket.Message.Send(connection, message); err != nil {
+						return
+					}
+				}
+			}))
+			t.Cleanup(backend.Close)
+			fixture := newLongLivedServer(t, newProxy(t, config.LocationConfig{ProxyPass: backend.URL}, nil))
+			connection, err := websocket.Dial("ws://"+fixture.address+"/", "", "http://"+fixture.address)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = connection.Close() })
+			echo := func(value string) {
+				t.Helper()
+				if err := connection.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+					t.Fatal(err)
+				}
+				if err := websocket.Message.Send(connection, []byte(value)); err != nil {
+					t.Fatal(err)
+				}
+				var received []byte
+				if err := websocket.Message.Receive(connection, &received); err != nil {
+					t.Fatal(err)
+				}
+				if string(received) != value {
+					t.Fatalf("echo=%q, want %q", received, value)
+				}
+			}
+			echo("before")
+			if phase == "shutdown" {
+				fixture.stop()
+				echo("hijacked tunnel still alive after server drain returns")
+			} else {
+				fixture.reload(t)
+				echo("after reload")
+				fixture.waitRetired(t)
+				echo("after forced retirement")
+			}
+		})
+	}
+}
+
+func TestLongLivedSSEReloadAndShutdown(t *testing.T) {
+	for _, phase := range []string{"reload_and_forced_retirement", "shutdown"} {
+		t.Run(phase, func(t *testing.T) {
+			events := make(chan string, 1)
+			backend := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.Header().Set("Content-Type", "text/event-stream")
+				writer.WriteHeader(http.StatusOK)
+				_, _ = io.WriteString(writer, "data: before\n\n")
+				_ = http.NewResponseController(writer).Flush()
+				for {
+					select {
+					case <-request.Context().Done():
+						return
+					case event := <-events:
+						if _, err := fmt.Fprintf(writer, "data: %s\n\n", event); err != nil {
+							return
+						}
+						if err := http.NewResponseController(writer).Flush(); err != nil {
+							return
+						}
+					}
+				}
+			}))
+			t.Cleanup(backend.Close)
+			fixture := newLongLivedServer(t, newProxy(t, config.LocationConfig{ProxyPass: backend.URL}, nil))
+			client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}, Timeout: 10 * time.Second}
+			response, err := client.Get("http://" + fixture.address + "/events")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = response.Body.Close() })
+			reader := bufio.NewReader(response.Body)
+			if event := readSSEDataWithin(t, reader, 5*time.Second); event != "before" {
+				t.Fatalf("first event=%q", event)
+			}
+			if phase == "shutdown" {
+				fixture.stop()
+				if _, err := reader.ReadString('\n'); err != nil {
+					t.Fatalf("event separator: %v", err)
+				}
+				if _, err := reader.ReadString('\n'); err == nil {
+					t.Fatal("SSE response still open after shutdown grace")
+				}
+			} else {
+				fixture.reload(t)
+				events <- "after reload"
+				if event := readSSEDataWithin(t, reader, 5*time.Second); event != "after reload" {
+					t.Fatalf("reload event=%q", event)
+				}
+				fixture.waitRetired(t)
+				events <- "after forced retirement"
+				if event := readSSEDataWithin(t, reader, 5*time.Second); event != "after forced retirement" {
+					t.Fatalf("retirement event=%q", event)
+				}
+			}
+		})
+	}
+}
 
 // TestProxyWebSocketPassthrough is the WebSocket conformance test: it proves an
 // end-to-end Upgrade (RFC 6455 handshake + framed text and binary messages)
