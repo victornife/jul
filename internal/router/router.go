@@ -36,6 +36,7 @@ type locationRoute struct {
 	predicates          *compiledPredicates
 	rewrites            []compiledRewrite
 	handler             http.Handler
+	metricRoute         string
 	sendTimeout         time.Duration
 	overrideSendTimeout bool
 	// index is the location's position in its server block's declaration order,
@@ -147,6 +148,10 @@ func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback 
 	bodyLimit := srv.ClientMaxBodySize.Bytes()
 	for i, loc := range srv.Locations {
 		lr := &locationRoute{matchType: loc.Match.Type, path: loc.Match.Path, index: i}
+		lr.metricRoute = "_unidentified"
+		if loc.RouteID != nil && *loc.RouteID != "" {
+			lr.metricRoute = *loc.RouteID
+		}
 		if loc.SendTimeout != nil {
 			lr.sendTimeout = loc.SendTimeout.Std()
 			lr.overrideSendTimeout = true
@@ -274,6 +279,11 @@ func (r *Router) For(addr string) http.Handler {
 			http.NotFound(w, req)
 			return
 		}
+		metricHost := "_other"
+		if srv.score(normalizeHost(req.Host)) > 0 && len(srv.names) > 0 {
+			metricHost = normalizeHost(srv.names[0])
+		}
+		middleware.SetHTTPMetricLabels(req, metricHost, "_unmatched")
 		var absoluteDeadline time.Time
 		if srv.writeTimeout > 0 {
 			absoluteDeadline = time.Now().Add(srv.writeTimeout)
@@ -296,6 +306,7 @@ func (r *Router) For(addr string) http.Handler {
 			http.NotFound(w, req)
 			return
 		}
+		middleware.SetHTTPMetricLabels(req, metricHost, loc.metricRoute)
 		sendTimeout := srv.sendTimeout
 		if loc.overrideSendTimeout {
 			sendTimeout = loc.sendTimeout

@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 369,
-    "schema_leaves": 314,
+    "schema_paths": 370,
+    "schema_leaves": 315,
     "resources": 9
   },
   "capability_build_tags": {
@@ -1027,6 +1027,19 @@
       "lifecycle_reason": "an atomic flag read by the metrics middleware on each request; OnReloaded flips it on every successful reload without rebuilding the registry or resetting any collector (#91)",
       "description": "HostLabel adds the request Host as the \"host\" label on jul_http_requests_total and jul_http_request_duration_seconds",
       "anchor": "observability-metrics-host_label"
+    },
+    "observability.metrics.route_label": {
+      "kind": "scalar",
+      "scalar": "bool",
+      "go_type": "bool",
+      "optional": false,
+      "dynamic": false,
+      "subsystem": "metrics",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "route labels change collector dimensions; the process-owned registry is constructed once and remains unchanged across reloads",
+      "startup_consumed": true,
+      "description": "RouteLabel opts into configuration-bounded route IDs on HTTP counters, latency and response bytes; requires restart",
+      "anchor": "observability-metrics-route_label"
     },
     "observability.tracing.enabled": {
       "kind": "scalar",

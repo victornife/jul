@@ -1523,24 +1523,24 @@ Tune the Prometheus metrics exposed at the admin `/metrics` endpoint. These
 metrics cover HTTP requests, cache events, upstream health, rate limiting, and
 more. No build tag is required.
 
-The `host_label` setting controls whether the request `Host` header is added as
-a Prometheus label. It is **off by default** because unbounded host values can
-explode metric cardinality.
+Optional labels are off by default. Enabled host labels use the matched
+server's primary configured name or `_other`, never raw request Host values.
 
 ```toml
 [observability.metrics]
 host_label = false
+route_label = false
 ```
 
 | Key | Type | Description |
 | --- | ---- | ----------- |
-| `host_label` | bool | Add the request `Host` as the `host` label on `jul_http_requests_total` and `jul_http_request_duration_seconds` (default `false`) |
+| `host_label` | bool | Enable configuration-bounded host labels; disabled values are empty (default `false`). Hot-reloadable |
+| `route_label` | bool | Add route ID labels to HTTP request, latency and response-byte families (default `false`). Requires restart because collector dimensions change |
 
-The `host` label is **off by default**: the Host header is client-controlled, so
-recording it unconditionally lets a flood of distinct Host values explode metric
-cardinality. Enable `host_label` only when the set of hosts is bounded. The
-setting is read once at boot; a reload keeps the running value — restart to
-apply a change.
+Locations without durable IDs use `_unidentified`; unmatched requests use
+`_unmatched`. Successful publication updates allowed label inventory and prunes
+retired series. See [per-route HTTP metrics](observability.md#per-route-http-metrics)
+for counter continuity, schemas and the selected-route Console chart.
 
 Every other metric label is bounded by construction — the request `method` is
 folded to a fixed set (unknown tokens become `other`), and no request path,

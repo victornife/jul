@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/observability"
 )
 
 // validTOML returns a marshaled, validate-passing starter config for tests.
@@ -149,10 +150,11 @@ func TestStatusAPI(t *testing.T) {
 			Strategy: "consistent_hash",
 			Hash:     &config.HashConfig{Key: "cookie", Name: "sid"},
 		}},
-		Compression: config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip", "br"}},
-		RateLimit:   config.RateLimitConfig{Enabled: true, Rate: 100},
-		Cache:       config.CacheConfig{Enabled: true},
-		Admin:       config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090"},
+		Compression:   config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip", "br"}},
+		Observability: config.ObservabilityConfig{Metrics: config.MetricsConfig{RouteLabel: true}},
+		RateLimit:     config.RateLimitConfig{Enabled: true, Rate: 100},
+		Cache:         config.CacheConfig{Enabled: true},
+		Admin:         config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090"},
 	}
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		Metrics:    http.NewServeMux(),
@@ -180,6 +182,7 @@ func TestStatusAPI(t *testing.T) {
 		"gRPC transcoding", "Upstream pools", "Active health checks", "Service discovery",
 		"Consistent-hash affinity",
 		"Prometheus metrics", "Access log", "Backend dial-failure accounting",
+		"Per-route HTTP metrics",
 		"Admin transport security", "Supported external admin API",
 	}
 	for _, name := range wantActive {
@@ -194,6 +197,24 @@ func TestStatusAPI(t *testing.T) {
 		if active[name] {
 			t.Errorf("capability %q = active, want inactive", name)
 		}
+	}
+}
+
+func TestStatsAPIRouteMetricsProjection(t *testing.T) {
+	server := newTestServer(t, config.AdminConfig{}, Deps{Stats: func() observability.StatsSnapshot {
+		return observability.StatsSnapshot{Available: true, RouteMetricsEnabled: true, RouteMetrics: []observability.HTTPRouteStats{{RouteID: "route-one", Requests: 10, Errors: 2, ResponseBytes: 100, DurationCount: 10, DurationSumSeconds: 0.5}}}
+	}})
+	response := httptest.NewRecorder()
+	server.routes().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/stats", nil))
+	var snapshot observability.StatsSnapshot
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d", response.Code)
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.RouteMetricsEnabled || len(snapshot.RouteMetrics) != 1 || snapshot.RouteMetrics[0].RouteID != "route-one" {
+		t.Fatalf("snapshot=%+v", snapshot.RouteMetrics)
 	}
 }
 

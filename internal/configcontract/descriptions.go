@@ -114,6 +114,7 @@ var DescriptionOverrides = map[string]string{
 	"global.access_log":                             "AccessLog is the destination for access records (e.g. a file path or \"stdout\")",
 	"global.error_log":                              "ErrorLog is the legacy destination for error records, kept for v1 compatibility",
 	"observability.tracing.enabled":                 "Enabled turns on OpenTelemetry distributed tracing",
+	"observability.metrics.route_label":             "RouteLabel opts into configuration-bounded route IDs on HTTP counters, latency and response bytes; requires restart",
 	"rate_limit.enabled":                            "Enabled turns on request rate limiting",
 	"servers.*.access_log":                          "AccessLog overrides the global access-log destination for this server block",
 	"servers.*.error_log":                           "ErrorLog overrides the global legacy error-log destination for this server block",

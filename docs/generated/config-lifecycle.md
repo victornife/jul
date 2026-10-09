@@ -17,12 +17,12 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 369 |
-| Schema leaves (configurable values) | 314 |
-| Registry entries | 314 |
-| Startup-consumed entries | 28 |
+| Schema paths (containers included) | 370 |
+| Schema leaves (configurable values) | 315 |
+| Registry entries | 315 |
+| Startup-consumed entries | 29 |
 | Class `hot_reload` | 272 |
-| Class `restart_required` | 28 |
+| Class `restart_required` | 29 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 3 |
@@ -184,6 +184,7 @@ value is compared as a digest so no secret material leaves the process.
 | `observability.access_log.rotate_max_mb` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
 | `observability.access_log.sinks` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
 | `observability.metrics.host_label` | `hot_reload` | `metrics` | — | an atomic flag read by the metrics middleware on each request; OnReloaded flips it on every successful reload without rebuilding the registry or resetting any collector (#91) |
+| `observability.metrics.route_label` | `restart_required` | `metrics` | startup | route labels change collector dimensions; the process-owned registry is constructed once and remains unchanged across reloads |
 | `observability.tracing.enabled` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |
 | `observability.tracing.endpoint` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |
 | `observability.tracing.exporter` | `restart_required` | `tracing` | startup | the tracer provider and exporter are created once at startup |

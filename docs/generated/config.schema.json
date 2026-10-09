@@ -492,6 +492,10 @@
             "host_label": {
               "description": "HostLabel adds the request Host as the \"host\" label on jul_http_requests_total and jul_http_request_duration_seconds",
               "type": "boolean"
+            },
+            "route_label": {
+              "description": "RouteLabel opts into configuration-bounded route IDs on HTTP counters, latency and response bytes; requires restart",
+              "type": "boolean"
             }
           },
           "type": "object"

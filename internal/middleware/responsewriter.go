@@ -5,11 +5,40 @@ package middleware
 
 import (
 	"bufio"
+	"context"
 	"net"
 	"net/http"
+	"sync"
 
 	"jul/internal/respwriter"
 )
+
+type HTTPMetricLabels struct {
+	mu    sync.Mutex
+	host  string
+	route string
+}
+
+type httpMetricLabelsKey struct{}
+
+func WithHTTPMetricLabels(request *http.Request) (*http.Request, *HTTPMetricLabels) {
+	labels := &HTTPMetricLabels{host: "_other", route: "_unmatched"}
+	return request.WithContext(context.WithValue(request.Context(), httpMetricLabelsKey{}, labels)), labels
+}
+
+func SetHTTPMetricLabels(request *http.Request, host, route string) {
+	if labels, ok := request.Context().Value(httpMetricLabelsKey{}).(*HTTPMetricLabels); ok {
+		labels.mu.Lock()
+		labels.host, labels.route = host, route
+		labels.mu.Unlock()
+	}
+}
+
+func (labels *HTTPMetricLabels) Values() (string, string) {
+	labels.mu.Lock()
+	defer labels.mu.Unlock()
+	return labels.host, labels.route
+}
 
 // Recorder observes a response as it is produced so an observer middleware
 // (metrics, access log, tracing) can report the final status and byte count

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,13 +19,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	dto "github.com/prometheus/client_model/go"
 
+	"jul/internal/config"
 	"jul/internal/middleware"
 )
 
 // Metrics holds the Prometheus collectors and a dedicated registry so the
 // admin /metrics endpoint exposes only this server's metrics.
 type Metrics struct {
-	registry *prometheus.Registry
+	registry          *prometheus.Registry
+	aggregateRegistry *prometheus.Registry
+	aggregateRequests *prometheus.CounterVec
+	aggregateDuration *prometheus.HistogramVec
 
 	// hostLabelEnabled controls whether the request Host is recorded as the
 	// "host" label on jul_http_requests_total / jul_http_request_duration_seconds.
@@ -33,7 +38,13 @@ type Metrics struct {
 	// cardinality. When disabled the label is emitted with an empty value so the
 	// metric shape is stable for dashboards. Atomic so it hot-reloads (#91)
 	// without replacing the registry or resetting any collector.
-	hostLabelEnabled atomic.Bool
+	hostLabelEnabled    atomic.Bool
+	routeLabelEnabled   bool
+	routeResponseBytes  *prometheus.CounterVec
+	labelInventoryMu    sync.RWMutex
+	labelInventoryReady bool
+	metricHosts         map[string]bool
+	metricRoutes        map[string]bool
 
 	requests    *prometheus.CounterVec
 	duration    *prometheus.HistogramVec
@@ -214,6 +225,46 @@ type MetricsOption func(*Metrics)
 // otherwise drive unbounded metric cardinality.
 func WithHostLabel(on bool) MetricsOption {
 	return func(m *Metrics) { m.hostLabelEnabled.Store(on) }
+}
+
+func WithRouteLabel(on bool) MetricsOption {
+	return func(metrics *Metrics) { metrics.routeLabelEnabled = on }
+}
+
+func (metrics *Metrics) SetHTTPLabelInventory(servers []config.ServerConfig) {
+	hosts := map[string]bool{"": true, "_other": true}
+	routes := map[string]bool{"_unmatched": true, "_unidentified": true}
+	for _, server := range servers {
+		if len(server.ServerNames) > 0 {
+			hosts[strings.ToLower(strings.TrimSuffix(hostLabel(strings.TrimSpace(server.ServerNames[0])), "."))] = true
+		}
+		for _, location := range server.Locations {
+			if location.RouteID != nil && *location.RouteID != "" {
+				routes[*location.RouteID] = true
+			}
+		}
+	}
+	metrics.labelInventoryMu.Lock()
+	defer metrics.labelInventoryMu.Unlock()
+	for host := range metrics.metricHosts {
+		if !hosts[host] {
+			metrics.requests.DeletePartialMatch(prometheus.Labels{"host": host})
+			metrics.duration.DeletePartialMatch(prometheus.Labels{"host": host})
+			if metrics.routeResponseBytes != nil {
+				metrics.routeResponseBytes.DeletePartialMatch(prometheus.Labels{"host": host})
+			}
+		}
+	}
+	if metrics.routeLabelEnabled {
+		for route := range metrics.metricRoutes {
+			if !routes[route] {
+				metrics.requests.DeletePartialMatch(prometheus.Labels{"route": route})
+				metrics.duration.DeletePartialMatch(prometheus.Labels{"route": route})
+				metrics.routeResponseBytes.DeletePartialMatch(prometheus.Labels{"route": route})
+			}
+		}
+	}
+	metrics.metricHosts, metrics.metricRoutes, metrics.labelInventoryReady = hosts, routes, true
 }
 
 // SetHostLabel atomically changes whether future requests record the Host
@@ -499,6 +550,20 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		egressBlocks:  newEgressBlockTracker(),
 	}
 	m.startTime = time.Now()
+	m.aggregateRegistry = prometheus.NewRegistry()
+	m.aggregateRequests = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "jul_http_requests_total", Help: "Lifetime node HTTP request accounting."}, []string{"method", "code"})
+	m.aggregateDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "jul_http_request_duration_seconds", Help: "Lifetime node HTTP latency accounting.", Buckets: prometheus.DefBuckets}, []string{"method"})
+	m.aggregateRegistry.MustRegister(m.aggregateRequests, m.aggregateDuration, m.httpResponseBytes)
+	for _, option := range opts {
+		option(m)
+	}
+	bytesCollector := prometheus.Collector(m.httpResponseBytes)
+	if m.routeLabelEnabled {
+		m.requests = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "jul_http_requests_total", Help: "Total HTTP requests handled, labeled by method, configured host, route ID and status code."}, []string{"method", "host", "route", "code"})
+		m.duration = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "jul_http_request_duration_seconds", Help: "HTTP request latency in seconds, labeled by method, configured host and route ID.", Buckets: prometheus.DefBuckets}, []string{"method", "host", "route"})
+		m.routeResponseBytes = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "jul_http_response_bytes_total", Help: "HTTP response-body bytes written after compression, labeled by method, configured host and route ID."}, []string{"method", "host", "route"})
+		bytesCollector = m.routeResponseBytes
+	}
 	reg.MustRegister(
 		m.admissionRejected,
 		m.retryAttempts,
@@ -512,7 +577,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.requests,
 		m.duration,
 		m.inflight,
-		m.httpResponseBytes,
+		bytesCollector,
 		m.cacheEvents,
 		m.cacheRevalidations,
 		m.cacheCaptureSkipped,
@@ -569,9 +634,6 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
-	for _, opt := range opts {
-		opt(m)
-	}
 	return m
 }
 
@@ -592,11 +654,28 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		defer m.inflight.Dec()
 
 		start := time.Now()
+		hostLabelEnabled := m.hostLabelEnabled.Load()
+		var labels *middleware.HTTPMetricLabels
+		if hostLabelEnabled || m.routeLabelEnabled {
+			r, labels = middleware.WithHTTPMetricLabels(r)
+		}
 		rec := middleware.NewRecorder(w)
 		next.ServeHTTP(rec.Writer(), r)
 
-		host := hostLabel(r.Host)
-		if !m.hostLabelEnabled.Load() {
+		host, route := "_other", "_unmatched"
+		if labels != nil {
+			host, route = labels.Values()
+		}
+		m.labelInventoryMu.RLock()
+		if m.labelInventoryReady {
+			if !m.metricHosts[host] {
+				host = "_other"
+			}
+			if !m.metricRoutes[route] {
+				route = "_unidentified"
+			}
+		}
+		if !hostLabelEnabled {
 			// Opt-out (default): collapse the client-controlled Host to a single
 			// empty series so per-host cardinality cannot grow unbounded.
 			host = ""
@@ -607,9 +686,18 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		// methods cannot explode cardinality (see the metric label policy in
 		// docs/core-http.md).
 		method := methodLabel(r.Method)
-		m.requests.WithLabelValues(method, host, strconv.Itoa(rec.Status())).Inc()
-		m.duration.WithLabelValues(method, host).Observe(time.Since(start).Seconds())
+		m.aggregateRequests.WithLabelValues(method, strconv.Itoa(rec.Status())).Inc()
+		m.aggregateDuration.WithLabelValues(method).Observe(time.Since(start).Seconds())
+		if m.routeLabelEnabled {
+			m.requests.WithLabelValues(method, host, route, strconv.Itoa(rec.Status())).Inc()
+			m.duration.WithLabelValues(method, host, route).Observe(time.Since(start).Seconds())
+			m.routeResponseBytes.WithLabelValues(method, host, route).Add(float64(rec.Bytes()))
+		} else {
+			m.requests.WithLabelValues(method, host, strconv.Itoa(rec.Status())).Inc()
+			m.duration.WithLabelValues(method, host).Observe(time.Since(start).Seconds())
+		}
 		m.httpResponseBytes.Add(float64(rec.Bytes()))
+		m.labelInventoryMu.RUnlock()
 		if state := rec.Header().Get("X-Cache"); state != "" {
 			m.cacheEvents.WithLabelValues(state).Inc()
 		}
@@ -622,11 +710,15 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		// into the per-path failure rollup (Console v2 Milestones 5.1 and 5.2).
 		durationMs := time.Since(start).Seconds() * 1000
 		status := rec.Status()
+		sampleHost := ""
+		if hostLabelEnabled {
+			sampleHost = hostLabel(r.Host)
+		}
 		m.samples.record(RequestSample{
 			Time:        start.UTC(),
 			Method:      r.Method,
 			Path:        r.URL.Path,
-			Host:        host,
+			Host:        sampleHost,
 			Status:      status,
 			DurationMs:  durationMs,
 			CacheState:  rec.Header().Get("X-Cache"),

@@ -4,7 +4,58 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { StatsSnapshot } from "@/api/client";
+import type { HTTPRouteStats, StatsSnapshot } from "@/api/client";
+
+export interface RouteMetricPoint {
+  requestsPerSec: number;
+  errorsPercent: number;
+  latencyMs: number | null;
+  bytesPerSec: number;
+}
+
+export function routeMetricInterval(
+  previous: HTTPRouteStats,
+  current: HTTPRouteStats,
+  elapsedMs: number,
+): RouteMetricPoint | null {
+  if (elapsedMs <= 0 || current.routeId !== previous.routeId) return null;
+  const requests = current.requests - previous.requests;
+  const errors = current.errors - previous.errors;
+  const bytes = current.responseBytes - previous.responseBytes;
+  const count = current.durationCount - previous.durationCount;
+  const duration = current.durationSumSeconds - previous.durationSumSeconds;
+  if (
+    [requests, errors, bytes, count, duration].some((value) => value < 0 || !Number.isFinite(value))
+  )
+    return null;
+  return {
+    requestsPerSec: (requests * 1000) / elapsedMs,
+    errorsPercent: requests > 0 ? Math.min(100, (errors * 100) / requests) : 0,
+    latencyMs: count > 0 ? (duration * 1000) / count : null,
+    bytesPerSec: (bytes * 1000) / elapsedMs,
+  };
+}
+
+export function useRouteMetricsHistory(
+  sample: HTTPRouteStats | undefined,
+  sampledAt: number,
+): RouteMetricPoint[] {
+  const previous = useRef<{ sample: HTTPRouteStats; at: number } | null>(null);
+  const [points, setPoints] = useState<RouteMetricPoint[]>([]);
+  useEffect(() => {
+    if (sample === undefined) {
+      previous.current = null;
+      setPoints([]);
+      return;
+    }
+    const last = previous.current;
+    previous.current = { sample, at: sampledAt };
+    if (last === null) return;
+    const point = routeMetricInterval(last.sample, sample, sampledAt - last.at);
+    setPoints((history) => (point === null ? [] : [...history, point].slice(-60)));
+  }, [sample, sampledAt]);
+  return points;
+}
 
 /**
  * MetricsHistory is the shape returned by useMetricsHistory. The six metric

@@ -256,15 +256,15 @@
     }
   ],
   "counts": {
-    "schema_paths": 369,
-    "schema_leaves": 314,
-    "registry_entries": 314,
-    "startup_consumed": 28,
+    "schema_paths": 370,
+    "schema_leaves": 315,
+    "registry_entries": 315,
+    "startup_consumed": 29,
     "by_class": {
       "hot_reload": 272,
       "ignored_deprecated": 4,
       "new_listener_only": 7,
-      "restart_required": 28,
+      "restart_required": 29,
       "validation_rejected_reserved": 3
     }
   },
@@ -1134,6 +1134,19 @@
       "subsystem": "metrics",
       "reason": "an atomic flag read by the metrics middleware on each request; OnReloaded flips it on every successful reload without rebuilding the registry or resetting any collector (#91)",
       "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "observability.metrics.route_label",
+      "class": "restart_required",
+      "subsystem": "metrics",
+      "reason": "route labels change collector dimensions; the process-owned registry is constructed once and remains unchanged across reloads",
+      "startup_consumed": true,
       "address_keyed": false,
       "conditional": false,
       "deprecated": false,

@@ -1526,7 +1526,8 @@ type MetricsConfig struct {
 	// edge exposed to arbitrary Host values can drive unbounded metric
 	// cardinality. Enable it only when the set of hosts is bounded (or pair it
 	// with a scrape-time relabel/drop rule).
-	HostLabel bool `toml:"host_label"`
+	HostLabel  bool `toml:"host_label"`
+	RouteLabel bool `toml:"route_label"`
 }
 
 // TracingConfig configures OpenTelemetry distributed tracing. Tracing is

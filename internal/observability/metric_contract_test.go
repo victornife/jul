@@ -5,6 +5,8 @@ package observability
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,9 +18,10 @@ import (
 )
 
 type metricContractDocument struct {
-	Version          int                    `json:"version"`
-	ReleasedBaseline releasedBaselineRef    `json:"released_baseline"`
-	Metrics          []metricContractMetric `json:"metrics"`
+	Version            int                    `json:"version"`
+	ReleasedBaseline   releasedBaselineRef    `json:"released_baseline"`
+	Metrics            []metricContractMetric `json:"metrics"`
+	RouteLabelVariants []metricContractMetric `json:"route_label_variants"`
 }
 
 type releasedBaselineRef struct {
@@ -156,6 +159,22 @@ func TestMetricContractMatchesCollectors(t *testing.T) {
 	for name := range want {
 		if _, ok := got[name]; !ok {
 			t.Errorf("contract metric %q was not exported after exercising every hook", name)
+		}
+	}
+}
+
+func TestOptInRouteMetricContractMatchesCollectors(t *testing.T) {
+	metrics := NewMetrics(WithRouteLabel(true))
+	handler := metrics.Middleware(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { _, _ = writer.Write([]byte("body")) }))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://example.test/", nil))
+	actual := gatheredMetricContract(t, metrics)
+	variants := loadMetricContract(t).RouteLabelVariants
+	if len(variants) != 3 {
+		t.Fatalf("route variants=%d, want 3", len(variants))
+	}
+	for _, expected := range variants {
+		if !reflect.DeepEqual(normalizeMetric(actual[expected.Name]), normalizeMetric(expected)) {
+			t.Fatalf("route contract differs for %s: actual=%+v expected=%+v", expected.Name, actual[expected.Name], expected)
 		}
 	}
 }

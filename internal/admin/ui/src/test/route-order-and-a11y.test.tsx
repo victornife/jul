@@ -19,6 +19,7 @@ import { RouteDetail } from "@/features/routes/RouteDetail.tsx";
 import { PredicatesEditor } from "@/features/routes/PredicatesEditor.tsx";
 import { ResponseHeadersEditor } from "@/features/routes/ResponseHeadersEditor.tsx";
 import type { LocationProjection, RouteProjection, RouteTarget } from "@/api/client.ts";
+import { routeMetricInterval } from "@/lib/useMetricsHistory";
 
 function Wrapper({ children }: { readonly children: ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -80,6 +81,141 @@ describe("RouteDetail route-order note", () => {
     });
     expect(screen.getByText("Route order")).toBeInTheDocument();
     expect(screen.getByText(/2 of 2 routes sharing this match/)).toBeInTheDocument();
+  });
+});
+
+describe("RouteDetail metrics", () => {
+  it("calculates interval RED and byte rates without cumulative averages", () => {
+    const previous = {
+      routeId: "route-one",
+      requests: 100,
+      errors: 10,
+      responseBytes: 1000,
+      durationCount: 100,
+      durationSumSeconds: 5,
+    };
+    const current = {
+      routeId: "route-one",
+      requests: 120,
+      errors: 12,
+      responseBytes: 5000,
+      durationCount: 120,
+      durationSumSeconds: 6,
+    };
+    expect(routeMetricInterval(previous, current, 2000)).toEqual({
+      requestsPerSec: 10,
+      errorsPercent: 10,
+      latencyMs: 50,
+      bytesPerSec: 2000,
+    });
+    expect(routeMetricInterval(current, previous, 2000)).toBeNull();
+    expect(routeMetricInterval(previous, { ...current, routeId: "other-route" }, 2000)).toBeNull();
+    expect(routeMetricInterval(previous, previous, 2000)?.latencyMs).toBeNull();
+  });
+
+  it("does not present unidentified aggregate data as a specific route", () => {
+    const loc = baseLoc();
+    const route: RouteProjection = {
+      listen: ":8080",
+      server_names: [],
+      http3: false,
+      h2c: false,
+      locations: [loc],
+    };
+    render(<RouteDetail route={route} loc={loc} onClose={vi.fn()} onEdit={vi.fn()} />, {
+      wrapper: Wrapper,
+    });
+    expect(screen.getByText("No durable route ID")).toBeInTheDocument();
+  });
+
+  it("renders disabled route metrics after a successful stats read", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          uptimeSeconds: 1,
+          requestsTotal: 0,
+          requestsPerSec: 0,
+          inFlight: 0,
+          connections: 0,
+          errorRate: 0,
+          latencyAvgMs: 0,
+          latencyP50Ms: 0,
+          latencyP95Ms: 0,
+          latencyP99Ms: 0,
+          cacheHitRatio: 0,
+          routeMetricsEnabled: false,
+          routeMetrics: [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const loc = baseLoc({ route_id: "route-one" });
+    const route: RouteProjection = {
+      listen: ":8080",
+      server_names: [],
+      http3: false,
+      h2c: false,
+      locations: [loc],
+    };
+    render(<RouteDetail route={route} loc={loc} onClose={vi.fn()} onEdit={vi.fn()} />, {
+      wrapper: Wrapper,
+    });
+    expect(await screen.findByText("Route metrics disabled")).toBeInTheDocument();
+  });
+
+  it("renders four route charts with an initial sampling baseline", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          uptimeSeconds: 1,
+          requestsTotal: 10,
+          requestsPerSec: 0,
+          inFlight: 0,
+          connections: 0,
+          errorRate: 0,
+          latencyAvgMs: 0,
+          latencyP50Ms: 0,
+          latencyP95Ms: 0,
+          latencyP99Ms: 0,
+          cacheHitRatio: 0,
+          routeMetricsEnabled: true,
+          routeMetrics: [
+            {
+              routeId: "route-one",
+              requests: 10,
+              errors: 1,
+              responseBytes: 1000,
+              durationCount: 10,
+              durationSumSeconds: 0.5,
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const loc = baseLoc({ route_id: "route-one" });
+    const route: RouteProjection = {
+      listen: ":8080",
+      server_names: [],
+      http3: false,
+      h2c: false,
+      locations: [loc],
+    };
+    render(<RouteDetail route={route} loc={loc} onClose={vi.fn()} onEdit={vi.fn()} />, {
+      wrapper: Wrapper,
+    });
+    expect(
+      await screen.findByRole("img", { name: "Request rate for route route-one" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "Server errors for route route-one" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "Mean latency for route route-one" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "Response rate for route route-one" }),
+    ).toBeInTheDocument();
   });
 });
 

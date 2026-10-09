@@ -28,7 +28,7 @@
 # docs/soak-evidence.md and #480 record the post-fix impact review and limits.
 
 version: 2
-updated: '2026-10-08'
+updated: '2026-10-09'
 features:
 - id: Y1-01
   name: TLS + automatic HTTPS (ACME)
@@ -404,6 +404,24 @@ features:
     9: true
   notes: 'Additive #518 capability; does not inherit Core HTTP GA or old soak evidence. Criterion 8 uses existing duration parsing. Runnable example: testdata/send-timeout.toml; Console Status reports configured defaults and overrides without values. Release, benchmark and soak certification remain separate.'
   delivery: merged
+- id: ROUTE-METRICS
+  name: Per-route HTTP metrics and bounded hosts
+  tags:
+  - core
+  maturity: Beta
+  doc: observability.md
+  criteria:
+    1: true
+    2: false
+    3: false
+    4: false
+    5: false
+    6: true
+    7: true
+    8: null
+    9: true
+  notes: 'Additive #521 capability; no inherited metrics/Core HTTP GA or soak evidence. Existing config parsing supplies criterion 8. Runnable example testdata/route-metrics.toml; Console Status and selected-route RED/bytes chart included. Label dimensions are restart-classified; host/route inventory is published and pruned with successful reloads. No client paths or raw Host values are metric labels.'
+  delivery: implemented
 - id: reload-tx
   name: Configuration reload transaction
   tags:

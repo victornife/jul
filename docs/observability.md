@@ -73,12 +73,49 @@ renamed, relabeled, or have its type/help changed accidentally; an intentional
 breaking change requires the compatibility/deprecation process rather than a
 silent collector edit.
 
-The request `host` label is present in the contract but emitted with an empty
-value by default because `Host` is client-controlled. Set
-`[observability.metrics].host_label = true` only when the host set is bounded;
-the flag hot-reloads (#91) — an atomic flip read by the metrics middleware on
-each request, never a registry rebuild — so existing counters/histograms/gauges
-are never reset and previously recorded host-labeled series are not deleted.
+The request `host` label is present but empty by default. When enabled, it uses
+the matched server's primary configured name or `_other`, never raw Host input.
+Wildcard matches share a configured name rather than exporting arbitrary
+subdomains. The flag hot-reloads and each request pins its mode at entry.
+
+### Per-route HTTP metrics
+
+This additive capability is **Beta / implemented**, with a
+[runnable example](../testdata/route-metrics.toml), Console Status visibility and
+a RED/response-byte chart in the selected route's detail drawer. Charts derive
+request rate, 5xx error fraction, mean latency and byte rate from successive
+cumulative snapshots. Initial sampling, missing IDs, no traffic and disabled
+mode are distinct states; counter resets establish a new baseline.
+
+Enable `[observability.metrics] route_label = true` to add `route` to
+`jul_http_requests_total` and `jul_http_request_duration_seconds`, and
+`method`, `host`, `route` to `jul_http_response_bytes_total`. Default collector
+shapes remain unchanged. The option requires restart because dimensions belong
+to the process-owned registry. The machine contract records enabled shapes in
+`route_label_variants`; the default/released schemas remain frozen.
+
+Route labels use the selected durable `route_id`, never URL paths or queries.
+Routes without IDs share `_unidentified`; unmatched requests and server-level
+redirects share `_unmatched`. Enabled host labels are bounded independently.
+Successful publication prunes retired configured host/route series; late old
+generation completions map to fixed fallback labels rather than recreating
+retired series. Failed candidates do not publish inventory changes.
+
+Per-route counters represent retained active inventory and may reset when an
+ID is removed/reintroduced. Use stable IDs and Prometheus `rate`/`increase`.
+Lifetime Console request/byte/latency aggregates remain independent of pruning.
+Example per-route error rate:
+
+```promql
+sum by (route) (rate(jul_http_requests_total{code=~"5.."}[5m]))
+/
+sum by (route) (rate(jul_http_requests_total[5m]))
+```
+
+Do not add arbitrary client, path, user or backend-address labels. Scrape
+relabel/drop rules may reduce dimensions but are not needed to bound raw Host.
+NGINX migration classification: **not applicable**, a Jul-specific operational
+metric dimension rather than request-handling behavior.
 
 ### Exported Jul.IA metric families
 
