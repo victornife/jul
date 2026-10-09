@@ -170,7 +170,7 @@ func TestProbeGRPCStatusMapping(t *testing.T) {
 	check := func(service string, timeout time.Duration) bool {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		return doProbeGRPCHealth(ctx, b, service, nil)
+		return doProbeGRPCHealth(ctx, b, service, nil, "")
 	}
 
 	hs.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
@@ -212,7 +212,7 @@ func doProbeGRPCHealthCtx(t *testing.T, b *Backend, service string, policy *back
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return doProbeGRPCHealth(ctx, b, service, policy)
+	return doProbeGRPCHealth(ctx, b, service, policy, "")
 }
 
 // TestProbeGRPCTimeout proves a probe against a backend that accepts the TCP

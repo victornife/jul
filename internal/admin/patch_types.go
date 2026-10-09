@@ -392,6 +392,9 @@ type upstreamHealthCheck struct {
 	// Service is the grpc.health.v1 service name for type = "grpc" (empty means
 	// whole-server health). Ignored for http/tcp.
 	Service string `json:"service,omitempty"`
+	Host    string `json:"host,omitempty"`
+	// Headers is write-only: omitted preserves HTTP headers, {} clears them.
+	Headers *map[string]string `json:"headers,omitempty"`
 }
 
 // upstreamDiscovery carries the dynamic-discovery fields the guided Apps editor

@@ -10,6 +10,21 @@
 | Report location | Original working copy: `/home/victornf/jul-audit-20260930/jul-audit-report-2026-09-30.md`; publication target: `docs/audit/jul-audit-report-2026-09-30.md` |
 | Post-audit baseline note | After the report was written, `main` moved to `f036b063` (PR #501: access-log writer sharing, a dependency security floor, docs). A read-only diff (8 files: `internal/observability/sinks.go` + test, CHANGELOG, three docs, Console lockfiles) shows no change to any file behind F-01–F-19, except `docs/known-limitations.md` line shifts: the cited L242 is now L238 and L510 is now L506. All findings still apply at `f036b063`. The Y1-10 access-log sink change itself was not re-reviewed. |
 
+## Delivery scope addendum — 2026-10-10 (#524 / #520)
+
+The selected P-26/P-19 implementation adds bounded secret-aware HTTP probe
+headers and Host, independent gRPC routing authority, lifecycle/config/API
+contracts and write-only Console edits. A runnable HMAC signed-URL WASM recipe
+includes key rotation, bounded canonical input, constant-time comparison,
+GET/HEAD access, expiry/skew/lifetime validation and a Go issuer. WASI now receives
+actual host wall time so expiry validation is meaningful in the compiled guest.
+Secret resolution also descends into struct-valued maps so plugin config
+env/file references are expanded and included in candidate redaction state.
+Tests cover native policy and actual host/guest behavior. NGINX Plus health and
+`secure_link` directives retain blocking migration classification; the recipe
+has its own protocol. This is implementation scope, not merge/release/soak or
+maturity certification; current execution and evidence belong to #62.
+
 ## Delivery scope addendum — 2026-10-09 (#523)
 
 PR #566 implements the maintainer-selected F-09/F-15 continuation: shared

@@ -274,6 +274,29 @@ function HealthCheckFields({
               }}
             />
           )}
+
+          {value.type !== "tcp" && (
+            <TextField
+              label="Host / authority"
+              value={value.host ?? ""}
+              placeholder="Backend authority (default)"
+              hint="Routes the probe; TLS identity still follows backend trust settings."
+              onChange={(next) => {
+                set("host", next);
+              }}
+            />
+          )}
+          {value.type === "http" && (
+            <TextField
+              label="HTTP headers (JSON, replace)"
+              value={value.headers ?? ""}
+              placeholder='{"X-Health-Token":"${env:HEALTH_TOKEN}"}'
+              hint="Values are write-only. Blank preserves existing headers; {} clears them. Up to 32 headers."
+              onChange={(next) => {
+                set("headers", next);
+              }}
+            />
+          )}
           <div className="grid grid-cols-2 gap-3">
             <TextField
               label="Interval"

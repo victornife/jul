@@ -101,3 +101,10 @@ curl -i http://127.0.0.1:8080/blocked -H 'X-Block: 1'   # 403 from request-block
 
 See [docs/plugins.md](../../docs/plugins.md) for the full authoring guide and
 [docs/abi.md](../../docs/abi.md) for which ABI to use and the v1/v2 reference.
+
+## Signed media/download links
+
+[The signed-url recipe](signed-url/README.md) includes a runnable configuration,
+Go issuer, rotated HMAC keys and GET/HEAD expiry validation. Both parent build
+scripts include it in `all` mode. Its native policy tests and actual compiled
+WASM guest tests run in CI; nginx `secure_link` formats remain a manual migration.

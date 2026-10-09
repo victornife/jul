@@ -5662,9 +5662,18 @@
                         "format": "int64"
                       }
                     },
+                    "headers": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
                     "healthy_threshold": {
                       "type": "integer",
                       "format": "int64"
+                    },
+                    "host": {
+                      "type": "string"
                     },
                     "interval": {
                       "type": "string"

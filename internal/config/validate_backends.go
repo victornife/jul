@@ -198,6 +198,7 @@ func validateHealthCheck(h *HealthCheckConfig, where string) []error {
 		return nil
 	}
 	var errs []error
+	errs = append(errs, validateHealthRequest(h, where)...)
 	switch h.Type {
 	case "http":
 		if strings.TrimSpace(h.Path) == "" {

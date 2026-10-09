@@ -39,7 +39,7 @@ func BenchmarkProbeGRPCShortLived(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		ok := doProbeGRPCHealth(ctx, backend, "", nil)
+		ok := doProbeGRPCHealth(ctx, backend, "", nil, "")
 		cancel()
 		if !ok {
 			b.Fatal("probe failed")

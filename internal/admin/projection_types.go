@@ -166,14 +166,16 @@ type AppProjection struct {
 	Verdict   string `json:"verdict,omitempty"`
 	Discovery string `json:"discovery,omitempty"`
 	// Detail fields (Milestone 2.4). Zero values render as "not configured".
-	MaxFails         int      `json:"max_fails,omitempty"`
-	FailTimeout      string   `json:"fail_timeout,omitempty"`
-	HealthCheckType  string   `json:"health_check_type,omitempty"`
-	HealthCheckPath  string   `json:"health_check_path,omitempty"`
-	HealthCheckIntvl string   `json:"health_check_interval,omitempty"`
-	DiscoveryTarget  string   `json:"discovery_target,omitempty"`
-	RoutesUsing      []string `json:"routes_using,omitempty"`
-	Warnings         []string `json:"warnings,omitempty"`
+	MaxFails               int      `json:"max_fails,omitempty"`
+	FailTimeout            string   `json:"fail_timeout,omitempty"`
+	HealthCheckHost        string   `json:"health_check_host,omitempty"`
+	HealthCheckHeaderCount int      `json:"health_check_header_count,omitempty"`
+	HealthCheckType        string   `json:"health_check_type,omitempty"`
+	HealthCheckPath        string   `json:"health_check_path,omitempty"`
+	HealthCheckIntvl       string   `json:"health_check_interval,omitempty"`
+	DiscoveryTarget        string   `json:"discovery_target,omitempty"`
+	RoutesUsing            []string `json:"routes_using,omitempty"`
+	Warnings               []string `json:"warnings,omitempty"`
 
 	// Guided-editor seed fields (Phase 4b). These expose the full, non-secret
 	// health-check and discovery detail so the structured Apps editor round-trips

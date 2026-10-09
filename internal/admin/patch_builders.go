@@ -5,6 +5,7 @@ package admin
 
 import (
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -219,6 +220,10 @@ func buildHealthCheck(in upstreamHealthCheck) (*config.HealthCheckConfig, string
 		UnhealthyThreshold: in.UnhealthyThreshold,
 		ExpectBody:         strings.TrimSpace(in.ExpectBody),
 		Service:            strings.TrimSpace(in.Service),
+		Host:               in.Host,
+	}
+	if in.Headers != nil {
+		hc.Headers = maps.Clone(*in.Headers)
 	}
 	if typ == "http" && hc.Path == "" {
 		return nil, "", fmt.Errorf("upstream_set_health_check: path is required for http probes")

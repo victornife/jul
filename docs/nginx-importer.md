@@ -685,3 +685,17 @@ expiration, false buffering and empty MIME tables retain their presence.
 Optional policy blocks remain explicit when their presence is significant.
 See [configuration](configuration.md#mime-policy-and-response-expiration) and
 the runnable [example](../testdata/expiration-mime.toml).
+
+### Health probes and signed links
+
+Jul supports manually configured HTTP health headers/Host and gRPC authority
+([health guide](health.md#probe-headers-and-routing-identity)). NGINX Plus active
+health directives and third-party health modules remain blocking: they are not
+translated or claimed equivalent to Jul's probe/threshold model.
+
+NGINX `secure_link` / `secure_link_md5` remain blocking. The
+[signed-URL WASM recipe](../examples/plugins/signed-url/README.md) offers HMAC-SHA256
+with its own versioned framing, canonical path rules, expiry and key rotation;
+it is not wire-compatible with nginx's secure-link formats. Manually attach the
+plugin and migrate the trusted issuer together; existing links require reissue.
+No assessment/corpus classification is promoted by adding this example.

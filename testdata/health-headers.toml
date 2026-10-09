@@ -1,0 +1,16 @@
+# Header-bearing virtual-host HTTP health probe; runnable with jul check.
+[[upstreams]]
+name = "api"
+servers = ["127.0.0.1:3000"]
+[upstreams.health_check]
+enabled = true
+type = "http"
+path = "/healthz"
+host = "health.internal:8080"
+headers = { "X-Forwarded-Proto" = "https", "X-Probe" = "jul" }
+
+[[servers]]
+listen = "127.0.0.1:8080"
+[[servers.locations]]
+match = { type = "prefix", path = "/" }
+proxy_pass = "http://api"

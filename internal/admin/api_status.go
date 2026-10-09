@@ -211,7 +211,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		}
 	}
 
-	var healthPools, discoveryPools, affinityPools int
+	var healthPools, healthRequestPools, discoveryPools, affinityPools int
 	affinityKeys := map[string]bool{}
 	discoveryKinds := map[string]bool{}
 	for i := range c.Upstreams {
@@ -231,6 +231,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		}
 		if up.HealthCheck != nil && up.HealthCheck.Enabled {
 			healthPools++
+			if (up.HealthCheck.Type == "http" && len(up.HealthCheck.Headers) > 0) || ((up.HealthCheck.Type == "http" || up.HealthCheck.Type == "grpc") && up.HealthCheck.Host != "") {
+				healthRequestPools++
+			}
 		}
 		if up.Discovery != nil {
 			if t := strings.ToLower(strings.TrimSpace(up.Discovery.Type)); t != "" && t != "static" {
@@ -423,6 +426,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 
 		{Group: "Upstreams", Name: "Upstream pools", Active: len(c.Upstreams) > 0, Detail: countDetailIf(len(c.Upstreams), "pool")},
 		{Group: "Upstreams", Name: "Active health checks", Active: healthPools > 0, Detail: countDetailIf(healthPools, "pool")},
+		{Group: "Upstreams", Name: "Health probe headers / Host", Active: healthRequestPools > 0, Detail: countDetailIf(healthRequestPools, "pool")},
 		{Group: "Upstreams", Name: "Backend TLS trust", Active: backendTLSPools+backendTLSRoutes > 0, Detail: backendTLSDetail},
 		{Group: "Upstreams", Name: "Service discovery", Active: discoveryPools > 0, Detail: discDetail},
 		{Group: "Upstreams", Name: "Consistent-hash affinity", Active: affinityPools > 0, Detail: affinityDetail(affinityPools, affinityKeys)},

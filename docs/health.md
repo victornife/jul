@@ -179,7 +179,8 @@ config authors know what is available and what is not.
 | Fresh connection per probe | ✅ | ✅ | ✅ | HTTP: `DisableKeepAlives`; TCP: dial+close; gRPC: short-lived `ClientConn` per probe |
 | Redirect following | ☐ | n/a | n/a | 3xx is treated as failure unless listed in `expect_status` |
 | Custom HTTP method (`HEAD`, `POST`, …) | ☐ | n/a | n/a | Only `GET` is supported |
-| Custom request headers | ☐ | n/a | n/a | Not supported |
+| Custom request headers | ✅ | n/a | n/a | Bounded `headers` map; secret references supported |
+| Routing Host/authority | ✅ | n/a | ✅ | `host`; independent from dial target and TLS identity |
 | TLS certificate verification | ✅ | n/a | ✅ | An `https`/TLS-gRPC pool is probed with the pool's resolved [`backend_tls`](upstreams.md#backend-tls) policy — the same trust live traffic uses |
 | gRPC health-check protocol (`grpc.health.v1.Health/Check`) | n/a | n/a | ✅ | Requires the `grpc` build tag; rejected clearly (not silently downgraded) in a lean build |
 | Named gRPC service health | n/a | n/a | ✅ | `service` (empty = whole-server health) |
@@ -189,6 +190,45 @@ config authors know what is available and what is not.
 | Console Status integration | ✅ | ✅ | ✅ | Pool count + per-backend health in Admin API |
 | Zero-downtime reload — adopt new params | ✅ | ✅ | ✅ | Unchanged pools keep running; changed pools restart checker |
 
+## Probe headers and routing identity
+
+HTTP probes can target a virtual host and supply health credentials:
+
+```toml
+[upstreams.health_check]
+enabled = true
+type = "http"
+path = "/healthz"
+host = "health.internal:8080"
+headers = { "Authorization" = "Bearer ${env:HEALTH_TOKEN}", "X-Forwarded-Proto" = "https" }
+```
+
+`host` overrides HTTP Host or gRPC `:authority`; it does not change the backend
+dial address, TLS SNI or certificate verification name. Configure TLS identity
+with the pool's `backend_tls.server_name`. Unset uses the backend authority.
+The value is an ASCII DNS name/IP with optional port, at most 253 bytes; IPv6
+requires brackets. TCP rejects `host`; gRPC/TCP reject HTTP `headers`.
+
+Headers have at most 32 entries, 128 bytes per name, 4096 bytes per value and
+16 KiB of combined names/values. Case-insensitive duplicates, invalid names or
+values, Host, Content-Length and hop-by-hop fields (Connection, Keep-Alive, TE,
+Trailer, Transfer-Encoding, Upgrade, Proxy-Connection, Proxy-Authenticate and
+Proxy-Authorization) are rejected. Use `host` for routing identity. Explicit
+User-Agent overrides the default `jul-healthcheck`. Headers are sent on every
+probe; redirects still are not followed, so probe credentials cannot leak via a
+redirect. Use HTTPS for credentials and configure pool trust normally.
+
+Values support the [secret reference](secrets.md) resolver; effective values are
+validated after resolution. A successful reload replaces the affected pool and
+its checker with an independent header snapshot; failed candidates retain the
+serving pool. Rotating a secret source requires reload. Console creation/editing
+supports Host and a JSON header replacement. Header values are write-only in the
+Apps projection and redacted in diffs: blank preserves existing HTTP headers,
+`{}` clears them, and changing protocol drops preserved HTTP headers. Raw-config
+access retains its existing permission boundary.
+
+See [the runnable sample](../testdata/health-headers.toml).
+
 ## Known limitations
 
 - **No shared state across instances:** Each Jul.IA process probes independently. In a multi-instance deployment, health state is local to each process.
@@ -196,7 +236,7 @@ config authors know what is available and what is not.
 - **Probes use the pool's policy, not a route's:** an HTTP or gRPC probe verifies with the [`backend_tls`](upstreams.md#backend-tls) block declared on the **upstream**. A route-level override applies to that route's traffic only — a pool may serve several routes with different overrides, so no single one could govern the probe. Put the trust roots a probe needs on the pool.
 
   *(Earlier revisions of this document stated that probes use `InsecureSkipVerify: true` "by design". That was never true of the shipped code, which set no `TLSClientConfig` at all and verified against the platform trust store; probes now use the resolved policy instead.)*
-- **Only `GET` is supported:** HTTP probes always use `GET`. There is no support for `HEAD`, `POST`, or custom headers.
+- **Only `GET` is supported:** HTTP probes always use `GET`. There is no support for `HEAD`, `POST` or request bodies. Custom headers use `headers`.
 - **gRPC probes require the `grpc` build tag:** a lean build rejects `type = "grpc"` at reload time with a clear error rather than silently falling back to another probe type; `jul capabilities` reports whether `grpc` is compiled in.
 - **gRPC probes do not support Unix-socket backends:** gRPC needs a TCP dial; use `type = "tcp"` for a Unix-socket member.
 

@@ -6,6 +6,7 @@ package upstream
 import (
 	"context"
 	"io"
+	"maps"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -32,6 +33,8 @@ type ProbeHook func(pool, source string, success bool, latency time.Duration)
 // healthParams is the resolved, validated probe configuration for a pool.
 type healthParams struct {
 	typ                string // "http" | "tcp" | "grpc"
+	host               string
+	headers            map[string]string
 	path               string
 	interval           time.Duration
 	timeout            time.Duration
@@ -51,11 +54,13 @@ func healthParamsFrom(cfg config.HealthCheckConfig) healthParams {
 	p := healthParams{
 		typ:                cfg.Type,
 		path:               cfg.Path,
+		host:               cfg.Host,
+		headers:            maps.Clone(cfg.Headers),
 		interval:           cfg.Interval.Std(),
 		timeout:            cfg.Timeout.Std(),
 		healthyThreshold:   cfg.HealthyThreshold,
 		unhealthyThreshold: cfg.UnhealthyThreshold,
-		expectStatus:       cfg.ExpectStatus,
+		expectStatus:       append([]int(nil), cfg.ExpectStatus...),
 		expectBody:         cfg.ExpectBody,
 		service:            cfg.Service,
 	}
@@ -292,7 +297,11 @@ func (hc *healthChecker) probeHTTP(ctx context.Context, b *Backend) bool {
 	if err != nil {
 		return false
 	}
+	req.Host = hc.params.host
 	req.Header.Set("User-Agent", "jul-healthcheck")
+	for name, value := range hc.params.headers {
+		req.Header.Set(name, value)
+	}
 	resp, err := hc.client.Do(req)
 	if err != nil {
 		return false
@@ -338,7 +347,7 @@ func (hc *healthChecker) probeTCP(ctx context.Context, b *Backend) bool {
 // nil in a build without the "grpc" tag; validateHealthCheck rejects type =
 // "grpc" configuration in that build, so probeGRPC below only ever sees a nil
 // seam in a test that constructs a healthChecker directly with typ = "grpc".
-var grpcHealthProbe func(ctx context.Context, b *Backend, service string, policy *backendtls.Policy) bool
+var grpcHealthProbe func(ctx context.Context, b *Backend, service string, policy *backendtls.Policy, authority string) bool
 
 // probeGRPC issues a standard gRPC health check. #427: the probe must never be
 // weaker than live traffic, so it reuses the pool's resolved backend trust
@@ -349,7 +358,7 @@ func (hc *healthChecker) probeGRPC(ctx context.Context, b *Backend) bool {
 	if grpcHealthProbe == nil {
 		return false
 	}
-	return grpcHealthProbe(ctx, b, hc.params.service, hc.policy)
+	return grpcHealthProbe(ctx, b, hc.params.service, hc.policy, hc.params.host)
 }
 
 // statusAllowed reports whether code is in the expected set. An empty set

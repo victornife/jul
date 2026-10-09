@@ -5,6 +5,7 @@ package admin
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -942,6 +943,12 @@ func diffUpstreamFields(name string, b, a *config.UpstreamConfig, d *ConfigDiff)
 // health check when it is enabled on both sides (probe type, path, timing,
 // thresholds, expected status set, expected body).
 func diffHealthCheckFields(name string, b, a *config.HealthCheckConfig, d *ConfigDiff) {
+	if b.Host != a.Host {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Host), After: orNone(a.Host), Detail: "Change health-check Host/authority of " + name}, "upstream "+name+" health check host")
+	}
+	if !maps.Equal(b.Headers, a.Headers) {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: "[redacted]", After: "[redacted]", Detail: "Change health-check headers of " + name}, "upstream "+name+" health check headers")
+	}
 	if !strings.EqualFold(b.Type, a.Type) {
 		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Type), After: orNone(a.Type), Detail: "Change health-check probe type of " + name}, "upstream "+name+" health check type")
 	}

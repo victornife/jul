@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 384,
-    "schema_leaves": 323,
+    "schema_paths": 387,
+    "schema_leaves": 325,
     "resources": 9
   },
   "capability_build_tags": {
@@ -4594,6 +4594,23 @@
       "description": "ExpectStatus lists acceptable HTTP status codes for a passing probe (default [200])",
       "anchor": "upstreams-x-health_check-expect_status"
     },
+    "upstreams.*.health_check.headers.*": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "health_check",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "probe headers are snapshotted with the replacement pool; values are secret-bearing",
+      "secret": true,
+      "value_kind": "string",
+      "constraint": "HTTP only; 32 entries, 128-byte RFC header names, 4096-byte valid values, 16384 combined bytes; no case duplicates, Host, Content-Length or hop-by-hop fields; resolved secret values validated",
+      "zero_semantics": "omitted/empty sends no custom headers; omitted structured patch preserves existing HTTP headers",
+      "active_when": "health check enabled",
+      "description": "Headers sets HTTP-only probe headers",
+      "anchor": "upstreams-x-health_check-headers-x"
+    },
     "upstreams.*.health_check.healthy_threshold": {
       "kind": "scalar",
       "scalar": "integer",
@@ -4610,6 +4627,22 @@
       "default": 2,
       "description": "HealthyThreshold is the number of consecutive successes to mark a backend healthy again (default 2)",
       "anchor": "upstreams-x-health_check-healthy_threshold"
+    },
+    "upstreams.*.health_check.host": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "health_check",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "active probes are restarted with the pool on each successful reload",
+      "value_kind": "string",
+      "constraint": "ASCII DNS hostname or IP with optional port, at most 253 bytes; IPv6 in brackets; http/grpc only; independent from backend TLS identity",
+      "zero_semantics": "omitted/empty uses backend authority",
+      "active_when": "health check enabled",
+      "description": "Host overrides HTTP Host or gRPC :authority",
+      "anchor": "upstreams-x-health_check-host"
     },
     "upstreams.*.health_check.interval": {
       "kind": "scalar",
@@ -4684,7 +4717,8 @@
       "active_when": "health check enabled",
       "allowed": [
         "http",
-        "tcp"
+        "tcp",
+        "grpc"
       ],
       "default": "http",
       "description": "Type is the probe protocol: \"http\" (default), \"tcp\", or \"grpc\"",

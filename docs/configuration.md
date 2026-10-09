@@ -1099,8 +1099,11 @@ servers = ["127.0.0.1:3000", "127.0.0.1:3001"]
 | Key | Type | Description |
 | --- | ---- | ----------- |
 | `enabled` | bool | Turn active probing on for this pool |
-| `type` | string | `http` (default) or `tcp` |
+| `type` | string | `http` (default), `tcp`, or `grpc` (`grpc` build tag) |
 | `path` | string | Request path for `http` probes (required) |
+| `host` | string | HTTP Host / gRPC authority override; dial/TLS identity unchanged; ≤253 bytes |
+| `headers` | map | HTTP-only string map; secret references; 32 entries, names ≤128 bytes, values ≤4096 bytes, total ≤16 KiB; see [validation and Console semantics](health.md#probe-headers-and-routing-identity) |
+| `service` | string | gRPC health service name; empty means whole-server health |
 | `interval` | duration | Delay between probe rounds (default `5s`) |
 | `timeout` | duration | Per-probe timeout; must be less than `interval` (default `2s`) |
 | `healthy_threshold` | int | Consecutive successes to mark a backend healthy (default `2`) |

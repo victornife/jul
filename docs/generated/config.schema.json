@@ -2358,12 +2358,26 @@
                 },
                 "type": "array"
               },
+              "headers": {
+                "additionalProperties": {
+                  "description": "Headers sets HTTP-only probe headers",
+                  "type": "string",
+                  "x-jul-constraint": "HTTP only; 32 entries, 128-byte RFC header names, 4096-byte valid values, 16384 combined bytes; no case duplicates, Host, Content-Length or hop-by-hop fields; resolved secret values validated",
+                  "x-jul-secret": true
+                },
+                "type": "object"
+              },
               "healthy_threshold": {
                 "default": 2,
                 "description": "HealthyThreshold is the number of consecutive successes to mark a backend healthy again (default 2)",
                 "minimum": 1,
                 "type": "integer",
                 "x-jul-constraint": "at least 1 effective"
+              },
+              "host": {
+                "description": "Host overrides HTTP Host or gRPC :authority",
+                "type": "string",
+                "x-jul-constraint": "ASCII DNS hostname or IP with optional port, at most 253 bytes; IPv6 in brackets; http/grpc only; independent from backend TLS identity"
               },
               "interval": {
                 "default": "5s",
@@ -2392,7 +2406,8 @@
                 "description": "Type is the probe protocol: \"http\" (default), \"tcp\", or \"grpc\"",
                 "enum": [
                   "http",
-                  "tcp"
+                  "tcp",
+                  "grpc"
                 ],
                 "type": "string",
                 "x-jul-constraint": "exact lowercase enum"

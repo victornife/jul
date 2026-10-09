@@ -8,6 +8,7 @@ package upstream
 import (
 	"context"
 	"crypto/tls"
+	"net"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -42,19 +43,29 @@ func init() {
 // (reload/discovery-churn/shutdown retirement) a cached connection would need.
 // The simpler model was kept rather than building a second connection cache
 // ahead of Wave 3's dedicated resource-ownership hardening (#428).
-func doProbeGRPCHealth(ctx context.Context, b *Backend, service string, policy *backendtls.Policy) bool {
+func doProbeGRPCHealth(ctx context.Context, b *Backend, service string, policy *backendtls.Policy, authority string) bool {
 	var creds credentials.TransportCredentials
 	if b.Scheme() == "https" {
 		tlsCfg := &tls.Config{}
 		if policy != nil {
 			tlsCfg = policy.ClientConfig()
 		}
+		if authority != "" && tlsCfg.ServerName == "" {
+			tlsCfg.ServerName = b.URL.Hostname()
+		}
 		creds = credentials.NewTLS(tlsCfg)
+		if authority != "" {
+			creds = probeRoutingCredentials{TransportCredentials: creds, serverName: tlsCfg.ServerName}
+		}
 	} else {
 		creds = insecure.NewCredentials()
 	}
 
-	conn, err := grpc.NewClient("passthrough:///"+b.Address, grpc.WithTransportCredentials(creds))
+	dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(creds)}
+	if authority != "" {
+		dialOpts = append(dialOpts, grpc.WithAuthority(authority))
+	}
+	conn, err := grpc.NewClient("passthrough:///"+b.Address, dialOpts...)
 	if err != nil {
 		return false
 	}
@@ -69,4 +80,28 @@ func doProbeGRPCHealth(ctx context.Context, b *Backend, service string, policy *
 		return false
 	}
 	return resp.GetStatus() == healthpb.HealthCheckResponse_SERVING
+}
+
+// probeRoutingCredentials separates HTTP/2 routing authority from TLS identity.
+// The embedded credentials retain the explicit live-traffic ServerName and do
+// the full handshake/verification. Only the informational override is cleared
+// so grpc.WithAuthority does not reject an intentionally different route name.
+// No certificate checks are disabled, and Clone retains the same boundary.
+type probeRoutingCredentials struct {
+	credentials.TransportCredentials
+	serverName string
+}
+
+func (c probeRoutingCredentials) Info() credentials.ProtocolInfo {
+	info := c.TransportCredentials.Info()
+	return credentials.ProtocolInfo{SecurityProtocol: info.SecurityProtocol}
+}
+func (c probeRoutingCredentials) Clone() credentials.TransportCredentials {
+	return probeRoutingCredentials{TransportCredentials: c.TransportCredentials.Clone(), serverName: c.serverName}
+}
+
+func (c probeRoutingCredentials) ClientHandshake(ctx context.Context, _ string, conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+	// grpc-go uses its supplied authority as the TLS name even when the
+	// tls.Config has ServerName. Freeze the pool's trust name at this seam.
+	return c.TransportCredentials.ClientHandshake(ctx, c.serverName, conn)
 }

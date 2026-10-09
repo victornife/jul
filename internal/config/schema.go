@@ -1032,6 +1032,13 @@ type HealthCheckConfig struct {
 	Type string `toml:"type"`
 	// Path is the request path for HTTP probes (required for type "http").
 	Path string `toml:"path"`
+	// Host overrides HTTP Host or gRPC :authority. It never changes the dial
+	// target or backend_tls server_name. Unset uses the backend authority.
+	Host string `toml:"host"`
+	// Headers sets HTTP-only probe headers. Values support secret references;
+	// at most 32 entries, 128-byte names and 4096-byte values (16 KiB total).
+	// Host, Content-Length and hop-by-hop headers are forbidden.
+	Headers map[string]string `toml:"headers"`
 	// Interval is the delay between probe rounds (default 5s).
 	Interval Duration `toml:"interval"`
 	// Timeout bounds a single probe (default 2s); must be less than Interval.
