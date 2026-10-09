@@ -791,8 +791,8 @@ though a new HTTP request can select a newly published route policy.
 
 #### Optional runtime decisions (#519)
 
-This slice wires the existing retirement counter and defers connection-age,
-upgraded-session shutdown and Console additions:
+The existing retirement counter is wired and its process totals are visible
+in Console Status. Connection-age and upgraded-session shutdown remain deferred:
 
 - **Connection age: deferred.** No maximum connection age is enforced.
   Revocation therefore has no enforced time bound on established connections;
@@ -812,7 +812,7 @@ upgraded-session shutdown and Console additions:
   not a notification-only callback. That design-first follow-up is
   [#562](https://github.com/victornife/jul/issues/562), an unselected candidate
   for shutdown-owned HTTP/1 upgraded sessions.
-- **Retirement metric: wired; Console addition deferred.** The existing
+- **Retirement metric and Console totals: available.** The existing
   `jul_transport_retired_total{mode="graceful|forced"}` contract is unchanged.
   Each superseded handler generation whose resource-retirement callback runs
   is counted once: `graceful` after drain, `forced` after grace expiry.
@@ -821,6 +821,10 @@ upgraded-session shutdown and Console additions:
   describes resource retirement, not proof that every active stream ended.
   The existing warning still supplies generation/grace detail. See
   [retirement alerting](observability.md#handler-generation-retirement).
+  The read-only **Generation retirement** card shows graceful/forced totals
+  since process start, with explicit zero/unavailable and restart-reset
+  behavior. These aggregates cannot identify a particular reload and expose
+  neither active draining sessions nor a last-retirement timestamp.
 
 `TestTransportRetirementMetricExactlyOnce`,
 `TestTransportRetirementMetricSkipsUnownedGeneration` and

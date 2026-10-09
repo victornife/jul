@@ -98,8 +98,23 @@ An example forced-retirement alert condition is:
 sum(increase(jul_transport_retired_total{mode="forced"}[5m])) > 0
 ```
 
-Use the existing warning for generation/grace details. No new Console
-retirement chart or control is included.
+The Console **Status** view includes a read-only **Generation retirement**
+card with graceful and forced totals **since process start**, projected from
+this existing counter through the optional `generationRetirements` field in
+the stats API. An available process with no retirement shows zero; a missing
+metrics source, failed collection or older server without the field shows
+**Unavailable**, not manufactured zero counts.
+
+These are current process counters, not interval deltas or persisted history.
+They reset when the process restarts; the next poll replaces the displayed
+totals, including lower/zero values, without negative deltas or carry-over.
+The card links to the lifecycle documentation and explains that forced
+resource cleanup after grace does not prove requests were dropped.
+
+**Aggregate totals cannot identify which reload caused a retirement.** They
+provide no per-reload identity, active-draining-session count or
+last-retirement timestamp. Use the existing warning for generation/grace
+detail; no historical chart, termination control or new collector is added.
 
 ### Per-route HTTP metrics
 

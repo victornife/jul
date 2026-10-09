@@ -4,12 +4,78 @@
 package observability
 
 import (
+	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
+
+type unavailableRetirementCollector struct{}
+
+func (unavailableRetirementCollector) Describe(desc chan<- *prometheus.Desc) {
+	desc <- prometheus.NewDesc("retirement_collection_probe", "Collection failure probe.", nil, nil)
+}
+
+func (unavailableRetirementCollector) Collect(metrics chan<- prometheus.Metric) {
+	metrics <- prometheus.NewInvalidMetric(prometheus.NewDesc("retirement_collection_probe", "Collection failure probe.", nil, nil), errors.New("collector unavailable"))
+}
+
+func TestSnapshotGenerationRetirementsUnavailable(t *testing.T) {
+	metrics := NewMetrics()
+	metrics.ObserveTransportRetired("forced")
+	metrics.transportRetired = nil
+	if got := metrics.Snapshot().GenerationRetirements; got != nil {
+		t.Fatalf("unowned source manufactured totals: %+v", got)
+	}
+	metrics = NewMetrics()
+	metrics.ObserveTransportRetired("graceful")
+	metrics.registry.MustRegister(unavailableRetirementCollector{})
+	if got := metrics.Snapshot().GenerationRetirements; got != nil {
+		t.Fatalf("failed collection manufactured zero totals: %+v", got)
+	}
+}
+
+func TestSnapshotGenerationRetirements(t *testing.T) {
+	metrics := NewMetrics()
+	if got := metrics.Snapshot().GenerationRetirements; got == nil || got.Graceful != 0 || got.Forced != 0 {
+		t.Fatalf("empty process totals=%+v, want available zero", got)
+	}
+	metrics.ObserveTransportRetired("graceful")
+	metrics.ObserveTransportRetired("graceful")
+	metrics.ObserveTransportRetired("forced")
+	for sample := 0; sample < 2; sample++ {
+		if got := metrics.Snapshot().GenerationRetirements; got == nil || got.Graceful != 2 || got.Forced != 1 {
+			t.Fatalf("process totals=%+v, want 2/1", got)
+		}
+	}
+	metrics.transportRetired.Reset()
+	if got := metrics.Snapshot().GenerationRetirements; got == nil || got.Graceful != 0 || got.Forced != 0 {
+		t.Fatalf("reset totals=%+v, want current zero", got)
+	}
+	metrics.ObserveTransportRetired("forced")
+	if got := metrics.Snapshot().GenerationRetirements; got == nil || got.Graceful != 0 || got.Forced != 1 {
+		t.Fatalf("post-reset totals=%+v", got)
+	}
+	if got := NewMetrics().Snapshot().GenerationRetirements; got == nil || got.Graceful != 0 || got.Forced != 0 {
+		t.Fatalf("new process inherited old counts: %+v", got)
+	}
+	encoded, err := json.Marshal(StatsSnapshot{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var unavailable map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &unavailable); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := unavailable["generationRetirements"]; present {
+		t.Fatalf("unavailable totals manufactured: %s", encoded)
+	}
+}
 
 // drive sends one request through the metrics middleware with the given status
 // and optional X-Cache state, sleeping briefly so an observable latency is

@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
@@ -44,6 +44,7 @@ import {
   TrafficControlsSchema,
   HistoryEntrySchema,
   ConfigDiffSchema,
+  StatsSnapshotSchema,
   type ConfigPatch,
 } from "@/api/client.ts";
 
@@ -273,6 +274,128 @@ describe("OverviewPanel", () => {
     );
   });
   afterEach(() => vi.restoreAllMocks());
+
+  const retirementStats = (graceful: number, forced: number) => ({
+    available: true,
+    uptimeSeconds: 10,
+    requestsTotal: 0,
+    requestsPerSec: 0,
+    inFlight: 0,
+    connections: 0,
+    errorRate: 0,
+    latencyAvgMs: 0,
+    latencyP50Ms: 0,
+    latencyP95Ms: 0,
+    latencyP99Ms: 0,
+    cacheHitRatio: 0,
+    generationRetirements: { graceful, forced },
+  });
+
+  it("shows process-lifetime totals with resource-cleanup and attribution limits", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              product: "Jul.IA",
+              version: "test",
+              status: [],
+              stats: retirementStats(12, 3),
+            }),
+        }),
+    );
+    render(<OverviewPanel />, { wrapper: Wrapper });
+    const card = await screen.findByRole("region", { name: "Generation retirement" });
+    expect(within(card).getByText("12")).toBeInTheDocument();
+    expect(within(card).getByText("3")).toBeInTheDocument();
+    expect(within(card).getByText(/Totals since process start/)).toBeInTheDocument();
+    expect(within(card).getByText(/does not prove requests were dropped/)).toBeInTheDocument();
+    expect(within(card).getByText(/cannot identify which reload/)).toBeInTheDocument();
+    expect(within(card).getByRole("link", { name: "Lifecycle documentation" })).toHaveAttribute(
+      "href",
+      "https://github.com/victornife/jul/blob/main/docs/reload-semantics.md#long-lived-connection-matrix",
+    );
+    expect(card.querySelector("svg")).toBeNull();
+  });
+
+  it("distinguishes zero totals from unavailable stats and old API payloads", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    const base = { product: "Jul.IA", version: "test", status: [], stats: retirementStats(0, 0) };
+    queryClient.setQueryData(["overview"], base);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <OverviewPanel />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const card = await screen.findByRole("region", { name: "Generation retirement" });
+    expect(within(card).getAllByText("0")).toHaveLength(2);
+    expect(within(card).queryByText("Unavailable")).toBeNull();
+    queryClient.setQueryData(["overview"], { ...base, stats: { ...base.stats, available: false } });
+    await waitFor(() => {
+      expect(within(card).getAllByText("Unavailable")).toHaveLength(2);
+    });
+    queryClient.setQueryData(["overview"], { ...base, stats: undefined });
+    await waitFor(() => {
+      expect(within(card).getAllByText("Unavailable")).toHaveLength(2);
+    });
+    queryClient.setQueryData(["overview"], {
+      ...base,
+      stats: { ...base.stats, generationRetirements: undefined },
+    });
+    await waitFor(() => {
+      expect(within(card).getAllByText("Unavailable")).toHaveLength(2);
+    });
+  });
+
+  it("replaces totals after process-counter reset rather than calculating a negative delta", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    const base = { product: "Jul.IA", version: "test", status: [], stats: retirementStats(12, 3) };
+    queryClient.setQueryData(["overview"], base);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <OverviewPanel />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const card = await screen.findByRole("region", { name: "Generation retirement" });
+    expect(within(card).getByText("12")).toBeInTheDocument();
+    queryClient.setQueryData(["overview"], {
+      ...base,
+      stats: { ...retirementStats(0, 0), uptimeSeconds: 1 },
+    });
+    await waitFor(() => {
+      expect(within(card).getAllByText("0")).toHaveLength(2);
+    });
+    expect(within(card).queryByText("12")).toBeNull();
+    queryClient.setQueryData(["overview"], { ...base, stats: retirementStats(1, 0) });
+    await waitFor(() => {
+      expect(within(card).getByText("1")).toBeInTheDocument();
+    });
+    expect(within(card).getByText("0")).toBeInTheDocument();
+  });
+
+  it("validates the additive stats schema without defaulting missing retirement data to zero", () => {
+    expect(StatsSnapshotSchema.parse(retirementStats(0, 0)).generationRetirements).toEqual({
+      graceful: 0,
+      forced: 0,
+    });
+    expect(
+      StatsSnapshotSchema.parse({ ...retirementStats(0, 0), generationRetirements: undefined })
+        .generationRetirements,
+    ).toBeUndefined();
+    expect(() => StatsSnapshotSchema.parse(retirementStats(-1, 0))).toThrow();
+    expect(() => StatsSnapshotSchema.parse(retirementStats(0, Number.POSITIVE_INFINITY))).toThrow();
+  });
 
   it("renders product name and grouped status rows", async () => {
     render(<OverviewPanel />, { wrapper: Wrapper });
@@ -1017,4 +1140,3 @@ describe("RouteDetail rate_limit generated TOML", () => {
     expect(toml).not.toHaveTextContent("undefined");
   });
 });
-

@@ -116,6 +116,51 @@ function HealthChip({
   );
 }
 
+function GenerationRetirementCard({ stats }: { readonly stats: StatsSnapshot | undefined }) {
+  const totals = stats?.available ? stats.generationRetirements : undefined;
+  return (
+    <section
+      aria-labelledby="generation-retirement-title"
+      className="w-full max-w-xl rounded-lg border border-jul-border bg-jul-surface p-4"
+    >
+      <h2 id="generation-retirement-title" className="text-sm font-semibold text-jul-text">
+        Generation retirement
+      </h2>
+      <p className="mt-1 text-xs text-jul-muted">
+        Totals since process start. Reset on process restart.
+      </p>
+      <dl className="my-3 grid grid-cols-2 gap-4">
+        <div className="min-w-0">
+          <dt className="text-xs text-jul-muted">Graceful</dt>
+          <dd className="mt-1 break-words text-xl font-semibold tabular-nums text-jul-text">
+            {totals?.graceful.toLocaleString() ?? "Unavailable"}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-xs text-jul-muted">Forced</dt>
+          <dd className="mt-1 break-words text-xl font-semibold tabular-nums text-jul-text">
+            {totals?.forced.toLocaleString() ?? "Unavailable"}
+          </dd>
+        </div>
+      </dl>
+      <p className="text-xs text-jul-muted">
+        Forced means resource cleanup after grace; it does not prove requests were dropped.
+      </p>
+      <p className="mt-1 text-xs text-jul-muted">
+        Aggregate totals cannot identify which reload caused a retirement.
+      </p>
+      <a
+        className="mt-2 inline-block text-xs text-jul-accent underline"
+        href="https://github.com/victornife/jul/blob/main/docs/reload-semantics.md#long-lived-connection-matrix"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Lifecycle documentation
+      </a>
+    </section>
+  );
+}
+
 function MetricCard({
   label,
   value,
@@ -755,6 +800,8 @@ export function OverviewPanel() {
           ))}
         </div>
       )}
+
+      <GenerationRetirementCard stats={stats} />
 
       {/* Live Traffic Cards */}
       {stats?.available && (

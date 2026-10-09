@@ -407,6 +407,12 @@ export const StatsSnapshotSchema = z.object({
   httpResponseBytesTotal: z.number().optional().default(0),
   routeMetricsEnabled: z.boolean().optional(),
   routeMetrics: z.array(HTTPRouteStatsSchema).optional(),
+  generationRetirements: z
+    .object({
+      graceful: z.number().finite().nonnegative(),
+      forced: z.number().finite().nonnegative(),
+    })
+    .optional(),
   cacheTiers: z.array(CacheTierOccupancySchema).optional(),
   upstreamWorstActive: PoolPressureSchema.optional(),
   upstreamWorstPending: PoolPressureSchema.optional(),

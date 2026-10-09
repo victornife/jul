@@ -15,6 +15,14 @@ v2.1.0 tag or its packaged READMEs.
 
 ### Added
 
+- **Console generation retirement visibility.** The Status view shows
+  graceful and forced resource-retirement totals since process start from the
+  existing collector. The stats projection distinguishes zero from unavailable;
+  displayed totals reset with the process instead of accumulating across
+  restarts. The card explains forced-cleanup semantics and links to lifecycle
+  documentation. Aggregate counts cannot identify a reload; no new collector,
+  configuration, timestamp, historical chart or session-lifecycle feature.
+
 - **Long-lived connection lifecycle evidence (#519).** Document the named-test
   reload, forced-retirement, shutdown, mTLS/CRL and `send_timeout` matrix for
   HTTP/1, HTTP/2, WebSocket, SSE, native/transcoded gRPC and L4. Real-client
@@ -24,7 +32,8 @@ v2.1.0 tag or its packaged READMEs.
   retirement counter exactly once at resource cleanup, excluding aborted
   reloads. Forced means resource retirement after grace expiry, not universal
   stream termination. Connection-age, proper upgraded-session draining and
-  Console additions remain deferred; connection policy and maturity are unchanged.
+  the separate Console follow-up exposes process totals. Connection policy
+  and maturity are unchanged.
 
 - **Opt-in route HTTP metrics and chart (#521).** Startup `route_label` adds
   durable route IDs to request, latency and response-byte families, preserving
