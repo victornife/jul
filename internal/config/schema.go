@@ -1524,7 +1524,7 @@ type MetricsConfig struct {
 	// The router supplies a primary configured server name or _other; request
 	// Host strings never become metric labels. Disabled values remain empty.
 	HostLabel  bool `toml:"host_label"`
-	RouteLabel bool `toml:"route_label"`
+	RouteLabel bool `toml:"route_label,omitempty"`
 }
 
 // TracingConfig configures OpenTelemetry distributed tracing. Tracing is

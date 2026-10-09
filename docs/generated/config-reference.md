@@ -903,6 +903,7 @@ RouteLabel opts into configuration-bounded route IDs on HTTP counters, latency a
 | | |
 | --- | --- |
 | Type | `bool` |
+| Optional | yes |
 | Lifecycle | `restart_required` |
 | Subsystem | `metrics` |
 | Why | route labels change collector dimensions; the process-owned registry is constructed once and remains unchanged across reloads |
