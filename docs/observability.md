@@ -85,7 +85,9 @@ This additive capability is **Beta / implemented**, with a
 a RED/response-byte chart in the selected route's detail drawer. Charts derive
 request rate, 5xx error fraction, mean latency and byte rate from successive
 cumulative snapshots. Initial sampling, missing IDs, no traffic and disabled
-mode are distinct states; counter resets establish a new baseline.
+mode are distinct states; counter resets establish a new baseline. Latency
+intervals without duration samples remain gaps on the same time axis as the
+other charts, not zero values or compressed time.
 
 Enable `[observability.metrics] route_label = true` to add `route` to
 `jul_http_requests_total` and `jul_http_request_duration_seconds`, and
@@ -99,7 +101,10 @@ Routes without IDs share `_unidentified`; unmatched requests and server-level
 redirects share `_unmatched`. Enabled host labels are bounded independently.
 Successful publication prunes retired configured host/route series; late old
 generation completions map to fixed fallback labels rather than recreating
-retired series. Failed candidates do not publish inventory changes.
+retired series. Candidate inventories are prepared without mutating live
+metrics and committed before candidate handlers become reachable. Failed
+candidates do not publish inventory changes. Configured host inventory uses
+the same canonicalization as routing, including bracketed IPv6 literals.
 
 Per-route counters represent retained active inventory and may reset when an
 ID is removed/reintroduced. Use stable IDs and Prometheus `rate`/`increase`.

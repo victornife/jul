@@ -56,7 +56,7 @@ function RouteMetrics({ routeId }: { readonly routeId: string | undefined }) {
       label: "Mean latency",
       unit: "ms",
       value: latest?.latencyMs,
-      data: points.flatMap((point) => (point.latencyMs === null ? [] : [point.latencyMs])),
+      data: points.map((point) => point.latencyMs),
       color: "var(--color-jul-success)",
     },
     {

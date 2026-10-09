@@ -8,6 +8,8 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 
 	"jul/internal/respwriter"
@@ -20,6 +22,43 @@ type HTTPMetricLabels struct {
 }
 
 type httpMetricLabelsKey struct{}
+
+func CanonicalHTTPHost(host string) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if strings.HasPrefix(host, "[") {
+		if end := strings.IndexByte(host, ']'); end >= 0 {
+			rest := host[end+1:]
+			if rest == "" || (strings.HasPrefix(rest, ":") && validHTTPHostPort(rest[1:])) {
+				return host[:end+1]
+			}
+		}
+		return ""
+	}
+	if end := strings.LastIndex(host, ":"); end >= 0 {
+		if strings.Count(host, ":") != 1 || !validHTTPHostPort(host[end+1:]) {
+			return ""
+		}
+		host = host[:end]
+	}
+	host = strings.TrimSuffix(host, ".")
+	if strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") || strings.Contains(host, "..") {
+		return ""
+	}
+	return host
+}
+
+func validHTTPHostPort(port string) bool {
+	if port == "" {
+		return false
+	}
+	for index := 0; index < len(port); index++ {
+		if port[index] < '0' || port[index] > '9' {
+			return false
+		}
+	}
+	value, err := strconv.Atoi(port)
+	return err == nil && value <= 65535
+}
 
 func WithHTTPMetricLabels(request *http.Request) (*http.Request, *HTTPMetricLabels) {
 	labels := &HTTPMetricLabels{host: "_other", route: "_unmatched"}

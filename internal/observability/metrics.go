@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -226,11 +225,15 @@ func WithRouteLabel(on bool) MetricsOption {
 }
 
 func (metrics *Metrics) SetHTTPLabelInventory(servers []config.ServerConfig) {
+	metrics.PrepareHTTPLabelInventory(servers)()
+}
+
+func (metrics *Metrics) PrepareHTTPLabelInventory(servers []config.ServerConfig) func() {
 	hosts := map[string]bool{"": true, "_other": true}
 	routes := map[string]bool{"_unmatched": true, "_unidentified": true}
 	for _, server := range servers {
 		if len(server.ServerNames) > 0 {
-			hosts[strings.ToLower(strings.TrimSuffix(hostLabel(strings.TrimSpace(server.ServerNames[0])), "."))] = true
+			hosts[middleware.CanonicalHTTPHost(server.ServerNames[0])] = true
 		}
 		for _, location := range server.Locations {
 			if location.RouteID != nil && *location.RouteID != "" {
@@ -238,27 +241,29 @@ func (metrics *Metrics) SetHTTPLabelInventory(servers []config.ServerConfig) {
 			}
 		}
 	}
-	metrics.labelInventoryMu.Lock()
-	defer metrics.labelInventoryMu.Unlock()
-	for host := range metrics.metricHosts {
-		if !hosts[host] {
-			metrics.requests.DeletePartialMatch(prometheus.Labels{"host": host})
-			metrics.duration.DeletePartialMatch(prometheus.Labels{"host": host})
-			if metrics.routeResponseBytes != nil {
-				metrics.routeResponseBytes.DeletePartialMatch(prometheus.Labels{"host": host})
+	return func() {
+		metrics.labelInventoryMu.Lock()
+		defer metrics.labelInventoryMu.Unlock()
+		for host := range metrics.metricHosts {
+			if !hosts[host] {
+				metrics.requests.DeletePartialMatch(prometheus.Labels{"host": host})
+				metrics.duration.DeletePartialMatch(prometheus.Labels{"host": host})
+				if metrics.routeResponseBytes != nil {
+					metrics.routeResponseBytes.DeletePartialMatch(prometheus.Labels{"host": host})
+				}
 			}
 		}
-	}
-	if metrics.routeLabelEnabled {
-		for route := range metrics.metricRoutes {
-			if !routes[route] {
-				metrics.requests.DeletePartialMatch(prometheus.Labels{"route": route})
-				metrics.duration.DeletePartialMatch(prometheus.Labels{"route": route})
-				metrics.routeResponseBytes.DeletePartialMatch(prometheus.Labels{"route": route})
+		if metrics.routeLabelEnabled {
+			for route := range metrics.metricRoutes {
+				if !routes[route] {
+					metrics.requests.DeletePartialMatch(prometheus.Labels{"route": route})
+					metrics.duration.DeletePartialMatch(prometheus.Labels{"route": route})
+					metrics.routeResponseBytes.DeletePartialMatch(prometheus.Labels{"route": route})
+				}
 			}
 		}
+		metrics.metricHosts, metrics.metricRoutes, metrics.labelInventoryReady = hosts, routes, true
 	}
-	metrics.metricHosts, metrics.metricRoutes, metrics.labelInventoryReady = hosts, routes, true
 }
 
 // SetHostLabel atomically changes whether future requests record the Host

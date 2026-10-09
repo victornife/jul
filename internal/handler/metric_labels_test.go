@@ -37,6 +37,7 @@ func TestHTTPRouteAndHostSeriesBoundedByConfiguration(t *testing.T) {
 	}
 	for _, enabled := range []bool{false, true} {
 		metrics := observability.NewMetrics(observability.WithHostLabel(true), observability.WithRouteLabel(enabled))
+		metrics.SetHTTPLabelInventory(configuration.Servers)
 		handler := metrics.Middleware(routes.For("test"))
 		for request := 0; request < 100; request++ {
 			for _, target := range []string{
@@ -75,6 +76,29 @@ func TestHTTPRouteAndHostSeriesBoundedByConfiguration(t *testing.T) {
 					t.Fatal("disabled mode changed released label shape")
 				}
 			}
+		}
+	}
+}
+
+func TestConfiguredIPv6MetricHostUsesCanonicalRouterName(t *testing.T) {
+	configuration := config.ProxyTarget("http://127.0.0.1:8082", "127.0.0.1:8081")
+	configuration.Servers[0].ServerNames = []string{"[::1]"}
+	if err := config.Validate(configuration); err != nil {
+		t.Fatal(err)
+	}
+	metrics := observability.NewMetrics(observability.WithHostLabel(true), observability.WithRouteLabel(true))
+	metrics.SetHTTPLabelInventory(configuration.Servers)
+	routes, err := router.New(configuration, map[string]router.Builder{router.ActionProxy: func(config.ServerConfig, config.LocationConfig) (http.Handler, error) {
+		return http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(writer, "body") }), nil
+	}}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics.Middleware(routes.For("127.0.0.1:8081")).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://[::1]:8081/", nil))
+	for _, family := range []string{"jul_http_requests_total", "jul_http_request_duration_seconds", "jul_http_response_bytes_total"} {
+		values := labelValuesFor(t, metrics, family, "host")
+		if len(values) != 1 || values[0] != "[::1]" {
+			t.Fatalf("%s host=%v, want [::1]", family, values)
 		}
 	}
 }
