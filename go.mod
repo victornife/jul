@@ -5,7 +5,7 @@ go 1.26.9
 require (
 	github.com/andybalholm/brotli v1.2.6
 	github.com/corazawaf/coraza-coreruleset/v4 v4.25.0
-	github.com/corazawaf/coraza/v3 v3.8.0
+	github.com/corazawaf/coraza/v3 v3.8.1
 	github.com/dunglas/httpsfv v1.1.2
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
