@@ -1274,8 +1274,8 @@ func TestApplyTimeoutRestoresAndBlocksConcurrentApply(t *testing.T) {
 	}
 
 	var submitted atomic.Bool
-	finalizerStarted := make(chan struct{})
 	finalizerContinue := make(chan struct{})
+	clock := newSavedNotLiveClock()
 	c := &ConfigApplyCoordinator{
 		BaseCtx:   context.Background(),
 		Path:      path,
@@ -1284,7 +1284,6 @@ func TestApplyTimeoutRestoresAndBlocksConcurrentApply(t *testing.T) {
 			submitted.Store(true)
 			// Never send a result until released; the synchronous path times out.
 			go func() {
-				close(finalizerStarted)
 				<-finalizerContinue
 				req.Result <- server.ReloadResult{
 					ID:        req.ID,
@@ -1298,29 +1297,16 @@ func TestApplyTimeoutRestoresAndBlocksConcurrentApply(t *testing.T) {
 		},
 		LiveSnapshot: func() server.LiveSnapshot {
 			cfg := config.ProxyTarget("127.0.0.1:9000", ":8080")
-			// reload_timeout also bounds preflight, which must finish on a slow
-			// runner; the first apply still times out because its finalizer blocks.
-			cfg.Global.ReloadTimeout = config.Duration(time.Second * raceTimeScale)
+			cfg.Global.ReloadTimeout = config.Duration(savedNotLiveBudget)
 			return server.LiveSnapshot{EffectiveConfig: cfg}
 		},
 		PlannedRestart: &PlannedRestartStore{},
 		waitMargin:     10 * time.Millisecond,
+		clock:          clock,
 	}
 
 	// First apply times out synchronously; the finalizer goroutine is started.
-	res1Ch := make(chan ApplyResult, 1)
-	go func() {
-		res, _ := c.ApplyRaw(admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
-		res1Ch <- res
-	}()
-
-	var res1 ApplyResult
-	select {
-	case <-finalizerStarted:
-		res1 = <-res1Ch
-	case res1 = <-res1Ch:
-		t.Fatalf("first apply returned before submitting its reload: %+v", res1)
-	}
+	res1 := applyRawAwaitingSavedNotLive(t, c, clock, admin.ApplyRequestContext{}, validConfigRaw(t, ":8081"), ApplyHot)
 	if !res1.OK {
 		t.Fatalf("ok = false, want true for timed-out apply; message: %s", res1.Message)
 	}
