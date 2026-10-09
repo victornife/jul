@@ -31,9 +31,9 @@ v2.1.0 tag or its packaged READMEs.
   new handshakes are rejected. Wire the existing bounded graceful/forced
   retirement counter exactly once at resource cleanup, excluding aborted
   reloads. Forced means resource retirement after grace expiry, not universal
-  stream termination. Connection-age, proper upgraded-session draining and
-  the separate Console follow-up exposes process totals. Connection policy
-  and maturity are unchanged.
+  stream termination. Connection age and proper upgraded-session draining remain
+  deferred; the separate Console follow-up exposes process totals. Connection
+  policy and maturity are unchanged.
 
 - **Opt-in route HTTP metrics and chart (#521).** Startup `route_label` adds
   durable route IDs to request, latency and response-byte families, preserving
