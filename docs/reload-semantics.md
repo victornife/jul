@@ -801,13 +801,17 @@ upgraded-session shutdown and Console additions:
   Jul process, accepting the scope of disruption. Jul has no targeted
   session-termination API. A future age policy must address the underlying TLS
   connection: closing one multiplexed HTTP/2 stream does not itself trigger a
-  new handshake. Mid-stream re-authentication remains out of scope.
+  new handshake. Mid-stream re-authentication remains out of scope. The
+  design-first follow-up is [#563](https://github.com/victornife/jul/issues/563),
+  an unselected candidate requiring an explicit operator revocation-bound need.
 - **Shutdown notifier: deferred.** A generic `RegisterOnShutdown` callback
   starts protocol-specific shutdown but Go does not wait for its completion.
   Graceful WebSocket shutdown is a real missing capability: it needs a
   Close-frame exchange, session ownership, a bounded drain and forced-close
   behavior. Those belong in a focused upgraded-session draining follow-up,
-  not a notification-only callback.
+  not a notification-only callback. That design-first follow-up is
+  [#562](https://github.com/victornife/jul/issues/562), an unselected candidate
+  for shutdown-owned HTTP/1 upgraded sessions.
 - **Retirement metric: wired; Console addition deferred.** The existing
   `jul_transport_retired_total{mode="graceful|forced"}` contract is unchanged.
   Each superseded handler generation whose resource-retirement callback runs
