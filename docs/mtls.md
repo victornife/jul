@@ -288,6 +288,17 @@ go test -run '^$' -bench 'Handshake|MTLS' -benchmem ./internal/server/
   the certificate they were accepted with. Per-location `require_client_cert` is
   part of normal routing and applies to the next request. The admin listener's
   `[admin.tls.client_auth]` is still read when the admin listener starts.
+- **Established streams and revocation.** An HTTP/1 or HTTP/2 stream can keep
+  exchanging data after its certificate is added to the CRL; the next full or
+  resumed handshake is checked against the new policy. This is not immediate
+  connection revocation: there is no maximum connection age or enforced
+  revocation time bound, and asking a client to reconnect cannot enforce one.
+  Jul has no targeted session-termination API. Operators must use their
+  upstream/backend, external load balancer or process termination controls
+  where immediate disconnection is required. A future age policy must close
+  or renew the underlying TLS connection, not merely one HTTP/2 stream. See the
+  [long-lived connection matrix](reload-semantics.md#long-lived-connection-matrix)
+  for named client-visible tests and the WebSocket/gRPC shutdown boundaries.
 - **Server vs client certificates are separate.** The server certificate can
   come from ACME or static `cert`/`key`; `ca_file` is only the trust anchor for
   *client* certificates. They do not interfere.

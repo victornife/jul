@@ -1122,6 +1122,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv.AltSvcTransitionHook = metrics.ObserveAltSvcTransition
 	srv.MTLSResultHook = metrics.ObserveMTLSHandshake
 	srv.CRLNextUpdateHook = metrics.SetMTLSCRLNextUpdates
+	srv.TransportRetiredHook = metrics.ObserveTransportRetired
 	// Drive L4 stream-proxy reloads from the same validated config as the HTTP
 	// listeners. Stream binding errors are reported as a degraded reload result
 	// but do not roll back the HTTP swap (the listener sets are independent).

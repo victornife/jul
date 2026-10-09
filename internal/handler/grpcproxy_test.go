@@ -136,6 +136,61 @@ func dialGRPC(t testing.TB, addr string) *grpc.ClientConn {
 	return conn
 }
 
+func TestLongLivedNativeGRPCReloadAndShutdown(t *testing.T) {
+	for _, phase := range []string{"reload_and_forced_retirement", "shutdown"} {
+		t.Run(phase, func(t *testing.T) {
+			backend := startGRPCEcho(t)
+			proxy, err := NewGRPCProxy(context.Background(), config.ServerConfig{}, config.LocationConfig{ProxyPass: "http://" + backend, GRPC: true}, nil, nil, grpcTestLogger(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if closer, ok := proxy.(io.Closer); ok {
+					_ = closer.Close()
+				}
+			})
+			fixture := newLongLivedServer(t, proxy)
+			connection := dialGRPC(t, fixture.address)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			stream, err := connection.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true, ClientStreams: true}, "/echo.Echo/Stream")
+			if err != nil {
+				t.Fatal(err)
+			}
+			echo := func(value string) {
+				t.Helper()
+				payload := []byte(value)
+				if err := stream.SendMsg(&payload); err != nil {
+					t.Fatal(err)
+				}
+				var received []byte
+				if err := stream.RecvMsg(&received); err != nil {
+					t.Fatal(err)
+				}
+				if string(received) != value {
+					t.Fatalf("echo=%q, want %q", received, value)
+				}
+			}
+			echo("before")
+			if phase == "shutdown" {
+				fixture.stop()
+				payload := []byte("after shutdown")
+				if err := stream.SendMsg(&payload); err == nil {
+					var received []byte
+					if err := stream.RecvMsg(&received); err == nil {
+						t.Fatal("native gRPC stream still alive after shutdown grace")
+					}
+				}
+			} else {
+				fixture.reload(t)
+				echo("after reload")
+				fixture.waitRetired(t)
+				echo("after forced handler CloseIdleConnections")
+			}
+		})
+	}
+}
+
 func TestGRPCProxyZeroBackendDiscoveryNoPanic(t *testing.T) {
 	// A discovery-backed gRPC upstream can have zero backends at build time;
 	// building the passthrough handler must not panic (regression:

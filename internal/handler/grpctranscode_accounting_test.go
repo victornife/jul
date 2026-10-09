@@ -7,16 +7,25 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/genproto/googleapis/api/annotations"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/dynamicpb"
 
 	"jul/internal/config"
 	"jul/internal/upstream"
@@ -25,7 +34,7 @@ import (
 // transcodeDescriptorSet writes a one-method descriptor set with a
 // google.api.http annotation, which is the minimum a transcoding route needs to
 // have any routes at all.
-func transcodeDescriptorSet(t *testing.T) string {
+func transcodeDescriptorSet(t *testing.T, streaming ...bool) string {
 	t.Helper()
 	strField := func(name string, num int32) *descriptorpb.FieldDescriptorProto {
 		return &descriptorpb.FieldDescriptorProto{
@@ -53,10 +62,11 @@ func transcodeDescriptorSet(t *testing.T) string {
 		Service: []*descriptorpb.ServiceDescriptorProto{{
 			Name: proto.String("EchoService"),
 			Method: []*descriptorpb.MethodDescriptorProto{{
-				Name:       proto.String("Echo"),
-				InputType:  proto.String(".echo.EchoRequest"),
-				OutputType: proto.String(".echo.EchoReply"),
-				Options:    opts,
+				Name:            proto.String("Echo"),
+				InputType:       proto.String(".echo.EchoRequest"),
+				OutputType:      proto.String(".echo.EchoReply"),
+				ServerStreaming: proto.Bool(len(streaming) != 0 && streaming[0]),
+				Options:         opts,
 			}},
 		}},
 	}}}
@@ -70,6 +80,117 @@ func transcodeDescriptorSet(t *testing.T) string {
 		t.Fatalf("write descriptor set: %v", err)
 	}
 	return path
+}
+
+func TestLongLivedTranscodedGRPCReloadAndShutdown(t *testing.T) {
+	for _, phase := range []string{"reload_graceful_completion", "forced_retirement", "shutdown"} {
+		t.Run(phase, func(t *testing.T) {
+			path := transcodeDescriptorSet(t, true)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var set descriptorpb.FileDescriptorSet
+			if err := proto.Unmarshal(raw, &set); err != nil {
+				t.Fatal(err)
+			}
+			descriptor, err := protodesc.NewFile(set.File[0], protoregistry.GlobalFiles)
+			if err != nil {
+				t.Fatal(err)
+			}
+			commands := make(chan string, 1)
+			backendDone := make(chan struct{})
+			backend := grpc.NewServer(grpc.UnknownServiceHandler(func(_ any, stream grpc.ServerStream) error {
+				defer close(backendDone)
+				request := dynamicpb.NewMessage(descriptor.Messages().ByName("EchoRequest"))
+				if err := stream.RecvMsg(request); err != nil {
+					return err
+				}
+				send := func(message string) error {
+					response := dynamicpb.NewMessage(descriptor.Messages().ByName("EchoReply"))
+					response.Set(response.Descriptor().Fields().ByName("message"), protoreflect.ValueOfString(message))
+					return stream.SendMsg(response)
+				}
+				if err := send("before"); err != nil {
+					return err
+				}
+				for {
+					select {
+					case <-stream.Context().Done():
+						return stream.Context().Err()
+					case command := <-commands:
+						if err := send(command); err != nil {
+							return err
+						}
+						if command == "after reload" {
+							return nil
+						}
+					}
+				}
+			}))
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			go func() { _ = backend.Serve(listener) }()
+			t.Cleanup(backend.Stop)
+			proxy, err := NewGRPCTranscode(context.Background(), config.ServerConfig{}, config.LocationConfig{GRPCTranscode: &config.GRPCTranscodeConfig{Target: listener.Addr().String(), DescriptorSet: path, Streaming: true}}, nil, nil, grpcTestLogger(), nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			closer := proxy.(io.Closer)
+			t.Cleanup(func() { _ = closer.Close() })
+			grace := 100 * time.Millisecond
+			if phase == "reload_graceful_completion" {
+				grace = time.Hour
+			}
+			fixture := newLongLivedServer(t, proxy, grace)
+			client := &http.Client{Timeout: 10 * time.Second}
+			response, err := client.Post("http://"+fixture.address+"/v1/echo", "application/json", strings.NewReader(`{"message":"begin"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("status=%d", response.StatusCode)
+			}
+			decoder := json.NewDecoder(response.Body)
+			var first map[string]any
+			if err := decoder.Decode(&first); err != nil || first["message"] != "before" {
+				t.Fatalf("first=%v err=%v", first, err)
+			}
+			if phase == "shutdown" {
+				fixture.stop()
+			} else {
+				fixture.reload(t)
+				if phase == "forced_retirement" {
+					fixture.waitRetired(t)
+				} else {
+					commands <- "after reload"
+					var next map[string]any
+					if err := decoder.Decode(&next); err != nil || next["message"] != "after reload" {
+						t.Fatalf("reload frame=%v err=%v", next, err)
+					}
+				}
+			}
+			select {
+			case <-backendDone:
+			case <-time.After(5 * time.Second):
+				t.Fatal("backend stream did not complete/cancel")
+			}
+			if phase != "reload_graceful_completion" {
+				var next map[string]any
+				if err := decoder.Decode(&next); err == nil && next["message"] != nil {
+					t.Fatalf("transcoded RPC still emitted data after %s: %v", phase, next)
+				}
+			} else {
+				if _, err := io.Copy(io.Discard, response.Body); err != nil {
+					t.Fatal(err)
+				}
+				fixture.waitRetired(t)
+			}
+		})
+	}
 }
 
 // admittedTranscoder builds a transcoding route under the supplied pool policy.

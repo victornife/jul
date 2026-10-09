@@ -11,13 +11,164 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"jul/internal/config"
 	"jul/internal/lifecycle"
+	"jul/internal/observability"
 	"jul/internal/redact"
 	"jul/internal/upstream"
 )
+
+func TestTransportRetirementMetricExactlyOnce(t *testing.T) {
+	for _, phase := range []string{"already_drained", "drains_within_grace", "grace_expires"} {
+		t.Run(phase, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				metrics := observability.NewMetrics()
+				server := leaseTestServer(time.Second)
+				server.TransportRetiredHook = metrics.ObserveTransportRetired
+				generation := newHandlerGen(context.Background(), time.Second, nil, nil, 1)
+				var closed atomic.Int64
+				if phase != "already_drained" {
+					generation.inflight.Add(1)
+				}
+				server.retireGen(generation, func() { closed.Add(1) }, nil, nil)
+				synctest.Wait()
+				if phase != "already_drained" {
+					if values := transportRetirementValues(t, metrics); values["graceful"] != 0 || values["forced"] != 0 {
+						t.Fatalf("counted retirement before resource closure: %v", values)
+					}
+					if phase == "grace_expires" {
+						time.Sleep(time.Second)
+					} else {
+						generation.release()
+					}
+					synctest.Wait()
+				}
+				wantMode := "graceful"
+				if phase == "grace_expires" {
+					wantMode = "forced"
+				}
+				values := transportRetirementValues(t, metrics)
+				if values[wantMode] != 1 || values["graceful"]+values["forced"] != 1 {
+					t.Fatalf("retirement counters=%v, want exactly one %s", values, wantMode)
+				}
+				if phase == "grace_expires" {
+					if generation.inflight.Load() != 1 {
+						t.Fatal("forced counter must not imply an active request was terminated")
+					}
+					generation.release()
+				}
+				server.retireTransport(generation, "forced")
+				server.retireTransport(generation, "graceful")
+				generation.doRetire()
+				server.wg.Wait()
+				values = transportRetirementValues(t, metrics)
+				if closed.Load() != 1 || values[wantMode] != 1 || values["graceful"]+values["forced"] != 1 {
+					t.Fatalf("repeated retirement or late drain counted twice: closures=%d values=%v", closed.Load(), values)
+				}
+			})
+		})
+	}
+}
+
+func transportRetirementValues(t *testing.T, metrics *observability.Metrics) map[string]float64 {
+	t.Helper()
+	families, err := metrics.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := make(map[string]float64)
+	for _, family := range families {
+		if family.GetName() != "jul_transport_retired_total" {
+			continue
+		}
+		for _, series := range family.GetMetric() {
+			if len(series.GetLabel()) != 1 || series.GetLabel()[0].GetName() != "mode" {
+				t.Fatalf("unexpected retirement labels: %v", series.GetLabel())
+			}
+			mode := series.GetLabel()[0].GetValue()
+			if mode != "graceful" && mode != "forced" {
+				t.Fatalf("unbounded retirement mode=%q", mode)
+			}
+			values[mode] = series.GetCounter().GetValue()
+		}
+	}
+	return values
+}
+
+func TestTransportRetirementMetricSkipsUnownedGeneration(t *testing.T) {
+	metrics := observability.NewMetrics()
+	server := leaseTestServer(time.Second)
+	server.TransportRetiredHook = metrics.ObserveTransportRetired
+	server.retireGen(nil, func() { t.Fatal("nil generation retired") }, nil, nil)
+	server.retireGen(newHandlerGen(context.Background(), time.Second, nil, nil, 1), nil, nil, nil)
+	if values := transportRetirementValues(t, metrics); values["graceful"] != 0 || values["forced"] != 0 {
+		t.Fatalf("unowned generation counted: %v", values)
+	}
+}
+
+func TestLongLivedHTTPForcedRetirementDoesNotCancelRequest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		server := leaseTestServer(time.Second)
+		metrics := observability.NewMetrics()
+		server.TransportRetiredHook = metrics.ObserveTransportRetired
+		entered, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		retired := make(chan struct{})
+		var requestError error
+		old := newHandlerGen(context.Background(), time.Second, map[string]http.Handler{
+			":80": http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				close(entered)
+				<-release
+				requestError = request.Context().Err()
+				_, _ = io.WriteString(writer, "old generation completed")
+			}),
+		}, nil, 1)
+		server.handlers.Store(old)
+		response := httptest.NewRecorder()
+		go func() {
+			server.dynamicHandler(":80").ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+			close(finished)
+		}()
+		<-entered
+		server.handlers.Store(newHandlerGen(context.Background(), time.Second, nil, nil, 2))
+		server.retireGen(old, func() { close(retired) }, nil, nil)
+		synctest.Wait()
+		select {
+		case <-retired:
+			t.Fatal("resources retired before grace elapsed")
+		default:
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		select {
+		case <-retired:
+		default:
+			t.Fatal("active generation resources not forcibly retired at grace")
+		}
+		if got := old.inflight.Load(); got != 1 {
+			t.Fatalf("in-flight requests after forced retirement=%d, want 1", got)
+		}
+		if values := transportRetirementValues(t, metrics); values["forced"] != 1 || values["graceful"] != 0 {
+			t.Fatalf("resource retirement counters=%v, want forced=1 graceful=0 while request survives", values)
+		}
+		close(release)
+		<-finished
+		server.wg.Wait()
+		if requestError != nil {
+			t.Fatalf("retirement canceled the HTTP request: %v", requestError)
+		}
+		if got := response.Body.String(); got != "old generation completed" {
+			t.Fatalf("response=%q", got)
+		}
+		select {
+		case <-old.drained:
+		default:
+			t.Fatal("generation did not drain after request completed")
+		}
+	})
+}
 
 // TestRedactionGenerationRegistryUnionAndRetire verifies the per-generation
 // redaction registry used by Publish: secrets are masked while any active

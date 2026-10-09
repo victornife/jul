@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
+
 	"jul/internal/config"
 )
 
@@ -103,6 +106,39 @@ func TestAdminWriteAndWatcherEcho(t *testing.T) {
 	if !waitForURL(t, adminHealthURL, 5*time.Second) {
 		t.Fatalf("admin server did not become ready")
 	}
+	retirementCounts := func() map[string]float64 {
+		t.Helper()
+		request, err := http.NewRequest(http.MethodGet, "http://"+adminAddr+"/metrics", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+		response, err := (&http.Client{Timeout: 5 * time.Second}).Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("metrics status=%d", response.StatusCode)
+		}
+		parser := expfmt.NewTextParser(model.LegacyValidation)
+		families, err := parser.TextToMetricFamilies(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		values := make(map[string]float64)
+		for _, series := range families["jul_transport_retired_total"].GetMetric() {
+			for _, label := range series.GetLabel() {
+				if label.GetName() == "mode" {
+					values[label.GetValue()] = series.GetCounter().GetValue()
+				}
+			}
+		}
+		return values
+	}
+	if values := retirementCounts(); values["graceful"] != 0 || values["forced"] != 0 {
+		t.Fatalf("startup counted serving-generation retirement: %v", values)
+	}
 	// Admin apply: change return code from 200 to 201. Do not write the file
 	// first: the apply endpoint persists the candidate itself, and a competing
 	// file-watcher reload from a manual write races with the managed reload and
@@ -140,6 +176,9 @@ func TestAdminWriteAndWatcherEcho(t *testing.T) {
 	// Wait for the live runtime to serve the admin-applied config.
 	if !waitForHTTPStatus(t, trafficURL, 201, 5*time.Second) {
 		t.Fatalf("admin-applied config did not become live")
+	}
+	if values := retirementCounts(); values["graceful"] != 1 || values["forced"] != 0 {
+		t.Fatalf("real Serve reload retirement counters=%v, want graceful=1 forced=0", values)
 	}
 
 	// Verify the on-disk file matches the admin-applied config.

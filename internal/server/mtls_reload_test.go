@@ -4,6 +4,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -36,6 +37,10 @@ type mtlsReloadFixture struct {
 }
 
 func newMTLSReloadFixture(t *testing.T, revoked ...int64) *mtlsReloadFixture {
+	return newMTLSReloadFixtureWithHandler(t, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { _, _ = writer.Write([]byte("ok")) }), revoked...)
+}
+
+func newMTLSReloadFixtureWithHandler(t *testing.T, handler http.Handler, revoked ...int64) *mtlsReloadFixture {
 	t.Helper()
 	dir := t.TempDir()
 	ca := newCA(t)
@@ -48,8 +53,7 @@ func newMTLSReloadFixture(t *testing.T, revoked ...int64) *mtlsReloadFixture {
 	f.src = &stubSource{}
 	f.src.set(f.snapshot(), nil)
 	factory := func(_ context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
-		h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
-		return map[string]http.Handler{f.addr: h}, 1, func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, nil
+		return map[string]http.Handler{f.addr: handler}, 1, func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, nil
 	}
 	srv := New(f.snapshot(), nil, lifecycle.Fingerprint{}, quietLogger(), factory, f.src, func(context.Context, *config.Config) error { return nil })
 	srv.CRLNextUpdateHook = func(m map[string]time.Time) {
@@ -76,6 +80,63 @@ func newMTLSReloadFixture(t *testing.T, revoked ...int64) *mtlsReloadFixture {
 	}
 	t.Fatal("TLS listener never became reachable")
 	return nil
+}
+
+func TestLongLivedMTLSStreamSurvivesClientRevocation(t *testing.T) {
+	for _, protocol := range []string{"http1", "http2"} {
+		t.Run(protocol, func(t *testing.T) {
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			defer releaseOnce.Do(func() { close(release) })
+			handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(writer, "data: before\n\n")
+				_ = http.NewResponseController(writer).Flush()
+				select {
+				case <-release:
+				case <-request.Context().Done():
+					return
+				}
+				_, _ = io.WriteString(writer, "data: after revocation\n\n")
+				_ = http.NewResponseController(writer).Flush()
+			})
+			fixture := newMTLSReloadFixtureWithHandler(t, handler)
+			_, victim := fixture.ca.clientCert(t, "long-lived", 19, nil, nil)
+			transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, ServerName: "a.example.com", Certificates: []tls.Certificate{victim}}, ForceAttemptHTTP2: protocol == "http2"}
+			defer transport.CloseIdleConnections()
+			client := &http.Client{Transport: transport, Timeout: 10 * time.Second}
+			response, err := client.Get("https://" + fixture.addr + "/events")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			wantMajor := 1
+			if protocol == "http2" {
+				wantMajor = 2
+			}
+			if response.ProtoMajor != wantMajor {
+				t.Fatalf("protocol=%s, want HTTP/%d", response.Proto, wantMajor)
+			}
+			reader := bufio.NewReader(response.Body)
+			if line, err := reader.ReadString('\n'); err != nil || line != "data: before\n" {
+				t.Fatalf("initial frame=%q err=%v", line, err)
+			}
+			fixture.ca.writeCRL(t, "", fixture.crlPath, 19)
+			if reload := fixture.doReload("revoke-live-stream"); reload.Outcome != ReloadAppliedLive {
+				t.Fatalf("CRL reload=%+v", reload)
+			}
+			if _, err := fixture.get(victim, nil); err == nil {
+				t.Fatal("new handshake accepted revoked certificate")
+			}
+			releaseOnce.Do(func() { close(release) })
+			if _, err := reader.ReadString('\n'); err != nil {
+				t.Fatal(err)
+			}
+			if line, err := reader.ReadString('\n'); err != nil || line != "data: after revocation\n" {
+				t.Fatalf("established stream frame=%q err=%v", line, err)
+			}
+		})
+	}
 }
 
 // snapshot copies the parts of f.cfg a test mutates, so the running server

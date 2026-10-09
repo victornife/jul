@@ -78,6 +78,29 @@ the matched server's primary configured name or `_other`, never raw Host input.
 Wildcard matches share a configured name rather than exporting arbitrary
 subdomains. The flag hot-reloads and each request pins its mode at entry.
 
+### Handler-generation retirement
+
+The existing `jul_transport_retired_total` counter is wired to actual
+superseded handler-generation resource retirement. Its only label is the
+bounded `mode`: `graceful` when requests/leases drained before cleanup,
+`forced` when cleanup followed the grace deadline. It counts once per
+generation, not per upstream socket or terminated client. Aborted reloads do
+not retire the serving generation and therefore do not increment it.
+
+**Forced resource retirement does not prove every active stream was cut.**
+The [connection matrix](reload-semantics.md#long-lived-connection-matrix)
+shows active proxy/WebSocket streams surviving where only idle connections
+are closed, unlike a transcoder's owned backend client connection.
+
+An example forced-retirement alert condition is:
+
+```promql
+sum(increase(jul_transport_retired_total{mode="forced"}[5m])) > 0
+```
+
+Use the existing warning for generation/grace details. No new Console
+retirement chart or control is included.
+
 ### Per-route HTTP metrics
 
 This additive capability is **Beta / implemented**, with a

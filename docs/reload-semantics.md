@@ -721,6 +721,117 @@ connection. A **rejected** reload never reaches step 1's swap: its freshly
 built (staged) resources are closed immediately and the live generation is
 untouched.
 
+### Long-lived connection matrix
+
+This matrix covers a successful HTTP handler reload on a retained listener,
+with the route and backend unchanged. Listener removal, upstream churn and
+external backend failure have their own ownership boundaries. "Continues"
+does not disable backend read timeouts, RPC deadlines or client cancellation.
+The evidence keys below identify named tests, including distinct assertions
+for reload, grace expiry and shutdown within the same protocol test.
+
+| Connection | Reload | Forced resource retirement after HTTP grace | HTTP server shutdown | Frontend mTLS/CRL rotation | HTTP `send_timeout` |
+| --- | --- | --- | --- | --- | --- |
+| HTTP/1.1 request | Existing request finishes on its old generation (H-R) | Resources close; no blanket request-context cancellation. A request using a closed resource can still fail (H-F) | Active response waits for grace, then the connection is closed (S-S) | Established TLS identity remains; new handshakes use the new policy (TLS-1) | Write-inactivity budget, not request lifetime; absolute `write_timeout` remains a separate cap (W) |
+| HTTP/2 request | Existing stream keeps its generation (G-R) | Same resource boundary as HTTP/1; an active native-proxy stream survives idle-connection closure (G-F) | Active streams wait for grace, then the connection is closed (G-S) | Established TLS identity remains where TLS is used; cleartext h2c has no client certificate (TLS-2) | Per-stream write/flush operation budget, not byte-progress refresh during one large operation (W) |
+| HTTP/1.1 WebSocket upgrade | Existing tunnel continues (WS-R) | Idle backend connection cleanup does not close the active tunnel (WS-F) | Hijacked tunnel is not awaited or closed by server drain; it can still exchange frames after drain returns. Actual process exit drops the socket (WS-S) | No new handshake or mid-tunnel authentication pass (TLS-1) | Not applied after hijack (WS-W) |
+| Proxied SSE / long HTTP response | Existing response continues (S-R) | Active proxy response survives idle-connection cleanup (S-F) | Waits for grace, then is cut (S-S) | Established TLS stream continues even after its certificate is revoked (TLS-1, TLS-2) | Quiet time between events is not a lifetime limit; blocked output is bounded (W, S-W) |
+| Native gRPC proxy stream | Existing RPC continues (G-R) | Active HTTP/2 backend RPC survives handler `CloseIdleConnections` (G-F) | Waits for grace, then is cut (G-S) | Existing TLS connection is not re-handshaken; plaintext h2c is outside mTLS (TLS-2) | HTTP/2 per-stream write operation budget; RPC deadlines remain independent (W) |
+| Transcoded gRPC stream | RPC may complete normally within grace (T-R) | Handler closure closes its owned gRPC client connection and cancels the backend stream (T-F) | Active downstream response is cut at grace; backend RPC is cancelled (T-S) | Established frontend TLS identity remains; this column is not backend trust rotation (TLS-1, TLS-2) | Uses its downstream HTTP protocol's budget, independently of the backend RPC deadline (W) |
+| L4 TCP / UDP session | TCP pool and established UDP session are retained for unchanged targets (L-R) | Not governed by HTTP handler-generation grace | TCP has a separate drain grace; UDP sessions are closed (L-S) | Not applicable: Jul is relaying rather than terminating client TLS here | Not applicable: HTTP `send_timeout` does not configure L4 writes |
+
+HTTP shutdown grace is `[global] shutdown_timeout` (default 30 seconds).
+It is not a hard end-to-end process-exit deadline: leased background work has
+its own bounded wait and generation resources have their own cleanup. L4 TCP
+shutdown uses its separate 30-second drain grace. WebSocket "shutdown" evidence
+tests server drain returning while a live tunnel still echoes; it does not
+claim a WebSocket close handshake or imply that a socket survives process exit.
+An established connection's TLS identity is not retroactively replaced, even
+though a new HTTP request can select a newly published route policy.
+
+#### Named evidence
+
+- **H-R:** `TestReloadDrainsBeforeRetiringClosers` in
+  [server reload tests](../internal/server/reload_test.go).
+- **H-F:** `TestLongLivedHTTPForcedRetirementDoesNotCancelRequest` in
+  [generation tests](../internal/server/generation_test.go); fake time proves
+  that resource closure and ordinary request cancellation are distinct.
+- **WS-R / WS-F / WS-S:** `TestLongLivedWebSocketReloadAndShutdown`, subtests
+  `reload_and_forced_retirement` and `shutdown`, in
+  [proxy stream tests](../internal/handler/proxy_stream_test.go).
+- **S-R / S-F / S-S:** `TestLongLivedSSEReloadAndShutdown`, the same two
+  lifecycle subtests, in [proxy stream tests](../internal/handler/proxy_stream_test.go).
+- **G-R / G-F / G-S:** `TestLongLivedNativeGRPCReloadAndShutdown`, subtests
+  `reload_and_forced_retirement` and `shutdown`, in
+  [native gRPC tests](../internal/handler/grpcproxy_test.go). This exercises
+  the real Jul HTTP/2 listener and production passthrough handler.
+- **T-R / T-F / T-S:** `TestLongLivedTranscodedGRPCReloadAndShutdown`, subtests
+  `reload_graceful_completion`, `forced_retirement` and `shutdown`, in
+  [transcoder handler tests](../internal/handler/grpctranscode_accounting_test.go).
+- **TLS-1 / TLS-2:** `TestLongLivedMTLSStreamSurvivesClientRevocation`, subtests
+  `http1` and `http2`, and `TestReloadRefreshesClientCRLWithoutRestart` in
+  [client-auth reload tests](../internal/server/mtls_reload_test.go). Shared
+  handshake-policy evidence applies to TLS-terminated protocol rows; it is
+  not a claim that plaintext gRPC or TLS passthrough authenticates clients.
+- **W / WS-W:** `TestSendTimeoutConnectionKeepsAbsoluteCap`,
+  `TestSendTimeoutConnectionTransportBoundaries`,
+  `TestSendTimeoutRefreshesWritesAndFlushes`,
+  `TestSendTimeoutHeadersAndFinalization` and
+  `TestSendTimeoutLeavesHijackedConnectionAlone` in
+  [response-writer tests](../internal/respwriter/respwriter_test.go).
+  **S-W:** `TestDownstreamSendTimeoutAllowsCompressedProxyStream` in
+  [proxy timeout tests](../internal/handler/proxy_timeout_test.go).
+- **L-R / L-S:** `TestStreamPoolReusedAcrossReload` in
+  [L4 admission tests](../internal/stream/l4_admission_test.go),
+  `TestLongLivedUDPSessionReloadAndShutdown` in
+  [UDP session tests](../internal/stream/udp_session_test.go), and
+  `TestReloadRemovingListenerDoesNotWaitForActiveSessions` /
+  `TestCloseWaitsForSessionsThatEndWithinGrace` in
+  [L4 drain tests](../internal/stream/removed_listener_drain_test.go).
+
+#### Optional runtime decisions (#519)
+
+This slice wires the existing retirement counter and defers connection-age,
+upgraded-session shutdown and Console additions:
+
+- **Connection age: deferred.** No maximum connection age is enforced.
+  Revocation therefore has no enforced time bound on established connections;
+  asking clients to reconnect is not enforcement. Operators can terminate
+  connections at an upstream/backend or external load balancer, or stop the
+  Jul process, accepting the scope of disruption. Jul has no targeted
+  session-termination API. A future age policy must address the underlying TLS
+  connection: closing one multiplexed HTTP/2 stream does not itself trigger a
+  new handshake. Mid-stream re-authentication remains out of scope. The
+  design-first follow-up is [#563](https://github.com/victornife/jul/issues/563),
+  an unselected candidate requiring an explicit operator revocation-bound need.
+- **Shutdown notifier: deferred.** A generic `RegisterOnShutdown` callback
+  starts protocol-specific shutdown but Go does not wait for its completion.
+  Graceful WebSocket shutdown is a real missing capability: it needs a
+  Close-frame exchange, session ownership, a bounded drain and forced-close
+  behavior. Those belong in a focused upgraded-session draining follow-up,
+  not a notification-only callback. That design-first follow-up is
+  [#562](https://github.com/victornife/jul/issues/562), an unselected candidate
+  for shutdown-owned HTTP/1 upgraded sessions.
+- **Retirement metric: wired; Console addition deferred.** The existing
+  `jul_transport_retired_total{mode="graceful|forced"}` contract is unchanged.
+  Each superseded handler generation whose resource-retirement callback runs
+  is counted once: `graceful` after drain, `forced` after grace expiry.
+  Aborted candidates and startup without a previous generation are not
+  retirements; late drain/repeated cleanup do not count again. `forced`
+  describes resource retirement, not proof that every active stream ended.
+  The existing warning still supplies generation/grace detail. See
+  [retirement alerting](observability.md#handler-generation-retirement).
+
+`TestTransportRetirementMetricExactlyOnce`,
+`TestTransportRetirementMetricSkipsUnownedGeneration` and
+`TestDoReloadDegradedOnBindFailure` back the accounting in
+[generation tests](../internal/server/generation_test.go) and
+[reload tests](../internal/server/reload_test.go). The other entries are
+recorded deferrals, not implemented capabilities or a promise that long-lived
+connections are immune to resource closure. See
+[known limitations](known-limitations.md#long-lived-connections) and
+[mTLS operational notes](mtls.md#operational-notes).
+
 ### Generation-owned background work
 
 Some work legitimately outlives the request that started it. Today that is the

@@ -895,8 +895,19 @@ func TestDoReloadDegradedOnBindFailure(t *testing.T) {
 
 	src := &stubSource{}
 	src.set(cfgWith(addr), nil)
-	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src,
+	baseFactory := bodyHandlerFactory(tag)
+	var resourceClosures, candidateAborts atomic.Int64
+	factory := func(ctx context.Context, configuration *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		handlers, generation, commit, abort, err := baseFactory(ctx, configuration)
+		return handlers, generation, func() (upstream.SnapshotMap, func()) {
+			snapshots, _ := commit()
+			return snapshots, func() { resourceClosures.Add(1) }
+		}, func() { abort(); candidateAborts.Add(1) }, err
+	}
+	srv := New(cfgWith(addr), nil, lifecycle.Fingerprint{}, quietLogger(), factory, src,
 		func(context.Context, *config.Config) error { return nil })
+	var retirements atomic.Int64
+	srv.TransportRetiredHook = func(string) { retirements.Add(1) }
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reload := make(chan ReloadRequest, 1)
@@ -950,6 +961,12 @@ func TestDoReloadDegradedOnBindFailure(t *testing.T) {
 	// aborted before any handler swap occurred.
 	if !eventually(t, "http://"+addr+"/", "v1") {
 		t.Error("existing listener should keep old handler after aborted reload")
+	}
+	if retirements.Load() != 0 {
+		t.Fatalf("aborted reload counted %d serving-generation retirements", retirements.Load())
+	}
+	if resourceClosures.Load() != 0 || candidateAborts.Load() != 1 {
+		t.Fatalf("aborted reload closures=%d candidate aborts=%d, want 0/1", resourceClosures.Load(), candidateAborts.Load())
 	}
 
 	cancel()
