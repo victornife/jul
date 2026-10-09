@@ -200,6 +200,53 @@ func TestStatusAPI(t *testing.T) {
 	}
 }
 
+func TestStatsAPIGenerationRetirements(t *testing.T) {
+	for _, state := range []string{"zero", "counted", "unavailable"} {
+		t.Run(state, func(t *testing.T) {
+			metrics := observability.NewMetrics()
+			if state == "counted" {
+				metrics.ObserveTransportRetired("graceful")
+				metrics.ObserveTransportRetired("forced")
+			}
+			dependencies := Deps{}
+			if state != "unavailable" {
+				dependencies.Stats = metrics.Snapshot
+			}
+			server := newTestServer(t, config.AdminConfig{}, dependencies)
+			response := httptest.NewRecorder()
+			server.routes().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/stats", nil))
+			if response.Code != http.StatusOK {
+				t.Fatalf("status=%d", response.Code)
+			}
+			var body map[string]json.RawMessage
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			raw, present := body["generationRetirements"]
+			if state == "unavailable" {
+				if present {
+					t.Fatalf("unavailable response contains retirement totals: %s", raw)
+				}
+				return
+			}
+			if !present {
+				t.Fatal("available retirement totals omitted")
+			}
+			var totals observability.GenerationRetirementStats
+			if err := json.Unmarshal(raw, &totals); err != nil {
+				t.Fatal(err)
+			}
+			want := 0.0
+			if state == "counted" {
+				want = 1
+			}
+			if totals.Graceful != want || totals.Forced != want {
+				t.Fatalf("HTTP totals=%+v, want %v/%v", totals, want, want)
+			}
+		})
+	}
+}
+
 func TestStatsAPIRouteMetricsProjection(t *testing.T) {
 	server := newTestServer(t, config.AdminConfig{}, Deps{Stats: func() observability.StatsSnapshot {
 		return observability.StatsSnapshot{Available: true, RouteMetricsEnabled: true, RouteMetrics: []observability.HTTPRouteStats{{RouteID: "route-one", Requests: 10, Errors: 2, ResponseBytes: 100, DurationCount: 10, DurationSumSeconds: 0.5}}}

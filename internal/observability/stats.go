@@ -98,9 +98,10 @@ type StatsSnapshot struct {
 	// not counted). The Console derives a bytes/sec trend from consecutive
 	// snapshots itself (#431 §25) rather than the server keeping a second
 	// rolling series.
-	HTTPResponseBytesTotal float64          `json:"httpResponseBytesTotal"`
-	RouteMetricsEnabled    bool             `json:"routeMetricsEnabled"`
-	RouteMetrics           []HTTPRouteStats `json:"routeMetrics"`
+	HTTPResponseBytesTotal float64                    `json:"httpResponseBytesTotal"`
+	RouteMetricsEnabled    bool                       `json:"routeMetricsEnabled"`
+	RouteMetrics           []HTTPRouteStats           `json:"routeMetrics"`
+	GenerationRetirements  *GenerationRetirementStats `json:"generationRetirements,omitempty"`
 
 	// CacheTiers is the occupancy of every configured cache tier. Absent
 	// entirely when caching is disabled.
@@ -123,6 +124,11 @@ type StatsSnapshot struct {
 	// generic thresholds its low/critical states were computed against.
 	Storage      []StorageHeadroom `json:"storage,omitempty"`
 	StorageHints *StorageHints     `json:"storageHints,omitempty"`
+}
+
+type GenerationRetirementStats struct {
+	Graceful float64 `json:"graceful"`
+	Forced   float64 `json:"forced"`
 }
 
 type HTTPRouteStats struct {
@@ -228,6 +234,9 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 		RouteMetricsEnabled: m.routeLabelEnabled,
 		RouteMetrics:        routeMetrics,
 	}
+	if err == nil && m.transportRetired != nil {
+		snap.GenerationRetirements = &GenerationRetirementStats{}
+	}
 
 	var (
 		latencySum   float64
@@ -239,6 +248,18 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 
 	for _, mf := range families {
 		switch mf.GetName() {
+		case "jul_transport_retired_total":
+			if snap.GenerationRetirements == nil {
+				continue
+			}
+			for _, metric := range mf.GetMetric() {
+				switch labelValue(metric, "mode") {
+				case "graceful":
+					snap.GenerationRetirements.Graceful += metric.GetCounter().GetValue()
+				case "forced":
+					snap.GenerationRetirements.Forced += metric.GetCounter().GetValue()
+				}
+			}
 		case "jul_http_requests_total":
 			for _, metric := range mf.GetMetric() {
 				v := metric.GetCounter().GetValue()
