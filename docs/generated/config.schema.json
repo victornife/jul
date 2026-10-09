@@ -490,7 +490,7 @@
           "additionalProperties": false,
           "properties": {
             "host_label": {
-              "description": "HostLabel adds the request Host as the \"host\" label on jul_http_requests_total and jul_http_request_duration_seconds",
+              "description": "HostLabel enables the configuration-bounded \"host\" label on HTTP metrics",
               "type": "boolean"
             },
             "route_label": {

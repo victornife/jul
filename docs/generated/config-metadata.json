@@ -1025,7 +1025,7 @@
       "subsystem": "metrics",
       "lifecycle_class": "hot_reload",
       "lifecycle_reason": "an atomic flag read by the metrics middleware on each request; OnReloaded flips it on every successful reload without rebuilding the registry or resetting any collector (#91)",
-      "description": "HostLabel adds the request Host as the \"host\" label on jul_http_requests_total and jul_http_request_duration_seconds",
+      "description": "HostLabel enables the configuration-bounded \"host\" label on HTTP metrics",
       "anchor": "observability-metrics-host_label"
     },
     "observability.metrics.route_label": {

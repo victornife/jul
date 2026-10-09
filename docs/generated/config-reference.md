@@ -887,7 +887,7 @@ Sinks selects the active access-log destinations: any of "stdout" (the server's 
 
 ## `observability.metrics.host_label` {#observability-metrics-host_label}
 
-HostLabel adds the request Host as the "host" label on jul_http_requests_total and jul_http_request_duration_seconds.
+HostLabel enables the configuration-bounded "host" label on HTTP metrics.
 
 | | |
 | --- | --- |

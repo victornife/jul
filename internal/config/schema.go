@@ -1520,12 +1520,9 @@ type ObservabilityConfig struct {
 // MetricsConfig tunes the Prometheus metrics exposed at the admin /metrics
 // endpoint, under the [observability.metrics] table.
 type MetricsConfig struct {
-	// HostLabel adds the request Host as the "host" label on
-	// jul_http_requests_total and jul_http_request_duration_seconds. It is off
-	// by default: the Host header is client-controlled, so enabling it on an
-	// edge exposed to arbitrary Host values can drive unbounded metric
-	// cardinality. Enable it only when the set of hosts is bounded (or pair it
-	// with a scrape-time relabel/drop rule).
+	// HostLabel enables the configuration-bounded "host" label on HTTP metrics.
+	// The router supplies a primary configured server name or _other; request
+	// Host strings never become metric labels. Disabled values remain empty.
 	HostLabel  bool `toml:"host_label"`
 	RouteLabel bool `toml:"route_label"`
 }

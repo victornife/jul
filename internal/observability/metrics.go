@@ -31,13 +31,9 @@ type Metrics struct {
 	aggregateRequests *prometheus.CounterVec
 	aggregateDuration *prometheus.HistogramVec
 
-	// hostLabelEnabled controls whether the request Host is recorded as the
-	// "host" label on jul_http_requests_total / jul_http_request_duration_seconds.
-	// It is opt-in (default off) because Host is client-controlled and an
-	// unbounded label would let a flood of distinct Host headers explode metric
-	// cardinality. When disabled the label is emitted with an empty value so the
-	// metric shape is stable for dashboards. Atomic so it hot-reloads (#91)
-	// without replacing the registry or resetting any collector.
+	// hostLabelEnabled controls the bounded routing-projection "host" label.
+	// Disabled values are empty; enabled values never contain raw Host input.
+	// Requests pin the atomic mode before entering the handler chain.
 	hostLabelEnabled    atomic.Bool
 	routeLabelEnabled   bool
 	routeResponseBytes  *prometheus.CounterVec
@@ -219,10 +215,8 @@ type Metrics struct {
 // MetricsOption customises a Metrics at construction time.
 type MetricsOption func(*Metrics)
 
-// WithHostLabel enables (or disables) the per-request "host" label on the HTTP
-// request counter and latency histogram. It is off by default: the Host header
-// is client-controlled, so an attacker sending many distinct values could
-// otherwise drive unbounded metric cardinality.
+// WithHostLabel enables (or disables) configuration-bounded host labels on HTTP
+// metrics. It is off by default; enabled requests without routing use _other.
 func WithHostLabel(on bool) MetricsOption {
 	return func(m *Metrics) { m.hostLabelEnabled.Store(on) }
 }
