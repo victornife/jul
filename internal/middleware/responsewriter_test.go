@@ -12,6 +12,62 @@ import (
 	"testing"
 )
 
+func TestCanonicalHTTPHost(t *testing.T) {
+	for _, test := range []struct{ host, want string }{
+		{"Example.COM", "example.com"},
+		{"  EXAMPLE.COM.:443  ", "example.com"},
+		{"*.Tenant.EXAMPLE.", "*.tenant.example"},
+		{"192.168.1.1:9090", "192.168.1.1"},
+		{"[::1]", "[::1]"},
+		{"[2001:DB8::1]:8080", "[2001:db8::1]"},
+		{"[::1]attacker:8080", ""},
+		{"[::1", ""},
+		{"[::1]:", ""},
+		{"[::1]:invalid", ""},
+		{"[::1]:65536", ""},
+		{"example.com:", ""},
+		{"example.com:bad", ""},
+		{"example.com:-1", ""},
+		{"example.com:99999", ""},
+		{"example.com:999999999999999999999999999999999999", ""},
+		{"example.com:0", "example.com"},
+		{"example.com:65535", "example.com"},
+		{"::1", ""},
+		{"a..example.com", ""},
+		{".example.com", ""},
+		{"a.example.com..", ""},
+		{":8080", ""},
+		{"", ""},
+	} {
+		t.Run(test.host, func(t *testing.T) {
+			if got := CanonicalHTTPHost(test.host); got != test.want {
+				t.Fatalf("CanonicalHTTPHost(%q)=%q, want %q", test.host, got, test.want)
+			}
+		})
+	}
+}
+
+func TestHTTPMetricLabelsStayRequestOwned(t *testing.T) {
+	original := httptest.NewRequest(http.MethodGet, "http://api.example/", nil)
+	first, labels := WithHTTPMetricLabels(original)
+	second, other := WithHTTPMetricLabels(original)
+	if first == original || second == original || first == second {
+		t.Fatal("label carrier must clone each request")
+	}
+	if host, route := labels.Values(); host != "_other" || route != "_unmatched" {
+		t.Fatalf("initial labels=(%q,%q)", host, route)
+	}
+	SetHTTPMetricLabels(original, "ignored.example", "ignored-route")
+	SetHTTPMetricLabels(first, "api.example", "_unmatched")
+	SetHTTPMetricLabels(first, "api.example", "route-one")
+	if host, route := labels.Values(); host != "api.example" || route != "route-one" {
+		t.Fatalf("selected labels=(%q,%q)", host, route)
+	}
+	if host, route := other.Values(); host != "_other" || route != "_unmatched" {
+		t.Fatalf("cross-request labels leaked: (%q,%q)", host, route)
+	}
+}
+
 func TestRecorderCapturesStatus(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)

@@ -105,6 +105,7 @@ inside the immutable release archives. They do not close the partial-audit ledge
 | Response cache (memory + disk) | [cache.md](cache.md) | `GA` / `soaked` |
 | Core HTTP (static / proxy / FastCGI / vhosts / routing) | [core-http.md](core-http.md) | `GA` / `soaked` |
 | Downstream write-inactivity timeout | [core-http.md](core-http.md#downstream-write-inactivity) | `Beta` / `merged` |
+| Per-route HTTP metrics and bounded hosts | [observability.md](observability.md#per-route-http-metrics) | `Beta` / `implemented` |
 | Configuration reload transaction | [reload-semantics.md](reload-semantics.md) | `GA` / `soaked` |
 | Trusted client address (client_address) | [configuration.md](configuration.md) | `GA` / `soaked` |
 | Backend TLS trust (backend_tls) | [upstreams.md](upstreams.md) | `GA` / `soaked` |

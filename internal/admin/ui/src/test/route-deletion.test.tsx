@@ -5,6 +5,7 @@
 
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RouteDetail } from "@/features/routes/RouteDetail.tsx";
@@ -59,7 +60,12 @@ function json(body: unknown): Response {
 }
 
 function Wrapper({ children }: { readonly children: ReactNode }) {
-  return <MemoryRouter>{children}</MemoryRouter>;
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return (
+    <QueryClientProvider client={client}>
+      <MemoryRouter>{children}</MemoryRouter>
+    </QueryClientProvider>
+  );
 }
 
 function ForbiddenWrapper({ children }: { readonly children: ReactNode }) {
@@ -78,7 +84,7 @@ function ForbiddenWrapper({ children }: { readonly children: ReactNode }) {
         has: () => false,
       }}
     >
-      <MemoryRouter>{children}</MemoryRouter>
+      <Wrapper>{children}</Wrapper>
     </PermissionContext.Provider>
   );
 }

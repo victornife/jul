@@ -365,7 +365,7 @@ func fullConfig() *config.Config {
 				ServiceName: "jul",
 				Insecure:    true,
 			},
-			Metrics: config.MetricsConfig{HostLabel: true},
+			Metrics: config.MetricsConfig{HostLabel: true, RouteLabel: true},
 			AccessLog: config.AccessLogConfig{
 				Enabled:     config.Bool(true),
 				Sinks:       []string{"stdout"},

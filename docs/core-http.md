@@ -732,6 +732,11 @@ WebSockets retain their existing idle/TCP behavior.
 
 ## Limits
 
+Opt-in route metrics retain configuration-bounded IDs and host labels, never raw
+request paths/Host values. Default metric shapes are unchanged; route dimensions
+are restart-classified and retired inventory is pruned after publication. See
+[per-route HTTP metrics](observability.md#per-route-http-metrics).
+
 - **No SCGI** (FastCGI and uWSGI only).
 - **No `ip_hash` / `random`** load-balancing strategies. Client-IP affinity is
   `strategy = "consistent_hash"` with the `client_ip` hash key

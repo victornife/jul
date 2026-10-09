@@ -132,7 +132,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	}
 
 	// Metrics persist across reloads so counters are not reset on config edits.
-	metrics := observability.NewMetrics(observability.WithHostLabel(cfg.Observability.Metrics.HostLabel))
+	metrics := observability.NewMetrics(observability.WithHostLabel(cfg.Observability.Metrics.HostLabel), observability.WithRouteLabel(cfg.Observability.Metrics.RouteLabel))
+	metrics.SetHTTPLabelInventory(cfg.Servers)
 
 	// Background cache revalidation reports its bounded outcome through the
 	// metrics registry. The cache cannot import observability, so the seam is a
@@ -1133,9 +1134,6 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		// never reaches OnReloaded at all, leaving the active format untouched.
 		setLogLevel(c.Global.LogLevel)
 		setLogFormat(c.Global.LogFormat)
-		// Hot-reload the metrics Host label mode (#91): an atomic flag flip,
-		// never a registry rebuild, so no counter/histogram/gauge resets.
-		metrics.SetHostLabel(c.Observability.Metrics.HostLabel)
 		// Hot-reload cache scalar policy/capacity (#92): installing the
 		// candidate policy and any capacity-driven eviction/deletion are both
 		// committed effects that must only happen after Publish, exactly like

@@ -284,6 +284,7 @@ func TestClassifyAgreesWithRestartRequired(t *testing.T) {
 		{"egress", func(c *config.Config) { c.Egress.Allow = []string{"192.0.2.0/24"} }},
 		{"log format", func(c *config.Config) { c.Global.LogFormat = "json" }},
 		{"metrics", func(c *config.Config) { c.Observability.Metrics.HostLabel = false }},
+		{"route metrics dimensions", func(c *config.Config) { c.Observability.Metrics.RouteLabel = false }},
 		{"acme domains", func(c *config.Config) { c.Servers[0].TLS.ACME.Domains = []string{"other.example.com"} }},
 		{"h2c", func(c *config.Config) { c.Servers[0].H2C = false }},
 		{"http3", func(c *config.Config) { c.Servers[0].HTTP3.Enabled = false }},

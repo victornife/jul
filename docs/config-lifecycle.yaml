@@ -76,13 +76,13 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 369
-  schema_leaves: 314
-  registry_entries: 314
-  startup_consumed: 28
+  schema_paths: 370
+  schema_leaves: 315
+  registry_entries: 315
+  startup_consumed: 29
   by_class:
     hot_reload: 272
-    restart_required: 28
+    restart_required: 29
     new_listener_only: 7
     ignored_deprecated: 4
     validation_rejected_reserved: 3
@@ -383,6 +383,11 @@ fields:
     class: hot_reload
     subsystem: metrics
     reason: "an atomic flag read by the metrics middleware on each request; OnReloaded flips it on every successful reload without rebuilding the registry or resetting any collector (#91)"
+  - path: "observability.metrics.route_label"
+    class: restart_required
+    subsystem: metrics
+    reason: "route labels change collector dimensions; the process-owned registry is constructed once and remains unchanged across reloads"
+    startup_consumed: true
   - path: "observability.tracing.enabled"
     class: restart_required
     subsystem: tracing

@@ -253,6 +253,10 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 	}
 
 	usedUpstreamKeys := upstreamKeysUsed(c, upstreams)
+	var commitMetricLabels func()
+	if f.Metrics != nil {
+		commitMetricLabels = f.Metrics.PrepareHTTPLabelInventory(c.Servers)
+	}
 	genID = f.genCounter.Add(1)
 
 	committed := false
@@ -276,6 +280,10 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		f.publishPluginModules(genID, gen.pluginModules)
 		f.publishPluginPhases(gen.pluginResponse)
 		f.publishWAF(genID, gen.wafPolicy)
+		if commitMetricLabels != nil {
+			commitMetricLabels()
+			f.Metrics.SetHostLabel(c.Observability.Metrics.HostLabel)
+		}
 		f.mu.Unlock()
 		return snapshots, combineRetirement(retireHandlers, retiredEgress)
 	}

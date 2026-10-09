@@ -402,6 +402,7 @@ func observabilityEntries() []Entry {
 		"observability.access_log.sinks",
 	)
 	out = append(out, hot("observability.metrics.host_label", SubMetrics, "an atomic flag read by the metrics middleware on each request; OnReloaded flips it on every successful reload without rebuilding the registry or resetting any collector (#91)"))
+	out = append(out, restartGroup(SubMetrics, "route labels change collector dimensions; the process-owned registry is constructed once and remains unchanged across reloads", "observability.metrics.route_label")...)
 	out = append(out, restartGroup(SubTracing, reasonTracingStartup,
 		"observability.tracing.enabled",
 		"observability.tracing.endpoint",

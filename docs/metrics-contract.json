@@ -4,6 +4,29 @@
     "tag": "v1.32.0",
     "commit": "6bb76a08846150663d7eeb9661edb718ef357a7c"
   },
+  "route_label_variants": [
+    {
+      "name": "jul_http_request_duration_seconds",
+      "type": "histogram",
+      "help": "HTTP request latency in seconds, labeled by method, configured host and route ID.",
+      "labels": ["host", "method", "route"],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_http_requests_total",
+      "type": "counter",
+      "help": "Total HTTP requests handled, labeled by method, configured host, route ID and status code.",
+      "labels": ["code", "host", "method", "route"],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_http_response_bytes_total",
+      "type": "counter",
+      "help": "HTTP response-body bytes written after compression, labeled by method, configured host and route ID.",
+      "labels": ["host", "method", "route"],
+      "state": "merged_release_pending"
+    }
+  ],
   "metrics": [
     {
       "name": "jul_acme_renewals_total",

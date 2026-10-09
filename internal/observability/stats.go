@@ -98,7 +98,9 @@ type StatsSnapshot struct {
 	// not counted). The Console derives a bytes/sec trend from consecutive
 	// snapshots itself (#431 §25) rather than the server keeping a second
 	// rolling series.
-	HTTPResponseBytesTotal float64 `json:"httpResponseBytesTotal"`
+	HTTPResponseBytesTotal float64          `json:"httpResponseBytesTotal"`
+	RouteMetricsEnabled    bool             `json:"routeMetricsEnabled"`
+	RouteMetrics           []HTTPRouteStats `json:"routeMetrics"`
 
 	// CacheTiers is the occupancy of every configured cache tier. Absent
 	// entirely when caching is disabled.
@@ -121,6 +123,53 @@ type StatsSnapshot struct {
 	// generic thresholds its low/critical states were computed against.
 	Storage      []StorageHeadroom `json:"storage,omitempty"`
 	StorageHints *StorageHints     `json:"storageHints,omitempty"`
+}
+
+type HTTPRouteStats struct {
+	RouteID            string  `json:"routeId"`
+	Requests           float64 `json:"requests"`
+	Errors             float64 `json:"errors"`
+	ResponseBytes      float64 `json:"responseBytes"`
+	DurationCount      float64 `json:"durationCount"`
+	DurationSumSeconds float64 `json:"durationSumSeconds"`
+}
+
+func routeMetricSnapshot(families []*dto.MetricFamily) []HTTPRouteStats {
+	byRoute := make(map[string]*HTTPRouteStats)
+	for _, family := range families {
+		if family.GetName() != "jul_http_requests_total" && family.GetName() != "jul_http_request_duration_seconds" && family.GetName() != "jul_http_response_bytes_total" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			route := labelValue(metric, "route")
+			if route == "" {
+				continue
+			}
+			row := byRoute[route]
+			if row == nil {
+				row = &HTTPRouteStats{RouteID: route}
+				byRoute[route] = row
+			}
+			switch family.GetName() {
+			case "jul_http_requests_total":
+				row.Requests += metric.GetCounter().GetValue()
+				if statusClass(labelValue(metric, "code")) == "5xx" {
+					row.Errors += metric.GetCounter().GetValue()
+				}
+			case "jul_http_request_duration_seconds":
+				row.DurationCount += float64(metric.GetHistogram().GetSampleCount())
+				row.DurationSumSeconds += metric.GetHistogram().GetSampleSum()
+			case "jul_http_response_bytes_total":
+				row.ResponseBytes += metric.GetCounter().GetValue()
+			}
+		}
+	}
+	rows := make([]HTTPRouteStats, 0, len(byRoute))
+	for _, row := range byRoute {
+		rows = append(rows, *row)
+	}
+	sort.Slice(rows, func(left, right int) bool { return rows[left].RouteID < rows[right].RouteID })
+	return rows
 }
 
 // CacheTierOccupancy is one cache tier's occupancy for the Console capacity
@@ -155,14 +204,29 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 		// rather than failing the dashboard.
 		families = nil
 	}
+	routeMetrics := []HTTPRouteStats{}
+	if m.routeLabelEnabled {
+		routeMetrics = routeMetricSnapshot(families)
+	}
+	if aggregateFamilies, aggregateErr := m.aggregateRegistry.Gather(); aggregateErr == nil {
+		kept := families[:0]
+		for _, family := range families {
+			if family.GetName() != "jul_http_requests_total" && family.GetName() != "jul_http_request_duration_seconds" && family.GetName() != "jul_http_response_bytes_total" {
+				kept = append(kept, family)
+			}
+		}
+		families = append(kept, aggregateFamilies...)
+	}
 
 	snap := StatsSnapshot{
-		Available:     true,
-		UptimeSeconds: time.Since(m.startTime).Seconds(),
-		StatusClasses: map[string]float64{},
-		CacheEvents:   map[string]float64{},
-		Methods:       map[string]float64{},
-		RateLimited:   map[string]float64{},
+		Available:           true,
+		UptimeSeconds:       time.Since(m.startTime).Seconds(),
+		StatusClasses:       map[string]float64{},
+		CacheEvents:         map[string]float64{},
+		Methods:             map[string]float64{},
+		RateLimited:         map[string]float64{},
+		RouteMetricsEnabled: m.routeLabelEnabled,
+		RouteMetrics:        routeMetrics,
 	}
 
 	var (

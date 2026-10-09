@@ -15,6 +15,12 @@ v2.1.0 tag or its packaged READMEs.
 
 ### Added
 
+- **Opt-in route HTTP metrics and chart (#521).** Startup `route_label` adds
+  durable route IDs to request, latency and response-byte families, preserving
+  default schemas. Enabled host labels are configuration-bounded. Publication
+  prunes retired series while lifetime Console totals stay independent. Status
+  and selected-route RED/bytes charts are included. Beta, not yet merged/released.
+
 - **Downstream write-inactivity timeout (#518).** Optional server and location
   `send_timeout` bounds stalled output without imposing a response lifetime.
   HTTP/1.1 tracks partial connection progress, including informational headers

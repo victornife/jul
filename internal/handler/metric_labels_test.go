@@ -4,6 +4,7 @@
 package handler
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,8 +15,93 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/observability"
+	"jul/internal/router"
 	"jul/internal/upstream"
 )
+
+func TestHTTPRouteAndHostSeriesBoundedByConfiguration(t *testing.T) {
+	id := "configured-route"
+	configuration := &config.Config{Servers: []config.ServerConfig{{
+		Listen: "test", ServerNames: []string{"api.example", "*.tenant.example"},
+		Locations: []config.LocationConfig{
+			{Match: config.MatchConfig{Type: "prefix", Path: "/api/"}, Root: ".", RouteID: &id},
+			{Match: config.MatchConfig{Type: "exact", Path: "/anonymous"}, Root: "."},
+		},
+	}}}
+	build := func(config.ServerConfig, config.LocationConfig) (http.Handler, error) {
+		return http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(writer, "body") }), nil
+	}
+	routes, err := router.New(configuration, map[string]router.Builder{router.ActionStatic: build}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{false, true} {
+		metrics := observability.NewMetrics(observability.WithHostLabel(true), observability.WithRouteLabel(enabled))
+		metrics.SetHTTPLabelInventory(configuration.Servers)
+		handler := metrics.Middleware(routes.For("test"))
+		for request := 0; request < 100; request++ {
+			for _, target := range []string{
+				fmt.Sprintf("http://host-%d.attacker.test/api/path-%d", request, request),
+				fmt.Sprintf("http://tenant-%d.tenant.example/api/path-%d", request, request),
+				fmt.Sprintf("http://host-%d.attacker.test/missing-%d", request, request),
+				"http://api.example/anonymous",
+			} {
+				handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, target, nil))
+			}
+		}
+		families, err := metrics.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, family := range families {
+			if family.GetName() != "jul_http_requests_total" && family.GetName() != "jul_http_request_duration_seconds" && family.GetName() != "jul_http_response_bytes_total" {
+				continue
+			}
+			if len(family.GetMetric()) > 4 {
+				t.Fatalf("%s raw requests expanded series to %d", family.GetName(), len(family.GetMetric()))
+			}
+			for _, series := range family.GetMetric() {
+				labels := make(map[string]string)
+				for _, label := range series.GetLabel() {
+					labels[label.GetName()] = label.GetValue()
+				}
+				if host, ok := labels["host"]; ok && host != "_other" && host != "api.example" {
+					t.Fatalf("unbounded host=%q", host)
+				}
+				if enabled {
+					if labels["route"] != id && labels["route"] != "_unidentified" && labels["route"] != "_unmatched" {
+						t.Fatalf("unexpected route=%q", labels["route"])
+					}
+				} else if _, ok := labels["route"]; ok {
+					t.Fatal("disabled mode changed released label shape")
+				}
+			}
+		}
+	}
+}
+
+func TestConfiguredIPv6MetricHostUsesCanonicalRouterName(t *testing.T) {
+	configuration := config.ProxyTarget("http://127.0.0.1:8082", "127.0.0.1:8081")
+	configuration.Servers[0].ServerNames = []string{"[::1]"}
+	if err := config.Validate(configuration); err != nil {
+		t.Fatal(err)
+	}
+	metrics := observability.NewMetrics(observability.WithHostLabel(true), observability.WithRouteLabel(true))
+	metrics.SetHTTPLabelInventory(configuration.Servers)
+	routes, err := router.New(configuration, map[string]router.Builder{router.ActionProxy: func(config.ServerConfig, config.LocationConfig) (http.Handler, error) {
+		return http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(writer, "body") }), nil
+	}}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics.Middleware(routes.For("127.0.0.1:8081")).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://[::1]:8081/", nil))
+	for _, family := range []string{"jul_http_requests_total", "jul_http_request_duration_seconds", "jul_http_response_bytes_total"} {
+		values := labelValuesFor(t, metrics, family, "host")
+		if len(values) != 1 || values[0] != "[::1]" {
+			t.Fatalf("%s host=%v, want [::1]", family, values)
+		}
+	}
+}
 
 // labelValuesFor returns the distinct values a metric family carries for one
 // label name.

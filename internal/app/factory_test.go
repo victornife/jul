@@ -12,13 +12,17 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/middleware"
 	"jul/internal/observability"
 	"jul/internal/plugins"
 	"jul/internal/redact"
+	"jul/internal/server"
 	"jul/internal/upstream"
 )
 
@@ -70,6 +74,166 @@ func minimalFactory(t *testing.T) (*HandlerFactory, func()) {
 		rt.Close()
 	}
 	return f, cleanup
+}
+
+func TestHTTPMetricInventoryPublishedBeforeReloadCallback(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(writer, "body") }))
+	defer backend.Close()
+	factory, cleanup := minimalFactory(t)
+	defer cleanup()
+	factory.Metrics = observability.NewMetrics(observability.WithHostLabel(true), observability.WithRouteLabel(true))
+	addr := freePort(t)
+	makeCandidate := func(routeID string) *config.Candidate {
+		cfg := config.ProxyTarget(backend.URL, addr)
+		cfg.Observability.Metrics.HostLabel = true
+		cfg.Observability.Metrics.RouteLabel = true
+		cfg.Servers[0].ServerNames = []string{"api.example"}
+		cfg.Servers[0].Locations[0].RouteID = &routeID
+		if routeID == "r-bbbbbbbbbbbbbbbbbbbbbbbbbb" {
+			cfg.Servers[0].Locations[0].Match.Path = "/new"
+		}
+		candidate, err := config.NewCandidate(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return candidate
+	}
+	initial := makeCandidate("r-aaaaaaaaaaaaaaaaaaaaaaaaaa")
+	initial.Effective.Observability.Metrics.HostLabel = false
+	initial.Raw.Observability.Metrics.HostLabel = false
+	factory.Metrics.SetHTTPLabelInventory(initial.Effective.Servers)
+	reloads := make(chan server.ReloadRequest)
+	srv := server.New(initial.Effective, initial.Raw, lifecycle.ComputeFingerprint(initial.Effective), factory.Log, factory.Prepare, config.NewTOMLSource(""), func(context.Context, *config.Config) error { return nil })
+	ready, callbackEntered, releaseCallback := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	srv.OnInitialGenerationReady = func() { close(ready) }
+	srv.OnReloaded = func(cfg *config.Config) (error, error) {
+		close(callbackEntered)
+		<-releaseCallback
+		factory.Metrics.SetHTTPLabelInventory(cfg.Servers)
+		return nil, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reloads, initial.Redaction) }()
+	var releaseOnce sync.Once
+	defer func() {
+		releaseOnce.Do(func() { close(releaseCallback) })
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}()
+	wait := func(signal <-chan struct{}) {
+		t.Helper()
+		select {
+		case <-signal:
+		case <-time.After(10 * time.Second):
+			t.Fatal("server phase did not complete")
+		}
+	}
+	wait(ready)
+	next := makeCandidate("r-bbbbbbbbbbbbbbbbbbbbbbbbbb")
+	result := make(chan server.ReloadResult, 1)
+	reloads <- server.ReloadRequest{Source: server.ReloadSourceAdmin, Candidate: next, Result: result}
+	select {
+	case <-callbackEntered:
+	case reloaded := <-result:
+		t.Fatalf("reload finished before publication callback: %+v", reloaded)
+	case <-time.After(10 * time.Second):
+		t.Fatal("publication callback not entered")
+	}
+	request, err := http.NewRequest(http.MethodGet, "http://"+addr+"/new", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Host = "api.example"
+	response, err := (&http.Client{Timeout: 5 * time.Second}).Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, readErr := io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", response.StatusCode)
+	}
+	rows := factory.Metrics.Snapshot().RouteMetrics
+	if len(rows) != 1 || rows[0].RouteID != *next.Effective.Servers[0].Locations[0].RouteID || rows[0].Requests != 1 || rows[0].DurationCount != 1 || rows[0].ResponseBytes != 4 {
+		t.Fatalf("new generation metrics before callback release: %+v", rows)
+	}
+	assertHost := func() {
+		t.Helper()
+		families, err := factory.Metrics.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, family := range families {
+			if family.GetName() != "jul_http_requests_total" && family.GetName() != "jul_http_request_duration_seconds" && family.GetName() != "jul_http_response_bytes_total" {
+				continue
+			}
+			for _, series := range family.GetMetric() {
+				for _, label := range series.GetLabel() {
+					if label.GetName() == "host" && label.GetValue() != "api.example" {
+						t.Fatalf("%s host=%q", family.GetName(), label.GetValue())
+					}
+				}
+			}
+		}
+	}
+	assertHost()
+	releaseOnce.Do(func() { close(releaseCallback) })
+	select {
+	case reloaded := <-result:
+		if reloaded.Outcome != server.ReloadAppliedLive {
+			t.Fatalf("reload=%+v", reloaded)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("reload did not complete")
+	}
+
+	rejected := makeCandidate("r-cccccccccccccccccccccccccc")
+	rejected.Effective.Servers[0].ServerNames = []string{"rejected.example"}
+	rejected.Effective.Observability.Metrics.HostLabel = false
+	_, _, _, abort, err := factory.Prepare(ctx, rejected.Effective)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := factory.Metrics.Snapshot().RouteMetrics; len(got) != 1 || got[0].RouteID != rows[0].RouteID || got[0].Requests != 1 {
+		abort()
+		t.Fatalf("prepare mutated live metrics: %+v", got)
+	}
+	abort()
+	busyListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busyListener.Close()
+	rejected.Effective.Servers[0].Listen = busyListener.Addr().String()
+	rejected.Raw.Servers[0].Listen = busyListener.Addr().String()
+	reloads <- server.ReloadRequest{Source: server.ReloadSourceAdmin, Candidate: rejected, Result: result}
+	select {
+	case failed := <-result:
+		if failed.Published || failed.FailedPhase != "stage_listeners" {
+			t.Fatalf("failed staging=%+v", failed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("failed staging result not delivered")
+	}
+	response, err = (&http.Client{Timeout: 5 * time.Second}).Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, readErr = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if got := factory.Metrics.Snapshot().RouteMetrics; len(got) != 1 || got[0].RouteID != rows[0].RouteID || got[0].Requests != 2 || got[0].ResponseBytes != 8 || got[0].DurationCount != 2 {
+		t.Fatalf("abort/staging failure changed live inventory: %+v", got)
+	}
+	assertHost()
 }
 
 func TestHandlerFactoryBuildMinimalConfigDryRun(t *testing.T) {

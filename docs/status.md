@@ -198,6 +198,7 @@ v2.0.0 or v2.1.0. Publication does not complete the unchecked GA criteria.
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
 | Auxiliary egress allow-list | SEC-EGRESS | core | `released` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [egress.md](egress.md) |
 | Downstream write-inactivity timeout | SEND-TIMEOUT | core | `merged` | ✅ | ☐ | ☐ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
+| Per-route HTTP metrics and bounded hosts | ROUTE-METRICS | core | `implemented` | ✅ | ☐ | ☐ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [observability.md](observability.md) |
 | Request predicates, response headers, and CORS | CGC-ROUTE | core | `released` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
 | Upstream resilience (admission, retry, circuit) | CGC-RES | core · `grpc` · `stream` | `released` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ☐ | [upstreams.md](upstreams.md) |
 | Configuration authority and managed drift | AUTO-AUTH | core · `console` | `released` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |

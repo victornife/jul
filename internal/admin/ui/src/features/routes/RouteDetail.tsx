@@ -5,13 +5,106 @@
 
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { Sparkline } from "@/components/Sparkline";
+import { useRouteMetricsHistory } from "@/lib/useMetricsHistory";
 import { Drawer } from "@/components/Drawer.tsx";
 import {
+  fetchStats,
   type LocationProjection,
   type LocationWAF,
   type RouteProjection,
   type RouteTarget,
 } from "@/api/client.ts";
+
+function RouteMetrics({ routeId }: { readonly routeId: string | undefined }) {
+  const { has } = usePermission();
+  const canRead = has("status:read");
+  const query = useQuery({
+    queryKey: ["route-metrics-stats", routeId],
+    queryFn: fetchStats,
+    enabled: canRead && routeId !== undefined,
+    refetchInterval: 2000,
+    retry: false,
+  });
+  const sample = query.data?.routeMetrics?.find((row) => row.routeId === routeId);
+  const points = useRouteMetricsHistory(sample, query.dataUpdatedAt);
+  const latest = points.at(-1);
+  let state: string | null = null;
+  if (!canRead) state = "Status access unavailable";
+  else if (routeId === undefined) state = "No durable route ID";
+  else if (query.isPending) state = "Loading route metrics";
+  else if (query.isError) state = "Route metrics unavailable";
+  else if (!query.data.routeMetricsEnabled) state = "Route metrics disabled";
+  else if (sample === undefined) state = "No traffic yet";
+  const charts = [
+    {
+      label: "Request rate",
+      unit: "req/s",
+      value: latest?.requestsPerSec,
+      data: points.map((point) => point.requestsPerSec),
+      color: "var(--color-jul-accent)",
+    },
+    {
+      label: "Server errors",
+      unit: "% 5xx",
+      value: latest?.errorsPercent,
+      data: points.map((point) => point.errorsPercent),
+      color: "var(--color-jul-danger)",
+    },
+    {
+      label: "Mean latency",
+      unit: "ms",
+      value: latest?.latencyMs,
+      data: points.map((point) => point.latencyMs),
+      color: "var(--color-jul-success)",
+    },
+    {
+      label: "Response rate",
+      unit: "B/s",
+      value: latest?.bytesPerSec,
+      data: points.map((point) => point.bytesPerSec),
+      color: "var(--color-jul-warning)",
+    },
+  ];
+  return (
+    <section aria-label="Route metrics" className="border-y border-jul-border py-4">
+      <h3 className="mb-3 text-sm font-semibold text-jul-text">Route metrics</h3>
+      {state !== null ? (
+        <p role="status" className="text-xs text-jul-muted">
+          {state}
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {charts.map((chart) => (
+            <div key={chart.label}>
+              <div className="flex items-baseline justify-between gap-2 text-xs">
+                <span className="text-jul-muted">{chart.label}</span>
+                <span className="tabular-nums text-jul-text">
+                  {chart.value == null
+                    ? "—"
+                    : new Intl.NumberFormat(undefined, {
+                        maximumFractionDigits: 2,
+                        notation: "compact",
+                      }).format(chart.value)}{" "}
+                  <span className="text-jul-muted">{chart.unit}</span>
+                </span>
+              </div>
+              <Sparkline
+                data={chart.data}
+                height={64}
+                width={240}
+                color={chart.color}
+                className="mt-2 h-16 w-full"
+                ariaLabel={`${chart.label} for route ${routeId ?? ""}`}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
@@ -955,6 +1048,7 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
       footer={footer}
     >
       <div className="space-y-5">
+        <RouteMetrics key={loc.route_id ?? "no-route-id"} routeId={loc.route_id} />
         <p className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
           {describe(loc.action)}
         </p>

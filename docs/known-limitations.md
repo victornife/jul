@@ -42,6 +42,19 @@ discovered correctness/security findings still pre-empt the roadmap.
 
 ## Deliberate product boundaries
 
+- **Per-route HTTP metrics are opt-in and Beta.** Enabling
+  `observability.metrics.route_label` requires restart because collector
+  dimensions are process-owned. Only durable route IDs are shown as individual
+  route charts; unidentified routes share `_unidentified`, and unmatched
+  requests share `_unmatched`. Host labels use primary configured names, not
+  arbitrary client Host values. Successful publication prunes retired
+  host/route series; late completions fall back to bounded sentinels, and
+  removed/reintroduced IDs may reset their counters. Lifetime node totals are
+  independent of pruning. Console latency is an interval mean, not a per-route
+  percentile; intervals without duration samples remain gaps, and counter
+  resets establish a fresh sampling baseline. See
+  [per-route HTTP metrics](observability.md#per-route-http-metrics).
+
 - Single-node operation; no production fleet control plane.
 - No Kubernetes Gateway API controller or service-mesh/xDS control plane.
 - No distributed cache, rate limit, circuit state or global quota.

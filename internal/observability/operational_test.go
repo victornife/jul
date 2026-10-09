@@ -323,11 +323,14 @@ func TestMetricsHostLabelOptIn(t *testing.T) {
 		t.Fatalf("default host label = %q, want empty (opt-out)", got)
 	}
 
-	// Opt-in: WithHostLabel(true) records the Host with the port stripped.
+	// Without a router projection, opt-in labels use the bounded fallback.
 	on := NewMetrics(WithHostLabel(true))
 	serve(on, "app.example.com:8443")
-	if got := requestsHostLabel(t, on); got != "app.example.com" {
-		t.Fatalf("opt-in host label = %q, want app.example.com", got)
+	if got := requestsHostLabel(t, on); got != "_other" {
+		t.Fatalf("opt-in host label = %q, want bounded fallback", got)
+	}
+	if samples := on.RequestSamples(); len(samples) != 1 || samples[0].Host != "app.example.com" {
+		t.Fatalf("diagnostic host changed: %+v", samples)
 	}
 }
 

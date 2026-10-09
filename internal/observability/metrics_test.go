@@ -9,6 +9,9 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"jul/internal/config"
+	"jul/internal/middleware"
 )
 
 func TestNewMetricsDefaults(t *testing.T) {
@@ -21,6 +24,129 @@ func TestNewMetricsDefaults(t *testing.T) {
 	}
 	if m.hostLabelEnabled.Load() {
 		t.Error("hostLabel should be off by default")
+	}
+}
+
+func TestHTTPHostLabelsDefaultToBoundedOther(t *testing.T) {
+	metrics := NewMetrics(WithHostLabel(true))
+	handler := metrics.Middleware(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { writer.WriteHeader(http.StatusOK) }))
+	for _, host := range []string{"one.attacker.test", "two.attacker.test"} {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://"+host+"/", nil))
+	}
+	families, err := metrics.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() != "jul_http_requests_total" {
+			continue
+		}
+		if len(family.GetMetric()) != 1 {
+			t.Fatalf("raw host values created %d series", len(family.GetMetric()))
+		}
+		for _, label := range family.GetMetric()[0].GetLabel() {
+			if label.GetName() == "host" && label.GetValue() != "_other" {
+				t.Fatalf("unbounded host label=%q", label.GetValue())
+			}
+		}
+	}
+}
+
+func TestOptInHTTPRouteLabelsUseRoutingProjection(t *testing.T) {
+	metrics := NewMetrics(WithHostLabel(true), WithRouteLabel(true))
+	handler := metrics.Middleware(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		middleware.SetHTTPMetricLabels(request, "api.example", "route-one")
+		_, _ = writer.Write([]byte("body"))
+	}))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://arbitrary.attacker.test/path", nil))
+	families, err := metrics.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool)
+	for _, family := range families {
+		if family.GetName() != "jul_http_requests_total" && family.GetName() != "jul_http_request_duration_seconds" && family.GetName() != "jul_http_response_bytes_total" {
+			continue
+		}
+		seen[family.GetName()] = true
+		labels := make(map[string]string)
+		for _, label := range family.GetMetric()[0].GetLabel() {
+			labels[label.GetName()] = label.GetValue()
+		}
+		if labels["host"] != "api.example" || labels["route"] != "route-one" {
+			t.Fatalf("%s labels=%v", family.GetName(), labels)
+		}
+		if family.GetName() == "jul_http_response_bytes_total" && family.GetMetric()[0].GetCounter().GetValue() != 4 {
+			t.Fatal("route byte counter lost response bytes")
+		}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("missing route metric families: %v", seen)
+	}
+}
+
+func TestRouteMetricInventoryPrunesRetiredLabels(t *testing.T) {
+	metrics := NewMetrics(WithHostLabel(true), WithRouteLabel(true))
+	oldID, newID := "old-route", "new-route"
+	metrics.SetHTTPLabelInventory([]config.ServerConfig{{ServerNames: []string{"old.example"}, Locations: []config.LocationConfig{{RouteID: &oldID}}}})
+	handler := metrics.Middleware(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		middleware.SetHTTPMetricLabels(request, "old.example", oldID)
+		_, _ = writer.Write([]byte("body"))
+	}))
+	request := httptest.NewRequest(http.MethodGet, "http://old.example/", nil)
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	metrics.SetHTTPLabelInventory([]config.ServerConfig{{ServerNames: []string{"new.example"}, Locations: []config.LocationConfig{{RouteID: &newID}}}})
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	families, err := metrics.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() != "jul_http_requests_total" && family.GetName() != "jul_http_request_duration_seconds" && family.GetName() != "jul_http_response_bytes_total" {
+			continue
+		}
+		if len(family.GetMetric()) != 1 {
+			t.Fatalf("retired series retained in %s", family.GetName())
+		}
+		for _, label := range family.GetMetric()[0].GetLabel() {
+			if label.GetName() == "host" && label.GetValue() != "_other" {
+				t.Fatal("retired host recreated")
+			}
+			if label.GetName() == "route" && label.GetValue() != "_unidentified" {
+				t.Fatal("retired route recreated")
+			}
+		}
+	}
+	if got := metrics.Snapshot().HTTPResponseBytesTotal; got != 8 {
+		t.Fatalf("lifetime node bytes reset after label pruning: %v", got)
+	}
+	if got := metrics.Snapshot().RequestsTotal; got != 2 {
+		t.Fatalf("lifetime node requests reset after label pruning: %v", got)
+	}
+}
+
+func TestRouteMetricsSnapshotAggregatesBoundedCounters(t *testing.T) {
+	metrics := NewMetrics(WithRouteLabel(true), WithHostLabel(true))
+	handler := metrics.Middleware(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		middleware.SetHTTPMetricLabels(request, "api.example", "route-one")
+		if request.URL.Path == "/failure" {
+			writer.WriteHeader(http.StatusInternalServerError)
+		}
+		_, _ = writer.Write([]byte("body"))
+	}))
+	for _, path := range []string{"/success", "/failure"} {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://example.test"+path, nil))
+	}
+	snapshot := metrics.Snapshot()
+	if !snapshot.RouteMetricsEnabled || len(snapshot.RouteMetrics) != 1 {
+		t.Fatalf("route snapshot=%+v", snapshot.RouteMetrics)
+	}
+	row := snapshot.RouteMetrics[0]
+	if row.RouteID != "route-one" || row.Requests != 2 || row.Errors != 1 || row.ResponseBytes != 8 || row.DurationCount != 2 {
+		t.Fatalf("row=%+v", row)
+	}
+	if disabled := NewMetrics().Snapshot(); disabled.RouteMetricsEnabled || len(disabled.RouteMetrics) != 0 {
+		t.Fatal("disabled mode fabricated route data")
 	}
 }
 

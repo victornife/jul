@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 314 configurable leaves.
+Coverage: 315 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -887,7 +887,7 @@ Sinks selects the active access-log destinations: any of "stdout" (the server's 
 
 ## `observability.metrics.host_label` {#observability-metrics-host_label}
 
-HostLabel adds the request Host as the "host" label on jul_http_requests_total and jul_http_request_duration_seconds.
+HostLabel enables the configuration-bounded "host" label on HTTP metrics.
 
 | | |
 | --- | --- |
@@ -895,6 +895,19 @@ HostLabel adds the request Host as the "host" label on jul_http_requests_total a
 | Lifecycle | `hot_reload` |
 | Subsystem | `metrics` |
 | Why | an atomic flag read by the metrics middleware on each request; OnReloaded flips it on every successful reload without rebuilding the registry or resetting any collector (#91) |
+
+## `observability.metrics.route_label` {#observability-metrics-route_label}
+
+RouteLabel opts into configuration-bounded route IDs on HTTP counters, latency and response bytes; requires restart.
+
+| | |
+| --- | --- |
+| Type | `bool` |
+| Optional | yes |
+| Lifecycle | `restart_required` |
+| Subsystem | `metrics` |
+| Why | route labels change collector dimensions; the process-owned registry is constructed once and remains unchanged across reloads |
+| Flags | startup-consumed |
 
 ## `observability.tracing.enabled` {#observability-tracing-enabled}
 

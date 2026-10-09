@@ -364,6 +364,16 @@ export const StorageHintsSchema = z.object({
 });
 export type StorageHints = z.infer<typeof StorageHintsSchema>;
 
+export const HTTPRouteStatsSchema = z.object({
+  routeId: z.string(),
+  requests: z.number().nonnegative(),
+  errors: z.number().nonnegative(),
+  responseBytes: z.number().nonnegative(),
+  durationCount: z.number().nonnegative(),
+  durationSumSeconds: z.number().nonnegative(),
+});
+export type HTTPRouteStats = z.infer<typeof HTTPRouteStatsSchema>;
+
 export const StatsSnapshotSchema = z.object({
   available: z.boolean().optional(),
   uptimeSeconds: z.number(),
@@ -395,6 +405,8 @@ export const StatsSnapshotSchema = z.object({
   // guidance (#445), not a percentage denominator. 0/absent = not reported.
   goMaxProcs: z.number().optional(),
   httpResponseBytesTotal: z.number().optional().default(0),
+  routeMetricsEnabled: z.boolean().optional(),
+  routeMetrics: z.array(HTTPRouteStatsSchema).optional(),
   cacheTiers: z.array(CacheTierOccupancySchema).optional(),
   upstreamWorstActive: PoolPressureSchema.optional(),
   upstreamWorstPending: PoolPressureSchema.optional(),

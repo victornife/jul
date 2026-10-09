@@ -32,7 +32,7 @@ export function Sparkline({
   onPointHover,
   thresholds,
 }: {
-  readonly data: number[];
+  readonly data: (number | null)[];
   readonly height?: number;
   readonly width?: number;
   readonly strokeWidth?: number;
@@ -54,7 +54,9 @@ export function Sparkline({
 
   const isInteractive = Boolean(onPointHover);
 
-  if (data.length < 2) {
+  const values = data.filter((value): value is number => value !== null && Number.isFinite(value));
+
+  if (data.length < 2 || values.length === 0) {
     return (
       <svg
         width={width}
@@ -83,7 +85,7 @@ export function Sparkline({
   // Scale including threshold values so lines are visible even when all data
   // is above or below a threshold.
   const thresholdValues = thresholds?.map((t) => t.value) ?? [];
-  const allValues = [...data, ...thresholdValues];
+  const allValues = [...values, ...thresholdValues];
   const min = Math.min(...allValues);
   const max = Math.max(...allValues);
   const range = max - min || 1;
@@ -96,7 +98,19 @@ export function Sparkline({
     return padding + (i / (data.length - 1)) * availableWidth;
   }
 
-  const points: string[] = data.map((v, i) => `${String(toX(i))},${String(toY(v))}`);
+  const segments: { index: number; value: number }[][] = [];
+  let segment: { index: number; value: number }[] | undefined;
+  data.forEach((value, index) => {
+    if (value === null || !Number.isFinite(value)) {
+      segment = undefined;
+      return;
+    }
+    if (segment === undefined) {
+      segment = [];
+      segments.push(segment);
+    }
+    segment.push({ index, value });
+  });
 
   function nearestIndex(clientX: number): number {
     if (!svgRef.current) return 0;
@@ -107,7 +121,8 @@ export function Sparkline({
 
   function triggerHover(idx: number | null): void {
     setActiveIdx(idx);
-    onPointHover?.(idx, idx !== null ? (data[idx] ?? null) : null);
+    const value = idx !== null ? data[idx] : null;
+    onPointHover?.(idx, value != null && Number.isFinite(value) ? value : null);
   }
 
   function handlePointerMove(e: React.PointerEvent<SVGSVGElement>): void {
@@ -121,15 +136,11 @@ export function Sparkline({
   function handleKeyDown(e: React.KeyboardEvent<SVGSVGElement>): void {
     if (e.key === "ArrowRight") {
       e.preventDefault();
-      const next =
-        activeIdx === null ? 0 : Math.min(data.length - 1, activeIdx + 1);
+      const next = activeIdx === null ? 0 : Math.min(data.length - 1, activeIdx + 1);
       triggerHover(next);
     } else if (e.key === "ArrowLeft") {
       e.preventDefault();
-      const prev =
-        activeIdx === null
-          ? data.length - 1
-          : Math.max(0, activeIdx - 1);
+      const prev = activeIdx === null ? data.length - 1 : Math.max(0, activeIdx - 1);
       triggerHover(prev);
     } else if (e.key === "Escape") {
       triggerHover(null);
@@ -138,7 +149,8 @@ export function Sparkline({
   }
 
   const hoverX = activeIdx !== null ? toX(activeIdx) : null;
-  const hoverY = activeIdx !== null ? toY(data[activeIdx] ?? 0) : null;
+  const hoverValue = activeIdx !== null ? data[activeIdx] : null;
+  const hoverY = hoverValue != null && Number.isFinite(hoverValue) ? toY(hoverValue) : null;
 
   return (
     <svg
@@ -186,15 +198,32 @@ export function Sparkline({
       })}
 
       {/* Data line */}
-      <polyline
-        points={points.join(" ")}
-        fill="none"
-        stroke={color}
-        strokeWidth={strokeWidth}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        vectorEffect="non-scaling-stroke"
-      />
+      {segments.map((points) => {
+        const first = points[0];
+        if (first === undefined) return null;
+        return points.length === 1 ? (
+          <circle
+            key={first.index}
+            cx={toX(first.index)}
+            cy={toY(first.value)}
+            r={strokeWidth / 2}
+            fill={color}
+          />
+        ) : (
+          <polyline
+            key={first.index}
+            points={points
+              .map((point) => `${String(toX(point.index))},${String(toY(point.value))}`)
+              .join(" ")}
+            fill="none"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        );
+      })}
 
       {/* Hover indicator */}
       {isInteractive && hoverX !== null && hoverY !== null && (
