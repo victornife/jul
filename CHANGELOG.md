@@ -46,6 +46,12 @@ v2.1.0 tag or its packaged READMEs.
 
 ### Security
 
+- **Go HTTP security updates.** Pin Go 1.26.9 and x/net v0.60.0 for the
+  published HTTP/1 CONNECT desynchronization and HTTP/2 HPACK, flow-control,
+  framing and window-update fixes. The Docker builder uses the matching
+  verified image digest; current-toolchain WASM fixtures are regenerated.
+  No protocol-policy, vulnerability-gate or compatibility baseline is lowered.
+
 - **Admin-plane hardening and review continuation (#514).** Scoped readback,
   content-free diagnostic projections and no-clobber metadata editing are
   strengthened; shared JSON responses prohibit storage. Accepted upload and
