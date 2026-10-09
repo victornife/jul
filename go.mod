@@ -14,6 +14,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.3
+	github.com/prometheus/common v0.70.1
 	github.com/quic-go/quic-go v0.63.0
 	github.com/tetratelabs/wazero v1.12.0
 	github.com/tufanbarisyildirim/gonginx v0.0.0-20260220081509-8e17ce617db3
@@ -52,7 +53,6 @@ require (
 	github.com/magefile/mage v1.17.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/petar-dambovaliev/aho-corasick v0.0.0-20250424160509-463d218d4745 // indirect
-	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
