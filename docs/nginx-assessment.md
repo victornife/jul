@@ -371,3 +371,24 @@ jul import nginx --assess --strict --follow-includes --root ./nginx ./nginx/ngin
 
 The assessment performs no DNS lookup, backend probe, NGINX execution, traffic
 replay, source edit, or production cutover.
+
+## Common idiom dispositions (#523)
+
+Plain positive/zero/negative expires and off are supported at HTTP/server/location
+scope under `NGX_HTTP_EXPIRES`, `NGX_SERVER_EXPIRES` and
+`NGX_LOCATION_EXPIRES`. Modified, daily @time, variables and special epoch/max
+forms stay blocking under those codes. MIME types/default_type use corresponding
+scope-specific TYPES/DEFAULT_TYPE codes with target mappings and provenance.
+The MIME block is assessed as one bounded table, not as unrelated extension
+directives. Includes are still assessed by the bounded resolver and actual contents.
+
+The complete static HTTP/1.1 WebSocket trio is informational
+(`NGX_LOCATION_WEBSOCKET`); incomplete, changed or duplicated forms block.
+Proxy buffering off maps to explicit immediate flushing
+(`NGX_LOCATION_PROXY_BUFFERING`); on blocks. Positive server body limits and
+static HTTP gzip types are supported; unlimited zero body size is blocking.
+send_timeout retains its shipped protocol approximation. Application-outcome
+retry and cache-fill lock stay blocking under their existing deferred policies.
+
+See [exact behavior and candidate pruning](nginx-importer.md#common-idioms-expiration-and-mime-523).
+No readiness, score or equivalence claim is inferred from directive spelling alone.

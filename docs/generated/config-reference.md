@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 315 configurable leaves.
+Coverage: 323 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -798,6 +798,35 @@ WorkerThreads accepts "auto" or a positive integer as a string.
 | Constraint | auto or a canonical positive base-10 integer |
 | Zero/empty semantics | omitted/empty and auto use the Go runtime default |
 | Active when | always |
+
+## `mime.default_type` {#mime-default_type}
+
+DefaultType is the media type for unmapped files; empty inherits.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `static_files` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Constraint | valid media type, at most 256 bytes, no CR/LF |
+| Zero/empty semantics | empty inherits; no policy retains native MIME behavior |
+| Active when | static serving |
+
+## `mime.types.*` {#mime-types-x}
+
+Types replaces the inherited extension table.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `static_files` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Constraint | at most 4096 lowercase dotted extensions (2..64 bytes) mapped to valid media types (at most 256 bytes, no CR/LF) |
+| Zero/empty semantics | omitted inherits; explicit empty map clears inherited extension table |
+| Active when | static serving |
 
 ## `observability.access_log.enabled` {#observability-access_log-enabled}
 
@@ -1904,6 +1933,21 @@ DirectoryListing serves an auto-generated index when a directory has no index fi
 | Subsystem | `static_files` |
 | Why | the handler tree is rebuilt from the effective config on each successful reload |
 
+## `servers.*.locations.*.expires` {#servers-x-locations-x-expires}
+
+Expires applies a response-time expiration policy to NGINX-compatible successful statuses.
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `headers` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Constraint | signed whole seconds; mutually exclusive with cache_control |
+| Zero/empty semantics | omitted disables; explicit zero emits max-age=0; negative emits no-cache |
+| Active when | configured, on NGINX-compatible expiration statuses |
+
 ## `servers.*.locations.*.fastcgi_params.*` {#servers-x-locations-x-fastcgi_params-x}
 
 FastCGIParams are additional FastCGI protocol parameters passed to the backend.
@@ -2195,6 +2239,35 @@ Type is one of "exact", "prefix", or "regex".
 | Zero/empty semantics | omitted selects the documented default where supported |
 | Active when | location configured |
 
+## `servers.*.locations.*.mime.default_type` {#servers-x-locations-x-mime-default_type}
+
+DefaultType is the media type for unmapped files; empty inherits.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `static_files` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Constraint | valid media type, at most 256 bytes, no CR/LF |
+| Zero/empty semantics | empty inherits; no policy retains native MIME behavior |
+| Active when | static serving |
+
+## `servers.*.locations.*.mime.types.*` {#servers-x-locations-x-mime-types-x}
+
+Types replaces the inherited extension table.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `static_files` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Constraint | at most 4096 lowercase dotted extensions (2..64 bytes) mapped to valid media types (at most 256 bytes, no CR/LF) |
+| Zero/empty semantics | omitted inherits; explicit empty map clears inherited extension table |
+| Active when | static serving |
+
 ## `servers.*.locations.*.plugin` {#servers-x-locations-x-plugin}
 
 Plugin names a handler plugin that serves this location as its action (mutually exclusive with root/proxy_pass/etc.).
@@ -2219,6 +2292,21 @@ Plugins lists middleware plugin names applied to this location, composed around 
 | Why | the plugin set is rebuilt and re-instantiated on each successful reload |
 | Requires | `wasm_plugins` |
 
+## `servers.*.locations.*.proxy_buffering` {#servers-x-locations-x-proxy_buffering}
+
+Reverse proxy.
+
+| | |
+| --- | --- |
+| Type | `bool` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `proxy_pass` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Constraint | only explicit false on a proxy location |
+| Zero/empty semantics | omitted retains native automatic flush policy; false flushes each write immediately |
+| Active when | proxy location |
+
 ## `servers.*.locations.*.proxy_connect_timeout` {#servers-x-locations-x-proxy_connect_timeout}
 
 ProxyConnectTimeout bounds dialing the backend for this location.
@@ -2235,7 +2323,7 @@ ProxyConnectTimeout bounds dialing the backend for this location.
 
 ## `servers.*.locations.*.proxy_pass` {#servers-x-locations-x-proxy_pass}
 
-Reverse proxy.
+ProxyPass names an upstream or a concrete HTTP(S) backend URL.
 
 | | |
 | --- | --- |
@@ -2739,6 +2827,35 @@ MaxHeaderBytes caps the size of request headers (default 1 MiB).
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 1 MiB |
 | Active when | always |
+
+## `servers.*.mime.default_type` {#servers-x-mime-default_type}
+
+DefaultType is the media type for unmapped files; empty inherits.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `static_files` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Constraint | valid media type, at most 256 bytes, no CR/LF |
+| Zero/empty semantics | empty inherits; no policy retains native MIME behavior |
+| Active when | static serving |
+
+## `servers.*.mime.types.*` {#servers-x-mime-types-x}
+
+Types replaces the inherited extension table.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `static_files` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Constraint | at most 4096 lowercase dotted extensions (2..64 bytes) mapped to valid media types (at most 256 bytes, no CR/LF) |
+| Zero/empty semantics | omitted inherits; explicit empty map clears inherited extension table |
+| Active when | static serving |
 
 ## `servers.*.name` {#servers-x-name}
 

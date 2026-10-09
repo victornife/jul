@@ -143,7 +143,7 @@ simplified NGINX model:
 | Hidden files | dotfiles blocked unless `allow_hidden` |
 | Range requests | served via `http.ServeContent` (partial content / `If-Range`) |
 | Caching validators | `ETag` = `"<mtime-unixnano>-<size>"`; conditional GETs honoured |
-| MIME types | Jul's streaming-media table first (`.m3u8`, `.mpd`, `.ts`, `.m4s`, `.mkv`, `.aac`), then Go's built-in table and the host's MIME database (`mime.TypeByExtension`), then content sniffing. See [Content-Type for static files](#content-type-for-static-files) |
+| MIME types | Configured tables take precedence. Without an explicit table, Jul's streaming-media table first (`.m3u8`, `.mpd`, `.ts`, `.m4s`, `.mkv`, `.aac`), then Go's built-in table and the host's MIME database (`mime.TypeByExtension`), then content sniffing. See [Content-Type for static files](#content-type-for-static-files) |
 | Precompressed assets | `.br` then `.gz` sidecars served when the client accepts them |
 | Error pages | per-status file (served) or URL (302 redirect) |
 
@@ -168,13 +168,13 @@ Jul therefore sets these types itself (#510):
 | `.mkv` | `video/matroska` | RFC 9559 |
 | `.aac` | `audio/aac` | IANA |
 
-**Precedence.** For these six extensions Jul's table wins over the host
+**Precedence without an explicit extension table.** For these six extensions Jul's table wins over the host
 database, so a container and a host serve the same file with the same type.
 This matters in practice: the Debian/Ubuntu `media-types` package maps `.ts` to
 `text/vnd.trolltech.linguist` (Qt translation sources), which strict HLS players
 reject. Every other extension uses Go's table, then the host database, then
 sniffing. Precompressed sidecars (`.br`/`.gz`) carry the type of the original
-file. There is no per-deployment override map yet.
+file. Configurable overrides are available through the scoped MIME policy below.
 
 ### Listener-scoped server fields
 
@@ -793,3 +793,35 @@ The socket path is dial identity only: HTTP Host follows the Unix contract in
 reuse is isolated with an internal per-backend opaque key. The first tranche is
 HTTP/1.1 over plaintext Unix sockets; it does not claim h2c, HTTP/2-over-Unix or
 TLS-over-Unix support.
+
+## Scoped MIME policy and response expiration
+
+Optional `[mime]`, `[servers.mime]` and `[servers.locations.mime]` policies
+resolve in that order. An explicit `types` table replaces the inherited
+extension table, including an empty table; `default_type` inherits separately.
+Configured tables take precedence over Jul's media/host tables. Unmapped
+extensions use default_type, or application/octet-stream when an explicit
+table has no fallback. Without a policy the existing media/Go/host/sniffing
+behavior is retained. Explicit Content-Type headers and ordered
+response_headers overrides take precedence. Precompressed files use the
+original extension. Policies are copied into each handler generation, never
+registered in Go's process-global MIME database.
+
+Optional location `expires` is a signed whole-second response policy:
+nonnegative values emit max-age and a relative Expires date; negative values
+emit no-cache and a past date. It applies to the NGINX-compatible success/redirect
+statuses listed in [migration guidance](nginx-importer.md#common-idioms-expiration-and-mime-523),
+including HEAD, conditional 304 and partial 206 responses. Existing expiration
+headers are replaced before ordered response_headers operations. It is outside
+the cache, so downstream policy does not change origin storage eligibility and
+cache hits recalculate Expires. Jul-generated CORS preflights retain their
+existing dedicated response policy.
+
+`proxy_buffering = false` on an HTTP proxy forces every write to flush
+immediately. Omission retains Go's native automatic streaming policy; true is
+rejected. This option does not introduce an aggregate response buffer.
+
+The Console Status overview reports configured MIME, expiration and immediate
+flushing by location count. The raw configuration editor exposes the full
+policy, with generated schema/validation and hot reload. See
+[configuration and bounds](configuration.md#mime-policy-and-response-expiration).

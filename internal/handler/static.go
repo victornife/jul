@@ -27,6 +27,7 @@ type staticHandler struct {
 	tryFiles     []string
 	dirListing   bool
 	allowHidden  bool
+	mimePolicy   *config.MIMEConfig
 	cacheControl string
 	errPages     *ErrorPages
 
@@ -76,6 +77,7 @@ func NewStaticWithOptions(srv config.ServerConfig, loc config.LocationConfig, op
 		dirListing:          loc.DirectoryListing,
 		allowHidden:         loc.AllowHidden,
 		cacheControl:        loc.CacheControl,
+		mimePolicy:          config.ResolveMIME(srv.MIME, loc.MIME),
 		errPages:            ep,
 		precompressed:       opts.Precompressed,
 		precompressEncoders: opts.Encoders,
@@ -183,7 +185,7 @@ func (h *staticHandler) serveFile(w http.ResponseWriter, r *http.Request, rel st
 	// ServeContent consults only Go's and the system's tables; set streaming
 	// media types explicitly so they do not depend on the host (#510).
 	if _, set := w.Header()["Content-Type"]; !set {
-		if ctype, ok := streamingMediaTypes[strings.ToLower(path.Ext(rel))]; ok {
+		if ctype := h.contentType(path.Ext(rel), false); ctype != "" {
 			w.Header().Set("Content-Type", ctype)
 		}
 	}
@@ -226,11 +228,13 @@ func (h *staticHandler) servePrecompressed(w http.ResponseWriter, r *http.Reques
 	hdr := w.Header()
 	// Set Content-Type from the original resource so the compressed bytes are
 	// not content-sniffed. Fall back to octet-stream for unknown extensions.
-	ctype := contentTypeByExtension(path.Ext(rel))
+	ctype := h.contentType(path.Ext(rel), true)
 	if ctype == "" {
 		ctype = "application/octet-stream"
 	}
-	hdr.Set("Content-Type", ctype)
+	if _, set := hdr["Content-Type"]; !set {
+		hdr.Set("Content-Type", ctype)
+	}
 	hdr.Set("Content-Encoding", enc)
 	hdr.Set("ETag", fmt.Sprintf(`"%x-%x"`, si.ModTime().UnixNano(), si.Size()))
 	if h.cacheControl != "" {

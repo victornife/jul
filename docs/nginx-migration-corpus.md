@@ -47,9 +47,10 @@ single-zone enablement mapping and candidate are unchanged.
 
 The sequential assertions live beside the existing MISS/HIT/BYPASS test,
 not in the single-response scenario model. `make nginx-migration-e2e` now runs
-the paired policy test as well as the existing reference fixtures. No third
-party image, proprietary traffic, external origin, new importer mapping, range
-cache or `expires` directive implementation is introduced. See
+the paired cache-policy test as well as the existing reference fixtures.
+That cache-policy fixture introduces no third-party image, proprietary traffic,
+external origin, new importer mapping, range cache or expiration implementation.
+The separate #523 expiration tranche is described below. See
 [operator guidance](nginx-importer.md#origin-cache-policy-differences).
 
 ## Bounded NGINX stream and HTTP PROXY-protocol identity evidence (#426)
@@ -634,3 +635,24 @@ The migration corpus now treats a named NGINX upstream containing a Unix socket
 and an HTTP location referencing that upstream as a supported #407 scenario.
 Direct NGINX Unix `proxy_pass` remains a blocking/manual mapping because Jul's
 public contract intentionally requires the socket to live in a named upstream.
+
+## Common idioms and configurable MIME evidence (#523)
+
+`idioms-runtime` adds exact assessment/candidate goldens for signed expiration,
+HTTP MIME tables/default_type, empty-table clearing, gzip types, positive server
+body limits, the exact WebSocket trio and immediate proxy flushing. Its real
+Jul/pinned NGINX replay asserts eligible Cache-Control values and status behavior.
+Off and ineligible header preservation are verified by the dedicated runtime tests.
+
+`TestNGINXCorpusExpirationMIMEPair` runs through the existing digest-pinned,
+unprivileged, read-only, network-disabled reference lane. Repository-authored
+static files verify MIME inheritance/replacement/fallback and dynamic Expires
+offsets for positive, zero, negative and off policies. Both runtimes exercise
+conditional 304 and range 206; Jul additionally exercises HEAD. Direct and
+precompressed original-extension precedence, immutable handler generations,
+strict invalid-input rejection and storage-cache capture isolation have owner
+tests. The original audit probe has only its deferred proxy_next_upstream blocker;
+send_timeout remains approximate. Boundary tests retain modified/@time/variable
+expiration, unlimited body size, non-exact WebSocket forms and content-mismatched
+MIME include filenames as blocking. These are asserted dimensions, not full
+NGINX parity or a release certification.

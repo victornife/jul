@@ -20,6 +20,7 @@ type assessmentWalker struct {
 }
 
 type walkFacts struct {
+	webSocket    bool
 	extraListen  bool
 	corsConflict bool
 	// httpProxyProtocolUsable is true when an HTTP server block declares a
@@ -63,6 +64,16 @@ func (w *assessmentWalker) walk(context AssessmentContext, d ngx.IDirective, fac
 		TargetPaths: append([]string(nil), cap.targetPaths...),
 	})
 
+	if d.GetName() == "types" && (context == ContextHTTP || context == ContextServer || context == ContextLocation) {
+		// Extension entries belong to the table result. Includes still need
+		// their own resolution and source-provenance result.
+		for _, child := range orderedChildren(d) {
+			if child.GetName() == "include" {
+				w.walk(ContextVariable, child, walkFacts{})
+			}
+		}
+		return
+	}
 	childContext, recurse := nestedContext(context, d.GetName())
 	if !recurse {
 		return
@@ -72,6 +83,7 @@ func (w *assessmentWalker) walk(context AssessmentContext, d ngx.IDirective, fac
 	switch {
 	case childContext == ContextLocation:
 		locationFacts.corsConflict = hasStaticCORSConflict(kids)
+		locationFacts.webSocket = exactWebSocket(kids)
 	case childContext == ContextServer:
 		locationFacts.httpProxyProtocolUsable = serverHasUsableHTTPProxyProtocolIdentity(kids)
 		locationFacts.serverClientAuthUsable = serverHasUsableClientAuth(kids)
@@ -94,6 +106,9 @@ func (w *assessmentWalker) walk(context AssessmentContext, d ngx.IDirective, fac
 func classifyDirective(context AssessmentContext, d ngx.IDirective, facts walkFacts) capability {
 	name := d.GetName()
 	params := paramValues(d)
+	if cap, ok := classifyIdiom(context, d, facts); ok {
+		return cap
+	}
 	if isRealIPDirective(name) {
 		return classifyRealIP(name, params, facts)
 	}

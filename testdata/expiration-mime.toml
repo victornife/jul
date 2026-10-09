@@ -1,0 +1,21 @@
+# Core-profile runnable example for scoped MIME policy and response expiration.
+# Run from the repository root: jul check -config testdata/expiration-mime.toml
+[mime]
+default_type = "application/octet-stream"
+types = { ".html" = "text/html", ".ts" = "video/mp2t", ".m3u8" = "application/vnd.apple.mpegurl" }
+
+[[servers]]
+listen = "127.0.0.1:8082"
+server_names = ["localhost"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "testdata/www"
+  index = ["index.html"]
+  expires = "1m"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/revalidate/" }
+  root = "testdata/www"
+  expires = "-1s"
+  mime = { types = {}, default_type = "text/plain" }

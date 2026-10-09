@@ -8,6 +8,8 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"strconv"
+	"time"
 
 	"jul/internal/config"
 	"jul/internal/respwriter"
@@ -50,8 +52,20 @@ func markGeneratedResponse(r *http.Request) {
 // location with neither response_headers nor cors installs no wrapper and
 // allocates nothing.
 func ResponsePolicy(headerOps []config.ResponseHeaderOp, cors *CORSPolicy) Middleware {
-	if len(headerOps) == 0 && cors == nil {
+	return ResponsePolicyWithExpires(headerOps, cors, nil)
+}
+
+// ResponsePolicyWithExpires applies expiration before ordered header operations.
+// Keeping it outside the response cache refreshes Expires on hits without
+// changing the origin headers used to decide storage eligibility.
+func ResponsePolicyWithExpires(headerOps []config.ResponseHeaderOp, cors *CORSPolicy, expires *config.Duration) Middleware {
+	if len(headerOps) == 0 && cors == nil && expires == nil {
 		return nil
+	}
+	var duration *time.Duration
+	if expires != nil {
+		value := expires.Std()
+		duration = &value
 	}
 	ops := make([]responseHeaderOp, len(headerOps))
 	for i, o := range headerOps {
@@ -63,7 +77,7 @@ func ResponsePolicy(headerOps []config.ResponseHeaderOp, cors *CORSPolicy) Middl
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			pw := &policyWriter{ResponseWriter: w, ops: ops, cors: cors, req: r}
+			pw := &policyWriter{ResponseWriter: w, ops: ops, cors: cors, req: r, expires: duration}
 			ctx := context.WithValue(r.Context(), policyWriterCtxKey{}, pw)
 			next.ServeHTTP(pw.Writer(), r.WithContext(ctx))
 		})
@@ -75,9 +89,10 @@ func ResponsePolicy(headerOps []config.ResponseHeaderOp, cors *CORSPolicy) Middl
 // wrapper, mirroring middleware.Recorder and cache.cacheWriter.
 type policyWriter struct {
 	http.ResponseWriter
-	ops  []responseHeaderOp
-	cors *CORSPolicy
-	req  *http.Request
+	ops     []responseHeaderOp
+	cors    *CORSPolicy
+	req     *http.Request
+	expires *time.Duration
 
 	wroteHeader bool
 	hijacked    bool
@@ -104,6 +119,9 @@ func (p *policyWriter) WriteHeader(code int) {
 	}
 	p.wroteHeader = true
 	if !p.skip {
+		if p.expires != nil && expirationStatus(code) {
+			applyExpiration(p.Header(), *p.expires, time.Now())
+		}
 		for _, op := range p.ops {
 			switch op.op {
 			case "add":
@@ -159,4 +177,22 @@ func (p *policyWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		p.hijacked = true
 	}
 	return conn, buf, err
+}
+
+func expirationStatus(code int) bool {
+	switch code {
+	case 200, 201, 204, 206, 301, 302, 303, 304, 307, 308:
+		return true
+	default:
+		return false
+	}
+}
+
+func applyExpiration(header http.Header, duration time.Duration, now time.Time) {
+	header.Set("Expires", now.UTC().Truncate(time.Second).Add(duration).Format(http.TimeFormat))
+	value := "no-cache"
+	if duration >= 0 {
+		value = "max-age=" + strconv.FormatInt(int64(duration/time.Second), 10)
+	}
+	header.Set("Cache-Control", value)
 }

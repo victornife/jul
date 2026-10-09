@@ -181,6 +181,10 @@ const (
 // Registry is the authoritative disposition of every public configuration path,
 // sorted by path so generated artifacts and review diffs stay stable.
 var Registry = assemble(
+	hotGroup(SubStaticFiles, reasonHandlerRebuild,
+		"mime.default_type", "mime.types.*",
+		"servers.*.mime.default_type", "servers.*.mime.types.*",
+		"servers.*.locations.*.mime.default_type", "servers.*.locations.*.mime.types.*"),
 	adminEntries(),
 	cacheEntries(),
 	compressionEntries(),
@@ -580,6 +584,7 @@ func locationEntries() []Entry {
 	// turns on (preflight_widening) are new mechanisms, not new fields on an
 	// old one.
 	out = append(out, hotGroup(SubHeaders, reasonHandlerRebuild,
+		loc+"expires",
 		loc+"response_headers.*.name",
 		loc+"response_headers.*.op",
 		loc+"response_headers.*.value",
@@ -619,6 +624,7 @@ func locationEntries() []Entry {
 		hot(loc+"plugin", SubPlugins, reasonPluginRebuild),
 		hot(loc+"plugins", SubPlugins, reasonPluginRebuild),
 		hot(loc+"proxy_connect_timeout", SubProxyTimeouts, reasonHandlerRebuild),
+		hot(loc+"proxy_buffering", SubProxyPass, reasonHandlerRebuild),
 		hot(loc+"proxy_pass", SubProxyPass, reasonHandlerRebuild),
 		hot(loc+"proxy_read_timeout", SubProxyTimeouts, reasonHandlerRebuild),
 		hot(loc+"proxy_retries", SubProxyRetries, reasonHandlerRebuild),

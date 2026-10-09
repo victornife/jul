@@ -219,3 +219,17 @@ Reviewing without edits emits no operation. Disabling compression changes only
 `enabled`; dormant encoder order, `level`, `min_size`, MIME types, and
 `precompressed` remain intact. Explicit `false`, `0`, and intentionally empty
 encoder/type arrays are transmitted rather than dropped by truthiness checks.
+
+## MIME and NGINX migration
+
+Configured static MIME tables apply to the original resource before choosing a
+precompressed sidecar. This lets explicit content types drive the existing
+compression allow-list consistently. The NGINX importer maps static HTTP
+gzip_types into compression.types and retains NGINX's implicit text/html.
+Repeated HTTP declarations accumulate unique types; `*` makes the whole set unrestricted.
+Only exact media types and the all-types `*` form of NGINX gzip_types translate.
+Family patterns such as `text/*` and `*/*` remain blocking: Jul would interpret
+them as wildcards, while NGINX treats them as literal type names.
+
+See [MIME policy](configuration.md#mime-policy-and-response-expiration) and
+[bounded importer rules](nginx-importer.md#common-idioms-expiration-and-mime-523).

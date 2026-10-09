@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 370,
-    "schema_leaves": 315,
+    "schema_paths": 384,
+    "schema_leaves": 323,
     "resources": 9
   },
   "capability_build_tags": {
@@ -912,6 +912,38 @@
       "default": "auto",
       "description": "WorkerThreads accepts \"auto\" or a positive integer as a string",
       "anchor": "global-worker_threads"
+    },
+    "mime.default_type": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": false,
+      "subsystem": "static_files",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "grammar",
+      "constraint": "valid media type, at most 256 bytes, no CR/LF",
+      "zero_semantics": "empty inherits; no policy retains native MIME behavior",
+      "active_when": "static serving",
+      "description": "DefaultType is the media type for unmapped files; empty inherits",
+      "anchor": "mime-default_type"
+    },
+    "mime.types.*": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "static_files",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "grammar",
+      "constraint": "at most 4096 lowercase dotted extensions (2..64 bytes) mapped to valid media types (at most 256 bytes, no CR/LF)",
+      "zero_semantics": "omitted inherits; explicit empty map clears inherited extension table",
+      "active_when": "static serving",
+      "description": "Types replaces the inherited extension table",
+      "anchor": "mime-types-x"
     },
     "observability.access_log.enabled": {
       "kind": "scalar",
@@ -2224,6 +2256,22 @@
       "description": "DirectoryListing serves an auto-generated index when a directory has no index file",
       "anchor": "servers-x-locations-x-directory_listing"
     },
+    "servers.*.locations.*.expires": {
+      "kind": "scalar",
+      "scalar": "duration",
+      "go_type": "*Duration",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "headers",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "duration",
+      "constraint": "signed whole seconds; mutually exclusive with cache_control",
+      "zero_semantics": "omitted disables; explicit zero emits max-age=0; negative emits no-cache",
+      "active_when": "configured, on NGINX-compatible expiration statuses",
+      "description": "Expires applies a response-time expiration policy to NGINX-compatible successful statuses",
+      "anchor": "servers-x-locations-x-expires"
+    },
     "servers.*.locations.*.fastcgi_params.*": {
       "kind": "scalar",
       "scalar": "string",
@@ -2576,6 +2624,38 @@
       "description": "Type is one of \"exact\", \"prefix\", or \"regex\"",
       "anchor": "servers-x-locations-x-match-type"
     },
+    "servers.*.locations.*.mime.default_type": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "static_files",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "grammar",
+      "constraint": "valid media type, at most 256 bytes, no CR/LF",
+      "zero_semantics": "empty inherits; no policy retains native MIME behavior",
+      "active_when": "static serving",
+      "description": "DefaultType is the media type for unmapped files; empty inherits",
+      "anchor": "servers-x-locations-x-mime-default_type"
+    },
+    "servers.*.locations.*.mime.types.*": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "static_files",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "grammar",
+      "constraint": "at most 4096 lowercase dotted extensions (2..64 bytes) mapped to valid media types (at most 256 bytes, no CR/LF)",
+      "zero_semantics": "omitted inherits; explicit empty map clears inherited extension table",
+      "active_when": "static serving",
+      "description": "Types replaces the inherited extension table",
+      "anchor": "servers-x-locations-x-mime-types-x"
+    },
     "servers.*.locations.*.plugin": {
       "kind": "scalar",
       "scalar": "string",
@@ -2606,6 +2686,22 @@
       "description": "Plugins lists middleware plugin names applied to this location, composed around the action (after any server-level plugins, outermost first)",
       "anchor": "servers-x-locations-x-plugins"
     },
+    "servers.*.locations.*.proxy_buffering": {
+      "kind": "scalar",
+      "scalar": "bool",
+      "go_type": "*bool",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "proxy_pass",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "boolean",
+      "constraint": "only explicit false on a proxy location",
+      "zero_semantics": "omitted retains native automatic flush policy; false flushes each write immediately",
+      "active_when": "proxy location",
+      "description": "Reverse proxy",
+      "anchor": "servers-x-locations-x-proxy_buffering"
+    },
     "servers.*.locations.*.proxy_connect_timeout": {
       "kind": "scalar",
       "scalar": "duration",
@@ -2631,7 +2727,7 @@
       "subsystem": "proxy_pass",
       "lifecycle_class": "hot_reload",
       "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
-      "description": "Reverse proxy",
+      "description": "ProxyPass names an upstream or a concrete HTTP(S) backend URL",
       "anchor": "servers-x-locations-x-proxy_pass"
     },
     "servers.*.locations.*.proxy_read_timeout": {
@@ -3216,6 +3312,38 @@
       "default": "1m",
       "description": "MaxHeaderBytes caps the size of request headers (default 1 MiB)",
       "anchor": "servers-x-max_header_bytes"
+    },
+    "servers.*.mime.default_type": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "static_files",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "grammar",
+      "constraint": "valid media type, at most 256 bytes, no CR/LF",
+      "zero_semantics": "empty inherits; no policy retains native MIME behavior",
+      "active_when": "static serving",
+      "description": "DefaultType is the media type for unmapped files; empty inherits",
+      "anchor": "servers-x-mime-default_type"
+    },
+    "servers.*.mime.types.*": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "static_files",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "grammar",
+      "constraint": "at most 4096 lowercase dotted extensions (2..64 bytes) mapped to valid media types (at most 256 bytes, no CR/LF)",
+      "zero_semantics": "omitted inherits; explicit empty map clears inherited extension table",
+      "active_when": "static serving",
+      "description": "Types replaces the inherited extension table",
+      "anchor": "servers-x-mime-types-x"
     },
     "servers.*.name": {
       "kind": "scalar",

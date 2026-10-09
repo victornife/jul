@@ -8,6 +8,7 @@ readonly NGINX_IMAGE="docker.io/library/nginx:1.28.3-alpine@sha256:a8b39bd9cf0f8
 readonly ARTIFACT_DIR="${NGINX_CORPUS_ARTIFACT_DIR:-${PWD}/tmp/nginx-migration-e2e}"
 readonly REQUIRED="${REQUIRE_NGINX_E2E:-0}"
 readonly -a FIXTURE_SPECS=(
+	"idioms-runtime:18111"
 	"core-multifile-return:18080"
 	"routing-cors-policy:18084"
 	"unix-http-upstream:18086"
@@ -245,6 +246,7 @@ PYAFFINITY
 	container_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${container_name}")"
 	if [[ ! "${container_ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 		echo "unexpected internal container address" >&2
+		docker logs "${container_name}" >&2 || true
 		exit 1
 	fi
 
@@ -328,9 +330,11 @@ for fixture_spec in "${FIXTURE_SPECS[@]}"; do
 done
 
 NGINX_CACHE_REFERENCE_IMAGE="${NGINX_IMAGE}" REQUIRE_NGINX_E2E=1 \
-	go test -tags importer ./cmd/jul -run '^TestNGINXCorpusTargetedCacheDifference$' -count=1 -v
+	go test -tags importer ./cmd/jul -run '^TestNGINXCorpus(TargetedCacheDifference|ExpirationMIMEPair)$' -count=1 -v
 
 cat >"${ARTIFACT_DIR}/result.txt" <<'EOF_RESULT'
+reference_passed: idioms-runtime
+reference_passed: expiration-mime-pair
 reference_passed: core-multifile-return
 reference_passed: routing-cors-policy
 reference_passed: unix-http-upstream

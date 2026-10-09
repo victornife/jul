@@ -34,6 +34,7 @@ func Validate(c *Config) error {
 	}
 
 	errs = append(errs, validateGlobalValues(c.Global)...)
+	errs = append(errs, validateMIME(c.MIME, "config")...)
 
 	errs = append(errs, validateEgress(c.Egress)...)
 
@@ -90,6 +91,7 @@ func Validate(c *Config) error {
 	for i, srv := range c.Servers {
 		where := fmt.Sprintf("servers[%d]", i)
 		errs = append(errs, validateServerValues(srv, where)...)
+		errs = append(errs, validateMIME(srv.MIME, where)...)
 		if strings.TrimSpace(srv.Listen) == "" {
 			errs = append(errs, fmt.Errorf("%s: 'listen' is required", where))
 		} else {

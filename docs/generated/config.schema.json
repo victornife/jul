@@ -432,6 +432,25 @@
       },
       "type": "object"
     },
+    "mime": {
+      "additionalProperties": false,
+      "properties": {
+        "default_type": {
+          "description": "DefaultType is the media type for unmapped files; empty inherits",
+          "type": "string",
+          "x-jul-constraint": "valid media type, at most 256 bytes, no CR/LF"
+        },
+        "types": {
+          "additionalProperties": {
+            "description": "Types replaces the inherited extension table",
+            "type": "string",
+            "x-jul-constraint": "at most 4096 lowercase dotted extensions (2..64 bytes) mapped to valid media types (at most 256 bytes, no CR/LF)"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "observability": {
       "additionalProperties": false,
       "properties": {
@@ -1120,6 +1139,12 @@
                   "description": "DirectoryListing serves an auto-generated index when a directory has no index file",
                   "type": "boolean"
                 },
+                "expires": {
+                  "description": "Expires applies a response-time expiration policy to NGINX-compatible successful statuses",
+                  "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+                  "type": "string",
+                  "x-jul-constraint": "signed whole seconds; mutually exclusive with cache_control"
+                },
                 "fastcgi_params": {
                   "additionalProperties": {
                     "description": "FastCGIParams are additional FastCGI protocol parameters passed to the backend",
@@ -1313,6 +1338,25 @@
                   ],
                   "type": "object"
                 },
+                "mime": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "default_type": {
+                      "description": "DefaultType is the media type for unmapped files; empty inherits",
+                      "type": "string",
+                      "x-jul-constraint": "valid media type, at most 256 bytes, no CR/LF"
+                    },
+                    "types": {
+                      "additionalProperties": {
+                        "description": "Types replaces the inherited extension table",
+                        "type": "string",
+                        "x-jul-constraint": "at most 4096 lowercase dotted extensions (2..64 bytes) mapped to valid media types (at most 256 bytes, no CR/LF)"
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                },
                 "plugin": {
                   "description": "Plugin names a handler plugin that serves this location as its action (mutually exclusive with root/proxy_pass/etc.)",
                   "type": "string",
@@ -1330,6 +1374,11 @@
                     "wasm_plugins"
                   ]
                 },
+                "proxy_buffering": {
+                  "description": "Reverse proxy",
+                  "type": "boolean",
+                  "x-jul-constraint": "only explicit false on a proxy location"
+                },
                 "proxy_connect_timeout": {
                   "description": "ProxyConnectTimeout bounds dialing the backend for this location",
                   "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
@@ -1337,7 +1386,7 @@
                   "x-jul-constraint": "non-negative"
                 },
                 "proxy_pass": {
-                  "description": "Reverse proxy",
+                  "description": "ProxyPass names an upstream or a concrete HTTP(S) backend URL",
                   "type": "string"
                 },
                 "proxy_read_timeout": {
@@ -1622,6 +1671,25 @@
             "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
             "type": "string",
             "x-jul-constraint": "non-negative"
+          },
+          "mime": {
+            "additionalProperties": false,
+            "properties": {
+              "default_type": {
+                "description": "DefaultType is the media type for unmapped files; empty inherits",
+                "type": "string",
+                "x-jul-constraint": "valid media type, at most 256 bytes, no CR/LF"
+              },
+              "types": {
+                "additionalProperties": {
+                  "description": "Types replaces the inherited extension table",
+                  "type": "string",
+                  "x-jul-constraint": "at most 4096 lowercase dotted extensions (2..64 bytes) mapped to valid media types (at most 256 bytes, no CR/LF)"
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
           },
           "name": {
             "description": "Name is a descriptive label for this server block, used only in projections",

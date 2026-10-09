@@ -566,6 +566,22 @@
       "active_when": "always"
     },
     {
+      "go_field": "LocationConfig.Expires",
+      "path": "servers[].locations[].expires",
+      "kind": "duration",
+      "constraint": "signed whole seconds; mutually exclusive with cache_control",
+      "zero_semantics": "omitted disables; explicit zero emits max-age=0; negative emits no-cache",
+      "active_when": "configured, on NGINX-compatible expiration statuses"
+    },
+    {
+      "go_field": "LocationConfig.ProxyBuffering",
+      "path": "servers[].locations[].proxy_buffering",
+      "kind": "boolean",
+      "constraint": "only explicit false on a proxy location",
+      "zero_semantics": "omitted retains native automatic flush policy; false flushes each write immediately",
+      "active_when": "proxy location"
+    },
+    {
       "go_field": "LocationConfig.ProxyConnectTimeout",
       "path": "servers[].locations[].proxy_connect_timeout",
       "kind": "duration",
@@ -660,6 +676,22 @@
       "constraint": "0s to 5m",
       "zero_semantics": "omitted/zero inherits the pool value",
       "active_when": "always"
+    },
+    {
+      "go_field": "MIMEConfig.DefaultType",
+      "path": "mime.default_type / servers[].mime.default_type / servers[].locations[].mime.default_type",
+      "kind": "grammar",
+      "constraint": "valid media type, at most 256 bytes, no CR/LF",
+      "zero_semantics": "empty inherits; no policy retains native MIME behavior",
+      "active_when": "static serving"
+    },
+    {
+      "go_field": "MIMEConfig.Types",
+      "path": "mime.types.<name> / servers[].mime.types.<name> / servers[].locations[].mime.types.<name>",
+      "kind": "grammar",
+      "constraint": "at most 4096 lowercase dotted extensions (2..64 bytes) mapped to valid media types (at most 256 bytes, no CR/LF)",
+      "zero_semantics": "omitted inherits; explicit empty map clears inherited extension table",
+      "active_when": "static serving"
     },
     {
       "go_field": "MatchConfig.Methods",
@@ -954,7 +986,7 @@
       "go_field": "ResponseHeaderOp.Name",
       "path": "servers[].locations[].response_headers[].name",
       "kind": "grammar",
-      "constraint": "RFC 9110 field-name token; hop-by-hop/framing names, Content-Encoding, and Vary/Access-Control-* under their \u00a78a/\u00a78b conditions are rejected",
+      "constraint": "RFC 9110 field-name token; hop-by-hop/framing names, Content-Encoding, and Vary/Access-Control-* under their §8a/§8b conditions are rejected",
       "zero_semantics": "required; there is no default",
       "active_when": "a response_headers entry is present"
     },
@@ -975,7 +1007,7 @@
       "go_field": "ResponseHeaderOp.Value",
       "path": "servers[].locations[].response_headers[].value",
       "kind": "grammar",
-      "constraint": "at most 4 KiB; every byte must be RFC 9110 \u00a75.5 VCHAR / SP / HTAB / obs-text",
+      "constraint": "at most 4 KiB; every byte must be RFC 9110 §5.5 VCHAR / SP / HTAB / obs-text",
       "zero_semantics": "omitted and explicitly empty are different: omitted is only legal for op = remove, and an empty value emits an empty field value on add/set",
       "active_when": "op is add or set"
     },

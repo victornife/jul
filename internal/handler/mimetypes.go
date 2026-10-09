@@ -41,3 +41,28 @@ func contentTypeByExtension(ext string) string {
 	}
 	return systemTypeByExtension(ext)
 }
+
+// contentType resolves explicit tables before built-ins and host defaults. The
+// original extension is used even when serving a compressed representation.
+func (h *staticHandler) contentType(ext string, precompressed bool) string {
+	ext = strings.ToLower(ext)
+	if h.mimePolicy != nil && h.mimePolicy.Types != nil {
+		if typ := (*h.mimePolicy.Types)[ext]; typ != "" {
+			return typ
+		}
+		if h.mimePolicy.DefaultType != "" {
+			return h.mimePolicy.DefaultType
+		}
+		return "application/octet-stream"
+	}
+	if h.mimePolicy != nil || precompressed {
+		if typ := contentTypeByExtension(ext); typ != "" {
+			return typ
+		}
+		if h.mimePolicy != nil {
+			return h.mimePolicy.DefaultType
+		}
+		return ""
+	}
+	return streamingMediaTypes[ext]
+}

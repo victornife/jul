@@ -15,6 +15,19 @@ v2.1.0 tag or its packaged READMEs.
 
 ### Added
 
+- **Faithful common NGINX idioms (#523).** Shared response-time expiration for
+  plain positive, zero and negative durations, with NGINX status gating,
+  dynamic Expires and cache-storage isolation. Configurable global/server/location
+  MIME tables and fallback types complete the override capability absent from
+  #510's built-in-media tranche. The importer translates scoped MIME/expiration,
+  static gzip types, positive server body limits and immediate proxy flushing,
+  recognizes the complete WebSocket upgrade trio, and omits ordinary default
+  fields with a canonical round-trip guard. Modified/@time/variable expiration,
+  application-outcome retry and cache-lock forms remain blocking. Includes retain
+  bounded content-based assessment. Console Status, runnable configuration,
+  generated contracts, corpus goldens and pinned NGINX comparisons accompany the
+  change; no released tag or maturity status is changed.
+
 - **Console generation retirement visibility.** The Status view shows
   graceful and forced resource-retirement totals since process start from the
   existing collector. The stats projection distinguishes zero from unavailable;

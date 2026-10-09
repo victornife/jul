@@ -78,6 +78,7 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 	target := &url.URL{Scheme: scheme, Path: basePath}
 
 	rp := &httputil.ReverseProxy{
+		FlushInterval: proxyFlushInterval(loc),
 		Transport: &balancingTransport{
 			pool:          pool,
 			base:          transport,
@@ -789,4 +790,11 @@ func (c *countedConn) Close() error {
 	err := c.Conn.Close()
 	c.release()
 	return err
+}
+
+func proxyFlushInterval(loc config.LocationConfig) time.Duration {
+	if loc.ProxyBuffering != nil && !*loc.ProxyBuffering {
+		return -1
+	}
+	return 0
 }
