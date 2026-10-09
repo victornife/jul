@@ -791,25 +791,40 @@ though a new HTTP request can select a newly published route policy.
 
 #### Optional runtime decisions (#519)
 
-This evidence/documentation slice does not add a connection-age setting,
-shutdown notifier or forced-retirement counter:
+This slice wires the existing retirement counter and defers connection-age,
+upgraded-session shutdown and Console additions:
 
 - **Connection age: deferred.** No maximum connection age is enforced.
-  Operators requiring immediate revocation must arrange reconnection or end
-  the session explicitly; certificate rotation does not re-authenticate an
-  established stream. A new age policy needs its own protocol and lifecycle
-  contract, not a silent reinterpretation of `shutdown_timeout`.
+  Revocation therefore has no enforced time bound on established connections;
+  asking clients to reconnect is not enforcement. Operators can terminate
+  connections at an upstream/backend or external load balancer, or stop the
+  Jul process, accepting the scope of disruption. Jul has no targeted
+  session-termination API. A future age policy must address the underlying TLS
+  connection: closing one multiplexed HTTP/2 stream does not itself trigger a
+  new handshake. Mid-stream re-authentication remains out of scope.
 - **Shutdown notifier: deferred.** A generic `RegisterOnShutdown` callback
-  is not a protocol-aware WebSocket close handshake. Jul currently has no
-  shutdown-owned upgraded-session registry; adding one would change the
-  observed tunnel contract and needs an explicit graceful-close design.
-- **Forced-retirement metric: deferred.** The existing warning identifies
-  the generation and grace expiry. No new collector or Console feature is
-  needed to correct this matrix; additive operational counters remain a
-  separate decision rather than an unannounced part of a test/docs change.
+  starts protocol-specific shutdown but Go does not wait for its completion.
+  Graceful WebSocket shutdown is a real missing capability: it needs a
+  Close-frame exchange, session ownership, a bounded drain and forced-close
+  behavior. Those belong in a focused upgraded-session draining follow-up,
+  not a notification-only callback.
+- **Retirement metric: wired; Console addition deferred.** The existing
+  `jul_transport_retired_total{mode="graceful|forced"}` contract is unchanged.
+  Each superseded handler generation whose resource-retirement callback runs
+  is counted once: `graceful` after drain, `forced` after grace expiry.
+  Aborted candidates and startup without a previous generation are not
+  retirements; late drain/repeated cleanup do not count again. `forced`
+  describes resource retirement, not proof that every active stream ended.
+  The existing warning still supplies generation/grace detail. See
+  [retirement alerting](observability.md#handler-generation-retirement).
 
-These are recorded scope decisions, not implemented capabilities or a promise
-that long-lived connections are immune to resource closure. See
+`TestTransportRetirementMetricExactlyOnce`,
+`TestTransportRetirementMetricSkipsUnownedGeneration` and
+`TestDoReloadDegradedOnBindFailure` back the accounting in
+[generation tests](../internal/server/generation_test.go) and
+[reload tests](../internal/server/reload_test.go). The other entries are
+recorded deferrals, not implemented capabilities or a promise that long-lived
+connections are immune to resource closure. See
 [known limitations](known-limitations.md#long-lived-connections) and
 [mTLS operational notes](mtls.md#operational-notes).
 

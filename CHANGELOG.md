@@ -20,9 +20,11 @@ v2.1.0 tag or its packaged READMEs.
   HTTP/1, HTTP/2, WebSocket, SSE, native/transcoded gRPC and L4. Real-client
   tests distinguish retained proxy streams from owned transcoder cancellation,
   and prove that a revoked client's established TLS stream can continue while
-  new handshakes are rejected. Optional connection-age, shutdown-notifier and
-  forced-retirement metric additions are explicitly deferred; runtime policy
-  and maturity are unchanged.
+  new handshakes are rejected. Wire the existing bounded graceful/forced
+  retirement counter exactly once at resource cleanup, excluding aborted
+  reloads. Forced means resource retirement after grace expiry, not universal
+  stream termination. Connection-age, proper upgraded-session draining and
+  Console additions remain deferred; connection policy and maturity are unchanged.
 
 - **Opt-in route HTTP metrics and chart (#521).** Startup `route_label` adds
   durable route IDs to request, latency and response-byte families, preserving

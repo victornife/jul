@@ -219,7 +219,8 @@ type Server struct {
 	MTLSResultHook func(result string)
 	// CRLNextUpdateHook, when set, receives after startup and every reload the
 	// earliest client-CRL NextUpdate per listen address (zero: none set).
-	CRLNextUpdateHook func(map[string]time.Time)
+	CRLNextUpdateHook    func(map[string]time.Time)
+	TransportRetiredHook func(mode string)
 
 	// OnReloaded, when set, is invoked after the new HTTP handlers are live
 	// (handler swap and listener changes committed). It applies side-effects that
@@ -472,7 +473,8 @@ func (g *handlerGen) release() {
 // doRetire closes the generation's resources exactly once. It first cancels the
 // generation's background lease group so no leased operation can still be
 // touching a resource that is about to close.
-func (g *handlerGen) doRetire() {
+func (g *handlerGen) doRetire() bool {
+	retired := false
 	g.retireOnce.Do(func() {
 		if g.bg != nil {
 			g.bg.Cancel()
@@ -480,7 +482,9 @@ func (g *handlerGen) doRetire() {
 		if g.retire != nil {
 			g.retire()
 		}
+		retired = true
 	})
+	return retired
 }
 
 // listenerEntry tracks a bound listener and its hot-reloadable TLS provider.
@@ -985,7 +989,7 @@ func (s *Server) retireGen(g *handlerGen, retireResources, retireRedaction, reti
 	// observes the retiring flag and refuses. Operations already leased keep the
 	// generation open exactly like an in-flight request.
 	if g.inflight.Load() == 0 {
-		g.doRetire()
+		s.retireTransport(g, "graceful")
 		if retireRedaction != nil {
 			retireRedaction()
 		}
@@ -1003,13 +1007,15 @@ func (s *Server) retireGen(g *handlerGen, retireResources, retireRedaction, reti
 		defer s.wg.Done()
 		t := time.NewTimer(grace)
 		defer t.Stop()
+		mode := "graceful"
 		select {
 		case <-g.drained:
 		case <-t.C:
+			mode = "forced"
 			s.log.Warn("reload: previous handler generation did not drain within grace; closing its resources",
 				"grace", grace, "generation", g.genID, "background_operations", g.bg.Active())
 		}
-		g.doRetire()
+		s.retireTransport(g, mode)
 	}()
 
 	// Wait for genuine drain, but do not block shutdown. If the drain completes
@@ -1030,6 +1036,12 @@ func (s *Server) retireGen(g *handlerGen, retireResources, retireRedaction, reti
 			s.moveRedactionToRetired(retireToTombstone)
 		}
 	}()
+}
+
+func (s *Server) retireTransport(g *handlerGen, mode string) {
+	if g.doRetire() && s.TransportRetiredHook != nil {
+		s.TransportRetiredHook(mode)
+	}
 }
 
 // moveRedactionToRetired transfers a generation's redaction state into the

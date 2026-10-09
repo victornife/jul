@@ -906,9 +906,9 @@ func (m *Metrics) ObserveAffinityKey(pool, status string) {
 }
 
 // ObserveTransportRetired counts a handler-generation transport retirement.
-// mode is "graceful" when the generation drained and "forced" when it was cut
-// short, which is the difference between a clean reload and one that dropped
-// in-flight work.
+// mode is "graceful" when the generation drained and "forced" when resource
+// retirement followed grace expiry. Forced resource closure does not imply
+// that every active request or stream was terminated.
 func (m *Metrics) ObserveTransportRetired(mode string) {
 	m.transportRetired.WithLabelValues(mode).Inc()
 }
