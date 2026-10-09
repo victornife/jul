@@ -753,3 +753,21 @@ first contract has three boundaries: no direct Unix spelling in `proxy_pass`, no
 TLS-over-Unix/`backend_tls`, and no HTTP active-health probe over Unix (use the
 connect/liveness `tcp` health type). HTTP/2-over-Unix/h2c is not advertised.
 These are explicit product boundaries rather than hidden runtime failures.
+
+## Expiration and MIME migration boundaries (#523)
+
+Only signed plain whole-second expires durations and off translate.
+Modified-time, daily @time, variable, epoch/max and millisecond/fractional
+forms remain blocking. Native expires is a downstream response policy;
+it does not override origin storage-cache eligibility or implement targeted
+CDN/Surrogate/X-Accel cache controls. Generated CORS preflights keep their
+dedicated policy. Application-outcome retries (#406) and cache fill locks
+(#525) remain deferred/blocking.
+
+MIME tables are bounded static maps with global/server/location inheritance,
+replacement and empty-table clearing. Explicit migrated tables bypass host
+databases/sniffing; source files named mime.types get no implicit mapping.
+Later extension declarations win, including duplicates. Variables and
+unrepresentable extension names require manual review. Arbitrary proxy headers and buffering on
+remain blocking. Read [migration guidance](nginx-importer.md#common-idioms-expiration-and-mime-523)
+before cutover.

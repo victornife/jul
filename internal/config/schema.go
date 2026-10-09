@@ -21,6 +21,8 @@ import (
 
 // Config is the root configuration document.
 type Config struct {
+	// MIME is the optional static-file MIME policy inherited by servers and locations.
+	MIME          *MIMEConfig         `toml:"mime,omitempty"`
 	Global        GlobalConfig        `toml:"global"`
 	Servers       []ServerConfig      `toml:"servers"`
 	Upstreams     []UpstreamConfig    `toml:"upstreams,omitempty"`
@@ -236,6 +238,8 @@ type GlobalConfig struct {
 
 // ServerConfig is a virtual host bound to one listen address.
 type ServerConfig struct {
+	// MIME overrides the global static-file MIME policy for this server.
+	MIME        *MIMEConfig      `toml:"mime,omitempty"`
 	Name        string           `toml:"name"`
 	Listen      string           `toml:"listen"`
 	ServerNames []string         `toml:"server_names"`
@@ -468,9 +472,19 @@ type LocationConfig struct {
 	DirectoryListing bool     `toml:"directory_listing"`
 	AllowHidden      bool     `toml:"allow_hidden"`
 	CacheControl     string   `toml:"cache_control"`
+	// Expires applies a response-time expiration policy to NGINX-compatible successful
+	// statuses. Nil disables it, zero revalidates immediately, negative means no-cache.
+	// Whole seconds only. Ordered response_headers operations run after this policy.
+	Expires *Duration `toml:"expires,omitempty"`
+	// MIME overrides the inherited static-file MIME policy for this location.
+	MIME *MIMEConfig `toml:"mime,omitempty"`
 
 	// Reverse proxy. ProxyPass is either an upstream reference
 	// ("http://name") or a concrete URL ("http://127.0.0.1:3000").
+	// ProxyBuffering accepts explicit false to flush every proxy write immediately.
+	// Nil retains native automatic streaming; true is not supported.
+	ProxyBuffering *bool `toml:"proxy_buffering,omitempty"`
+	// ProxyPass names an upstream or a concrete HTTP(S) backend URL.
 	ProxyPass           string   `toml:"proxy_pass"`
 	ProxyConnectTimeout Duration `toml:"proxy_connect_timeout"`
 	ProxyReadTimeout    Duration `toml:"proxy_read_timeout"`
@@ -1585,3 +1599,14 @@ type AccessLogConfig struct {
 // enabled when the key is omitted for backward compatibility; an explicit
 // false is the only supported disable mechanism.
 func (a AccessLogConfig) IsEnabled() bool { return a.Enabled == nil || *a.Enabled }
+
+// MIMEConfig is a static-file extension table and fallback content type. Each
+// explicitly supplied Types table replaces the inherited table, including an
+// empty table; omitted Types inherits. Keys are lowercase dotted extensions.
+// Without an explicit policy Jul retains its built-in, host and sniffing behavior.
+type MIMEConfig struct {
+	// Types replaces the inherited extension table. An empty table clears it.
+	Types *map[string]string `toml:"types,omitempty"`
+	// DefaultType is the media type for unmapped files; empty inherits.
+	DefaultType string `toml:"default_type,omitempty"`
+}

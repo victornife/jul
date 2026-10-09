@@ -157,3 +157,40 @@ func TestStatusAdminRowsAreInactiveWhenAdminIsDisabled(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusAPIExpirationMIMEAndProxyFlushing(t *testing.T) {
+	for _, name := range []string{"Static MIME policy", "Response expiration", "Immediate proxy flushing"} {
+		row, exists := statusRows(t, &config.Config{})[name]
+		if !exists || row.Active || row.Detail != "" {
+			t.Fatalf("inactive %s: %+v", name, row)
+		}
+	}
+	empty := map[string]string{}
+	zero := config.Duration(0)
+	cfg := &config.Config{MIME: &config.MIMEConfig{DefaultType: "text/plain"}, Servers: []config.ServerConfig{
+		{MIME: &config.MIMEConfig{}, Locations: []config.LocationConfig{
+			{Root: "/not-exposed", Expires: &zero},
+			{ProxyPass: "http://not-exposed", ProxyBuffering: config.Bool(false)},
+			{Root: "/also-not-exposed", MIME: &config.MIMEConfig{Types: &empty}},
+		}},
+	}}
+	rows := statusRows(t, cfg)
+	for _, name := range []string{"Static MIME policy", "Response expiration", "Immediate proxy flushing"} {
+		row := rows[name]
+		if !row.Active || row.Detail == "" || strings.Contains(row.Detail, "exposed") {
+			t.Fatalf("%s: %+v", name, row)
+		}
+	}
+	if rows["Static MIME policy"].Detail != "2 static locations" {
+		t.Fatal(rows["Static MIME policy"])
+	}
+	cfg.MIME = nil
+	cfg.Servers[0].Locations[2].MIME = nil
+	if statusRows(t, cfg)["Static MIME policy"].Active {
+		t.Fatal("empty policy is active")
+	}
+	cfg.Servers[0].MIME = &config.MIMEConfig{DefaultType: "application/octet-stream"}
+	if !statusRows(t, cfg)["Static MIME policy"].Active {
+		t.Fatal("server policy missing")
+	}
+}

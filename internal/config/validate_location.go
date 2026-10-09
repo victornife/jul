@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // This file holds the per-location and location-referenced validators (actions,
@@ -22,6 +23,19 @@ import (
 func validateLocation(loc LocationConfig, where string, upstreamNames map[string]int, plugins map[string]PluginConfig) []error {
 	var errs []error
 	errs = append(errs, validateLocationValues(loc, where)...)
+	errs = append(errs, validateMIME(loc.MIME, where)...)
+	if loc.Expires != nil {
+		if loc.Expires.Std()%time.Second != 0 {
+			errs = append(errs, fmt.Errorf("%s.expires: must be a whole number of seconds", where))
+		}
+		if loc.CacheControl != "" {
+			errs = append(errs, fmt.Errorf("%s: expires and cache_control conflict; use response_headers for an ordered override", where))
+		}
+	}
+
+	if loc.ProxyBuffering != nil && (*loc.ProxyBuffering || loc.ProxyPass == "") {
+		errs = append(errs, fmt.Errorf("%s.proxy_buffering: only false on a proxy location is supported", where))
+	}
 
 	// Count configured actions to catch conflicts (e.g. root + proxy_pass).
 	var actions []string

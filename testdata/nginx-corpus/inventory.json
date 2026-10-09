@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "fixture_schema_version": 1,
-  "fixture_count": 36,
-  "core_fixtures": 34,
+  "fixture_count": 37,
+  "core_fixtures": 35,
   "full_fixtures": 2,
   "categories": [
     {
       "name": "cache-compression",
-      "count": 3
+      "count": 4
     },
     {
       "name": "client-identity",
@@ -19,7 +19,7 @@
     },
     {
       "name": "core-http-routing",
-      "count": 3
+      "count": 4
     },
     {
       "name": "fastcgi",
@@ -39,7 +39,7 @@
     },
     {
       "name": "protocol-gateways",
-      "count": 12
+      "count": 13
     },
     {
       "name": "request-policy",
@@ -97,17 +97,17 @@
     },
     {
       "name": "informational",
-      "count": 35
+      "count": 39
     },
     {
       "name": "supported",
-      "count": 350
+      "count": 379
     }
   ],
   "risks": [
     {
       "name": "availability",
-      "count": 89
+      "count": 90
     },
     {
       "name": "observability",
@@ -115,19 +115,19 @@
     },
     {
       "name": "operational",
-      "count": 80
+      "count": 89
     },
     {
       "name": "performance",
-      "count": 7
+      "count": 10
     },
     {
       "name": "routing",
-      "count": 212
+      "count": 231
     },
     {
       "name": "security",
-      "count": 43
+      "count": 44
     }
   ],
   "codes": [
@@ -156,8 +156,20 @@
       "count": 1
     },
     {
+      "name": "NGX_HTTP_DEFAULT_TYPE",
+      "count": 1
+    },
+    {
+      "name": "NGX_HTTP_EXPIRES",
+      "count": 1
+    },
+    {
       "name": "NGX_HTTP_GZIP",
-      "count": 2
+      "count": 3
+    },
+    {
+      "name": "NGX_HTTP_GZIP_TYPES",
+      "count": 1
     },
     {
       "name": "NGX_HTTP_LOG_FORMAT",
@@ -169,7 +181,11 @@
     },
     {
       "name": "NGX_HTTP_SERVER",
-      "count": 36
+      "count": 37
+    },
+    {
+      "name": "NGX_HTTP_TYPES",
+      "count": 1
     },
     {
       "name": "NGX_HTTP_UPSTREAM",
@@ -204,6 +220,10 @@
       "count": 1
     },
     {
+      "name": "NGX_LOCATION_EXPIRES",
+      "count": 3
+    },
+    {
       "name": "NGX_LOCATION_FASTCGI",
       "count": 2
     },
@@ -220,12 +240,16 @@
       "count": 2
     },
     {
+      "name": "NGX_LOCATION_PROXY_BUFFERING",
+      "count": 1
+    },
+    {
       "name": "NGX_LOCATION_PROXY_CONNECT_TIMEOUT",
       "count": 1
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS",
-      "count": 13
+      "count": 14
     },
     {
       "name": "NGX_LOCATION_PROXY_PASS_DYNAMIC",
@@ -245,7 +269,7 @@
     },
     {
       "name": "NGX_LOCATION_RETURN",
-      "count": 22
+      "count": 28
     },
     {
       "name": "NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT",
@@ -256,8 +280,16 @@
       "count": 1
     },
     {
+      "name": "NGX_LOCATION_TYPES",
+      "count": 1
+    },
+    {
       "name": "NGX_LOCATION_UWSGI",
       "count": 1
+    },
+    {
+      "name": "NGX_LOCATION_WEBSOCKET",
+      "count": 3
     },
     {
       "name": "NGX_MAIL_UNSUPPORTED",
@@ -269,11 +301,11 @@
     },
     {
       "name": "NGX_MAIN_EVENTS",
-      "count": 34
+      "count": 35
     },
     {
       "name": "NGX_MAIN_HTTP",
-      "count": 36
+      "count": 37
     },
     {
       "name": "NGX_MAIN_MAIL",
@@ -316,6 +348,10 @@
       "count": 1
     },
     {
+      "name": "NGX_SERVER_BODY_LIMIT",
+      "count": 1
+    },
+    {
       "name": "NGX_SERVER_CLIENT_AUTH_CA",
       "count": 1
     },
@@ -329,7 +365,7 @@
     },
     {
       "name": "NGX_SERVER_LISTEN",
-      "count": 35
+      "count": 36
     },
     {
       "name": "NGX_SERVER_LISTEN_HTTP2_CLEARTEXT",
@@ -337,11 +373,11 @@
     },
     {
       "name": "NGX_SERVER_LOCATION",
-      "count": 43
+      "count": 50
     },
     {
       "name": "NGX_SERVER_NAME",
-      "count": 25
+      "count": 26
     },
     {
       "name": "NGX_SERVER_SEND_TIMEOUT",
@@ -455,7 +491,7 @@
   "verdicts": [
     {
       "name": "equivalent_for_asserted_dimensions",
-      "count": 12
+      "count": 18
     },
     {
       "name": "expected_difference",
@@ -469,6 +505,7 @@
       "fixtures": [
         "cache-runtime",
         "compression-runtime",
+        "idioms-runtime",
         "security-cache-boundaries"
       ],
       "deferred_dimensions": [
@@ -484,6 +521,7 @@
         "approximate-alias",
         "blocking-dynamic-proxy",
         "core-multifile-return",
+        "idioms-runtime",
         "proxy-pass-uri-runtime",
         "routing-cors-policy",
         "routing-precedence-runtime",
@@ -514,6 +552,7 @@
         "fastcgi-gateway",
         "fastcgi-gateway-runtime",
         "grpc-gateway-runtime",
+        "idioms-runtime",
         "protocol-boundaries",
         "stream-extensibility-boundaries",
         "stream-named-upstream",

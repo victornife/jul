@@ -57,7 +57,7 @@ func TestNGINXCorpusAssessmentCandidateAndRealJul(t *testing.T) {
 			if report.Assessment.HasBlocking() {
 				t.Fatalf("required candidate has blocking findings: %+v", report.Assessment.Results)
 			}
-			toml, err := config.Marshal(cfg)
+			toml, err := nginx.MarshalCandidate(cfg)
 			if err != nil {
 				t.Fatalf("marshal candidate: %v", err)
 			}

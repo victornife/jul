@@ -2,7 +2,7 @@
 
 Jul.IA is configured by a single TOML document. The top-level tables are
 `[global]`, `[[servers]]`, `[[upstreams]]`, `[cache]`, `[admin]`,
-`[compression]`, `[rate_limit]`, `[egress]`, `[observability]`, `[waf]`,
+`[compression]`, `[mime]`, `[rate_limit]`, `[egress]`, `[observability]`, `[waf]`,
 `[plugins.<name>]`, and `[[stream]]`. Several tables are only honoured when the matching build tag is
 present (for example `[waf]` requires the `waf` tag, `[[stream]]` the `stream`
 tag, and `[plugins.<name>]` the `wasmplugins` tag); absent tags are rejected at
@@ -747,7 +747,9 @@ try_files = ["$uri", "$uri/", "/index.html"]
 | `try_files` | []string | Fallback sequence (supports `$uri`) |
 | `directory_listing` | bool | Enable auto directory index |
 | `allow_hidden` | bool | Serve dotfiles |
-| `cache_control` | string | `Cache-Control` header for served files |
+| `cache_control` | string | Fixed `Cache-Control` header for served files; cannot be combined with `expires` |
+| `expires` | optional duration | Signed whole-second response-time expiration; see [policy](#mime-policy-and-response-expiration) |
+| `mime` | optional table | Scoped static MIME policy; see [policy](#mime-policy-and-response-expiration) |
 
 Content-Type comes from the file extension. Streaming-media extensions
 (`.m3u8`, `.mpd`, `.ts`, `.m4s`, `.mkv`, `.aac`) use Jul's own table, so they
@@ -774,6 +776,7 @@ proxy_read_timeout = "30s"
 
 | Key | Type | Description |
 | --- | ---- | ----------- |
+| `proxy_buffering` | optional bool | Only explicit false: flush each proxy write immediately; omitted retains native automatic streaming |
 | `proxy_pass` | string | `http://upstream-name` or a concrete `http://host:port`. A path component is not a location-prefix replacement: it is prepended to the client's full incoming request path (`net/http/httputil.ProxyRequest.SetURL` semantics) rather than substituted for the matched location prefix |
 | `proxy_connect_timeout` | duration | Connection establishment timeout (default 10s) |
 | `proxy_read_timeout` | duration | Per-read inactivity bound on the upstream response — the maximum gap between successive reads, covering both the headers (time-to-first-byte) and a slow-trickle body. `0` (default) leaves it unbounded. A steadily streaming response is never interrupted while data keeps flowing |
@@ -1930,3 +1933,53 @@ Direct Unix syntax in `proxy_pass` is deliberately not part of the Jul grammar.
 Unix HTTP is plaintext-only, cannot use `backend_tls`, and cannot use an HTTP
 active-health probe; `health_check.type = "tcp"` provides connect/liveness
 probing over the backend's configured Unix network. See [upstreams.md](upstreams.md#http-over-unix-domain-sockets-407).
+
+## MIME policy and response expiration
+
+All these fields are core and hot reloadable. The Console Status overview
+shows active location counts; edit their full configuration in the raw editor.
+The generated [field reference](generated/config-reference.md) and JSON Schema
+describe the same source-owned contracts.
+
+```toml
+[mime]
+default_type = "application/octet-stream"
+types = { ".html" = "text/html", ".ts" = "video/mp2t" }
+
+[[servers]]
+listen = ":8080"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  root = "/srv/www"
+  expires = "1h"
+  mime = { default_type = "text/plain" }
+```
+
+MIME scopes resolve global → server → location. A missing extension table
+inherits; an explicit table replaces all inherited mappings. `types = {}`
+clears the table. default_type inherits independently. Without a policy,
+streaming-media defaults precede the Go/host database and content sniffing.
+An explicit table uses only its mappings and default_type (application/octet-stream
+if omitted), giving deterministic container/host behavior. Setting only
+default_type retains native extension lookup and changes the unknown-file
+fallback. Content-Type already set by a handler/header policy takes precedence;
+compressed sidecars use the original extension.
+
+Extension keys must be lowercase dotted tokens, 2–64 bytes, using letters,
+digits, underscore, hyphen or plus after the dot. A table has at most 4096
+entries. Media types must parse as valid types, be at most 256 bytes and contain
+no CR/LF. Invalid values are rejected before publication. Handler generations
+own copied maps, so an edit cannot alter an earlier generation.
+
+Location expires is optional: omission disables policy; `"0s"` emits
+max-age=0; a negative duration emits no-cache. Durations must be whole seconds.
+On eligible responses Expires is calculated from current response time and
+Cache-Control replaces all previous values. Ordered response_headers operations
+run afterward. The fixed static cache_control field conflicts with expires;
+use an ordered response_headers override when intentional. Storage-cache policy
+continues to use origin headers, while hits recalculate downstream expiration.
+See [exact statuses and migration forms](nginx-importer.md#common-idioms-expiration-and-mime-523).
+
+Run the repository example from the repository root:
+`jul check -config testdata/expiration-mime.toml`.

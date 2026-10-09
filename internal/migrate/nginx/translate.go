@@ -17,7 +17,8 @@ import (
 
 // translator accumulates a Report while walking an nginx directive tree.
 type translator struct {
-	report Report
+	report     Report
+	httpIdioms idiomScope
 	// httpRealIP is the http-level realip scope, inherited by every server
 	// block exactly as nginx inherits the directives.
 	httpRealIP realIPPolicy
@@ -67,6 +68,8 @@ func Translate(src *ngx.Config, source string) (out *config.Config, rep *Report)
 // translateHTTP walks the directives inside an http block.
 func (t *translator) translateHTTP(d ngx.IDirective, out *config.Config) {
 	kids := httpChildren(d)
+	t.httpIdioms = t.resolveIdioms(kids, idiomScope{})
+	out.MIME = t.httpIdioms.mime
 	// realip directives are collected first: httpChildren yields the server
 	// blocks before their sibling directives, so a server would otherwise be
 	// translated before the http-level policy it inherits has been seen.
@@ -86,6 +89,14 @@ func (t *translator) translateHTTP(d ngx.IDirective, out *config.Config) {
 			t.translateServer(c, out)
 		case "upstream":
 			t.translateUpstream(c, out)
+		case "expires", "types", "default_type":
+			// consumed by the scope pre-pass
+		case "gzip_types":
+			if cap, _ := classifyIdiom(ContextHTTP, c, walkFacts{}); cap.class == AssessmentSupported {
+				out.Compression.Types = appendGZIPTypes(out.Compression.Types, paramValues(c))
+			} else {
+				t.report.skip(c, "gzip_types contains an unsupported media type")
+			}
 		case "gzip":
 			if isOn(paramValues(c)) {
 				out.Compression.Enabled = config.Bool(true)
@@ -108,6 +119,8 @@ func (t *translator) translateHTTP(d ngx.IDirective, out *config.Config) {
 // translateServer converts one server block into a config.ServerConfig.
 func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 	var s config.ServerConfig
+	scope := t.resolveIdioms(children(d), t.httpIdioms)
+	s.MIME = scope.mime
 	var realIP realIPPolicy
 	var tls config.TLSConfig
 	hasTLS := false
@@ -120,6 +133,16 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 	var clientAuthCAFile string
 	var clientAuthCRLFile string
 	clientAuthLine := 0
+	// Static defaults are sibling-scoped, not declaration-order scoped.
+	for _, c := range children(d) {
+		p := paramValues(c)
+		if c.GetName() == "root" && len(p) > 0 {
+			serverRoot = p[0]
+		}
+		if c.GetName() == "index" && len(p) > 0 {
+			serverIndex = p
+		}
+	}
 
 	for _, c := range children(d) {
 		cp := paramValues(c)
@@ -149,6 +172,17 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 				hasTLS = true
 				tls.Enabled = true
 			}
+		case "expires", "types", "default_type":
+			// consumed by the scope pre-pass
+		case "client_max_body_size":
+			if len(cp) == 1 {
+				var size config.Size
+				if size.UnmarshalText([]byte(cp[0])) == nil && size > 0 {
+					s.ClientMaxBodySize = size
+					break
+				}
+			}
+			t.report.skip(c, "client_max_body_size requires a positive size; zero/unlimited is not representable")
 		case "server_name":
 			for _, n := range cp {
 				if n != "_" && n != "" {
@@ -164,7 +198,7 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 				serverIndex = cp
 			}
 		case "location":
-			if loc, ok := t.translateLocation(c, serverRoot, serverIndex); ok {
+			if loc, ok := t.translateLocation(c, serverRoot, serverIndex, scope); ok {
 				s.Locations = append(s.Locations, loc)
 			}
 		case "ssl_certificate":
@@ -225,7 +259,7 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 		if len(s.Locations) > 0 {
 			t.report.note("server return at line %d: synthesized a catch-all '/' but nginx evaluates a server-level return before locations; Jul.IA gives matching locations precedence, so verify the intended order", serverReturnLine)
 		}
-		loc := config.LocationConfig{Match: config.MatchConfig{Type: "prefix", Path: "/"}}
+		loc := config.LocationConfig{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Expires: scope.expires}
 		applyReturn(&loc, serverReturn, &t.report, serverReturnLine)
 		s.Locations = append(s.Locations, loc)
 		t.report.Locations++
@@ -234,8 +268,9 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 	// A server-level root with no location serving "/" is exposed at "/".
 	if serverRoot != "" && !hasRootPathLocation(s.Locations) {
 		loc := config.LocationConfig{
-			Match: config.MatchConfig{Type: "prefix", Path: "/"},
-			Root:  serverRoot,
+			Match:   config.MatchConfig{Type: "prefix", Path: "/"},
+			Root:    serverRoot,
+			Expires: scope.expires,
 		}
 		if len(serverIndex) > 0 {
 			loc.Index = serverIndex
@@ -269,7 +304,7 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 // translateLocation converts one location block. serverRoot/serverIndex are the
 // inherited static-file defaults from the enclosing server. ok is false when the
 // location could not be represented (and was reported instead).
-func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serverIndex []string) (config.LocationConfig, bool) {
+func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serverIndex []string, inherited ...idiomScope) (config.LocationConfig, bool) {
 	mod, path, ok := locationModifierAndPath(d)
 	if !ok {
 		t.report.skipNamed("location", d.GetLine(), "could not parse the location match")
@@ -285,7 +320,13 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 		return config.LocationConfig{}, false
 	}
 
-	loc := config.LocationConfig{Match: match}
+	parent := idiomScope{}
+	if len(inherited) > 0 {
+		parent = inherited[0]
+	}
+	scope := t.resolveIdioms(children(d), parent)
+	loc := config.LocationConfig{Match: match, Expires: scope.expires, MIME: scope.mime}
+	webSocket := exactWebSocket(children(d))
 	root := serverRoot
 	index := serverIndex
 
@@ -308,6 +349,18 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 	for _, c := range children(d) {
 		cp := paramValues(c)
 		switch c.GetName() {
+		case "expires", "types", "default_type":
+			// consumed by the scope pre-pass
+		case "proxy_http_version", "proxy_set_header":
+			if !webSocket || c.GetName() == "proxy_set_header" && (len(cp) == 0 || !strings.EqualFold(cp[0], "Upgrade") && !strings.EqualFold(cp[0], "Connection")) {
+				t.report.skip(c, "only the complete static WebSocket upgrade trio is recognized")
+			}
+		case "proxy_buffering":
+			if len(cp) == 1 && cp[0] == "off" {
+				loc.ProxyBuffering = config.Bool(false)
+			} else {
+				t.report.skip(c, "only proxy_buffering off is translated")
+			}
 		case "proxy_pass":
 			if len(cp) > 0 {
 				loc.ProxyPass = translateProxyPass(cp[0], &t.report, c.GetLine())

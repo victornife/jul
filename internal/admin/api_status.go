@@ -108,6 +108,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		sendTimeoutServers   int
 		sendTimeoutLocations int
 		openTrust            bool
+		mimeLocs             int
+		expiresLocs          int
+		flushLocs            int
 		staticLocs           int
 		backendTLSPools      int
 		backendTLSRoutes     int
@@ -159,6 +162,15 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		}
 		for j := range srv.Locations {
 			loc := &srv.Locations[j]
+			if loc.Expires != nil {
+				expiresLocs++
+			}
+			if loc.Root != "" && (mimeConfigured(c.MIME) || mimeConfigured(srv.MIME) || mimeConfigured(loc.MIME)) {
+				mimeLocs++
+			}
+			if loc.ProxyPass != "" && loc.ProxyBuffering != nil && !*loc.ProxyBuffering {
+				flushLocs++
+			}
 			if loc.SendTimeout != nil && *loc.SendTimeout > 0 {
 				sendTimeoutLocations++
 			}
@@ -383,6 +395,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 	return []FeatureStatus{
 		{Group: "Traffic", Name: "Virtual hosts", Active: len(c.Servers) > 0, Detail: vhostDetail},
 		{Group: "Traffic", Name: "Downstream send timeout", Active: sendTimeoutServers+sendTimeoutLocations > 0, Detail: countUnit(sendTimeoutServers, "server default") + "; " + countUnit(sendTimeoutLocations, "location override")},
+		{Group: "Traffic", Name: "Static MIME policy", Active: mimeLocs > 0, Detail: countDetailIf(mimeLocs, "static location")},
+		{Group: "Traffic", Name: "Response expiration", Active: expiresLocs > 0, Detail: countDetailIf(expiresLocs, "location")},
+		{Group: "Traffic", Name: "Immediate proxy flushing", Active: flushLocs > 0, Detail: countDetailIf(flushLocs, "proxy location")},
 		{Group: "Traffic", Name: "Static file serving", Active: staticLocs > 0, Detail: countDetailIf(staticLocs, "location")},
 		{Group: "Traffic", Name: "Reverse proxy", Active: proxyLocs > 0, Detail: countDetailIf(proxyLocs, "location")},
 		{Group: "Traffic", Name: "FastCGI / uWSGI", Active: fastcgiLocs > 0, Detail: countDetailIf(fastcgiLocs, "location")},
@@ -504,4 +519,8 @@ func withPluginEngine(detail, engine string) string {
 		return detail
 	}
 	return detail + "; engine: " + engine
+}
+
+func mimeConfigured(policy *config.MIMEConfig) bool {
+	return policy != nil && (policy.Types != nil || policy.DefaultType != "")
 }

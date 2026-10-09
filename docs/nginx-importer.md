@@ -128,6 +128,8 @@ the Jul request path.
 | `server` | ✅ | Translated to `[[servers]]`. |
 | `upstream` | ✅ | Translated to `[[upstreams]]`. |
 | `gzip` | ✅ | `gzip on` enables compression. |
+| `gzip_types` | ✅ (bounded) | Static media types map to `compression.types`, retaining NGINX's implicit `text/html`; `*` is supported. Invalid/variable types block. |
+| `expires`, `types`, `default_type` | ✅ (bounded) | Inherited by servers and locations; see [common idioms](#common-idioms-expiration-and-mime-523). |
 | `set_real_ip_from`, `real_ip_header`, `real_ip_recursive` | ⚠️ | Maps to listener-scoped client-address policy; see [realip](#realip-set_real_ip_from--real_ip_header). |
 | `include` | ⚠️ | Expanded only through the bounded resolver above. |
 | `map`, `geo`, `split_clients` | ❌ | Variable-driven behavior requires manual design. |
@@ -138,7 +140,9 @@ the Jul request path.
 | --- | --- | --- |
 | `listen` | ✅ | Normalizes bare ports, wildcards, and IPv6-any; TLS flag inferred. Only the first listen is retained. |
 | `server_name` | ✅ | `_` is dropped; other names are retained. |
-| `root`, `index` | ✅ | Applied to the server or synthesized `/` location. |
+| `root`, `index` | ✅ | Inherited independently of directive order or applied to a synthesized `/` location. |
+| `client_max_body_size` | ✅ (positive) / ❌ (zero) | Positive sizes map directly; NGINX zero means unlimited, while Jul zero selects its default. |
+| `expires`, `types`, `default_type` | ✅ (bounded) | Server scope overrides HTTP scope; see [common idioms](#common-idioms-expiration-and-mime-523). |
 | `location` | ✅ | See the location table. |
 | `ssl_certificate`, `ssl_certificate_key` | ✅ | Map to server TLS fields. |
 | `ssl_protocols` | ⚠️ | Maps to a minimum version; legacy versions raise the floor to TLS 1.2. |
@@ -162,6 +166,10 @@ the Jul request path.
 | `uwsgi_param` | ❌ | Jul has no per-parameter uWSGI configuration equivalent; always blocking. See [gRPC, FastCGI, and uWSGI gateways](#grpc-fastcgi-and-uwsgi-gateways-367) below. |
 | `grpc_pass` | ✅ (bounded) / ❌ | See [gRPC, FastCGI, and uWSGI gateways](#grpc-fastcgi-and-uwsgi-gateways-367) below. |
 | `root`, `index`, `try_files` | ✅ | Preserve location overrides. |
+| `expires`, `types`, `default_type` | ✅ (bounded) | See [common idioms](#common-idioms-expiration-and-mime-523); unsupported expiration forms block. |
+| Exact WebSocket upgrade trio | informational | `proxy_http_version 1.1`, `proxy_set_header Upgrade $http_upgrade`, and `proxy_set_header Connection upgrade` together with a usable `proxy_pass` use native HTTP/1.1 upgrades. Missing/changed/duplicated elements and arbitrary headers remain blocking. |
+| `proxy_buffering off` | ✅ | Sets `proxy_buffering = false`, forcing immediate flush per proxy write. `on` is blocking. |
+| `proxy_next_upstream`, `proxy_cache_lock` | ❌ | Deferred application-outcome retry (#406) and cache fill-lock (#525) capabilities. |
 | `alias` | ⚠️ | Maps to `root`; NGINX prefix-stripping semantics differ. |
 | `return` | ✅ | Status and redirect preserved; response body text is not. |
 | `rewrite` | ✅ | Pattern, replacement, and recognized flags are preserved. |
@@ -453,8 +461,8 @@ when both must be restricted; do not assume a previously passive CDN field is
 still passive. Port `X-Accel-Expires` to intentional standard origin policy,
 not to an importer-invented alias. `Surrogate-Control` remains forwarding-only.
 NGINX's `expires` directive generates downstream `Expires`/`Cache-Control`;
-it is not an origin targeted-policy selector and its importer work remains
-independently scoped to #523. Range/fragment/slice work remains #442's decision.
+it is not an origin targeted-policy selector. Plain signed-duration migration
+uses the separate response-time policy described below (#523). Range/fragment/slice work remains #442's decision.
 
 `TestNGINXCorpusTargetedCacheDifference` uses the existing `cache-runtime`
 candidate, real Jul, and pinned NGINX 1.28.3 with a synthetic local origin.
@@ -632,3 +640,48 @@ emits a source-located manual finding and omits that location rather than
 producing malformed Jul configuration. Map it to a deterministic operator-chosen
 `[[upstreams]]` name with `servers = ["unix:/path.sock"]`, then reference
 `proxy_pass = "http://name"`.
+
+## Common idioms: expiration and MIME (#523)
+
+Plain `expires <duration>` maps to optional location `expires`, through the
+shared response policy. HTTP/server values inherit into locations regardless of
+declaration order; `expires off` clears inheritance. NGINX's signed seconds,
+minutes, hours, days, weeks, 30-day months (`M`) and 365-day years translate when
+they fit a whole-second Go duration. `modified`, `@time`, variables,
+`epoch`, `max`, fractional/millisecond and unrepresentable forms remain blocking.
+
+| Source | Response behavior |
+| --- | --- |
+| `expires 1h` | `Expires` = response time + 1h; `Cache-Control: max-age=3600` |
+| `expires 0` | Current response time; `Cache-Control: max-age=0` |
+| `expires -1` | Response time − 1s; `Cache-Control: no-cache` |
+| `expires off` | No expiration policy; existing origin headers remain |
+
+Expiration replaces existing Expires and Cache-Control values on statuses
+200, 201, 204, 206, 301, 302, 303, 304, 307 and 308. Other statuses retain their
+origin headers. Ordered `add_header ... always` operations apply afterward.
+The wrapper is outside storage-cache capture: cache hits get fresh downstream
+expiration; origin storage policy still determines whether Jul caches a response.
+The static-only fixed `cache_control` field cannot be combined with `expires`.
+
+`types { media/type ext ...; }` and `default_type` translate at HTTP, server
+and location scopes into `mime.types` (dotted lowercase extensions) and
+`mime.default_type`. A local table replaces inherited mappings; `types {}`
+clears them. Repeated local blocks accumulate entries; the last declaration
+of an extension wins, including duplicates within a block, as in NGINX.
+Unmapped files use the inherited default type. When no
+source table exists, a translated default_type uses NGINX's core table:
+html → text/html, gif → image/gif, jpg → image/jpeg, with default text/plain.
+This deliberately avoids host MIME databases or content sniffing in a migrated
+explicit policy.
+
+Includes, including raw mappings included inside a types block, need `--follow-includes` and the existing bounded root/security
+contract. Actual file contents determine support; a file called `mime.types`
+does not receive special trust or imply a standard mapping.
+
+Importer output omits ordinary fields equal to defaults. A canonical
+marshal/reparse comparison guards effective behavior, and explicit zero
+expiration, false buffering and empty MIME tables retain their presence.
+Optional policy blocks remain explicit when their presence is significant.
+See [configuration](configuration.md#mime-policy-and-response-expiration) and
+the runnable [example](../testdata/expiration-mime.toml).

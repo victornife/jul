@@ -10,6 +10,19 @@
 | Report location | Original working copy: `/home/victornf/jul-audit-20260930/jul-audit-report-2026-09-30.md`; publication target: `docs/audit/jul-audit-report-2026-09-30.md` |
 | Post-audit baseline note | After the report was written, `main` moved to `f036b063` (PR #501: access-log writer sharing, a dependency security floor, docs). A read-only diff (8 files: `internal/observability/sinks.go` + test, CHANGELOG, three docs, Console lockfiles) shows no change to any file behind F-01–F-19, except `docs/known-limitations.md` line shifts: the cited L242 is now L238 and L510 is now L506. All findings still apply at `f036b063`. The Y1-10 access-log sink change itself was not re-reviewed. |
 
+## Delivery scope addendum — 2026-10-09 (#523)
+
+PR #566 implements the maintainer-selected F-09/F-15 continuation: shared
+plain/zero/negative response-time expiration, configurable MIME at global,
+server and location scopes, bounded idiom translation and default-aware output.
+#510's merged tranche supplied only the six built-in streaming media mappings;
+its historical configurable-table proposal was not delivered there. #523 owns
+that missing capability. The runtime and importer documentation describes the
+new target, tests and retained limits; modified/@time/variable expiration,
+#406 retries and #525 cache fill locks remain deferred/blocking. This addendum
+records delivery scope, not a merged/release/soak or maturity certification.
+The original September audit and immutable release evidence remain historical.
+
 ## Delivery status addendum — 2026-10-06
 
 Current source baseline: post-#548 `main` at

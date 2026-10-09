@@ -1,0 +1,370 @@
+{
+  "schema_version": 1,
+  "id": "idioms-runtime",
+  "tier": "core",
+  "description": "Bounded common idioms: signed expiration, inherited MIME tables, positive body limits, gzip types, exact WebSocket trio and immediate proxy flushing. Runtime assertions cover expiration Cache-Control status/sign/off behavior.",
+  "origin": {
+    "kind": "repository_authored",
+    "license": "AGPL-3.0-only",
+    "source": "victornife/jul#523"
+  },
+  "categories": [
+    "cache-compression",
+    "core-http-routing",
+    "protocol-gateways"
+  ],
+  "build_tags": [
+    "importer"
+  ],
+  "root": "nginx/nginx.conf",
+  "follow_includes": false,
+  "expected_assessment": {
+    "status": "ready_for_review",
+    "ready": true,
+    "complete": true,
+    "files_read": 1,
+    "sources": [
+      "nginx.conf"
+    ],
+    "results": [
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_EVENTS",
+        "class": "informational",
+        "risk": "operational",
+        "context": "main",
+        "directive": "events"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_MAIN_HTTP",
+        "class": "supported",
+        "risk": "operational",
+        "context": "main",
+        "directive": "http"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_TYPES",
+        "class": "supported",
+        "risk": "operational",
+        "context": "http",
+        "directive": "types"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_DEFAULT_TYPE",
+        "class": "supported",
+        "risk": "operational",
+        "context": "http",
+        "directive": "default_type"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_EXPIRES",
+        "class": "supported",
+        "risk": "operational",
+        "context": "http",
+        "directive": "expires"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_GZIP",
+        "class": "supported",
+        "risk": "performance",
+        "context": "http",
+        "directive": "gzip"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_GZIP_TYPES",
+        "class": "supported",
+        "risk": "performance",
+        "context": "http",
+        "directive": "gzip_types"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_HTTP_SERVER",
+        "class": "supported",
+        "risk": "routing",
+        "context": "http",
+        "directive": "server"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LISTEN",
+        "class": "supported",
+        "risk": "availability",
+        "context": "server",
+        "directive": "listen"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_NAME",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "server_name"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_BODY_LIMIT",
+        "class": "supported",
+        "risk": "security",
+        "context": "server",
+        "directive": "client_max_body_size"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_SERVER_LOCATION",
+        "class": "supported",
+        "risk": "routing",
+        "context": "server",
+        "directive": "location",
+        "count": 7
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_RETURN",
+        "class": "supported",
+        "risk": "routing",
+        "context": "location",
+        "directive": "return",
+        "count": 6
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_EXPIRES",
+        "class": "supported",
+        "risk": "operational",
+        "context": "location",
+        "directive": "expires",
+        "count": 3
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_TYPES",
+        "class": "supported",
+        "risk": "operational",
+        "context": "location",
+        "directive": "types"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_PROXY_PASS",
+        "class": "supported",
+        "risk": "routing",
+        "context": "location",
+        "directive": "proxy_pass"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_WEBSOCKET",
+        "class": "informational",
+        "risk": "routing",
+        "context": "location",
+        "directive": "proxy_http_version"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_WEBSOCKET",
+        "class": "informational",
+        "risk": "routing",
+        "context": "location",
+        "directive": "proxy_set_header",
+        "count": 2
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_PROXY_BUFFERING",
+        "class": "supported",
+        "risk": "performance",
+        "context": "location",
+        "directive": "proxy_buffering"
+      }
+    ]
+  },
+  "expected_candidate": {
+    "required": true,
+    "contains": [
+      "client_max_body_size = '4m'",
+      "default_type = 'application/octet-stream'",
+      "expires = '-1s'",
+      "expires = '0s'",
+      "expires = '1h0m0s'",
+      "proxy_buffering = false",
+      "video/mp2t"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "positive",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/positive",
+        "host": "idioms-runtime.test"
+      },
+      "assert": [
+        "status",
+        "headers"
+      ],
+      "assert_headers": [
+        "cache-control"
+      ],
+      "ignore_headers": [
+        "date",
+        "expires",
+        "server"
+      ],
+      "reference": {
+        "status": 200,
+        "headers": {
+          "cache-control": [
+            "max-age=3600"
+          ]
+        }
+      },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "negative",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/negative",
+        "host": "idioms-runtime.test"
+      },
+      "assert": [
+        "status",
+        "headers"
+      ],
+      "assert_headers": [
+        "cache-control"
+      ],
+      "ignore_headers": [
+        "date",
+        "expires",
+        "server"
+      ],
+      "reference": {
+        "status": 201,
+        "headers": {
+          "cache-control": [
+            "no-cache"
+          ]
+        }
+      },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "zero",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/zero",
+        "host": "idioms-runtime.test"
+      },
+      "assert": [
+        "status",
+        "headers"
+      ],
+      "assert_headers": [
+        "cache-control"
+      ],
+      "ignore_headers": [
+        "date",
+        "expires",
+        "server"
+      ],
+      "reference": {
+        "status": 204,
+        "headers": {
+          "cache-control": [
+            "max-age=0"
+          ]
+        }
+      },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "off",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/off",
+        "host": "idioms-runtime.test"
+      },
+      "assert": [
+        "status"
+      ],
+      "ignore_headers": [
+        "date",
+        "expires",
+        "server"
+      ],
+      "reference": {
+        "status": 200
+      },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "ineligible",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/ineligible",
+        "host": "idioms-runtime.test"
+      },
+      "assert": [
+        "status"
+      ],
+      "ignore_headers": [
+        "date",
+        "expires",
+        "server"
+      ],
+      "reference": {
+        "status": 404
+      },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    },
+    {
+      "id": "empty",
+      "safe": true,
+      "side_effect_free": true,
+      "request": {
+        "method": "GET",
+        "path": "/empty",
+        "host": "idioms-runtime.test"
+      },
+      "assert": [
+        "status",
+        "headers"
+      ],
+      "assert_headers": [
+        "cache-control"
+      ],
+      "ignore_headers": [
+        "date",
+        "expires",
+        "server"
+      ],
+      "reference": {
+        "status": 204,
+        "headers": {
+          "cache-control": [
+            "max-age=3600"
+          ]
+        }
+      },
+      "expected_verdict": "equivalent_for_asserted_dimensions"
+    }
+  ]
+}

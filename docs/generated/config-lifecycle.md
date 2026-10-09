@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 370 |
-| Schema leaves (configurable values) | 315 |
-| Registry entries | 315 |
+| Schema paths (containers included) | 384 |
+| Schema leaves (configurable values) | 323 |
+| Registry entries | 323 |
 | Startup-consumed entries | 29 |
-| Class `hot_reload` | 272 |
+| Class `hot_reload` | 280 |
 | Class `restart_required` | 29 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -177,6 +177,8 @@ value is compared as a digest so no secret material leaves the process.
 | `global.reload_timeout` | `hot_reload` | `reload_timeout` | — | the threshold is read from the effective config at the start of each reload |
 | `global.shutdown_timeout` | `hot_reload` | `shutdown_timeout` | — | the drain budget is read from the effective config on each graceful stop |
 | `global.worker_threads` | `hot_reload` | `worker_threads` | — | OnReloaded applies the cap with runtime.GOMAXPROCS, restoring the container-aware default for "auto" |
+| `mime.default_type` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `mime.types.*` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `observability.access_log.enabled` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
 | `observability.access_log.file` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
 | `observability.access_log.format` | `hot_reload` | `access_log` | — | a candidate sink generation is built and validated before Publish, then swapped in with the new handler generation; the previous generation's file/syslog resources close only after its requests drain (#98) |
@@ -260,6 +262,7 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.cors.max_age` | `hot_reload` | `cors` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.deny` | `hot_reload` | `access_control` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.directory_listing` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.expires` | `hot_reload` | `headers` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.fastcgi_params.*` | `hot_reload` | `fastcgi` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.fastcgi_pass` | `hot_reload` | `fastcgi` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.grpc` | `hot_reload` | `grpc` | — | the handler tree is rebuilt from the effective config on each successful reload |
@@ -282,8 +285,11 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.match.query.*.op` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.match.query.*.value` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.match.type` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.mime.default_type` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.mime.types.*` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.plugin` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `servers.*.locations.*.plugins` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
+| `servers.*.locations.*.proxy_buffering` | `hot_reload` | `proxy_pass` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.proxy_connect_timeout` | `hot_reload` | `proxy_timeouts` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.proxy_pass` | `hot_reload` | `proxy_pass` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.proxy_read_timeout` | `hot_reload` | `proxy_timeouts` | — | the handler tree is rebuilt from the effective config on each successful reload |
@@ -323,6 +329,8 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.waf.request_body_limit` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |
 | `servers.*.locations.*.waf.response_body_check` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |
 | `servers.*.max_header_bytes` | `new_listener_only` | `listener_limits` | cond. | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
+| `servers.*.mime.default_type` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.mime.types.*` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.name` | `hot_reload` | `server_identity` | — | the block label appears only in configuration projections, which are rebuilt from the effective config on each reload |
 | `servers.*.plugins` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `servers.*.proxy_protocol` | `restart_required` | `client_address` | startup, per-address, cond. | the PROXY-protocol wrapper is installed when the address binds, ahead of the TLS wrap, so it is fixed for the listener's lifetime |

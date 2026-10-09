@@ -7,6 +7,7 @@
       "fixtures": [
         "cache-runtime",
         "compression-runtime",
+        "idioms-runtime",
         "security-cache-boundaries"
       ],
       "evidence": [
@@ -33,6 +34,7 @@
         "approximate-alias",
         "blocking-dynamic-proxy",
         "core-multifile-return",
+        "idioms-runtime",
         "proxy-pass-uri-runtime",
         "routing-cors-policy",
         "routing-precedence-runtime",
@@ -73,6 +75,7 @@
         "fastcgi-gateway",
         "fastcgi-gateway-runtime",
         "grpc-gateway-runtime",
+        "idioms-runtime",
         "protocol-boundaries",
         "stream-extensibility-boundaries",
         "stream-named-upstream",

@@ -28,7 +28,10 @@ func durationPtr(d time.Duration) *config.Duration {
 // path cannot be extracted from it, which is what happens when a new field is
 // registered without an extractor or with a mistyped path.
 func fullConfig() *config.Config {
+	types := map[string]string{".sample": "application/x-sample"}
+	policy := &config.MIMEConfig{Types: &types, DefaultType: "application/octet-stream"}
 	return &config.Config{
+		MIME: policy,
 		Global: config.GlobalConfig{
 			WorkerThreads:         "4",
 			AccessLog:             "stdout",
@@ -87,6 +90,7 @@ func fullConfig() *config.Config {
 			},
 		},
 		Servers: []config.ServerConfig{{
+			MIME:              policy,
 			Name:              "default",
 			Listen:            ":8443",
 			ServerNames:       []string{"example.com"},
@@ -136,6 +140,9 @@ func fullConfig() *config.Config {
 				MaxHops:          8,
 			},
 			Locations: []config.LocationConfig{{
+				MIME:           policy,
+				Expires:        durationPtr(time.Second),
+				ProxyBuffering: config.Bool(false),
 				Match: config.MatchConfig{
 					Type:    "prefix",
 					Path:    "/",

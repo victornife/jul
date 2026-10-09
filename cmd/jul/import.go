@@ -147,9 +147,9 @@ func cmdImport(args []string) int {
 	}
 	assessment.SetSourceOrder(*sourceOrder)
 
-	toml, err := config.Marshal(cfg)
+	toml, err := nginx.MarshalCandidate(cfg)
 	if err != nil {
-		fmt.Fprintln(stderr, "error: could not marshal the translated config")
+		fmt.Fprintf(stderr, "error: could not marshal the translated config: %v\n", err)
 		return importExitInternal
 	}
 

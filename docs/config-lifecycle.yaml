@@ -76,12 +76,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 370
-  schema_leaves: 315
-  registry_entries: 315
+  schema_paths: 384
+  schema_leaves: 323
+  registry_entries: 323
   startup_consumed: 29
   by_class:
-    hot_reload: 272
+    hot_reload: 280
     restart_required: 29
     new_listener_only: 7
     ignored_deprecated: 4
@@ -355,6 +355,14 @@ fields:
     class: hot_reload
     subsystem: worker_threads
     reason: "OnReloaded applies the cap with runtime.GOMAXPROCS, restoring the container-aware default for \"auto\""
+  - path: "mime.default_type"
+    class: hot_reload
+    subsystem: static_files
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "mime.types.*"
+    class: hot_reload
+    subsystem: static_files
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
   - path: "observability.access_log.enabled"
     class: hot_reload
     subsystem: access_log
@@ -708,6 +716,10 @@ fields:
     class: hot_reload
     subsystem: static_files
     reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.expires"
+    class: hot_reload
+    subsystem: headers
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
   - path: "servers.*.locations.*.fastcgi_params.*"
     class: hot_reload
     subsystem: fastcgi
@@ -796,6 +808,14 @@ fields:
     class: hot_reload
     subsystem: routing
     reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.mime.default_type"
+    class: hot_reload
+    subsystem: static_files
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.mime.types.*"
+    class: hot_reload
+    subsystem: static_files
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
   - path: "servers.*.locations.*.plugin"
     class: hot_reload
     subsystem: plugins
@@ -804,6 +824,10 @@ fields:
     class: hot_reload
     subsystem: plugins
     reason: "the plugin set is rebuilt and re-instantiated on each successful reload"
+  - path: "servers.*.locations.*.proxy_buffering"
+    class: hot_reload
+    subsystem: proxy_pass
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
   - path: "servers.*.locations.*.proxy_connect_timeout"
     class: hot_reload
     subsystem: proxy_timeouts
@@ -962,6 +986,14 @@ fields:
     subsystem: listener_limits
     reason: "the value is read once when the socket binds; an address kept across the reload keeps the value it bound with"
     conditional: true
+  - path: "servers.*.mime.default_type"
+    class: hot_reload
+    subsystem: static_files
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.mime.types.*"
+    class: hot_reload
+    subsystem: static_files
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
   - path: "servers.*.name"
     class: hot_reload
     subsystem: server_identity

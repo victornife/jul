@@ -121,6 +121,7 @@ func New(cfg *config.Config, builders map[string]Builder, fallback Builder, locM
 		if srv.Listen == "" {
 			continue
 		}
+		srv.MIME = config.ResolveMIME(cfg.MIME, srv.MIME)
 		sr, err := buildServerRoute(srv, reg, fallback, locModifier, log)
 		if err != nil {
 			return nil, err
@@ -147,6 +148,7 @@ func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback 
 
 	bodyLimit := srv.ClientMaxBodySize.Bytes()
 	for i, loc := range srv.Locations {
+		loc.MIME = config.ResolveMIME(srv.MIME, loc.MIME)
 		lr := &locationRoute{matchType: loc.Match.Type, path: loc.Match.Path, index: i}
 		lr.metricRoute = "_unidentified"
 		if loc.RouteID != nil && *loc.RouteID != "" {
@@ -218,7 +220,7 @@ func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback 
 		// produces a 500 carrying the location's policy headers instead of an
 		// opaque one from the global recover outside the router. A location with
 		// neither response_headers nor cors installs no wrapper.
-		if rp := middleware.ResponsePolicy(loc.ResponseHeaders, middleware.CompileCORS(loc.CORS)); rp != nil {
+		if rp := middleware.ResponsePolicyWithExpires(loc.ResponseHeaders, middleware.CompileCORS(loc.CORS), loc.Expires); rp != nil {
 			h = rp(middleware.Recover(log)(h))
 		}
 
