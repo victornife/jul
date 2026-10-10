@@ -553,7 +553,8 @@ listen = "127.0.0.1:{port}"
         text = run.stdout + run.stderr
         (out / "h3spec.txt").write_text(text)
     results = h3spec_results(text, run.returncode)
-    return judge("h3", results, out)
+    skips = [line.strip() for line in text.splitlines() if "Skipping this test." in line]
+    return judge("h3", results, out, {"tool_skip_warnings": skips})
 
 
 def h3spec_results(text, returncode):
@@ -568,8 +569,7 @@ def h3spec_results(text, returncode):
             break
         if not stripped or stripped.startswith(("Finished", "Failures", "Randomized", "To rerun")):
             continue
-        indent = len(line) - len(line.lstrip())
-        if indent <= 2 and not stripped.endswith(("✔", "✘", "FAILED")) and not re.search(r"\[(✔|✘)\]", stripped):
+        if stripped in ("QUIC servers", "HTTP/3 servers"):
             section = stripped
             continue
         m = re.match(r"(.*?)\s*(\[✔\]|\[✘\]|FAILED \[\d+\])\s*$", stripped)

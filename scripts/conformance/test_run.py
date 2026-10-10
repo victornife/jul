@@ -75,6 +75,7 @@ class H3specResultsTests(unittest.TestCase):
                   "  same case [\x1b[32m✔\x1b[0m]\n"
                   "  same case [\x1b[31m✘\x1b[0m]\n"
                   "HTTP/3 servers\n"
+                  "Warning: 0-RTT is not possible. Skipping this test.\n"
                   "  good case [\x1b[32m✔\x1b[0m]\n"
                   "Failures:\n\n  1) QUIC servers same case\n"
                   "3 examples, 1 failure\n")
