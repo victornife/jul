@@ -69,5 +69,28 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(report["passed"], 1)
 
 
+class H3specResultsTests(unittest.TestCase):
+    def test_ansi_status_and_duplicate_descriptions_preserve_each_example(self):
+        output = ("QUIC servers\n"
+                  "  same case [\x1b[32m✔\x1b[0m]\n"
+                  "  same case [\x1b[31m✘\x1b[0m]\n"
+                  "HTTP/3 servers\n"
+                  "  good case [\x1b[32m✔\x1b[0m]\n"
+                  "Failures:\n\n  1) QUIC servers same case\n"
+                  "3 examples, 1 failure\n")
+        results = run.h3spec_results(output, 1)
+        self.assertEqual(len(results), 3)
+        self.assertTrue(results["h3spec QUIC servers: same case"][0])
+        self.assertFalse(results["h3spec QUIC servers: same case [2]"][0])
+        self.assertTrue(results["h3spec HTTP/3 servers: good case"][0])
+
+    def test_incomplete_or_inconsistent_output_cannot_pass(self):
+        for output, code in (("", 0), ("QUIC servers\n  case [✔]\n2 examples, 0 failures\n", 0),
+                             ("QUIC servers\n  case [✔]\n1 example, 1 failure\n", 1),
+                             ("QUIC servers\n  case [✔]\n1 example, 0 failures\n", 1)):
+            with self.subTest(output=output, code=code):
+                self.assertFalse(run.h3spec_results(output, code)["h3spec run"][0])
+
+
 if __name__ == "__main__":
     unittest.main()

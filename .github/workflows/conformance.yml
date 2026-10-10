@@ -1,7 +1,7 @@
 name: Conformance
 
 # Protocol conformance lane (#513). It runs weekly, on demand, and for PRs
-# changing the host/guest Go module or this workflow, so toolchain and dependency
+# changing the host/guest Go module, suite harness or this workflow, so toolchain and dependency
 # upgrades recheck the inherited runtime behavior. Each suite starts the full-profile
 # binary with its own configuration, runs one external tool or corpus, uploads
 # its report, and fails only on a case that is neither passing nor listed in
@@ -18,6 +18,8 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'examples/plugins/go.mod'
+      - 'scripts/conformance/**'
+      - 'testdata/conformance/allowlist.yaml'
       - '.github/workflows/conformance.yml'
   schedule:
     - cron: "17 4 * * 1"

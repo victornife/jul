@@ -483,11 +483,19 @@ log_level = "warn"
 [observability.access_log]
 enabled = false
 
+[[upstreams]]
+name = "echo"
+servers = [{{ address = "127.0.0.1:{echo}" }}]
+  [upstreams.resilience]
+  # Malformed WebSocket cases intentionally reset the echo connection. Keep
+  # that single test origin available for the next independent case.
+  max_fails = 100000
+
 [[servers]]
 listen = "127.0.0.1:{port}"
   [[servers.locations]]
   match = {{ type = "prefix", path = "/" }}
-  proxy_pass = "http://127.0.0.1:{echo}"
+  proxy_pass = "http://echo"
 """
     spec = {"outdir": "/reports", "servers": [{"agent": "jul-proxy", "url": f"ws://127.0.0.1:{port}"}],
             "cases": ["*"], "exclude-cases": ["12.*", "13.*"], "exclude-agent-cases": {}}
@@ -544,11 +552,20 @@ listen = "127.0.0.1:{port}"
         run = subprocess.run([args.h3spec, "-n", "127.0.0.1", str(port)], capture_output=True, text=True, timeout=900)
         text = run.stdout + run.stderr
         (out / "h3spec.txt").write_text(text)
-    # hspec prints one line per example; failures are numbered and listed at
-    # the end. Record each example as passed unless it is listed as failed.
+    results = h3spec_results(text, run.returncode)
+    return judge("h3", results, out)
+
+
+def h3spec_results(text, returncode):
+    # The pinned binary emits ANSI-coloured status marks even when captured.
+    # Strip those before parsing so the verdict retains individual cases.
+    text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    results = {}
     section = ""
     for line in text.splitlines():
         stripped = line.strip()
+        if stripped == "Failures:":
+            break
         if not stripped or stripped.startswith(("Finished", "Failures", "Randomized", "To rerun")):
             continue
         indent = len(line) - len(line.lstrip())
@@ -558,10 +575,18 @@ listen = "127.0.0.1:{port}"
         m = re.match(r"(.*?)\s*(\[✔\]|\[✘\]|FAILED \[\d+\])\s*$", stripped)
         if m:
             name = f"h3spec {section}: {m.group(1).strip()}"
+            # h3spec has two examples with the same TLS description.
+            original, instance = name, 1
+            while name in results:
+                instance += 1
+                name = f"{original} [{instance}]"
             results[name] = ("✔" in m.group(2), m.group(2))
-    if not results:
-        results["h3spec run"] = (run.returncode == 0, text[-300:])
-    return judge("h3", results, out)
+    summary = re.search(r"(\d+) examples?, (\d+) failures?", text)
+    if (not summary or len(results) != int(summary.group(1)) or
+            sum(not passed for passed, _ in results.values()) != int(summary.group(2)) or
+            (returncode != 0 and not any(not passed for passed, _ in results.values()))):
+        results["h3spec run"] = (False, "incomplete or inconsistent h3spec output: " + text[-300:])
+    return results
 
 
 SUITES = {"h2spec": suite_h2spec, "framing": suite_framing, "cache": suite_cache,
