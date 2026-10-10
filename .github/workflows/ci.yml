@@ -112,7 +112,7 @@ jobs:
       - name: run the ABI suites against the fresh builds
         env:
           JUL_PLUGIN_FIXTURES: ${{ runner.temp }}/plugins
-        run: go test -tags wasmplugins -count=1 -run 'ABI|Negotiate|ResponsePhase|RequestPhaseV2|V2|HandlerType' ./internal/plugins/
+        run: go test -tags wasmplugins -count=1 -run 'ABI|Negotiate|ResponsePhase|RequestPhaseV2|V2|HandlerType|SignedURL' ./internal/plugins/
 
   test-windows:
     name: test-windows (${{ matrix.profile }})
@@ -301,6 +301,14 @@ jobs:
           cache: true
       - name: go test -coverprofile
         run: go test -tags "${{ env.FULL_TAGS }}" -coverprofile=cover.out ./...
+      - name: signed-URL policy coverage (separate guest module)
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd examples/plugins && go test -coverprofile=../../signed-url-policy.cover ./signed-url/policy ./signed-url/sign)
+          percent=$(cd examples/plugins && go tool cover -func=../../signed-url-policy.cover | awk '/^total:/ {gsub(/%/, "", $3); print $3}')
+          awk -v p="$percent" 'BEGIN { if (p < 90) exit 1 }'
+          sed -i 's|^juliaplugins/|examples/plugins/|' signed-url-policy.cover
       - name: enforce coverage floor
         shell: bash
         run: |
@@ -382,7 +390,7 @@ jobs:
       - name: upload to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         with:
-          files: ./cover.out
+          files: ./cover.out,./signed-url-policy.cover
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 

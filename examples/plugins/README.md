@@ -28,6 +28,7 @@ go build -tags wasmplugins -o jul ./cmd/jul
 | [`v2-redact/`](v2-redact) | **v2 bounded body transform.** Redacts configured strings in text/JSON responses; optional fail-closed reject (needs `abi = "jul-abi/v2"`, `memory_limit` ≈ 2× `max_response_body`) |
 | [`testguest-v2/`](testguest-v2) | The v2 conformance guest driven by the host test suite |
 | [`request-block/`](request-block) | Middleware: `403` + body when `X-Block: 1`, else `Continue` |
+| [`signed-url/`](signed-url) | **v1 request-only authorization.** HMAC-SHA256 GET/HEAD links with expiry and rotation; can share a chain with v2 response plugins |
 | [`kv-counter/`](kv-counter) | Middleware: counts requests in the KV store, reports `X-Count` (needs `kv = true`) |
 | [`egress-check/`](egress-check) | Middleware: guarded outbound `Fetch` to an allow-listed host, reports `X-Egress-Status` (needs `fetch = true`) |
 | [`testguest-panic/`](testguest-panic) | Panics on invocation — used by the panic-isolation test |
@@ -101,3 +102,13 @@ curl -i http://127.0.0.1:8080/blocked -H 'X-Block: 1'   # 403 from request-block
 
 See [docs/plugins.md](../../docs/plugins.md) for the full authoring guide and
 [docs/abi.md](../../docs/abi.md) for which ABI to use and the v1/v2 reference.
+
+## Signed media/download links
+
+[The signed-url recipe](signed-url/README.md) includes a runnable configuration,
+Go issuer, rotated HMAC keys and GET/HEAD expiry validation. Both parent build
+scripts include it in `all` mode. Its native policy tests and actual compiled
+WASM guest tests run in CI, including mixed v1/v2 chains. Its v1 ABI declaration
+is intentional: authorization finishes before the handler/response phase;
+v1 remains supported by Jul's v2-capable runtime. nginx `secure_link` formats
+remain a manual migration.

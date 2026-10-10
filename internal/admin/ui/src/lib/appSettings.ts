@@ -24,12 +24,15 @@ export interface HealthCheckDraft {
   expectStatus: string;
   expectBody: string;
   service: string;
+  host?: string;
+  headers?: string;
 }
 
 export function seedHealthCheck(app: AppProjection): HealthCheckDraft {
   return {
     enabled: app.health_check,
-    type: app.health_check_type === "tcp" ? "tcp" : app.health_check_type === "grpc" ? "grpc" : "http",
+    type:
+      app.health_check_type === "tcp" ? "tcp" : app.health_check_type === "grpc" ? "grpc" : "http",
     path: app.health_check_path ?? "",
     interval: app.health_check_interval ?? "",
     timeout: app.health_check_timeout ?? "",
@@ -42,6 +45,8 @@ export function seedHealthCheck(app: AppProjection): HealthCheckDraft {
     expectStatus: (app.health_check_expect_status ?? []).join(", "),
     expectBody: app.health_check_expect_body ?? "",
     service: app.health_check_service ?? "",
+    host: app.health_check_host ?? "",
+    headers: "",
   };
 }
 
@@ -76,12 +81,34 @@ export function healthCheckToPatch(d: HealthCheckDraft): HealthCheckPatch {
     ...(http && status.length > 0 ? { expect_status: status } : {}),
     ...(http && d.expectBody.trim() ? { expect_body: d.expectBody.trim() } : {}),
     ...(grpc && d.service.trim() ? { service: d.service.trim() } : {}),
+    ...(d.type !== "tcp" && d.host?.trim() ? { host: d.host.trim() } : {}),
+    ...(http && d.headers?.trim() ? { headers: parseHealthHeaders(d.headers) } : {}),
   };
+}
+
+export function parseHealthHeaders(raw: string): Record<string, string> {
+  const value: unknown = JSON.parse(raw);
+  if (
+    value === null ||
+    Array.isArray(value) ||
+    typeof value !== "object" ||
+    !Object.values(value).every((v) => typeof v === "string")
+  ) {
+    throw new Error("Headers must be a JSON object with string values.");
+  }
+  return value as Record<string, string>;
 }
 
 export function healthCheckWarnings(d: HealthCheckDraft): string[] {
   const w: string[] = [];
   if (!d.enabled) return w;
+  if (d.type === "http" && d.headers?.trim()) {
+    try {
+      parseHealthHeaders(d.headers);
+    } catch {
+      w.push("Headers must be a JSON object with string values.");
+    }
+  }
   if (d.type === "http" && d.path.trim() === "") {
     w.push("HTTP probes need a request path (e.g. /healthz).");
   }

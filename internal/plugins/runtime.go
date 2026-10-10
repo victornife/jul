@@ -517,6 +517,7 @@ func (p *plugin) instantiate(ctx context.Context) (api.Module, error) {
 	}
 	cfg := wazero.NewModuleConfig().
 		WithName("").
+		WithSysWalltime().
 		WithStartFunctions("_initialize")
 	return p.runtime.InstantiateModule(ctx, p.compiled, cfg)
 }

@@ -240,6 +240,8 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 			if up.HealthCheck.Enabled {
 				ap.HealthCheckType = up.HealthCheck.Type
 				ap.HealthCheckPath = up.HealthCheck.Path
+				ap.HealthCheckHost = up.HealthCheck.Host
+				ap.HealthCheckHeaderCount = len(up.HealthCheck.Headers)
 				if up.HealthCheck.Interval > 0 {
 					ap.HealthCheckIntvl = string(mustMarshal(up.HealthCheck.Interval.MarshalText()))
 				}

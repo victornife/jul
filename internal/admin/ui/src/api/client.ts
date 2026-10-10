@@ -803,6 +803,8 @@ export const AppProjectionSchema = z.object({
   health_check_expect_status: z.array(z.number()).optional(),
   health_check_expect_body: z.string().optional(),
   health_check_service: z.string().optional(),
+  health_check_host: z.string().optional(),
+  health_check_header_count: z.number().optional(),
   discovery_refresh: z.string().optional(),
   discovery_consul: z
     .object({
@@ -1941,6 +1943,8 @@ export type HealthCheckPatch = {
   expect_status?: number[];
   expect_body?: string;
   service?: string;
+  host?: string;
+  headers?: Record<string, string>;
 };
 
 // DiscoveryPatch is the upstream dynamic-discovery block the guided Apps editor

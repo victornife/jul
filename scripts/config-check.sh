@@ -90,6 +90,19 @@ done
 echo "== examples/"
 while IFS= read -r -d '' f; do
 	case "$f" in
+	examples/plugins/signed-url/jul.toml)
+		# Opaque guest parameters are runtime-checked; build the shipped source
+		# and validate the sample with the same CWD semantics as its recipe.
+		guest_dir="$(mktemp -d "${TMPDIR:-/tmp}/jul-signed-url-check.XXXXXX")"
+		if (cd examples/plugins && GOOS=wasip1 GOARCH=wasm go build -trimpath -buildvcs=false -buildmode=c-shared -o "$guest_dir/signed-url.wasm" ./signed-url); then
+			cp "$f" "$guest_dir/jul.toml"
+			SIGNED_URL_KEY=YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE check jul.toml "$guest_dir"
+		else
+			fail=1
+		fi
+		rm -rf "$guest_dir"
+		continue
+		;;
 	*/rust-proxy/Cargo.toml | */rust-proxy/.cargo/config.toml)
 		continue
 		;;

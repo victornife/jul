@@ -102,6 +102,37 @@ afterEach(() => {
 });
 
 describe("HealthCheckEditor", () => {
+  it("edits Host and write-only headers through a reviewed patch", async () => {
+    render(
+      <Wrapper>
+        <HealthCheckEditor
+          app={app({
+            health_check: true,
+            health_check_type: "http",
+            health_check_path: "/",
+            health_check_host: "health.internal",
+            health_check_header_count: 1,
+          })}
+          onClose={() => undefined}
+        />
+      </Wrapper>,
+    );
+    expect(screen.getByText(/1 headers configured; values hidden/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/Host \/ authority/), {
+      target: { value: "new.internal" },
+    });
+    fireEvent.change(screen.getByLabelText(/HTTP headers \(JSON, replace\)/), {
+      target: { value: '{"X-Token":"${env:HEALTH_TOKEN}"}' },
+    });
+    fireEvent.click(screen.getByText("Review in editor →"));
+    await waitFor(() => {
+      expect(seenBody).not.toBe("");
+    });
+    expect((JSON.parse(seenBody) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
+      health_check: { host: "new.internal", headers: { "X-Token": "${env:HEALTH_TOKEN}" } },
+    });
+  });
+
   it("seeds from the projection and posts an upstream_set_health_check patch", async () => {
     render(
       <Wrapper>

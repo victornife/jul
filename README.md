@@ -558,3 +558,8 @@ Key sections covered there:
 - [HTTP/3](docs/configuration.md#http3-quic) — QUIC listener
 - [`[plugins]`](docs/configuration.md#plugins) — WASM plugins
 - [`[[stream]]`](docs/configuration.md#stream) — L4 TCP/UDP proxy
+
+HTTP active health probes support bounded secret-bearing headers and virtual-host
+routing; gRPC probes can override authority without changing backend TLS trust.
+See [health configuration](docs/health.md#probe-headers-and-routing-identity).
+For expiring media/download links, see the [signed-URL WASM recipe](examples/plugins/signed-url/README.md).

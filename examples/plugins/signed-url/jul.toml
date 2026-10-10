@@ -1,0 +1,21 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
+# Run from examples/plugins/signed-url after building the module.
+[plugins.signed-url]
+path = "./signed-url.wasm"
+type = "middleware"
+abi = "jul-abi/v1"
+memory_limit = "32m"
+timeout = "250ms"
+max_instances = 16
+config = { "key.current" = "${env:SIGNED_URL_KEY}", clock_skew_seconds = "5", max_ttl_seconds = "86400" }
+
+[[servers]]
+listen = "127.0.0.1:8080"
+plugins = ["signed-url"]
+
+[[servers.locations]]
+match = { type = "prefix", path = "/media/" }
+root = "./public"
+cache_control = "private, no-store"

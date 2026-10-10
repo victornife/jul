@@ -25,7 +25,7 @@ build() { # build <package> <output name>
 
 v2=(v2-status-header v2-redact testguest-v2)
 if [[ "$mode" == "all" ]]; then
-	for p in header-inject request-block kv-counter egress-check testguest-panic testguest-loop "${v2[@]}"; do
+	for p in header-inject request-block signed-url kv-counter egress-check testguest-panic testguest-loop "${v2[@]}"; do
 		build "$p" "$p"
 	done
 else

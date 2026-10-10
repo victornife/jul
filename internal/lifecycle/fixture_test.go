@@ -295,6 +295,8 @@ func fullConfig() *config.Config {
 				InsecureSkipVerify: false,
 			},
 			HealthCheck: &config.HealthCheckConfig{
+				Host:               "health.internal",
+				Headers:            map[string]string{"X-Health-Token": "fixture-secret"},
 				Enabled:            true,
 				Type:               "http",
 				Path:               "/healthz",

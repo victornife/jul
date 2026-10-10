@@ -232,3 +232,44 @@ describe("discoveryWarnings", () => {
     expect(discoveryTokenNote(seedDiscovery(app({ discovery: "consul" })))).toBeNull();
   });
 });
+
+describe("health probe routing and write-only credentials", () => {
+  it("seeds Host without reading headers and preserves omitted credentials", () => {
+    const draft = seedHealthCheck(
+      app({
+        health_check: true,
+        health_check_type: "http",
+        health_check_path: "/healthz",
+        health_check_host: "health.internal",
+        health_check_header_count: 1,
+      }),
+    );
+    expect(draft.host).toBe("health.internal");
+    expect(draft.headers).toBe("");
+    expect(healthCheckToPatch(draft)).toMatchObject({ host: "health.internal" });
+    expect(healthCheckToPatch(draft)).not.toHaveProperty("headers");
+  });
+  it("replaces, clears and rejects malformed header maps", () => {
+    const draft = seedHealthCheck(
+      app({ health_check: true, health_check_type: "http", health_check_path: "/" }),
+    );
+    expect(
+      healthCheckToPatch({ ...draft, headers: '{"X-Token":"${env:HEALTH_TOKEN}"}' }).headers,
+    ).toEqual({ "X-Token": "${env:HEALTH_TOKEN}" });
+    expect(healthCheckToPatch({ ...draft, headers: "{}" }).headers).toEqual({});
+    for (const headers of ["bad", "[]", "null", '{"X":3}']) {
+      expect(healthCheckWarnings({ ...draft, headers })).toContain(
+        "Headers must be a JSON object with string values.",
+      );
+    }
+    expect(
+      healthCheckToPatch({ ...draft, type: "grpc", host: "grpc.internal", headers: "{}" }),
+    ).toMatchObject({ host: "grpc.internal" });
+    expect(healthCheckToPatch({ ...draft, type: "grpc", headers: "{}" })).not.toHaveProperty(
+      "headers",
+    );
+    expect(
+      healthCheckToPatch({ ...draft, type: "tcp", host: "unused", headers: "{}" }),
+    ).not.toHaveProperty("host");
+  });
+});

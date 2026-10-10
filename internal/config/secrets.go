@@ -279,37 +279,43 @@ func walkConfigStrings(c *Config, fn func(string) string) {
 	walkValue(reflect.ValueOf(c), fn)
 }
 
-func walkValue(v reflect.Value, fn func(string) string) {
+// walkValue returns whether a string changed. Map entries are addressable
+// copies because reflection cannot set a struct field in a map value. Pure
+// inspection callbacks never write maps, so CountSecretRefs/IsResolved remain
+// safe for immutable serving snapshots.
+func walkValue(v reflect.Value, fn func(string) string) bool {
+	changed := false
 	switch v.Kind() {
 	case reflect.Pointer:
 		if !v.IsNil() {
-			walkValue(v.Elem(), fn)
+			changed = walkValue(v.Elem(), fn)
 		}
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
-			walkValue(v.Field(i), fn)
+			changed = walkValue(v.Field(i), fn) || changed
 		}
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < v.Len(); i++ {
-			walkValue(v.Index(i), fn)
+			changed = walkValue(v.Index(i), fn) || changed
 		}
 	case reflect.Map:
-		// Only string-valued maps carry secret references worth resolving (the
-		// keys are field names, not values). Rebuild entries whose value changes.
-		if v.Type().Elem().Kind() == reflect.String {
-			for _, k := range v.MapKeys() {
-				old := v.MapIndex(k).String()
-				if nv := fn(old); nv != old {
-					v.SetMapIndex(k, reflect.ValueOf(nv).Convert(v.Type().Elem()))
-				}
+		// Keys are configuration identities/names, never secret values. Descend
+		// into values including structs, such as map[string]PluginConfig.
+		for _, k := range v.MapKeys() {
+			value := reflect.New(v.Type().Elem()).Elem()
+			value.Set(v.MapIndex(k))
+			if walkValue(value, fn) {
+				v.SetMapIndex(k, value)
+				changed = true
 			}
 		}
 	case reflect.String:
 		if v.CanSet() {
 			if nv := fn(v.String()); nv != v.String() {
 				v.SetString(nv)
+				changed = true
 			}
 		}
-	default:
 	}
+	return changed
 }

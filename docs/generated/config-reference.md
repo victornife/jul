@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 323 configurable leaves.
+Coverage: 325 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -3863,6 +3863,21 @@ ExpectStatus lists acceptable HTTP status codes for a passing probe (default [20
 | Why | active probes are restarted with the pool on each successful reload |
 | Default | [200] |
 
+## `upstreams.*.health_check.headers.*` {#upstreams-x-health_check-headers-x}
+
+Headers sets HTTP-only probe headers.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `health_check` |
+| Why | probe headers are snapshotted with the replacement pool; values are secret-bearing |
+| Flags | secret |
+| Constraint | HTTP only; 32 entries, 128-byte RFC header names, 4096-byte valid values, 16384 combined bytes; no case duplicates, Host, Content-Length or hop-by-hop fields; resolved secret values validated |
+| Zero/empty semantics | omitted/empty sends no custom headers; omitted structured patch preserves existing HTTP headers |
+| Active when | health check enabled |
+
 ## `upstreams.*.health_check.healthy_threshold` {#upstreams-x-health_check-healthy_threshold}
 
 HealthyThreshold is the number of consecutive successes to mark a backend healthy again (default 2).
@@ -3876,6 +3891,20 @@ HealthyThreshold is the number of consecutive successes to mark a backend health
 | Default | 2 |
 | Constraint | at least 1 effective |
 | Zero/empty semantics | omitted/zero defaults to 2 |
+| Active when | health check enabled |
+
+## `upstreams.*.health_check.host` {#upstreams-x-health_check-host}
+
+Host overrides HTTP Host or gRPC :authority.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `health_check` |
+| Why | active probes are restarted with the pool on each successful reload |
+| Constraint | ASCII DNS hostname or IP with optional port, at most 253 bytes; IPv6 in brackets; http/grpc only; independent from backend TLS identity |
+| Zero/empty semantics | omitted/empty uses backend authority |
 | Active when | health check enabled |
 
 ## `upstreams.*.health_check.interval` {#upstreams-x-health_check-interval}
@@ -3941,7 +3970,7 @@ Type is the probe protocol: "http" (default), "tcp", or "grpc".
 | Subsystem | `health_check` |
 | Why | active probes are restarted with the pool on each successful reload |
 | Default | http |
-| Allowed values | `http`, `tcp` |
+| Allowed values | `http`, `tcp`, `grpc` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
 | Active when | health check enabled |

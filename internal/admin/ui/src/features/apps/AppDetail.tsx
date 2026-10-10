@@ -60,7 +60,8 @@ const BACKEND_STATE_COLOUR: Record<BackendState, string> = {
 };
 
 function HealthState({ state }: { readonly state: BackendState | undefined }) {
-  const label = state === undefined ? "state unknown — backend is not live" : BACKEND_STATE_LABEL[state];
+  const label =
+    state === undefined ? "state unknown — backend is not live" : BACKEND_STATE_LABEL[state];
   return (
     <>
       <span
@@ -407,7 +408,9 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
               <Row label="Affinity key" value={hashDescription} />
               <Row
                 label="Applies to"
-                value={app.hash.applies_to === "http" ? "HTTP routes only" : "HTTP and stream routes"}
+                value={
+                  app.hash.applies_to === "http" ? "HTTP routes only" : "HTTP and stream routes"
+                }
               />
             </>
           )}
@@ -420,6 +423,15 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
                 : "off"
             }
           />
+          {app.health_check_host && (
+            <Row label="Probe Host / authority" value={app.health_check_host} />
+          )}
+          {app.health_check_header_count !== undefined && (
+            <Row
+              label="HTTP probe headers"
+              value={`${String(app.health_check_header_count)} configured (values hidden)`}
+            />
+          )}
           {app.health_check_interval && (
             <Row label="Probe interval" value={app.health_check_interval} />
           )}
@@ -474,7 +486,11 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
             </button>
           </div>
           {strategy === "consistent_hash" && (
-            <HashSettingsFields value={hash} onChange={setHash} disabled={!canWrite || patch.busy} />
+            <HashSettingsFields
+              value={hash}
+              onChange={setHash}
+              disabled={!canWrite || patch.busy}
+            />
           )}
           {hashIssues.map((issue) => (
             <p key={issue} className="text-xs text-jul-danger">

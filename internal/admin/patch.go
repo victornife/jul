@@ -15,6 +15,7 @@ package admin
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 
 	"jul/internal/config"
@@ -328,6 +329,9 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		hc, summary, err := buildHealthCheck(*req.HealthCheck)
 		if err != nil {
 			return "", err
+		}
+		if hc != nil && hc.Type == "http" && req.HealthCheck.Headers == nil && up.HealthCheck != nil && up.HealthCheck.Type == "http" {
+			hc.Headers = maps.Clone(up.HealthCheck.Headers)
 		}
 		up.HealthCheck = hc
 		return fmt.Sprintf("upstream %s active health checks %s", req.Upstream, summary), nil

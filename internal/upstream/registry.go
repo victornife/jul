@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -175,6 +176,9 @@ func healthConfigEqual(a, b config.HealthCheckConfig) bool {
 	if a.Enabled != b.Enabled ||
 		a.Type != b.Type ||
 		a.Path != b.Path ||
+		a.Host != b.Host ||
+		a.Service != b.Service ||
+		!maps.Equal(a.Headers, b.Headers) ||
 		a.Interval != b.Interval ||
 		a.Timeout != b.Timeout ||
 		a.HealthyThreshold != b.HealthyThreshold ||
@@ -394,7 +398,10 @@ func (r *Registry) For(ctx context.Context, up config.UpstreamConfig, scheme str
 // healthCfgOrZero returns the enabled health check config or a zero value.
 func healthCfgOrZero(cfg *config.HealthCheckConfig) config.HealthCheckConfig {
 	if cfg != nil {
-		return *cfg
+		c := *cfg
+		c.Headers = maps.Clone(cfg.Headers)
+		c.ExpectStatus = append([]int(nil), cfg.ExpectStatus...)
+		return c
 	}
 	return config.HealthCheckConfig{}
 }
@@ -806,7 +813,7 @@ func metaOf(up config.UpstreamConfig, scheme string) upstreamMeta {
 		backendTLSSig: backendTLSSignature(up),
 	}
 	if up.HealthCheck != nil {
-		m.health = *up.HealthCheck
+		m.health = healthCfgOrZero(up.HealthCheck)
 	}
 	if up.Hash != nil {
 		m.hash = *up.Hash

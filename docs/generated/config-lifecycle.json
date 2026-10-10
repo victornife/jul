@@ -256,12 +256,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 384,
-    "schema_leaves": 323,
-    "registry_entries": 323,
+    "schema_paths": 387,
+    "schema_leaves": 325,
+    "registry_entries": 325,
     "startup_consumed": 29,
     "by_class": {
-      "hot_reload": 280,
+      "hot_reload": 282,
       "ignored_deprecated": 4,
       "new_listener_only": 7,
       "restart_required": 29,
@@ -4041,7 +4041,33 @@
       "secret_digested": false
     },
     {
+      "path": "upstreams.*.health_check.headers.*",
+      "class": "hot_reload",
+      "subsystem": "health_check",
+      "reason": "probe headers are snapshotted with the replacement pool; values are secret-bearing",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": true
+    },
+    {
       "path": "upstreams.*.health_check.healthy_threshold",
+      "class": "hot_reload",
+      "subsystem": "health_check",
+      "reason": "active probes are restarted with the pool on each successful reload",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "upstreams.*.health_check.host",
       "class": "hot_reload",
       "subsystem": "health_check",
       "reason": "active probes are restarted with the pool on each successful reload",

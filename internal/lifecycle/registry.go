@@ -714,11 +714,13 @@ func upstreamEntries() []Entry {
 		"upstreams.*.health_check.healthy_threshold",
 		"upstreams.*.health_check.interval",
 		"upstreams.*.health_check.path",
+		"upstreams.*.health_check.host",
 		"upstreams.*.health_check.service",
 		"upstreams.*.health_check.timeout",
 		"upstreams.*.health_check.type",
 		"upstreams.*.health_check.unhealthy_threshold",
 	)...)
+	out = append(out, secretDigest(hot("upstreams.*.health_check.headers.*", SubHealthCheck, "probe headers are snapshotted with the replacement pool; values are secret-bearing")))
 	out = append(out, backendTLSEntries("upstreams.*.backend_tls.", false)...)
 	// The Consul agent's trust is resolved with the pool, like a backend's.
 	out = append(out, backendTLSEntries("upstreams.*.discovery.consul.tls.", false)...)

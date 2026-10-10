@@ -506,11 +506,27 @@
       "active_when": "op is exact or regex"
     },
     {
+      "go_field": "HealthCheckConfig.Headers",
+      "path": "upstreams[].health_check.headers.*",
+      "kind": "string",
+      "constraint": "HTTP only; 32 entries, 128-byte RFC header names, 4096-byte valid values, 16384 combined bytes; no case duplicates, Host, Content-Length or hop-by-hop fields; resolved secret values validated",
+      "zero_semantics": "omitted/empty sends no custom headers; omitted structured patch preserves existing HTTP headers",
+      "active_when": "health check enabled"
+    },
+    {
       "go_field": "HealthCheckConfig.HealthyThreshold",
       "path": "upstreams[].health_check.healthy_threshold",
       "kind": "integer",
       "constraint": "at least 1 effective",
       "zero_semantics": "omitted/zero defaults to 2",
+      "active_when": "health check enabled"
+    },
+    {
+      "go_field": "HealthCheckConfig.Host",
+      "path": "upstreams[].health_check.host",
+      "kind": "string",
+      "constraint": "ASCII DNS hostname or IP with optional port, at most 253 bytes; IPv6 in brackets; http/grpc only; independent from backend TLS identity",
+      "zero_semantics": "omitted/empty uses backend authority",
       "active_when": "health check enabled"
     },
     {
@@ -538,7 +554,8 @@
       "active_when": "health check enabled",
       "allowed": [
         "http",
-        "tcp"
+        "tcp",
+        "grpc"
       ]
     },
     {
@@ -986,7 +1003,7 @@
       "go_field": "ResponseHeaderOp.Name",
       "path": "servers[].locations[].response_headers[].name",
       "kind": "grammar",
-      "constraint": "RFC 9110 field-name token; hop-by-hop/framing names, Content-Encoding, and Vary/Access-Control-* under their §8a/§8b conditions are rejected",
+      "constraint": "RFC 9110 field-name token; hop-by-hop/framing names, Content-Encoding, and Vary/Access-Control-* under their \u00a78a/\u00a78b conditions are rejected",
       "zero_semantics": "required; there is no default",
       "active_when": "a response_headers entry is present"
     },
@@ -1007,7 +1024,7 @@
       "go_field": "ResponseHeaderOp.Value",
       "path": "servers[].locations[].response_headers[].value",
       "kind": "grammar",
-      "constraint": "at most 4 KiB; every byte must be RFC 9110 §5.5 VCHAR / SP / HTAB / obs-text",
+      "constraint": "at most 4 KiB; every byte must be RFC 9110 \u00a75.5 VCHAR / SP / HTAB / obs-text",
       "zero_semantics": "omitted and explicitly empty are different: omitted is only legal for op = remove, and an empty value emits an empty field value on add/set",
       "active_when": "op is add or set"
     },

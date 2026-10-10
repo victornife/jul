@@ -199,6 +199,28 @@ export function HealthCheckEditor({ app, onClose }: AppEditorDrawerProps) {
               />
             )}
 
+            {draft.type !== "tcp" && (
+              <TextField
+                label="Host / authority"
+                value={draft.host ?? ""}
+                placeholder="Backend authority (default)"
+                hint="Routes the probe; TLS identity still follows backend trust settings."
+                onChange={(v) => {
+                  set("host", v);
+                }}
+              />
+            )}
+            {draft.type === "http" && (
+              <TextField
+                label="HTTP headers (JSON, replace)"
+                value={draft.headers ?? ""}
+                placeholder='{"X-Health-Token":"${env:HEALTH_TOKEN}"}'
+                hint={`${String(app.health_check_header_count ?? 0)} headers configured; values hidden. Blank preserves existing headers; {} clears them. Up to 32 headers.`}
+                onChange={(v) => {
+                  set("headers", v);
+                }}
+              />
+            )}
             <div className="grid grid-cols-2 gap-3">
               <TextField
                 label="Interval"

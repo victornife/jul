@@ -15,6 +15,13 @@ v2.1.0 tag or its packaged READMEs.
 
 ### Added
 
+- Bounded HTTP health-check `headers` with secret references and `host` for
+  HTTP Host/gRPC authority, independent from backend TLS identity; reload-owned
+  snapshots and write-only Console header editing (#524).
+- Runnable HMAC-SHA256 signed-URL WASM reference and Go signer, with GET/HEAD,
+  expiry/skew/lifetime bounds, canonical paths, rotated keys, denial tests and
+  host wall-clock support for WASI guests (#520).
+
 - **Faithful common NGINX idioms (#523).** Shared response-time expiration for
   plain positive, zero and negative durations, with NGINX status gating,
   dynamic Expires and cache-storage isolation. Configurable global/server/location
@@ -106,6 +113,9 @@ v2.1.0 tag or its packaged READMEs.
   dependency audit and coverage gates remain unchanged.
 
 ### Fixed
+
+- Secret resolution now traverses struct-valued maps, including plugin declarations,
+  so plugin config env/file references resolve and enter redaction state (#520).
 
 - **Configuration watcher shutdown.** `Serve` now cancels and joins its
   file-backed configuration watcher before returning. Notification channels

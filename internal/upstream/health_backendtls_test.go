@@ -123,7 +123,7 @@ func TestProbeUsesTheSameTrustAsLiveTraffic(t *testing.T) {
 		defer pool.Close()
 		hc := &healthChecker{
 			pool:   pool,
-			params: healthParamsFrom(config.HealthCheckConfig{Enabled: true, Type: "http", Path: "/healthz"}),
+			params: healthParamsFrom(config.HealthCheckConfig{Enabled: true, Type: "http", Path: "/healthz", Host: "routing.internal"}),
 			states: map[*Backend]*probeState{},
 			client: &http.Client{Timeout: 2 * time.Second, Transport: probeTransport(2*time.Second, policy)},
 		}
@@ -193,7 +193,7 @@ func TestProbeAndLiveTrafficFailIdentically(t *testing.T) {
 		defer pool.Close()
 		hc := &healthChecker{
 			pool:   pool,
-			params: healthParamsFrom(config.HealthCheckConfig{Enabled: true, Type: "http", Path: "/healthz"}),
+			params: healthParamsFrom(config.HealthCheckConfig{Enabled: true, Type: "http", Path: "/healthz", Host: "routing.internal"}),
 			states: map[*Backend]*probeState{},
 			client: &http.Client{Timeout: 2 * time.Second, Transport: probeTransport(2*time.Second, policy)},
 		}
@@ -326,7 +326,7 @@ func TestPrivateCABackendIsBothReachableAndHealthy(t *testing.T) {
 		Servers:  []config.UpstreamServer{{Address: addr, Weight: 1}},
 		MaxFails: 1,
 		HealthCheck: &config.HealthCheckConfig{
-			Enabled: true, Type: "http", Path: "/healthz",
+			Enabled: true, Type: "http", Path: "/healthz", Host: "routing.internal",
 			Interval: config.Duration(20 * time.Millisecond),
 			Timeout:  config.Duration(2 * time.Second),
 			// One successful probe is enough for the transition, so the test

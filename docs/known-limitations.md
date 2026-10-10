@@ -771,3 +771,17 @@ Later extension declarations win, including duplicates. Variables and
 unrepresentable extension names require manual review. Arbitrary proxy headers and buffering on
 remain blocking. Read [migration guidance](nginx-importer.md#common-idioms-expiration-and-mime-523)
 before cutover.
+
+## Health headers and signed-link recipe boundaries
+
+HTTP active probes support bounded custom headers and Host; gRPC supports a
+routing authority override with independent backend TLS trust. HTTP methods
+remain GET-only, with no bodies; headers are HTTP-only and cannot set transport
+framing. See [health configuration](health.md#probe-headers-and-routing-identity).
+
+Signed URLs are a [WASM reference recipe](../examples/plugins/signed-url/README.md),
+not built-in auth or nginx secure-link format compatibility. GET/HEAD only,
+canonical public paths, exactly three query fields, bearer replay until expiry,
+local clocks/key configuration and external-cache/logging controls apply.
+No sessions, per-client binding, single-use tokens, manifest rewriting, DRM or
+mid-stream revocation are provided. Missing/invalid guest policy fails closed.

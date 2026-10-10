@@ -22,6 +22,7 @@ startup if it is populated, so misconfiguration fails loudly.
 - [Concepts](#concepts)
 - [Which ABI? v1 or v2](#which-abi-v1-or-v2)
 - [Configuration](#configuration)
+- [Signed media and download URLs](#signed-media-and-download-urls)
 - [Writing a plugin](#writing-a-plugin)
 - [Writing a response-phase plugin (jul-abi/v2)](#writing-a-response-phase-plugin-jul-abiv2)
 - [Building a plugin](#building-a-plugin)
@@ -678,3 +679,35 @@ Run one target at a time: `go test -tags wasmplugins -run='^$' -fuzz='^FuzzRespo
 Changing directory `A → B` does not migrate, copy or delete plugin files. Disabling uploads also leaves existing files intact and does not activate/deactivate plugins: activation remains configuration-driven. Candidate storage is checked before Publish with reversible probes that do not create the configured final directory. Request writes are confined with `os.Root`, use owner-only temporary/final files on Unix, reject symlink/special-file destinations and retain atomic replacement semantics.
 
 See [Admin runtime hot reload (HR-06B)](admin-runtime-hot-reload.md) for the complete request-generation, Prepare/Publish, rollback and filesystem-safety contract.
+
+## Signed media and download URLs
+
+The [signed-url example](../examples/plugins/signed-url/README.md) protects GET/HEAD
+media and download paths with HMAC-SHA256, expiry and key rotation. It includes
+Go/WASI source, Bash/PowerShell builds, a runnable `jul.toml` and a Go link issuer:
+
+```bash
+# From examples/plugins, with the same unpadded base64url secret as Jul:
+go run ./signed-url/sign -path /media/demo.txt -kid current -ttl 300
+```
+
+The guest deliberately uses `jul-abi/v1`: authorization completes in the
+request phase before the location runs. It works in the v2-capable runtime and
+can share a chain with v2 response plugins; compiled-guest tests cover both
+orders, GET/HEAD, Range 206 and rejection before the handler/response hook.
+Keep its declaration at `abi = "jul-abi/v1"`; selecting v2 requires a guest
+built with the v2 SDK and matching marker/imports. See [which ABI to use](abi.md#which-abi-should-i-use).
+
+Use `${env:SIGNED_URL_KEY}` or `${file:/run/secrets/signed-url-key}` in the plugin's
+`config` under `key.<kid>`. The verifier uses constant-time MAC comparison and
+403 for every denial, including expiry; fixed plugin logs distinguish reasons
+without recording credentials. The [protocol and recipe](../examples/plugins/signed-url/README.md#exact-signing-protocol)
+define canonical paths, authenticated key IDs, configurable query names, skew,
+lifetime bounds and caching/logging/replay limitations. This is a bounded
+reference extension, not built-in `secure_link` compatibility. NGINX signature
+formats require issuer migration; the importer keeps those directives blocking.
+
+WASI guests receive the host wall clock for time-based validation. This supplies
+no filesystem/environment/network access; the guest still receives secrets only
+through Jul's resolved plugin config. Existing invocation, instance and memory
+limits apply.

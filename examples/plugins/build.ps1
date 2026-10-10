@@ -21,7 +21,7 @@ try {
     $env:GOARCH = "wasm"
     $v2 = @("v2-status-header", "v2-redact", "testguest-v2")
     if ($All) {
-        $builds = @("header-inject", "request-block", "kv-counter", "egress-check", "testguest-panic", "testguest-loop") + $v2 | ForEach-Object { @{ Pkg = $_; Name = $_ } }
+        $builds = @("header-inject", "request-block", "signed-url", "kv-counter", "egress-check", "testguest-panic", "testguest-loop") + $v2 | ForEach-Object { @{ Pkg = $_; Name = $_ } }
     } else {
         $builds = @(@{ Pkg = "header-inject"; Name = "v1-current-header-inject" }) + ($v2 | ForEach-Object { @{ Pkg = $_; Name = $_ } })
     }
