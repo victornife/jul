@@ -441,6 +441,11 @@ refreshes only the current and v2 fixtures, built with `-trimpath -buildvcs=fals
 so CI can prove they equal a fresh build of their sources. Keep old fixtures
 across releases so backward compatibility stays covered.
 
+The host and current example module now use Go 1.27.2. A host toolchain upgrade
+does not change either ABI or require existing supported guests to be rebuilt.
+Only the four current-toolchain fixtures are refreshed; historical v1 guests and
+both ABI contract goldens remain unchanged.
+
 ## CI
 
 The golden, negotiation, conformance and prebuilt-guest suites run under the

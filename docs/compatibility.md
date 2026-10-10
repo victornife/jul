@@ -1,6 +1,6 @@
 # Jul.IA — compatibility & versioning policy
 
-> Version 1.11 · Updated 2026-09-29
+> Version 1.12 · Updated 2026-10-10
 
 This document defines what "stable" means for Jul.IA and what a **GA** label
 guarantees about a feature's contract. It is the fleet-wide answer to GA
@@ -18,6 +18,37 @@ Jul.IA follows [Semantic Versioning 2.0.0](https://semver.org): **MAJOR.MINOR.PA
 The first stable line is **v1.0.0**. The version is reported by `jul -version`.
 The core configuration format and documented standalone admin API covered by
 this policy remain open-source per [ADR 0012](adr/0012-oss-open-core-boundary.md).
+
+## Supported build toolchain and platforms
+
+Current source requires **Go 1.27.2 or later**. The root and example WASM guest
+modules use the same minimum; CI and release workflows select the exact patch
+from the root `go.mod`. The Docker builder tag and digest are pinned separately,
+and deployment CI checks that its Go version equals the root directive. The
+vendored FastCGI module retains its own Go 1.21 minimum and is compiled and
+tested with Jul's selected toolchain.
+
+Release profiles remain `lean` and `full` for Linux, Windows and macOS, on
+`amd64` and `arm64`. **Binaries built with Go 1.27 require macOS 13 Ventura or
+later**; operators on older macOS versions must upgrade the OS before using
+these builds. Published release packages and their recorded build environments
+remain unchanged by a source toolchain upgrade.
+
+Go 1.27 changes implementation details in HTTP, JSON and compression. Existing
+Jul configuration and v1/v2 plugin ABI contracts remain in force; exact Go JSON
+error wording and compressed bytes are not Jul compatibility guarantees.
+Runtime conformance and migration evidence must be checked again when upgrading
+Go. The [Go 1.27 release notes](https://go.dev/doc/go1.27) describe the upstream
+changes; [the upgrade review](reviews/2026-10-10-go-1.27.2.md) records Jul's
+validation scope. This upgrade is preparation for a future release and does not
+claim new soak evidence or change feature maturity.
+
+HTTP/1 and the bundled HTTP/2 server also inherit Go 1.27's default **500
+header-value count limit**, in addition to Jul's configured `max_header_bytes`.
+Repeated header lines count individually; the upstream Go rule also counts
+comma-separated `Trailer` declarations individually. Increasing
+`max_header_bytes` does not increase this count limit. This is a stdlib server
+boundary, not a new Jul configuration key or an HTTP/3-wide guarantee.
 
 ## What the GA contract covers
 

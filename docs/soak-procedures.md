@@ -28,7 +28,7 @@ apply/reload path.
 ## Prerequisites
 
 - [ ] Linux host that can run unattended for the target duration
-- [ ] Go 1.26+ installed (`go version`)
+- [ ] The Go version pinned in `go.mod` installed (`go version`)
 - [ ] Repository cloned, working tree clean, exact commit SHA recorded
   (`git rev-parse HEAD`)
 - [ ] `make config-check` passes (every shipped `.toml` still loads)

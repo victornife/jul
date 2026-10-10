@@ -1,3 +1,6 @@
+# Rechecked with Go 1.27.2 on 2026-10-10: the five historical h2spec groups
+# remain (566/584, 18 allowed target failures, zero unexpected/stale). Rationales
+# retain their original Go 1.26.8 source analysis; see the Go 1.27.2 upgrade review.
 # Known conformance deviations (#513).
 #
 # Every failing case of a conformance suite must be fixed or listed here with

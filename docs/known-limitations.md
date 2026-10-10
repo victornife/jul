@@ -161,7 +161,7 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 ## HTTP/2 conformance
 
 Jul is not advertised as fully h2spec-conformant. #539 remains the tracking
-owner for the exact residual cases. With Go 1.26.8, invalid h2c prefaces end
+owner for the exact residual cases. Rechecked with Go 1.27.2, invalid h2c prefaces end
 without a GOAWAY; duplicate SETTINGS are rejected before mutation; prohibited
 connection headers and invalid `TE` get Go-generated `400` responses rather
 than protocol stream errors, before Jul's handler/backend runs. The latter

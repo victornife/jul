@@ -12,7 +12,9 @@ technical merit aligned with the project's vision.
 
 1. **Fork** the repository.
 2. **Clone** your fork and create a feature branch.
-3. **Install** Go 1.26+ and ensure `$GOPATH/bin` is in your `$PATH`.
+3. **Install** Go 1.27.2 or later and ensure `$GOPATH/bin` is in your `$PATH`.
+   CI and release builds select the version in `go.mod`; the Docker builder must
+   use the same patch version. See [compatibility.md](docs/compatibility.md#supported-build-toolchain-and-platforms).
 4. **Run tests** before opening a PR:
    ```bash
    make ci-fast          # lean build — fast, catches most issues

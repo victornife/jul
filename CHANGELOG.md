@@ -330,6 +330,15 @@ v0.62.0 to v0.63.0 and `google.golang.org/grpc` v1.83.2 to v1.84.0.
 
 ### Changed
 
+- **Go 1.27.2 toolchain.** Source, CI/release builds, Docker and current WASM
+  examples move together to Go 1.27.2. macOS builds now require macOS 13 Ventura
+  or later. Both plugin ABIs and the historical v1 guest fixtures remain
+  supported; only current-toolchain fixtures are rebuilt. See
+  [compatibility.md](docs/compatibility.md#supported-build-toolchain-and-platforms)
+  and [the upgrade review](docs/reviews/2026-10-10-go-1.27.2.md). This is future-release
+  preparation, with no new soak or maturity claim.
+
+
 - **Runtime resource ownership model (#428).** New authoritative [resource-ownership.md](docs/resource-ownership.md) records, for every major runtime resource family, its owner, scope, logical identity, replacement fingerprint, liveness override and Prepare/Publish/Abort/Retire/drain/close semantics, the deliberate process and restart boundaries, and the #414/#415/#420/#427 regressions that pin them. It links to — never duplicates — the generated lifecycle table. `internal/lifecycletest` adds a small shared test vocabulary (explicit-close `Resource` fake, bounded goroutine/FD quiescence check) used by new churn/quiescence and shutdown-during-reload tests. `internal/app/config_apply.go` is split by responsibility into baseline/CAS/drift, planned-restart staging, managed-apply ledger, and restoration/terminal-result files around the unchanged single coordinator (pure moves, no behavior change).
 
 ### Fixed

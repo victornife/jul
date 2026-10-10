@@ -175,8 +175,10 @@ security contract is correct.
 
 The [`conformance`](../.github/workflows/conformance.yml) workflow (#513)
 checks Jul against external protocol suites instead of hand-written
-expectations. It runs weekly and on `workflow_dispatch`, and it is **not** a
-pull-request gate. Each suite starts the full-profile binary with its own
+expectations. It runs weekly, on `workflow_dispatch`, and for pull requests
+changing `go.mod`, `go.sum`, the example guest `go.mod`, or the conformance
+workflow, so runtime/dependency upgrades recheck the inherited behavior. It is
+not a repository-wide required branch-protection gate. Each suite starts the full-profile binary with its own
 configuration, uploads its report as an artifact, and fails only on a case
 that is neither passing nor listed in
 [`testdata/conformance/allowlist.yaml`](../testdata/conformance/allowlist.yaml)
