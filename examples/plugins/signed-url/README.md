@@ -7,6 +7,23 @@ all validation failures receive **403**, `Cache-Control: no-store` and the same
 `Forbidden` body. Logs contain only fixed denial reasons; expired signatures
 have a distinct `expired` reason after signature verification.
 
+## ABI selection and v2 compatibility
+
+Authorization needs only the request method, URI and configuration, so this
+guest uses `jul-abi/v1`, the supported default for request-only plugins. Jul's
+v2-capable runtime runs it alongside `jul-abi/v2` plugins in the same chain;
+the compiled-guest tests cover both plugin orders with `v2-status-header`.
+Valid GET/HEAD and Range requests reach the handler and its v2 response hook.
+Denied requests stop before the handler and response hook, including when the
+v2 plugin subscribed first. Authorization does not buffer the media response.
+
+Keep `abi = "jul-abi/v1"` for `signed-url.wasm`. Changing that field to
+`jul-abi/v2` rejects this module at load time: the SDK imports and ABI marker
+must match the declaration. A separate v2 guest is warranted only if a new
+policy needs the actual handler response; see the [ABI selection guide](../../../docs/abi.md#which-abi-should-i-use).
+The `jul-signed-url/v1` MAC framing identifies the signing protocol independently
+of the guest ABI.
+
 ## Build and run
 
 Requires Go 1.26.9+ and Jul with `wasmplugins`. From the repository root:

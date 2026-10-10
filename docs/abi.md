@@ -9,9 +9,9 @@ supported**:
   phase** that sees the response the location actually produced.
 
 The v1 ABI is GA in published v2.0.0 and remains the default. The v2 response
-phase is a separate Beta capability in the proposed v2.1.0 tree. It was absent
-from v2.0.0. Both require a binary built with `wasmplugins`. Shipping v2 does
-not retire v1.
+phase is a separate Beta capability in published [v2.1.0](https://github.com/victornife/jul/releases/tag/v2.1.0)
+`full` artifacts; it was absent from v2.0.0. Both require a binary built with
+`wasmplugins`. Shipping v2 does not retire v1.
 
 v2 is not "v1, but newer". It exists for one reason: letting a plugin act on the
 real upstream/handler response. A plugin that does not need that should stay on

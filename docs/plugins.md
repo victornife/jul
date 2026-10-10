@@ -691,6 +691,13 @@ Go/WASI source, Bash/PowerShell builds, a runnable `jul.toml` and a Go link issu
 go run ./signed-url/sign -path /media/demo.txt -kid current -ttl 300
 ```
 
+The guest deliberately uses `jul-abi/v1`: authorization completes in the
+request phase before the location runs. It works in the v2-capable runtime and
+can share a chain with v2 response plugins; compiled-guest tests cover both
+orders, GET/HEAD, Range 206 and rejection before the handler/response hook.
+Keep its declaration at `abi = "jul-abi/v1"`; selecting v2 requires a guest
+built with the v2 SDK and matching marker/imports. See [which ABI to use](abi.md#which-abi-should-i-use).
+
 Use `${env:SIGNED_URL_KEY}` or `${file:/run/secrets/signed-url-key}` in the plugin's
 `config` under `key.<kid>`. The verifier uses constant-time MAC comparison and
 403 for every denial, including expiry; fixed plugin logs distinguish reasons
