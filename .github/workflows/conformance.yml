@@ -4,8 +4,10 @@ name: Conformance
 # changing the host/guest Go module, suite harness or this workflow, so toolchain and dependency
 # upgrades recheck the inherited runtime behavior. Each suite starts the full-profile
 # binary with its own configuration, runs one external tool or corpus, uploads
-# its report, and fails only on a case that is neither passing nor listed in
+# its report, and fails on a case that is neither passing nor listed in
 # testdata/conformance/allowlist.yaml (with a rationale and an issue).
+# Temporary exceptions also fail when stale, missing or used with changed
+# dependency/tool identities; #569 tracks the seven inherited HTTP/3 cases.
 #
 # HTTP/3 tool decision: h3spec (kazu-yamamoto) ships a Linux binary and
 # exercises QUIC transport and HTTP/3 framing errors against a live server, so

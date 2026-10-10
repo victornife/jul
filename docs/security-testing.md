@@ -179,11 +179,22 @@ expectations. It runs weekly, on `workflow_dispatch`, and for pull requests
 changing `go.mod`, `go.sum`, the example guest `go.mod`, the conformance harness,
 allow-list or workflow, so runtime/dependency upgrades recheck the inherited behavior. It is
 not a repository-wide required branch-protection gate. Each suite starts the full-profile binary with its own
-configuration, uploads its report as an artifact, and fails only on a case
+configuration, uploads its report as an artifact, and fails on a case
 that is neither passing nor listed in
 [`testdata/conformance/allowlist.yaml`](../testdata/conformance/allowlist.yaml)
 with a rationale and an issue. An allow-listed case that starts passing is
-reported as stale.
+reported as stale. Entries marked `temporary` additionally fail if a case
+passes, disappears from the run, or the tested dependency/tool identities
+change; review the owner issue and remove or reverify them.
+
+HTTP/3 currently has seven exact temporary dependency exceptions under
+[#569](https://github.com/victornife/jul/issues/569). Go 1.26.9 and Go 1.27.2
+both reproduce **42/49** with quic-go v0.63.0 and qpack v0.6.0. The guard reads
+those versions from the tested binary and binds the exceptions to the h3spec
+v0.1.13 binary hash. Reports preserve actual passes, allowed failures and the
+tool's skipped 0-RTT warning. An accepted verdict is not a claim of complete
+RFC conformance. See the [upgrade review](reviews/2026-10-10-go-1.27.2.md)
+for upstream dispositions and exception policy.
 
 | Suite | Tool | Target |
 | --- | --- | --- |
