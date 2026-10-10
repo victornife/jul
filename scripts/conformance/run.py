@@ -6,7 +6,8 @@ suite-specific configuration, runs one external or corpus-driven test tool
 against it, writes a machine-readable report under --out, and compares every
 failing case with testdata/conformance/allowlist.yaml. A failure that is not
 allow-listed fails the suite; an allow-listed case that now passes is reported
-as stale so the list shrinks as deviations are fixed.
+as stale so the list shrinks as deviations are fixed. Temporary exceptions
+also fail when stale, unexercised or used with a different dependency/tool.
 
 Suites: h2spec, framing, cache, autobahn, h3. Tools are supplied by the
 workflow (see .github/workflows/conformance.yml); the framing corpus needs
@@ -16,6 +17,7 @@ nothing but Python.
 import argparse
 import contextlib
 import functools
+import hashlib
 import http.server
 import json
 import os
@@ -133,6 +135,21 @@ def judge(suite, results, out, evidence=None):
         elif not passed:
             allowed.append((case, entry["issue"]))
     stale = sorted(matched - failing)
+    review = []
+    for entry in listed.values():
+        if not entry.get("temporary"):
+            continue
+        if entry["id"].endswith("*") or not entry.get("verified_with"):
+            raise SystemExit(f"temporary allowlist {suite}: exact ID and verified_with are required")
+        reasons = []
+        if entry["id"] not in matched:
+            reasons.append("case was not exercised")
+        elif entry["id"] in stale:
+            reasons.append("case now passes; remove exception")
+        if (evidence or {}).get("versions") != entry["verified_with"]:
+            reasons.append("dependency or tool identity changed; recheck exception")
+        if reasons:
+            review.append({"id": entry["id"], "issue": entry["issue"], "reasons": reasons})
     report = {
         "suite": suite,
         "total": len(results),
@@ -140,6 +157,7 @@ def judge(suite, results, out, evidence=None):
         "allow_listed_failures": [{"id": c, "issue": i} for c, i in allowed],
         "unexpected_failures": [{"id": c, "detail": d} for c, d in unexpected],
         "stale_allowlist_entries": stale,
+        "temporary_exceptions_needing_review": review,
     }
     if evidence is not None:
         report.update(evidence)
@@ -150,7 +168,9 @@ def judge(suite, results, out, evidence=None):
         print(f"  UNEXPECTED {case}: {detail}")
     for case in stale:
         print(f"  STALE (now passing, remove from allowlist) {case}")
-    return 1 if unexpected else 0
+    for entry in review:
+        print(f"  REVIEW {entry['id']}: {'; '.join(entry['reasons'])} ({entry['issue']})")
+    return 1 if unexpected or review else 0
 
 
 # --- h2spec ----------------------------------------------------------------
@@ -483,11 +503,19 @@ log_level = "warn"
 [observability.access_log]
 enabled = false
 
+[[upstreams]]
+name = "echo"
+servers = [{{ address = "127.0.0.1:{echo}" }}]
+  [upstreams.resilience]
+  # Malformed WebSocket cases intentionally reset the echo connection. Keep
+  # that single test origin available for the next independent case.
+  max_fails = 100000
+
 [[servers]]
 listen = "127.0.0.1:{port}"
   [[servers.locations]]
   match = {{ type = "prefix", path = "/" }}
-  proxy_pass = "http://127.0.0.1:{echo}"
+  proxy_pass = "http://echo"
 """
     spec = {"outdir": "/reports", "servers": [{"agent": "jul-proxy", "url": f"ws://127.0.0.1:{port}"}],
             "cases": ["*"], "exclude-cases": ["12.*", "13.*"], "exclude-agent-cases": {}}
@@ -516,6 +544,7 @@ listen = "127.0.0.1:{port}"
 
 
 def suite_h3(args, out):
+    versions = h3_versions(args.jul, args.h3spec)
     cert, key = self_signed(out)
     www = static_root(out)
     port = free_port()
@@ -544,24 +573,61 @@ listen = "127.0.0.1:{port}"
         run = subprocess.run([args.h3spec, "-n", "127.0.0.1", str(port)], capture_output=True, text=True, timeout=900)
         text = run.stdout + run.stderr
         (out / "h3spec.txt").write_text(text)
-    # hspec prints one line per example; failures are numbered and listed at
-    # the end. Record each example as passed unless it is listed as failed.
+    results = h3spec_results(text, run.returncode)
+    skips = [line.strip() for line in text.splitlines() if "Skipping this test." in line]
+    return judge("h3", results, out, {"tool_skip_warnings": skips, "versions": versions})
+
+
+def h3_versions(jul, h3spec):
+    # Read the tested binary, rather than assuming it matches this checkout.
+    output = subprocess.check_output(["go", "version", "-m", jul], text=True)
+    dependencies = {"github.com/quic-go/quic-go", "github.com/quic-go/qpack"}
+    versions = {}
+    module = None
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) >= 3 and fields[0] == "dep":
+            module = fields[1]
+            if module in dependencies:
+                versions[module] = fields[2]
+        elif fields and fields[0] == "=>" and module in dependencies:
+            # A replaced dependency must not inherit the release's exception.
+            versions[module] += " => " + " ".join(fields[1:])
+    tool = Path(shutil.which(h3spec) or h3spec)
+    versions["h3spec_sha256"] = hashlib.sha256(tool.read_bytes()).hexdigest()
+    return versions
+
+
+def h3spec_results(text, returncode):
+    # The pinned binary emits ANSI-coloured status marks even when captured.
+    # Strip those before parsing so the verdict retains individual cases.
+    text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    results = {}
     section = ""
     for line in text.splitlines():
         stripped = line.strip()
+        if stripped == "Failures:":
+            break
         if not stripped or stripped.startswith(("Finished", "Failures", "Randomized", "To rerun")):
             continue
-        indent = len(line) - len(line.lstrip())
-        if indent <= 2 and not stripped.endswith(("✔", "✘", "FAILED")) and not re.search(r"\[(✔|✘)\]", stripped):
+        if stripped in ("QUIC servers", "HTTP/3 servers"):
             section = stripped
             continue
         m = re.match(r"(.*?)\s*(\[✔\]|\[✘\]|FAILED \[\d+\])\s*$", stripped)
         if m:
             name = f"h3spec {section}: {m.group(1).strip()}"
+            # h3spec has two examples with the same TLS description.
+            original, instance = name, 1
+            while name in results:
+                instance += 1
+                name = f"{original} [{instance}]"
             results[name] = ("✔" in m.group(2), m.group(2))
-    if not results:
-        results["h3spec run"] = (run.returncode == 0, text[-300:])
-    return judge("h3", results, out)
+    summary = re.search(r"(\d+) examples?, (\d+) failures?", text)
+    if (not summary or len(results) != int(summary.group(1)) or
+            sum(not passed for passed, _ in results.values()) != int(summary.group(2)) or
+            (returncode != 0 and not any(not passed for passed, _ in results.values()))):
+        results["h3spec run"] = (False, "incomplete or inconsistent h3spec output: " + text[-300:])
+    return results
 
 
 SUITES = {"h2spec": suite_h2spec, "framing": suite_framing, "cache": suite_cache,

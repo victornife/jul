@@ -2,7 +2,7 @@
 # Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 # SPDX-License-Identifier: agpl
 
-# Builds the example plugins. Requires Go 1.26+ with the wasip1/wasm target.
+# Builds the example plugins. Requires Go 1.27.2+ with the wasip1/wasm target.
 #
 #   ./build.sh              refresh the committed fixtures in testdata/plugins:
 #                           the jul-abi/v2 guests and the current-toolchain v1

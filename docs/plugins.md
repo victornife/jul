@@ -288,7 +288,7 @@ transform).
 ## Building a plugin
 
 Plugins are built for the WASI preview-1 target with the standard Go toolchain
-(Go 1.26+). `c-shared` build mode produces a reactor module (one that exposes a
+(Go 1.27.2+). `c-shared` build mode produces a reactor module (one that exposes a
 `_initialize` start function instead of `main`), which is how the host runs guest
 `init` functions before invoking the export:
 

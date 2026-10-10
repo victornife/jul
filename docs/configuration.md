@@ -275,6 +275,12 @@ write_timeout = "60s"
 | `h2c` | bool | On a plaintext listener, also accept cleartext HTTP/2 (h2c) for native gRPC clients without TLS; ignored on a TLS listener (HTTP/2 is negotiated via ALPN) |
 | `client_address` | table | Trusted-proxy policy for deriving the canonical client address (see [Client address and trusted proxies](#client-address-and-trusted-proxies)) |
 
+With Go 1.27, HTTP/1 and the bundled HTTP/2 server additionally apply the
+stdlib's 500 header-value count limit. `max_header_bytes` controls bytes, not
+this count; increasing it does not permit more values. See
+[toolchain compatibility](compatibility.md#supported-build-toolchain-and-platforms)
+for the counting rules and protocol scope.
+
 ### Fields resolved once per listen address
 
 `send_timeout` is not a socket setting: the matched virtual host selects its

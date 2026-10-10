@@ -7,7 +7,7 @@
 [![Status](https://img.shields.io/badge/status-active-brightgreen.svg)](https://github.com/victornife/jul)
 [![Tests & CI](https://github.com/victornife/jul/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/victornife/jul/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/victornife/jul/actions/workflows/github-code-scanning/codeql/badge.svg?branch=main)](https://github.com/victornife/jul/actions/workflows/github-code-scanning/codeql)
-[![Go Version](https://img.shields.io/badge/go-1.26-blue.svg)](https://github.com/victornife/jul/blob/main/go.mod)
+[![Go Version](https://img.shields.io/badge/go-1.27-blue.svg)](https://github.com/victornife/jul/blob/main/go.mod)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/victornife/jul#license)
 [![Codecov](https://codecov.io/gh/victornife/jul/graph/badge.svg?branch=main)](https://codecov.io/gh/victornife/jul)
 [![Snyk security](https://snyk.io/test/github/victornife/jul/badge.svg)](https://snyk.io/test/github/victornife/jul)
@@ -22,7 +22,7 @@ operations Console in a single static, dependency-free binary.
 
 - **Binary / module / service name:** `jul`
 - **Product name:** `Jul.IA`
-- **Language:** Go 1.26
+- **Language:** Go 1.27
 - **License:** AGPL-3.0
 
 > Current product maturity and delivery are governed by

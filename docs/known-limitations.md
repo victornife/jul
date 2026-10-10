@@ -161,7 +161,7 @@ on `main`. Their dated audit records remain evidence, not current defect lists.
 ## HTTP/2 conformance
 
 Jul is not advertised as fully h2spec-conformant. #539 remains the tracking
-owner for the exact residual cases. With Go 1.26.8, invalid h2c prefaces end
+owner for the exact residual cases. Rechecked with Go 1.27.2, invalid h2c prefaces end
 without a GOAWAY; duplicate SETTINGS are rejected before mutation; prohibited
 connection headers and invalid `TE` get Go-generated `400` responses rather
 than protocol stream errors, before Jul's handler/backend runs. The latter
@@ -472,6 +472,14 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
 
 ## HTTP/3 over QUIC ([http3.md](http3.md))
 
+- **Seven inherited QUIC/HTTP/3 conformance deviations are temporarily
+  excepted.** quic-go v0.63.0 with qpack v0.6.0 scores 42/49 in pinned h3spec
+  v0.1.13 on both Go 1.26.9 and 1.27.2. The deviations concern malformed-peer
+  frame/settings/QPACK error handling. Exact cases, upstream dispositions and
+  removal criteria are tracked in [#569](https://github.com/victornife/jul/issues/569).
+  A dependency/tool change or a recovered case forces exception review;
+  passing the allow-listed lane is not full RFC conformance. See
+  [conformance evidence](security-testing.md#protocol-conformance-lane).
 - **No WebSocket over HTTP/3 — or over HTTP/2.** Jul.IA implements the HTTP/1.1 `Upgrade` mechanism
   only. WebSocket over HTTP/2 and HTTP/3 uses extended `CONNECT` (RFC 8441 / RFC 9220), which Jul.IA
   does not implement. Go's bundled HTTP/2 server keeps extended `CONNECT` behind

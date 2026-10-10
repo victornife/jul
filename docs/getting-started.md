@@ -6,10 +6,13 @@ console.
 
 ## Prerequisites
 
-- A downloaded Jul.IA binary in your working directory, or Go 1.26+ to
+- A downloaded Jul.IA binary in your working directory, or Go 1.27.2+ to
   build it from source (`go build -o jul ./cmd/jul` from the repository root).
 - A terminal (PowerShell on Windows, bash/zsh on Linux/macOS).
 - Ports 8080 and 9090 free on your machine.
+
+Current macOS builds require macOS 13 Ventura or later; see
+[supported platforms](compatibility.md#supported-build-toolchain-and-platforms).
 
 ## Zero-config mode
 

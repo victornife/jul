@@ -1,10 +1,13 @@
 name: Conformance
 
-# Scheduled protocol conformance lane (#513). Non-blocking: it runs weekly and
-# on demand, never as a pull-request gate. Each suite starts the full-profile
+# Protocol conformance lane (#513). It runs weekly, on demand, and for PRs
+# changing the host/guest Go module, suite harness or this workflow, so toolchain and dependency
+# upgrades recheck the inherited runtime behavior. Each suite starts the full-profile
 # binary with its own configuration, runs one external tool or corpus, uploads
-# its report, and fails only on a case that is neither passing nor listed in
+# its report, and fails on a case that is neither passing nor listed in
 # testdata/conformance/allowlist.yaml (with a rationale and an issue).
+# Temporary exceptions also fail when stale, missing or used with changed
+# dependency/tool identities; #569 tracks the seven inherited HTTP/3 cases.
 #
 # HTTP/3 tool decision: h3spec (kazu-yamamoto) ships a Linux binary and
 # exercises QUIC transport and HTTP/3 framing errors against a live server, so
@@ -12,6 +15,14 @@ name: Conformance
 # suite a required gate after four consecutive green weekly runs.
 
 on:
+  pull_request:
+    paths:
+      - 'go.mod'
+      - 'go.sum'
+      - 'examples/plugins/go.mod'
+      - 'scripts/conformance/**'
+      - 'testdata/conformance/allowlist.yaml'
+      - '.github/workflows/conformance.yml'
   schedule:
     - cron: "17 4 * * 1"
   workflow_dispatch:

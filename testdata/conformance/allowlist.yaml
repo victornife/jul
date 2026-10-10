@@ -1,10 +1,14 @@
+# Rechecked with Go 1.27.2 on 2026-10-10: the five historical h2spec groups
+# remain (566/584, 18 allowed target failures, zero unexpected/stale). Rationales
+# retain their original Go 1.26.8 source analysis; see the Go 1.27.2 upgrade review.
 # Known conformance deviations (#513).
 #
 # Every failing case of a conformance suite must be fixed or listed here with
 # a rationale and a linked issue. An `id` ending in `*` matches by prefix (the
 # h2spec target suffix, e.g. " [tls-static]", comes last so one entry can
 # cover every target). Entries that start passing are reported as stale;
-# remove them.
+# remove them. Temporary entries additionally fail if they start passing,
+# disappear from the run, or the tested dependency/tool identities change.
 
 h2spec:
   - id: "http2/3.5: Sends invalid connection preface [h2c-*"
@@ -65,6 +69,74 @@ cache:
       pass; remove after consistent successful setup and case execution.
     issue: https://github.com/victornife/jul/issues/540
 
-# Populated from the first scheduled runs (no local runner for these tools).
 autobahn: []
-h3: []
+
+# Temporary dependency deviations (#569), reproduced on Go 1.26.9 and 1.27.2
+# on 2026-10-10. h3spec v0.1.13's exact labels (including old RFC section
+# numbers and spelling) are retained. The raw score remains 42/49, not 49/49.
+# Review before the future release and on every quic-go/qpack/tool change.
+h3:
+  - id: "h3spec QUIC servers: MUST send PROTOCOL_VIOLATION if PATH_CHALLENGE in Handshake is received [Transport 17.2.4]"
+    rationale: >-
+      quic-go v0.63.0 rejects the prohibited Handshake frame with
+      FRAME_ENCODING_ERROR instead of RFC 9000 section 12.4's
+      PROTOCOL_VIOLATION. No exact active upstream issue found on 2026-10-10.
+    issue: https://github.com/victornife/jul/issues/569
+    temporary: true
+    verified_with: &h3_versions
+      github.com/quic-go/quic-go: v0.63.0
+      github.com/quic-go/qpack: v0.6.0
+      h3spec_sha256: b5f8eddd968cb195d1e3e7698d33fa141d6b2ad56153089d89928ac0fdee28bf
+  - id: "h3spec HTTP/3 servers: MUST send H3_MISSING_SETTINGS if the first control frame is not SETTINGS [HTTP/3 6.2.1]"
+    rationale: >-
+      quic-go skips MAX_PUSH_ID preceding SETTINGS instead of closing with
+      H3_MISSING_SETTINGS (RFC 9114 section 6.2.1). Related push validation
+      issue quic-go/quic-go#5686 is closed not planned, not an accepted fix
+      for this exact control-stream case.
+    issue: https://github.com/victornife/jul/issues/569
+    temporary: true
+    verified_with: *h3_versions
+  - id: "h3spec HTTP/3 servers: MUST send H3_SETTINGS_ERROR if HTTP/2 settings are included [HTTP/3 7.2.4.1]"
+    rationale: >-
+      quic-go accepts reserved HTTP/2 setting 0x2 as unknown instead of
+      H3_SETTINGS_ERROR (RFC 9114 section 7.2.4.1). No exact active upstream
+      issue found on 2026-10-10; the 0-RTT SETTINGS issue #5772 is distinct.
+    issue: https://github.com/victornife/jul/issues/569
+    temporary: true
+    verified_with: *h3_versions
+  - id: "h3spec HTTP/3 servers: MUST send H3_FRAME_UNEXPECTED if CANCEL_PUSH is received in a request stream [HTTP/3 7.2.5]"
+    rationale: >-
+      quic-go skips unsupported CANCEL_PUSH on a request stream and serves
+      the following request rather than closing with H3_FRAME_UNEXPECTED
+      (RFC 9114 section 7.2.3). Related push validation issue
+      quic-go/quic-go#5686 is closed not planned, not this exact case.
+    issue: https://github.com/victornife/jul/issues/569
+    temporary: true
+    verified_with: *h3_versions
+  - id: "h3spec HTTP/3 servers: MUST send QPACK_DECOMPRESSION_FAILED if an invalid static table index exits in a field line representation [QPACK 3.1]"
+    rationale: >-
+      Wire reproduction shows a stream reset with correct code 0x200 while
+      the connection stays open; RFC 9204 section 3.1 requires a connection
+      error. Closed quic-go/quic-go#4406 / merged #5439 fixed the code,
+      not this scope. The h3spec client's local error is not the wire error.
+    issue: https://github.com/victornife/jul/issues/569
+    temporary: true
+    verified_with: *h3_versions
+  - id: "h3spec HTTP/3 servers: MUST send QPACK_ENCODER_STREAM_ERROR if a new dynamic table capacity value exceeds the limit [QPACK 4.1.3]"
+    rationale: >-
+      quic-go ignores QPACK encoder instructions, including capacity above
+      the advertised zero limit; RFC 9204 section 4.3.1 requires a 0x201
+      connection error. Merged quic-go/quic-go#3063 documents ignoring these
+      streams; open #2424 concerns dynamic-table efficiency, not this check.
+    issue: https://github.com/victornife/jul/issues/569
+    temporary: true
+    verified_with: *h3_versions
+  - id: "h3spec HTTP/3 servers: MUST send QPACK_DECODER_STREAM_ERROR if Insert Count Increment is 0 [QPACK 4.4.3]"
+    rationale: >-
+      quic-go ignores QPACK decoder instructions, including invalid zero
+      increment; RFC 9204 section 4.4.3 requires a 0x202 connection error.
+      Merged quic-go/quic-go#3063 documents ignoring these streams;
+      no exact active invalid-instruction issue found on 2026-10-10.
+    issue: https://github.com/victornife/jul/issues/569
+    temporary: true
+    verified_with: *h3_versions

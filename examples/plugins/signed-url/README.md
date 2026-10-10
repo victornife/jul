@@ -26,7 +26,7 @@ of the guest ABI.
 
 ## Build and run
 
-Requires Go 1.26.9+ and Jul with `wasmplugins`. From the repository root:
+Requires Go 1.27.2+ and Jul with `wasmplugins`. From the repository root:
 
 ```bash
 go build -tags wasmplugins -o /tmp/jul ./cmd/jul

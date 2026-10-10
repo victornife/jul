@@ -173,6 +173,15 @@ staging. The admin listener's client-auth policy still requires a restart.
    remain restart-bound; see limitation 2 above. ACME renewal continues
    while the process is running either way.
 
+5. **Inherited protocol conformance deviations.** Pinned h3spec v0.1.13
+   reports 42/49 with quic-go v0.63.0 and qpack v0.6.0 on both Go 1.26.9 and
+   1.27.2. Seven exact temporary exceptions cover malformed-peer QUIC frame,
+   control-stream, SETTINGS and QPACK error handling. They require review on
+   a dependency/tool change or when a case passes, and remain tracked in
+   [#569](https://github.com/victornife/jul/issues/569). The accepted CI verdict
+   is not full HTTP/3 RFC conformance; see
+   [conformance evidence](security-testing.md#protocol-conformance-lane).
+
 ## Benchmarks
 
 Run with `go test -tags http3 -bench=. ./internal/server/`.

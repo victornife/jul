@@ -4,6 +4,8 @@
 package admin
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -53,21 +55,67 @@ func TestPprofRouteDisabledByConfig(t *testing.T) {
 		return s.routes()
 	}
 
-	do := func(h http.Handler) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	do := func(h http.Handler, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.Header.Set("Authorization", "Bearer "+adminTok)
 		rr := httptest.NewRecorder()
 		h.ServeHTTP(rr, req)
 		return rr
 	}
 
-	off := false
-	if rr := do(build(t, &off)); rr.Code != http.StatusNotFound {
-		t.Fatalf("pprof disabled: got %d, want 404", rr.Code)
-	}
+	// Go 1.27 adds goroutineleak to the stdlib's pprof subtree. It must inherit
+	// Jul's existing capability gate just like the index and heap profiles.
+	for _, path := range []string{"/debug/pprof/", "/debug/pprof/heap", "/debug/pprof/goroutineleak"} {
+		t.Run(path, func(t *testing.T) {
+			off := false
+			if rr := do(build(t, &off), path); rr.Code != http.StatusNotFound {
+				t.Fatalf("pprof disabled: got %d, want 404", rr.Code)
+			}
 
-	on := true
-	if rr := do(build(t, &on)); rr.Code == http.StatusNotFound {
-		t.Fatalf("pprof enabled: got 404, want the request to pass authz and reach the handler")
+			on := true
+			if rr := do(build(t, &on), path); rr.Code != http.StatusOK {
+				t.Fatalf("pprof enabled: got %d, want 200", rr.Code)
+			}
+		})
+	}
+}
+
+func TestGoroutineLeakProfileRequiresAdminManage(t *testing.T) {
+	const adminTok = "pprof-leak-admin-token-32-chars-pad"
+	const viewerTok = "pprof-leak-viewer-token-32-chars-pad"
+	s := newTestServer(t, config.AdminConfig{Listen: "127.0.0.1:0"}, Deps{})
+	pol, err := rbac.Build(true, rbac.RoleViewer, nil, []rbac.PrincipalDef{
+		{Name: "root", Role: rbac.RoleAdmin, Token: adminTok},
+		{Name: "reader", Role: rbac.RoleViewer, Token: viewerTok},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatalf("build policy: %v", err)
+	}
+	s.UpdatePolicy(pol)
+	h := s.routes()
+	for _, tc := range []struct {
+		name  string
+		token string
+		local string
+		want  int
+	}{
+		{name: "anonymous", local: "127.0.0.1", want: http.StatusUnauthorized},
+		{name: "viewer", token: viewerTok, local: "127.0.0.1", want: http.StatusForbidden},
+		{name: "admin", token: adminTok, local: "127.0.0.1", want: http.StatusOK},
+		{name: "insecure_public_listener", token: adminTok, local: "192.0.2.1", want: http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/debug/pprof/goroutineleak", nil)
+			req = req.WithContext(context.WithValue(req.Context(), http.LocalAddrContextKey,
+				&net.TCPAddr{IP: net.ParseIP(tc.local), Port: 9090}))
+			if tc.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+			}
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, req)
+			if rr.Code != tc.want {
+				t.Fatalf("profile status = %d, want %d", rr.Code, tc.want)
+			}
+		})
 	}
 }
