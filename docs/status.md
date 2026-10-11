@@ -186,7 +186,15 @@ long-running post-GA soak gate.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| *(none)* | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| Auxiliary egress allow-list | SEC-EGRESS | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [egress.md](egress.md) |
+| Request predicates, response headers, and CORS | CGC-ROUTE | core | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
+| Upstream resilience (admission, retry, circuit) | CGC-RES | core · `grpc` · `stream` | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [upstreams.md](upstreams.md) |
+
+These three bounded contracts are promoted for v2.2.0 under #527; the
+[decision and evidence](reviews/2026-10-12-ga-220.md) keep criterion 5 pending
+under ADR 0005. No new long-running soak or maturity change for other rows is
+claimed. Apps now exposes effective resilience limits and live pressure/budget
+state through the existing readback API.
 
 ## Beta
 
@@ -196,11 +204,8 @@ v2.0.0 or v2.1.0. Publication does not complete the unchecked GA criteria.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| Auxiliary egress allow-list | SEC-EGRESS | core | `released` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [egress.md](egress.md) |
 | Downstream write-inactivity timeout | SEND-TIMEOUT | core | `merged` | ✅ | ☐ | ☐ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
 | Per-route HTTP metrics and bounded hosts | ROUTE-METRICS | core | `implemented` | ✅ | ☐ | ☐ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [observability.md](observability.md) |
-| Request predicates, response headers, and CORS | CGC-ROUTE | core | `released` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
-| Upstream resilience (admission, retry, circuit) | CGC-RES | core · `grpc` · `stream` | `released` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ☐ | [upstreams.md](upstreams.md) |
 | Configuration authority and managed drift | AUTO-AUTH | core · `console` | `released` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |
 | Generated configuration contracts and route identity | AUTO-CONTRACT | core | `released` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | n/a | [generated/config-reference.md](generated/config-reference.md) |
 | NGINX migration assessment, provenance, and includes | MIG-ASSESS | `importer` | `released` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ✅ | [nginx-assessment.md](nginx-assessment.md) |

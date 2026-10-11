@@ -109,9 +109,9 @@ inside the immutable release archives. They do not close the partial-audit ledge
 | Configuration reload transaction | [reload-semantics.md](reload-semantics.md) | `GA` / `soaked` |
 | Trusted client address (client_address) | [configuration.md](configuration.md) | `GA` / `soaked` |
 | Backend TLS trust (backend_tls) | [upstreams.md](upstreams.md) | `GA` / `soaked` |
-| Auxiliary egress allow-list | [egress.md](egress.md) | `Beta` / `released` |
-| Request predicates, response headers, and CORS | [core-http.md](core-http.md) | `Beta` / `released` |
-| Upstream resilience (admission, retry, circuit) | [upstreams.md](upstreams.md) | `Beta` / `released` |
+| Auxiliary egress allow-list | [egress.md](egress.md) | `GA-soak-pending` / `released` |
+| Request predicates, response headers, and CORS | [core-http.md](core-http.md) | `GA-soak-pending` / `released` |
+| Upstream resilience (admission, retry, circuit) | [upstreams.md](upstreams.md) | `GA-soak-pending` / `released` |
 | Configuration authority and managed drift | [reload-semantics.md](reload-semantics.md) | `Beta` / `released` |
 | Generated configuration contracts and route identity | [generated/config-reference.md](generated/config-reference.md) | `Beta` / `released` |
 | NGINX migration assessment, provenance, and includes | [nginx-assessment.md](nginx-assessment.md) | `Beta` / `released` |

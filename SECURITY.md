@@ -1,6 +1,6 @@
 # Security Policy
 
-> Last reviewed: 2026-09-15
+> Last reviewed: 2026-10-12
 
 This is the umbrella security document for **Jul.IA** (`jul`). It defines the
 trust model the server is built around, the hardening defaults you should know
@@ -35,16 +35,18 @@ Jul.IA follows [Semantic Versioning](https://semver.org/) and the
 follows:
 
 - **`main`** — receives security fixes first. Development happens here.
-- **Latest `v1.x` release** — security fixes from `main` are back-ported to the
-  latest minor release branch when feasible.
-- **Older releases** — no committed back-ports; upgrade to the latest `v1.x`
-  release.
+- **Latest stable release** — receives the supported fix through the next
+  stable release, with an affected-version/advisory record where applicable.
+  v2.2.0 is the selected fixed release after v2.1.0; it is not available until
+  the release's actual packages have passed verification and are published.
+- **Older releases** — no committed back-ports; upgrade to the latest stable
+  release. No separate emergency/backport campaign is selected for this release.
 
 | Version | Security fixes |
 | --- | --- |
 | `main` | ✅ yes — fixes land here first |
-| Latest `v1.x` release | ✅ yes — back-ported from `main` when feasible |
-| Older `v1.x` / pre-1.0 tags | ⚠️ best effort; upgrade recommended |
+| Latest stable release | ✅ yes — supported next stable fix and advisory coordination |
+| Older stable/prerelease tags | ⚠️ best effort; upgrade recommended |
 
 The [compatibility policy](docs/compatibility.md) governs how breaking and
 security changes are versioned.

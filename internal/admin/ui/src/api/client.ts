@@ -1253,6 +1253,32 @@ export type MTLSProjection = z.infer<typeof MTLSProjectionSchema>;
 
 // ── Query functions ──────────────────────────────────────────────────────────
 
+export const PoolResilienceSchema = z.object({
+  name: z.string(),
+  scheme: z.string().optional(),
+  verdict: z.string(),
+  active: z.number().nonnegative(),
+  pending: z.number().nonnegative(),
+  eligible: z.number().nonnegative(),
+  limits: z.object({
+    max_active_requests: z.number().nonnegative(),
+    max_active_per_backend: z.number().nonnegative(),
+    max_pending_requests: z.number().nonnegative(),
+    pending_timeout: z.string().optional(),
+    retry_attempts: z.number().nonnegative(),
+    retry_budget_percent: z.number().nonnegative(),
+    circuit_max_fails: z.number().nonnegative(),
+    circuit_fail_timeout: z.string().optional(),
+    circuit_half_open_probes: z.number().nonnegative(),
+  }),
+  retry_budget: z.object({ percent: z.number().nonnegative(), remaining: z.number().nonnegative() }),
+  by_state: z.record(z.string(), z.number()),
+});
+
+export function fetchPoolResilience(name: string) {
+  return api<unknown>(`/upstreams/${encodeURIComponent(name)}/resilience`).then((data) => z.array(PoolResilienceSchema).parse(data));
+}
+
 export function fetchOverview(): Promise<Overview> {
   return api<unknown>("/runtime/overview").then((d) => OverviewSchema.parse(d));
 }

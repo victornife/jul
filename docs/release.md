@@ -90,6 +90,22 @@ starting point: before publication they must be reconciled with `CHANGELOG.md`,
 the current security/status/known-limitations documents, and the actual
 artifacts produced for the tagged SHA.
 
+## v2.2.0 preparation
+
+The selected next minor release is v2.2.0; v2.1.0 remains the latest published
+release until verified fixed packages are available. See the
+[release preparation record](release-candidates/v2.2.0.md) for the frozen
+scope, macOS 13+/Go 1.27.2 compatibility, #569's seven exact HTTP/3 exceptions,
+security-advisory coordination and actual-download/upgrade acceptance.
+
+After the normal workflow creates the draft from immutable tag `v2.2.0`,
+dispatch `release-package-verification.yml` with that tag and its exact source
+SHA. It downloads the actual draft-release archives on native hosts and checks
+checksums, embedded identity, signed provenance/SBOM, startup and old-to-new-to-old
+upgrade/rollback. Review the reports before publication. No new long-running
+soak or overall coverage target is introduced; the normal short release gate
+is unchanged.
+
 ## Published v2.1.0 verification
 
 Stable [`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0)

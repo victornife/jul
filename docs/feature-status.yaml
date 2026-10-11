@@ -505,62 +505,58 @@ features:
   name: Auxiliary egress allow-list
   tags:
   - core
-  maturity: Beta
+  maturity: GA-soak-pending
   delivery: released
   doc: egress.md
   criteria:
     1: true
     2: null
     3: true
-    4: false
+    4: true
     5: false
     6: true
     7: true
     8: null
     9: true
-  notes: Published in v1.32.1-rc.1 as a prerelease capability and in stable v2.0.0; feature-specific GA certification
-    and soak remain explicit decisions.
+  notes: 'Promoted under #527 for v2.2.0: bounded auxiliary-fetch contract and Security operability certified in reviews/2026-10-12-ga-220.md. Not a global firewall. ADR 0005 post-GA soak remains pending; no new soak is claimed.'
 - id: CGC-ROUTE
   name: Request predicates, response headers, and CORS
   tags:
   - core
-  maturity: Beta
+  maturity: GA-soak-pending
   delivery: released
   doc: core-http.md
   criteria:
     1: true
     2: true
     3: true
-    4: false
+    4: true
     5: false
     6: true
     7: true
     8: null
     9: true
-  notes: 'Merged on main through #145-#147. It is not contained in v1.32.1-rc.1 and is not promoted through the older Core
-    HTTP GA row.'
+  notes: 'Promoted independently of Core HTTP under #527 for v2.2.0: existing predicate/header/CORS contract certified in reviews/2026-10-12-ga-220.md. No full NGINX parity or new routing language. ADR 0005 post-GA soak remains pending.'
 - id: CGC-RES
   name: Upstream resilience (admission, retry, circuit)
   tags:
   - core
   - grpc
   - stream
-  maturity: Beta
+  maturity: GA-soak-pending
   delivery: released
   doc: upstreams.md
   criteria:
     1: true
     2: true
     3: true
-    4: false
+    4: true
     5: false
     6: true
     7: true
     8: true
-    9: false
-  notes: 'Admission, retry and circuit slices are merged. The pre-soak correction centralizes cross-protocol failure attribution,
-    keeps client and Jul-owned cancellation neutral, and returns neutral half-open probes. Published in stable v2.0.0
-    as Beta; feature-specific GA certification and soak remain open.'
+    9: true
+  notes: 'Promoted under #527 for v2.2.0: existing admission/retry/circuit contract and Apps effective-limit/pressure/circuit/retry-budget readback certified in reviews/2026-10-12-ga-220.md. Outcome-aware retries remain deferred. ADR 0005 post-GA soak remains pending.'
 - id: AUTO-AUTH
   name: Configuration authority and managed drift
   tags:

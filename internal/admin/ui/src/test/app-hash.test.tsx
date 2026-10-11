@@ -5,6 +5,7 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppProjection, ConfigPatch } from "@/api/client.ts";
@@ -156,7 +157,9 @@ const realFetch = globalThis.fetch;
 let requests: ConfigPatch[][] = [];
 
 function Wrapper({ children }: { readonly children: ReactNode }) {
-  return <MemoryRouter initialEntries={["/apps"]}>{children}</MemoryRouter>;
+  const client = new QueryClient({defaultOptions: {queries: {retry: false, staleTime: Infinity}}});
+  client.setQueryData(["upstream-resilience", "api"], []);
+  return <QueryClientProvider client={client}><MemoryRouter initialEntries={["/apps"]}>{children}</MemoryRouter></QueryClientProvider>;
 }
 
 describe("AppDetail affinity", () => {
@@ -164,6 +167,7 @@ describe("AppDetail affinity", () => {
     requests = [];
     takePendingDraft();
     globalThis.fetch = vi.fn((_input: string, init?: RequestInit) => {
+      if (_input === "/api/upstreams/api/resilience") return Promise.resolve(new Response("[]", {status: 200, headers: {"Content-Type": "application/json"}}));
       const body = JSON.parse(typeof init?.body === "string" ? init.body : "null") as {
         ops: ConfigPatch[];
       };
