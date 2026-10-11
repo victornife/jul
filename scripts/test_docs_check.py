@@ -123,9 +123,14 @@ def test_index_status_projection_catches_stale_delivery():
         assert failures == 0, f"current projections disagree: {failures} errors"
         index = docs / "index.md"
         text = index.read_text()
-        old = "| Auxiliary egress allow-list | [egress.md](egress.md) | `Beta` / `released` |"
+        feature = next(entry for entry in features if entry["id"] == "SEC-EGRESS")
+        old = (
+            f"| {feature['name']} | [{feature['doc']}]({feature['doc']}) | "
+            f"`{feature['maturity']}` / `{feature['delivery']}` |"
+        )
         assert old in text
-        index.write_text(text.replace(old, old.replace("`released`", "`merged`"), 1))
+        stale_delivery = "merged" if feature["delivery"] != "merged" else "released"
+        index.write_text(text.replace(old, old.replace(f"`{feature['delivery']}`", f"`{stale_delivery}`"), 1))
         _, failures = _run_in_tmp(root, docs_check.check_feature_status_manifest)
         assert failures == 1, f"stale index delivery should be one failure, got {failures}"
 
