@@ -383,7 +383,7 @@ jobs:
 
       - name: upload coverage profile
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: coverage-profile
           path: cover.out
@@ -416,7 +416,7 @@ jobs:
         run: scripts/bench.sh | tee bench-results.txt
       - name: upload benchmark results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: benchmark-results
           path: bench-results.txt
@@ -442,7 +442,7 @@ jobs:
       # input is reproducible and can be committed as a permanent regression seed.
       - name: upload fuzz crashers
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: fuzz-crashers
           path: '**/testdata/fuzz/**'
@@ -471,7 +471,7 @@ jobs:
       # (see docs/soak-evidence.md), not an unbacked assertion.
       - name: upload soak results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: soak-results
           path: soak-results.txt
@@ -554,7 +554,7 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
         with:
           version: 11.8.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version-file: ${{ env.CONSOLE_UI }}/package.json
           cache: pnpm
@@ -638,7 +638,7 @@ jobs:
 
       - name: upload build log
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: console-build-log-${{ matrix.profile }}
           path: build.log
@@ -718,7 +718,7 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
         with:
           version: 11.8.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version-file: internal/admin/ui/package.json
           cache: pnpm
@@ -751,7 +751,7 @@ jobs:
           fi
       - name: upload coverage output
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: console-coverage-output
           path: internal/admin/ui/coverage-output.txt
@@ -769,7 +769,7 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
         with:
           version: 11.8.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version-file: internal/admin/ui/package.json
           cache: pnpm
@@ -805,7 +805,7 @@ jobs:
         run: pnpm --dir ${{ env.CONSOLE_UI }} run e2e:ci
       - name: upload Playwright report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: playwright-report
           path: internal/admin/ui/playwright-report/
@@ -832,7 +832,7 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
         with:
           version: 11.8.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version-file: ${{ env.CONSOLE_UI }}/package.json
           cache: pnpm
@@ -871,7 +871,7 @@ jobs:
         run: pnpm --dir ${{ env.CONSOLE_UI }} exec playwright test --project=real-server
       - name: upload Playwright report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: playwright-report-real-server
           path: internal/admin/ui/playwright-report/
