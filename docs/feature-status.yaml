@@ -403,7 +403,7 @@ features:
     8: null
     9: true
   notes: 'Additive #518 capability; does not inherit Core HTTP GA or old soak evidence. Criterion 8 uses existing duration parsing. Runnable example: testdata/send-timeout.toml; Console Status reports configured defaults and overrides without values. Release, benchmark and soak certification remain separate.'
-  delivery: merged
+  delivery: released
 - id: ROUTE-METRICS
   name: Per-route HTTP metrics and bounded hosts
   tags:
@@ -421,7 +421,7 @@ features:
     8: null
     9: true
   notes: 'Additive #521 capability; no inherited metrics/Core HTTP GA or soak evidence. Existing config parsing supplies criterion 8. Runnable example testdata/route-metrics.toml; Console Status and selected-route RED/bytes chart included. Label dimensions are restart-classified; host/route inventory is published and pruned with successful reloads. No client paths or raw Host values are metric labels.'
-  delivery: implemented
+  delivery: released
 - id: reload-tx
   name: Configuration reload transaction
   tags:

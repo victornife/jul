@@ -63,20 +63,21 @@ NGINX who want a gentler on-ramp.
 
 ## Current direction
 
-Jul.IA published the bounded standalone gateway as stable
-[`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0) on 2026-09-30,
-from immutable source `0951090a6fb7703769a15b4749be9664a9842c98`.
-Waves 1–6 and the audit fixes are included, still at their own maturity.
-#434 is no-go for this release and stays CANDIDATE/LATER. Certification is
-[release closure #480](https://github.com/victornife/jul/issues/480).
-The corrected runtime source has exact-source validation and a documented
-post-fix evidence review; see [soak evidence](docs/soak-evidence.md) and
-[release verification](docs/release.md). The twelve release archives, signed
-attestations and six downloaded-package smoke executions were verified, with
-unexecuted platforms reported explicitly. These web-documentation updates are
-post-tag, not changes to the tagged archives. The remaining
-[access-log policy overlap](https://github.com/victornife/jul/issues/502)
-and partial-audit limits remain explicit; this is not a full-audit claim.
+Jul.IA published stable
+[`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0) at
+**2026-10-11T23:49:52Z**, from immutable source
+`b12e051139f652b400cff37d9f063f5637a7d550`. The selected remediation is complete;
+the three bounded #527 contracts are GA with their post-GA soak gate pending.
+All twelve actual release archives passed signed identity/checksum/SPDX and
+native startup/upgrade/rollback checks across six OS/architecture hosts. See
+[published verification](docs/release.md#published-v220-verification).
+Darwin packages require macOS 13+. Seven exact inherited HTTP/3 exceptions
+remain tracked under #569; no complete RFC conformance or new long-running soak
+is claimed. The two #514 advisories were disclosed after fixed packages verified.
+Historical [v2.1.0 verification](docs/release.md#published-v210-verification)
+and source-bound soak evidence remain intact. These web-documentation updates
+are post-tag and do not modify the immutable archives. No deferred candidate,
+including #434, is activated by publication; partial-audit limits remain explicit.
 Additional features do not inherit the GA status of older capabilities. Fleet, hosted
 cloud, GraphQL composition and AI remain optional horizons or bounded
 experiments; none is required for the single-node product to remain useful. See the
@@ -98,9 +99,10 @@ human view and evidence matrix are in [`docs/status.md`](docs/status.md).
 | **GA · soak pending** | Bounded auxiliary egress, method/header/query routing, response-header policy/CORS and upstream admission/retry/circuit contracts, promoted for v2.2.0 under [the #527 decision](docs/reviews/2026-10-12-ga-220.md); no new soak claimed |
 | **Beta · released in v2.0.0** | Configuration authority/generated contracts, NGINX assessment/provenance/include traversal, diagnostics, admin TLS, external API/CLI, selected hot reload and Unix HTTP upstreams |
 | **Beta · released in v2.1.0** | gRPC Health/Check probes, resource and storage headroom, serving WAF policy visibility, Console diagnostics guidance, WASM ABI v2 response phase, consistent-hash affinity, client-certificate policy hot reload, and the post-v2.0.0 NGINX translation/E2E evidence |
+| **Beta · released in v2.2.0** | Downstream write-inactivity timeout and bounded per-route metrics/charts; publication does not complete their open GA criteria |
 
 Published stable
-[`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0)
+[`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0)
 is the latest GitHub Release. The older
 [`v2.0.0-rc.1` checkpoint](docs/release-candidates/v2.0.0-rc.1.md) remains a
 separate prerelease. A Beta capability does not become GA because it is

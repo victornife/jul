@@ -1,18 +1,20 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.19 · Updated 2026-09-30
+> Version 2.20 · Updated 2026-10-12
 >
-> Stable v2.1.0 is published. Its seven additive Beta rows now have `released`
-> delivery; maturity and all GA criteria are unchanged. This is a post-tag
-> publication-status update, not a change to the immutable packaged documents.
+> Stable v2.2.0 is published. The two newly shipped Beta rows now have `released`
+> delivery; their maturity and GA criteria remain unchanged. The separately
+> approved #527 contracts remain GA-soak-pending. This is a post-tag status
+> update, not a change to immutable packages or historical soak evidence.
 
-The published source is `0951090a6fb7703769a15b4749be9664a9842c98`, with exact-main gates and
-impact-reviewed runtime evidence recorded under [release closure #480](https://github.com/victornife/jul/issues/480).
+The current published source is `b12e051139f652b400cff37d9f063f5637a7d550`, with
+[exact-source package/native verification](release.md#published-v220-verification).
+The v2.1.0 source and #480 runtime review remain historical evidence.
 The four-hour measurements on `3258f1a3` and the corrected one-hour
 logging/reload validation on `f036b063` are separate source-bound evidence,
-not one relabeled soak. [Release and package verification](release.md#published-v210-verification)
-record the twelve archives, signed attestations and six actual package smoke
-executions, including native execution limits. No GA criterion is completed
+not one relabeled soak. [Release and package verification](release.md#published-v220-verification)
+record the twelve archives, signed attestations and six native hosts' package
+startup/upgrade/rollback checks. No GA criterion is completed
 by publication alone.
 
 > **Source of truth:** [`docs/feature-status.yaml`](feature-status.yaml) is the
@@ -59,8 +61,8 @@ not inherit an older GA row merely because it lives in the same package or guide
 
 ### Current product snapshot
 
-- **Published release:** stable [`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0)
-  is the current published release at `0951090a6fb7703769a15b4749be9664a9842c98`.
+- **Published release:** stable [`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0)
+  is the current published release at `b12e051139f652b400cff37d9f063f5637a7d550`.
   [#480](https://github.com/victornife/jul/issues/480) records its scope,
   source-bound runtime review, package verification and residuals.
   Historical `v2.0.0` at `d56f5ceaf7ddb8a3875cbe6e27c9540db4130f75`
@@ -204,8 +206,8 @@ v2.0.0 or v2.1.0. Publication does not complete the unchecked GA criteria.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| Downstream write-inactivity timeout | SEND-TIMEOUT | core | `merged` | ✅ | ☐ | ☐ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
-| Per-route HTTP metrics and bounded hosts | ROUTE-METRICS | core | `implemented` | ✅ | ☐ | ☐ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [observability.md](observability.md) |
+| Downstream write-inactivity timeout | SEND-TIMEOUT | core | `released` | ✅ | ☐ | ☐ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
+| Per-route HTTP metrics and bounded hosts | ROUTE-METRICS | core | `released` | ✅ | ☐ | ☐ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [observability.md](observability.md) |
 | Configuration authority and managed drift | AUTO-AUTH | core · `console` | `released` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |
 | Generated configuration contracts and route identity | AUTO-CONTRACT | core | `released` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | n/a | [generated/config-reference.md](generated/config-reference.md) |
 | NGINX migration assessment, provenance, and includes | MIG-ASSESS | `importer` | `released` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ✅ | [nginx-assessment.md](nginx-assessment.md) |

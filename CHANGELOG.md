@@ -11,7 +11,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [2.2.0] - 2026-10-12
 
-Release preparation: publication awaits immutable-source package verification.
+Published at 2026-10-11T23:49:52Z from immutable source
+`b12e051139f652b400cff37d9f063f5637a7d550`; all twelve actual packages passed
+six-host native verification. See [published verification](docs/release.md#published-v220-verification).
 Darwin packages now require macOS 13+ (Go 1.27.2). Seven exact inherited
 HTTP/3 exceptions remain tracked by #569; this is not full RFC conformance.
 See [release preparation](docs/release-candidates/v2.2.0.md) for upgrade,
