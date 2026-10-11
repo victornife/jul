@@ -37,6 +37,11 @@ def check_identity(metadata, tag, commit, operating_system, architecture):
             raise RuntimeError(f"package identity mismatch for {key}")
 
 
+def native_architecture(machine, environment, windows):
+    native = environment.get("PROCESSOR_ARCHITEW6432", environment.get("PROCESSOR_ARCHITECTURE", machine)) if windows else machine
+    return {"x86_64": "amd64", "amd64": "amd64", "arm64": "arm64", "aarch64": "arm64"}[native.lower()]
+
+
 def unpack(archive, directory):
     if archive.suffix == ".zip":
         with zipfile.ZipFile(archive) as package:
@@ -148,6 +153,8 @@ def exercise(binary, configuration, traffic, admin, token, full):
 
 
 def self_test():
+    assert native_architecture("AMD64", {"PROCESSOR_ARCHITECTURE": "AMD64", "PROCESSOR_ARCHITEW6432": "ARM64"}, True) == "arm64"
+    assert native_architecture("aarch64", {}, False) == "arm64"
     correct = {"version": "v2.2.0", "commit": "source", "os": "linux", "arch": "arm64", "dirty": False}
     check_identity(correct, "v2.2.0", "source", "linux", "arm64")
     try:
@@ -186,7 +193,7 @@ def main():
     if not all((arguments.tag, arguments.commit, arguments.os, arguments.arch, arguments.directory, arguments.report)):
         parser.error("tag, commit, os, arch, directory and report are required")
     host_os = {"Linux": "linux", "Darwin": "darwin", "Windows": "windows"}[platform.system()]
-    host_arch = {"x86_64": "amd64", "AMD64": "amd64", "arm64": "arm64", "aarch64": "arm64"}[platform.machine()]
+    host_arch = native_architecture(platform.machine(), os.environ, os.name == "nt")
     if (host_os, host_arch) != (arguments.os, arguments.arch):
         raise RuntimeError("native verification requested on a different host architecture")
     arguments.directory.mkdir(parents=True, exist_ok=True)
