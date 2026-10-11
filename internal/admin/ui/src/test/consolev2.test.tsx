@@ -482,6 +482,46 @@ describe("RoutesPanel", () => {
 // ── AppsPanel health aggregation ──────────────────────────────────────────────
 
 import { AppsPanel } from "@/features/apps/AppsPanel.tsx";
+import { AppResilience } from "@/features/apps/AppDetail.tsx";
+
+describe("GA resilience operability", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const pool = {
+    name: "api", scheme: "http", verdict: "degraded", active: 9, pending: 2, eligible: 1,
+    limits: { max_active_requests: 10, max_active_per_backend: 6, max_pending_requests: 3, pending_timeout: "2s", retry_attempts: 2, retry_budget_percent: 10, circuit_max_fails: 3, circuit_fail_timeout: "30s", circuit_half_open_probes: 1 },
+    retry_budget: { percent: 10, remaining: 0 }, by_state: { available: 1, circuit_open: 1 },
+  };
+  it("shows effective pressure, circuit state and an exhausted retry budget", async () => {
+    const fetch = vi.fn().mockResolvedValue({ok: true, json: () => Promise.resolve([pool])});
+    vi.stubGlobal("fetch", fetch);
+    render(<AppResilience name="api" />, {wrapper: Wrapper});
+    expect(await screen.findByText("9 / 10")).toBeInTheDocument();
+    expect(screen.getByText("2 / 3")).toBeInTheDocument();
+    expect(screen.getByText("0 remaining (10%)")).toBeInTheDocument();
+    expect(screen.getByText(/circuit open: 1/)).toBeInTheDocument();
+    expect(screen.getByRole("link", {name: "Edit resilience configuration"})).toHaveAttribute("href", "/config");
+    expect(fetch).toHaveBeenCalledWith("/api/upstreams/api/resilience", expect.anything());
+  });
+  it("distinguishes unbounded admission and disabled budgets from unavailable data", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ok: true, json: () => Promise.resolve([{...pool, active: 0, pending: 0, limits: {...pool.limits, max_active_requests: 0, max_active_per_backend: 0, max_pending_requests: 0}, retry_budget: {percent: 0, remaining: 0}}])}));
+    render(<AppResilience name="api" />, {wrapper: Wrapper});
+    expect(await screen.findByText("0 / unlimited")).toBeInTheDocument();
+    expect(screen.getByText("0 / 0")).toBeInTheDocument();
+    expect(screen.getByText("disabled")).toBeInTheDocument();
+    expect(screen.queryByText("Live resilience unavailable")).toBeNull();
+  });
+  it("reports a missing live pool without inventing healthy or zero state", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ok: true, json: () => Promise.resolve([])}));
+    render(<AppResilience name="api" />, {wrapper: Wrapper});
+    expect(await screen.findByText("Live resilience unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("0 / unlimited")).toBeNull();
+  });
+  it("reports transport errors as unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    render(<AppResilience name="api" />, {wrapper: Wrapper});
+    expect(await screen.findByText("Live resilience unavailable")).toBeInTheDocument();
+  });
+});
 
 describe("AppsPanel", () => {
   beforeEach(() => {

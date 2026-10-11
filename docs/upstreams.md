@@ -1,6 +1,6 @@
 # Upstreams and backend trust
 
-> **Maturity and delivery:** the pool/balancing/health foundation and `backend_tls` are GA/soaked in published v2.0.0. Admission/retry/circuit controls are separately tracked Beta/released capabilities. Consistent-hash affinity is Beta and is in the proposed v2.1.0 tree, not in v2.0.0. See [status.md](status.md) and [Reload behaviour](#reload-behaviour).
+> **Maturity and delivery:** the pool/balancing/health foundation and `backend_tls` are GA/soaked in published v2.0.0. The existing admission/retry/circuit contract is independently GA (soak pending) for v2.2.0 under [the #527 decision](reviews/2026-10-12-ga-220.md). Consistent-hash affinity remains Beta and shipped in v2.1.0. See [status.md](status.md) and [Reload behaviour](#reload-behaviour).
 
 An `[[upstreams]]` block is a named pool of backends with a balancing strategy,
 passive and optional active health checking, optional dynamic discovery, and —
@@ -63,7 +63,8 @@ proxy_pass = "https://inventory"
 > re-trips it. [ADR 0017](adr/0017-upstream-resilience-and-overload-control.md) makes that model
 > explicit and decides the concurrency, pending, connection, retry-budget and half-open controls that
 > extend it. Admission, retry budget and half-open controls shipped in v2.0.0
-> as Beta; feature-specific GA/soak evidence remains open.
+> as Beta; #527 certifies the bounded contract as GA for v2.2.0 while retaining
+> its pending post-GA soak gate.
 
 > **Who can use a pool.** `proxy_pass`, `grpc_transcode.target`, `fastcgi_pass` and `uwsgi_pass` all
 > accept a named upstream, so FastCGI and uWSGI routes are pool members with the same load balancing,
@@ -142,6 +143,14 @@ Two backends with the same canonical identity are a validation error in a
 `consistent_hash` pool, because they would tie for every key.
 
 ## Admission and overload control
+
+Console **Apps** provides backend circuit reasons. Opening an App now shows
+effective resilience limits, active/pending work, eligible backends, circuit
+states and retry-budget allowance through the existing readback API. Zero
+admission limits mean unlimited; an exhausted budget is distinct from a disabled
+budget. Missing/failed live readback is unavailable, not healthy zero. Use the
+linked Config editor for advanced authoritative policy editing, and the sizing
+guide below for safe limits. No runtime retry or admission policy is changed.
 
 `[upstreams.resilience]` bounds how much work the pool will accept. It answers a different question
 from health checking: health decides *which* backend a request may go to, admission decides *whether*

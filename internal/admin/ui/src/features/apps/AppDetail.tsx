@@ -4,6 +4,9 @@
  */
 
 import { useEffect, useState } from "react";
+
+import { useQuery } from "@tanstack/react-query";
+import { fetchPoolResilience } from "@/api/client.ts";
 import { Link } from "react-router-dom";
 import type { AppProjection, BackendProjection, BackendState } from "@/api/client.ts";
 import { usePermission } from "@/auth/usePermission.ts";
@@ -30,6 +33,89 @@ const STRATEGIES: ReadonlyArray<{ readonly value: string; readonly label: string
   { value: "least_conn", label: "Least connections" },
   { value: "consistent_hash", label: "Consistent hash (affinity)" },
 ];
+
+export function AppResilience({ name }: { readonly name: string }) {
+  const { has } = usePermission();
+  const canRead = has("status:read");
+  const query = useQuery({
+    queryKey: ["upstream-resilience", name],
+    queryFn: () => fetchPoolResilience(name),
+    enabled: canRead,
+    refetchInterval: 2000,
+    retry: false,
+  });
+  return (
+    <section aria-label="Upstream resilience" className="space-y-3 border-y border-jul-border py-3">
+      <h3 className="text-sm font-semibold text-jul-text">Resilience</h3>
+      {!canRead ? (
+        <p role="status">Status access unavailable</p>
+      ) : query.isPending ? (
+        <p role="status">Loading resilience</p>
+      ) : query.isError || query.data.length === 0 ? (
+        <p role="status">Live resilience unavailable</p>
+      ) : (
+        query.data.map((pool) => (
+          <div
+            key={`${pool.name}:${pool.scheme ?? ""}`}
+            className="space-y-1 text-xs text-jul-text"
+          >
+            <p className="font-semibold">
+              {pool.scheme ?? "HTTP"}: {pool.verdict}
+            </p>
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
+              <dt>Active / pool limit</dt>
+              <dd>
+                {pool.active} / {pool.limits.max_active_requests || "unlimited"}
+              </dd>
+              <dt>Pending / queue limit</dt>
+              <dd>
+                {pool.pending} / {pool.limits.max_pending_requests}
+              </dd>
+              <dt>Backend active limit</dt>
+              <dd>{pool.limits.max_active_per_backend || "unlimited"}</dd>
+              <dt>Pending timeout</dt>
+              <dd>{pool.limits.pending_timeout ?? "request context only"}</dd>
+              <dt>Eligible backends</dt>
+              <dd>{pool.eligible}</dd>
+              <dt>Total attempt limit</dt>
+              <dd>{pool.limits.retry_attempts || "each distinct backend once"}</dd>
+              <dt>Retry budget</dt>
+              <dd>
+                {pool.retry_budget.percent === 0
+                  ? "disabled"
+                  : `${String(pool.retry_budget.remaining)} remaining (${String(pool.retry_budget.percent)}%)`}
+              </dd>
+              <dt>Circuit threshold</dt>
+              <dd>{pool.limits.circuit_max_fails} failures</dd>
+              <dt>Circuit cooldown</dt>
+              <dd>{pool.limits.circuit_fail_timeout ?? "disabled"}</dd>
+              <dt>Half-open probe limit</dt>
+              <dd>{pool.limits.circuit_half_open_probes || "unlimited"}</dd>
+            </dl>
+            <p className="text-jul-muted">
+              {Object.entries(pool.by_state)
+                .map(([state, count]) => `${state.replaceAll("_", " ")}: ${String(count)}`)
+                .join("; ")}
+            </p>
+          </div>
+        ))
+      )}
+      <div className="flex flex-wrap gap-3 text-xs text-jul-accent">
+        <Link to="/config" className="underline">
+          Edit resilience configuration
+        </Link>
+        <a
+          href="https://github.com/victornife/jul/blob/main/docs/upstreams.md#sizing-the-limits"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline"
+        >
+          Limits and failure semantics
+        </a>
+      </div>
+    </section>
+  );
+}
 
 function Row({ label, value }: { readonly label: string; readonly value: React.ReactNode }) {
   return (
@@ -400,6 +486,8 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
             ))}
           </div>
         )}
+
+        <AppResilience name={app.name} />
 
         <div className="rounded-md border border-jul-border bg-jul-surface px-4 py-2">
           <Row label="Strategy" value={app.strategy} />

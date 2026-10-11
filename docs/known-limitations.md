@@ -19,11 +19,15 @@ discovered correctness/security findings still pre-empt the roadmap.
 
 - **Published in stable `v2.0.0`, still Beta:** admin TLS/mTLS, external API and
   remote CLI, selected runtime-policy hot reload, HTTP over Unix-domain
-  upstreams, routing/response policy, generic resilience, configuration
+  upstreams, configuration
   authority/generated contracts, NGINX assessment/provenance/includes, local
-  diagnostics/support bundles and the auxiliary egress allow-list. Publication
+  diagnostics/support bundles. Publication
   does not supply their missing feature-specific GA or soak evidence. The older
   admin, core HTTP and base NGINX importer GA rows cover their own contracts.
+- **GA with post-GA soak pending for v2.2.0:** the bounded routing/CORS,
+  resilience and auxiliary-egress contracts are independently certified under
+  [#527's decision](reviews/2026-10-12-ga-220.md). Criterion 5 remains pending;
+  no new soak, universal retry policy or global egress firewall is claimed.
 - **GA in stable `v2.0.0`:** trusted client address and backend TLS trust were
   separately certified under #409; their manifest delivery is `soaked`.
 - **In the proposed v2.1.0 tree, still Beta / `merged` until publication:**

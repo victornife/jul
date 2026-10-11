@@ -1,5 +1,11 @@
 # Egress allow-list
 
+The bounded auxiliary-fetch contract is GA (soak pending) for v2.2.0 under
+[the #527 decision](reviews/2026-10-12-ga-220.md). This does not expand its
+security boundary or relabel historical/consolidated soak evidence. The current
+limitations and Security-panel denial visibility below remain part of the
+stable contract.
+
 > Optional hardening that constrains the destinations the server itself connects
 > to for its **config-driven auxiliary fetches** — JWKS retrieval, forward-auth
 > subrequests, Consul/Kubernetes service discovery, ACME issuance, OCSP

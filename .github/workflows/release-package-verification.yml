@@ -1,0 +1,62 @@
+name: Release package verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing immutable release tag
+        required: true
+      source:
+        description: Exact expected source commit
+        required: true
+
+permissions:
+  contents: read
+  attestations: read
+
+jobs:
+  native-download:
+    name: Download and upgrade (${{ matrix.os }}/${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: linux, arch: amd64, runner: ubuntu-24.04}
+          - {os: linux, arch: arm64, runner: ubuntu-24.04-arm}
+          - {os: darwin, arch: amd64, runner: macos-15-intel}
+          - {os: darwin, arch: arm64, runner: macos-14}
+          - {os: windows, arch: amd64, runner: windows-2025}
+          - {os: windows, arch: arm64, runner: windows-11-arm}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - name: Verify immutable source
+        shell: bash
+        env:
+          EXPECTED_SOURCE: ${{ inputs.source }}
+          EXPECTED_TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$EXPECTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SOURCE" ]]
+      - name: Verify actual downloads, startup and upgrade/rollback
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SOURCE: ${{ inputs.source }}
+          RELEASE_OS: ${{ matrix.os }}
+          RELEASE_ARCH: ${{ matrix.arch }}
+        run: |
+          python scripts/verify-release-packages.py --tag "$RELEASE_TAG" --commit "$RELEASE_SOURCE" \
+            --os "$RELEASE_OS" --arch "$RELEASE_ARCH" --directory package-downloads --report package-verification.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: package-verification-${{ matrix.os }}-${{ matrix.arch }}
+          path: package-verification.json
+          if-no-files-found: error

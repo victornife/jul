@@ -182,7 +182,7 @@ describe("App config:write/config:apply/config:raw boundaries", () => {
 
   it("disables every AppDetail mutation and deletion control without config:write", () => {
     render(
-      <Scope permissions={["config:apply", "config:raw"]}>
+      <Scope permissions={["config:apply", "config:raw"]} query>
         <AppDetail app={app()} onClose={() => undefined} />
       </Scope>,
     );

@@ -275,6 +275,22 @@ and none is planned. This is a stated decision, not an omission:
 
 ## Delivery state and compatibility
 
+### v2.2.0 GA contract certification
+
+Under #527 the maintainer promotes the existing bounded routing/CORS,
+upstream admission/retry/circuit and auxiliary-egress surfaces to GA with
+their post-GA soak gate explicitly pending. Their documented configuration
+keys, types, defaults, lifecycle meanings, metrics and observable behavior
+are stable within v2 under this policy. The immutable v2.2.0 source/tag is
+the publication baseline. New optional features do not inherit GA by proximity.
+
+The [per-feature decision](reviews/2026-10-12-ga-220.md) records evidence,
+operability, non-goals and pending stability gates. Schema/value/lifecycle
+drift tests and the focused v2.2.0 configuration guard protect accepted
+configurations. Internal Console endpoints are not promoted into the external
+API contract. No full NGINX parity, new retry outcome taxonomy, global firewall
+or complete SSRF guarantee is included. No long-running soak is claimed.
+
 Compatibility promises attach to a released contract, not merely to code merged
 on `main`. `implemented`, `merged`, and `candidate` capabilities may be usable
 and documented while remaining Beta and outside the stable GA surface. The

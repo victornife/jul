@@ -8,8 +8,90 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pelletier/go-toml/v2"
 	"jul/internal/config"
 )
+
+func TestGA220ExistingConfigurationContract(t *testing.T) {
+	raw := []byte(`
+[egress]
+enabled = true
+allow = ["api.example.com", "127.0.0.1"]
+[[upstreams]]
+name = "api"
+servers = ["127.0.0.1:9000"]
+[upstreams.resilience]
+max_active_requests = 100
+max_active_per_backend = 60
+max_pending_requests = 10
+pending_timeout = "2s"
+[[servers]]
+listen = "127.0.0.1:8080"
+[[servers.locations]]
+match = { type = "prefix", path = "/" }
+proxy_pass = "http://api"
+response_headers = [{op = "set", name = "X-Contract", value = "v2"}]
+[servers.locations.cors]
+enabled = true
+allowed_origins = ["https://client.example.com"]
+allowed_methods = ["GET", "HEAD"]
+`)
+	candidate, err := config.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Validate(candidate); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := config.Marshal(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundTrip, err := config.Parse(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Validate(roundTrip); err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := toml.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	jsonDocument, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(jsonDocument, &document); err != nil {
+		t.Fatal(err)
+	}
+	if err := minivalidate(buildTestSchema(t), document); err != nil {
+		t.Fatalf("GA configuration no longer matches generated contract: %v", err)
+	}
+	if !candidate.Egress.Enabled || len(candidate.Egress.Allow) != 2 {
+		t.Fatal("egress configuration meaning changed")
+	}
+	limits := candidate.Upstreams[0].Resilience
+	if limits == nil || limits.MaxActiveRequests != 100 || limits.MaxActivePerBackend != 60 || limits.MaxPendingRequests != 10 || limits.PendingTimeout.Std().String() != "2s" {
+		t.Fatalf("resilience configuration meaning changed: %+v", limits)
+	}
+	location := candidate.Servers[0].Locations[0]
+	if location.CORS == nil || !location.CORS.Enabled || len(location.CORS.AllowedOrigins) != 1 || len(location.ResponseHeaders) != 1 {
+		t.Fatal("routing/CORS configuration meaning changed")
+	}
+	defaults, err := config.Parse([]byte(`[[servers]]
+listen = "127.0.0.1:8080"
+[[servers.locations]]
+match = {type = "prefix", path = "/"}
+return = 200
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Egress.Enabled || defaults.Servers[0].Locations[0].CORS != nil || len(defaults.Servers[0].Locations[0].ResponseHeaders) != 0 {
+		t.Fatal("optional GA policies became enabled by default")
+	}
+}
 
 func buildTestSchema(t *testing.T) map[string]any {
 	t.Helper()

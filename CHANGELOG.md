@@ -9,6 +9,29 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-12
+
+Release preparation: publication awaits immutable-source package verification.
+Darwin packages now require macOS 13+ (Go 1.27.2). Seven exact inherited
+HTTP/3 exceptions remain tracked by #569; this is not full RFC conformance.
+See [release preparation](docs/release-candidates/v2.2.0.md) for upgrade,
+rollback and coordinated advisory-disclosure requirements.
+
+### Changed
+
+- Independently promote the existing bounded routing/CORS, resilience and
+  auxiliary-egress contracts under #527 to GA with post-GA soak explicitly
+  pending. No new long-running soak or overall-coverage target. Apps now exposes
+  effective resilience limits, live admission pressure, circuit states and retry
+  allowance through the existing API; expert editing remains the Config path.
+
+### Release Verification
+
+- Verify actual twelve-platform/profile downloads, checksums, embedded source
+  identity and signed provenance/SBOM, then native startup and v2.1.0
+  upgrade/rollback. The normal release smoke gate is retained; historical
+  measurements are not relabeled as new soak evidence.
+
 Post-publication documentation and delivery-status reconciliation, plus the
 post-v2.1.0 audit remediation below. None of this is part of the immutable
 v2.1.0 tag or its packaged READMEs.
@@ -86,6 +109,10 @@ v2.1.0 tag or its packaged READMEs.
   deviation. See `docs/security-testing.md`.
 
 ### Security
+
+- Include the scoped admin diagnostic/readback confidentiality corrections
+  from #514. Both verified advisory records identify v2.2.0 as the first
+  patched release; disclosure follows actual fixed-package verification.
 
 - **Go HTTP security updates.** Pin Go 1.26.9 and x/net v0.60.0 for the
   published HTTP/1 CONNECT desynchronization and HTTP/2 HPACK, flow-control,
