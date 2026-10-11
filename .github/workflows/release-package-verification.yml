@@ -17,6 +17,9 @@ permissions:
 jobs:
   native-download:
     name: Download and upgrade (${{ matrix.os }}/${{ matrix.arch }})
+    permissions:
+      contents: write
+      attestations: read
     strategy:
       fail-fast: false
       matrix:
