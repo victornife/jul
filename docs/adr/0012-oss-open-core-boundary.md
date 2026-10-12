@@ -96,7 +96,8 @@ functionality out of commercial-only releases.
 
 ## Related
 
-- [docs/vision/README.md](../vision/README.md) — product promise and three pillars
+- [Public vision and mission](../vision/README.md) — purpose and sharing ambition
+- [Engineering context](../vision/engineering-context.md) — standalone product promise and architectural pillars
 - [docs/roadmap/README.md](../roadmap/README.md) — demand-gated horizon
 - [docs/compatibility.md](../compatibility.md) — stable config/API contract
 - [LICENSE](../../LICENSE) — AGPL-3.0

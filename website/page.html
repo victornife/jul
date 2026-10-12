@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="$description">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="color-scheme" content="light">
+  <title>$document_title</title>
+  <link rel="stylesheet" href="$stylesheet_url">
+  <link rel="icon" href="$icon_url" type="image/png">
+</head>
+<body class="$page_class">
+  <a class="skip-link" href="#content">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="$home_url" aria-label="Jul.IA home">Jul<span>.IA</span></a>
+      <nav aria-label="Main navigation">$nav<a class="github-link" href="$repository">GitHub ↗</a></nav>
+    </div>
+  </header>
+  <main id="content" tabindex="-1">
+    <section class="masthead" aria-labelledby="page-title">
+      <div class="hero-copy">
+        <p class="eyebrow">$label</p>
+        <h1 id="page-title">$heading</h1>
+        $actions
+      </div>
+      $hero_extra
+    </section>
+    <div class="reading-layout">
+      <article class="prose">$body</article>
+      <aside class="contents">
+        <nav aria-label="On this page"><p class="contents-title">On this page</p>$toc</nav>
+      </aside>
+    </div>
+  </main>
+  <footer class="site-footer">
+    <div><a class="brand" href="$home_url">Jul<span>.IA</span></a><p>Open-source gateway · <a href="$repository/blob/main/LICENSE">AGPL-3.0</a></p></div>
+    <div class="footer-links"><a href="$source_url">View source</a><a href="$repository">GitHub ↗</a></div>
+  </footer>
+</body>
+</html>

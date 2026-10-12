@@ -1,5 +1,7 @@
 # Jul.IA
 
+**Build Anything. Share It on Your Terms.**
+
 <p align="center">
   <img src="docs/assets/logo.png" alt="Jul.IA logo" width="320" />
 </p>
@@ -14,11 +16,36 @@
 [![Maintainability](https://qlty.sh/gh/victornife/projects/jul/maintainability.svg)](https://qlty.sh/gh/victornife/projects/jul)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/victornife/jul)
 
-**Jul.IA** is a self-contained edge and protocol gateway written in Go and
-configured through TOML. It combines reverse proxying, load balancing, static
-serving, FastCGI/uWSGI, HTTP and gRPC gateway behavior, optional L4 proxying,
-TLS/mTLS, policy, observability, configuration lifecycle, and an embedded
-operations Console in a single static, dependency-free binary.
+**Jul.IA** is a portable, open-source application and protocol gateway written
+in Go and configured through TOML. It brings routing, protection, traffic
+controls and an embedded operations Console together in a single static
+binary. You can use it to serve websites and manage requests to applications
+you already run, in your homelab, on your own server or in the cloud.
+
+## Why Jul.IA?
+
+AI is making software creation faster and more personal. More people can build
+useful tools for their own needs, teams and communities.
+
+Sharing them can still become a second infrastructure project. Making an
+application reachable, controlling access and keeping it running can demand
+more time, expertise and expense than expected. Even a small application may
+need advanced protection and traffic controls.
+
+Our mission is to give people and teams the freedom to run and share their own
+software, with advanced capabilities and control over their infrastructure and
+dependencies, while reducing unnecessary cost and complexity.
+
+**[Our vision](docs/vision/README.md)** ·
+**[Practical guide](docs/practical-guide.md)** ·
+**[Get started](docs/getting-started.md)**
+
+The [brief statement](docs/vision/brief.md) introduces our principles and the
+sharing experience we are building toward. The standalone gateway is available
+today; an integrated workflow for publishing, invitations and group access is
+our longer-term ambition.
+
+---
 
 - **Binary / module / service name:** `jul`
 - **Product name:** `Jul.IA`
@@ -42,12 +69,17 @@ operations Console in a single static, dependency-free binary.
 
 ## Who is Jul.IA for?
 
-**Jul.IA is for:** solo operators and small infrastructure teams who want
-NGINX-grade routing and reverse proxying — plus protocol gateway capabilities
-(gRPC transcoding, L4 TCP/UDP proxying) — in a single binary, configured in
-TOML, without NGINX's operational complexity. Operators who want a built-in
-observability console without standing up a separate tool. Teams migrating from
-NGINX who want a gentler on-ramp.
+**Jul.IA is for:** individuals, homelab operators, communities and teams who
+want advanced gateway capabilities on infrastructure they choose. It can be
+useful when you need routing, access policy, traffic controls, protocol
+gateways and operational visibility together, even for a small application.
+It can work alongside connectivity tools such as Cloudflare Tunnel and
+Tailscale, and help teams assess and migrate supported NGINX configurations.
+
+Choose it when that combination fits your needs and reduces the components
+you have to operate. Existing gateways and platforms may already be enough;
+our [practical guide](docs/practical-guide.md#how-we-compare-and-combine-with-other-tools)
+explains the alternatives and responsibilities that remain.
 
 **Jul.IA is not the right tool if you need:**
 - **Fleet or multi-node management** — Jul.IA runs on one node; fleet
