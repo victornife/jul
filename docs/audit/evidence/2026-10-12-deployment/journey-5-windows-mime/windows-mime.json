@@ -1,0 +1,234 @@
+{
+  "journey": "Mime",
+  "evidence_class": "controlled-ci-lab",
+  "harness_source": "6ab52a4ff14b84da47fbfa6c5cd064864cd5400a",
+  "checks": {
+    "virtual_service_identity": "passed",
+    "ordinary_user_denied_secure_config_and_history": "passed",
+    "managed_apply_rollback_restart": "passed",
+    "registry_mime_precedence_and_precompressed": "passed",
+    "registry_fixture_restoration": "passed"
+  },
+  "host": {
+    "os": "windows",
+    "arch": "AMD64",
+    "version": "10.0.26100.0"
+  },
+  "limits": [
+    "Disposable native Windows runner and synthetic fixtures, not an enterprise ACL/registry inventory"
+  ],
+  "package": {
+    "binary_sha256": "d818aec685fbf0e4bf8f131d7d749689f83bb389a9db28b7724b627d00bf1013",
+    "metadata": {
+      "product": "Jul.IA",
+      "version": "v2.2.0",
+      "commit": "b12e051139f652b400cff37d9f063f5637a7d550",
+      "build_date": "2026-10-11T23:14:04Z",
+      "dirty": false,
+      "go_version": "go1.27.2",
+      "os": "windows",
+      "arch": "amd64"
+    }
+  },
+  "mime": {
+    "extension": ".j516556cbe6f",
+    "checks": [
+      {
+        "scope": "native",
+        "file": "live.m3u8",
+        "gzip": false,
+        "type": "application/vnd.apple.mpegurl",
+        "verdict": "passed"
+      },
+      {
+        "scope": "native",
+        "file": "live.m3u8",
+        "gzip": true,
+        "type": "application/vnd.apple.mpegurl",
+        "verdict": "passed"
+      },
+      {
+        "scope": "native",
+        "file": "manifest.mpd",
+        "gzip": false,
+        "type": "application/dash+xml",
+        "verdict": "passed"
+      },
+      {
+        "scope": "native",
+        "file": "manifest.mpd",
+        "gzip": true,
+        "type": "application/dash+xml",
+        "verdict": "passed"
+      },
+      {
+        "scope": "native",
+        "file": "segment.ts",
+        "gzip": false,
+        "type": "video/mp2t",
+        "verdict": "passed"
+      },
+      {
+        "scope": "native",
+        "file": "segment.ts",
+        "gzip": true,
+        "type": "video/mp2t",
+        "verdict": "passed"
+      },
+      {
+        "scope": "native",
+        "file": "segment.m4s",
+        "gzip": false,
+        "type": "video/iso.segment",
+        "verdict": "passed"
+      },
+      {
+        "scope": "native",
+        "file": "segment.m4s",
+        "gzip": true,
+        "type": "video/iso.segment",
+        "verdict": "passed"
+      },
+      {
+        "scope": "native",
+        "file": "movie.mkv",
+        "gzip": false,
+        "type": "video/matroska",
+        "verdict": "passed"
+      },
+      {
+        "scope": "native",
+        "file": "movie.mkv",
+        "gzip": true,
+        "type": "video/matroska",
+        "verdict": "passed"
+      },
+      {
+        "scope": "native",
+        "file": "audio.aac",
+        "gzip": false,
+        "type": "audio/aac",
+        "verdict": "passed"
+      },
+      {
+        "scope": "native",
+        "file": "audio.aac",
+        "gzip": true,
+        "type": "audio/aac",
+        "verdict": "passed"
+      },
+      {
+        "scope": "native",
+        "file": "ordinary.j516556cbe6f",
+        "gzip": false,
+        "type": "application/x-jul516-native",
+        "verdict": "passed"
+      },
+      {
+        "scope": "native",
+        "file": "ordinary.j516556cbe6f",
+        "gzip": true,
+        "type": "application/x-jul516-native",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "live.m3u8",
+        "gzip": false,
+        "type": "application/octet-stream",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "live.m3u8",
+        "gzip": true,
+        "type": "application/octet-stream",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "manifest.mpd",
+        "gzip": false,
+        "type": "application/octet-stream",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "manifest.mpd",
+        "gzip": true,
+        "type": "application/octet-stream",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "segment.ts",
+        "gzip": false,
+        "type": "application/octet-stream",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "segment.ts",
+        "gzip": true,
+        "type": "application/octet-stream",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "segment.m4s",
+        "gzip": false,
+        "type": "application/octet-stream",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "segment.m4s",
+        "gzip": true,
+        "type": "application/octet-stream",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "movie.mkv",
+        "gzip": false,
+        "type": "application/octet-stream",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "movie.mkv",
+        "gzip": true,
+        "type": "application/octet-stream",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "audio.aac",
+        "gzip": false,
+        "type": "application/octet-stream",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "audio.aac",
+        "gzip": true,
+        "type": "application/octet-stream",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "ordinary.j516556cbe6f",
+        "gzip": false,
+        "type": "application/x-jul516-explicit",
+        "verdict": "passed"
+      },
+      {
+        "scope": "explicit",
+        "file": "ordinary.j516556cbe6f",
+        "gzip": true,
+        "type": "application/x-jul516-explicit",
+        "verdict": "passed"
+      }
+    ]
+  }
+}

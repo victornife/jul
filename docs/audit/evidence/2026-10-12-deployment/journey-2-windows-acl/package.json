@@ -1,0 +1,18 @@
+{
+  "archive": "jul_v2.2.0_windows_amd64_full.zip",
+  "sha256": "9a841f53e6e6b9f730daa206add1df4832a840cd3d17bd6c157291b286a4664d",
+  "metadata": {
+    "product": "Jul.IA",
+    "version": "v2.2.0",
+    "commit": "b12e051139f652b400cff37d9f063f5637a7d550",
+    "build_date": "2026-10-11T23:14:04Z",
+    "dirty": false,
+    "go_version": "go1.27.2",
+    "os": "windows",
+    "arch": "amd64"
+  },
+  "checksums": "passed",
+  "provenance": "passed",
+  "sbom": "passed",
+  "harness_source": "6ab52a4ff14b84da47fbfa6c5cd064864cd5400a"
+}

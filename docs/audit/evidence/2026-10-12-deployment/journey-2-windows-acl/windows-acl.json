@@ -1,0 +1,104 @@
+{
+  "journey": "ExistingAcl",
+  "evidence_class": "controlled-ci-lab",
+  "harness_source": "6ab52a4ff14b84da47fbfa6c5cd064864cd5400a",
+  "checks": {
+    "existing_root_provision_refusal": "passed",
+    "virtual_service_identity": "passed",
+    "existing_secure_acl_preservation": "passed",
+    "ordinary_user_denied_secure_config_and_history": "passed",
+    "managed_apply_rollback_restart": "passed",
+    "permissive_acl_retained_and_readable": "passed"
+  },
+  "host": {
+    "arch": "AMD64",
+    "os": "windows",
+    "version": "10.0.26100.0"
+  },
+  "limits": [
+    "Disposable native Windows runner and synthetic fixtures, not an enterprise ACL/registry inventory"
+  ],
+  "package": {
+    "metadata": {
+      "product": "Jul.IA",
+      "version": "v2.2.0",
+      "commit": "b12e051139f652b400cff37d9f063f5637a7d550",
+      "build_date": "2026-10-11T23:14:04Z",
+      "dirty": false,
+      "go_version": "go1.27.2",
+      "os": "windows",
+      "arch": "amd64"
+    },
+    "binary_sha256": "d818aec685fbf0e4bf8f131d7d749689f83bb389a9db28b7724b627d00bf1013"
+  },
+  "acl_snapshots": [
+    {
+      "before": [
+        "S-1-5-32-544|Allow|FullControl|ContainerInherit, ObjectInherit|None|True",
+        "S-1-5-18|Allow|FullControl|ContainerInherit, ObjectInherit|None|True"
+      ],
+      "after": [
+        "S-1-5-80-2250104845-1855805764-1291309796-1875303849-3709164524|Allow|Modify, Synchronize|ContainerInherit, ObjectInherit|None|False",
+        "S-1-5-32-544|Allow|FullControl|ContainerInherit, ObjectInherit|None|True",
+        "S-1-5-18|Allow|FullControl|ContainerInherit, ObjectInherit|None|True"
+      ],
+      "fixture_path": "secure\\data",
+      "owner_preserved": true
+    },
+    {
+      "before": [
+        "S-1-5-11|Allow|ReadAndExecute, Synchronize|None|None|False",
+        "S-1-5-18|Allow|FullControl|ContainerInherit, ObjectInherit|None|False",
+        "S-1-5-32-544|Allow|FullControl|ContainerInherit, ObjectInherit|None|False"
+      ],
+      "after": [
+        "S-1-5-11|Allow|ReadAndExecute, Synchronize|None|None|False",
+        "S-1-5-18|Allow|FullControl|ContainerInherit, ObjectInherit|None|False",
+        "S-1-5-32-544|Allow|FullControl|ContainerInherit, ObjectInherit|None|False"
+      ],
+      "fixture_path": "secure",
+      "owner_preserved": true
+    },
+    {
+      "before": [
+        "S-1-5-32-544|Allow|FullControl|ContainerInherit, ObjectInherit|None|True",
+        "S-1-5-18|Allow|FullControl|ContainerInherit, ObjectInherit|None|True"
+      ],
+      "after": [
+        "S-1-5-80-2250104845-1855805764-1291309796-1875303849-3709164524|Allow|Modify, Synchronize|ContainerInherit, ObjectInherit|None|False",
+        "S-1-5-80-2250104845-1855805764-1291309796-1875303849-3709164524|Allow|Modify, Synchronize|ContainerInherit, ObjectInherit|None|True",
+        "S-1-5-32-544|Allow|FullControl|ContainerInherit, ObjectInherit|None|True",
+        "S-1-5-18|Allow|FullControl|ContainerInherit, ObjectInherit|None|True"
+      ],
+      "fixture_path": "secure\\data\\history",
+      "owner_preserved": true
+    },
+    {
+      "before": [
+        "S-1-5-32-544|Allow|FullControl|ContainerInherit, ObjectInherit|None|True",
+        "S-1-5-18|Allow|FullControl|ContainerInherit, ObjectInherit|None|True"
+      ],
+      "after": [
+        "S-1-5-80-2250104845-1855805764-1291309796-1875303849-3709164524|Allow|Modify, Synchronize|ContainerInherit, ObjectInherit|None|False",
+        "S-1-5-32-544|Allow|FullControl|ContainerInherit, ObjectInherit|None|True",
+        "S-1-5-18|Allow|FullControl|ContainerInherit, ObjectInherit|None|True"
+      ],
+      "fixture_path": "secure\\config",
+      "owner_preserved": true
+    },
+    {
+      "before": [
+        "S-1-5-32-544|Allow|FullControl|None|None|True",
+        "S-1-5-18|Allow|FullControl|None|None|True"
+      ],
+      "after": [
+        "S-1-5-80-2250104845-1855805764-1291309796-1875303849-3709164524|Allow|Read, Synchronize|None|None|False",
+        "S-1-5-80-2250104845-1855805764-1291309796-1875303849-3709164524|Allow|Modify, Synchronize|None|None|True",
+        "S-1-5-32-544|Allow|FullControl|None|None|True",
+        "S-1-5-18|Allow|FullControl|None|None|True"
+      ],
+      "fixture_path": "secure\\config\\server.toml",
+      "owner_preserved": true
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "journey": "docker",
+  "evidence_class": "controlled-ci-lab",
+  "harness_source": "6ab52a4ff14b84da47fbfa6c5cd064864cd5400a",
+  "source": "b12e051139f652b400cff37d9f063f5637a7d550",
+  "source_archive_sha256": "122a7a0730f2df0b91d58807a9125d5123f0fb35e8ecdec38fadf07505bc3fe3",
+  "image_id": "sha256:718a1aebed902d0c04b4beac6e4a6e164844406f381b078b42ab145f8e620be0",
+  "binary_metadata": {
+    "product": "Jul.IA",
+    "version": "v2.2.0",
+    "commit": "unknown",
+    "build_date": "unknown",
+    "dirty": false,
+    "go_version": "go1.27.2",
+    "os": "linux",
+    "arch": "amd64"
+  },
+  "network": {
+    "topology": "separate-network-namespace/shared-runner-kernel",
+    "client_address": "198.19.218.2",
+    "server_gateway": "198.19.218.1",
+    "host_interface": "j516h58424c2"
+  },
+  "root_sha256": "c167fc4d1811e3918e3a3dc4e11fac2d670817173d2799c738706455a675a162",
+  "module_sha256": "1641d893c36149ef76bb6430f21a5b9dcb1efc77e539cea86a3fb651e03b4882",
+  "checks": {
+    "frozen_source_full_profile": "passed",
+    "nonroot": "passed",
+    "routed_tls_static_proxy_wasm": "passed",
+    "wrong_ca": "passed",
+    "remote_admin_auth_console": "passed",
+    "exec_tls_healthcheck": "passed",
+    "managed_apply_rollback": "passed",
+    "config_history_recreation": "passed",
+    "cache_volume_recreation": "passed",
+    "access_log_recreation": "passed"
+  },
+  "limits": [
+    "Locally built pinned-source image, not a published GHCR image or signed image attestation",
+    "Dockerfile records version but not embedded source commit; source archive/image identity is recorded separately",
+    "Separate client/container namespaces share the runner kernel; no Internet/cloud firewall certification",
+    "Cache volume persistence is a marker check, not a new HTTP cache correctness test"
+  ]
+}

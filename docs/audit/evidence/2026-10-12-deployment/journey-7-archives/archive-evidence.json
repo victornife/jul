@@ -1,0 +1,103 @@
+{
+  "journey": "archives",
+  "evidence_class": "reconciled-existing-native-evidence",
+  "new_native_execution": false,
+  "harness_source": "6ab52a4ff14b84da47fbfa6c5cd064864cd5400a",
+  "source": "b12e051139f652b400cff37d9f063f5637a7d550",
+  "tag_object": "9115edc5961b92526b9ec76b2c752bc146ce3523",
+  "original_verification_run": 38185464698,
+  "original_verified_at": "2026-10-11T23:49:24.148295+00:00",
+  "original_report_sha256": "ed67d54f2da3d7a262cfea2ade6d169f6b5cfe3d6166519554322b3d7791b516",
+  "profiles": [
+    {
+      "os": "darwin",
+      "arch": "amd64",
+      "profile": "lean",
+      "archive_sha256": "7c7ccb7b188eca49af46fb9809c4557ab9cff9ad59be10821599d44e7e500aff",
+      "verdict": "passed-existing-native-evidence"
+    },
+    {
+      "os": "darwin",
+      "arch": "amd64",
+      "profile": "full",
+      "archive_sha256": "e5d43a8fb91c34e40d969753b3aeb963323e95a105c4c4ecaf5d6ce7a52e40dd",
+      "verdict": "passed-existing-native-evidence"
+    },
+    {
+      "os": "darwin",
+      "arch": "arm64",
+      "profile": "lean",
+      "archive_sha256": "40a16cafe1bd7df282cc51fd955a38da90c8537d144142b5bcd17afe30e882d4",
+      "verdict": "passed-existing-native-evidence"
+    },
+    {
+      "os": "darwin",
+      "arch": "arm64",
+      "profile": "full",
+      "archive_sha256": "52841b1c4771483f9d3bd0cde6f947d4daa44d34600406400b53c38c79f75aa8",
+      "verdict": "passed-existing-native-evidence"
+    },
+    {
+      "os": "linux",
+      "arch": "amd64",
+      "profile": "lean",
+      "archive_sha256": "5ef07791d0aaa24a90f5ccd7f471eb6d462e96e0b8005ce505d4ae8e6ed3741d",
+      "verdict": "passed-existing-native-evidence"
+    },
+    {
+      "os": "linux",
+      "arch": "amd64",
+      "profile": "full",
+      "archive_sha256": "288ffa323d92d8abb586d364954eaaaa627026304471e33a3ec1174339287862",
+      "verdict": "passed-existing-native-evidence"
+    },
+    {
+      "os": "linux",
+      "arch": "arm64",
+      "profile": "lean",
+      "archive_sha256": "acc66012bba50848707d6de7cdf1701225b3ae7683ca51a71f5a955810aceb59",
+      "verdict": "passed-existing-native-evidence"
+    },
+    {
+      "os": "linux",
+      "arch": "arm64",
+      "profile": "full",
+      "archive_sha256": "07d468c3e92232b0174cbdc66cd2abbb507719e332b3f60a5dfc60b22f172998",
+      "verdict": "passed-existing-native-evidence"
+    },
+    {
+      "os": "windows",
+      "arch": "amd64",
+      "profile": "lean",
+      "archive_sha256": "7cde99b6f15ce86199a782dd903014c18d20bc801d9c06fa1f09a02a3a051320",
+      "verdict": "passed-existing-native-evidence"
+    },
+    {
+      "os": "windows",
+      "arch": "amd64",
+      "profile": "full",
+      "archive_sha256": "9a841f53e6e6b9f730daa206add1df4832a840cd3d17bd6c157291b286a4664d",
+      "verdict": "passed-existing-native-evidence"
+    },
+    {
+      "os": "windows",
+      "arch": "arm64",
+      "profile": "lean",
+      "archive_sha256": "d89be90644f878d5dc9f065b06bb55f348f2a80847feec858e0a05944b668d5f",
+      "verdict": "passed-existing-native-evidence"
+    },
+    {
+      "os": "windows",
+      "arch": "arm64",
+      "profile": "full",
+      "archive_sha256": "fccc7c050d83898f3cc361c67937a0fda429b0a2c53a98efb0d6d6650232febe",
+      "verdict": "passed-existing-native-evidence"
+    }
+  ],
+  "limits": [
+    "No new long-running soak; three independently promoted GA contracts remain soak-pending.",
+    "Seven exact HTTP/3 exceptions under issue569 retained; no full RFC conformance claim.",
+    "First native attempt38185018989 failed before tests due draft-asset token visibility; no package pass claim from it.",
+    "Verification workflow permission fix is post-tag; immutable release packages/source were not modified."
+  ]
+}

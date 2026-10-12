@@ -150,7 +150,9 @@ MIME lookup for a controlled registry-mapped ordinary extension and the six
 deterministic streaming mappings. Compare direct/precompressed responses and
 an explicit scoped MIME table, which bypasses host lookup. Record relevant
 registry state and Content-Type/Content-Encoding/Vary results; restore only
-the lab registry entries this journey created. Keep it separate from owner
+the values the fixture changed, preserving their original registry kinds,
+and remove uniquely owned fixture keys. Cleanup must pass before emitting
+successful evidence. Keep it separate from owner
 tests for deterministic or explicit mappings.
 
 ## 6. macOS archive first run

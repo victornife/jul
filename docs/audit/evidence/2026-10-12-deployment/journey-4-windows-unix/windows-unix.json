@@ -1,0 +1,33 @@
+{
+  "journey": "Unix",
+  "evidence_class": "controlled-ci-lab",
+  "harness_source": "6ab52a4ff14b84da47fbfa6c5cd064864cd5400a",
+  "checks": {
+    "virtual_service_identity": "passed",
+    "ordinary_user_denied_secure_config_and_history": "passed",
+    "managed_apply_rollback_restart": "passed",
+    "af_unix_service_proxy_host_failure_recovery": "passed"
+  },
+  "host": {
+    "version": "10.0.26100.0",
+    "arch": "AMD64",
+    "os": "windows"
+  },
+  "limits": [
+    "Disposable native Windows runner and synthetic fixtures, not an enterprise ACL/registry inventory"
+  ],
+  "package": {
+    "binary_sha256": "d818aec685fbf0e4bf8f131d7d749689f83bb389a9db28b7724b627d00bf1013",
+    "metadata": {
+      "product": "Jul.IA",
+      "version": "v2.2.0",
+      "commit": "b12e051139f652b400cff37d9f063f5637a7d550",
+      "build_date": "2026-10-11T23:14:04Z",
+      "dirty": false,
+      "go_version": "go1.27.2",
+      "os": "windows",
+      "arch": "amd64"
+    }
+  },
+  "backend_fixture_sha256": "8249d3b088b3fc42b22da7b144e8e36e1c1bed3f9cf6c3f11bd46783c12f862f"
+}

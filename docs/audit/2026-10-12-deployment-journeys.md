@@ -2,7 +2,8 @@
 
 This is the execution ledger for issue [#516](https://github.com/victornife/jul/issues/516).
 The maintainer selected all seven ranked journeys on 2026-10-12, in the order
-below. Pending entries are requirements, not successful results.
+below. All seven completed in the selected CI scope; final PR integration is
+tracked separately from the execution identities below.
 
 The maintainer subsequently selected **GitHub CI** as the execution environment.
 The remaining journeys use controlled production-like conditions on disposable
@@ -30,8 +31,8 @@ requires each journey to pass before the next runs.
 | 1 | Linux systemd, trusted chain, firewall, independent client, WASM | Passed in approved CI lab | Published package, both hardened units, private three-certificate chain, routed client namespace and firewall denial/recovery |
 | 2 | Windows service with pre-existing ACLs | Passed in approved CI lab | Secure/permissive pre-installation fixtures, effective ordinary-user denial/readability, preserved owners/ACEs and actual service recovery |
 | 3 | Docker externally routed HTTPS and durable state | Passed in approved CI lab | Frozen-source full nonroot image, namespace/bridge routing, TLS/admin/healthcheck and container-recreation persistence |
-| 4 | Windows service AF_UNIX HTTP upstream | Pending | Actual service identity, socket access, successful traffic and failure/recovery |
-| 5 | Windows registry/native MIME lookup | Pending | Deployed package, registry lookup, explicit-table precedence, direct/precompressed responses |
+| 4 | Windows service AF_UNIX HTTP upstream | Passed in approved CI lab | Actual virtual service account, normal response/Host, backend failure without path leakage and recovery |
+| 5 | Windows registry/native MIME lookup | Passed in approved CI lab | All 28 native/explicit direct/gzip checks and original registry value/kind restoration |
 | 6 | macOS Intel and Apple Silicon archive first run | Passed for the original archive/first-run scope | Native release verification on darwin/amd64 and darwin/arm64, both profiles |
 | 7 | All OS/architecture/profile archive downloads | Passed for the original package scope | All six native hosts/twelve profiles, including checksums/attestations/startup/upgrade/rollback |
 
@@ -66,7 +67,7 @@ These checks used bounded disposable native environments. They do not certify
 real service identities, pre-existing Windows ACLs, external routing, a
 production certificate deployment or long-duration feature stability.
 
-## Journey 1 preparation and remaining execution
+## Historical journey 1 preparation and prefix runs
 
 The previous systemd journey built with only `console` and therefore did not
 execute a WASM guest under either shipped unit. The prepared extension builds
@@ -118,8 +119,8 @@ unchanged published Windows full package and its packaged installer. The
 secure fixture refused ordinary-user config/history access while preserving
 unrelated entries/data; the permissive fixture remained readable before and
 after installation, as documented. Both used the actual virtual service
-account and retained service availability/recovery. Docker is next; later
-rows are not promoted by these results. See the
+account and retained service availability/recovery. These prefix runs did not
+promote later rows; the completed integrated run below supplies their evidence. See the
 [execution runbook](../deployment-journeys.md).
 
 Do not advance closure on preparatory checks. If a released-package defect
@@ -148,3 +149,56 @@ contexts now explicitly require TLS 1.2+, and the replacement Go backend
 escapes the echoed Host value. No query exclusion, suppression, gate reduction
 or released-product vulnerability claim is introduced. Corrected hosted
 execution and CodeQL must pass before closure.
+
+The [second integrated run](https://github.com/victornife/jul/actions/runs/38314171746)
+on reviewed head `b74e361a` passed journeys 1–4, including actual Windows
+service AF_UNIX traffic, Host preservation and backend failure/recovery.
+[MIME job115029015590](https://github.com/victornife/jul/actions/runs/38314171746/job/115029015590)
+passed all 28 response checks, then failed restoring the pre-existing `.ts`
+registry value through a read-only PowerShell registry handle. Rows 6–7 were
+skipped. The fixture now opens an explicitly writable handle, preserves and
+verifies the original value/kind, and disposes its handles. Successful traffic
+alone does not complete the journey; its cleanup must pass too. This is a
+verification-tooling correction, not a change to the published Jul package.
+
+## Completed seven-job execution
+
+[Run38315192960](https://github.com/victornife/jul/actions/runs/38315192960)
+passed all seven jobs, in order, at reviewed harness head
+`2c196095531890116bafaedf7794269234f9f24b`. Every report records the actual CI
+checkout `6ab52a4ff14b84da47fbfa6c5cd064864cd5400a`; the published package and
+frozen Docker source remain `b12e051139f652b400cff37d9f063f5637a7d550`.
+The retained reports do not certify a later documentation commit or merge.
+
+| Order | Successful job | Retained raw report |
+| --- | --- | --- |
+| 1 | [115030032193](https://github.com/victornife/jul/actions/runs/38315192960/job/115030032193) | [systemd network](evidence/2026-10-12-deployment/journey-1-systemd/systemd-network.json) |
+| 2 | [115030281788](https://github.com/victornife/jul/actions/runs/38315192960/job/115030281788) | [Windows ACL](evidence/2026-10-12-deployment/journey-2-windows-acl/windows-acl.json) |
+| 3 | [115030801294](https://github.com/victornife/jul/actions/runs/38315192960/job/115030801294) | [Docker network/recreation](evidence/2026-10-12-deployment/journey-3-docker/docker-network.json) |
+| 4 | [115031344635](https://github.com/victornife/jul/actions/runs/38315192960/job/115031344635) | [Windows AF_UNIX](evidence/2026-10-12-deployment/journey-4-windows-unix/windows-unix.json) |
+| 5 | [115031832752](https://github.com/victornife/jul/actions/runs/38315192960/job/115031832752) | [Windows MIME/restoration](evidence/2026-10-12-deployment/journey-5-windows-mime/windows-mime.json) |
+| 6 | [115032227643](https://github.com/victornife/jul/actions/runs/38315192960/job/115032227643) | [Four macOS profiles](evidence/2026-10-12-deployment/journey-6-macos/macos-evidence.json) |
+| 7 | [115032282899](https://github.com/victornife/jul/actions/runs/38315192960/job/115032282899) | [Twelve archive profiles](evidence/2026-10-12-deployment/journey-7-archives/archive-evidence.json) |
+
+The [retention manifest](evidence/2026-10-12-deployment/manifest.json) records
+all seven artifact ZIP digests, unmodified JSON file hashes, job identities and
+start/completion times. Downloaded ZIP bytes matched GitHub's digests, every
+report matched the checkout identity, and the next job started only after its
+predecessor completed successfully. Package-verifier reports are retained beside
+the systemd and Windows reports. Public evidence contains no tokens, private
+keys or raw secret-bearing config readback.
+
+The MIME result includes all 28 content/type/encoding/body checks and successful
+registry restoration. Reconciliation retains the original native run38185464698
+and report SHA-256, verifies the immutable tag/source and current asset digests,
+and explicitly sets `new_native_execution: false`: four macOS profiles and
+twelve total profiles are reconciled, not rerun on Linux. The private CA,
+shared-kernel routing, synthetic ACLs and derived Docker image limits above
+remain. No Jul runtime defect was established; all encountered fixture/CodeQL
+findings were corrected and the sequence passed without gate suppression.
+
+D12's selected GitHub-CI scope has executed evidence. #515/D11 semantic review,
+#569's seven inherited HTTP/3 exceptions and post-GA soak are separate work.
+[PR #575](https://github.com/victornife/jul/pull/575) owns final-head CI and
+maintainer review; #516 closure follows integration. No broad repository audit
+or private-production certification is implied.
