@@ -29,7 +29,7 @@ requires each journey to pass before the next runs.
 | --- | --- | --- | --- |
 | 1 | Linux systemd, trusted chain, firewall, independent client, WASM | Passed in approved CI lab | Published package, both hardened units, private three-certificate chain, routed client namespace and firewall denial/recovery |
 | 2 | Windows service with pre-existing ACLs | Passed in approved CI lab | Secure/permissive pre-installation fixtures, effective ordinary-user denial/readability, preserved owners/ACEs and actual service recovery |
-| 3 | Docker externally routed HTTPS and durable state | Pending | Frozen-source image, routed client, TLS/admin/healthcheck and restart/persistence |
+| 3 | Docker externally routed HTTPS and durable state | Passed in approved CI lab | Frozen-source full nonroot image, namespace/bridge routing, TLS/admin/healthcheck and container-recreation persistence |
 | 4 | Windows service AF_UNIX HTTP upstream | Pending | Actual service identity, socket access, successful traffic and failure/recovery |
 | 5 | Windows registry/native MIME lookup | Pending | Deployed package, registry lookup, explicit-table precedence, direct/precompressed responses |
 | 6 | macOS Intel and Apple Silicon archive first run | Passed for the original archive/first-run scope | Native release verification on darwin/amd64 and darwin/arm64, both profiles |
@@ -125,3 +125,26 @@ rows are not promoted by these results. See the
 Do not advance closure on preparatory checks. If a released-package defect
 appears, retain that failing result and verify any correction under its own
 source/package identity. Published tags and archives remain unchanged.
+
+## Failed attempts and corrections
+
+The [first integrated run](https://github.com/victornife/jul/actions/runs/38312478556)
+on reviewed head `145fcd5d` passed journeys 1–3, including
+[Docker job115022324941](https://github.com/victornife/jul/actions/runs/38312478556/job/115022324941).
+[AF_UNIX job115023063549](https://github.com/victornife/jul/actions/runs/38312478556/job/115023063549)
+stopped before proxy execution because the Python backend fixture could not
+start on Windows. Rows 5–7 were correctly skipped by the dependency chain;
+they are not recorded as passed. The fixture now uses Go's native `net.Listen`
+Windows AF_UNIX implementation; the tested Jul binary stays unchanged. The
+fixture's readiness identifies its PID/network and the report records its
+binary hash. CPython's [socket header](https://github.com/python/cpython/blob/v3.13.0/Modules/socketmodule.h#L90-L94)
+removes AF_UNIX without `sys/un.h`, and its socketserver Unix classes are
+conditional. The agent workspace also denies AF_UNIX creation, so local
+cross-build/vet are not relabeled as hosted functional evidence.
+
+CodeQL reported two TLS-version alerts in the new trust-test fixture and one
+response-splitting alert in the Python backend's raw Host echo. The test
+contexts now explicitly require TLS 1.2+, and the replacement Go backend
+escapes the echoed Host value. No query exclusion, suppression, gate reduction
+or released-product vulnerability claim is introduced. Corrected hosted
+execution and CodeQL must pass before closure.

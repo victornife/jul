@@ -10,6 +10,7 @@ on:
       - 'scripts/test-windows-service.ps1'
       - 'scripts/docker-network-journey.py'
       - 'scripts/windows-deployment-*.py'
+      - 'testdata/deployment-backend/**'
       - 'scripts/reconcile-deployment-packages.py'
       - 'scripts/verify-release-packages.py'
       - 'deploy/**'
@@ -24,6 +25,7 @@ on:
       - 'scripts/test-windows-service.ps1'
       - 'scripts/docker-network-journey.py'
       - 'scripts/windows-deployment-*.py'
+      - 'testdata/deployment-backend/**'
       - 'scripts/reconcile-deployment-packages.py'
       - 'scripts/verify-release-packages.py'
       - 'deploy/**'
@@ -95,6 +97,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.13'
@@ -105,10 +111,12 @@ jobs:
       - name: Execute AF_UNIX service journey
         shell: pwsh
         run: |
+          go build -o windows-backend.exe ./testdata/deployment-backend
+          if ($LASTEXITCODE -ne 0) { throw 'Native Unix fixture build failed.' }
           $package = (Get-Content package-path.txt -Raw).Trim()
           ./scripts/test-windows-service.ps1 -Journey Unix -ReportPath windows-unix.json `
             -BinaryPath (Join-Path $package 'jul.exe') -InstallerPath (Join-Path $package 'install-service.ps1') `
-            -ProvisionPath (Join-Path $package 'new-secure-data-dir.ps1')
+            -ProvisionPath (Join-Path $package 'new-secure-data-dir.ps1') -BackendBinaryPath (Join-Path $PWD 'windows-backend.exe')
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:

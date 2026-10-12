@@ -5,7 +5,8 @@ param(
     [string] $InstallerPath = '',
     [string] $ProvisionPath = '',
     [ValidateSet('Fresh', 'ExistingAcl', 'Unix', 'Mime')] [string] $Journey = 'Fresh',
-    [string] $ReportPath = ''
+    [string] $ReportPath = '',
+    [string] $BackendBinaryPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,13 +42,21 @@ function Start-UnixBackend {
     foreach ($path in @($script:socketPath, $script:backendReady)) {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
     }
-    $arguments = @(('"' + (Join-Path $PSScriptRoot 'windows-deployment-backend.py') + '"'),
-                  '--unix', ('"' + $script:socketPath + '"'), '--ready-file', ('"' + $script:backendReady + '"'))
-    $process = Start-Process -FilePath (Get-Command python).Source -ArgumentList $arguments -PassThru `
+    if (-not $BackendBinaryPath -or -not (Test-Path -LiteralPath $BackendBinaryPath -PathType Leaf)) {
+        throw 'AF_UNIX journey requires the native Go fixture binary.'
+    }
+    $arguments = @('--unix', ('"' + $script:socketPath + '"'), '--ready-file', ('"' + $script:backendReady + '"'))
+    $process = Start-Process -FilePath $BackendBinaryPath -ArgumentList $arguments -PassThru `
         -RedirectStandardError (Join-Path $root 'backend-errors.log')
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
-        if ($process.HasExited) { throw 'AF_UNIX backend exited before readiness.' }
-        if (Test-Path -LiteralPath $script:backendReady) { return $process }
+        if ($process.HasExited) {
+            $details = Get-Content -LiteralPath (Join-Path $root 'backend-errors.log') -Raw
+            throw "AF_UNIX backend exited before readiness: $details"
+        }
+        if (Test-Path -LiteralPath $script:backendReady) {
+            $ready = Get-Content -LiteralPath $script:backendReady -Raw | ConvertFrom-Json
+            if ($ready.network -eq 'unix' -and $ready.pid -eq $process.Id) { return $process }
+        }
         Start-Sleep -Milliseconds 200
     }
     Stop-Process -Id $process.Id -Force
@@ -396,6 +405,7 @@ exit 0
         Write-Host 'PASS: pre-existing secure and permissive ACLs, effective ordinary-user access, preserved entries and service availability'
     }
     if ($Journey -eq 'Unix') {
+        $report.backend_fixture_sha256 = (Get-FileHash -Algorithm SHA256 $BackendBinaryPath).Hash.ToLowerInvariant()
         $response = Invoke-WebRequest -Uri ($script:trafficURL + 'proxy/') -Headers @{Host = 'jul516-upstream.test'} -SkipHttpErrorCheck -TimeoutSec 5
         Assert-Status $response 200
         if ($response.Content.Trim() -ne 'Jul CI Unix backend' -or $response.Headers['X-Backend-Host'] -ne 'jul516-upstream.test') { throw 'Unix proxy did not preserve response/Host.' }
@@ -403,7 +413,7 @@ exit 0
         $backendProcess = $null
         $failure = Invoke-WebRequest -Uri ($script:trafficURL + 'proxy/') -SkipHttpErrorCheck -TimeoutSec 5
         if ([int]$failure.StatusCode -notin @(502, 503)) { throw 'Unix backend failure did not produce the documented gateway error.' }
-        if ($failure.Content.Contains($script:socketPath)) { throw 'Socket path leaked in client error.' }
+        if ($failure.Content.Contains($script:socketPath) -or $failure.Content.Contains($script:socketPath.Replace('\', '/'))) { throw 'Socket path leaked in client error.' }
         $backendProcess = Start-UnixBackend
         $recovered = $false
         for ($attempt = 0; $attempt -lt 30; $attempt++) {

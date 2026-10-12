@@ -34,12 +34,14 @@ class TrustTests(unittest.TestCase):
 
         server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(server_cert, self.pki["key"])
         server.socket = context.wrap_socket(server.socket, server_side=True)
         worker = threading.Thread(target=server.serve_forever)
         worker.start()
         try:
             trusted = ssl.create_default_context(cafile=str(client_ca))
+            trusted.minimum_version = ssl.TLSVersion.TLSv1_2
             # Connect locally but set an independent TLS hostname for negatives.
             import socket
             with socket.create_connection(("127.0.0.1", server.server_port), timeout=3) as connection:
