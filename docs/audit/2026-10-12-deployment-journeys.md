@@ -18,7 +18,7 @@ below. Pending entries are requirements, not successful results.
 
 | Order | Journey | Verdict | Evidence or remaining requirement |
 | --- | --- | --- | --- |
-| 1 | Linux systemd, trusted chain, firewall, independent client, WASM | Pending | Package/unit/WASM automation prepared; actual host/client/trust/firewall execution required |
+| 1 | Linux systemd, trusted chain, firewall, independent client, WASM | Partially verified | Published package/unit/WASM checks passed; actual trusted-chain/firewall/independent-client execution required |
 | 2 | Windows service with pre-existing ACLs | Pending | Reviewed secure and permissive existing roots; effective service/ordinary-user access and managed recovery |
 | 3 | Docker externally routed HTTPS and durable state | Pending | Frozen-source image, routed client, TLS/admin/healthcheck and restart/persistence |
 | 4 | Windows service AF_UNIX HTTP upstream | Pending | Actual service identity, socket access, successful traffic and failure/recovery |
@@ -68,9 +68,29 @@ response header. Existing adoption/Apply/history/rollback/restart/read-only
 checks remain. The bounded guest probe uses a five-second timeout to exercise
 interpretation without turning this journey into a CPU benchmark.
 
-The JSON report explicitly labels this automation **disposable** and leaves
-trusted-chain, independent-client and firewall requirements **pending**.
-Hosted results will be linked here after execution; preparation is not a pass.
+The [hosted systemd run](https://github.com/victornife/jul/actions/runs/38306777753)
+and [job](https://github.com/victornife/jul/actions/runs/38306777753/job/115002637828)
+passed both source-build and actual v2.2.0 full-package execution on Linux
+amd64 with systemd 255. Both units kept the hardening setting, reported the
+interpreter, executed the pinned guest and passed recovery/read-only checks.
+No product defect was established by this bounded run.
+
+The reviewed preparation head was `7ea42206556f0f95c28b7eeea29ad236a588ac91`;
+the workflow checked out CI merge `15091fd09c24efc5e16ff53602b2847a362d5229`.
+That harness identity is distinct from unchanged published package source
+`b12e051139f652b400cff37d9f063f5637a7d550`. The actual full archive SHA-256 was
+`288ffa323d92d8abb586d364954eaaaa627026304471e33a3ec1174339287862`, and the
+serving guest SHA-256 was
+`1641d893c36149ef76bb6430f21a5b9dcb1efc77e539cea86a3fb651e03b4882`.
+
+Artifact `11772628066` has SHA-256
+`bc645a0b5f29f407c3afa5a11ec6b7c96dc49e81da9f93212a3d251d777918a4`;
+the downloaded bytes matched it. Unmodified [source report](evidence/2026-10-12-systemd/systemd-source.json)
+and [package report](evidence/2026-10-12-systemd/systemd-package.json) are
+retained in the repository so artifact expiry does not remove the verdicts.
+Both explicitly label this automation **disposable** and leave trusted-chain,
+independent-client and firewall requirements **pending**. They do not certify
+the later documentation commit or the unexecuted lab/network requirements.
 
 The current agent workspace has no running systemd, Docker or Windows runtime.
 The maintainer selected an existing Linux lab, but the workspace has no
