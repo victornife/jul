@@ -110,6 +110,17 @@ from the existing fresh-root CI result.
 
 ## 3. Docker external HTTPS and persistence
 
+The CI implementation builds from the frozen v2.2.0 Git archive using the
+documented full profile and pinned Dockerfile images. A separate routed client
+namespace reaches the bridge container through published gateway ports. The
+lab config supplies its CA through `SSL_CERT_FILE`, so the unchanged shell-free
+exec healthcheck can verify admin TLS using the certificate's loopback SAN.
+Reports retain source-archive and image hashes separately: the shipped
+Dockerfile embeds version but does not embed a source commit, and this derived
+image is not a published/attested GHCR artifact. Recreation checks preserve
+the original history ID and access-log prefix; the cache-volume check uses a
+marker and does not repeat HTTP cache correctness certification.
+
 Build the documented image/profile from frozen v2.2.0 source; record source,
 builder identity, image digest and binary capabilities. There is no published
 GHCR image implied by this check. Use persistent config/history/cache/log

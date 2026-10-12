@@ -41,8 +41,8 @@ function Start-UnixBackend {
     foreach ($path in @($script:socketPath, $script:backendReady)) {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
     }
-    $arguments = @('"' + (Join-Path $PSScriptRoot 'windows-deployment-backend.py') + '"',
-                  '--unix', '"' + $script:socketPath + '"', '--ready-file', '"' + $script:backendReady + '"')
+    $arguments = @(('"' + (Join-Path $PSScriptRoot 'windows-deployment-backend.py') + '"'),
+                  '--unix', ('"' + $script:socketPath + '"'), '--ready-file', ('"' + $script:backendReady + '"'))
     $process = Start-Process -FilePath (Get-Command python).Source -ArgumentList $arguments -PassThru `
         -RedirectStandardError (Join-Path $root 'backend-errors.log')
     for ($attempt = 0; $attempt -lt 30; $attempt++) {

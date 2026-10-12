@@ -10,6 +10,7 @@ on:
       - 'scripts/test-windows-service.ps1'
       - 'scripts/docker-network-journey.py'
       - 'scripts/windows-deployment-*.py'
+      - 'scripts/reconcile-deployment-packages.py'
       - 'scripts/verify-release-packages.py'
       - 'deploy/**'
       - 'docs/deployment-journeys.md'
@@ -23,6 +24,7 @@ on:
       - 'scripts/test-windows-service.ps1'
       - 'scripts/docker-network-journey.py'
       - 'scripts/windows-deployment-*.py'
+      - 'scripts/reconcile-deployment-packages.py'
       - 'scripts/verify-release-packages.py'
       - 'deploy/**'
       - 'docs/deployment-journeys.md'
@@ -65,6 +67,117 @@ jobs:
           path: |
             package.json
             systemd-network.json
+          if-no-files-found: error
+
+  docker:
+    name: '3 Docker routed TLS and recreation'
+    needs: windows-acl
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.13'
+      - name: Execute frozen-source Docker network journey
+        run: python scripts/docker-network-journey.py --report docker-network.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: journey-3-docker
+          path: docker-network.json
+          if-no-files-found: error
+
+  windows-unix:
+    name: '4 Windows service AF_UNIX'
+    needs: docker
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.13'
+      - name: Verify published native package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/prepare-deployment-package.py --os windows --arch amd64 --directory packages --report package.json --path-output package-path.txt
+      - name: Execute AF_UNIX service journey
+        shell: pwsh
+        run: |
+          $package = (Get-Content package-path.txt -Raw).Trim()
+          ./scripts/test-windows-service.ps1 -Journey Unix -ReportPath windows-unix.json `
+            -BinaryPath (Join-Path $package 'jul.exe') -InstallerPath (Join-Path $package 'install-service.ps1') `
+            -ProvisionPath (Join-Path $package 'new-secure-data-dir.ps1')
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: journey-4-windows-unix
+          path: |
+            package.json
+            windows-unix.json
+          if-no-files-found: error
+
+  windows-mime:
+    name: '5 Windows registry and explicit MIME'
+    needs: windows-unix
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.13'
+      - name: Verify published native package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/prepare-deployment-package.py --os windows --arch amd64 --directory packages --report package.json --path-output package-path.txt
+      - name: Execute registry MIME service journey
+        shell: pwsh
+        run: |
+          $package = (Get-Content package-path.txt -Raw).Trim()
+          ./scripts/test-windows-service.ps1 -Journey Mime -ReportPath windows-mime.json `
+            -BinaryPath (Join-Path $package 'jul.exe') -InstallerPath (Join-Path $package 'install-service.ps1') `
+            -ProvisionPath (Join-Path $package 'new-secure-data-dir.ps1')
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: journey-5-windows-mime
+          path: |
+            package.json
+            windows-mime.json
+          if-no-files-found: error
+
+  macos-evidence:
+    name: '6 macOS native evidence reconciliation'
+    needs: windows-mime
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Reconcile unchanged native macOS evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/reconcile-deployment-packages.py --scope macos --report macos-evidence.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: journey-6-macos
+          path: macos-evidence.json
+          if-no-files-found: error
+
+  archive-evidence:
+    name: '7 twelve-profile archive reconciliation'
+    needs: macos-evidence
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Reconcile unchanged six-host archive evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/reconcile-deployment-packages.py --scope all --report archive-evidence.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: journey-7-archives
+          path: archive-evidence.json
           if-no-files-found: error
 
   windows-acl:

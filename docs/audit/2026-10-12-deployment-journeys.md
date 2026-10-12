@@ -28,7 +28,7 @@ requires each journey to pass before the next runs.
 | Order | Journey | Verdict | Evidence or remaining requirement |
 | --- | --- | --- | --- |
 | 1 | Linux systemd, trusted chain, firewall, independent client, WASM | Passed in approved CI lab | Published package, both hardened units, private three-certificate chain, routed client namespace and firewall denial/recovery |
-| 2 | Windows service with pre-existing ACLs | Pending | Reviewed secure and permissive existing roots; effective service/ordinary-user access and managed recovery |
+| 2 | Windows service with pre-existing ACLs | Passed in approved CI lab | Secure/permissive pre-installation fixtures, effective ordinary-user denial/readability, preserved owners/ACEs and actual service recovery |
 | 3 | Docker externally routed HTTPS and durable state | Pending | Frozen-source image, routed client, TLS/admin/healthcheck and restart/persistence |
 | 4 | Windows service AF_UNIX HTTP upstream | Pending | Actual service identity, socket access, successful traffic and failure/recovery |
 | 5 | Windows registry/native MIME lookup | Pending | Deployed package, registry lookup, explicit-table precedence, direct/precompressed responses |
@@ -110,8 +110,16 @@ passed on reviewed head `9310bc41749f9c581330e44faef65b08778eb66f`.
 The private chain, wrong-CA/hostname/missing-intermediate rejection, routed
 client, scoped firewall denial/recovery and authenticated read-only admin
 checks executed successfully against the unchanged published full package.
-The raw report retains the workflow checkout and package identities. Windows
-ACL execution is next; remaining rows are not promoted by this result. See the
+The raw report retains the workflow checkout and package identities. The
+[two-journey run](https://github.com/victornife/jul/actions/runs/38311074090)
+also passed [Windows ACL job115016900365](https://github.com/victornife/jul/actions/runs/38311074090/job/115016900365)
+on reviewed head `d05be7f3406d849d430048054bd4690f14c4cb14`, against the
+unchanged published Windows full package and its packaged installer. The
+secure fixture refused ordinary-user config/history access while preserving
+unrelated entries/data; the permissive fixture remained readable before and
+after installation, as documented. Both used the actual virtual service
+account and retained service availability/recovery. Docker is next; later
+rows are not promoted by these results. See the
 [execution runbook](../deployment-journeys.md).
 
 Do not advance closure on preparatory checks. If a released-package defect
