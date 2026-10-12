@@ -1,0 +1,42 @@
+{
+  "journey": "systemd",
+  "evidence_class": "disposable",
+  "harness_source": "15091fd09c24efc5e16ff53602b2847a362d5229",
+  "host": {
+    "os": "Linux",
+    "arch": "x86_64",
+    "systemd": "systemd 255 (255.4-1ubuntu8.17)"
+  },
+  "checks": {
+    "editable_wasm_interpreter": "passed",
+    "editable_recovery": "passed",
+    "single_host_temporary_tls": "passed",
+    "readonly_wasm_interpreter": "passed",
+    "readonly_apply_denied": "passed"
+  },
+  "production_like": {
+    "trusted_chain": "pending",
+    "independent_client": "pending",
+    "firewall": "pending"
+  },
+  "binary": {
+    "archive": "jul_v2.2.0_linux_amd64_full.tar.gz",
+    "sha256": "288ffa323d92d8abb586d364954eaaaa627026304471e33a3ec1174339287862",
+    "metadata": {
+      "product": "Jul.IA",
+      "version": "v2.2.0",
+      "commit": "b12e051139f652b400cff37d9f063f5637a7d550",
+      "build_date": "2026-10-11T23:14:04Z",
+      "dirty": false,
+      "go_version": "go1.27.2",
+      "os": "linux",
+      "arch": "amd64"
+    },
+    "checksums": "passed",
+    "provenance": "passed",
+    "sbom": "passed",
+    "kind": "published-package",
+    "binary_sha256": "38f36cf0f276674c9a89f2daf7dfaf87920f5deb45149ce40b1eb0ffcabfc54d"
+  },
+  "wasm_module_sha256": "1641d893c36149ef76bb6430f21a5b9dcb1efc77e539cea86a3fb651e03b4882"
+}

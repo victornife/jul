@@ -9,6 +9,18 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Verification
+
+- Add seven sequential GitHub CI deployment journeys for unchanged v2.2.0
+  packages/frozen Docker source: hardened systemd WASM with private-chain trust,
+  routed client and firewall rejection/recovery; pre-existing Windows ACLs;
+  routed Docker TLS/admin/healthcheck and recreation persistence; actual Windows
+  service AF_UNIX proxy/failure/recovery; registry/explicit MIME and gzip
+  responses; then reconciliation of existing native macOS and twelve-profile
+  archive evidence. Retain source-bound raw reports, failed attempts and lab
+  limits. Fix Windows backend and registry-cleanup fixtures and explicit TLS
+  minima in trust tests. No runtime, maturity, soak or coverage-floor change.
+
 ## [2.2.0] - 2026-10-12
 
 Published at 2026-10-11T23:49:52Z from immutable source

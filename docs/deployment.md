@@ -193,6 +193,19 @@ the runner's non-loopback address with a trusted temporary TLS certificate and
 checks that tokenless requests are denied. This is a disposable single-host
 TLS exercise; production certificates and network policy require separate verification.
 
+The journey also exercises a pinned WASM middleware guest under both units,
+checking the running service's interpreter mode and guest-generated response
+header while keeping `MemoryDenyWriteExecute=yes`. Its optional published-package
+mode verifies archive/source/profile identity and signed attestations before
+installation; source-build and package results remain separate. See the
+[#516 execution runbook](deployment-journeys.md) and
+[dated verdict ledger](audit/2026-10-12-deployment-journeys.md) for the separate
+controlled CI network journey. It uses a private root/intermediate/leaf chain,
+an explicitly trusted root, a routed client namespace and scoped firewall
+denial/recovery, including wrong-CA/name/missing-intermediate rejection.
+The client shares the runner kernel; site-specific certificate trust and
+Internet/cloud firewall policy still require operator verification.
+
 ### Plugins and MemoryDenyWriteExecute
 
 Both units set `MemoryDenyWriteExecute=yes`, a W^X policy that forbids making
@@ -306,6 +319,15 @@ docker run --rm \
   use `sinks = []` as an off setting: an enabled block with an explicit empty
   sink list is rejected. Access-log changes hot-apply (#98) — no restart needed.
 
+The [ordered deployment workflow](../.github/workflows/deployment-journeys-516.yml)
+also builds the full image from the frozen v2.2.0 Git archive. Its routed client
+exercises HTTPS static/proxy/WASM, authenticated admin/Console and the baked
+exec healthcheck with `SSL_CERT_FILE` pointing to the lab root. Container
+recreation preserves config/history, a cache-volume marker and the existing
+access-log bytes. The ledger records source-archive and image identities;
+this derived image is separate from any published GHCR image. Client and
+container namespaces share the runner kernel.
+
 ## Windows service
 
 [deploy/windows/install-service.ps1](../deploy/windows/install-service.ps1)
@@ -346,6 +368,17 @@ account, then exercises initial managed adoption, Apply, history rollback and
 restart with a loopback admin token. It provisions the fresh protected directory
 and runs a separate ordinary local user to deny config reads and history writes.
 Existing production directories still require their own ACL review.
+
+The [ordered deployment workflow](../.github/workflows/deployment-journeys-516.yml)
+uses unchanged published v2.2.0 full packages for three additional native
+Windows journeys: ACL fixtures created before installation, HTTP/1.1 AF_UNIX
+under the actual virtual service identity, and native registry/explicit MIME
+lookup with direct/gzip responses. Secure ACL fixtures deny ordinary-user
+config/history access; permissive fixtures remain readable after installation,
+confirming the preservation boundary above. Registry fixtures restore the
+original value and kind before recording success. See the
+[source-bound ledger](audit/2026-10-12-deployment-journeys.md) for verdicts and
+limits; synthetic CI fixtures do not inventory an enterprise deployment.
 
 ## Behind a reverse proxy or load balancer
 

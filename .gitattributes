@@ -15,3 +15,7 @@ docs/generated/** text eol=lf
 # Git hooks run under /bin/sh (Git for Windows' bundled sh included) and must
 # keep LF endings on every platform, regardless of core.autocrlf.
 .githooks/* text eol=lf
+
+# Retained CI evidence must match its recorded raw SHA-256 on every checkout.
+# Windows reports intentionally retain CRLF; recognize their line terminators.
+docs/audit/evidence/2026-10-12-deployment/** -text whitespace=cr-at-eol

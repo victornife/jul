@@ -20,7 +20,7 @@ their current disposition belongs to the issue tracker and #62.
 
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
-| [2026-09-27 documentation review](audit/old/2026-09-27-documentation-review.md) | `36e0411a` at clean `main`; remediation on isolated branch | Historical **partial** documentation review and findings/coverage ledger; no exhaustive certification or 10/10 claim | D11/D12 and remaining semantic/platform review stay open; see the current report and #62 for issue sequencing |
+| [2026-09-27 documentation review](audit/old/2026-09-27-documentation-review.md) | `36e0411a` at clean `main`; remediation on isolated branch | Historical **partial** documentation review and findings/coverage ledger; no exhaustive certification or 10/10 claim | D11 and remaining semantic review stay open; D12 has selected CI evidence in the current deployment ledger, with integration tracked by #516/#62 |
 | [2026-09-29 high-risk continuation](audit/old/2026-09-29-high-risk-continuation.md) | PR #482 head `bd8f5b0`; stacked PR #495 at `731fced8` | Targeted security and runtime boundary review; nine branch workflows passed on the exact PR head | Authentication ambiguity, admin mutation admission, bounded dependency and file reads; remaining scopes and verification limits explicit |
 | [2026-09-29 cache/WAF/plugin continuation](audit/old/2026-09-29-cache-waf-plugin-continuation.md) | Stacked after PR #495 head `731fced8` | Merged via #496; tree matches `ed302aae` | Conditional/cache timing and occupancy, WAF compilation input/deadline, plugin fetch/module/request integrity; other ledger rows remain open |
 | [2026-09-29 final high-impact batch](audit/old/2026-09-29-final-high-impact-batch.md) | Stacked tip `5a592d40` | Merged via #497; integrated tree matches that tip at `23c68d6f` | CGI/uWSGI framing, short stream writes, bounds and host routing; not a full audit |
@@ -73,11 +73,18 @@ their current disposition belongs to the issue tracker and #62.
 - Wave 6 (#437 storage headroom, #440 WAF policy visibility and #445
   diagnostics guidance) shipped in v2.1.0. These Beta/released
   additions do not inherit the stable v2.0.0 release or base-feature GA.
-- The 2026-09-27 documentation ledger's **D11** and **D12** remain open.
-  D11 is unfinished review of examples, config leaves and platform
-  instructions. D12 is unfinished production-like certificate, existing
-  Windows ACL, and non-loopback admin TLS evidence. Passing release gates
-  does not close them and does not make the repository fully audited.
+- The 2026-09-27 documentation ledger's **D11** remains open for review of
+  examples, config leaves and platform instructions under #515. **D12** now
+  has executed evidence for all seven journeys in the maintainer-selected
+  GitHub CI scope: real systemd/Windows identities, private-chain trust,
+  routed client/firewall checks, pre-existing ACL fixtures, Docker persistence,
+  AF_UNIX and registry MIME, followed by existing native macOS/archive
+  reconciliation. The [deployment ledger](audit/2026-10-12-deployment-journeys.md)
+  retains reports, failures, corrections and exact source/package identities;
+  #575/#516 track final integration. Disposable native fixtures, shared-kernel
+  namespaces and private lab PKI do not certify private production hosts,
+  enterprise trust/ACL inventories, Internet/cloud firewall policy or long soak.
+  This does not make the repository fully audited.
 - #434 is no-go for v2.1.0. It stays CANDIDATE/LATER.
 
 Volatile issue-level sequencing is owned by

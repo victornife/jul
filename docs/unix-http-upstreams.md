@@ -81,6 +81,14 @@ The `unix-http-upstream` migration-corpus fixture validates the imported Jul can
 
 The permanent `CGC-FOLLOWUP #407 Unix HTTP proxy quality` workflow runs real AF_UNIX HTTP contract tests on Linux, macOS and Windows runners. If a supported runner stops providing usable AF_UNIX semantics, that platform gate must fail rather than silently skipping the behavior. macOS fixtures use a deliberately short `/tmp` path to stay below Darwin's Unix-socket path limit.
 
+The [ordered deployment journey](deployment-journeys.md)
+also exercises the unchanged published Windows full package as `NT SERVICE\jul`,
+using a native Go AF_UNIX HTTP fixture. It verifies response body, preserved
+Host, gateway failure without socket-path disclosure and recovery after backend
+replacement. The [dated ledger](audit/2026-10-12-deployment-journeys.md) retains
+the actual CI/package identities. This disposable service check does not imply
+POSIX filesystem permissions or support for the excluded Unix protocols above.
+
 The same workflow also runs the full configured-neighbor tag matrix, race detection, importer checks, issue-owned added-production-statement coverage, dependency integrity (`go mod verify` plus no-drift `go mod tidy`), and a same-runner TCP hot-path benchmark comparison against `main`. The benchmark reports the <=2% regression target from #407 and treats >5% as an automatic material-regression failure requiring investigation.
 
 The implementation uses Go's existing standard-library networking and HTTP primitives and adds no new runtime third-party dependency. Dependency correctness is therefore expressed as no unexpected `go.mod`/`go.sum` drift plus the repository-wide vulnerability and dependency gates, not as an unnecessary package-version bump.

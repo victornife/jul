@@ -1,0 +1,28 @@
+{
+  "journey": "systemd",
+  "evidence_class": "disposable",
+  "harness_source": "15091fd09c24efc5e16ff53602b2847a362d5229",
+  "host": {
+    "os": "Linux",
+    "arch": "x86_64",
+    "systemd": "systemd 255 (255.4-1ubuntu8.17)"
+  },
+  "checks": {
+    "editable_wasm_interpreter": "passed",
+    "editable_recovery": "passed",
+    "single_host_temporary_tls": "passed",
+    "readonly_wasm_interpreter": "passed",
+    "readonly_apply_denied": "passed"
+  },
+  "production_like": {
+    "trusted_chain": "pending",
+    "independent_client": "pending",
+    "firewall": "pending"
+  },
+  "binary": {
+    "kind": "source-build",
+    "source": "15091fd09c24efc5e16ff53602b2847a362d5229",
+    "binary_sha256": "624d5802d4fe7e8f610c30268090b56a8836c9767ac167c40a24a44a536bb2e9"
+  },
+  "wasm_module_sha256": "1641d893c36149ef76bb6430f21a5b9dcb1efc77e539cea86a3fb651e03b4882"
+}

@@ -8,6 +8,10 @@ on:
       - 'deploy/docker/server.toml'
       - 'docs/deployment.md'
       - 'scripts/systemd-deployment-e2e.py'
+      - 'scripts/deployment_lab.py'
+      - 'scripts/verify-release-packages.py'
+      - 'testdata/plugins/v1-current-header-inject.wasm'
+      - 'internal/plugins/**'
       - 'cmd/jul/**'
       - 'internal/admin/**'
       - 'internal/app/**'
@@ -24,6 +28,10 @@ on:
       - 'deploy/docker/server.toml'
       - 'docs/deployment.md'
       - 'scripts/systemd-deployment-e2e.py'
+      - 'scripts/deployment_lab.py'
+      - 'scripts/verify-release-packages.py'
+      - 'testdata/plugins/v1-current-header-inject.wasm'
+      - 'internal/plugins/**'
       - 'cmd/jul/**'
       - 'internal/admin/**'
       - 'internal/app/**'
@@ -35,6 +43,7 @@ on:
 
 permissions:
   contents: read
+  attestations: read
 
 concurrency:
   group: systemd-deployment-e2e-${{ github.workflow }}-${{ github.ref }}
@@ -53,4 +62,24 @@ jobs:
       - name: Record systemd runtime
         run: systemctl --version && test -d /run/systemd/system && sudo -n true
       - name: Exercise shipped service units
-        run: python3 scripts/systemd-deployment-e2e.py
+        run: python3 scripts/systemd-deployment-e2e.py --report systemd-source.json
+      - name: Download the published v2.2.0 full package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v2.2.0 --repo victornife/jul \
+            --pattern 'jul_v2.2.0_linux_amd64_full.tar.gz*' --pattern SHA256SUMS --dir systemd-package
+      - name: Exercise the verified published package under both units
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/systemd-deployment-e2e.py --package-directory systemd-package \
+            --tag v2.2.0 --source b12e051139f652b400cff37d9f063f5637a7d550 --report systemd-package.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: systemd-deployment-evidence
+          path: |
+            systemd-source.json
+            systemd-package.json
+          if-no-files-found: warn

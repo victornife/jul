@@ -1,0 +1,18 @@
+{
+  "archive": "jul_v2.2.0_linux_amd64_full.tar.gz",
+  "sha256": "288ffa323d92d8abb586d364954eaaaa627026304471e33a3ec1174339287862",
+  "metadata": {
+    "product": "Jul.IA",
+    "version": "v2.2.0",
+    "commit": "b12e051139f652b400cff37d9f063f5637a7d550",
+    "build_date": "2026-10-11T23:14:04Z",
+    "dirty": false,
+    "go_version": "go1.27.2",
+    "os": "linux",
+    "arch": "amd64"
+  },
+  "checksums": "passed",
+  "provenance": "passed",
+  "sbom": "passed",
+  "harness_source": "6ab52a4ff14b84da47fbfa6c5cd064864cd5400a"
+}

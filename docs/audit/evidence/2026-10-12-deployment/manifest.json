@@ -1,0 +1,168 @@
+{
+  "workflow_run": 38315192960,
+  "workflow_url": "https://github.com/victornife/jul/actions/runs/38315192960",
+  "reviewed_head": "2c196095531890116bafaedf7794269234f9f24b",
+  "workflow_checkout": "6ab52a4ff14b84da47fbfa6c5cd064864cd5400a",
+  "published_package_source": "b12e051139f652b400cff37d9f063f5637a7d550",
+  "published_tag": "v2.2.0",
+  "ordered_jobs": [
+    {
+      "id": 115030032193,
+      "name": "1 systemd chain, routed client and firewall",
+      "started_at": "2026-10-12T22:11:22Z",
+      "completed_at": "2026-10-12T22:12:06Z",
+      "conclusion": "success",
+      "html_url": "https://github.com/victornife/jul/actions/runs/38315192960/job/115030032193"
+    },
+    {
+      "id": 115030281788,
+      "name": "2 Windows pre-existing ACLs",
+      "started_at": "2026-10-12T22:12:31Z",
+      "completed_at": "2026-10-12T22:13:45Z",
+      "conclusion": "success",
+      "html_url": "https://github.com/victornife/jul/actions/runs/38315192960/job/115030281788"
+    },
+    {
+      "id": 115030801294,
+      "name": "3 Docker routed TLS and recreation",
+      "started_at": "2026-10-12T22:14:04Z",
+      "completed_at": "2026-10-12T22:15:26Z",
+      "conclusion": "success",
+      "html_url": "https://github.com/victornife/jul/actions/runs/38315192960/job/115030801294"
+    },
+    {
+      "id": 115031344635,
+      "name": "4 Windows service AF_UNIX",
+      "started_at": "2026-10-12T22:15:28Z",
+      "completed_at": "2026-10-12T22:16:58Z",
+      "conclusion": "success",
+      "html_url": "https://github.com/victornife/jul/actions/runs/38315192960/job/115031344635"
+    },
+    {
+      "id": 115031832752,
+      "name": "5 Windows registry and explicit MIME",
+      "started_at": "2026-10-12T22:17:01Z",
+      "completed_at": "2026-10-12T22:18:12Z",
+      "conclusion": "success",
+      "html_url": "https://github.com/victornife/jul/actions/runs/38315192960/job/115031832752"
+    },
+    {
+      "id": 115032227643,
+      "name": "6 macOS native evidence reconciliation",
+      "started_at": "2026-10-12T22:18:15Z",
+      "completed_at": "2026-10-12T22:18:23Z",
+      "conclusion": "success",
+      "html_url": "https://github.com/victornife/jul/actions/runs/38315192960/job/115032227643"
+    },
+    {
+      "id": 115032282899,
+      "name": "7 twelve-profile archive reconciliation",
+      "started_at": "2026-10-12T22:18:25Z",
+      "completed_at": "2026-10-12T22:18:37Z",
+      "conclusion": "success",
+      "html_url": "https://github.com/victornife/jul/actions/runs/38315192960/job/115032282899"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 11776372739,
+      "name": "journey-1-systemd",
+      "zip_digest": "sha256:fa4665ec9c324af77904e6828eab28b4c477b86224c5ca3174d9e9938b3c8328",
+      "zip_bytes": 1656,
+      "files": [
+        {
+          "path": "journey-1-systemd/package.json",
+          "sha256": "5fb595178f0a34184e7140a43863b4149fd0a7b380f5f153e01b117379acf30f"
+        },
+        {
+          "path": "journey-1-systemd/systemd-network.json",
+          "sha256": "236551f2606529e09fc6d6ffeb929ff519a851c886a47c5a6db5a45288776fd2"
+        }
+      ]
+    },
+    {
+      "id": 11776053877,
+      "name": "journey-2-windows-acl",
+      "zip_digest": "sha256:95bf21bfdeb5ec981e1ef4188f3b9f93c223304ad3f0b89b12a0c4912db401b6",
+      "zip_bytes": 1504,
+      "files": [
+        {
+          "path": "journey-2-windows-acl/package.json",
+          "sha256": "57cb390892d5e8c1fe7d349c224ba042a107b98e3b3da8fc1badda61359457de"
+        },
+        {
+          "path": "journey-2-windows-acl/windows-acl.json",
+          "sha256": "2c9de641154ffa948866525cf55214db8e0bbd61f60512fc03634577df610a2a"
+        }
+      ]
+    },
+    {
+      "id": 11775499796,
+      "name": "journey-3-docker",
+      "zip_digest": "sha256:ef65aad4c6c95361867033ea0a9d4296e0a41b72bcf5772dbc78bfca80de1506",
+      "zip_bytes": 1093,
+      "files": [
+        {
+          "path": "journey-3-docker/docker-network.json",
+          "sha256": "319cac31791e6da7778efd85614caca623af2ceb97cdc6c00c5551c7e7096c85"
+        }
+      ]
+    },
+    {
+      "id": 11775729836,
+      "name": "journey-4-windows-unix",
+      "zip_digest": "sha256:da07ffe7984367dd9df67343e2469ba1b57d8b9ce3d54918b296ea5a6db4003b",
+      "zip_bytes": 1197,
+      "files": [
+        {
+          "path": "journey-4-windows-unix/package.json",
+          "sha256": "57cb390892d5e8c1fe7d349c224ba042a107b98e3b3da8fc1badda61359457de"
+        },
+        {
+          "path": "journey-4-windows-unix/windows-unix.json",
+          "sha256": "38898712700b952344c3d0940671971870c345b0b201c022d00bfc3e757a7238"
+        }
+      ]
+    },
+    {
+      "id": 11776598266,
+      "name": "journey-5-windows-mime",
+      "zip_digest": "sha256:c4668fe60dd4e14ec508ce612ece07972518a4ee2506850d09bc4158b08d46d1",
+      "zip_bytes": 1495,
+      "files": [
+        {
+          "path": "journey-5-windows-mime/package.json",
+          "sha256": "57cb390892d5e8c1fe7d349c224ba042a107b98e3b3da8fc1badda61359457de"
+        },
+        {
+          "path": "journey-5-windows-mime/windows-mime.json",
+          "sha256": "794ffcd87c16ba2311d6597294bcc06ccb1f62e38cb04b8bcab148ea430141a4"
+        }
+      ]
+    },
+    {
+      "id": 11775874692,
+      "name": "journey-6-macos",
+      "zip_digest": "sha256:094bd142c220919edea54f2c4d2bc5d06b580a85d5d3a2fd18d80a2a5adc05a4",
+      "zip_bytes": 1002,
+      "files": [
+        {
+          "path": "journey-6-macos/macos-evidence.json",
+          "sha256": "4474c2d8614fc4c7e34bc84fc35b2790da1d040ebdd622a30bfb12d3fc309d09"
+        }
+      ]
+    },
+    {
+      "id": 11775614970,
+      "name": "journey-7-archives",
+      "zip_digest": "sha256:3f661d9ce3a1fba29c5ed0b91d841feba8d6656c243206327eab9d809a90625c",
+      "zip_bytes": 1378,
+      "files": [
+        {
+          "path": "journey-7-archives/archive-evidence.json",
+          "sha256": "bdee25379ddd0047880e5b0f38029eac9bd9a59dc720b8755360dc2aea0fa8ea"
+        }
+      ]
+    }
+  ]
+}
