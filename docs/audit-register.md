@@ -78,6 +78,10 @@ their current disposition belongs to the issue tracker and #62.
   instructions. D12 is unfinished production-like certificate, existing
   Windows ACL, and non-loopback admin TLS evidence. Passing release gates
   does not close them and does not make the repository fully audited.
+  The v2.2.0 six-host/twelve-profile native verification did satisfy D12's
+  macOS Intel/archive first-run and all-platform download requirements.
+  Remaining service/network/registry requirements and their sequential
+  verdicts are recorded in the [deployment ledger](audit/2026-10-12-deployment-journeys.md).
 - #434 is no-go for v2.1.0. It stays CANDIDATE/LATER.
 
 Volatile issue-level sequencing is owned by

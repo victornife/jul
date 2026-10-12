@@ -193,6 +193,16 @@ the runner's non-loopback address with a trusted temporary TLS certificate and
 checks that tokenless requests are denied. This is a disposable single-host
 TLS exercise; production certificates and network policy require separate verification.
 
+The journey also exercises a pinned WASM middleware guest under both units,
+checking the running service's interpreter mode and guest-generated response
+header while keeping `MemoryDenyWriteExecute=yes`. Its optional published-package
+mode verifies archive/source/profile identity and signed attestations before
+installation; source-build and package results remain separate. See the
+[#516 execution runbook](deployment-journeys.md) and
+[dated verdict ledger](audit/2026-10-12-deployment-journeys.md) for outstanding
+trusted-chain, firewall and independent-client requirements. The temporary TLS
+and single-host checks do not complete those requirements.
+
 ### Plugins and MemoryDenyWriteExecute
 
 Both units set `MemoryDenyWriteExecute=yes`, a W^X policy that forbids making

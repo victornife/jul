@@ -5,8 +5,12 @@ The Ubuntu runner must boot with systemd and grant passwordless sudo. Refuse
 pre-existing Jul service resources, then remove only resources this run made.
 """
 
+import argparse
+import hashlib
+import importlib.util
 import json
 from pathlib import Path
+import platform
 import secrets
 import shutil
 import socket
@@ -33,7 +37,7 @@ def port():
         return sock.getsockname()[1]
 
 
-def request(url, token=None, body=None, content_type=None, ssl_context=None):
+def request(url, token=None, body=None, content_type=None, ssl_context=None, include_headers=False):
     headers = {}
     if token:
         headers["Authorization"] = "Bearer " + token
@@ -45,8 +49,12 @@ def request(url, token=None, body=None, content_type=None, ssl_context=None):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
                                              urllib.request.HTTPSHandler(context=ssl_context))
         with opener.open(urllib.request.Request(url, data=body, headers=headers), timeout=5) as response:
+            if include_headers:
+                return response.status, response.read(), response.headers
             return response.status, response.read()
     except urllib.error.HTTPError as error:
+        if include_headers:
+            return error.code, error.read(), error.headers
         return error.code, error.read()
 
 
@@ -78,7 +86,47 @@ def get_config(admin, token, ssl_context=None):
     return json.loads(body)
 
 
+def verify_wasm(unit, traffic, admin, token, module_digest):
+    assert run("systemctl", "show", unit, "--property=MemoryDenyWriteExecute", "--value") == "yes"
+    status, body = request(admin + "/api/plugins", token)
+    expect(200, status, body)
+    plugins = json.loads(body)
+    assert plugins["compiled"] and plugins["engine"] == "interpreter", "service is not using the interpreter"
+    serving = next(item for item in plugins["plugins"] if item["name"] == "systemd-probe")
+    assert serving["digest"] == "sha256:" + module_digest, "service loaded a different WASM module"
+    status, body, headers = request(traffic, include_headers=True)
+    expect(200, status, body)
+    assert headers.get("X-Plugin") == "header-inject", "WASM middleware did not execute"
+    print(f"PASS: {unit} keeps MemoryDenyWriteExecute=yes and executes the pinned WASM guest with interpreter")
+
+
+def prepare_binary(arguments, temporary):
+    if arguments.package_directory:
+        # Use the same checksum/source/profile/attestation verifier as the native
+        # release journey. The package stays bound to its original source even
+        # when this harness is run from a later commit.
+        spec = importlib.util.spec_from_file_location("release_verifier", Path(__file__).with_name("verify-release-packages.py"))
+        verifier = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(verifier)
+        architecture = verifier.native_architecture(platform.machine(), {}, False)
+        binary, evidence = verifier.verify_archive(arguments.package_directory.resolve(), arguments.tag,
+                                                   arguments.source, "linux", architecture, "full")
+        evidence["kind"] = "published-package"
+        return binary, evidence
+    binary = temporary / "jul"
+    run("go", "build", "-tags", "console,wasmplugins", "-o", str(binary), "./cmd/jul")
+    return binary, {"kind": "source-build", "source": run("git", "rev-parse", "HEAD")}
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--package-directory", type=Path,
+                        help="Directory containing the published full Linux archive, its .sha256 and SHA256SUMS; requires gh")
+    parser.add_argument("--tag", default="v2.2.0")
+    parser.add_argument("--source", default="b12e051139f652b400cff37d9f063f5637a7d550")
+    parser.add_argument("--wasm-module", type=Path, default=Path("testdata/plugins/v1-current-header-inject.wasm"))
+    parser.add_argument("--report", type=Path)
+    arguments = parser.parse_args()
     assert Path("/run/systemd/system").is_dir(), "CI host is not running systemd"
     paths = [Path("/usr/local/bin/jul"), Path("/etc/jul"), Path("/var/lib/jul"),
              Path("/var/cache/jul"), Path("/var/log/jul"),
@@ -90,20 +138,28 @@ def main():
     site = Path("/srv/jul-systemd-e2e-" + suffix)
     tmp = Path(tempfile.mkdtemp(prefix="jul-systemd-e2e-"))
     created = {"user": False, "binary": False, "config": False, "site": False, "units": False}
+    report = {"journey": "systemd", "evidence_class": "disposable",
+              "harness_source": run("git", "rev-parse", "HEAD"),
+              "host": {"os": platform.system(), "arch": platform.machine(),
+                       "systemd": run("systemctl", "--version").splitlines()[0]},
+              "checks": {}, "production_like": {"trusted_chain": "pending", "independent_client": "pending", "firewall": "pending"}}
     try:
-        # Build the same console-tagged binary the units launch. The unit's
-        # fixed ExecStart path is safe to use after the pre-existing-path guard.
-        run("go", "build", "-tags", "console", "-o", str(tmp / "jul"), "./cmd/jul")
+        binary, report["binary"] = prepare_binary(arguments, tmp)
+        report["binary"]["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
+        module = arguments.wasm_module.resolve()
+        module_digest = hashlib.sha256(module.read_bytes()).hexdigest()
+        report["wasm_module_sha256"] = module_digest
         run("sudo", "useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "jul")
         created["user"] = True
         created["binary"] = True
-        run("sudo", "install", "-m0755", str(tmp / "jul"), "/usr/local/bin/jul")
+        run("sudo", "install", "-m0755", str(binary), "/usr/local/bin/jul")
         created["site"] = True
         run("sudo", "install", "-d", "-m0755", str(site))
         (tmp / "index.html").write_text("Jul systemd E2E\n")
         run("sudo", "install", "-m0644", str(tmp / "index.html"), str(site / "index.html"))
         created["config"] = True
         run("sudo", "install", "-d", "-o", "jul", "-g", "jul", "-m0700", "/etc/jul")
+        run("sudo", "install", "-o", "jul", "-g", "jul", "-m0600", str(module), "/etc/jul/systemd-probe.wasm")
         token = secrets.token_urlsafe(36)
         traffic_port, admin_port = port(), port()
         while admin_port == traffic_port:
@@ -114,6 +170,9 @@ def main():
         raw = raw.replace('root = "/var/www"', f'root = "{site}"', 1)
         raw = raw.replace('history_dir = "/var/lib/jul/config-history"',
                           f'token = "{token}"\nhistory_dir = "/var/lib/jul/config-history"', 1)
+        raw = raw.replace('server_names = ["localhost"]', 'server_names = ["localhost"]\nplugins = ["systemd-probe"]', 1)
+        raw += ('\n[plugins.systemd-probe]\npath = "/etc/jul/systemd-probe.wasm"\ntype = "middleware"\n'
+                f'sha256 = "sha256:{module_digest}"\ntimeout = "5s"\n')
         assert raw.count(f'token = "{token}"') == 1 and f'root = "{site}"' in raw
         (tmp / "server.toml").write_text(raw)
         run("sudo", "install", "-o", "jul", "-g", "jul", "-m0600", str(tmp / "server.toml"), "/etc/jul/server.toml")
@@ -129,6 +188,8 @@ def main():
         admin = f"http://127.0.0.1:{admin_port}"
         run("sudo", "systemctl", "start", "jul.service")
         assert b"Jul systemd E2E" in wait_ready("jul.service", traffic, admin)
+        verify_wasm("jul.service", traffic, admin, token, module_digest)
+        report["checks"]["editable_wasm_interpreter"] = "passed"
         assert run("sudo", "stat", "-c", "%U:%G %a", "/etc/jul") == "jul:jul 700"
         assert run("sudo", "stat", "-c", "%U:%G %a", "/etc/jul/server.toml") == "jul:jul 600"
         assert run("sudo", "stat", "-c", "%U:%G %a", "/var/lib/jul") == "jul:jul 700"
@@ -165,6 +226,7 @@ def main():
         wait_ready("jul.service", traffic, admin)
         assert 'log_level = "info"' in get_config(admin, token)["raw"]
         print("PASS: editable unit, service identity, adoption, Apply, rollback and restart")
+        report["checks"]["editable_recovery"] = "passed"
 
         # A restart-bound admin resource is persisted as one staged candidate.
         # The current service keeps serving until the process actually restarts.
@@ -251,6 +313,7 @@ def main():
         secured = get_config(tls_admin, token, trusted)
         assert '[admin.tls]' in secured["raw"] and 'listen = "0.0.0.0:' in secured["raw"]
         print("PASS: non-loopback admin TLS certificate and token on the shipped systemd unit")
+        report["checks"]["single_host_temporary_tls"] = "passed"
 
         run("sudo", "systemctl", "stop", "jul.service")
         readonly = raw.replace('config_authority = "managed"', 'config_authority = "file_owned"', 1)
@@ -262,6 +325,8 @@ def main():
         run("sudo", "-u", "jul", "/usr/local/bin/jul", "check", "--config", "/etc/jul/server.toml")
         run("sudo", "systemctl", "start", "jul-readonly.service")
         assert b"Jul systemd E2E" in wait_ready("jul-readonly.service", traffic, admin)
+        verify_wasm("jul-readonly.service", traffic, admin, token, module_digest)
+        report["checks"]["readonly_wasm_interpreter"] = "passed"
         assert run("sudo", "stat", "-c", "%U:%G %a", "/etc/jul/server.toml") == "root:jul 640"
         before = get_config(admin, token)
         candidate = before["raw"].replace('log_level = "info"', 'log_level = "debug"', 1)
@@ -269,6 +334,7 @@ def main():
         assert get_config(admin, token)["raw"] == before["raw"]
         assert run("systemctl", "is-active", "jul-readonly.service") == "active"
         print("PASS: read-only unit, group-readable config and denied Apply without write")
+        report["checks"]["readonly_apply_denied"] = "passed"
     finally:
         if created["units"]:
             for name in ("jul-readonly.service", "jul.service"):
@@ -284,6 +350,9 @@ def main():
                 run("sudo", "rm", "-rf", "--", path)
             run("sudo", "userdel", "jul")
         shutil.rmtree(tmp)
+    if arguments.report:
+        arguments.report.parent.mkdir(parents=True, exist_ok=True)
+        arguments.report.write_text(json.dumps(report, indent=2) + "\n")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,15 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Verification
+
+- Extend the systemd deployment journey to execute a pinned WASM guest under
+  both shipped hardened units, verify the running interpreter, and support
+  verified published full packages separately from source builds. Record
+  disposable results and remaining trusted-chain/firewall/independent-client
+  requirements explicitly. Reconcile #516's already-completed v2.2.0 macOS and
+  twelve-profile native download evidence without claiming new runs or soak.
+
 ## [2.2.0] - 2026-10-12
 
 Published at 2026-10-11T23:49:52Z from immutable source
