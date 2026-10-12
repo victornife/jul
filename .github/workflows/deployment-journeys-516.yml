@@ -46,6 +46,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.13'
+      - name: Verify lab trust fixtures
+        run: python scripts/test_deployment_lab.py
       - name: Verify published native package
         env:
           GH_TOKEN: ${{ github.token }}
@@ -63,4 +65,35 @@ jobs:
           path: |
             package.json
             systemd-network.json
+          if-no-files-found: error
+
+  windows-acl:
+    name: '2 Windows pre-existing ACLs'
+    needs: systemd
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.13'
+      - name: Verify published native package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/prepare-deployment-package.py --os windows --arch amd64 --directory packages --report package.json --path-output package-path.txt
+      - name: Execute existing-directory ACL journey
+        shell: pwsh
+        run: |
+          $package = (Get-Content package-path.txt -Raw).Trim()
+          ./scripts/test-windows-service.ps1 -Journey ExistingAcl -ReportPath windows-acl.json `
+            -BinaryPath (Join-Path $package 'jul.exe') -InstallerPath (Join-Path $package 'install-service.ps1') `
+            -ProvisionPath (Join-Path $package 'new-secure-data-dir.ps1')
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: journey-2-windows-acl
+          path: |
+            package.json
+            windows-acl.json
           if-no-files-found: error

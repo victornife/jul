@@ -27,7 +27,7 @@ requires each journey to pass before the next runs.
 
 | Order | Journey | Verdict | Evidence or remaining requirement |
 | --- | --- | --- | --- |
-| 1 | Linux systemd, trusted chain, firewall, independent client, WASM | Partially verified | Published package/unit/WASM checks passed; actual trusted-chain/firewall/independent-client execution required |
+| 1 | Linux systemd, trusted chain, firewall, independent client, WASM | Passed in approved CI lab | Published package, both hardened units, private three-certificate chain, routed client namespace and firewall denial/recovery |
 | 2 | Windows service with pre-existing ACLs | Pending | Reviewed secure and permissive existing roots; effective service/ordinary-user access and managed recovery |
 | 3 | Docker externally routed HTTPS and durable state | Pending | Frozen-source image, routed client, TLS/admin/healthcheck and restart/persistence |
 | 4 | Windows service AF_UNIX HTTP upstream | Pending | Actual service identity, socket access, successful traffic and failure/recovery |
@@ -104,9 +104,14 @@ the later documentation commit or the unexecuted lab/network requirements.
 The initial existing-host option had no connected SSH/runner/client, so no
 private-host execution occurred. The later explicit GitHub-CI selection
 supersedes that prerequisite. The controlled network extension is prepared;
-its chain, negative trust/hostname/missing-intermediate cases, routed client,
-scoped firewall denial/recovery and authenticated read-only admin behavior
-remain pending until the new hosted run completes. See the
+its [first controlled CI run](https://github.com/victornife/jul/actions/runs/38309491556)
+and [job](https://github.com/victornife/jul/actions/runs/38309491556/job/115011460608)
+passed on reviewed head `9310bc41749f9c581330e44faef65b08778eb66f`.
+The private chain, wrong-CA/hostname/missing-intermediate rejection, routed
+client, scoped firewall denial/recovery and authenticated read-only admin
+checks executed successfully against the unchanged published full package.
+The raw report retains the workflow checkout and package identities. Windows
+ACL execution is next; remaining rows are not promoted by this result. See the
 [execution runbook](../deployment-journeys.md).
 
 Do not advance closure on preparatory checks. If a released-package defect
