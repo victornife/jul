@@ -6,6 +6,16 @@ Run the seven journeys in their selected order. Keep disposable platform
 checks separate from the production-like requirements. The published target
 is v2.2.0 source `b12e051139f652b400cff37d9f063f5637a7d550`.
 
+The maintainer selected **GitHub CI** for execution. The dedicated
+[sequential workflow](../.github/workflows/deployment-journeys-516.yml) uses
+native disposable runners with controlled production-like conditions. Its
+client has a separate network namespace but shares the runner kernel; its
+private three-certificate chain has an explicitly trusted lab root. Windows
+fixtures predate service installation and exercise real effective permissions.
+No private host, public-CA issuance, enterprise ACL inventory or Internet/cloud
+firewall deployment is implied. Site-specific deployment checks below are
+operator procedures outside this bounded CI certification.
+
 ## Evidence for every journey
 
 Record harness commit/clean state, package source/tag/profile and checksum,
@@ -17,10 +27,16 @@ public evidence. Preserve failed results and link corrections separately.
 
 ## 1. Linux systemd
 
-Use a dedicated authorized systemd lab host and an independently connected
-client. Identify the host/client connection or runner names, TLS DNS name,
-existing trusted certificate chain/key and client CA locations, and approved
-allow/deny network paths before installing or changing firewall rules.
+The CI job uses an actual systemd host and an isolated client namespace linked
+by a veth route. A scoped iptables chain applies only to the test interface.
+The runner creates a root CA, intermediate and leaf for a lab hostname, serves
+the full chain, and trusts only the root on the external namespace client.
+Wrong CA, wrong hostname and a missing intermediate must fail verification;
+firewall denial must reject a previously working TLS path and recover when
+restored. Both privileged and read-only checks retain the shipped hardening.
+
+For a later site-specific check, identify the authorized host/client, TLS
+hostname and trust locations, and approved network paths before installation.
 
 ### Published package and unit preflight
 
@@ -47,7 +63,10 @@ The script refuses pre-existing Jul service paths/users, temporarily installs
 both shipped units and a pinned probe guest, and removes only its test
 resources. It verifies editable recovery, read-only refusal, actual interpreter
 mode and guest execution without disabling `MemoryDenyWriteExecute`.
-Its temporary TLS and single-host probes remain **disposable** evidence.
+Its default temporary TLS and single-host probes remain **disposable** evidence.
+The `--ci-network` option adds the explicitly bounded routed/trust/firewall
+lab checks and records them as `controlled-ci-lab`; it does not claim private
+production deployment.
 The source-build mode is for CI regression checks and is recorded separately.
 
 ### Trusted-chain and network execution

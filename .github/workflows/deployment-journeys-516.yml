@@ -1,0 +1,66 @@
+name: Deployment journeys 516
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/deployment-journeys-516.yml'
+      - 'scripts/deployment_lab.py'
+      - 'scripts/prepare-deployment-package.py'
+      - 'scripts/systemd-deployment-e2e.py'
+      - 'scripts/test-windows-service.ps1'
+      - 'scripts/docker-network-journey.py'
+      - 'scripts/windows-deployment-*.py'
+      - 'scripts/verify-release-packages.py'
+      - 'deploy/**'
+      - 'docs/deployment-journeys.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/deployment-journeys-516.yml'
+      - 'scripts/deployment_lab.py'
+      - 'scripts/prepare-deployment-package.py'
+      - 'scripts/systemd-deployment-e2e.py'
+      - 'scripts/test-windows-service.ps1'
+      - 'scripts/docker-network-journey.py'
+      - 'scripts/windows-deployment-*.py'
+      - 'scripts/verify-release-packages.py'
+      - 'deploy/**'
+      - 'docs/deployment-journeys.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  attestations: read
+
+concurrency:
+  group: deployment-516-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  systemd:
+    name: '1 systemd chain, routed client and firewall'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.13'
+      - name: Verify published native package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/prepare-deployment-package.py --os linux --arch amd64 \
+            --directory packages --report package.json --path-output package-path.txt
+      - name: Execute controlled systemd network journey
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/systemd-deployment-e2e.py --package-directory packages --ci-network --report systemd-network.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: journey-1-systemd
+          path: |
+            package.json
+            systemd-network.json
+          if-no-files-found: error

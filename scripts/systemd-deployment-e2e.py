@@ -7,6 +7,7 @@ pre-existing Jul service resources, then remove only resources this run made.
 
 import argparse
 import hashlib
+import http.server
 import importlib.util
 import json
 from pathlib import Path
@@ -17,11 +18,14 @@ import socket
 import ssl
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+
+from deployment_lab import RoutedClient, certificate_chain
 
 
 def run(*args):
@@ -69,7 +73,7 @@ def wait_ready(unit, traffic, admin, ssl_context=None):
         if state == "failed":
             raise AssertionError(f"{unit} failed: {run('sudo', 'journalctl', '-u', unit, '-n', '30', '--no-pager')[-3000:]}")
         try:
-            status, body = request(traffic)
+            status, body = request(traffic, ssl_context=ssl_context)
             expect(200, status, body)
             expect(200, *request(admin + "/readyz", ssl_context=ssl_context))
             if state == "active":
@@ -118,6 +122,88 @@ def prepare_binary(arguments, temporary):
     return binary, {"kind": "source-build", "source": run("git", "rev-parse", "HEAD")}
 
 
+def verify_ci_network(temporary, readonly, traffic_port, admin_port, token):
+    """Real TLS/routed packets/firewall on an explicitly controlled CI topology."""
+    class Backend(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Jul CI proxy backend\n")
+
+        def log_message(self, *unused):
+            pass
+
+    backend = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Backend)
+    worker = threading.Thread(target=backend.serve_forever, daemon=True)
+    worker.start()
+    try:
+        with RoutedClient(temporary) as client:
+            pki = certificate_chain(temporary / "pki", addresses=(client.gateway,))
+            for source, target in ((pki["chain"], "network.pem"), (pki["key"], "network.key")):
+                run("sudo", "install", "-o", "root", "-g", "jul", "-m0640", str(source), "/etc/jul/" + target)
+            full_trust = temporary / "management-ca.pem"
+            full_trust.write_bytes(pki["root"].read_bytes() + (temporary / "pki/intermediate.pem").read_bytes())
+            trusted = ssl.create_default_context(cafile=str(full_trust))
+            tls_raw = readonly.replace(f'listen = "127.0.0.1:{traffic_port}"',
+                                       f'listen = "{client.gateway}:{traffic_port}"', 1)
+            tls_raw = tls_raw.replace('server_names = ["localhost"]', 'server_names = ["jul516.test"]', 1)
+            tls_raw = tls_raw.replace(f'listen = "127.0.0.1:{admin_port}"',
+                                     f'listen = "{client.gateway}:{admin_port}"', 1)
+            proxy = ('[[servers.locations]]\nmatch = {type = "prefix", path = "/proxy/"}\n'
+                     f'proxy_pass = "http://127.0.0.1:{backend.server_port}"\n\n')
+            tls_raw = tls_raw.replace('[[servers.locations]]', proxy + '[[servers.locations]]', 1)
+            tls_raw = tls_raw.replace('[admin]', '[servers.tls]\nenabled = true\n'
+                                     'cert = "/etc/jul/network.pem"\nkey = "/etc/jul/network.key"\n\n[admin]', 1)
+            tls_raw += '\n[admin.tls]\nenabled = true\ncert = "/etc/jul/network.pem"\nkey = "/etc/jul/network.key"\n'
+            (temporary / "network.toml").write_text(tls_raw)
+            run("sudo", "systemctl", "stop", "jul-readonly.service")
+            run("sudo", "install", "-o", "root", "-g", "jul", "-m0640", str(temporary / "network.toml"), "/etc/jul/server.toml")
+            run("sudo", "-u", "jul", "/usr/local/bin/jul", "check", "--config", "/etc/jul/server.toml")
+            client.firewall(traffic_port, admin_port)
+            management_traffic = f"https://{client.gateway}:{traffic_port}/"
+            management_admin = f"https://{client.gateway}:{admin_port}"
+            run("sudo", "systemctl", "start", "jul-readonly.service")
+            wait_ready("jul-readonly.service", management_traffic, management_admin, trusted)
+            status, body, headers = client.fetch(traffic_port, pki["root"])
+            assert status == 200 and b"Jul systemd E2E" in body and headers.get("x-plugin") == "header-inject"
+            status, body, _ = client.fetch(traffic_port, pki["root"], path="/proxy/")
+            assert status == 200 and body == b"Jul CI proxy backend\n"
+            assert client.fetch(admin_port, pki["root"], path="/api/plugins")[0] == 401
+            status, body, _ = client.fetch(admin_port, pki["root"], path="/api/plugins", token=token)
+            assert status == 200 and json.loads(body)["engine"] == "interpreter"
+            before = run("sudo", "sha256sum", "/etc/jul/server.toml").split()[0]
+            assert client.fetch(admin_port, pki["root"], path="/api/config/apply", token=token,
+                                method="POST", data=tls_raw.encode(), content_type="application/toml")[0] == 409
+            assert run("sudo", "sha256sum", "/etc/jul/server.toml").split()[0] == before
+            client.fetch(traffic_port, pki["wrong_root"], failure=60)
+            client.fetch(traffic_port, pki["root"], hostname="wrong.jul516.test", failure=60)
+            run("sudo", "install", "-o", "root", "-g", "jul", "-m0640", str(pki["leaf"]), "/etc/jul/network.pem")
+            run("sudo", "systemctl", "restart", "jul-readonly.service")
+            wait_ready("jul-readonly.service", management_traffic, management_admin, trusted)
+            client.fetch(traffic_port, pki["root"], failure=60)
+            run("sudo", "install", "-o", "root", "-g", "jul", "-m0640", str(pki["chain"]), "/etc/jul/network.pem")
+            run("sudo", "systemctl", "restart", "jul-readonly.service")
+            wait_ready("jul-readonly.service", management_traffic, management_admin, trusted)
+            client.allow(traffic_port, False)
+            client.fetch(traffic_port, pki["root"], failure=7)
+            counters = run("sudo", "iptables", "-nvxL", client.chain)
+            rejected = sum(int(line.split()[0]) for line in counters.splitlines()
+                           if len(line.split()) > 2 and line.split()[2] == "REJECT")
+            assert rejected > 0, "firewall rejection was not exercised"
+            client.allow(traffic_port, True)
+            assert client.fetch(traffic_port, pki["root"])[0] == 200
+            run("sudo", "systemctl", "stop", "jul-readonly.service")
+            print("PASS: CI private root/intermediate/leaf chain, isolated routed client, TLS negatives and scoped firewall recovery")
+            return {**client.evidence(), "root_sha256": pki["root_sha256"], "firewall_rejections": rejected,
+                    "trusted_chain": "passed", "wrong_ca": "passed", "wrong_hostname": "passed",
+                    "missing_intermediate": "passed", "firewall_deny_recovery": "passed",
+                    "remote_admin_auth": "passed", "remote_readonly_apply": "passed", "static_proxy_wasm": "passed"}
+    finally:
+        backend.shutdown()
+        backend.server_close()
+        worker.join()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package-directory", type=Path,
@@ -126,6 +212,7 @@ def main():
     parser.add_argument("--source", default="b12e051139f652b400cff37d9f063f5637a7d550")
     parser.add_argument("--wasm-module", type=Path, default=Path("testdata/plugins/v1-current-header-inject.wasm"))
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--ci-network", action="store_true", help="Exercise a controlled CI private CA, routed namespace and scoped firewall")
     arguments = parser.parse_args()
     assert Path("/run/systemd/system").is_dir(), "CI host is not running systemd"
     paths = [Path("/usr/local/bin/jul"), Path("/etc/jul"), Path("/var/lib/jul"),
@@ -335,6 +422,14 @@ def main():
         assert run("systemctl", "is-active", "jul-readonly.service") == "active"
         print("PASS: read-only unit, group-readable config and denied Apply without write")
         report["checks"]["readonly_apply_denied"] = "passed"
+        if arguments.ci_network:
+            report["network"] = verify_ci_network(tmp, readonly, traffic_port, admin_port, token)
+            report["evidence_class"] = "controlled-ci-lab"
+            report["production_like"] = {"trusted_chain": "passed-private-ci-ca", "independent_client": "passed-network-namespace",
+                                         "firewall": "passed-scoped-iptables"}
+            report["limits"] = ["Ephemeral lab PKI, not an enterprise/public certificate deployment",
+                                "Client and service share the runner kernel; client has a separate network namespace",
+                                "No production Internet routing, cloud firewall or long-duration stability claim"]
     finally:
         if created["units"]:
             for name in ("jul-readonly.service", "jul.service"):

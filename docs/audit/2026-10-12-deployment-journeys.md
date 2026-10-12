@@ -4,6 +4,15 @@ This is the execution ledger for issue [#516](https://github.com/victornife/jul/
 The maintainer selected all seven ranked journeys on 2026-10-12, in the order
 below. Pending entries are requirements, not successful results.
 
+The maintainer subsequently selected **GitHub CI** as the execution environment.
+The remaining journeys use controlled production-like conditions on disposable
+native runners: a private root/intermediate/leaf chain, separate client network
+namespace and routed packets/firewall rules, pre-existing Windows ACL fixtures,
+actual service identity, registry lookup and durable Docker volumes. This
+scope does not certify an enterprise/public CA deployment, a separate physical
+client host, Internet ingress or a production cloud firewall. The CI sequence
+requires each journey to pass before the next runs.
+
 ## Source and evidence identities
 
 - Published package source: `b12e051139f652b400cff37d9f063f5637a7d550`, tag `v2.2.0`.
@@ -92,11 +101,12 @@ Both explicitly label this automation **disposable** and leave trusted-chain,
 independent-client and firewall requirements **pending**. They do not certify
 the later documentation commit or the unexecuted lab/network requirements.
 
-The current agent workspace has no running systemd, Docker or Windows runtime.
-The maintainer selected an existing Linux lab, but the workspace has no
-preconfigured SSH alias/agent or known runner connection to that host/client.
-Actual connection names, TLS hostname/trust locations and approved network
-path are required to execute the first journey. See the
+The initial existing-host option had no connected SSH/runner/client, so no
+private-host execution occurred. The later explicit GitHub-CI selection
+supersedes that prerequisite. The controlled network extension is prepared;
+its chain, negative trust/hostname/missing-intermediate cases, routed client,
+scoped firewall denial/recovery and authenticated read-only admin behavior
+remain pending until the new hosted run completes. See the
 [execution runbook](../deployment-journeys.md).
 
 Do not advance closure on preparatory checks. If a released-package defect
