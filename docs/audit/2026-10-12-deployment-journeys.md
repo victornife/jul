@@ -197,6 +197,11 @@ shared-kernel routing, synthetic ACLs and derived Docker image limits above
 remain. No Jul runtime defect was established; all encountered fixture/CodeQL
 findings were corrected and the sequence passed without gate suppression.
 
+Final review also added the trust-test file and pinned WASM guest to both
+workflow path filters, so edits to either input alone trigger the journey.
+This filter correction changes no executed harness or package behavior;
+the final PR head has separate checks recorded in GitHub.
+
 D12's selected GitHub-CI scope has executed evidence. #515/D11 semantic review,
 #569's seven inherited HTTP/3 exceptions and post-GA soak are separate work.
 [PR #575](https://github.com/victornife/jul/pull/575) owns final-head CI and
