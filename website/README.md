@@ -37,6 +37,13 @@ missing assets, broken anchors and unsafe link schemes fail publication. The
 tests cover source updates, navigation, tables, literal command examples and
 failure boundaries.
 
+The repository's existing Console browser-smoke job also checks all five site
+pages at desktop and mobile widths, keyboard access, images and navigation
+under the `/jul/` project path. It reuses the Console's locked Playwright
+dependency and retains screenshots in the `website-browser-preview` artifact.
+When those development dependencies and the browser are installed, run the
+same checks locally with `node scripts/test-site.cjs` after building the site.
+
 ## GitHub Pages
 
 The [website workflow](../.github/workflows/website.yml) builds and checks pull

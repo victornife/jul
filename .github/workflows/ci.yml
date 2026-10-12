@@ -803,6 +803,23 @@ jobs:
             || echo "::warning::playwright install-deps failed (apt busy?); continuing with the image's own libraries"
       - name: run browser smoke
         run: pnpm --dir ${{ env.CONSOLE_UI }} run e2e:ci
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: check the public website on desktop and mobile
+        # Reuse the installed, locked Playwright/browser; no second frontend
+        # dependency set or client JavaScript is added to the public website.
+        run: |
+          python -m pip install --require-hashes -r website/requirements.txt
+          python scripts/build-site.py
+          node scripts/test-site.cjs
+      - name: retain website browser previews
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: website-browser-preview
+          path: dist/site-preview/
+          if-no-files-found: ignore
       - name: upload Playwright report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
