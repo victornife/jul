@@ -5,8 +5,8 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 
 ## Start with product truth
 
-Stable [`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0) was
-published on 2026-09-30 at `0951090a6fb7703769a15b4749be9664a9842c98`.
+Stable [`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0) was
+published at 2026-10-11T23:49:52Z from `b12e051139f652b400cff37d9f063f5637a7d550`.
 The capability table records shipped delivery; Beta capabilities stay Beta
 until their own GA evidence exists. Publication does not satisfy open criteria.
 
@@ -104,8 +104,8 @@ inside the immutable release archives. They do not close the partial-audit ledge
 | Secrets references + log redaction | [secrets.md](secrets.md) | `GA` / `soaked` |
 | Response cache (memory + disk) | [cache.md](cache.md) | `GA` / `soaked` |
 | Core HTTP (static / proxy / FastCGI / vhosts / routing) | [core-http.md](core-http.md) | `GA` / `soaked` |
-| Downstream write-inactivity timeout | [core-http.md](core-http.md#downstream-write-inactivity) | `Beta` / `merged` |
-| Per-route HTTP metrics and bounded hosts | [observability.md](observability.md#per-route-http-metrics) | `Beta` / `implemented` |
+| Downstream write-inactivity timeout | [core-http.md](core-http.md#downstream-write-inactivity) | `Beta` / `released` |
+| Per-route HTTP metrics and bounded hosts | [observability.md](observability.md#per-route-http-metrics) | `Beta` / `released` |
 | Configuration reload transaction | [reload-semantics.md](reload-semantics.md) | `GA` / `soaked` |
 | Trusted client address (client_address) | [configuration.md](configuration.md) | `GA` / `soaked` |
 | Backend TLS trust (backend_tls) | [upstreams.md](upstreams.md) | `GA` / `soaked` |

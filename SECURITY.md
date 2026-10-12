@@ -37,8 +37,8 @@ follows:
 - **`main`** — receives security fixes first. Development happens here.
 - **Latest stable release** — receives the supported fix through the next
   stable release, with an affected-version/advisory record where applicable.
-  v2.2.0 is the selected fixed release after v2.1.0; it is not available until
-  the release's actual packages have passed verification and are published.
+  v2.2.0 is the published fixed release after v2.1.0; actual packages passed
+  verification before publication and the two #514 advisories are public.
 - **Older releases** — no committed back-ports; upgrade to the latest stable
   release. No separate emergency/backport campaign is selected for this release.
 

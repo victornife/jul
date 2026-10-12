@@ -92,8 +92,8 @@ artifacts produced for the tagged SHA.
 
 ## v2.2.0 preparation
 
-The selected next minor release is v2.2.0; v2.1.0 remains the latest published
-release until verified fixed packages are available. See the
+v2.2.0 is published and is the latest stable release. Its immutable preparation
+record remains preserved; see the
 [release preparation record](release-candidates/v2.2.0.md) for the frozen
 scope, macOS 13+/Go 1.27.2 compatibility, #569's seven exact HTTP/3 exceptions,
 security-advisory coordination and actual-download/upgrade acceptance.
@@ -105,6 +105,45 @@ checksums, embedded identity, signed provenance/SBOM, startup and old-to-new-to-
 upgrade/rollback. Review the reports before publication. No new long-running
 soak or overall coverage target is introduced; the normal short release gate
 is unchanged.
+
+## Published v2.2.0 verification
+
+Stable [v2.2.0](https://github.com/victornife/jul/releases/tag/v2.2.0) was
+published **2026-10-11T23:49:52Z**, from immutable source
+`b12e051139f652b400cff37d9f063f5637a7d550` (annotated tag object
+`9115edc5961b92526b9ec76b2c752bc146ce3523`). All fourteen applicable
+merged-source workflows passed; the preparation PR's final head passed 61
+checks. The [official tag release run](https://github.com/victornife/jul/actions/runs/38184479322)
+passed build/test, the unchanged short smoke and all twelve package builds.
+
+All twelve actual archives, lean/full on Linux/macOS/Windows amd64/arm64,
+passed aggregate/individual SHA-256, embedded tag/source/clean/platform/profile
+identity, bundled SPDX and signed provenance/SBOM bound to the release workflow
+and exact source. The [native actual-download run](https://github.com/victornife/jul/actions/runs/38185464698)
+executed all six native hosts: config/startup, static/proxy, authenticated admin
+metrics, full Console/WAF and v2.1.0-to-v2.2.0-to-v2.1.0 upgrade/rollback using
+a v2.1-compatible config. Both new Linux/arm64 packages additionally passed on
+the maintainer host. No unexecuted native cell is called passed.
+
+The [downloadable verification record](https://github.com/victornife/jul/releases/download/v2.2.0/package-verification.json)
+retains every profile digest, build metadata, attestation and upgrade verdict.
+The first native attempt failed before tests because its read-only token could
+not see draft assets. Verification-only #573 corrected job access; definition
+source `9b73d7cb` still checked out and verified package source `b12e0511`.
+The tag and archives were never moved or replaced.
+
+Both #514 advisories were published after verified fixed downloads:
+[GHSA-4338-8694-mm4g](https://github.com/victornife/jul/security/advisories/GHSA-4338-8694-mm4g)
+and [GHSA-376x-77gx-jmmf](https://github.com/victornife/jul/security/advisories/GHSA-376x-77gx-jmmf).
+Affected releases are `>=1.32.1-rc.1, <2.2.0`; v2.2.0 is the first patched
+release, with no CVE requested. Private synthetic evidence remains restricted.
+
+macOS 13+ is required. The seven exact #569 HTTP/3 exceptions remain visible;
+raw 42/49 h3spec and skipped 0-RTT limits are not full RFC conformance.
+The three separately approved GA contracts remain **soak pending**. No extra
+long-running soak, overall coverage target or maturity promotion for other Beta
+features is claimed. This post-tag publication-status documentation does not
+change packaged READMEs or previous release/runtime evidence.
 
 ## Published v2.1.0 verification
 
