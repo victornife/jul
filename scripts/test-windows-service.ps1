@@ -239,8 +239,10 @@ proxy_pass = "http://lab-unix"
         $tsExisted = Test-Path -LiteralPath $tsPath
         if (-not $tsExisted) { New-Item -Path $tsPath -Force | Out-Null }
         $tsKey = Get-Item -LiteralPath $tsPath
-        $tsValueExisted = $tsKey.GetValueNames() -contains 'Content Type'
-        if ($tsValueExisted) { $tsValue = $tsKey.GetValue('Content Type'); $tsKind = $tsKey.GetValueKind('Content Type') }
+        try {
+            $tsValueExisted = $tsKey.GetValueNames() -contains 'Content Type'
+            if ($tsValueExisted) { $tsValue = $tsKey.GetValue('Content Type'); $tsKind = $tsKey.GetValueKind('Content Type') }
+        } finally { $tsKey.Dispose() }
         $tsChanged = $true
         New-ItemProperty -Path $tsPath -Name 'Content Type' -Value 'application/x-jul516-conflict' -PropertyType String -Force | Out-Null
         & python (Join-Path $PSScriptRoot 'windows-deployment-mime.py') prepare --extension $mimeExtension --directory $siteDir
@@ -446,9 +448,19 @@ exit 0
     if ($backendProcess -and -not $backendProcess.HasExited) { Stop-Process -Id $backendProcess.Id -Force }
     if ($registryCreated) { Remove-Item -LiteralPath $registryPath -Force }
     if ($tsChanged) {
-        if ($tsValueExisted) { (Get-Item -LiteralPath $tsPath).SetValue('Content Type', $tsValue, $tsKind) }
+        if ($tsValueExisted) {
+            $restoreKey = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SOFTWARE\Classes\.ts', $true)
+            if (-not $restoreKey) { throw 'Could not open MIME fixture key for restoration.' }
+            try {
+                $restoreKey.SetValue('Content Type', $tsValue, $tsKind)
+                if ($restoreKey.GetValue('Content Type') -cne $tsValue -or $restoreKey.GetValueKind('Content Type') -ne $tsKind) {
+                    throw 'Original MIME registry value/type was not restored.'
+                }
+            } finally { $restoreKey.Dispose() }
+        }
         elseif ($tsExisted) { Remove-ItemProperty -LiteralPath $tsPath -Name 'Content Type' }
         else { Remove-Item -LiteralPath $tsPath -Force }
+        $report.checks.registry_fixture_restoration = 'passed'
     }
     if (Test-Path $probePath) { Remove-Item -Path $probePath -Force }
     if ($rootCreated -and (Test-Path $root)) {
