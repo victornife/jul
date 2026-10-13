@@ -62,5 +62,8 @@
     "guides-semantic.log": "10f1a06cae0f6463e75893e803d10e47e338e666c1c43bcea241ce9a190c6524",
     "guides-transcode-contracts.log": "3d99c7d225b5281fbfad6fd39c9733a272480b25d81f25493ed59da71b709a84",
     "guides-trust-route-storage.log": "be43863f6998b0efb648ac57c1a495ba15283e9a4405643853dc8c033fe7854c"
-  }
+  },
+  "area_source": "cb205121dd044030bc2863708891412f2fb82230",
+  "area_tree": "83a0ef67b917111bbbc7c1ec0b57aced8bfcb4e9",
+  "establishing_pr": "https://github.com/victornife/jul/pull/601"
 }
