@@ -129,7 +129,7 @@ response frame is delivered as an in-band error frame (`{"error":…}` for NDJSO
 
 | Aspect | Behavior |
 | --- | --- |
-| Backend transport | h2c (default) or TLS (`tls = true`, verified against system roots) |
+| Backend transport | h2c (default) or TLS (`tls = true`, verified `backend_tls` policy; system roots by default) |
 | Backend selection | Per-request pick from the resolved upstream pool (load-balanced and health-checked) |
 | Connection reuse | gRPC connections are cached per backend address and shared across requests |
 | Inbound metadata | `Authorization` and any `Grpc-Metadata-<key>` header → gRPC metadata |
@@ -140,7 +140,7 @@ response frame is delivered as an in-band error frame (`{"error":…}` for NDJSO
 
 ### Retry
 
-Transcoded **unary** calls are retried; **streaming is not**, and neither is native gRPC passthrough.
+Eligible transcoded **unary** calls may be retried; **streaming is not**, and neither is native gRPC passthrough.
 
 The asymmetry is not an omission. A unary call's request is an in-memory message, so replaying it
 costs nothing and cannot fail, and its response is fully decoded before a byte is written — the whole
@@ -166,8 +166,9 @@ rpc GetItem(GetItemRequest) returns (Item) {
 }
 ```
 
-**The default, `IDEMPOTENCY_UNKNOWN`, is never retried** — silence is not a promise, and the method
-most likely to be silent about it is the one that charges a card.
+**The default `IDEMPOTENCY_UNKNOWN` authorizes no retry by itself.** A retry-safe
+HTTP binding can still authorize it; POST/PATCH with unknown idempotency cannot.
+Silence is not a promise, especially for a method that charges a card.
 
 Every other status code is terminal. An `InvalidArgument` is the application's answer, not a failure
 to reach it; asking a second backend the same question returns the same answer more expensively while
@@ -193,8 +194,9 @@ is a correctness bug; each is a bounded scope decision.
 - **RPCs may be cut at the retired-connection grace boundary.**
   When the upstream pool changes (e.g. service discovery), removed backend
   connections are kept for 30 seconds so in-flight RPCs can drain. The
-  reconciler runs on a 30-second timer, so the worst-case lag between a backend
-  leaving and its connection closing is **60 seconds**. A backend replaced at
+  reconciler runs on a 30-second timer, so the nominal timer window between a backend
+  leaving and its connection closing is up to **60 seconds**, subject to process
+  scheduling; this is not a wall-clock revocation SLO. A backend replaced at
   the same address — a recycled pod IP — counts as removed: the connection was
   dialled to a process that no longer exists, so it is retired and a fresh one
   is dialled for the replacement. RPCs that

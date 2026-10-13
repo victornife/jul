@@ -54,7 +54,7 @@ The `proxy_pass` scheme selects how Jul.IA dials the backend:
 | `proxy_pass` | Backend transport |
 | --- | --- |
 | `http://…` | Cleartext HTTP/2 (h2c) — prior knowledge, no TLS |
-| `https://…` | HTTP/2 over TLS (certificate verified against the system roots) |
+| `https://…` | HTTP/2 over TLS (verified `backend_tls` policy; system roots by default) |
 
 The backend may be a named `[[upstreams]]` pool or a literal `host:port`. A
 literal target becomes a single-backend pool.
@@ -112,9 +112,11 @@ over cleartext HTTP/2.
 ## Load balancing & health
 
 Because the backend is an ordinary `[[upstreams]]` pool, the pool's strategy
-(`round_robin`, `weighted_round_robin`, `least_conn`) and passive health checks
+(`round_robin`, `weighted_round_robin`, `least_conn`, `consistent_hash`) and passive health checks
 (`max_fails` / `fail_timeout`) apply, and `least_conn` reflects the full
-lifetime of a streaming call. The pool may also run an active
+lifetime of a streaming call. `consistent_hash` uses the configured bounded
+[affinity key](upstreams.md#consistent-hash-affinity) and ranked eligible backends;
+it does not promise NGINX placement equivalence. The pool may also run an active
 [`grpc.health.v1.Health/Check` probe](health.md#grpc-probes)
 (`upstreams.health_check.type = "grpc"`), which ejects a backend reporting
 `NOT_SERVING` from rotation before a client ever reaches it — the same pool
@@ -160,7 +162,7 @@ What passthrough supports today, enumerated so the boundary is explicit
 | Incremental flush | each frame flushed as it arrives (no buffering) | ✅ |
 | Inbound transport | h2c (`h2c = true`) or HTTP/2 via ALPN on a TLS listener | ✅ |
 | Backend transport | h2c (`http://`) or HTTP/2 over TLS (`https://`) | ✅ |
-| Load balancing | upstream `round_robin` / `weighted_round_robin` / `least_conn` | ✅ |
+| Load balancing | upstream `round_robin` / `weighted_round_robin` / `least_conn` / `consistent_hash` | ✅ |
 | Passive health | `max_fails` / `fail_timeout` per backend | ✅ |
 | Path routing | mixed gRPC + HTTP on one listener by location prefix | ✅ |
 | Mid-stream retry | a started stream is **not** replayed to another backend | ❌ (by design) |

@@ -26,6 +26,13 @@ for the original reasoning.
 | 2026-08-14 | **§9 premise corrected.** Probes were said to skip verification "by design"; the shipped code never did, and the claim came from a documentation error. |
 | 2026-08-14 | Added: topology matrix, address-family parity, TLS termination model, identity assertion to the backend, PROXY on HTTP listeners, and re-entry conditions for every deferral. |
 
+> **Current reading (2026-10-13):** Context, pre-implementation tables and
+> implementation sequencing below record the dated design baseline. For current
+> delivered behavior and operator limits, use [the active guide](../security-posture.md)
+> and [feature status](../feature-status.yaml). Routing, resilience and auxiliary
+> egress retain their separate #590 post-GA soak obligation; this review runs no
+> new long-duration campaign.
+
 ## Context
 
 Jul defaults every IP-based security decision to the real transport peer and never implicitly trusts
@@ -523,8 +530,13 @@ in production.
 **UDP client preservation is a non-goal.** The PROXY protocol defines a DGRAM form, so this is
 implementable, but on a connectionless transport the header must ride on every datagram, which changes
 the MTU and fragmentation calculus and interacts with session keying. The security cost today is zero:
-no UDP consumer reads the client address — there is no per-source ACL, rate limit or affinity — so
-building the framing would populate a value nothing reads.
+at the August design checkpoint, no UDP consumer used a per-source policy.
+Consistent-hash affinity subsequently shipped in #432: UDP placement uses the
+observed socket peer at session creation, as [ADR 0021](0021-consistent-hash-affinity.md)
+states. A relay therefore supplies the affinity source address; this does not
+recover the original client or implement PROXY v2 DGRAM. The first trigger below
+is now relevant for any future client-preservation proposal, but does not
+automatically activate that deferred protocol work.
 
 *Re-entry:* adopted when any one of (1) a UDP stream gains any per-source policy — ACL, rate limit or
 session affinity — because at that moment the socket peer stops being sufficient and the gap becomes

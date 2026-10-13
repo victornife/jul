@@ -320,6 +320,23 @@ class SemanticDriftTests(unittest.TestCase):
         write_json(root / "docs/generated/config-metadata.json", {"fields": []})
         self.assert_domain(sd.check_config_claims(root), "configuration", "metadata has no fields")
 
+    def test_real_audit_history_retention_consumer_rejects_restart_drift(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        source = Path(__file__).resolve().parents[1]
+        write(root / "docs/generated/config-lifecycle.json",
+              (source / "docs/generated/config-lifecycle.json").read_text())
+        consumer = (source / "docs/audit-sink-hot-reload.md").read_text()
+        write(root / "docs/audit-sink-hot-reload.md", consumer)
+        self.assertEqual(sd.check_lifecycle_claims(root), [])
+        contradicted = consumer.replace("| `admin.history_keep` | `hot_reload` |",
+                                       "| `admin.history_keep` | `restart_required` |")
+        self.assertNotEqual(consumer, contradicted)
+        write(root / "docs/audit-sink-hot-reload.md", contradicted)
+        findings = sd.check_lifecycle_claims(root)
+        self.assert_domain(findings, "lifecycle", "admin.history_keep")
+
     def test_lifecycle_unknown_path_class_subsystem_and_mismatch(self):
         root = self.repo()
         p = root / "docs/configuration.md"

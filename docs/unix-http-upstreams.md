@@ -41,7 +41,8 @@ Unix HTTP runs through the existing handler-generation-owned `http.Transport`, `
 
 Consequently the same controls apply to TCP and Unix members:
 
-- round-robin, weighted round-robin and least-connections balancing;
+- round-robin, weighted round-robin, least-connections and consistent-hash
+  balancing (the latter follows the shared [affinity contract](upstreams.md#consistent-hash-affinity));
 - global active/pending admission limits;
 - per-backend connection limits;
 - retry/deadline/backoff/budget behavior, including TCP-to-Unix and Unix-to-Unix retry;

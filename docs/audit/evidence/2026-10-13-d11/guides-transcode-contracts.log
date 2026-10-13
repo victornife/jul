@@ -1,0 +1,44 @@
+=== RUN   TestConnCacheAddressReusePreservesPerGenerationGrace
+--- PASS: TestConnCacheAddressReusePreservesPerGenerationGrace (0.00s)
+=== RUN   TestConnCacheChurnExpiresToLiveBaselineAndCloseReleasesAll
+--- PASS: TestConnCacheChurnExpiresToLiveBaselineAndCloseReleasesAll (0.00s)
+=== RUN   TestConnCacheChurnHasHardRetiredBound
+--- PASS: TestConnCacheChurnHasHardRetiredBound (0.01s)
+=== RUN   TestTranscodedUnaryDoesNotRetryApplicationErrors
+=== RUN   TestTranscodedUnaryDoesNotRetryApplicationErrors/invalid_argument_is_terminal
+=== RUN   TestTranscodedUnaryDoesNotRetryApplicationErrors/not_found_is_terminal
+=== RUN   TestTranscodedUnaryDoesNotRetryApplicationErrors/permission_denied_is_terminal
+=== RUN   TestTranscodedUnaryDoesNotRetryApplicationErrors/unavailable_is_retried
+--- PASS: TestTranscodedUnaryDoesNotRetryApplicationErrors (0.01s)
+    --- PASS: TestTranscodedUnaryDoesNotRetryApplicationErrors/invalid_argument_is_terminal (0.00s)
+    --- PASS: TestTranscodedUnaryDoesNotRetryApplicationErrors/not_found_is_terminal (0.00s)
+    --- PASS: TestTranscodedUnaryDoesNotRetryApplicationErrors/permission_denied_is_terminal (0.00s)
+    --- PASS: TestTranscodedUnaryDoesNotRetryApplicationErrors/unavailable_is_retried (0.00s)
+=== RUN   TestTranscodedRetryIdempotencyMatrix
+=== RUN   TestTranscodedRetryIdempotencyMatrix/GET_is_retry-safe_by_binding
+=== RUN   TestTranscodedRetryIdempotencyMatrix/PUT_is_retry-safe_by_binding
+=== RUN   TestTranscodedRetryIdempotencyMatrix/DELETE_is_retry-safe_by_binding
+=== RUN   TestTranscodedRetryIdempotencyMatrix/POST_with_unknown_idempotency_is_never_retried
+=== RUN   TestTranscodedRetryIdempotencyMatrix/POST_declared_NO_SIDE_EFFECTS_is_retried
+=== RUN   TestTranscodedRetryIdempotencyMatrix/POST_declared_IDEMPOTENT_is_retried
+=== RUN   TestTranscodedRetryIdempotencyMatrix/PATCH_with_unknown_idempotency_is_never_retried
+=== RUN   TestTranscodedRetryIdempotencyMatrix/PATCH_declared_IDEMPOTENT_is_retried
+--- PASS: TestTranscodedRetryIdempotencyMatrix (0.02s)
+    --- PASS: TestTranscodedRetryIdempotencyMatrix/GET_is_retry-safe_by_binding (0.00s)
+    --- PASS: TestTranscodedRetryIdempotencyMatrix/PUT_is_retry-safe_by_binding (0.00s)
+    --- PASS: TestTranscodedRetryIdempotencyMatrix/DELETE_is_retry-safe_by_binding (0.00s)
+    --- PASS: TestTranscodedRetryIdempotencyMatrix/POST_with_unknown_idempotency_is_never_retried (0.00s)
+    --- PASS: TestTranscodedRetryIdempotencyMatrix/POST_declared_NO_SIDE_EFFECTS_is_retried (0.00s)
+    --- PASS: TestTranscodedRetryIdempotencyMatrix/POST_declared_IDEMPOTENT_is_retried (0.00s)
+    --- PASS: TestTranscodedRetryIdempotencyMatrix/PATCH_with_unknown_idempotency_is_never_retried (0.00s)
+    --- PASS: TestTranscodedRetryIdempotencyMatrix/PATCH_declared_IDEMPOTENT_is_retried (0.00s)
+=== RUN   TestTranscodedRetryHonoursAttemptCap
+--- PASS: TestTranscodedRetryHonoursAttemptCap (0.00s)
+=== RUN   TestConnCacheDropsAReplacedWorkload
+--- PASS: TestConnCacheDropsAReplacedWorkload (0.00s)
+=== RUN   TestConnCacheEvictsAReplacedWorkloadOnReconcile
+--- PASS: TestConnCacheEvictsAReplacedWorkloadOnReconcile (0.00s)
+=== RUN   TestConnCacheKeepsAStableWorkload
+--- PASS: TestConnCacheKeepsAStableWorkload (0.00s)
+PASS
+ok  	jul/internal/transcode	0.053s
