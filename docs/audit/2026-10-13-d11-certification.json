@@ -3819,7 +3819,7 @@
         "No fresh seven-journey execution or long-duration soak; release/tag/packages remain immutable b12e051139f652b400cff37d9f063f5637a7d550"
       ],
       "open_defects": [],
-      "establishing_pr": "deployment area PR (pending publication)",
+      "establishing_pr": "https://github.com/victornife/jul/pull/599",
       "id": "D11-N001",
       "original_path": "docs/deployment.md",
       "current_paths": [
@@ -3869,7 +3869,7 @@
         "No fresh seven-journey execution or long-duration soak; release/tag/packages remain immutable b12e051139f652b400cff37d9f063f5637a7d550"
       ],
       "open_defects": [],
-      "establishing_pr": "deployment area PR (pending publication)",
+      "establishing_pr": "https://github.com/victornife/jul/pull/599",
       "id": "D11-N002",
       "original_path": "docs/deployment-journeys.md",
       "current_paths": [
@@ -3918,7 +3918,7 @@
         "No fresh seven-journey execution or long-duration soak; release/tag/packages remain immutable b12e051139f652b400cff37d9f063f5637a7d550"
       ],
       "open_defects": [],
-      "establishing_pr": "deployment area PR (pending publication)",
+      "establishing_pr": "https://github.com/victornife/jul/pull/599",
       "id": "D11-N003",
       "original_path": "docs/audit/2026-10-12-deployment-journeys.md",
       "current_paths": [
