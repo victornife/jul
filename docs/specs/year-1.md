@@ -3,6 +3,9 @@
 
 # JUL Engineering Execution Plan — YEAR 1 (maximum detail)
 
+> **Current reading (2026-10-13):** Historical Year1 design and June maturity/benchmark targets; squad/quarter proposals are not today's execution plan or measured guarantees.
+> Current replacements: [active authority](../feature-status.yaml) and [current sequence/contract](../roadmap/README.md); #62 owns programme status. The original dated text remains below for traceability.
+
 > Version 1.2 · Updated 2026-06-21 · Maturity: shipped at **Beta** per
 > [ADR 0003](../adr/0003-maturity-and-ga.md), except **Y1-01 (TLS + automatic
 > HTTPS)** and **Y1-04 (authentication)** which are **GA — soak pending** from

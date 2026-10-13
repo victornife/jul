@@ -1,5 +1,8 @@
 # Native gRPC passthrough + h2c
 
+Run the commands below from this example directory. Build the local `./jul`
+binary first; external backends and lab TLS trust still need to be supplied.
+
 Reverse-proxy **native gRPC** end to end over HTTP/2 — no transcoding. Jul
 forwards each call unchanged, preserving trailers (`grpc-status` /
 `grpc-message`) and flushing streaming frames as they arrive, while still

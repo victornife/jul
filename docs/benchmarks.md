@@ -4,7 +4,9 @@
 
 ## Running benchmarks
 
-The in-tree benchmark suite lives across 8 packages and is driven by `scripts/bench.sh`:
+The harness runs module-wide benchmarks by default; the catalogue below is a
+selected operator reference, not a fixed eight-package inventory. It is driven by
+`scripts/bench.sh` (the local full-profile correction is #606):
 
 ```bash
 # Smoke run (fast, verifies compilation + execution)
@@ -17,12 +19,18 @@ BENCHTIME=2s scripts/bench.sh
 COUNT=6 scripts/bench.sh ./internal/router/
 
 # Full opt-in feature set (includes gRPC, mTLS, HTTP/3, transcoding)
-BENCH_TAGS="brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes" scripts/bench.sh
+BENCH_TAGS="brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" scripts/bench.sh
 ```
 
-Each benchmark is named `Benchmark<Subsystem><Scenario>`. They are end-to-end where possible (real handler, real TLS handshake, real balancer) rather than micro-benchmarks of isolated functions, so the numbers reflect production costs.
+Benchmark names identify their scenario. The suite mixes microbenchmarks with
+real handler, TLS and balancer paths; each measures its own boundary rather
+than certifying production throughput.
 
 ## Benchmark catalogue
+
+Any numbers in this catalogue are earlier illustrative observations, not fresh
+measurements of the current release. Resolve names to the owning benchmark and
+retain its source, toolchain and workload when publishing new numbers.
 
 | Package | Benchmark | What it measures | Typical use |
 | --- | --- | --- | --- |
@@ -33,8 +41,8 @@ Each benchmark is named `Benchmark<Subsystem><Scenario>`. They are end-to-end wh
 | `internal/handler` | `BenchmarkStaticServe` | End-to-end static file serve (open, MIME, ETag, `ServeContent`) | Static asset throughput baseline |
 | `internal/handler` | `BenchmarkGRPCPassthroughUnary` | Unary gRPC call forwarded end-to-end | gRPC proxy overhead vs direct call |
 | `internal/router` | `BenchmarkHostScore/exact` | Exact `Host` header match | VHost routing hot path |
-| `internal/router` | `BenchmarkMatchLocation/prefix` | Longest-prefix location match | Most common location type |
-| `internal/router` | `BenchmarkMatchLocation/regex` | Regex location match | Regex routing cost |
+| `internal/router` | `BenchmarkSelectLocation/prefix` | Longest-prefix location match | Most common location type |
+| `internal/router` | `BenchmarkSelectLocation/regex` | Regex location match | Regex routing cost |
 | `internal/upstream` | `BenchmarkBalancerRoundRobin` | Lock-free rotation across backends | Balancer micro-overhead |
 | `internal/upstream` | `BenchmarkPoolPick` | Full hot path: health filter + balancer | Per-request backend selection |
 | `internal/server` | `BenchmarkSNICertSelection` | SNI cert lookup per TLS handshake | Large cert catalogue performance |
@@ -86,7 +94,10 @@ unsupported key.
 
 Jul.IA uses Go's default goroutine-per-request model. There is no fixed worker pool to tune. Two levers matter:
 
-1. **`GOMAXPROCS`** — set to the number of physical CPU cores (or vCPUs) available. The Go scheduler handles the rest.
+1. **`GOMAXPROCS` / `global.worker_threads`** — the startup default is Go's
+   container-aware scheduler choice. A positive worker_threads value caps it;
+   auto restores the captured startup default. Size against actual CPU quota
+   and workload, rather than automatically forcing the host CPU count.
 2. **File descriptor limits** — on Linux, ensure `ulimit -n` covers `(listeners + upstream_backends) × expected_parallelism`. For 10k concurrent connections, `ulimit -n 65536` is typical.
 
 ### Response cache recertification baseline
@@ -141,7 +152,11 @@ listen = "127.0.0.1:8080"
 
 **Rule of thumb:** Size the memory cache to hold your hottest 20% of responses. Disk cache is for larger working sets where memory is too expensive.
 
-**Key design:** The cache key is `(method, Host, path, Vary headers)`. Collisions are rare unless you have many distinct `Vary` values (e.g. per-user caching without a stable surrogate key).
+**Key design:** the base key includes method, Host and request URI (path plus
+query); Vary adds the selected header-value variant. Many variants increase
+working-set pressure, not hash-collision probability. Storage and policy bounds
+are defined in [cache.md](cache.md); do not infer safe per-user caching from this
+short key summary.
 
 ### Compression levels
 
@@ -152,7 +167,7 @@ encoder's valid range; `0` selects each encoder's default.
 | Encoder | Default level | Valid range | Tune when … |
 | --- | --- | --- | --- |
 | gzip | 6 | 1–9 | High CPU → lower to 4; poor ratio → raise to 8 |
-| brotli | 6 | 0–11 | Same logic; Brotli-4 ≈ gzip-9 at lower CPU |
+| brotli | 6 | 0–11 | Measure size/CPU on the actual content |
 | zstd | 3 | 1–4 (mapped to Speed* levels) | Very fast; raise for better ratio |
 
 ```toml
@@ -215,38 +230,46 @@ key strategies.
 
 TLS 1.3 handshakes are the dominant connection cost. Two mitigations:
 
-1. **Session resumption** — TLS 1.3 0-RTT and session tickets are enabled by default. Ensure `tls_config` does not disable them.
-2. **Certificate caching** — Jul.IA caches parsed certificates. For very large cert catalogues (1000+ SNI entries), ensure the cache is warm before taking traffic (the first access parses the PEM).
+1. **Connection reuse and session resumption** can reduce repeated handshake
+   work. Session tickets are distinct from early data: HTTP/3 explicitly sets
+   `Allow0RTT: false`; this guide does not promise 0-RTT or a `tls_config` knob.
+2. **Prepared certificates** are loaded before startup/Publish for file-backed
+   TLS, not first parsed by an arbitrary request. ACME has its own issuance/cache
+   lifecycle. Measure a representative certificate/connection workload.
 
 ### HTTP/3 over QUIC
 
 HTTP/3 reduces head-of-line blocking and improves lossy-network latency, but QUIC handshakes and encryption add per-packet CPU overhead. Use it when:
 
 - Clients are mobile / over lossy networks.
-- You can absorb ~10–20% more CPU for the same throughput.
+- Measurements on your representative clients and network justify its CPU/latency trade-off.
 
-Benchmark `BenchmarkHTTP3Throughput` against your TCP baseline (`BenchmarkStaticServe` or `BenchmarkPoolPick`) to quantify the delta on your hardware.
+BenchmarkHTTP3Throughput measures a real QUIC server/client path. Compare it with an equivalent HTTP/2 workload on your hardware; a static-handler benchmark or pool-selection microbenchmark is not an equivalent transport baseline.
 
 ### Static file serving
 
 The static handler uses `os.Root` (openat) for path traversal safety, then `http.ServeContent` with `If-Modified-Since` / ETag handling. For highest throughput:
 
 1. Use an in-memory or disk cache for static responses (avoids disk read on cache hit).
-2. Enable `sendfile` implicitly: Jul.IA uses `http.ServeContent`, which elides copies when possible.
+2. `http.ServeContent` handles validators/ranges; zero-copy opportunities depend
+   on the OS, protocol and transport. There is no TOML sendfile switch or universal
+   zero-copy guarantee.
 3. Pre-compress assets offline and serve the `.gz` / `.br` variants if your build pipeline supports it (avoids runtime compression CPU).
 
 ### Logging overhead
 
-Structured logging (`json` or `text`) has a small per-request cost. At extreme throughput (>50k req/s), consider:
-
-- Setting `log_level = "warn"` to skip `info`-level lines.
-- Using an asynchronous access-log sink (`syslog` or `file` with buffering) rather than `stdout`.
+Structured logging has a workload-dependent per-request cost. The standard
+stdout sink obeys global log_level, so warn suppresses its info access lines.
+Dedicated file/syslog sinks use their own info handler and write synchronously;
+changing global level does not disable those copies. Measure configured sinks
+and adjust the supported access-log policy, rather than assuming an asynchronous
+queue or a throughput threshold.
 
 ## Lean product budgets
 
-Jul.IA's "lean" promise is enforced as a set of recorded budgets. The numbers
-below are the current baselines; they are updated when a deliberate change
-moves them. Deterministic checks (binary size, generated-asset size) may gate
+Jul.IA's "lean" budgets combine recorded observations and specific enforced gates. The numbers
+below are dated machine/toolchain observations, not measurements of current
+v2.2.0 or this audit. Deterministic checks (binary size, generated-asset size) may gate
 CI; shared-runner latency and RSS remain evidence artifacts until stable
 runners exist.
 
@@ -276,9 +299,10 @@ Representative per-tag deltas over the lean binary:
 | `stream` | ~0.1 MiB | L4 proxy runtime |
 | `consul` / `kubernetes` | ~0.02 MiB each | Small REST clients (no vendor SDKs) |
 
-**Gate:** a +10% change to lean or full size requires explanation in the
-change notes; a +20% deterministic regression fails CI unless deliberately
-accepted in the same change.
+**Recorded budget policy:** binary-size changes need review against a named
+source/toolchain baseline. The main workflow does not implement the formerly
+claimed automatic +20% binary-size failure; its explicit Console asset gate is
+described below. Do not represent a budget proposal as an enforced check.
 
 ### Runtime footprint
 
@@ -301,7 +325,7 @@ Stable, allocation-free or near-allocation-free hot paths (measured with
 
 | Path | Time/op | Allocs/op | Notes |
 | --- | --- | --- | --- |
-| `BenchmarkMatchLocation/prefix` | ~39 ns | 0 | Most common location match |
+| `BenchmarkSelectLocation/prefix` | ~39 ns | 0 | Most common location match |
 | `BenchmarkHostScore/exact` | ~106 ns | 0 | Virtual-host selection |
 | `BenchmarkBalancerRoundRobin` | ~14 ns | 0 | Backend rotation |
 | `BenchmarkBalancerLeastConn` | ~16 ns | 0 | Backend selection |
@@ -311,9 +335,9 @@ Stable, allocation-free or near-allocation-free hot paths (measured with
 ### Console asset budget
 
 The Console v2 SPA is embedded in the binary. The initial route budget is
-**~250 KB gzip** ([ADR 0006](adr/0006-console-v2-stack.md)). Current initial
-route (HTML shell + entry JS/CSS + runtime + vendor) is **~168 KB gzip**,
-leaving headroom for new panels.
+**~250 KB gzip** ([ADR 0006](adr/0006-console-v2-stack.md)). The earlier **~168 KB gzip** observation is historical. The frontend job measures
+the actual emitted initial-route assets at its checkout and enforces the budget;
+use that run's size report rather than treating an older value as current.
 
 ### Dependency and license budget
 

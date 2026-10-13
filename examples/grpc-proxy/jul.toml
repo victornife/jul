@@ -3,9 +3,9 @@
 
 # Native gRPC passthrough (grpc = true), requires a -tags grpc binary.
 #
-#   go build -tags grpc -o ../../jul ../../cmd/jul
-#   ../../jul -check -config jul.toml
-#   ../../jul -config jul.toml
+#   go build -tags grpc -o jul ../../cmd/jul
+#   ./jul -check -config jul.toml
+#   ./jul -config jul.toml
 #
 # Jul forwards native gRPC end to end over HTTP/2 (trailers preserved, frames
 # flushed immediately) and balances calls across the backend pool. This is

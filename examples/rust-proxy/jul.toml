@@ -7,6 +7,7 @@
 #       cd examples/rust-proxy && cargo run --release
 #    (or, without Cargo:
 #       rustc -O examples/rust-proxy/app.rs -o examples/rust-proxy/app
+#       rustc -O examples/rust-proxy/app.rs -o examples/rust-proxy/app.exe  (Windows)
 #       .\examples\rust-proxy\app.exe      (Windows)
 #       ./examples/rust-proxy/app          (Linux/macOS) )
 # 2. Start Jul with this config:

@@ -1,0 +1,9 @@
+=== RUN   TestD11SnapshotRejectsForbiddenProfile
+    zz_d11_pprof_reproducer_test.go:12: heap-T0.out: err=<nil> body="synthetic access denied"
+    zz_d11_pprof_reproducer_test.go:13: HTTP 403 response persisted as profiler artifact: heap-T0.out
+    zz_d11_pprof_reproducer_test.go:12: goroutine-T0.out: err=<nil> body="synthetic access denied"
+    zz_d11_pprof_reproducer_test.go:13: HTTP 403 response persisted as profiler artifact: goroutine-T0.out
+--- FAIL: TestD11SnapshotRejectsForbiddenProfile (0.00s)
+FAIL
+FAIL	command-line-arguments	0.004s
+FAIL

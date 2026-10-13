@@ -1,5 +1,8 @@
 # gRPC → JSON transcoding gateway
 
+Run the commands below from this example directory. Build the local `./jul`
+binary first; external backends and lab TLS trust still need to be supplied.
+
 Expose a **unary gRPC** service as a RESTful **JSON** API. Jul reads the
 `google.api.http` annotations compiled into your `.proto`, translates each
 incoming HTTP request into a gRPC call, and turns the protobuf reply back into
@@ -69,8 +72,8 @@ go run gen_descriptor.go        # writes ./api.pb
 ## 2. Validate and run
 
 ```bash
-../../jul -check -config jul.toml      # schema check (any build)
-../../jul -config jul.toml             # needs a -tags grpc binary
+./jul -check -config jul.toml      # schema check (any build)
+./jul -config jul.toml             # needs a -tags grpc binary
 ```
 
 Start any gRPC server that implements `echo.EchoService` on

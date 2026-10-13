@@ -1,0 +1,7 @@
+time=2026-10-13T08:16:25.431-05:00 level=INFO msg="starting Jul.IA" version=dev config="<zero-config: proxy 127.0.0.1:46259>"
+time=2026-10-13T08:16:25.432-05:00 level=INFO msg="wasm plugin engine" mode=compiler reason="native code generation is available"
+time=2026-10-13T08:16:25.432-05:00 level=INFO msg=listening addr=127.0.0.1:42669 tls=false http3=false
+time=2026-10-13T08:16:25.523-05:00 level=INFO msg=access method=GET host=127.0.0.1:42669 path=/ query="" status=200 bytes=20 duration_ms=1.282 client_ip=127.0.0.1 request_id=8948243b9b1f31b3 user_agent=Python-urllib/3.12
+time=2026-10-13T08:16:25.525-05:00 level=INFO msg=access method=GET host=127.0.0.1:42669 path=/ query="" status=200 bytes=20 duration_ms=0.842 client_ip=127.0.0.1 request_id=c9d6f6ae0e5676de user_agent=Python-urllib/3.12
+time=2026-10-13T08:16:25.528-05:00 level=INFO msg="shutdown signal received, draining connections"
+time=2026-10-13T08:16:25.528-05:00 level=INFO msg="shutdown complete"

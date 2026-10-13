@@ -618,6 +618,33 @@ def check_capability_claims(root: Path, capabilities: dict[str, Any] | None = No
     return sorted(set(findings))
 
 
+
+def check_benchmark_catalogue(root: Path) -> list[Finding]:
+    """Resolve structured package/benchmark references against owning Go tests."""
+    path = root / "docs/benchmarks.md"
+    if not path.exists():
+        return []
+    findings = []
+    for line, headers, cells in _table_rows(path.read_text(encoding="utf-8")):
+        if "Package" not in headers or "Benchmark" not in headers:
+            continue
+        package = cells[headers.index("Package")].strip("`")
+        benchmark = cells[headers.index("Benchmark")].strip("`").split("/", 1)[0]
+        if not package.startswith("internal/") or not re.fullmatch(r"Benchmark\w+", benchmark):
+            findings.append(Finding("docs/benchmarks.md", line, "benchmark catalogue", f"invalid reference {package}/{benchmark}",
+                                    "owning *_test.go benchmark declaration", "an internal package and named benchmark",
+                                    "correct the structured benchmark reference"))
+            continue
+        declared = set()
+        for source in (root / package).glob("*_test.go"):
+            declared.update(re.findall(r"^func (Benchmark\w+)\(", source.read_text(encoding="utf-8"), re.M))
+        if benchmark not in declared:
+            findings.append(Finding("docs/benchmarks.md", line, "benchmark catalogue", f"missing {package}/{benchmark}",
+                                    f"{package}/*_test.go", "a benchmark declared by its owner",
+                                    "update the consumer to the actual owning benchmark"))
+    return findings
+
+
 def check_current_authority_links(root: Path) -> list[Finding]:
     required = {
         "docs/index.md": ("issues/62", "feature-status.yaml", "generated/config-reference.md", "generated/openapi.json", "audit-register.md"),
@@ -663,4 +690,5 @@ def check_repository(root: Path, *, cli_help: str | None = None, capabilities: d
     findings.extend(check_cli_claims(root, help_text=cli_help, capabilities=capabilities) if not cli_failure else cli_failure)
     findings.extend(check_capability_claims(root, capabilities=capabilities) if not cli_failure else [])
     findings.extend(check_current_authority_links(root))
+    findings.extend(check_benchmark_catalogue(root))
     return sorted(set(findings))

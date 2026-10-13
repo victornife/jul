@@ -2,12 +2,15 @@
 
 > Version 1.6 · Updated 2026-07-19
 
-> **📌 Current repository state:** all findings from Rounds 5–13 are resolved and
+> **Historical July checkpoint:** findings from Rounds 5–13 were resolved and
 > tracked in [`docs/audit-register.md`](../audit-register.md). The point-in-time
 > reviews previously linked here are now archived under [`previous_reviews/`](previous_reviews/).
 >
-> This directory no longer holds an authoritative current-state audit; it is a
-> **historical decision log** only.
+> This directory no longer holds an authoritative whole-repository current-state audit; it is a
+> **decision log with dated, source-bound reviews**. Individual later reviews
+> retain their scoped evidence; they are not whole-repository certification.
+> Current selected work, later findings and
+> repair/reviewer status are owned by #62 and the active audit register.
 
 This folder is the **decision log** for Jul.IA: external/internal reviews that have
 been evaluated, plus the explicit record of *what we adopted, reframed, deferred,

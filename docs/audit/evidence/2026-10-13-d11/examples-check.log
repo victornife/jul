@@ -1,0 +1,40 @@
+cwd=examples/grpc-gateway command=/tmp/jul-lean-d11 -check -config jul.toml exit=0
+Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.
+configuration jul.toml is valid
+
+cwd=examples/grpc-gateway command=/tmp/jul-full-d11 -check -config jul.toml exit=0
+Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.
+configuration jul.toml is valid
+
+cwd=examples/grpc-proxy command=/tmp/jul-lean-d11 -check -config jul.toml exit=0
+Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.
+configuration jul.toml is valid
+
+cwd=examples/grpc-proxy command=/tmp/jul-full-d11 -check -config jul.toml exit=0
+Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.
+configuration jul.toml is valid
+
+cwd=examples/l4 command=/tmp/jul-lean-d11 -check -config jul.toml exit=0
+Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.
+configuration jul.toml is valid
+
+cwd=examples/l4 command=/tmp/jul-full-d11 -check -config jul.toml exit=0
+Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.
+configuration jul.toml is valid
+
+cwd=examples/rust-proxy command=/tmp/jul-lean-d11 -check -config jul.toml exit=0
+Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.
+configuration jul.toml is valid
+
+cwd=examples/rust-proxy command=/tmp/jul-full-d11 -check -config jul.toml exit=0
+Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.
+configuration jul.toml is valid
+
+cwd=examples/python-uwsgi command=/tmp/jul-lean-d11 -check -config jul.toml exit=0
+Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.
+configuration jul.toml is valid
+
+cwd=examples/python-uwsgi command=/tmp/jul-full-d11 -check -config jul.toml exit=0
+Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.
+configuration jul.toml is valid
+

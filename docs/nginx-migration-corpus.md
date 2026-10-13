@@ -7,10 +7,12 @@ evidence. It does not produce a compatibility percentage and it never labels an
 entire configuration equivalent. Every runtime verdict is limited to the
 response dimensions named by one scenario.
 
-## Completed evidence baseline
+## Completed initial evidence baseline (2026-08-31)
 
-Issue #154 closes with a bounded evidence programme rather than an open-ended
-parity mandate. The checked-in baseline contains:
+Issue #154 closed with a bounded programme. The counts below identify its
+original closure source, not the current expanded corpus. Current non-scoring
+inventory/coverage files and the later owner sections below account for added
+fixtures and runtime dimensions. The original baseline contained:
 
 - **11 repository-owned fixtures**: 9 in the core tier and 2 in the full tier;
 - exact schema-v2 assessment goldens with provenance for 127 directive results;

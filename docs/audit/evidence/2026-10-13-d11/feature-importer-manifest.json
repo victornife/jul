@@ -1,0 +1,93 @@
+{
+  "binary_sha256": "82d618b062a38658f1d0bc859ee26d8045116c0cb21a751d0bf651a1451ab4bd",
+  "build": {
+    "arch": "amd64",
+    "build_date": "2026-10-13T09:11:26Z",
+    "commit": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc",
+    "dirty": true,
+    "go_version": "go1.27.2",
+    "os": "linux",
+    "product": "Jul.IA",
+    "version": "dev"
+  },
+  "capabilities": {
+    "exit_codes": [
+      {
+        "code": 0,
+        "meaning": "success: applied live, read completed, clean shutdown, or healthy probe"
+      },
+      {
+        "code": 1,
+        "meaning": "validation or configuration error"
+      },
+      {
+        "code": 2,
+        "meaning": "usage error: bad flags, missing argument, disabled admin, malformed request, or missing resource"
+      },
+      {
+        "code": 3,
+        "meaning": "success; restart required to converge (staged or owned_not_serving)"
+      },
+      {
+        "code": 4,
+        "meaning": "success with a degraded outcome"
+      },
+      {
+        "code": 5,
+        "meaning": "conflict or state left uncertain by failed restoration"
+      },
+      {
+        "code": 6,
+        "meaning": "configuration authority denial: server is file_owned"
+      },
+      {
+        "code": 7,
+        "meaning": "authentication, authorization, or insecure-transport refusal"
+      },
+      {
+        "code": 8,
+        "meaning": "connectivity, TLS, or rate-limit failure"
+      },
+      {
+        "code": 9,
+        "meaning": "server, capability, storage, timeout, or internal failure"
+      }
+    ],
+    "features": {
+      "acme": true,
+      "brotli": true,
+      "console": true,
+      "consul": true,
+      "grpc": true,
+      "http3": true,
+      "importer": true,
+      "kubernetes": true,
+      "otel": true,
+      "stream_proxy": true,
+      "waf": true,
+      "wasm_plugins": true,
+      "zstd": true
+    },
+    "product": "Jul.IA",
+    "version": "dev"
+  },
+  "environment": {
+    "platform": "Linux-6.18.44-x86_64-with-glibc2.39",
+    "python": "3.12.14",
+    "runner_arch": null,
+    "runner_image": null,
+    "runner_image_version": null,
+    "runner_os": null
+  },
+  "fixtures": {
+    "lint": "env-backed admin token; literal-token warning and strict exit 2",
+    "nginx_blocking_sha256": "2043b4e37ad26319b172e729a952f1c33df24944a29256d9a8137f7b9796c227",
+    "nginx_clean_sha256": "0a458c759f6ae18806e82905d10a72c5710597027b1c5a75f5cd9f4e15b3e527",
+    "response_sha256": "21437b7d440eee05c001285e7c629e95078e5d5c0ab4e95719425d6f95db222f"
+  },
+  "harness_sha256": "6f9c0bd2bd8d92bc596f9908f7fc631fbf3401822b74199af6e28b55264f4cff",
+  "mode": "importer",
+  "requested_seconds": 2,
+  "source_sha": "local",
+  "started_utc": "2026-10-13T13:24:06Z"
+}

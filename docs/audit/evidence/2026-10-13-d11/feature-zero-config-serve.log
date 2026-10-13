@@ -1,0 +1,7 @@
+time=2026-10-13T08:16:25.325-05:00 level=INFO msg="starting Jul.IA" version=dev config="<zero-config: serve /tmp/jul-feature-soak-a90a3502/public>"
+time=2026-10-13T08:16:25.327-05:00 level=INFO msg="wasm plugin engine" mode=compiler reason="native code generation is available"
+time=2026-10-13T08:16:25.328-05:00 level=INFO msg=listening addr=127.0.0.1:35707 tls=false http3=false
+time=2026-10-13T08:16:25.419-05:00 level=INFO msg=access method=GET host=127.0.0.1:35707 path=/ query="" status=200 bytes=20 duration_ms=1.4 client_ip=127.0.0.1 request_id=b15d0afa01dcf1a4 user_agent=Python-urllib/3.12
+time=2026-10-13T08:16:25.524-05:00 level=INFO msg=access method=GET host=127.0.0.1:35707 path=/ query="" status=200 bytes=20 duration_ms=0.149 client_ip=127.0.0.1 request_id=137372c3bebd3409 user_agent=Python-urllib/3.12
+time=2026-10-13T08:16:25.525-05:00 level=INFO msg="shutdown signal received, draining connections"
+time=2026-10-13T08:16:25.525-05:00 level=INFO msg="shutdown complete"

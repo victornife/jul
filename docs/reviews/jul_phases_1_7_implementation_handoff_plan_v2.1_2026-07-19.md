@@ -1,5 +1,8 @@
 # Jul.IA Phases 1–7 Implementation Handoff Plan
 
+> **Current reading (2026-10-13):** Historical July implementation handoff, superseded for current sequencing.
+> Current replacements: [active authority](../operating-model.md) and [current sequence/contract](../roadmap/README.md); #62 owns programme status. The original dated text remains below for traceability.
+
 **Document status:** Implementation-ready; all planning decisions in §4 are resolved and normative
 **Document revision:** 2.1
 **Repository:** `victornife/jul`

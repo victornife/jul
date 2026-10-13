@@ -15,7 +15,7 @@
 // Build and start the server first:
 //
 //	go build -tags wasmplugins -o ./jul ./cmd/jul
-//	./jul -config testdata/plugins.toml//
+//	./jul -config testdata/plugins.toml
 //
 // Exit codes:
 //
