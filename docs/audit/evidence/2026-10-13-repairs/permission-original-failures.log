@@ -1,0 +1,58 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+ RUN  v4.1.11 /workspace/scratch/081a0d718172/jul-repairs/internal/admin/ui
+
+ ❯ src/test/config-history-hardening.test.tsx (15 tests | 5 failed | 8 skipped) 1131ms
+     × blocks a prepared rollback after revocation and requires an explicit click after recovery 191ms
+     × blocks raw live confirmation after config:apply is revoked 739ms
+     × blocks structured live confirmation after config:apply is revoked 30ms
+     × blocks raw staged confirmation after config:apply is revoked 39ms
+     × blocks structured staged confirmation after config:apply is revoked 40ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/test/config-history-hardening.test.tsx > open confirmations follow the current permission grants > blocks a prepared rollback after revocation and requires an explicit click after recovery
+Error: expect(element).toBeDisabled()
+
+Received element is not disabled:
+  <button
+  class="rounded-md px-4 py-1.5 text-sm font-medium disabled:opacity-50 bg-jul-danger/90 text-jul-bg hover:bg-jul-danger"
+  type="button"
+/>
+ ❯ src/test/config-history-hardening.test.tsx:148:20
+    146|       </Scope>,
+    147|     );
+    148|     expect(submit).toBeDisabled();
+       |                    ^
+    149|     expect(
+    150|       within(dialog).getByText("Requires the history:rollback permissi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/test/config-history-hardening.test.tsx > open confirmations follow the current permission grants > blocks raw live confirmation after config:apply is revoked
+ FAIL  src/test/config-history-hardening.test.tsx > open confirmations follow the current permission grants > blocks structured live confirmation after config:apply is revoked
+ FAIL  src/test/config-history-hardening.test.tsx > open confirmations follow the current permission grants > blocks raw staged confirmation after config:apply is revoked
+ FAIL  src/test/config-history-hardening.test.tsx > open confirmations follow the current permission grants > blocks structured staged confirmation after config:apply is revoked
+Error: expect(element).toBeDisabled()
+
+Received element is not disabled:
+  <button
+  class="rounded-md px-4 py-1.5 text-sm font-medium disabled:opacity-50 bg-jul-accent text-jul-bg hover:brightness-110"
+  type="button"
+/>
+ ❯ src/test/config-history-hardening.test.tsx:283:22
+    281|         </Scope>,
+    282|       );
+    283|       expect(submit).toBeDisabled();
+       |                      ^
+    284|       expect(within(dialog).getByText("Requires the config:apply permi…
+    285|       fireEvent.click(submit);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 2 passed | 8 skipped (15)
+   Start at  05:14:22
+   Duration  2.46s (transform 326ms, setup 72ms, import 490ms, tests 1.13s, environment 591ms)
+

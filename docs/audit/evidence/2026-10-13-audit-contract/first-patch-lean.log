@@ -1,0 +1,24 @@
+--- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit (0.01s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit/missing (0.00s)
+        audit_contract_followup_test.go:91: missing/false failure identity: []
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit/invalid (0.00s)
+        audit_contract_followup_test.go:91: missing/false failure identity: []
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit/disabled (0.00s)
+        audit_contract_followup_test.go:91: missing/false failure identity: []
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit/expired (0.00s)
+        audit_contract_followup_test.go:91: missing/false failure identity: []
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit/legacy_invalid (0.00s)
+        audit_contract_followup_test.go:91: missing/false failure identity: []
+time=2026-10-13T06:30:23.200-05:00 level=WARN msg="configuration history retention prune degraded after publish" error="remove history metadata: injected remove failure\nremove history metadata: injected remove failure"
+2026/10/13 06:30:23 WARN admin rate limit exceeded class=read retry_after_s=60
+2026/10/13 06:30:23 WARN admin rate limit exceeded class=read retry_after_s=60
+2026/10/13 06:30:23 WARN admin rate limit exceeded class=read retry_after_s=60
+2026/10/13 06:30:24 http: TLS handshake error from 127.0.0.1:54258: tls: client didn't provide a certificate
+2026/10/13 06:30:24 http: TLS handshake error from 127.0.0.1:54270: tls: client didn't provide a certificate
+2026/10/13 06:30:24 http: TLS handshake error from 127.0.0.1:59802: tls: client didn't provide a certificate
+2026/10/13 06:30:24 http: TLS handshake error from 127.0.0.1:59810: tls: failed to verify certificate: x509: certificate signed by unknown authority (possibly because of "x509: ECDSA verification failure" while trying to verify candidate authority certificate "admin test CA")
+2026/10/13 06:30:24 http: TLS handshake error from 127.0.0.1:52130: tls: client didn't provide a certificate
+FAIL
+FAIL	jul/internal/admin	2.792s
+ok  	jul/internal/rbac	0.003s
+FAIL

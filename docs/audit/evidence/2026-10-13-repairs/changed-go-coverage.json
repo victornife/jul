@@ -1,0 +1,9 @@
+{
+  "covered": 22,
+  "total": 22,
+  "percent": 100.0,
+  "files": [
+    "scripts/burn-in-stream-load.go"
+  ],
+  "uncovered": []
+}

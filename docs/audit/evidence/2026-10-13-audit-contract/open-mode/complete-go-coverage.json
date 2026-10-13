@@ -1,0 +1,24 @@
+{
+  "covered": 105,
+  "total": 107,
+  "percent": 98.13084112149532,
+  "files": [
+    "internal/admin/api.go",
+    "internal/admin/audit.go",
+    "internal/admin/rbac.go",
+    "scripts/burn-in-load.go",
+    "scripts/burn-in-stream-load.go"
+  ],
+  "uncovered": [
+    [
+      "scripts/burn-in-load.go",
+      "45.2,46.1",
+      1
+    ],
+    [
+      "scripts/burn-in-load.go",
+      "642.3,643.1",
+      1
+    ]
+  ]
+}
