@@ -36,6 +36,9 @@
     "semantic-tests.log": "26cc07613dddeb3f1f6829bd93c524e9f6df0099791493d3ecd689f114ba9099",
     "stream-owner-race.log": "4951ff0394c54aa6b759017fd3ec93b423cd2618e85095887f0bc2e1e96da324",
     "tcp-tests.log": "59bc368a4a904dd467c7687211fc3ca9c417825ba98da0222a5a8e0ce4ed474a",
-    "tcp.cover": "74ae9dd82b1621fc2d2084f1b0eec9a493dda41b42d5c5fb17604c6831809af3"
-  }
+    "tcp.cover": "74ae9dd82b1621fc2d2084f1b0eec9a493dda41b42d5c5fb17604c6831809af3",
+    "final-docs-check.log": "0cda33ba92d6c443c62e10d91e10fdfa5c48e94f522fef977dc59c8de9ce0698"
+  },
+  "final_documentation_check_source": "504a12a",
+  "final_documentation_check_result": "2089 passed, 0 failed"
 }
