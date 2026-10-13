@@ -9,6 +9,16 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Fixed
+
+- Recheck known Console grants in already-open rollback, live config apply and
+  restart-staging confirmations. Disable denied confirmation with a permission
+  explanation, preserve submitted outcomes, and require explicit confirmation
+  after grant recovery (#595).
+- Read complete TCP load-generator echoes across fragmented replies and verify
+  their contents. Report successful rounds separately from failed connections
+  and compute the connection success rate with consistent units (#594).
+
 ### Verification
 
 - Enforce Console coverage floors for configuration, history and the API client,
