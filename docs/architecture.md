@@ -4,7 +4,7 @@ This document describes how the Jul.IA repository is organized.
 
 ## Overview
 
-Jul.IA is a single-static-binary HTTP edge server written in Go, configured
+Jul.IA is a single-binary HTTP edge server written in Go, configured
 through TOML. The repository follows a standard Go project structure with a few
 domain-specific conventions.
 
@@ -32,7 +32,7 @@ internal/
   server/              # HTTP/1, HTTP/2, HTTP/3 server construction and lifecycle
   signals/             # Graceful shutdown and config reload signal handling
   stream/              # L4 TCP/UDP stream proxy (build-tagged)
-  tracing/             # OpenTelemetry tracer setup
+  tracing/             # Dependency-free trace-ID context seam (OTel setup lives in observability)
   transcode/           # gRPC-JSON transcoding runtime
   upstream/            # Upstream pool management, health checks, discovery
   waf/                 # Web Application Firewall (Coraza integration)
@@ -57,8 +57,10 @@ docs/adr/              # Architecture Decision Records
   `docs/generated/config-lifecycle.{md,json}` are generated mirrors kept honest
   by `make generated-check`. An unclassified path fails closed rather than
   defaulting to hot reload.
-- **Zero external runtime deps:** The shipped binary is statically linked and
-  needs no interpreter or shared libraries (Go standard library + chosen deps).
+- **Standalone release runtime:** Published profiles need no external interpreter,
+  Node runtime or separately installed third-party shared library. Platform OS
+  facilities, trust stores and supported versions still apply; this is not a
+  claim that every platform executable is fully statically linked.
 - **One resilience subsystem:** admission, retry and circuit state are owned by
   `internal/upstream` and shared by every backend transport — HTTP, gRPC,
   transcoding, FastCGI, uWSGI and the L4 stream proxy — rather than reimplemented

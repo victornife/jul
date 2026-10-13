@@ -1,5 +1,8 @@
 # ReloadPlan file-level task breakdown
 
+> **Current reading (2026-10-13):** Historical July task breakdown; old estimates and proposed YAML-loading task are not active implementation requirements.
+> Current replacements: [active authority](../reload-semantics.md) and [current sequence/contract](../generated/config-lifecycle.md); #62 owns programme status. The original dated text remains below for traceability.
+
 **Owner:** Jul.IA core team
 **Date:** 2026-07-16
 **Scope:** file-level work required to implement ADR 0011 / `docs/specs/reload-plan.md`

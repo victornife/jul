@@ -12,16 +12,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Four update ecosystems: Go modules, npm Console, GitHub Actions and Docker; grouping/weekly schedules propose updates rather than proving every deployed image fresh",
+        "Corrected the ecosystem count and Docker digest promise; dependency validation remains the owning CI job"
+      ],
+      "implementation_and_authority": [
+        ".github/dependabot.yml",
+        "go.mod",
+        "internal/admin/ui/package.json",
+        "Dockerfile"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "No Dependabot/live upstream update was triggered; YAML and current consumer paths were inspected.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-002",
@@ -33,16 +54,35 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "56 unique configured labels with valid colour values; names/descriptions are repository policy, not feature completion",
+        "The sync workflow dry-runs PRs and applies on main; unlisted labels may be deleted under its explicit policy"
+      ],
+      "implementation_and_authority": [
+        ".github/labels.yml",
+        ".github/workflows/labels.yml"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "No live label sync or assertion that the remote label estate currently equals this file; parsed inventory retained.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-003",
@@ -54,16 +94,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Beta minimum remains DoD1/6/9; runtime features require their Console/API surface while machine-native CLI/migration/automation use ADR0014",
+        "Corrected the blanket Console-only requirement without weakening GA criteria or promoting features"
+      ],
+      "implementation_and_authority": [
+        ".github/pull_request_template.md",
+        "docs/adr/0014-operability-surfaces.md",
+        "docs/adr/0003-maturity-and-ga.md",
+        "docs/adr/0004-console-ui-invariants.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Normative contribution policy, not evidence that every historical PR complied.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-004",
@@ -75,16 +136,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Backend admission files enforce their 90% owner floors; frontend AdminRuntimeSettingsDrawer enforces90 S/B/F/L",
+        "Real-server Console and gRPC admission checks supplement focused coverage"
+      ],
+      "implementation_and_authority": [
+        ".github/workflows/admin-admission-quality.yml",
+        "internal/admin/ratelimit.go",
+        "internal/admin/patch_admin_runtime.go",
+        "internal/admin/ui/src/features"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Owner-specific job/floors; no universal frontend90% or live production-load proof.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-005",
@@ -96,16 +178,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Lean/full AUTO04 automation suites and scoped CLI/adminclient coverage enforce90% owning files",
+        "Coverage command failures propagate; whole target files are measured rather than selected tests being called full-product coverage"
+      ],
+      "implementation_and_authority": [
+        ".github/workflows/auto04-coverage.yml",
+        "scripts/check-auto04-coverage.py",
+        "internal/adminclient",
+        "cmd/jul"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Scoped AUTO04 contract; historical source-bound reports retain their original source.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-006",
@@ -117,16 +220,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Diagnostics, doctor and support-bundle package floors are85%; race cases cover actual owner contracts",
+        "Path-filtered workflow uploads its measured results; diagnostics redaction/recovery remains the owner test contract"
+      ],
+      "implementation_and_authority": [
+        ".github/workflows/diagnostics-coverage.yml",
+        "internal/diagnostics",
+        "cmd/jul",
+        "scripts/check-package-coverage.py"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Only matching paths trigger this owner job; not a universal repository gate.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-007",
@@ -138,16 +262,36 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "PR preflight runs20-second zero-config and importer smokes; one-hour feature qualifiers require explicit dispatch",
+        "Manifest checks source/binary/capabilities before execution; short preflight is not ADR0005 soak duration or criterion5 completion"
+      ],
+      "implementation_and_authority": [
+        ".github/workflows/feature-soak.yml",
+        "scripts/feature-soak.py",
+        "docs/adr/0005-soak-post-ga-gate.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Local zero-config memory sampling failed because this workspace exposes host /proc and child namespace PIDs; importer smoke passes. Hosted Linux preflight is required; no #590 long campaign.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-008",
@@ -159,16 +303,36 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Linux/kind lab changes EndpointSlice port18081 to18082 and verifies convergence; PR/nightly lane retains logs",
+        "Port-change assertion proves its disposable cluster scenario, not every Kubernetes distribution"
+      ],
+      "implementation_and_authority": [
+        ".github/workflows/discovery-k8s-kind.yml",
+        "scripts/test-discovery-k8s-live.sh",
+        "internal/upstream/disco_k8s.go"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Controlled hosted kind/Docker lab; no new local Kubernetes provider execution or production estate certification.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-009",
@@ -180,16 +344,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Linux pwsh/Docker Consul convergence lane and native Windows Kubernetes runbook are distinct consumers",
+        "Corrected the stale migration comment; failure artifacts and bounded listener/readiness checks are retained"
+      ],
+      "implementation_and_authority": [
+        ".github/workflows/discovery-live.yml",
+        "scripts/test-discovery-live.ps1",
+        "scripts/test-discovery-k8s-live.ps1",
+        "internal/upstream/disco_consul.go"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "PowerShell/Docker unavailable locally; source/caller review and original hosted evidence only, not a new provider campaign.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-010",
@@ -201,16 +386,38 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "AF_UNIX quality runs native Linux/macOS/Windows scenarios, race/full importer cases and changed-statement scoring",
+        "Benchmark comparisons distinguish the2% target and greater-than5% automatic failure threshold"
+      ],
+      "implementation_and_authority": [
+        ".github/workflows/issue407-quality.yml",
+        "scripts/strip_moved_lines.py",
+        ".github/workflows/issue407-quality.yml",
+        "internal/upstream",
+        "internal/migrate/nginx"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Native platform jobs own Unix proof; this workspace operation-not-permitted failures are retained rather than skipped as passes.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-011",
@@ -222,16 +429,38 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Reload equivalence/fingerprint/semantic-noop checks run across native platforms with full/race ownership",
+        "Scoped changed-statement coverage supports the reload contract; it is not an all-feature requalification"
+      ],
+      "implementation_and_authority": [
+        ".github/workflows/issue408-quality.yml",
+        "internal/app",
+        "internal/config",
+        "internal/lifecycle",
+        "scripts/strip_moved_lines.py"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Native platforms and exact checkout matter; no blanket hot reload or every field mutable promise.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-012",
@@ -243,16 +472,44 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Legacy security-matrix feature-branch/manual triggers are not mandatory main PR checks",
+        "Current main CI, security-gates and generated contracts are the active replacement; old workflow history remains identifiable"
+      ],
+      "implementation_and_authority": [
+        ".github/workflows/issue94-security-matrix.yml",
+        ".github/workflows/ci.yml",
+        ".github/workflows/security-gates.yml",
+        ".github/workflows/ci.yml"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Historical workflow trigger boundary; no claim that this inactive-on-main lane validates current PRs.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "current_semantic_certification": false,
+      "document_status": "Historical design/context or conceptual material; not current shipped semantics",
+      "current_replacement": [
+        "docs/operating-model.md",
+        "docs/feature-status.yaml",
+        "docs/generated/config-reference.md"
+      ]
     },
     {
       "id": "D11-013",
@@ -264,16 +521,36 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "PR dry-run and main mutation use the pinned labeler action; configured stock-label renames/exclusions/deletion are explicit",
+        "Corrected checkout comment to match pinned v7; label data and mutation policy are unchanged"
+      ],
+      "implementation_and_authority": [
+        ".github/workflows/labels.yml",
+        ".github/labels.yml",
+        ".github/workflows/labels.yml"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "No main label mutation was executed for the audit; pinned action README and YAML parsing support the consumer contract.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-014",
@@ -285,16 +562,39 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Existing plugin69, RBAC75 and WAF72 owner floors remain manifest-scoped",
+        "Lean/full negative gates, catalogue/transport tests and normal coverage uploads support actual security regressions"
+      ],
+      "implementation_and_authority": [
+        ".github/workflows/security-gates.yml",
+        "scripts/security-gates.sh",
+        "scripts/security-package-coverage.json",
+        "internal/plugins",
+        "internal/rbac",
+        "internal/waf"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Risk-focused regression ownership, not every-line independent security certification or unrelated provider/shared journey testing.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-015",
@@ -306,16 +606,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Python semantic checker enforces90% branch coverage and positive/contradiction fixtures",
+        "Real CLI/config/lifecycle/API/feature consumers are read-only; history_keep and benchmark catalogue contradictions now have focused regressions"
+      ],
+      "implementation_and_authority": [
+        ".github/workflows/semantic-drift-coverage.yml",
+        "scripts/semantic_drift.py",
+        "scripts/test_semantic_drift.py",
+        "scripts/docs-check.py"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "The machine-checkable contracts are scoped; prose and operational execution still require substantive human/source review.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-016",
@@ -1805,16 +2126,38 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Single Go binary follows Prepare/Publish/Abort/Retire with generation-owned server/upstream resources",
+        "Corrected all-platform static-linking and tracing-package claims: trace-ID context seam is dependency-free, OTel setup is owned by observability"
+      ],
+      "implementation_and_authority": [
+        "internal/app",
+        "internal/lifecycle",
+        "internal/tracing",
+        "internal/observability",
+        "docs/generated/config-lifecycle.json"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Architecture ownership substantiation; no promise of interpreter-free OS facilities, every-platform static linkage or universal hot reload.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-054",
@@ -1826,16 +2169,35 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Unchanged1024x1024 RGBA PNG is a reference brand asset with SHA256250049893551b69a4065eb82f79149b0e1ddd4eef6cf44b8daa9aa2a9db42f52",
+        "Visual inspection/PNG decoding establish its asset identity; the image makes no technical capability claim"
+      ],
+      "implementation_and_authority": [
+        "docs/assets/logo.png",
+        "docs/index.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Reference-asset review only; branding is not security/performance evidence.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-055",
@@ -1889,16 +2251,45 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Module-wide benchmark harness and owning benchmark names replace fixed-package/stale-name claims; full default tag correction is selectedPR606",
+        "Corrected cache URI/query key, synchronous dedicated logging, prepared TLS certificates, disabled QUIC0RTT and unsupported tls_config/async/sendfile promises",
+        "Historical size/RSS/ns/assets observations remain dated; no enforced+20% binary-size gate or generic Brotli/QUIC CPU equivalence is claimed"
+      ],
+      "implementation_and_authority": [
+        "scripts/bench.sh",
+        ".github/workflows/ci.yml",
+        "internal/server/http3.go",
+        "internal/server/tls.go",
+        "internal/cache/cache.go",
+        "internal/handler/static.go",
+        "internal/observability/sinks.go",
+        "internal/app/serve.go",
+        "scripts/semantic_drift.py"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
-      "open_defects": [],
-      "establishing_pr": null
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "No fresh performance baseline or production throughput certification. PR606 must be integrated for the corrected default full profile; numeric shared-runner outputs remain source-bound.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
+      "open_defects": [
+        "https://github.com/victornife/jul/issues/605"
+      ],
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-057",
@@ -2107,16 +2498,42 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Schema2 assessment exposes provenance/root source, migration classification/status and bounded guidance rather than broad parity",
+        "Draft2020-12 schema and synthetic example validate; owning Go regressions cover determinism, mappings, absolute paths, include failure/redaction and source confinement"
+      ],
+      "implementation_and_authority": [
+        "docs/nginx-assessment.schema.json",
+        "docs/nginx-assessment.example.json",
+        "internal/migrate/nginx/assessment_types.go",
+        "internal/migrate/nginx"
+      ],
+      "named_tests": [
+        "TestAssessmentSchemaV2IncludesRootSourceProvenance",
+        "TestAssessmentSchemaV2IsDeterministicAcrossDirectories",
+        "TestImportIncludeRootAndSymlinkEscape",
+        "TestImportIncludeParseErrorAndSecretRedaction"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Example/schema consistency and actual owner tests; no fresh paired NGINX runtime or every external estate equivalence.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-063",
@@ -2128,16 +2545,42 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Schema2 assessment exposes provenance/root source, migration classification/status and bounded guidance rather than broad parity",
+        "Draft2020-12 schema and synthetic example validate; owning Go regressions cover determinism, mappings, absolute paths, include failure/redaction and source confinement"
+      ],
+      "implementation_and_authority": [
+        "docs/nginx-assessment.schema.json",
+        "docs/nginx-assessment.example.json",
+        "internal/migrate/nginx/assessment_types.go",
+        "internal/migrate/nginx"
+      ],
+      "named_tests": [
+        "TestAssessmentSchemaV2IncludesRootSourceProvenance",
+        "TestAssessmentSchemaV2IsDeterministicAcrossDirectories",
+        "TestImportIncludeRootAndSymlinkEscape",
+        "TestImportIncludeParseErrorAndSecretRedaction"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Example/schema consistency and actual owner tests; no fresh paired NGINX runtime or every external estate equivalence.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-064",
@@ -2149,16 +2592,36 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Initial11-fixture/127-result corpus figures are explicitly the August31 baseline, not current inventory",
+        "Expanded corpus and later issue-owned corrections preserve precise unsupported/manual outcomes instead of blanket parity"
+      ],
+      "implementation_and_authority": [
+        "internal/migrate/nginx/corpus",
+        "docs/nginx-assessment.schema.json",
+        "docs/known-limitations.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Current importer race suites pass; no new paired NGINX execution or removal of exact upstream-conformance exceptions.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-065",
@@ -2170,16 +2633,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Operating model has six portfolio lanes, including bounded experiments and vision horizon; the product remains a standalone gateway",
+        "Descriptive machine authority differs from normative accepted ADRs and #62 execution; scope selection, source-bound evidence and appropriate DoD/review precede closure"
+      ],
+      "implementation_and_authority": [
+        "docs/operating-model.md",
+        "docs/adr/0013-project-operating-model-and-completeness.md",
+        "docs/adr/0014-operability-surfaces.md",
+        "docs/feature-status.yaml"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Policy review, not claim all existing backlog complied; selected #515/#517 repairs do not authorize #590 soak or maturity promotion.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-066",
@@ -2280,16 +2764,43 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "July Phase1-7 review rounds are closed historical context; later dated reports retain their individual source scopes",
+        "Corrected the index boundary so old handoff material cannot imply a fresh whole-repository audit"
+      ],
+      "implementation_and_authority": [
+        "docs/reviews/README.md",
+        "docs/audit-register.md",
+        "docs/operating-model.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Index/navigation reconciliation; old archived reports and verdicts remain unchanged.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "current_semantic_certification": false,
+      "document_status": "Historical design/context or conceptual material; not current shipped semantics",
+      "current_replacement": [
+        "docs/operating-model.md",
+        "docs/feature-status.yaml",
+        "docs/generated/config-reference.md"
+      ]
     },
     {
       "id": "D11-069",
@@ -2301,16 +2812,44 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "July19 handoff source1daf and its proposed phase/delivery state are superseded",
+        "Added current-reading replacement links while retaining original dated findings/tasks without relabeling them current execution"
+      ],
+      "implementation_and_authority": [
+        "docs/reviews/README.md",
+        "docs/roadmap/README.md",
+        "docs/operating-model.md",
+        "docs/audit-register.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Original152KB historical handoff body is preserved; it is not current semantic certification.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "current_semantic_certification": false,
+      "document_status": "Historical design/context or conceptual material; not current shipped semantics",
+      "current_replacement": [
+        "docs/operating-model.md",
+        "docs/feature-status.yaml",
+        "docs/generated/config-reference.md"
+      ]
     },
     {
       "id": "D11-070",
@@ -2362,16 +2901,38 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Years1-2 historical plans and Years3-5 horizons do not activate capabilities or own shipped maturity",
+        "Approved public vision and preserved engineering context are distinct; current model/ADRs/status govern implementation"
+      ],
+      "implementation_and_authority": [
+        "docs/specs/README.md",
+        "docs/vision/README.md",
+        "docs/vision/engineering-context.md",
+        "docs/operating-model.md",
+        "docs/feature-status.yaml"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Index classification only; no future feature/maturity/GA activation.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-072",
@@ -2474,16 +3035,38 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Core completeness is a bounded normative standalone product contract, with explicit trust, lifecycle, migration and exclusions",
+        "Accepted ADR0018/0019 define route policy and managed/file_owned authority; generation/compiled-resource ownership differs from universal mutability or fleet/SSO guarantees"
+      ],
+      "implementation_and_authority": [
+        "docs/specs/core-gateway-completeness.md",
+        "docs/adr/0018-bounded-route-matching-and-response-policy.md",
+        "docs/adr/0019-configuration-authority-generated-contracts-and-resource-identity.md",
+        "docs/generated/config-lifecycle.json",
+        "docs/feature-status.yaml"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Normative requirement status remains #62/status; #590 post-GA soak remains separate, not completed by this audit.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-075",
@@ -2495,16 +3078,45 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Historical platform/security design proposals are separated from current supported-build and runtime authority",
+        "Added a current-reading boundary and authority links; retained original proposal body and dated sequencing"
+      ],
+      "implementation_and_authority": [
+        "docs/specs/hardening-platform.md",
+        "internal/lifecycle",
+        "docs/generated/config-lifecycle.json",
+        "docs/feature-status.yaml",
+        "docs/operating-model.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Historical disposition only, current_semantic_certification=false; no implied activation or certification of proposed types/tasks.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "current_semantic_certification": false,
+      "document_status": "Historical design/context or conceptual material; not current shipped semantics",
+      "current_replacement": [
+        "docs/operating-model.md",
+        "docs/feature-status.yaml",
+        "docs/generated/config-reference.md"
+      ]
     },
     {
       "id": "D11-076",
@@ -2516,16 +3128,45 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Historical reload type/resource sketches are replaced by the actual lifecycle registry and generated classifications",
+        "Added a current-reading boundary and authority links; retained original proposal body and dated sequencing"
+      ],
+      "implementation_and_authority": [
+        "docs/specs/reload-plan.md",
+        "internal/lifecycle",
+        "docs/generated/config-lifecycle.json",
+        "docs/feature-status.yaml",
+        "docs/operating-model.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Historical disposition only, current_semantic_certification=false; no implied activation or certification of proposed types/tasks.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "current_semantic_certification": false,
+      "document_status": "Historical design/context or conceptual material; not current shipped semantics",
+      "current_replacement": [
+        "docs/operating-model.md",
+        "docs/feature-status.yaml",
+        "docs/generated/config-reference.md"
+      ]
     },
     {
       "id": "D11-077",
@@ -2537,16 +3178,45 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Historical task checklist and proposed YAMLLoad/type names are not current Go API or active task completion",
+        "Added a current-reading boundary and authority links; retained original proposal body and dated sequencing"
+      ],
+      "implementation_and_authority": [
+        "docs/specs/reload-tasks.md",
+        "internal/lifecycle",
+        "docs/generated/config-lifecycle.json",
+        "docs/feature-status.yaml",
+        "docs/operating-model.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Historical disposition only, current_semantic_certification=false; no implied activation or certification of proposed types/tasks.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "current_semantic_certification": false,
+      "document_status": "Historical design/context or conceptual material; not current shipped semantics",
+      "current_replacement": [
+        "docs/operating-model.md",
+        "docs/feature-status.yaml",
+        "docs/generated/config-reference.md"
+      ]
     },
     {
       "id": "D11-078",
@@ -2558,16 +3228,45 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Historical quarters/maturity/task proposals do not override current delivered feature status",
+        "Added a current-reading boundary and authority links; retained original proposal body and dated sequencing"
+      ],
+      "implementation_and_authority": [
+        "docs/specs/year-1.md",
+        "internal/lifecycle",
+        "docs/generated/config-lifecycle.json",
+        "docs/feature-status.yaml",
+        "docs/operating-model.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Historical disposition only, current_semantic_certification=false; no implied activation or certification of proposed types/tasks.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "current_semantic_certification": false,
+      "document_status": "Historical design/context or conceptual material; not current shipped semantics",
+      "current_replacement": [
+        "docs/operating-model.md",
+        "docs/feature-status.yaml",
+        "docs/generated/config-reference.md"
+      ]
     },
     {
       "id": "D11-079",
@@ -2579,16 +3278,45 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Historical Console/editing task chronology does not override delivered POST editors, actual history semantics or current gates",
+        "Added a current-reading boundary and authority links; retained original proposal body and dated sequencing"
+      ],
+      "implementation_and_authority": [
+        "docs/specs/year-2.md",
+        "internal/lifecycle",
+        "docs/generated/config-lifecycle.json",
+        "docs/feature-status.yaml",
+        "docs/operating-model.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Historical disposition only, current_semantic_certification=false; no implied activation or certification of proposed types/tasks.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "current_semantic_certification": false,
+      "document_status": "Historical design/context or conceptual material; not current shipped semantics",
+      "current_replacement": [
+        "docs/operating-model.md",
+        "docs/feature-status.yaml",
+        "docs/generated/config-reference.md"
+      ]
     },
     {
       "id": "D11-080",
@@ -2600,16 +3328,43 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Year3 is an explicitly future horizon, not an implemented feature inventory",
+        "Experiment selection requires bounded governance and separate decision; proposals do not change the standalone product boundary"
+      ],
+      "implementation_and_authority": [
+        "docs/specs/year-3.md",
+        "docs/operating-model.md",
+        "docs/feature-status.yaml"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Horizon-only disposition, current_semantic_certification=false; no execution/activation/maturity assertion.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "current_semantic_certification": false,
+      "document_status": "Historical design/context or conceptual material; not current shipped semantics",
+      "current_replacement": [
+        "docs/operating-model.md",
+        "docs/feature-status.yaml",
+        "docs/generated/config-reference.md"
+      ]
     },
     {
       "id": "D11-081",
@@ -2621,16 +3376,43 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Year4 is an explicitly future horizon, not an implemented feature inventory",
+        "Experiment selection requires bounded governance and separate decision; proposals do not change the standalone product boundary"
+      ],
+      "implementation_and_authority": [
+        "docs/specs/year-4.md",
+        "docs/operating-model.md",
+        "docs/feature-status.yaml"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Horizon-only disposition, current_semantic_certification=false; no execution/activation/maturity assertion.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "current_semantic_certification": false,
+      "document_status": "Historical design/context or conceptual material; not current shipped semantics",
+      "current_replacement": [
+        "docs/operating-model.md",
+        "docs/feature-status.yaml",
+        "docs/generated/config-reference.md"
+      ]
     },
     {
       "id": "D11-082",
@@ -2642,16 +3424,43 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Year5 is an explicitly future horizon, not an implemented feature inventory",
+        "Experiment selection requires bounded governance and separate decision; proposals do not change the standalone product boundary"
+      ],
+      "implementation_and_authority": [
+        "docs/specs/year-5.md",
+        "docs/operating-model.md",
+        "docs/feature-status.yaml"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Horizon-only disposition, current_semantic_certification=false; no execution/activation/maturity assertion.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "current_semantic_certification": false,
+      "document_status": "Historical design/context or conceptual material; not current shipped semantics",
+      "current_replacement": [
+        "docs/operating-model.md",
+        "docs/feature-status.yaml",
+        "docs/generated/config-reference.md"
+      ]
     },
     {
       "id": "D11-083",
@@ -2702,20 +3511,43 @@
       "original_disposition": "not reviewed",
       "original_reason_and_limit": "structural link/TOML checks where applicable; behavioral assertions require independent semantic review",
       "current_paths": [
-        "docs/vision/README.md"
+        "docs/vision/README.md",
+        "docs/vision/engineering-context.md"
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Original engineering-vision surface was moved to engineering-context.md; current README is the approved #576 public vision",
+        "Both roles remain explicitly mapped; public words are preserved byte-for-byte against current main and practical/status/model own present engineering claims"
+      ],
+      "implementation_and_authority": [
+        "docs/vision/README.md",
+        "docs/vision/engineering-context.md",
+        "docs/practical-guide.md",
+        "docs/feature-status.yaml"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Public purpose/aspiration is not a shipped capability inventory; historical engineering sequencing is not current semantic certification.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "path_reconciliation": "The frozen original README engineering vision was preserved as engineering-context.md by merged #576; README now contains approved public wording. Both are retained; no denominator replacement."
     },
     {
       "id": "D11-085",
@@ -2727,16 +3559,44 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Conceptual protocol/system primer is not a Jul public API, shipped feature inventory or production-conformance assertion",
+        "Added an explicit conceptual boundary and current practical/config/status replacements; illustrative languages/protocols do not activate product support"
+      ],
+      "implementation_and_authority": [
+        "docs/vision/appendix.md",
+        "docs/practical-guide.md",
+        "docs/generated/config-reference.md",
+        "docs/feature-status.yaml"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Conceptual reference disposition, current_semantic_certification=false; no full RFC audit or every illustrative technology execution.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "current_semantic_certification": false,
+      "document_status": "Historical design/context or conceptual material; not current shipped semantics",
+      "current_replacement": [
+        "docs/operating-model.md",
+        "docs/feature-status.yaml",
+        "docs/generated/config-reference.md"
+      ]
     },
     {
       "id": "D11-086",
@@ -2787,16 +3647,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Build/run now use ./jul from example CWD; descriptor paths resolve there",
+        "Full grpc tag, external service and TLS/trust prerequisites remain explicit; Jul is a gateway rather than supplied backend"
+      ],
+      "implementation_and_authority": [
+        "examples/grpc-gateway/README.md",
+        "examples/grpc-gateway/jul.toml",
+        "internal/transcode",
+        "internal/handler/grpctranscode.go"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Lean/full legacy-check structural passes and owner contracts; no fresh external gRPC application/provider execution.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-088",
@@ -2846,16 +3727,36 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "grpc passthrough example has consistent local binary/CWD/build commands",
+        "TLS/mTLS examples require real external backend certificates/trust and tagged native gRPC implementation"
+      ],
+      "implementation_and_authority": [
+        "examples/grpc-proxy/README.md",
+        "examples/grpc-proxy/jul.toml",
+        "internal/handler/grpcproxy.go"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Structural checks and owning native-RPC source/tests; not a runnable bundled external service or new provider campaign.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-090",
@@ -2944,16 +3845,39 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "L4 README builds a local stream-tag binary before lint and uses consistent ./jul commands",
+        "Lean legacy-check validates structure while actual startup requires stream capability; TCP/UDP/demo backend prerequisites are explicit"
+      ],
+      "implementation_and_authority": [
+        "examples/l4/README.md",
+        "examples/l4/jul.toml",
+        "internal/stream",
+        "cmd/jul"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
-      "open_defects": [],
-      "establishing_pr": null
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "No fresh long stream soak; deterministic selectedTCP repair #597 proves fragmentation handling separately.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
+      "open_defects": [
+        "https://github.com/victornife/jul/issues/594"
+      ],
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-093",
@@ -3085,16 +4009,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Guest scripts build Go WASI wasip1/wasm c-shared artifacts, distinguish fixtures from all and preserve historical committed v1 fixtures",
+        "Fresh Bash all build onGo1.27.2 produced10 guest outputs; fixture names/toolchain contracts agree with callers"
+      ],
+      "implementation_and_authority": [
+        "examples/plugins/build.ps1",
+        "examples/plugins",
+        "internal/plugins",
+        "internal/plugins"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Bash fresh-build pass does not certify native PowerShell execution (unavailable locally); owning hosted/native evidence and historical fixture identities remain separate.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-097",
@@ -3106,16 +4051,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Guest scripts build Go WASI wasip1/wasm c-shared artifacts, distinguish fixtures from all and preserve historical committed v1 fixtures",
+        "Fresh Bash all build onGo1.27.2 produced10 guest outputs; fixture names/toolchain contracts agree with callers"
+      ],
+      "implementation_and_authority": [
+        "examples/plugins/build.sh",
+        "examples/plugins",
+        "internal/plugins",
+        "internal/plugins"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Bash fresh-build pass does not certify native PowerShell execution (unavailable locally); owning hosted/native evidence and historical fixture identities remain separate.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-098",
@@ -3127,16 +4093,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Both uWSGI and Jul commands now declare repo-root CWD and explicit app.py/config paths",
+        "Python/uWSGI is an external application server; Jul owns the uWSGI client/proxy contract, not installing that dependency"
+      ],
+      "implementation_and_authority": [
+        "examples/python-uwsgi/README.md",
+        "examples/python-uwsgi/app.py",
+        "examples/python-uwsgi/jul.toml",
+        "internal/handler"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Example structure/Jul check and existing uWSGI owner tests; external uWSGI server not newly executed and its native Windows support is not implied.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-099",
@@ -3185,16 +4172,36 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Cargo http.check-revoke override is Rust toolchain build metadata, not a Jul TLS or runtime trust knob",
+        "It does not change Jul backend verification or the credentials/origin contract"
+      ],
+      "implementation_and_authority": [
+        "examples/rust-proxy/.cargo/config.toml",
+        "examples/rust-proxy/Cargo.toml",
+        "internal/handler/proxy.go"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "TOML parsed; Cargo/Rust compiler unavailable locally. No Rust distribution/network certificate behavior was newly executed.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-101",
@@ -3206,16 +4213,35 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Rust edition2021 binary metadata has no third-party crate dependencies",
+        "The sample owns a standalone external demo application; it is not the Jul Go module/build profile"
+      ],
+      "implementation_and_authority": [
+        "examples/rust-proxy/Cargo.toml",
+        "examples/rust-proxy/app.rs"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Cargo metadata parsed and source reviewed; no new cargo build or external application execution.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-102",
@@ -3227,16 +4253,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Commands consistently distinguish repo-root Jul config from Cargo CWD; Windows build explicitly creates jul.app.exe",
+        "Threaded backend demo sends Connection:close and is not a persistent-connection or bounded production server; Jul TOML values remain unchanged"
+      ],
+      "implementation_and_authority": [
+        "examples/rust-proxy/README.md",
+        "examples/rust-proxy/jul.toml",
+        "examples/rust-proxy/app.rs",
+        "internal/handler/proxy.go"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Lean/full structural legacy-check passes; missing local Rust compiler is not a pass for the demo backend.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-103",
@@ -3248,16 +4295,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Commands consistently distinguish repo-root Jul config from Cargo CWD; Windows build explicitly creates jul.app.exe",
+        "Threaded backend demo sends Connection:close and is not a persistent-connection or bounded production server; Jul TOML values remain unchanged"
+      ],
+      "implementation_and_authority": [
+        "examples/rust-proxy/README.md",
+        "examples/rust-proxy/jul.toml",
+        "examples/rust-proxy/app.rs",
+        "internal/handler/proxy.go"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Lean/full structural legacy-check passes; missing local Rust compiler is not a pass for the demo backend.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-104",
@@ -4244,16 +5312,37 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Zero-config mode checks real static/proxy response, lint token warnings/strict exit2, process RSS/descriptors and bounded load; importer checks repeated deterministic clean/manual exit3",
+        "Manifest captures exact build/capability/fixture identities; one-hour minimum and feature-specific scopes prevent short smoke or importer scenarios being relabeled full maturity/conformance"
+      ],
+      "implementation_and_authority": [
+        "scripts/feature-soak.py",
+        ".github/workflows/feature-soak.yml",
+        "docs/adr/0005-soak-post-ga-gate.md",
+        "internal/migrate/nginx"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "Importer2-second smoke passes; zero-config local /proc namespace mismatch is a failed local execution with logs retained. Hosted20-second preflight, not a new one-hour qualifier or #590 campaign.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-109",
@@ -4321,16 +5410,42 @@
       ],
       "area": "examples-workflows-specifications",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
-      "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "review_boundary": "Specified documented/operator-visible claims, owning source and caller contracts for every frozen path; not every-line security review or unrelated provider/soak campaign",
+      "status": "reviewed",
+      "verdict": "defect filed/linked",
+      "claims": [
+        "All57 originally expanded operational/test-script paths are retained with hashes, callers and applicable Bash/Python/Node syntax checks",
+        "Scorer/build/deployment/coverage/discovery/signal/load scripts are scoped to their callers; native PowerShell and environment/provider constraints remain distinct from pass",
+        "Reproducible TCP/profile/fuzz-discovery/default-tag defects are selected repairs in #597/#600/#606, with failing originals and regression evidence; burn-in-wasm usage typo corrected"
+      ],
+      "implementation_and_authority": [
+        "scripts",
+        "Makefile",
+        ".github/workflows/ci.yml",
+        "docs/soak-procedures.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
-      "open_defects": [],
-      "establishing_pr": null
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "limitations": [
+        "This is full wildcard consumer/contract reconciliation, not every-line code/security audit or native execution of every script. Selected corrective PRs are drafts, not integrated passes.",
+        "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
+      ],
+      "open_defects": [
+        "https://github.com/victornife/jul/issues/594",
+        "https://github.com/victornife/jul/issues/598",
+        "https://github.com/victornife/jul/issues/605"
+      ],
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-110",
@@ -4629,6 +5744,131 @@
         "https://github.com/victornife/jul/issues/602"
       ],
       "establishing_pr": "https://github.com/victornife/jul/pull/604"
+    },
+    {
+      "original_disposition": "supplemental related surface",
+      "original_reason_and_limit": "Material related active/historical consumer introduced since original inventory; original112denominator unchanged",
+      "area": "examples-workflows-specifications",
+      "responsible_owner": "Single-agent implementation reviewer; assigned human owns independent acceptance",
+      "review_boundary": "Specific related consumer/status/evidence boundaries",
+      "status": "reviewed",
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "named_tests": [],
+      "open_defects": [],
+      "id": "D11-N005",
+      "original_path": "docs/vision/engineering-context.md",
+      "current_paths": [
+        "docs/vision/engineering-context.md"
+      ],
+      "verdict": "correct",
+      "claims": [
+        "Preserved earlier engineering vision owns dated context, not current sequence or shipped semantics",
+        "Current model/ADRs/status and approved public vision are explicit replacements"
+      ],
+      "implementation_and_authority": [
+        "docs/operating-model.md",
+        "docs/feature-status.yaml"
+      ],
+      "limitations": [
+        "Historical context, current_semantic_certification=false; original moved row084 also explicitly retains this path."
+      ],
+      "current_semantic_certification": false
+    },
+    {
+      "original_disposition": "supplemental related surface",
+      "original_reason_and_limit": "Material related active/historical consumer introduced since original inventory; original112denominator unchanged",
+      "area": "examples-workflows-specifications",
+      "responsible_owner": "Single-agent implementation reviewer; assigned human owns independent acceptance",
+      "review_boundary": "Specific related consumer/status/evidence boundaries",
+      "status": "reviewed",
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "named_tests": [],
+      "open_defects": [],
+      "id": "D11-N006",
+      "original_path": "docs/practical-guide.md",
+      "current_paths": [
+        "docs/practical-guide.md"
+      ],
+      "verdict": "correct",
+      "claims": [
+        "Approved v2.2.0 practical consumer distinguishes full/lean capabilities, GA/Beta status, external applications and setup/trust requirements",
+        "Binary installation alone does not configure protections; managed history/rollback and restart boundaries retain actual limits"
+      ],
+      "implementation_and_authority": [
+        "docs/feature-status.yaml",
+        "docs/generated/config-reference.md",
+        "docs/deployment.md",
+        "internal/app/managed_apply_finalizer.go"
+      ],
+      "limitations": [
+        "Approved public wording unchanged; existing deterministic config/deployment/history evidence, no fresh private deployment or #590 soak."
+      ],
+      "current_semantic_certification": true
+    },
+    {
+      "original_disposition": "supplemental related surface",
+      "original_reason_and_limit": "Material related active/historical consumer introduced since original inventory; original112denominator unchanged",
+      "area": "examples-workflows-specifications",
+      "responsible_owner": "Single-agent implementation reviewer; assigned human owns independent acceptance",
+      "review_boundary": "Specific related consumer/status/evidence boundaries",
+      "status": "reviewed",
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/operations-inventory.json",
+        "evidence/2026-10-13-d11/examples-check.log",
+        "evidence/2026-10-13-d11/assessment-schema.log",
+        "evidence/2026-10-13-d11/assessment-owner.log",
+        "evidence/2026-10-13-d11/c5-docs.log",
+        "evidence/2026-10-13-d11/c5-semantic.log",
+        "evidence/2026-10-13-d11/c5-config.log",
+        "2026-10-13-d11-examples-workflows.md",
+        "evidence/2026-10-13-d11/c5-consumer-identities.json"
+      ],
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "named_tests": [],
+      "open_defects": [],
+      "id": "D11-N007",
+      "original_path": "docs/soak-procedures.md",
+      "current_paths": [
+        "docs/soak-procedures.md"
+      ],
+      "verdict": "correct",
+      "claims": [
+        "Source-bound soak/resource evidence differs from request success; auth/TLS/admin profiler prerequisites remain explicit",
+        "Selected TCP/capture/harness corrections have independent original-failure/repair evidence in #597/#600/#606"
+      ],
+      "implementation_and_authority": [
+        "scripts/burn-in-load.go",
+        "scripts/burn-in-stream-load.go",
+        "scripts/bench.sh",
+        "scripts/fuzz.sh",
+        "docs/adr/0005-soak-post-ga-gate.md"
+      ],
+      "limitations": [
+        "No new hour campaign, maturity promotion or consolidated criterion5 completion. Draft corrections require integration."
+      ],
+      "current_semantic_certification": true
     }
   ],
   "reviewer_spot_check": {

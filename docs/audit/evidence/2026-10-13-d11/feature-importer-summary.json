@@ -1,0 +1,19 @@
+{
+  "binary_sha256": "82d618b062a38658f1d0bc859ee26d8045116c0cb21a751d0bf651a1451ab4bd",
+  "candidates_sha256": {
+    "blocking": "0922414e75f2d87aaa67cbc58bfbaa38b558875e16cacff1fee7e0a81b2b146d",
+    "clean": "aeb9198dc9823e46746e34cab81812494f054030bbf479dd3b74a22bfa85c5d5"
+  },
+  "child_peak_rss_kib": 75776,
+  "cycles": 2,
+  "elapsed_seconds": 2.109,
+  "finished_utc": "2026-10-13T13:24:09Z",
+  "manifest_sha256": "5e7d41cef77fddd1be21a27fd8075c0e3c7121cf8f504a699c1671e5ecd59a93",
+  "mode": "importer",
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.39",
+  "python": "3.12.14",
+  "requested_seconds": 2,
+  "result": "pass",
+  "sha": "local",
+  "started_utc": "2026-10-13T13:24:06Z"
+}

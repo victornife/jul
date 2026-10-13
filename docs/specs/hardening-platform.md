@@ -7,6 +7,9 @@
 
 # JUL Engineering Execution Plan — Hardening & platform (pre-1.0)
 
+> **Current reading (2026-10-13):** Historical phase mapping and target decomposition, not current backlog/delivery status. Local RBAC excludes future API token management; #81 typed controls are delivered.
+> Current replacements: [active authority](../feature-status.yaml) and [current sequence/contract](../roadmap/README.md); #62 owns programme status. The original dated text remains below for traceability.
+
 > Version 1.6 · Updated 2026-07-31
 >
 > Scope note: this is the home for cross-cutting robustness work that was

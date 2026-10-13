@@ -1,5 +1,8 @@
 # ReloadPlan implementation design
 
+> **Current reading (2026-10-13):** Historical July implementation design; concrete types/task sequence below are not the current runtime contract.
+> Current replacements: [active authority](../reload-semantics.md) and [current sequence/contract](../adr/0011-reload-plan.md); #62 owns programme status. The original dated text remains below for traceability.
+
 **Owner:** Jul.IA core team
 **Date:** 2026-07-16
 **Scope:** configuration reload transaction, secret handling, lifecycle governance, admin preflight, docs validation

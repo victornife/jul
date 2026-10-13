@@ -1,0 +1,27 @@
+{
+  "unchanged_TOML_values": [
+    "burn-in-current.toml",
+    "examples/grpc-gateway/jul.toml",
+    "examples/grpc-proxy/jul.toml",
+    "examples/l4/jul.toml",
+    "examples/rust-proxy/jul.toml"
+  ],
+  "approved_public_and_context_bytes_unchanged": {
+    "docs/vision/README.md": "9a8af60bb31e0aa4642e612cd3a7902b37fb6c7f54316ebe6f35a371f565fcba",
+    "docs/practical-guide.md": "295abea4b55202e94498797a5721c4f9e63d336cff30c7fd5c923129fe70e18f",
+    "docs/vision/engineering-context.md": "bb502fbf74a7137c2aad174ecbacd0d18af04f5fae1a53690f518ec784e7df44"
+  },
+  "guest_outputs": {
+    "signed-url.wasm": "61780ee09e6cc83ec1ecfef4f39d1accbbf8e5bd024159adf8d777dfab113ed5",
+    "v2-status-header.wasm": "a1ef5f2619312f53c6fe9628d3545041c5e42783e2e54e94c8206b0ae006802d",
+    "header-inject.wasm": "1641d893c36149ef76bb6430f21a5b9dcb1efc77e539cea86a3fb651e03b4882",
+    "testguest-panic.wasm": "83c5ae4aa1c1ed9b8b1e0640484e2c7e324dc8dd31cf958576ec143c1dff9239",
+    "testguest-v2.wasm": "67c77418033aa1315ee5e9847a1beb3e53b082038985885c80fe90ce336f0ee3",
+    "testguest-loop.wasm": "b166f21fd4feee22094a52d500cdb918fd18ea14423d20baafba0cc76cf976a0",
+    "request-block.wasm": "f93197a89ba89e55b08b443e7005616253342121c203e98e0bc724c4e9835397",
+    "kv-counter.wasm": "0a3aa02c4a94e7730511d3095b803bb7a12fcbf7669bc05d57ccabb8ae08e258",
+    "v2-redact.wasm": "371d2f31cdd66d073e66c895a6838dd3a2a220c57c81917409e0e2ac354921cf",
+    "egress-check.wasm": "72e4138c0902d059922327e567cdb6e0bb411bae71c9f07f60a83732a589b7e4"
+  },
+  "proc_boundary": "/proc/self/status NSpid exposes host and child namespace; child proc.pid is not the host /proc index. Local zero-config sample failed; no RSS/fd pass claimed."
+}

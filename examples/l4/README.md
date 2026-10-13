@@ -1,5 +1,8 @@
 # L4 stream proxy (TCP / UDP)
 
+Run the commands below from this example directory. Build the local `./jul`
+binary first; external backends and lab TLS trust still need to be supplied.
+
 Reverse-proxy raw **TCP** and **UDP** connections with [`[[stream]]`](../../docs/stream-proxy.md)
 blocks — databases, brokers, DNS, or TLS services routed by SNI without
 terminating. This feature is gated behind the **`stream` build tag**:
@@ -19,16 +22,17 @@ See [`jul.toml`](jul.toml) for the full configuration.
 
 ## Run it
 
-Validate the config (no build tag needed for linting):
-
-```bash
-../../jul lint -config jul.toml
-```
-
-Build a stream-enabled binary and start it:
+Build the local stream-enabled binary, then validate the config. Legacy
+`-check`/lint is structural; runtime startup still requires the feature tag:
 
 ```bash
 go build -tags stream -o jul ../../cmd/jul
+./jul lint -config jul.toml
+```
+
+Start that binary:
+
+```bash
 ./jul --config jul.toml
 ```
 

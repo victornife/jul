@@ -3,6 +3,9 @@
 
 # JUL Engineering Execution Plan — Year 2 (Protocol Gateway + Extensibility Moat)
 
+> **Current reading (2026-10-13):** Historical Year2 design and June maturity; proposed protocol/config/API spellings and GraphQL work do not override current supported capabilities.
+> Current replacements: [active authority](../feature-status.yaml) and [current sequence/contract](../roadmap/README.md); #62 owns programme status. The original dated text remains below for traceability.
+
 > Version 1.8 · Updated 2026-06-24
 >
 > Maturity note: shipped Y2 features are **Beta**, except the first **GA**

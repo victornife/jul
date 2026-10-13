@@ -5,7 +5,7 @@
 #   go build -tags stream -o jul ../../cmd/jul
 #   ./jul --config jul.toml
 # Lint anytime with:
-#   ../../jul lint -config jul.toml
+#   ./jul lint -config jul.toml
 
 [global]
 log_level = "info"

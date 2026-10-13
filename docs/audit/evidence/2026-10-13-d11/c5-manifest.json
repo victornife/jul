@@ -1,0 +1,53 @@
+{
+  "area": "remaining48 original D11 rows +3supplemental rows",
+  "base_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc",
+  "measured_area_source": "c89f423a0b5b3bbc6359bc36a672799a3fae6ef6",
+  "measured_area_tree": "a2b1675213fa242fc9f10b8655924d8a529db304",
+  "parent_area_source": "768443ead338866af7384a488a1887c8dad755b2",
+  "environment": {
+    "go": "go1.27.2",
+    "python": "3.12.14",
+    "os": "Linux workspace; host /proc and nested PID namespace"
+  },
+  "checks": {
+    "docs-check": "2124/0 before dated area record; final log supplies exact count",
+    "test_docs_check": "pass after explicit Go PATH; first toolchain-missing attempt retained",
+    "test_semantic_drift": "28fixtures pass;518statements/266branches;93% combined coverage >=90",
+    "generated-check": "pass",
+    "config-check": "all shipped configs load with full tags",
+    "d11 --complete": "0errors, all112 originals",
+    "d11 fixtures": "7pass",
+    "five example legacy-checks": "10 lean/full calls pass, structural boundary",
+    "assessment schema/example": "Draft2020-12 pass via jsonschema4.26.0",
+    "assessment owner": "importer/corpus race pass",
+    "guest all build": "10Go WASI outputs, pass",
+    "feature importer": "2seconds,2cycles pass",
+    "feature zero-config": "failed local resource sample; namespace boundary, no pass"
+  },
+  "Go_production_statement_changes": 0,
+  "evidence_sha256": {
+    "c5-semantic.log": "64776facb01275f767d37cfb73144dd87fceda96bb80c7344db6dccaaa40f034",
+    "feature-importer-summary.json": "2a94315c8b2aa43b0616d1c9f0b91b4768107244d7c802f83fb711aedd95a2cc",
+    "c5-ledger.log": "190751e0b043e17fcf28f2355d85c9297fdb96497b2fd99bf4bb85a843e06119",
+    "feature-zero-config-manifest.json": "c04959b839ddab3a57fcfc13d75b8c6e1fa466be498cbde8be7c6c66e7a03e01",
+    "feature-importer-manifest.json": "5e7d41cef77fddd1be21a27fd8075c0e3c7121cf8f504a699c1671e5ecd59a93",
+    "feature-tests-with-environment-failures.log": "be8480c7c685a8ea4dc3ed176ea57216f5389d1e667687281064d8c78e32d042",
+    "feature-zero-config-proxy.log": "7b5fd5f3e8538c9a4ea3dc1648231ad99923ca29efe1ccee435e28d766d0df99",
+    "c5-consumer-identities.json": "8dd050557afef6c73a8c63475328c92d8db37f1faca91f04e2dc170cb04c0cad",
+    "c5-docs.log": "d43c6199d677adfbe5ef4cb7429b58a4fa69d3936203c4ec025d44ac88ef9760",
+    "guest-builds.log": "a9128a9a7c2228b1fe8aec05e4d1f958b6a503703a2820d22f08b1ee957dcf6d",
+    "examples-check.log": "ff856b34fd0edddf12dcb4c75c20860c636fbbb36b7450c47d64ff63a3a11564",
+    "c5-generated.log": "2ff01d8cbb80e3dc08c6a352f547ada4a777da689ca86e018cae8a32eadad04b",
+    "feature-zero-config-serve.log": "d21147d433ff02b7d882a110521897b59190e26939c27de27447eba2dafb71c7",
+    "feature-zero-config-summary.json": "9112bb8a7d805777d3834bd53dd49a5ddd7194eed3a6d83ae6888cdf5637a03f",
+    "feature-zero-local-failed.log": "4c741d8153c036239607eaa18e3461bc30910c2e2b8db495deed6a85520dea5c",
+    "c5-ledger-tests.log": "0d6653413f55f7cf64dbfab59b6b29c640ade8e63585414ab2a44a0892a5ed0a",
+    "c5-docs-tests.log": "0079bbf4fc4af2e8454abd2bb68f79590e1b3d41226626d6079154f2d98c4a7e",
+    "operations-inventory.json": "306bda72c771fe15831f0adf6036244afa15dcb57860445e3bb8b26eace4910d",
+    "feature-importer-local.log": "b9263444b5e4b25a7f19ea47290500c0323b779ad0e5e02736f842990601e23d",
+    "c5-config.log": "222b5add6e36262a456cfc1da38b7df1de452b6d9abee4525d0cdac8cfa1b840",
+    "assessment-owner.log": "b75b92d4a682e7b4cfe2cc705eb5c7f5216755a0b70dbd19ef673b978b1afaf2",
+    "assessment-schema.log": "5fadf6e54d06f68fcb595beed53a80a826ed3685ffbd190beb397f49b6d458c6",
+    "c5-docs-tests-toolchain-missing.log": "44777c5bf773f584ecfab60565fd468bc035e6495d4d082152e49dc8150eb9f1"
+  }
+}

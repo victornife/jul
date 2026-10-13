@@ -11,6 +11,9 @@ to it. No external crates.
 
 ## Run
 
+Run commands from the repository root; the backend terminal changes directory
+only for Cargo. The second Jul terminal stays at the root.
+
 1. Build and start the Rust app (pick one):
 
    ```bash
@@ -20,7 +23,10 @@ to it. No external crates.
    # Or without Cargo, straight from rustc:
    rustc -O examples/rust-proxy/app.rs -o examples/rust-proxy/app
    ./examples/rust-proxy/app        # Linux/macOS
-   .\examples\rust-proxy\app.exe    # Windows
+
+   # On Windows, name the output explicitly:
+   rustc -O examples/rust-proxy/app.rs -o examples/rust-proxy/app.exe
+   .\examples\rust-proxy\app.exe
    ```
 
 2. In another terminal, start Jul.IA with this config:
@@ -37,5 +43,6 @@ to it. No external crates.
   rust-analyzer discovers the project. A `.cargo/config.toml` sets
   `check-revoke = false` to work around corporate-network TLS revocation-check
   failures on Windows (schannel `CRYPT_E_NO_REVOCATION_CHECK`).
-- The server spawns a thread per connection, so it handles Jul.IA's concurrent
-  keep-alive connections correctly.
+- The demonstration handles concurrent connections on separate threads and
+  sends `Connection: close` after each response. It does not implement a
+  persistent-connection server, production admission limits or process supervision.

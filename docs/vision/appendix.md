@@ -2,6 +2,13 @@
 
 > A practical, beginner-friendly, but technically meaningful guide to HTTP, edge infrastructure, proxies, APIs, TLS, caching, reliability, observability, and backend networking.
 
+> **Reading boundary (2026-10-13):** this is a conceptual web-infrastructure
+> primer, not a Jul configuration/API contract, shipped-feature inventory or
+> production/conformance certification. Fictional scenarios and architectural
+> possibilities do not activate capabilities. Use the [practical guide](../practical-guide.md),
+> [configuration](../configuration.md) and [feature status](../feature-status.yaml)
+> for supported Jul behavior.
+
 ## How to read this appendix
 
 This appendix is for people who may have heard words like **HTTP**, **TLS**, **proxy**, **REST**, **gRPC**, **CDN**, or **load balancer**, but do not yet have a clear mental picture of how these pieces fit together.

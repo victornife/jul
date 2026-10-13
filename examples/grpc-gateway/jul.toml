@@ -3,8 +3,8 @@
 
 # gRPC <-> JSON transcoding (grpc_transcode), requires a -tags grpc binary.
 #
-#   ../../jul -check -config jul.toml
-#   ../../jul -config jul.toml
+#   ./jul -check -config jul.toml
+#   ./jul -config jul.toml
 #
 # Jul reads the google.api.http annotations compiled into a descriptor set and
 # translates each HTTP request into a gRPC call, then the protobuf reply back

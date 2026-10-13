@@ -10,7 +10,8 @@ forced into an old year sequence.
 
 For product direction and programme entry rules, see:
 
-- [../vision/](../vision/) — product north star, architectural commitments, and target users;
+- [../vision/](../vision/) — approved public vision/mission;
+- [engineering context](../vision/engineering-context.md) — earlier architectural commitments, kept separately from the public copy;
 - [../roadmap/](../roadmap/) — current correctness, core, operations, experiment, and horizon portfolio;
 - [../operating-model.md](../operating-model.md) — issue/PR governance, evidence, WIP, and Definition of Done;
 - [../adr/0013-project-operating-model-and-completeness.md](../adr/0013-project-operating-model-and-completeness.md) — durable portfolio and experiment decision;

@@ -11,10 +11,13 @@ Serves a minimal WSGI app through the native **uWSGI protocol** using
 
 ## Run
 
+Run both terminals from the repository root. Install the external uWSGI server
+first; this example does not supply or supervise it.
+
 1. Start the app under uWSGI (listens on the uWSGI socket):
 
    ```bash
-   uwsgi --socket 127.0.0.1:3031 --wsgi-file app.py --callable application
+   uwsgi --socket 127.0.0.1:3031 --wsgi-file examples/python-uwsgi/app.py --callable application
    ```
 
 2. In another terminal, start Jul.IA with this config:

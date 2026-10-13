@@ -1,0 +1,11 @@
+building header-inject -> header-inject.wasm
+building request-block -> request-block.wasm
+building signed-url -> signed-url.wasm
+building kv-counter -> kv-counter.wasm
+building egress-check -> egress-check.wasm
+building testguest-panic -> testguest-panic.wasm
+building testguest-loop -> testguest-loop.wasm
+building v2-status-header -> v2-status-header.wasm
+building v2-redact -> v2-redact.wasm
+building testguest-v2 -> testguest-v2.wasm
+done -> /tmp/jul-d11-guest-builds

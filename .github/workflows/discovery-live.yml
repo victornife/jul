@@ -5,8 +5,8 @@ name: discovery-live
 # (scripts/test-discovery-consul-live.ps1 -CI): it stands up real Consul +
 # backend containers, points a real jul build at them, deregisters an instance,
 # and asserts the pool converges live. The Consul lane is Docker-only, so it runs
-# directly on an ubuntu runner; the Kubernetes lane stays a local runbook (it
-# depends on Windows-only host-networking cmdlets — see docs/service-discovery.md).
+# directly on an Ubuntu runner. The older Windows Kubernetes runbook remains;
+# discovery-k8s-kind.yml separately gates real EndpointSlice convergence in kind.
 #
 # This lane is intentionally NOT on the every-push critical path (it pulls images
 # and runs a multi-second convergence loop). It runs:

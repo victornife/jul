@@ -1,0 +1,351 @@
+{
+  "baseline": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc",
+  "original_script_paths": 57,
+  "paths": [
+    {
+      "path": "scripts/audit-closure-check.sh",
+      "sha256": "bafc9d3591f970a6ba3626c10704d78a66e2caacd42db765dff98ecac7b339cc",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/bench-compare.sh",
+      "sha256": "3b8de3cf7fcd5b981477032bcb093fd87a37479752c19f1909881b332a52d1cc",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/bench.sh",
+      "sha256": "e68b196d96aa3cea7610e1c0b4df88a63c8e5ebb731b6f3ccf0f722689af92ec",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/build-site.py",
+      "sha256": "f9143b992ede3604149ba4c8d4cb57c0a11981d12b67c4252fb3f56b1e2f9f21",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/burn-in-backend.go",
+      "sha256": "312f1f29a553a0b9d930cc52d344ecd11121cb012e0f8c50360f9b0916bf2794",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/burn-in-load.go",
+      "sha256": "81906cfde3dd447233214e45f29ace3497b7dda4641c23889cb472edb2cbd430",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/burn-in-load.ps1",
+      "sha256": "70211dea01eba094d19a4bc228c665a7e697b667a694c24dc8a9694c155e7796",
+      "local_check": "PowerShell unavailable locally; source/caller only, hosted owner evidence separate"
+    },
+    {
+      "path": "scripts/burn-in-stream-load.go",
+      "sha256": "826cd400b2677f094cdc185d6ea9f73521603d6ee32da0fd5ea967ce72277fdc",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/burn-in-wasm.go",
+      "sha256": "7226bfe7ef59621e43d4a3f424414a4d3a51ec2977bfe716d789e62f29aa6704",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/check-auto04-coverage.py",
+      "sha256": "ce74de29e0a7b039b75f4db5799840bc4244e8fa4f0cea464f19ae6968af3fe3",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/check-full-tags-sync.py",
+      "sha256": "5c034367f3cdb35d8b28095182fc9d9e06adef8fc29c159743da1d25a4f4a040",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/check-license-headers.sh",
+      "sha256": "e2ebaba20e9705941c9bdbfb2bad5a2aa3e499e1cb72e6e3e62470ffac6abaca",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/check-package-coverage.py",
+      "sha256": "65e7ef8250fad9f8449ebc237322bc01bad7563d4d6dd18ffabcb77c2ca4e449",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/config-check.sh",
+      "sha256": "7c9645f42cba0ab8c291b4b09968e3e95efcb95b38e4c784aa973af4a5cef8c0",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/conformance/run.py",
+      "sha256": "e88a47dbdde78648bbfbf3315b7dc5115b845ea856d734eca4bfe2cb8225e17a",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/conformance/test_run.py",
+      "sha256": "37ae73d53f8b44c29ae66510b20629cc9625dd95c71afe415dc892656719e56f",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/deployment_lab.py",
+      "sha256": "790af8e552ab526f10e433cb3d3c46008787e0cf06de64ef57dc6060e45522f2",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/docker-network-journey.py",
+      "sha256": "c330066674f5955db95c84cf86906166400fd88075a2c622524afc7d64e326e6",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/fault-backend.go",
+      "sha256": "fe1f0fa06a70dad9e5b14e8277e3330cf902804e9524f499e25f46572baf63c9",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/fault-dnsd.go",
+      "sha256": "ef20859944ea426a732a7dd5a2b4ca123ad8a3e33362324922a452413246ca86",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/fault-evidence.sh",
+      "sha256": "922acee5ab96d89c2cbc74a85e0ac0093321d6b298fe7bfca798bd68246e9d88",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/fault-load.go",
+      "sha256": "dbf25fac740bc42f87f80a17ca6a6b943823b060f83d4c1e3b415765d11e66a4",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/fix_config.py",
+      "sha256": "2b0cb9d54536d319d7b8c87ea1388332c1949e4b1a110e41fbdad73eb358196b",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/fix_test_config.py",
+      "sha256": "623e02188e969acfb1cb4293595af74784796fb5103f3677aa6c7aad4e8d8885",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/fuzz.sh",
+      "sha256": "9c1a1633b1c58231a06ae18e6a68b70fd6a6d3cf5efb689e4bbaf31a203b3339",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/gen-certs.go",
+      "sha256": "8c4c8ef81aa806641777ccba2c6815442173f84b78dde31768bdfdbc4133b358",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/grpc-echo-server.go",
+      "sha256": "22887ff6d3275868eb16bf18897c655a1ffa25922ea50fd32ea8d5495d94b7bf",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/grpc-load.go",
+      "sha256": "cb8a34e8bd9d18c90515fb1eae075249e17673dc2ca184caa4e89874776f36d1",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/install-hooks.ps1",
+      "sha256": "e82e676edcea9b2847b343df79be582f887b8e7188bf335cd0e5fd2353a2be85",
+      "local_check": "PowerShell unavailable locally; source/caller only, hosted owner evidence separate"
+    },
+    {
+      "path": "scripts/install-hooks.sh",
+      "sha256": "1ea6482db7c40da4834340e41240a6adc4d0a4d9d0d553fa34483d1e5fe5530d",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/macos-package-first-run.py",
+      "sha256": "005480939e3bce05abab5def749cfd85382497a17ec4b9e054a49de45c15a078",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/nginx-corpus-check.sh",
+      "sha256": "79565998568a055ff17389e1e456a46a97e9b8f86b4420bfbdc32d05f81b52b8",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/nginx-corpus-report.go",
+      "sha256": "85ce1f29f2f0d7841bd48b3824653ef2f6de08519dc486f3368b50172ad0cf75",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/nginx-migration-e2e.sh",
+      "sha256": "3bacb6d4b8cac005d8e9846415eea8b6c4db251c1e9b48d5e1cbd77be2b00fb9",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/pre-commit-hook.sh",
+      "sha256": "77fac6e0fd9acbe7c8492b4027747c9bd30794fec0e6b92ac2313732cc7d06bc",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/prepare-deployment-package.py",
+      "sha256": "e2636df49a425fa491d8436d5501501341a053b7c440d50233988ccf52fac1ef",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/reconcile-deployment-packages.py",
+      "sha256": "20604fae777cb587550da188f99146c43aedd583de70871c77d733a64268629d",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/security-gates.sh",
+      "sha256": "9962733a8ad9e4788a827422bd689696dcfd6f7a7218281032faa1d6b5810a25",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/security-package-coverage.json",
+      "sha256": "f5b25ec58494cfe32a1662d503c6be576f62404cd37b845f91f7e548ee24444f",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/soak-manifest-init.sh",
+      "sha256": "40b3872ed26a9fd69579bba6e0f7a8babd6670c0b48e5583df6d9b097fff3ff4",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/soak-repro-smoke.sh",
+      "sha256": "75447aee5816dcf322e6fe432c631cd310eb1f2f4ad3feaabd71f25c414a5593",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/soak-scrape.go",
+      "sha256": "c08621918ddd964087a8cb1fd8000322459ecee02f7fc2396823404979ec9c08",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/soak.sh",
+      "sha256": "96977af98bd61f57ee6880c12fda292b8002d0bd3d517bd5e06dc8b75831112a",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/stream-echo.go",
+      "sha256": "80a4d9de82d124f588fe603d8d76b749e7da3a9a0e56b4270585f95e9d1ea480",
+      "local_check": "source/caller contract review"
+    },
+    {
+      "path": "scripts/strip_moved_lines.py",
+      "sha256": "4ea897d03621c2547e679883eb6977ffbaec8cd638960b3112aa4167622081c3",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/test-discovery-consul-live.ps1",
+      "sha256": "c7e18f4b7961a46e8fb15d08fd67e4f7f9a19c2f6fb45922f2956fc77dce66b8",
+      "local_check": "PowerShell unavailable locally; source/caller only, hosted owner evidence separate"
+    },
+    {
+      "path": "scripts/test-discovery-k8s-live.sh",
+      "sha256": "68ed9fa298086adc863eac22c03d33076dba9f89b3bc850e66b87531d35c9912",
+      "local_check": "bash -n",
+      "exit": 0
+    },
+    {
+      "path": "scripts/test-discovery-live.ps1",
+      "sha256": "acffbf329d4c4a877bc472e01d9fab4a238d475c1e48666574037638f46f9c7f",
+      "local_check": "PowerShell unavailable locally; source/caller only, hosted owner evidence separate"
+    },
+    {
+      "path": "scripts/test-site.cjs",
+      "sha256": "03568d09683c26e37c2ec0983470059bc0f093e77127e7926a1c5580c1f7e222",
+      "local_check": "node --check",
+      "exit": 0
+    },
+    {
+      "path": "scripts/test_build_site.py",
+      "sha256": "4b2c77916f94c97c25e2a6baa58a6b8b4f25a2bfbd610435b4aed17ae26365cd",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/test_check_package_coverage.py",
+      "sha256": "17ac93c64cede068708889d85a0de1816e1a34f020d8f8ab6aa20ae82a5edb74",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/test_deployment_lab.py",
+      "sha256": "f36780e6bd6b89d1e152995a67cbe63d7e7ece43deb1006aa9b0ca2913226b6b",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/test_semantic_drift.py",
+      "sha256": "f3b62a8e3a9911319d5f49ad3a354f9478f0f0a1784df2d6961f0046f9a60875",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/test_strip_moved_lines.py",
+      "sha256": "d658731b6031c0f8dca2a87adcc0dbc2099e926b0c044d4f304bec884548d426",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/verify-release-packages.py",
+      "sha256": "192108ed002cf19c089fa85fe5039e3096781641a7793c4053c2819dd6376337",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/windows-deployment-mime.py",
+      "sha256": "b7f2e43bd398618279587d2a59afa7b886670b6c65d00a604594bc2247fd9e4b",
+      "local_check": "python compile",
+      "exit": 0
+    },
+    {
+      "path": "scripts/write_test_config.py",
+      "sha256": "d7d18a04072b44d346345469334a7bfaf76ad059e5e70c0b6e98662146e00fdf",
+      "local_check": "python compile",
+      "exit": 0
+    }
+  ],
+  "limitations": [
+    "Documented contract/caller/syntax boundary, not every-line code audit",
+    "PowerShell/native/external-provider execution is not claimed by local syntax checks",
+    "Selected597/600/603/606 repairs retain separate sources/evidence"
+  ],
+  "labels": {
+    "count": 56,
+    "unique_names": true,
+    "color_format": "optional# plus6hex; pinned action README verified separately",
+    "live_sync_executed": false
+  },
+  "workflows": {
+    "parsed_count": 24,
+    "loader": "BaseLoader",
+    "meaning": "syntax/inventory, not hosted execution"
+  },
+  "rust_metadata": {
+    "parsed": true,
+    "cargo/rustc": "unavailable locally",
+    "meaning": "Rust build metadata, not Jul runtime config"
+  }
+}

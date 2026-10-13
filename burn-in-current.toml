@@ -21,11 +21,14 @@
 #   Window 5: go run scripts/stream-echo.go -port 55432
 #   Window 6: ./jul -config burn-in-current.toml
 #   Window 7: go run scripts/burn-in-load.go -duration <dur> -workers <n> -current \
-#               -health "http://127.0.0.1:8080/bounded/" -admin "https://127.0.0.1:9090"
+#               -health "http://127.0.0.1:8080/bounded/" \
+#               -admin "https://127.0.0.1:9090" -adminToken "$JUL_BURNIN_ADMIN_TOKEN"
 #   pprof snapshots additionally require the lab certificate to be trusted by the
-#   load-generator process and an enabled admin.pprof surface; the snapshot client
-#   verifies TLS normally and silently skips transport failures. Check that both
-#   snapshots exist and contain profiler output. Churn clients use separate
+#   load-generator process and an enabled admin.pprof surface. Set the variable
+#   above to the configured admin-role token. Selected corrective PR #600 reports
+#   capture failures while preserving TLS verification; integrate it before using
+#   that capture contract. Check all four profiles contain profiler output.
+#   Churn clients use separate
 #   lab-only transports. Request success alone does not establish resource evidence.
 #   Window 8: go run scripts/burn-in-stream-load.go -duration <dur> -workers <n> -target 127.0.0.1:15432
 #

@@ -523,5 +523,33 @@ class SemanticDriftTests(unittest.TestCase):
         self.assertEqual(sd.check_metric_claims(root), [])
 
 
+
+class BenchmarkCatalogueContract(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        write(self.root / "internal/router/router_test.go", "package router\nfunc BenchmarkSelectLocation(b *testing.B) {}\n")
+
+    def catalogue(self, package, name):
+        write(self.root / "docs/benchmarks.md", f"| Package | Benchmark |\n| --- | --- |\n| `{package}` | `{name}` |\n")
+
+    def test_current_owner_and_subcase_pass(self):
+        self.assertEqual(sd.check_benchmark_catalogue(self.root), [])
+        self.catalogue("internal/router", "BenchmarkSelectLocation/prefix")
+        self.assertEqual(sd.check_benchmark_catalogue(self.root), [])
+
+    def test_stale_name_and_wrong_owner_are_rejected(self):
+        for package, name in (("internal/router", "BenchmarkMatchLocation/prefix"),
+                              ("internal/cache", "BenchmarkSelectLocation")):
+            with self.subTest(package=package, name=name):
+                self.catalogue(package, name)
+                self.assertEqual(len(sd.check_benchmark_catalogue(self.root)), 1)
+
+    def test_malformed_structured_reference_is_rejected(self):
+        self.catalogue("../internal/router", "not-a-benchmark")
+        self.assertEqual(len(sd.check_benchmark_catalogue(self.root)), 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

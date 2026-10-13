@@ -1,0 +1,3 @@
+go run ./internal/lifecycle/lifecyclegen -out docs -check
+go run ./internal/configcontract/configcontractgen -out docs -check
+go run ./internal/apicontract/apicontractgen -out docs -check
