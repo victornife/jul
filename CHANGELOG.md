@@ -11,6 +11,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Verification
 
+- Enforce Console coverage floors for configuration, history and the API client,
+  plus individual core apply-panel/reducer floors. Local console-check now runs
+  the same coverage gates as CI, preserving the existing global 58% statement
+  floor. Add meaningful network-boundary/UI regressions and independent gate
+  violation evidence; retain per-file/area reports and reject missing targets.
+  No gateway or Console runtime behavior, dependency, maturity or Go coverage
+  gate changes.
+
 - Add seven sequential GitHub CI deployment journeys for unchanged v2.2.0
   packages/frozen Docker source: hardened systemd WASM with private-chain trust,
   routed client and firewall rejection/recovery; pre-existing Windows ACLs;
