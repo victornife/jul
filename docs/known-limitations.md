@@ -27,16 +27,18 @@ discovered correctness/security findings still pre-empt the roadmap.
 - **GA with post-GA soak pending for v2.2.0:** the bounded routing/CORS,
   resilience and auxiliary-egress contracts are independently certified under
   [#527's decision](reviews/2026-10-12-ga-220.md). Criterion 5 remains pending;
-  no new soak, universal retry policy or global egress firewall is claimed.
+  [#590](https://github.com/victornife/jul/issues/590) owns the remaining
+  source-bound stability evidence. No new soak, universal retry policy or
+  global egress firewall is claimed.
 - **GA in stable `v2.0.0`:** trusted client address and backend TLS trust were
   separately certified under #409; their manifest delivery is `soaked`.
-- **In the proposed v2.1.0 tree, still Beta / `merged` until publication:**
+- **Published in stable `v2.1.0`, still Beta / `released`:**
   gRPC Health/Check probes, runtime resource and storage headroom, serving WAF
   policy/provenance visibility, Console diagnostics guidance, WASM ABI v2
   response handling, consistent-hash affinity, and client-certificate policy
-  hot reload. Published v2.0.0 does not contain them. Inclusion in v2.1.0 does
+  hot reload. Published v2.0.0 does not contain them. Publication in v2.1.0 does
   not promote them to GA. Bounded NGINX translation and migration E2E
-  improvements are in the same candidate and remain approximated or blocking
+  improvements shipped in v2.1.0 and remain approximated or blocking
   where the importer guide says so.
 - **Remaining operational boundaries:** Unix-domain upstreams support named
   plaintext HTTP/1.1 pools, not TLS, HTTP/2 or direct Unix `proxy_pass`.
