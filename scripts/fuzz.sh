@@ -41,13 +41,15 @@ FUZZTIME="${FUZZTIME:-15s}"
 
 PKGS=("$@")
 if [ "${#PKGS[@]}" -eq 0 ]; then
-	mapfile -t PKGS < <(go list -tags "${TAGS}" ./...)
+	package_list="$(go list -tags "${TAGS}" ./...)"
+	mapfile -t PKGS <<< "${package_list}"
 fi
 
 status=0
 for pkg in "${PKGS[@]}"; do
 	# List fuzz targets defined in this package (empty when it has none).
-	targets="$(go test -tags "${TAGS}" -list '^Fuzz' "${pkg}" 2>/dev/null | grep '^Fuzz' || true)"
+	listed="$(go test -tags "${TAGS}" -list '^Fuzz' "${pkg}")"
+	targets="$(printf '%s\n' "${listed}" | awk '/^Fuzz/ { print }')"
 	[ -z "${targets}" ] && continue
 	for t in ${targets}; do
 		# Try up to twice to absorb the flaky "context deadline exceeded"

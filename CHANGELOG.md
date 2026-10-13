@@ -11,6 +11,11 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Fixed
 
+- Propagate fuzz package/target discovery failures instead of reporting a false
+  smoke pass, and include WAF in the local benchmark default. Check both
+  harness defaults against the existing full profile and retain retry policy;
+  add actual-command failure/profile regressions (#605).
+
 - Preserve public credential IDs in audit CSV with an appended column, and
   record anonymous authentication rejections through the existing audit owner
   without credential/request data (#602). Retain response, authorization,
