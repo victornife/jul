@@ -701,6 +701,8 @@ jobs:
           python-version: "3.12"
       - name: verify Makefile and ci.yml FULL_TAGS are in sync
         run: python scripts/check-full-tags-sync.py
+      - name: verify harness failure and profile contracts
+        run: python scripts/test_full_tag_harnesses.py
 
   vulncheck:
     name: govulncheck
