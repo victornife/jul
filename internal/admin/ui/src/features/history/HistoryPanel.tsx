@@ -158,6 +158,8 @@ function RollbackConfirm({
   readonly pending: boolean;
   readonly pollingExpired: boolean;
 }) {
+  const { has } = usePermission();
+  const canRollback = has("history:rollback");
   // The preview reads the snapshot server-side and diffs it against the
   // persisted config through the rollback-scoped endpoint, so a least-privilege
   // rollback-only role can review the change without config:write (N-02). It
@@ -190,9 +192,10 @@ function RollbackConfirm({
       // Query can serve the previous successful preview during a background
       // refetch, so gating on diff.isSuccess alone could confirm against a stale
       // baseline (Net-new issue 1, cached-preview manifestation).
-      confirmDisabled={pending || diff.isFetching || !diff.isSuccess}
+      confirmDisabled={!canRollback || pending || diff.isFetching || !diff.isSuccess}
       cancelDisabled={pending && !pollingExpired}
       onConfirm={() => {
+        if (!canRollback) return;
         onConfirm(diff.data?.base_version, challengeActive);
       }}
       onCancel={onCancel}
@@ -204,6 +207,9 @@ function RollbackConfirm({
         unavailable, the rollback can still apply and the Console will show a recovery warning.
       </p>
       <div className="mt-3">
+        {!canRollback && (
+          <p className="text-xs text-jul-warning">Requires the history:rollback permission.</p>
+        )}
         {adminChanges.length > 0 && (
           <ul className="mb-3 list-disc space-y-1 pl-5 text-xs text-jul-warning">
             {adminChanges.map((change) => (
@@ -318,6 +324,7 @@ interface AdminChallenge {
 
 export function HistoryPanel() {
   const qc = useQueryClient();
+  const { has } = usePermission();
   const [viewing, setViewing] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [rollingId, setRollingId] = useState<string | null>(null);
@@ -662,6 +669,7 @@ export function HistoryPanel() {
           id={confirmId}
           busy={rollbackMutation.isPending}
           onConfirm={(baseVersion, confirmed) => {
+            if (!has("history:rollback")) return;
             rollbackMutation.mutate({
               id: confirmId,
               confirmed,

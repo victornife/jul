@@ -1,0 +1,30 @@
+FAIL /tmp/tmpjb5kcztu/docs/index.md:118 — feature SEC-EGRESS status mismatch: index=`GA-soak-pending` / `merged`, manifest=`GA-soak-pending` / `released`
+FAIL /tmp/tmp98jmqfb8/docs/audit-register.md:0 — finding R9-01 appears as both Resolved and Open in audit-register.md — remove or archive the stale entry
+FAIL /tmp/tmpr84srqrb/docs/specs/year-3.md:0 — missing horizon banner: 'Concept horizon — not committed'
+FAIL /tmp/tmpr84srqrb/docs/specs/year-4.md:0 — missing horizon banner: 'Concept horizon — not committed'
+FAIL /tmp/tmpr84srqrb/docs/specs/year-5.md:0 — missing horizon banner: 'Concept horizon — not committed'
+FAIL /tmp/tmpjn6h2v24/docs/roadmap/README.md:7 — active roadmap broken link: missing.md
+FAIL /tmp/tmp7tf2vtsp/docs/roadmap/README.md:8 — duplicate active roadmap ID: HP-01
+FAIL /tmp/tmpfys1g8w9/docs/roadmap/README.md:8 — active roadmap ID HP-03 also appears as delivered
+FAIL /tmp/tmpkdlmk93n/internal/lifecycle/registry.go:0 — closed-world violation: 2 schema leaves, 1 registry entries, 0 exemptions — every public leaf needs exactly one disposition
+FAIL /tmp/tmp267uce0n/internal/lifecycle/registry.go:0 — restart_required path 'admin.listen' is not startup-consumed; the reload gate would ignore it
+FAIL /tmp/tmp0pmgay3y/internal/lifecycle/registry.go:0 — path 'admin.listen' uses undocumented subsystem 'mystery'
+FAIL /tmp/tmpj4enr7vc/internal/lifecycle/registry.go:0 — path 'admin.listen' has no reason
+FAIL /tmp/tmptb94a9aj/docs/config-lifecycle.yaml:0 — YAML version 1 does not match the metadata version 2
+FAIL /tmp/tmpgrmefd8z/docs/reload-semantics.md:0 — restart-required subsystem 'cache' is not mentioned in reload-semantics.md — keep the conceptual doc in sync with the registry
+Traceback (most recent call last):
+  File "/workspace/scratch/081a0d718172/jul-repairs/scripts/test_docs_check.py", line 698, in <module>
+    _run_existing_tests()
+  File "/workspace/scratch/081a0d718172/jul-repairs/scripts/test_docs_check.py", line 556, in _run_existing_tests
+    test_lifecycle_generator_check_is_non_mutating_and_names_the_remedy()
+  File "/workspace/scratch/081a0d718172/jul-repairs/scripts/test_docs_check.py", line 527, in test_lifecycle_generator_check_is_non_mutating_and_names_the_remedy
+    result = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 548, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 1955, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'go'

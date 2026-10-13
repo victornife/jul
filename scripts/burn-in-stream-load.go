@@ -6,14 +6,34 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// echoRound reads one complete reply: TCP does not preserve write boundaries.
+func echoRound(conn net.Conn, payload, readBuf []byte) error {
+	n, err := conn.Write(payload)
+	if err != nil {
+		return err
+	}
+	if n != len(payload) {
+		return io.ErrShortWrite
+	}
+	if _, err := io.ReadFull(conn, readBuf); err != nil {
+		return err
+	}
+	if !bytes.Equal(readBuf, payload) {
+		return fmt.Errorf("echo reply differs from payload")
+	}
+	return nil
+}
 
 func main() {
 	var (
@@ -65,13 +85,7 @@ func main() {
 				connOK := true
 				for r := 0; r < 1000 && time.Now().Before(end) && connOK; r++ {
 					conn.SetDeadline(time.Now().Add(10 * time.Second))
-					if _, err := conn.Write(payload); err != nil {
-						connOK = false
-						atomic.AddInt64(&fail, 1)
-						break
-					}
-					n, err := conn.Read(readBuf)
-					if err != nil || n != len(payload) {
+					if err := echoRound(conn, payload, readBuf); err != nil {
 						connOK = false
 						atomic.AddInt64(&fail, 1)
 						break
@@ -122,11 +136,11 @@ func main() {
 	fmt.Printf("Duration     : %v\n", *duration)
 	fmt.Printf("Total conns  : %d\n", t)
 	fmt.Printf("Echo rounds  : %d\n", r)
-	fmt.Printf("Successful   : %d\n", s)
-	fmt.Printf("Failed       : %d\n", f)
+	fmt.Printf("Successful rounds : %d\n", s)
+	fmt.Printf("Failed conns : %d\n", f)
 	if t > 0 {
 		fmt.Printf("Error rate   : %.2f%%\n", float64(f)/float64(t)*100)
-		fmt.Printf("Success rate : %.2f%%\n", float64(s)/float64(t)*100)
+		fmt.Printf("Success rate : %.2f%%\n", float64(t-f)/float64(t)*100)
 	}
 	fmt.Println("===========================================")
 }

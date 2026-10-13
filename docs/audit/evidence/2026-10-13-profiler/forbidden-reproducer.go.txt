@@ -1,0 +1,15 @@
+//go:build ignore
+
+package main
+import ("net/http"; "net/http/httptest"; "os"; "path/filepath"; "testing")
+func TestD11SnapshotRejectsForbiddenProfile(t *testing.T) {
+ server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){ w.WriteHeader(http.StatusForbidden); _,_ = w.Write([]byte("synthetic access denied")) }))
+ defer server.Close()
+ directory := t.TempDir()
+ snapPProf(server.URL,directory,"T0","synthetic-lab-token")
+ for _,name := range []string{"heap-T0.out","goroutine-T0.out"} {
+  data,err := os.ReadFile(filepath.Join(directory,name))
+  t.Logf("%s: err=%v body=%q",name,err,data)
+  if err == nil {t.Errorf("HTTP 403 response persisted as profiler artifact: %s",name)}
+ }
+}
