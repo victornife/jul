@@ -1,0 +1,31 @@
+{
+  "state": "implementation ready for human review",
+  "measured_source": "ab2a9bc56d95ea56531d504ed6c86e656c82359b",
+  "measured_tree": "45fd62234f200aa8cc1c7a40389d0cc1d9eaab76",
+  "original_total": 230,
+  "original_unreviewed": 112,
+  "original_rows_dispositioned": 112,
+  "supplemental": 7,
+  "proposed_human_sample": 16,
+  "required_actual_original_sample": 12,
+  "actual_human_review": "pending",
+  "checks": {
+    "docs-check": "2212passed/0failed",
+    "docs-fixtures": "pass",
+    "semantic": "28fixtures;93% >=90%",
+    "generated": "pass",
+    "ledger --complete": "0errors",
+    "ledger fixtures": "13pass"
+  },
+  "evidence_sha256": {
+    "final-docs-tests.log": "c82d038bbebfdad46ecb75b7d087a3113240a49cb471a15a09a627331aea4581",
+    "final-generated.log": "2ff01d8cbb80e3dc08c6a352f547ada4a777da689ca86e018cae8a32eadad04b",
+    "final-ledger-tests.log": "d034ab39354c2f034fa02526bcbb2b25197c79369aa9fb04ff68ee72fc6a232f",
+    "final-ledger.log": "190751e0b043e17fcf28f2355d85c9297fdb96497b2fd99bf4bb85a843e06119",
+    "final-docs.log": "ee24f4bf0bd5691451b5b85e1c5d3714ec6a2284dc7ed6a51736c9b7dcfe8104",
+    "final-semantic.log": "85faf0706ef11d7f098542b4630e710e67784f23737d547a43a08fd9cc2b545b"
+  },
+  "hosted_preintegration_record": "preintegration-hosted.json",
+  "integration_authorization": "User2026-10-13: continue to completion, then merge in correct order; actual human D11 review is still a closure requirement",
+  "Go_production_statement_changes": 0
+}

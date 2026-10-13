@@ -3956,7 +3956,7 @@
         "Current replacement: fresh candidate from examples/migrate/README.md; saved legacy output is retained, not counted as current importer certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)",
+      "establishing_pr": "https://github.com/victornife/jul/pull/596",
       "current_semantic_certification": false
     },
     {
@@ -5876,7 +5876,68 @@
     "reviewer": null,
     "sampled_rows": [],
     "source": null,
-    "result": null
+    "result": null,
+    "review_kind": null,
+    "proposed_sampled_rows": [
+      "D11-020",
+      "D11-024",
+      "D11-058",
+      "D11-067",
+      "D11-110",
+      "D11-055",
+      "D11-060",
+      "D11-066",
+      "D11-083",
+      "D11-072",
+      "D11-104",
+      "D11-109",
+      "D11-084",
+      "D11-078",
+      "D11-063",
+      "D11-028"
+    ],
+    "packet": "2026-10-13-d11-reviewer-packet.md",
+    "minimum_original_rows": 12,
+    "preparation_owner": "Agent; this field does not establish a human review"
   },
-  "state": "in_progress"
+  "state": "ready_for_review",
+  "summary": {
+    "original_total": 230,
+    "original_unreviewed": 112,
+    "original_dispositions": {
+      "fixed in this PR": 49,
+      "correct": 57,
+      "defect filed/linked": 4,
+      "accepted limitation": 2
+    },
+    "original_area_counts": {
+      "examples-workflows-specifications": 48,
+      "configuration": 31,
+      "console-api-cli": 9,
+      "security-protocol-observability": 24
+    },
+    "supplemental_rows": 7,
+    "supplemental_dispositions": {
+      "fixed in this PR": 2,
+      "correct": 4,
+      "accepted limitation": 1
+    },
+    "original_noncurrent_semantic_rows": [
+      "D11-012",
+      "D11-068",
+      "D11-069",
+      "D11-073",
+      "D11-075",
+      "D11-076",
+      "D11-077",
+      "D11-078",
+      "D11-079",
+      "D11-080",
+      "D11-081",
+      "D11-082",
+      "D11-085",
+      "D11-094"
+    ],
+    "state_boundary": "Agent implementation/disposition preparation complete; actual human spot-check and final integration pending"
+  }
 }

@@ -27,8 +27,11 @@ def check(root: Path, complete: bool = False) -> list[str]:
         errors.append("Original denominator changed")
     expected = {r["id"]: r for r in frozen["frozen_rows"]}
     actual = current["rows"]
-    if len(actual) != len(expected) or len({r["id"] for r in actual}) != len(expected):
+    if len(actual) != len(expected) or {r["id"] for r in actual} != set(expected):
         errors.append("Original row missing, duplicated or denominator replaced")
+    new_ids = [r["id"] for r in current["new_rows"]]
+    if len(set(new_ids)) != len(new_ids) or set(new_ids) & set(expected):
+        errors.append("Supplemental row ID duplicated or overlaps original inventory")
     tests: set[str] = set()
     for directory in (root / "internal", root / "cmd"):
         for path in directory.rglob("*_test.go"):
@@ -44,12 +47,22 @@ def check(root: Path, complete: bool = False) -> list[str]:
             errors.append(f"{name}: unexplained moved/removed/wildcard boundary")
         if not row.get("responsible_owner") or not row.get("review_boundary"):
             errors.append(f"{name}: owner/boundary missing")
+        if not row.get("current_paths") and not row.get("path_reconciliation"):
+            errors.append(f"{name}: current paths missing without reconciliation")
+        for path in row.get("current_paths", []):
+            relative = Path(path)
+            if relative.is_absolute() or ".." in relative.parts or not (root / relative).exists():
+                errors.append(f"{name}: missing or invalid current path {path}")
         if row.get("verdict") is None:
             if complete:
                 errors.append(f"{name}: no substantive final disposition")
             continue
         if row["verdict"] not in verdicts:
             errors.append(f"{name}: invalid verdict")
+        if row.get("status") not in {"reviewed", "superseded-context"}:
+            errors.append(f"{name}: disposition has a nonfinal row status")
+        if not re.fullmatch(r"https://github.com/victornife/jul/pull/\d+", row.get("establishing_pr") or ""):
+            errors.append(f"{name}: establishing PR is not a concrete reviewable PR")
         for key in ("claims", "implementation_and_authority", "execution_evidence", "limitations", "establishing_pr"):
             if not row.get(key):
                 errors.append(f"{name}: {key} missing")
@@ -67,8 +80,13 @@ def check(root: Path, complete: bool = False) -> list[str]:
     review = current["reviewer_spot_check"]
     if review["status"] == "completed":
         minimum = (len(expected) + 9) // 10
-        if len(set(review.get("sampled_rows", []))) < minimum or not all(review.get(k) for k in ("reviewer", "source", "result")):
-            errors.append("Completed reviewer spot-check lacks reviewer/source/10% sample/result")
+        sampled = set(review.get("sampled_rows", []))
+        if not sampled <= set(expected) or len(sampled) < minimum or not all(review.get(k) for k in ("reviewer", "source", "result")):
+            errors.append("Completed reviewer spot-check lacks reviewer/source/10% original sample/result")
+        if review.get("review_kind") not in {"maintainer-human", "maintainer-assigned-human"}:
+            errors.append("Completed reviewer spot-check must identify an actual human review; agent preparation does not qualify")
+    elif current.get("state") == "completed":
+        errors.append("Completed D11 state requires the actual human reviewer spot-check")
     return errors
 
 
