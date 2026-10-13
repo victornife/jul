@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { ConfigPanel } from "@/features/config/ConfigPanel.tsx";
 import { HistoryPanel } from "@/features/history/HistoryPanel.tsx";
 import { PermissionContext } from "@/auth/usePermission.ts";
-import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
+import { setPendingDraft, takePendingDraft } from "@/lib/configDraftHandoff.ts";
 
 vi.unmock("@/api/client.ts");
 vi.mock("@/features/config/CodeEditor.tsx", () => ({
@@ -39,16 +39,18 @@ let fetchMock: ReturnType<typeof vi.fn<NetworkFetch>>;
 function Scope({
   children,
   permissions = ["config:raw", "config:write", "config:apply", "history:rollback"],
+  ready = true,
 }: {
   children: ReactNode;
   permissions?: string[];
+  ready?: boolean;
 }) {
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter>
         <PermissionContext.Provider
           value={{
-            ready: true,
+            ready,
             isLoading: false,
             identity: {
               principal: "test",
@@ -57,7 +59,7 @@ function Scope({
               legacy: false,
               permissions,
             },
-            has: (p) => permissions.includes(p),
+            has: (p) => !ready || permissions.includes(p),
           }}
         >
           {children}
@@ -118,6 +120,194 @@ afterEach(() => {
   vi.restoreAllMocks();
   sessionStorage.clear();
   takePendingDraft();
+});
+
+describe("open confirmations follow the current permission grants", () => {
+  it("blocks a prepared rollback after revocation and requires an explicit click after recovery", async () => {
+    network((url) =>
+      url === "/api/config/rollback"
+        ? json({ ok: true, reload: { outcome: "no_change" } })
+        : undefined,
+    );
+    const view = render(
+      <Scope>
+        <HistoryPanel />
+      </Scope>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    const dialog = await screen.findByRole("dialog");
+    const submit = within(dialog).getByRole("button", { name: "Roll back" });
+    await waitFor(() => {
+      expect(submit).toBeEnabled();
+    });
+    view.rerender(
+      <Scope permissions={["config:read"]}>
+        <HistoryPanel />
+      </Scope>,
+    );
+    expect(submit).toBeDisabled();
+    expect(
+      within(dialog).getByText("Requires the history:rollback permission."),
+    ).toBeInTheDocument();
+    fireEvent.click(submit);
+    expect(mutations("/config/rollback")).toHaveLength(0);
+    view.rerender(
+      <Scope>
+        <HistoryPanel />
+      </Scope>,
+    );
+    expect(submit).toBeEnabled();
+    expect(mutations("/config/rollback")).toHaveLength(0);
+    fireEvent.click(submit);
+    await waitFor(() => {
+      expect(mutations("/config/rollback")).toHaveLength(1);
+    });
+    expect(JSON.parse(mutations("/config/rollback")[0]?.[1]?.body as string)).toEqual({
+      id: "snap-1",
+      base_version: "v1",
+    });
+  });
+
+  it("keeps cancellation available after permission loss", async () => {
+    network(() => undefined);
+    const view = render(
+      <Scope>
+        <HistoryPanel />
+      </Scope>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    await screen.findByRole("dialog");
+    view.rerender(
+      <Scope permissions={[]}>
+        <HistoryPanel />
+      </Scope>,
+    );
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mutations("/config/rollback")).toHaveLength(0);
+  });
+
+  it("preserves unknown-identity gating and truthful server rejection", async () => {
+    network((url) => (url === "/api/config/rollback" ? json({ error: "denied" }, 403) : undefined));
+    render(
+      <Scope ready={false} permissions={[]}>
+        <HistoryPanel />
+      </Scope>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    const dialog = await screen.findByRole("dialog");
+    const submit = within(dialog).getByRole("button", { name: "Roll back" });
+    await waitFor(() => {
+      expect(submit).toBeEnabled();
+    });
+    fireEvent.click(submit);
+    expect((await screen.findAllByText("HTTP 403")).length).toBeGreaterThan(0);
+    expect(mutations("/config/rollback")).toHaveLength(1);
+    expect(screen.queryByText("Rolled back successfully")).toBeNull();
+  });
+
+  it.each([
+    ["raw live", false, false],
+    ["structured live", true, false],
+    ["raw staged", false, true],
+    ["structured staged", true, true],
+  ] as const)(
+    "blocks %s confirmation after config:apply is revoked",
+    async (_name, patch, stage) => {
+      const grants = patch
+        ? ["config:write", "config:apply"]
+        : ["config:raw", "config:write", "config:apply"];
+      const label = stage ? "Save for next restart" : "Apply live";
+      const endpoint = patch ? "/api/config/patch/apply" : "/api/config/apply";
+      network((url) =>
+        url.startsWith(endpoint) ? json({ error: "server denies this request" }, 403) : undefined,
+      );
+      if (patch || stage) {
+        const assessment = {
+          baseVersion: "v1",
+          previewDiff: { summary: "reviewed edit" },
+          lifecycle: {
+            changes: [],
+            can_apply_hot: !stage,
+            can_stage_restart: true,
+            hot_paths: stage ? [] : ["servers"],
+            restart_required_paths: stage ? ["global.config_authority"] : [],
+            new_listener_only_paths: [],
+            ignored_deprecated_paths: [],
+            validation_rejected_paths: [],
+            pending_subsystems: stage ? ["runtime"] : [],
+          },
+          recommendedAction: stage ? ("stage_restart" as const) : ("hot" as const),
+          pendingRestart: { state: "none" as const, subsystems: [] },
+        };
+        if (patch)
+          setPendingDraft({
+            ...assessment,
+            kind: "patch",
+            ops: [{ op: "server_add", listen: ":9090" }],
+            valid: true,
+            validationErrors: [],
+            candidateState: "hidden",
+            requiresFreshPreview: false,
+          });
+        else
+          setPendingDraft({
+            ...assessment,
+            recommendedAction: "stage_restart",
+            kind: "toml",
+            toml: "# changed",
+            candidateState: "memory_only",
+          });
+      }
+      const view = render(
+        <Scope permissions={grants}>
+          <ConfigPanel />
+        </Scope>,
+      );
+      if (!patch && !stage) await edit();
+      else {
+        const apply = await screen.findByRole("button", { name: label });
+        await waitFor(() => {
+          expect(apply).toBeEnabled();
+        });
+        fireEvent.click(apply);
+      }
+      const dialog = await screen.findByRole("dialog");
+      const submit = within(dialog).getByRole("button", { name: label });
+      expect(submit).toBeEnabled();
+      view.rerender(
+        <Scope permissions={grants.filter((p) => p !== "config:apply")}>
+          <ConfigPanel />
+        </Scope>,
+      );
+      expect(submit).toBeDisabled();
+      expect(within(dialog).getByText("Requires the config:apply permission.")).toBeInTheDocument();
+      fireEvent.click(submit);
+      expect(mutations(endpoint)).toHaveLength(0);
+      view.rerender(
+        <Scope permissions={grants}>
+          <ConfigPanel />
+        </Scope>,
+      );
+      expect(submit).toBeEnabled();
+      expect(mutations(endpoint)).toHaveLength(0);
+      fireEvent.click(submit);
+      await waitFor(() => {
+        expect(mutations(endpoint)).toHaveLength(1);
+      });
+      const [url, init] = mutations(endpoint)[0] ?? [];
+      if (stage) expect(url).toContain("mode=stage_restart");
+      else expect(url).toBe(patch ? endpoint : "/api/config/apply?base_version=v1");
+      if (patch)
+        expect(JSON.parse(init?.body as string)).toMatchObject({
+          base_version: "v1",
+          ops: [{ op: "server_add", listen: ":9090" }],
+        });
+      else expect(init?.body).toBe("# changed");
+      expect((await screen.findAllByText(stage ? "HTTP 403" : "Apply failed.")).length).toBeGreaterThan(0);
+      expect(mutations(endpoint)).toHaveLength(1);
+    },
+  );
 });
 
 describe("raw configuration recovery preserves reviewed operation identity", () => {
@@ -311,7 +501,7 @@ describe("history identity, permission and recovery boundaries", () => {
           })
         : undefined,
     );
-    render(
+    const view = render(
       <Scope>
         <HistoryPanel />
       </Scope>,
@@ -330,6 +520,9 @@ describe("history identity, permission and recovery boundaries", () => {
       within(screen.getByRole("dialog")).getByRole("button", { name: /Working|Roll back/ }),
     );
     expect(mutations("/config/rollback")).toHaveLength(1);
+    view.rerender(<Scope permissions={[]}><HistoryPanel /></Scope>);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     await act(async () => {
       complete?.(json({ ok: true, reload: { outcome: "applied_live" } }));
       await Promise.resolve();

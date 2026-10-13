@@ -1,0 +1,20 @@
+Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.
+configuration /tmp/tmptxe2wmnj/stream.toml is valid
+L4 Stream TCP load test starting...
+Duration    : 2s
+Workers     : 4
+Target      : 127.0.0.1:35499
+End time    : 10:19:34 UTC
+
+Pre-flight OK: TCP connection accepted
+
+========== L4 STREAM TCP RESULTS ==========
+Duration     : 2s
+Total conns  : 4
+Echo rounds  : 188
+Successful rounds : 188
+Failed conns : 0
+Error rate   : 0.00%
+Success rate : 100.00%
+===========================================
+

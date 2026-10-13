@@ -101,6 +101,13 @@ configuration apply, history rollback, plugin upload, cache purge, and audit
 export — are disabled with a short note explaining which permission is required,
 instead of letting the operator click through to a guaranteed 403.
 
+Already-open configuration apply, restart-staging and history rollback dialogs
+recheck the current known permission before confirmation. Revoking the required
+grant disables confirmation and shows its permission name; cancellation remains
+available unless a submitted operation is still pending. Restoring the grant
+does not submit anything automatically: the operator must confirm again. A
+submitted operation keeps its pending/result state when permissions change.
+
 Gating is a UX hint only; the **server remains authoritative** and authorizes
 every request. It fails open until the identity is known, so the console is never
 blanked during load or when running without RBAC, and a 403 is handled inline
