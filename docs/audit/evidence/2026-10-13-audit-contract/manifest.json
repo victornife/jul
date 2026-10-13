@@ -1,0 +1,80 @@
+{
+  "measured_source": "718bfaa9d9dc1a4157d26e30e8c9102c60334f25",
+  "measured_tree": "4cfd7254f69ac755393dff6723cd5021460f6e1c",
+  "baseline": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc",
+  "corrective_parent": "15280bdc20a23c5d3455e8c3a18fbb625d1c809a",
+  "dependency_pr": 600,
+  "issue": 602,
+  "go": "1.27.2",
+  "platform": "Linux amd64",
+  "measured_at_utc": "2026-10-13T11:42:17.321031+00:00",
+  "complete_changed_production": {
+    "covered": 99,
+    "total": 101,
+    "percent": 98.01980198019803,
+    "files": [
+      "internal/admin/audit.go",
+      "internal/admin/rbac.go",
+      "scripts/burn-in-load.go",
+      "scripts/burn-in-stream-load.go"
+    ],
+    "uncovered": [
+      [
+        "scripts/burn-in-load.go",
+        "45.2,46.1",
+        1
+      ],
+      [
+        "scripts/burn-in-load.go",
+        "642.3,643.1",
+        1
+      ]
+    ]
+  },
+  "corrective_only": {
+    "covered": 30,
+    "total": 30,
+    "percent": 100.0,
+    "files": [
+      "internal/admin/audit.go",
+      "internal/admin/rbac.go"
+    ],
+    "uncovered": []
+  },
+  "outcomes": {
+    "baseline": "CSV and15route rejection regressions fail as expected; success/403controlpasses",
+    "first_patch": "failed: only single-grant entry covered",
+    "shared_helper_regressions": "passed under race",
+    "lean_owner": "passed admin/rbac",
+    "full_tag_race_owner": "passed admin/rbac",
+    "vet": "passed",
+    "load_generator_regressions": "bothpassed under race",
+    "docs": "2092/0",
+    "docs_regressions": "passed",
+    "semantic_regressions": "24passed",
+    "generated": "passed",
+    "hosted_final_head": "pending"
+  },
+  "sha256": {
+    "admin.cover": "d0d8bf5ca8f7a395d34a9ab1e85a54b24f34cdfab0427fda6772dfad7603b084",
+    "after.log": "83d253988cb958ea4a9fa0f3c5fa2aa420310bcd07356c324f2932966b684d52",
+    "before.log": "c8548e9247ff16eaf558cbd0ae0c3fbffa5e5db487a22df5d8d20bda14c19516",
+    "complete-go-coverage.json": "d1b8661b99e387b6b5755cdc83b6d592e80173fdcb463b91f5cdc5f3366ec1c4",
+    "complete-go.diff": "8d4b0103cf5f90172aaf13a2fdc9e1e107d6fb84620efd6baa815abe8479fb95",
+    "corrective-go-coverage.json": "717fc1f29b3efe09a9d122cf3250c471a5d412ef6e896e62a5ee66c913b78b10",
+    "corrective-go.diff": "d35283368d5042e79bacf0d475277774e82016152e825943d38dfc0535ddf1b2",
+    "docs-tests.log": "9c65d17d57fd050f424183bfce7caaae7b12076164914dd9f6bf05803f323193",
+    "docs.log": "4650b93164848a0a81fe73dfb2799c0f913ea545b11fe8da16cc00225ade76b3",
+    "first-patch-full.log": "66a472e065c0ceb8fac514a5793e865ff47a3a5f3ae1d11db3d0e8822b6402ac",
+    "first-patch-lean.log": "70784b35307531f31ab3a429a974baa329cd7c184f82cbd575e40eea6924a519",
+    "full-owner.log": "3416da8672e0be20c24fd7a20d78e34c64b746c4f0754382b52b4f1a2cad5520",
+    "generated.log": "2ff01d8cbb80e3dc08c6a352f547ada4a777da689ca86e018cae8a32eadad04b",
+    "http-load.cover": "a3fc2c24e334c43d6dd33080cc567a1f720ed966339615a206ad1e7be48c27b1",
+    "http-tests.log": "e55bc20f1719d4f614f4a0d0da8977bb9382fe98cf0e03bd957b7e01572148f0",
+    "lean-owner.log": "0f5824c9c7802c5087650fad1f539d59c0e1eaa52869d7731b81e285161199ed",
+    "semantic.log": "279bd1889295af91df8d13411a8871a549f1df666e9c833b4de680b12a15b405",
+    "stream-load.cover": "61b14c96f5eccf6afff63d95f776b1066a16c9aa8902ef2324bf8ad5d14c3cda",
+    "stream-tests.log": "8675545cc9e7a54884037b98fba7cfc19d5da357660250c4ec42c65ac3b7a10d",
+    "vet.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

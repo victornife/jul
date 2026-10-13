@@ -255,7 +255,7 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", "attachment; filename=\"audit.csv\"")
 		cw := csv.NewWriter(w)
-		_ = cw.Write([]string{"id", "time", "actor", "operation", "resource", "result", "detail", "source_ip"})
+		_ = cw.Write([]string{"id", "time", "actor", "operation", "resource", "result", "detail", "source_ip", "token_id"})
 		for _, ev := range events {
 			_ = cw.Write([]string{
 				strconv.FormatInt(ev.ID, 10),
@@ -266,6 +266,7 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 				ev.Result,
 				ev.Detail,
 				ev.SourceIP,
+				ev.TokenID,
 			})
 		}
 		cw.Flush()

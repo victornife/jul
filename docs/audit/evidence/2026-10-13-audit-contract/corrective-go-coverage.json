@@ -1,0 +1,10 @@
+{
+  "covered": 30,
+  "total": 30,
+  "percent": 100.0,
+  "files": [
+    "internal/admin/audit.go",
+    "internal/admin/rbac.go"
+  ],
+  "uncovered": []
+}
