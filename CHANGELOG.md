@@ -11,6 +11,13 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Fixed
 
+- Reject failed, empty or interrupted HTTP load-generator profiler captures;
+  retain complete existing files and remove partial downloads. Report capture
+  outcomes separately from traffic, preserve TLS verification and exit with
+  failure when any required snapshot is missing (#598). Add explicit-file
+  race regressions and include the tool in complete changed-Go coverage and
+  the normal Codecov upload. No release package or soak result is changed.
+
 - Recheck known Console grants in already-open rollback, live config apply and
   restart-staging confirmations. Disable denied confirmation with a permission
   explanation, preserve submitted outcomes, and require explicit confirmation

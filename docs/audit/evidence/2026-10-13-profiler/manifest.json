@@ -1,0 +1,86 @@
+{
+  "measured_source": "cc2c644e861fd63082d392473d8088345b55ad59",
+  "measured_tree": "1234aadbd738224f7f999159569779c9b8507a9f",
+  "baseline": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc",
+  "corrective_parent": "ca64af4",
+  "dependency_pr": 597,
+  "measured_at_utc": "2026-10-13T11:11:57.039983+00:00",
+  "go": "1.27.2",
+  "platform": "Linux amd64",
+  "complete_changed_production": {
+    "covered": 69,
+    "total": 71,
+    "percent": 97.1830985915493,
+    "files": [
+      "scripts/burn-in-load.go",
+      "scripts/burn-in-stream-load.go"
+    ],
+    "uncovered": [
+      [
+        "scripts/burn-in-load.go",
+        "45.2,46.1",
+        1
+      ],
+      [
+        "scripts/burn-in-load.go",
+        "642.3,643.1",
+        1
+      ]
+    ]
+  },
+  "corrective_only": {
+    "covered": 47,
+    "total": 49,
+    "percent": 95.91836734693878,
+    "files": [
+      "scripts/burn-in-load.go"
+    ],
+    "uncovered": [
+      [
+        "scripts/burn-in-load.go",
+        "45.2,46.1",
+        1
+      ],
+      [
+        "scripts/burn-in-load.go",
+        "642.3,643.1",
+        1
+      ]
+    ]
+  },
+  "whole_http_tool_statement_percent": 36.0,
+  "outcomes": {
+    "before_reproducer": "failed as expected exit1",
+    "after_reproducer": "passed exit0",
+    "race_regressions": "passed",
+    "vet": "passed",
+    "scorer_fixtures": "passed",
+    "docs": "2091 passed, 0 failed",
+    "docs_regressions": "passed",
+    "semantic_regressions": "24 passed",
+    "generated": "passed",
+    "hosted_final_head": "pending"
+  },
+  "limits": [
+    "Short loopback runtime/command fixtures; no production deployment or long soak",
+    "Uncovered thin os.Exit wrapper and exceptional file-close branch; no exclusions"
+  ],
+  "sha256": {
+    "after.log": "3ecf750f31c0d2c7a2868d18c0ef4d9f90fd33622323e73c795ad854941b8e9b",
+    "before.log": "71bf7262d4cd245a25c86b7a07481b2a1e0602d93b7431db43034e12e8a5209a",
+    "complete-go-coverage.json": "551da28a37836a2d857bef13951fbee9f12f8153cc1935bff4a374fcc0788d27",
+    "complete-go.diff": "d8d0add069cf6a1d678e5500335f0c710cda382bc7ce628dac5eb11376de2608",
+    "corrective-go-coverage.json": "9e2fadbea4592794322d4b2cdd8d5993a50326283f801af3753c5ec01cac434c",
+    "corrective-go.diff": "c0706255d2c74a692497791d4925fd90c42e4729fe7cfb23727a105ab9e4aaad",
+    "docs-tests.log": "c0876c2bbda10266b17191ab217d3115315162a7d0d7f34d141bbc92d8efc697",
+    "docs.log": "9eace504535bf89f9bfdbf938d192ffb70a951e52f1b45453447dc6aa419efdf",
+    "forbidden-reproducer.go.txt": "be9e2b905619b372053befe8c441ae2086673809b0104306026ff5585dbd913a",
+    "generated.log": "2ff01d8cbb80e3dc08c6a352f547ada4a777da689ca86e018cae8a32eadad04b",
+    "http-load.cover": "95483ac2ad2b4b6b19ccc78a1e7375180df23b9cba62818c4e4377ed4986439f",
+    "scorer-tests.log": "d03ce458f2a6cd2b4f27522f3aacad03ce1872c028853507c3ad02ca621bdcad",
+    "semantic.log": "26cc07613dddeb3f1f6829bd93c524e9f6df0099791493d3ecd689f114ba9099",
+    "stream-load.cover": "ba700fb8d107d387ac9ee23ed7e04023253c5b4409626ec70ef1c87f6fd99ed5",
+    "tests.log": "63f441ddc34d04aa23e858d6f2261f07e3ac3cff032afb056c042abcca143e59",
+    "vet.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

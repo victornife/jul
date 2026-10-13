@@ -303,14 +303,15 @@ jobs:
           cache: true
       - name: go test -coverprofile
         run: go test -tags "${{ env.FULL_TAGS }}" -coverprofile=cover.out ./...
-      - name: TCP load-generator regression and complete changed Go coverage
+      - name: Load-generator regressions and complete changed Go coverage
         shell: bash
         run: |
           set -euo pipefail
           go test -race -count=1 -coverprofile=stream-load.cover scripts/burn-in-stream-load.go scripts/burn-in-stream-load_test.go
+          go test -race -count=1 -coverprofile=http-load.cover scripts/burn-in-load.go scripts/burn-in-load_test.go
           python3 scripts/test_check_added_go_coverage.py
           git diff --unified=0 origin/main...HEAD -- '*.go' | python3 scripts/strip_moved_lines.py > stream-load.diff
-          python3 scripts/check-added-go-coverage.py --diff stream-load.diff --profile cover.out --profile stream-load.cover > stream-load-coverage.json
+          python3 scripts/check-added-go-coverage.py --diff stream-load.diff --profile cover.out --profile stream-load.cover --profile http-load.cover > stream-load-coverage.json
       - name: signed-URL policy coverage (separate guest module)
         shell: bash
         run: |
@@ -399,12 +400,13 @@ jobs:
           path: |
             cover.out
             stream-load.cover
+            http-load.cover
             stream-load.diff
             stream-load-coverage.json
       - name: upload to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         with:
-          files: ./cover.out,./signed-url-policy.cover,./stream-load.cover
+          files: ./cover.out,./signed-url-policy.cover,./stream-load.cover,./http-load.cover
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 

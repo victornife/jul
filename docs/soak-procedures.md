@@ -55,6 +55,22 @@ apply/reload path.
 | `scripts/soak-repro-smoke.sh` (`make soak-repro-smoke`) | Runs the #287 resilience-soak reproduction at trivial duration; a CI gate against this exact class of doc rot. |
 | `scripts/soak-manifest-init.sh` (`make soak-manifest-init`) | Creates a dated, pre-filled evidence directory (JUL-AUD-018). |
 
+The HTTP load generator captures heap and goroutine profiles at `T0` and
+`Tend`. Set `-admin` to the actual admin URL and `-adminToken` to a principal
+with `admin:manage`; the profiler surface must be enabled. Profile downloads
+verify TLS normally, so a private lab CA must be trusted by the load-generator
+process. Traffic's separate lab TLS settings do not bypass profiler trust.
+
+Each capture has a ten-second timeout, rejects redirects and non-200 responses,
+and publishes a nonempty, fully downloaded body through a temporary file.
+Capture failures leave an existing completed destination unchanged and remove
+partial temporary files. The tool reports each profile outcome without printing
+the credential or response body. It still reports traffic results if capture
+fails, then exits 1; only four successful captures produce the completion claim.
+A directory-creation or health-preflight failure exits before traffic begins.
+These are capture checks, not a substitute for interpreting the profiles or
+completing a long-duration soak. See the [#598 repair evidence](audit/2026-10-13-profiler-capture.md).
+
 ### Load-generator mode flags (`scripts/burn-in-load.go`)
 
 | Flag | Exercises |
