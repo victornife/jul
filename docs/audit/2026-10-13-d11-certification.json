@@ -1,6 +1,7 @@
 {
   "version": 1,
   "original_inventory": "2026-10-13-d11-original.json",
+  "integration_note": "Original area-source verdicts and limitations retain their measured source, including then-pending integration. All selected repairs are now merged; resolved_defects and the completed reviewer_spot_check establish the final disposition without relabeling original evidence.",
   "rows": [
     {
       "id": "D11-001",
@@ -2703,7 +2704,7 @@
       "status": "reviewed",
       "verdict": "fixed in this PR",
       "claims": [
-        "OTel http.target uses URL.Path without query, while host/path/user-agent may still contain sensitive values; raw Slog access records separately include query",
+        "OTel url.path uses URL.Path without query, while host/path/user-agent may still contain sensitive values; raw Slog access records separately include query",
         "Access-log fields are method,host,path,query,status,bytes,duration_ms,client_ip,request_id,user_agent plus conditional trust/result/reason/trace fields and slog envelope",
         "stdout obeys global log level; configured file/syslog sinks emit info; Console-tail projection is not a promise of raw-sink redaction",
         "Runnable check uses -config; collector, trust and writable paths remain external prerequisites"
@@ -5960,12 +5961,37 @@
     }
   ],
   "reviewer_spot_check": {
-    "status": "pending",
-    "reviewer": null,
-    "sampled_rows": [],
-    "source": null,
-    "result": null,
-    "review_kind": null,
+    "status": "completed",
+    "reviewer": "GitHub Copilot",
+    "sampled_rows": [
+      "D11-020", "D11-024", "D11-058", "D11-067", "D11-110",
+      "D11-055", "D11-060", "D11-066", "D11-083", "D11-072",
+      "D11-104", "D11-109", "D11-084", "D11-078", "D11-063", "D11-028"
+    ],
+    "source": "c33c6de2743ad8a2a5225d3200138ed920e7f90a",
+    "result": "Accepted within the documented source-backed operator-contract scope after metadata corrections; no remaining sampled implementation defect found. Integration and CI of this closing change are separate from the reviewed source.",
+    "review_kind": "maintainer-authorized-ai",
+    "independent_human_review": false,
+    "maintainer_authorization": {
+      "maintainer": "victornife",
+      "status": "approved",
+      "reference": "https://github.com/victornife/jul/issues/515#issuecomment-6155828469"
+    },
+    "review_record": "2026-10-13-d11-reviewer-packet.md",
+    "corrections": [
+      "Corrected the OTel claim from http.target to the actual url.path attribute; raw query access-log disclosure remains explicit.",
+      "Reconciled stale unmerged/draft preparation wording with actual resolved corrective merges, preserving original source-bound verdicts and failures.",
+      "Clarified the operations inventory source boundary: 56 hashes match baseline616f0ca; the semantic fixture hash matches dbca836acf2749f553a0edcb69feb7c1c016d679, not the baseline or integrated source. Original artifact bytes remain unchanged."
+    ],
+    "script_inventory_reconciliation": {
+      "original_artifact": "evidence/2026-10-13-d11/operations-inventory.json",
+      "baseline_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc",
+      "baseline_matching_paths": 56,
+      "remaining_path": "scripts/test_semantic_drift.py",
+      "remaining_recorded_hash_source": "dbca836acf2749f553a0edcb69feb7c1c016d679",
+      "remaining_recorded_sha256": "f3b62a8e3a9911319d5f49ad3a354f9478f0f0a1784df2d6961f0046f9a60875",
+      "reviewed_source_sha256": "d45821e0716436964d8ffede97f02296187fa2c4000b5a159f9fba1a15f8b205"
+    },
     "proposed_sampled_rows": [
       "D11-020",
       "D11-024",
@@ -5988,7 +6014,7 @@
     "minimum_original_rows": 12,
     "preparation_owner": "Agent; this field does not establish a human review"
   },
-  "state": "ready_for_review",
+  "state": "completed",
   "summary": {
     "original_total": 230,
     "original_unreviewed": 112,

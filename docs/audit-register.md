@@ -8,7 +8,7 @@ live issue tracker.
 
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
-| [2026-10-13 D11 final preparation](audit/2026-10-13-d11-final.md) | Frozen current-main616f0ca; per-area measured source/CI identities retained | All112 original dispositions and7 supplemental rows; selected corrective PRs and16-row human reviewer packet | Implementation ready for review; actual human >=12-original-row spot-check and final closing record remain pending; no whole-product certification |
+| [2026-10-13 D11 closure review](audit/2026-10-13-d11-final.md) | Frozen main616f0ca; actual16-row review at integrated `c33c6de2`; per-area source/CI identities retained | All112 original dispositions and7 supplemental rows; selected repairs merged; maintainer-authorized AI acceptance record | Scoped review complete with metadata corrections; final integration tracked by #515; no independent human or whole-product certification |
 | [2026-10-08 admin security continuation](audit/2026-10-08-admin-security-continuation.md) | Post-#549 `33e946d0`; remediation #550 | Maintainer-accepted risk-focused #514 checklist, route/Console inventories, corrections and private finding dispositions | Scoped review completed through #550 (`8d45cfbf`); subsequent fixed v2.2.0 packages and advisory publication are recorded separately on #514; no every-line or independent-human certification |
 | [2026-10-06 admin route-policy foundation](audit/2026-10-06-admin-security-review.md) | Post-#548 `1b449614` | Targeted #514 boundary review and CI-enforced permission/transport inventory | Historical partial installment, superseded by the maintainer-accepted risk-focused #514 continuation and merged #550; the original every-line ambition is not retrospectively certified |
 | [2026-09-30 read-only product and technical audit](audit/jul-audit-report-2026-09-30.md) | Frozen candidate `3258f1a3`; delivery status appended against main `9bcc9333` on 2026-10-01 | Current post-release findings plus a dated implementation/PR status snapshot; not an exhaustive certification | Findings F-01–F-19 and original evidence remain pinned to their audited baseline; the addendum distinguishes merged work from green-but-pending PRs and open phase issues |
@@ -21,7 +21,7 @@ their current disposition belongs to the issue tracker and #62.
 
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
-| [2026-09-27 documentation review](audit/old/2026-09-27-documentation-review.md) | `36e0411a` at clean `main`; remediation on isolated branch | Historical **partial** documentation review and findings/coverage ledger; no exhaustive certification or 10/10 claim | D11 remains open under #515; D12 completed its selected controlled-CI scope through merged #575 (`39b93efb`) and closed #516; source/package and environment limits remain in the deployment ledger |
+| [2026-09-27 documentation review](audit/old/2026-09-27-documentation-review.md) | `36e0411a` at clean `main`; remediation on isolated branch | Historical **partial** documentation review and findings/coverage ledger; no exhaustive certification or 10/10 claim | D11's original inventory is reconciled with maintainer-authorized AI review under #515; D12 completed its selected controlled-CI scope through merged #575 (`39b93efb`) and closed #516; source/package and environment limits remain explicit |
 | [2026-09-29 high-risk continuation](audit/old/2026-09-29-high-risk-continuation.md) | PR #482 head `bd8f5b0`; stacked PR #495 at `731fced8` | Targeted security and runtime boundary review; nine branch workflows passed on the exact PR head | Authentication ambiguity, admin mutation admission, bounded dependency and file reads; remaining scopes and verification limits explicit |
 | [2026-09-29 cache/WAF/plugin continuation](audit/old/2026-09-29-cache-waf-plugin-continuation.md) | Stacked after PR #495 head `731fced8` | Merged via #496; tree matches `ed302aae` | Conditional/cache timing and occupancy, WAF compilation input/deadline, plugin fetch/module/request integrity; other ledger rows remain open |
 | [2026-09-29 final high-impact batch](audit/old/2026-09-29-final-high-impact-batch.md) | Stacked tip `5a592d40` | Merged via #497; integrated tree matches that tip at `23c68d6f` | CGI/uWSGI framing, short stream writes, bounds and host routing; not a full audit |
@@ -46,8 +46,10 @@ their current disposition belongs to the issue tracker and #62.
   `f2d68fb74ff2a22061204dd03439914839c37d37`. The bounded consumer cleanup
   [#591](https://github.com/victornife/jul/pull/591) merged as
   `616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc`. These do not certify D11's
-  remaining 112 original unreviewed rows. #515/#517 are the selected hardening
-  pass; the live scope and integration/reviewer requirements remain in #62.
+  original112-row review by themselves. The #515/#517 hardening implementation
+  and selected repairs are merged; D11's16-row review is explicitly AI with
+  maintainer authorization, not independent human certification. Final closing
+  integration and live programme scope remain in #515/#62.
 - Stable [v2.1.0](https://github.com/victornife/jul/releases/tag/v2.1.0),
   published 2026-09-30 at `0951090a6fb7703769a15b4749be9664a9842c98`, includes the source-bound four-hour
   measurements and the #501 access-log ownership correction, followed by
@@ -88,8 +90,9 @@ their current disposition belongs to the issue tracker and #62.
 - Wave 6 (#437 storage headroom, #440 WAF policy visibility and #445
   diagnostics guidance) shipped in v2.1.0. These Beta/released
   additions do not inherit the stable v2.0.0 release or base-feature GA.
-- The 2026-09-27 documentation ledger's **D11** remains open for review of
-  examples, config leaves and platform instructions under #515. **D12** now
+- The 2026-09-27 documentation ledger's **D11** has all112 original dispositions
+  and a completed16-row maintainer-authorized AI review under #515; the frozen
+  inventory and historical exclusions remain unchanged. **D12** now
   has executed evidence for all seven journeys in the maintainer-selected
   GitHub CI scope: real systemd/Windows identities, private-chain trust,
   routed client/firewall checks, pre-existing ACL fixtures, Docker persistence,

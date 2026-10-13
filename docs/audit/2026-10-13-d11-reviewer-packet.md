@@ -1,16 +1,16 @@
-# D11 maintainer / assigned human reviewer packet
+# D11 maintainer-authorized AI review record
 
-All112 original rows have individual dispositions; seven supplemental rows do not change the denominator. Original230-row TSV and112-row frozen JSON remain immutable. This packet is agent preparation. The actual human review is **pending**; proposed samples below are not recorded as completed review.
+All112 original rows have individual dispositions; seven supplemental rows do not change the denominator. Original230-row TSV and112-row frozen JSON remain immutable. GitHub Copilot checked the16 original rows below at integrated source `c33c6de2743ad8a2a5225d3200138ed920e7f90a`. The maintainer explicitly replaced the human-only closure condition with documented AI review plus maintainer acceptance in [the authorization record](https://github.com/victornife/jul/issues/515#issuecomment-6155828469). **No independent human spot-check is claimed.** Original area-source verdicts and failures remain historical evidence; resolved findings are not reopened by their original defect-linked verdicts.
 
 ## Required acceptance
 
-Review at least12 distinct **original** IDs (ceil(112/10)). The16-row proposed sample spans config/deployment/security/Console/CLI, a filed selected defect and historical limitations. It may be replaced with another stratified original sample. New deployment rows may supplement it but do not count toward12.
+Review at least12 distinct **original** IDs (ceil(112/10)). The16-row actual sample spans config/deployment/security/Console/CLI, resolved selected defects and historical limitations. Supplemental deployment rows do not count toward12.
 
-Pin the final completion PR head / integrated source before reviewing. Inspect each sampled original claim, current source/test/evidence, verdict and limitation. Record reviewer identity, maintainer assignment if relevant, source SHA, actual sampled original IDs, result and corrections in reviewer_spot_check in the companion JSON. Set review_kind to maintainer-human or maintainer-assigned-human only after that person performs the review. Set state=completed only after actual acceptance and approved integration; do not copy proposed_sampled_rows into the actual field as a substitute for reviewing.
+The companion JSON records the reviewer, exact reviewed source, actual sample, result, corrections and maintainer authorization. Human reviewers retain the `maintainer-human` / `maintainer-assigned-human` kinds. This review uses `maintainer-authorized-ai` and `independent_human_review=false`; the guard requires the recorded maintainer approval. Final closing-change CI and integration are separate from the sampled runtime source and remain required before issue closure.
 
-The strengthened checker rejects replaced/unknown original IDs, supplemental duplicate/overlap, missing/escaping current paths, unresolved establishing PRs and fabricated completion without a human-kind original-row sample. CI runs both the checker and18 contradiction fixtures.
+The checker retains frozen identities, the12-original-row minimum, path/evidence/test checks and exact source-SHA validation. Unauthorized AI completion or a nonhuman identity recorded as human fails. CI runs the checker and22 contradiction fixtures; preparing a packet alone still does not complete review.
 
-## Proposed original sample
+## Actual original sample
 
 | ID | Original surface | Area | Disposition |
 | --- | --- | --- | --- |
@@ -220,7 +220,7 @@ Current paths: docs/otel.md. Owner: Single-agent D11 implementation reviewer; ma
 Verdict: **fixed in this PR**; [establishing PR](https://github.com/victornife/jul/pull/601).
 
 Reviewed claims:
-- OTel http.target uses URL.Path without query, while host/path/user-agent may still contain sensitive values; raw Slog access records separately include query
+- OTel url.path uses URL.Path without query, while host/path/user-agent may still contain sensitive values; raw Slog access records separately include query
 - Access-log fields are method,host,path,query,status,bytes,duration_ms,client_ip,request_id,user_agent plus conditional trust/result/reason/trace fields and slog envelope
 - stdout obeys global log level; configured file/syslog sinks emit info; Console-tail projection is not a promise of raw-sink redaction
 - Runnable check uses -config; collector, trust and writable paths remain external prerequisites
@@ -295,7 +295,7 @@ Evidence:
 Limits:
 - Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification
 - Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate
-- Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak
+- Runtime/Console corrections597/600/603 are merged and source-bound in the final resolution ledger; no new maturity, token-management API or long soak
 
 ## D11-104: internal/admin/**; internal/adminapi/**; internal/apicontract/**
 
@@ -308,7 +308,7 @@ Verdict: **defect filed/linked**; [establishing PR](https://github.com/victornif
 Reviewed claims:
 - Entire original admin/adminapi/apicontract wildcard retained: current/internal-vs-external routes, transport/auth/permissions, DTO/error/OpenAPI contracts and mutation/history/idempotency owner boundaries
 - #517 config/history/client coverage proof is path-scoped and source-bound; server authorization remains authoritative
-- #595 known-grant confirmation defect and #602 CSV/auth-failure gaps have retained reproducible corrections in separate PR597/603; integration still pending
+- #595 known-grant confirmation defect and #602 CSV/auth-failure gaps have retained reproducible corrections integrated through PR597/603
 
 Authority: `internal/admin`, `internal/adminapi`, `internal/apicontract`, `docs/admin-api.md`, `SECURITY.md`.
 
@@ -326,7 +326,7 @@ Evidence:
 Limits:
 - Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification
 - Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate
-- Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak
+- Runtime/Console corrections597/600/603 are merged and source-bound in the final resolution ledger; no new maturity, token-management API or long soak
 
 Filed finding owners (selected corrections merged; original source failures retained): https://github.com/victornife/jul/issues/595, https://github.com/victornife/jul/issues/602.
 
@@ -361,7 +361,7 @@ Evidence:
 - [evidence/2026-10-13-d11/c5-consumer-identities.json](evidence/2026-10-13-d11/c5-consumer-identities.json)
 
 Limits:
-- This is full wildcard consumer/contract reconciliation, not every-line code/security audit or native execution of every script. Selected corrective PRs are drafts, not integrated passes.
+- This is wildcard consumer/contract reconciliation, not every-line code/security audit or native execution of every script. Selected corrective PRs are merged; original and corrected executions retain separate identities.
 - Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity.
 
 Filed finding owners (selected corrections merged; original source failures retained): https://github.com/victornife/jul/issues/594, https://github.com/victornife/jul/issues/598, https://github.com/victornife/jul/issues/605.
@@ -490,7 +490,7 @@ Evidence:
 Limits:
 - Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification
 - Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate
-- Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak
+- Runtime/Console corrections597/600/603 are merged and source-bound in the final resolution ledger; no new maturity, token-management API or long soak
 
 ## Supplemental verification
 
@@ -498,10 +498,45 @@ Check new deployment/runbook rows D11-N001/N002 against #516 original identities
 
 ## Actual review record
 
-- [ ] Actual reviewer / maintainer assignment identified.
-- [ ] Reviewed source SHA pinned.
-- [ ] At least12 actual distinct original IDs inspected.
-- [ ] Result and corrections recorded in companion JSON.
-- [ ] Final exact-head checks passed and integration recorded.
+- [x] Reviewer: GitHub Copilot; method explicitly authorized by maintainer `victornife`, not an independent human review.
+- [x] Reviewed source: `c33c6de2743ad8a2a5225d3200138ed920e7f90a`.
+- [x]16 distinct original IDs checked; no supplemental ID counted.
+- [x] Result and metadata corrections recorded in companion JSON.
+- [ ] Final closing-change exact-head checks and integration, recorded on the completion PR and #515.
 
-None of these boxes is completed by preparing this document. #515 remains open until the actual review and its closing record are accepted/merged; this preparation packet may merge while human review is pending.
+### Observations by original row
+
+| ID | Actual check and result |
+| --- | --- |
+| D11-020 | Compared the selected HTTP/TLS mix with `burn-in-load.go`; smoke, external collector/PKI prerequisites and non-native-gRPC/L4 limits are explicit. Compression/health defaults passed. |
+| D11-024 | Verified bounded HTTP routing and repeated TCP, not multi-hour sessions. Fragmented echo/short-write/corruption regressions passed; #594 resolution remains separate from its original failure. |
+| D11-058 | Checked owning metadata coverage, schema-path resolution and numeric bounds tests; all selected contracts passed. Metadata is not a replacement runtime validator. |
+| D11-067 | Compared authority/preflight/stage/restoration and legacy-ID contracts with reload source; selected app/admin checks passed. No universal established-stream survival is claimed. |
+| D11-110 | Read the synthetic example's external-service and secret-reference prerequisites; no all-capability execution or production certification is claimed. |
+| D11-055 | Compared event-time sink selection and post-Publish history pruning with owning source. Concurrent cutover, deferred prune and advisory prune-failure tests passed. |
+| D11-060 | Compared unary safe-binding/protobuf retry rules and30-second retirement/timer intervals with source. Idempotency, terminal errors, attempt caps and replacement eviction tests passed. |
+| D11-066 | Compared `semconv.URLPath(r.URL.Path)` and raw access-log Query with the guide; corrected the ledger/packet attribute name. Sink/trace-ID/sampler tests passed; query leakage remains explicit. |
+| D11-083 | Read named plaintextHTTP1.1/Host/error and health-check boundaries, owning source/test assertions and #516's source-bound Windows evidence. No new local/native AF_UNIX execution is claimed. |
+| D11-072 | Compared current route catalogs, one-token model, hash/ID derivation and future API boundary with the spec; catalog and transport-policy checks passed. Resolved repair status is explicit. |
+| D11-104 | Inspected token/audit/CSV attribution, config/rollback confirmation guards and external API DTO/catalog contracts. Five permission-loss UI cases and the selected API contracts passed. |
+| D11-109 | Preserved all57 script paths; checked inventory source hashes, full-tag/discovery failure propagation and profiler publication/rejection. Eight harness fixtures and selected TCP/profile cases passed. |
+| D11-084 | Verified approved public vision, practical guide and moved engineering-context byte hashes; current gateway capabilities and future sharing remain distinct. |
+| D11-078 | Checked the current-reading boundary and authority links. Historical targets and quarter plans remain excluded from shipped-semantic certification. |
+| D11-063 | Compared schema2 provenance/status constraints and owning assessment/include tests; selected importer checks passed with the required build tag. No paired external NGINX campaign is claimed. |
+| D11-028 | Compared preserved CLI/help inventory and automation source with actual-process exit0-9, real-admin-route and help tests; those selected contracts passed. |
+
+### Source and execution boundaries
+
+The old operations inventory remains byte-for-byte unchanged. Its56 baseline hashes match `616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc`; `scripts/test_semantic_drift.py` instead matches recorded SHA-256 `f3b62a8e3a9911319d5f49ad3a354f9478f0f0a1784df2d6961f0046f9a60875` at committed source `dbca836acf2749f553a0edcb69feb7c1c016d679`. The sampled integrated file has SHA-256 `d45821e0716436964d8ffede97f02296187fa2c4000b5a159f9fba1a15f8b205`. These sources are not interchangeable. The companion JSON records this provenance correction rather than relabeling an older hash as current.
+
+Focused checks actually run in this review:
+
+- `python3 scripts/test_d11_certification.py` (22 fixtures) and `python3 scripts/check-d11-certification.py --complete`.
+- Configuration/config-contract tests for public numeric coverage, path resolution, bounds and compression/health defaults.
+- `grpc otel` owner tests for unary retry/replacement, audit/history cutover, trace/log contracts, route policy, managed reload, external API and actual-process CLI.
+- Explicit-file TCP fragmentation/corruption tests and HTTP profiler status/trust/empty/truncated/publication tests.
+- `python3 scripts/test_full_tag_harnesses.py` (eight actual shell-harness regressions).
+- Five selected `config-history-hardening.test.tsx` permission-revocation cases; ten unrelated cases intentionally skipped by the test-name filter, not claimed as run.
+- Assessment/include owner tests with `-tags importer`. The first mixed-package invocation lacked that tag and failed setup for this package; its corrected focused invocation passed. Missing test-file lookup attempts were corrected before executing the affected checks.
+
+No CI/pre-push-wide race/fuzz/vulnerability/Console gates were duplicated locally. Original hosted native/coverage/903-test evidence retains its measured source. No runtime feature, maturity, public vision, frozen original inventory, release/tag, #590 campaign or external-provider certification is changed. The scoped AI review found no remaining sampled runtime defect after the metadata corrections above; it is not independent human or whole-product certification.

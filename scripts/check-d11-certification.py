@@ -90,13 +90,26 @@ def check(root: Path, complete: bool = False) -> list[str]:
         sampled = set(review.get("sampled_rows", []))
         if not sampled <= set(expected) or len(sampled) < minimum or not all(review.get(k) for k in ("reviewer", "source", "result")):
             errors.append("Completed reviewer spot-check lacks reviewer/source/10% original sample/result")
-        if review.get("review_kind") not in {"maintainer-human", "maintainer-assigned-human"}:
+        kind = review.get("review_kind")
+        if kind == "maintainer-authorized-ai":
+            authorization = review.get("maintainer_authorization")
+            if not isinstance(authorization, dict):
+                authorization = {}
+            reference = authorization.get("reference")
+            if (authorization.get("maintainer") != "victornife" or authorization.get("status") != "approved"
+                    or not isinstance(reference, str)
+                    or not re.fullmatch(r"https://github.com/victornife/jul/issues/515#issuecomment-\d+", reference)
+                    or review.get("independent_human_review") is not False):
+                errors.append("Completed AI spot-check requires explicit maintainer authorization and no human-review claim")
+        elif kind not in {"maintainer-human", "maintainer-assigned-human"}:
             errors.append("Completed reviewer spot-check must identify an actual human review; agent preparation does not qualify")
+        elif review.get("reviewer") == "GitHub Copilot" or review.get("independent_human_review") is False:
+            errors.append("An AI/nonhuman reviewer cannot be recorded as an actual human review")
         source = review.get("source")
         if not isinstance(source, str) or not re.fullmatch(r"[0-9a-f]{40}", source):
             errors.append("Completed reviewer spot-check must pin a full reviewed Git source SHA")
     elif current.get("state") == "completed":
-        errors.append("Completed D11 state requires the actual human reviewer spot-check")
+        errors.append("Completed D11 state requires the accepted reviewer spot-check")
     return errors
 
 
