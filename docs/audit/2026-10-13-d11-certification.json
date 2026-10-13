@@ -985,12 +985,20 @@
       "limitations": [
         "Source/contract review and deterministic tests; config-check loads with full tags and skip-static-roots, not proof of every enabled external integration or long-duration stability",
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification",
-        "Short valid TCP reads are misclassified by the current load generator; runtime stream contracts are separate from this harness defect"
+        "Original source misclassified valid fragmented TCP replies; merged PR597 repairs it. Original failure and repaired tests retain separate source identities."
       ],
-      "open_defects": [
-        "https://github.com/victornife/jul/issues/594"
+      "open_defects": [],
+      "establishing_pr": "https://github.com/victornife/jul/pull/596",
+      "resolved_defects": [
+        {
+          "issue": "https://github.com/victornife/jul/issues/594",
+          "corrective_pr": "https://github.com/victornife/jul/pull/597",
+          "reviewed_head": "f93160823692d236286949ec6e2778f3e15b2c1c",
+          "merge": "1b5dc69fc359f63bbcf28c8f7459f2c1c79a75bf",
+          "status": "merged; issue closed/completed"
+        }
       ],
-      "establishing_pr": "https://github.com/victornife/jul/pull/596"
+      "review_verdict_boundary": "Original area-source review verdict retained; linked defects repaired by subsequent approved corrective sources. Resolved records do not relabel the original failing execution as a pass."
     },
     {
       "id": "D11-025",
@@ -1027,12 +1035,20 @@
       "limitations": [
         "Source/contract review and deterministic tests; config-check loads with full tags and skip-static-roots, not proof of every enabled external integration or long-duration stability",
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification",
-        "Short valid TCP reads are misclassified by the current load generator; runtime stream contracts are separate from this harness defect"
+        "Original source misclassified valid fragmented TCP replies; merged PR597 repairs it. Original failure and repaired tests retain separate source identities."
       ],
-      "open_defects": [
-        "https://github.com/victornife/jul/issues/594"
+      "open_defects": [],
+      "establishing_pr": "https://github.com/victornife/jul/pull/596",
+      "resolved_defects": [
+        {
+          "issue": "https://github.com/victornife/jul/issues/594",
+          "corrective_pr": "https://github.com/victornife/jul/pull/597",
+          "reviewed_head": "f93160823692d236286949ec6e2778f3e15b2c1c",
+          "merge": "1b5dc69fc359f63bbcf28c8f7459f2c1c79a75bf",
+          "status": "merged; issue closed/completed"
+        }
       ],
-      "establishing_pr": "https://github.com/victornife/jul/pull/596"
+      "review_verdict_boundary": "Original area-source review verdict retained; linked defects repaired by subsequent approved corrective sources. Resolved records do not relabel the original failing execution as a pass."
     },
     {
       "id": "D11-026",
@@ -2283,13 +2299,21 @@
         "evidence/2026-10-13-d11/c5-consumer-identities.json"
       ],
       "limitations": [
-        "No fresh performance baseline or production throughput certification. PR606 must be integrated for the corrected default full profile; numeric shared-runner outputs remain source-bound.",
+        "No fresh performance baseline or production throughput certification. Merged PR606 provides the corrected default full profile; numeric shared-runner outputs remain source-bound.",
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
-      "open_defects": [
-        "https://github.com/victornife/jul/issues/605"
+      "open_defects": [],
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "resolved_defects": [
+        {
+          "issue": "https://github.com/victornife/jul/issues/605",
+          "corrective_pr": "https://github.com/victornife/jul/pull/606",
+          "reviewed_head": "5faa4c0a21f6f05e72f749894c579eb773438c99",
+          "merge": "3d997ef396d3985e10a8dced10dc3289ad706444",
+          "status": "merged; issue closed/completed"
+        }
       ],
-      "establishing_pr": "https://github.com/victornife/jul/pull/607"
+      "review_verdict_boundary": "Original area-source review verdict retained; linked defects repaired by subsequent approved corrective sources. Resolved records do not relabel the original failing execution as a pass."
     },
     {
       "id": "D11-057",
@@ -3874,10 +3898,18 @@
         "No fresh long stream soak; deterministic selectedTCP repair #597 proves fragmentation handling separately.",
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
-      "open_defects": [
-        "https://github.com/victornife/jul/issues/594"
+      "open_defects": [],
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "resolved_defects": [
+        {
+          "issue": "https://github.com/victornife/jul/issues/594",
+          "corrective_pr": "https://github.com/victornife/jul/pull/597",
+          "reviewed_head": "f93160823692d236286949ec6e2778f3e15b2c1c",
+          "merge": "1b5dc69fc359f63bbcf28c8f7459f2c1c79a75bf",
+          "status": "merged; issue closed/completed"
+        }
       ],
-      "establishing_pr": "https://github.com/victornife/jul/pull/607"
+      "review_verdict_boundary": "Original area-source review verdict retained; linked defects repaired by subsequent approved corrective sources. Resolved records do not relabel the original failing execution as a pass."
     },
     {
       "id": "D11-093",
@@ -4822,7 +4854,7 @@
       "claims": [
         "Entire original admin/adminapi/apicontract wildcard retained: current/internal-vs-external routes, transport/auth/permissions, DTO/error/OpenAPI contracts and mutation/history/idempotency owner boundaries",
         "#517 config/history/client coverage proof is path-scoped and source-bound; server authorization remains authoritative",
-        "#595 known-grant confirmation defect and #602 CSV/auth-failure gaps have retained reproducible corrections in separate PR597/603; integration still pending"
+        "#595 known-grant confirmation defect and #602 CSV/auth-failure gaps have retained reproducible corrections in separate PR597/603; corrective PRs merged and issues closed/completed"
       ],
       "implementation_and_authority": [
         "internal/admin",
@@ -4850,12 +4882,9 @@
       "limitations": [
         "Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification",
         "Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate",
-        "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
+        "Runtime/Console corrections597/600/603 are merged with separately verified source identities; no new maturity, token-management API or long soak"
       ],
-      "open_defects": [
-        "https://github.com/victornife/jul/issues/595",
-        "https://github.com/victornife/jul/issues/602"
-      ],
+      "open_defects": [],
       "establishing_pr": "https://github.com/victornife/jul/pull/604",
       "path_reconciliation": "Four original content-hashed embedded asset paths were renamed by the established Console build in selected repair PR597. Full original expansion remains in frozen JSON; all other original paths are retained. Explicit old-to-new mapping below; no wildcard or denominator narrowing.",
       "path_changes": {
@@ -4863,7 +4892,24 @@
         "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js.map": "internal/admin/assets/dist/assets/CodeEditor-B-y7hQIU.js.map",
         "internal/admin/assets/dist/assets/index-CTCwXmN5.js": "internal/admin/assets/dist/assets/index-B126UQtA.js",
         "internal/admin/assets/dist/assets/index-CTCwXmN5.js.map": "internal/admin/assets/dist/assets/index-B126UQtA.js.map"
-      }
+      },
+      "resolved_defects": [
+        {
+          "issue": "https://github.com/victornife/jul/issues/595",
+          "corrective_pr": "https://github.com/victornife/jul/pull/597",
+          "reviewed_head": "f93160823692d236286949ec6e2778f3e15b2c1c",
+          "merge": "1b5dc69fc359f63bbcf28c8f7459f2c1c79a75bf",
+          "status": "merged; issue closed/completed"
+        },
+        {
+          "issue": "https://github.com/victornife/jul/issues/602",
+          "corrective_pr": "https://github.com/victornife/jul/pull/603",
+          "reviewed_head": "d7952e49946de6fbc4c09d36abde4e1986b58648",
+          "merge": "ddaadb0599091f34cdd71ca7fa1f8d822048e36c",
+          "status": "merged; issue closed/completed"
+        }
+      ],
+      "review_verdict_boundary": "Original area-source review verdict retained; linked defects repaired by subsequent approved corrective sources. Resolved records do not relabel the original failing execution as a pass."
     },
     {
       "id": "D11-105",
@@ -5445,15 +5491,35 @@
         "evidence/2026-10-13-d11/c5-consumer-identities.json"
       ],
       "limitations": [
-        "This is full wildcard consumer/contract reconciliation, not every-line code/security audit or native execution of every script. Selected corrective PRs are drafts, not integrated passes.",
+        "This is full wildcard consumer/contract reconciliation, not every-line code/security audit or native execution of every script. Selected corrective PRs are merged; original and repaired executions retain their source boundaries.",
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
-      "open_defects": [
-        "https://github.com/victornife/jul/issues/594",
-        "https://github.com/victornife/jul/issues/598",
-        "https://github.com/victornife/jul/issues/605"
+      "open_defects": [],
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
+      "resolved_defects": [
+        {
+          "issue": "https://github.com/victornife/jul/issues/594",
+          "corrective_pr": "https://github.com/victornife/jul/pull/597",
+          "reviewed_head": "f93160823692d236286949ec6e2778f3e15b2c1c",
+          "merge": "1b5dc69fc359f63bbcf28c8f7459f2c1c79a75bf",
+          "status": "merged; issue closed/completed"
+        },
+        {
+          "issue": "https://github.com/victornife/jul/issues/598",
+          "corrective_pr": "https://github.com/victornife/jul/pull/600",
+          "reviewed_head": "7ffa34e42e958591917078e330f9a32449f52d00",
+          "merge": "5145857ab5e68b1f75f84b8cf13435b42a448bd8",
+          "status": "merged; issue closed/completed"
+        },
+        {
+          "issue": "https://github.com/victornife/jul/issues/605",
+          "corrective_pr": "https://github.com/victornife/jul/pull/606",
+          "reviewed_head": "5faa4c0a21f6f05e72f749894c579eb773438c99",
+          "merge": "3d997ef396d3985e10a8dced10dc3289ad706444",
+          "status": "merged; issue closed/completed"
+        }
       ],
-      "establishing_pr": "https://github.com/victornife/jul/pull/607"
+      "review_verdict_boundary": "Original area-source review verdict retained; linked defects repaired by subsequent approved corrective sources. Resolved records do not relabel the original failing execution as a pass."
     },
     {
       "id": "D11-110",
@@ -5747,11 +5813,25 @@
         "Supplemental related consumer does not change the112originaldenominator",
         "Pending requests/grant freshness and history advisory outcomes retain their actual contract; no whole-product certification"
       ],
-      "open_defects": [
-        "https://github.com/victornife/jul/issues/595",
-        "https://github.com/victornife/jul/issues/602"
+      "open_defects": [],
+      "establishing_pr": "https://github.com/victornife/jul/pull/604",
+      "resolved_defects": [
+        {
+          "issue": "https://github.com/victornife/jul/issues/595",
+          "corrective_pr": "https://github.com/victornife/jul/pull/597",
+          "reviewed_head": "f93160823692d236286949ec6e2778f3e15b2c1c",
+          "merge": "1b5dc69fc359f63bbcf28c8f7459f2c1c79a75bf",
+          "status": "merged; issue closed/completed"
+        },
+        {
+          "issue": "https://github.com/victornife/jul/issues/602",
+          "corrective_pr": "https://github.com/victornife/jul/pull/603",
+          "reviewed_head": "d7952e49946de6fbc4c09d36abde4e1986b58648",
+          "merge": "ddaadb0599091f34cdd71ca7fa1f8d822048e36c",
+          "status": "merged; issue closed/completed"
+        }
       ],
-      "establishing_pr": "https://github.com/victornife/jul/pull/604"
+      "review_verdict_boundary": "Original area-source review verdict retained; linked defects repaired by subsequent approved corrective sources. Resolved records do not relabel the original failing execution as a pass."
     },
     {
       "original_disposition": "supplemental related surface",
@@ -5946,6 +6026,14 @@
       "D11-085",
       "D11-094"
     ],
-    "state_boundary": "Agent implementation/disposition preparation complete; actual human spot-check and final integration pending"
+    "state_boundary": "Agent implementation/disposition preparation complete; actual human spot-check and final integration pending",
+    "resolved_issue_ids": [
+      594,
+      595,
+      598,
+      602,
+      605
+    ],
+    "open_selected_product_defects": 0
   }
 }

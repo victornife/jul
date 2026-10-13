@@ -68,6 +68,13 @@ class DispositionContract(unittest.TestCase):
         self.current["rows"][0]["verdict"] = "defect filed/linked"
         self.assertTrue(any("owner link" in e for e in self.errors()))
 
+    def test_resolved_defect_preserves_original_review_and_failing_source(self):
+        self.current["rows"][0].update(verdict="defect filed/linked", open_defects=[],
+                                     resolved_defects=[{"issue": "https://github.com/victornife/jul/issues/1",
+                                                        "corrective_pr": "https://github.com/victornife/jul/pull/2",
+                                                        "reviewed_head": "a" * 40, "merge": "b" * 40}])
+        self.assertEqual(self.errors(), [])
+
     def test_pending_area_allowed_for_area_pr_but_not_final_packet(self):
         self.current["rows"][0]["verdict"] = None
         self.assertEqual(self.errors(complete=False), [])

@@ -82,7 +82,7 @@ def check(root: Path, complete: bool = False) -> list[str]:
         for evidence in row.get("execution_evidence", []):
             if not evidence.startswith("https://") and not (base / evidence).exists():
                 errors.append(f"{name}: missing execution evidence {evidence}")
-        if row["verdict"] == "defect filed/linked" and not row.get("open_defects"):
+        if row["verdict"] == "defect filed/linked" and not (row.get("open_defects") or row.get("resolved_defects")):
             errors.append(f"{name}: filed-defect verdict without an owner link")
     review = current["reviewer_spot_check"]
     if review["status"] == "completed":

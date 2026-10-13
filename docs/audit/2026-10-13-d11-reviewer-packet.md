@@ -8,7 +8,7 @@ Review at least12 distinct **original** IDs (ceil(112/10)). The16-row proposed s
 
 Pin the final completion PR head / integrated source before reviewing. Inspect each sampled original claim, current source/test/evidence, verdict and limitation. Record reviewer identity, maintainer assignment if relevant, source SHA, actual sampled original IDs, result and corrections in reviewer_spot_check in the companion JSON. Set review_kind to maintainer-human or maintainer-assigned-human only after that person performs the review. Set state=completed only after actual acceptance and approved integration; do not copy proposed_sampled_rows into the actual field as a substitute for reviewing.
 
-The strengthened checker rejects replaced/unknown original IDs, supplemental duplicate/overlap, missing/escaping current paths, unresolved establishing PRs and fabricated completion without a human-kind original-row sample. CI runs both the checker and17 contradiction fixtures.
+The strengthened checker rejects replaced/unknown original IDs, supplemental duplicate/overlap, missing/escaping current paths, unresolved establishing PRs and fabricated completion without a human-kind original-row sample. CI runs both the checker and18 contradiction fixtures.
 
 ## Proposed original sample
 
@@ -85,7 +85,7 @@ Limits:
 - Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification
 - Short valid TCP reads are misclassified by the current load generator; runtime stream contracts are separate from this harness defect
 
-Selected finding owners: https://github.com/victornife/jul/issues/594.
+Filed finding owners (selected corrections merged; original source failures retained): https://github.com/victornife/jul/issues/594.
 
 ## D11-058: docs/config-value-contract.json
 
@@ -328,7 +328,7 @@ Limits:
 - Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate
 - Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak
 
-Selected finding owners: https://github.com/victornife/jul/issues/595, https://github.com/victornife/jul/issues/602.
+Filed finding owners (selected corrections merged; original source failures retained): https://github.com/victornife/jul/issues/595, https://github.com/victornife/jul/issues/602.
 
 Four rebuilt content-hashed bundle paths are explicitly mapped old-to-new in path_changes for this row; PR597 build/embedding evidence owns that rename. The frozen original expansion is unchanged.
 
@@ -364,7 +364,7 @@ Limits:
 - This is full wildcard consumer/contract reconciliation, not every-line code/security audit or native execution of every script. Selected corrective PRs are drafts, not integrated passes.
 - Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity.
 
-Selected finding owners: https://github.com/victornife/jul/issues/594, https://github.com/victornife/jul/issues/598, https://github.com/victornife/jul/issues/605.
+Filed finding owners (selected corrections merged; original source failures retained): https://github.com/victornife/jul/issues/594, https://github.com/victornife/jul/issues/598, https://github.com/victornife/jul/issues/605.
 
 ## D11-084: docs/vision/README.md
 
