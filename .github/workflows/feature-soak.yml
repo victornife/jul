@@ -6,6 +6,9 @@ on:
     paths:
       - 'scripts/feature-soak.py'
       - '.github/workflows/feature-soak.yml'
+      # Command/prerequisite drift in the active operator runbook needs the
+      # same short preflight. The one-hour qualifier remains dispatch-only.
+      - 'docs/soak-procedures.md'
 
 permissions:
   contents: read
