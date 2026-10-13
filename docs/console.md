@@ -6,8 +6,9 @@ The Console is a separate admin web control plane, loopback-bound by default, fo
 Jul.IA server: a live metrics dashboard, a runtime-status overview of which
 capabilities are active, upstream health, certificate inventory, safe
 configuration editing with version history and one-click rollback, and a setup
-wizard. It ships **inside the single binary** (no external assets, no Node
-build) and is gated by the `console` build tag.
+wizard. It ships **inside the single binary** (no external assets or Node
+runtime). Maintainers build the committed SPA assets with Node/pnpm; ordinary
+Go/release builds embed those assets. The SPA is gated by the `console` build tag.
 
 
 > **Durable audit sink hot reload (HR-07C).** The Admin Runtime Settings drawer edits the audit JSONL path and rotation policy through the typed `admin_audit_sink_set` operation. Path switches never migrate or delete old files; disabling durability keeps the in-memory audit ring and monotonic IDs. Active health is bounded and secret-safe. See [audit sink hot reload](audit-sink-hot-reload.md).
@@ -106,6 +107,13 @@ every request. It fails open until the identity is known, so the console is neve
 blanked during load or when running without RBAC, and a 403 is handled inline
 without re-triggering the token prompt. When the credential is rejected (401) the
 cached identity is dropped so a stale permission set never lingers.
+
+Identity refresh is periodic and runs on focus/403; it is not a push channel for
+instantaneous remote revocation. The separately selected #595 repair in #597
+also rechecks known grants in already-open confirmation dialogs. Unknown
+identity retains the loading-time UI policy above; the server still decides
+whether a submitted request is authorized. Pending requests keep their terminal
+outcome visible rather than replaying after credential/grant recovery.
 
 
 ### Overview
@@ -369,14 +377,22 @@ No private-key material is ever returned. Backed by `GET /api/certs`.
 
 ### History & rollback
 
-Every time you save a configuration change (via the settings form, the raw TOML
-editor, or the wizard), the **previous** configuration is snapshotted to
-`history_dir` as a timestamped `.toml` file before the new one takes effect.
+Managed mutations capture the previous configuration as part of preparation.
+After the operation reaches its terminal outcome, the history finalizer writes
+the applicable previous/recovery snapshot and metadata to `history_dir`.
+This durable write is not guaranteed to finish before the new configuration is
+live. History persistence failure is advisory: an operation may commit and
+report degraded history health. See [deployment.md](deployment.md) and
+[ADR 0015](adr/0015-managed-apply-terminal-ledger.md).
 
-The History panel lists snapshots newest-first. **Preview** shows the stored
-TOML; **Roll back** re-applies it through the same validated write path used by
-the editor, which hot-reloads on success. Because a rollback is also a write, it
-snapshots the pre-rollback configuration first — so you can always undo an undo.
+The History panel lists snapshots newest-first. Ordinary **Preview** uses a
+secret-safe diff; complete stored TOML additionally requires `history:raw`.
+**Roll back** uses the validated managed write path, with conflict, authority,
+trust/admin-change and lifecycle checks. A live rollback records its previous
+configuration through the same terminal finalizer. A reverse rollback is
+available only if that snapshot was successfully retained; it is not guaranteed
+after history-storage failure or pruning. Restart-bound changes use the
+supported staging workflow rather than claiming they became live.
 
 Snapshots are pruned to `history_keep` (default 50). Endpoints:
 
@@ -404,8 +420,10 @@ Generates a starter configuration without hand-writing TOML:
 `POST /api/wizard` (and the v2 alias `POST /api/wizard/generate`) returns the
 generated TOML for review (it is validated first, so the wizard never proposes a
 config the editor would reject). Click **Apply & reload** to write it through
-`POST /api/config/raw`, which validates, snapshots the current config, persists,
-and hot-reloads.
+`POST /api/config/raw`, which validates/preflights and persists/applies through
+the managed coordinator. The terminal outcome distinguishes live, restart
+staging, restored failure and degraded commit; history finalization is described
+above. File-owned authority does not permit this managed write.
 
 ### Search & discovery
 
@@ -833,9 +851,10 @@ retain their documented parser semantics; summaries list field names only. `rate
 limiter; lowering the cap affects new admissions without terminating existing
 connections. Every `global_set` field (`log_level`, `log_format`,
 `worker_threads`, `shutdown_timeout`, `reload_timeout`,
-`redact_min_secret_length`) is also hot. The current Global and Traffic
-Controls forms keep their guided validated-TOML-upsert path until #81; `[cache]`
-remains truthful stage-only and the raw editor remains available.
+`redact_min_secret_length`) is also hot. The Global and Traffic Controls forms
+use these sparse typed operations after #81, preserving omitted/dormant values;
+the cache form retains its validated-TOML path and lifecycle-assessed staging
+when the candidate requires it. The raw editor remains available.
 
 The **Streams** panel adds guided **creation and in-place editing** of L4
 (TCP/UDP) reverse-proxy listeners (`[[stream]]`): the listen address, protocol,
@@ -991,9 +1010,13 @@ never taken down) **and** surfaces a degraded `audit_sink` on the runtime
 overview (`GET /api/runtime/overview`), which the Console renders as a banner —
 rather than silently dropping the trail. Durability favors immediate writes over
 per-event `fsync`: events are written as they happen but not flushed to stable
-storage on every record, an explicit trade-off. Actor identity is currently the
-shared-token `"operator"`; per-user attribution arrives with RBAC (designed in
-[docs/specs/console-rbac.md](specs/console-rbac.md), [ADR 0010](adr/0010-console-rbac.md)).
+storage on every record, an explicit trade-off. Durable writes are synchronous
+and can contribute filesystem latency; a sink failure does not roll back the
+audited operation. Named RBAC credentials carry their authenticated principal
+and public token ID; valid legacy credentials use `shared`, and unauthenticated
+events use `anonymous`. The separately selected #602 correction adds anonymous
+credential-rejection events and appends credential IDs to CSV while preserving
+the existing column positions. See [the RBAC spec](specs/console-rbac.md).
 
 ## Capability matrix
 
@@ -1144,9 +1167,11 @@ commitments, keyboard-shortcut map, and verification live in
 - **Authentication:** all data and mutating APIs require the bearer token when
   `[admin].token` is set, compared in constant time. The token is held in the
   browser's `sessionStorage` only.
-- **Same-origin + CSP:** console pages send a strict `Content-Security-Policy`
-  (`default-src 'self'`), `X-Frame-Options: DENY`, and `X-Content-Type-Options:
-  nosniff`. The SPA talks only to same-origin `/api` endpoints.
+- **Same-origin + CSP:** the SPA uses strict `script-src 'self'` and per-response
+  editor style nonces, with `X-Frame-Options: DENY` and `nosniff`. The supported
+  minimal configuration GUI uses a separate legacy inline-script/style policy.
+  The SPA talks only to same-origin `/api` endpoints. #514's bounded review
+  records this distinction; it is not universal security certification.
 - **Path-traversal safe:** snapshot identifiers are validated against a strict
   charset (`[0-9A-Za-z._-]`, no separators or `..`), so the history endpoints
   can never read or write outside `history_dir`.

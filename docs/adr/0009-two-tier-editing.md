@@ -23,8 +23,10 @@ Adopt a **two-tier editing model** for complex route types in Console v2:
 
 ### Tier 1 — Quick Edit
 - Lives **inside the existing `RouteDetail` drawer** (or equivalent inline surface).
-- Exposes only the **most frequently mutated fields** (≤ 4–6 inputs).
-- Uses the standard patch API (`PATCH /api/config`) with `op: "location_set_*"`.
+- Exposes the **most frequently mutated fields**. The original 4–6-input design
+  goal is guidance; the delivered transcode editor's larger field set is listed below.
+- Builds a typed `op: "location_set_*"` draft for the standard patch workflow:
+  `POST /api/config/patch` or conflict-checked `/preview`, then `/apply` after review.
 - On save, the config diff is handed off to the existing `/config` review flow (`setPendingDraft`).
 - A prominent "Open in Designer" deeplink takes the user to Tier 2, pre-filled with current values.
 

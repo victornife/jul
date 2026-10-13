@@ -1,0 +1,63 @@
+--- FAIL: TestNGINXCorpusHashAffinityRealE2E (0.01s)
+    corpus_affinity_runtime_test.go:46: listen Unix corpus backend "/tmp/jul432/a.sock": listen unix /tmp/jul432/a.sock: socket: operation not permitted
+2026/10/13 06:36:39 http: TLS handshake error from 127.0.0.1:53194: tls: client didn't provide a certificate
+2026/10/13 06:36:39 http: TLS handshake error from 127.0.0.1:53210: tls: client didn't provide a certificate
+2026/10/13 06:36:39 http: TLS handshake error from 127.0.0.1:44252: remote error: tls: bad certificate
+2026/10/13 06:36:39 http: TLS handshake error from 127.0.0.1:40076: tls: client didn't provide a certificate
+flag provided but not defined: -nope
+Usage of healthcheck:
+  -addr string
+    	override the admin host:port to probe (keeps the endpoint path)
+  -ca-file string
+    	additional PEM CA bundle for an HTTPS probe
+  -client-cert string
+    	mTLS client certificate for an HTTPS probe
+  -client-key string
+    	mTLS client private key for an HTTPS probe
+  -config string
+    	config file used to discover the admin listen address (default "server.toml")
+  -json
+    	emit the result as JSON
+  -quiet
+    	suppress output; report only via the exit code
+  -ready
+    	probe readiness (/readyz) instead of liveness (/healthz)
+  -timeout duration
+    	overall request timeout (default 3s)
+  -url string
+    	probe this full URL instead of discovering it from the config
+--- FAIL: TestNGINXCorpusAssessmentCandidateAndRealJul (0.32s)
+    --- FAIL: TestNGINXCorpusAssessmentCandidateAndRealJul/unix-http-upstream (0.01s)
+        import_corpus_test.go:77: listen Unix corpus backend "/tmp/jul407/backend.sock": listen unix /tmp/jul407/backend.sock: socket: operation not permitted
+    --- FAIL: TestNGINXCorpusAssessmentCandidateAndRealJul/upstream-hash-affinity-runtime (0.01s)
+        import_corpus_test.go:77: listen Unix corpus backend "/tmp/jul432/a.sock": listen unix /tmp/jul432/a.sock: socket: operation not permitted
+error: --config is required (use - for stdin)
+error: exactly one of --config or --history-id is required
+error: --base-version is required
+error: --base-version is required
+error: connect: Get "http://127.0.0.1:1/api/v1/status": dial tcp 127.0.0.1:1: connect: connection refused
+error: --history-id is required
+error: connect: Get "http://127.0.0.1:1/api/v1/config/export": dial tcp 127.0.0.1:1: connect: connection refused
+error: connect: Get "http://127.0.0.1:1/api/v1/status": dial tcp 127.0.0.1:1: connect: connection refused
+time=2026-10-13T06:36:42.446-05:00 level=INFO msg="starting Jul.IA" version=dev config=<test:run-serve-smoke>
+time=2026-10-13T06:36:42.454-05:00 level=INFO msg=listening addr=127.0.0.1:37821 tls=false http3=false
+time=2026-10-13T06:36:42.472-05:00 level=INFO msg=access method=GET host=127.0.0.1:37821 path=/smoke.html query="" status=200 bytes=14 duration_ms=0.266 client_ip=127.0.0.1 request_id=c9230325e5ea37db user_agent=Go-http-client/1.1
+time=2026-10-13T06:36:42.473-05:00 level=INFO msg=access method=GET host=127.0.0.1:37821 path=/smoke.html query="" status=200 bytes=14 duration_ms=0.137 client_ip=127.0.0.1 request_id=4d6938b24c7e20b0 user_agent=Go-http-client/1.1
+time=2026-10-13T06:36:42.474-05:00 level=INFO msg="shutdown signal received, draining connections"
+time=2026-10-13T06:36:42.474-05:00 level=INFO msg="shutdown complete"
+time=2026-10-13T06:36:42.474-05:00 level=INFO msg="starting Jul.IA" version=dev config=<test:run-proxy-smoke>
+time=2026-10-13T06:36:42.482-05:00 level=INFO msg=listening addr=127.0.0.1:36345 tls=false http3=false
+time=2026-10-13T06:36:42.502-05:00 level=INFO msg=access method=GET host=127.0.0.1:36345 path=/ query="" status=200 bytes=16 duration_ms=1.159 client_ip=127.0.0.1 request_id=4bfa28a0f17c2fa0 user_agent=Go-http-client/1.1
+time=2026-10-13T06:36:42.503-05:00 level=INFO msg=access method=GET host=127.0.0.1:36345 path=/ query="" status=200 bytes=16 duration_ms=0.449 client_ip=127.0.0.1 request_id=45572fac786e5a03 user_agent=Go-http-client/1.1
+time=2026-10-13T06:36:42.504-05:00 level=INFO msg="shutdown signal received, draining connections"
+time=2026-10-13T06:36:42.504-05:00 level=INFO msg="shutdown complete"
+Usage of version:
+  -json
+    	emit the version report as JSON
+Usage of completion:
+FAIL
+FAIL	jul/cmd/jul	5.593s
+ok  	jul/internal/adminapi	1.020s
+ok  	jul/internal/apicontract	2.621s
+ok  	jul/internal/rbac	1.018s
+FAIL

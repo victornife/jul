@@ -1,0 +1,45 @@
+{
+  "runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc",
+  "docs_parent": "4e01349c8578292e02fefd538c891dd169d0329e",
+  "original_area_rows": 9,
+  "original_denominator": 112,
+  "reviewed_total": 64,
+  "remaining": 48,
+  "supplemental_rows_total": 4,
+  "go": "1.27.2",
+  "platform": "Linux amd64",
+  "outcomes": {
+    "docs": "2108/0",
+    "semantic_fixtures": "25passed",
+    "docs_fixtures": "passed",
+    "generated": "passed",
+    "ledger": "0errors",
+    "ledger_fixtures": "7passed",
+    "focusedCLI": "passed under race;console/importertags",
+    "adminapi/apicontract/rbac": "passed under race;console/importertags",
+    "broad_cmd": "failed: AF_UNIX operation not permitted; retained",
+    "human_spot_check": "pending"
+  },
+  "source_sha256": {
+    "docs/accessibility.md": "2c01b1b2eefedc5df54c5fdc6ff468628ffd25f0145afce52aad87c6df7f4861",
+    "docs/adr/0006-console-v2-stack.md": "0162d9e1e894abcc3207b09b63a73a38a93852b8d4d6fbcd15c754a5911787ca",
+    "docs/adr/0009-two-tier-editing.md": "6ab685ee064b032158cbb1ff9a41d73243f0834259ecdda3035f1f0757a0e857",
+    "docs/adr/0010-console-rbac.md": "8174edf7fe292021806a7da683dce5bde08de28c41d536ed452fc083caf246ac",
+    "docs/console.md": "3592d4f83664c0a0ed731637255a5f4a8c9dbde92811ae044d042bd43774e81d",
+    "docs/specs/console-rbac.md": "f0d2964367923dc845f41f5f5d2195885be97551f14539c392f1b4d0e0ca26b9",
+    "docs/specs/console-v2.md": "ceef0a38dc787623076c7c8cf37ba16d439daae212c6d4218f97e5d2a682d466"
+  },
+  "sha256": {
+    "console-api-owner.log": "02767c1cdc06a837a902bec4d454d2d7004ea78f546d2e8bb88161fd6ab015c4",
+    "console-cli-focused.log": "b9465f89c9cb18520360e17bfb321c8953c5b2bef4de00e81be762ea6238c7e8",
+    "console-cli-help-full.log": "a559dc182b1127d76a22ac164df5ef7ff42dd218e7009507423db310e8630228",
+    "console-cli-help-lean.log": "a559dc182b1127d76a22ac164df5ef7ff42dd218e7009507423db310e8630228",
+    "console-cli-owner.log": "85cb1e2532fb9939b555fdd540c8214e306ee8bb0e389e187c2596f290794d64",
+    "console-docs-tests.log": "90b2bf6ef7587231a47a7c52dda953cd5472cfa921e8aea793d95bfd3604e526",
+    "console-docs.log": "d6f324a0c58055b9e701315a1ca569146b247bd0568b8d397e36ed1cf18aa053",
+    "console-generated.log": "2ff01d8cbb80e3dc08c6a352f547ada4a777da689ca86e018cae8a32eadad04b",
+    "console-ledger-tests.log": "9ec9e3c52e7908b746c625587944c7e1eb71f90fc834fbb4527d510523684dd2",
+    "console-ledger.log": "190751e0b043e17fcf28f2355d85c9297fdb96497b2fd99bf4bb85a843e06119",
+    "console-semantic.log": "10f1a06cae0f6463e75893e803d10e47e338e666c1c43bcea241ce9a190c6524"
+  }
+}

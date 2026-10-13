@@ -1,0 +1,81 @@
+jul - an NGINX-inspired HTTP edge server
+
+Usage:
+  jul [flags]                          run the server (default)
+  jul serve [-config f]                run the server (explicit form)
+  jul check [-config f] [-json] [-quiet] [-skip-static-roots]
+                                       structural and stateless runtime preflight
+  jul healthcheck [-config f] [-addr host:port | -url u] [-ready] [-timeout d]
+                  [-ca-file f] [-client-cert f -client-key f]
+                                       probe the admin health endpoint (exit 0 healthy, 1 unhealthy)
+  jul lint [-config f] [-strict] [-json] [-quiet]
+                                       validate and report best-practice warnings
+  jul fmt  [-config f] [-w] [-diff]    rewrite the config in canonical TOML
+  jul run  --serve <dir> | --proxy <target> [--listen addr]
+                                       run a zero-config server (no file needed)
+  jul import nginx [-o out.toml] [-strict] <nginx.conf>
+                                       translate an NGINX config (needs -tags importer)
+  jul version [-json]                  print version and build metadata
+  jul capabilities [-json]             report compiled features and exit-code contract
+  jul completion <bash|zsh|fish|powershell>
+                                       print a shell completion script
+
+Exit codes:
+  0  success / clean shutdown / healthy probe
+  1  error / validation failed / unhealthy probe / fmt would change the file
+  2  usage or config error (bad flags, missing required argument), or lint -strict warnings
+
+Flags:
+  -check
+    	validate the configuration and exit
+  -config string
+    	path to the TOML configuration file (default "server.toml")
+  -version
+    	print version and exit
+
+Local diagnostics:
+  jul doctor [-config f] [-json] [-strict] [-check-network]
+                                       run deterministic read-only checks
+  jul support-bundle [-config f] [-output file] [-json] [-include-logs]
+                                       write a bounded, secret-safe local archive
+
+Remote automation (stable /api/v1):
+  jul plan --endpoint u --config candidate.toml [--base-version v] [--json]
+  jul diff --endpoint u (--config candidate.toml | --history-id id) [--json]
+  jul apply --endpoint u --config candidate.toml --base-version v [--idempotency-key k] [--json]
+  jul stage --endpoint u --config candidate.toml --base-version v [--idempotency-key k] [--json]
+  jul status --endpoint u [--apply-id id] [--json]
+  jul rollback --endpoint u --history-id id [--base-version v] [--idempotency-key k] [--json]
+  jul export --endpoint u [--json]
+  jul diagnostics --endpoint u [--json]
+  jul apply --endpoint u --adopt-external [--base-version v] [--adopt-mode hot|stage_restart]
+
+Remote connection flags:
+  --endpoint u       explicit Jul admin endpoint; otherwise profile/JUL_ENDPOINT
+  --profile name     named profile from the Jul CLI profile file
+  --token-file path  bearer-token file; '-' reads the token from stdin
+  --ca-file path     additional CA bundle
+  --client-cert path mTLS client certificate (requires --client-key)
+  --client-key path  mTLS client private key
+  --timeout d        ordinary request timeout
+  --json             exactly one JSON object on stdout
+  --verbose          bounded operation/request diagnostics; never credentials or bodies
+
+Remote credential precedence:
+  explicit flags/profile selection > named profile > JUL_ENDPOINT/JUL_TOKEN_FILE/JUL_TOKEN > no endpoint
+
+Remote automation exit contract:
+  0  successful live/read/ordinary operation
+  1  validation/configuration failure
+  2  usage/request error
+  3  successful operation requiring restart/convergence
+  4  successful degraded outcome
+  5  conflict or uncertain state after failed restoration
+  6  configuration-authority denial
+  7  authentication/authorization/insecure-transport refusal
+  8  connectivity/TLS/rate-limit failure
+  9  server/capability/storage/operation-timeout/internal failure
+
+Security:
+  No raw --token argument or generic --insecure bypass exists. Plain HTTP is
+  accepted only for loopback. Control-plane redirects are not followed.

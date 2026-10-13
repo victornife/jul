@@ -829,18 +829,45 @@
         "cmd/jul/version.go",
         "cmd/jul/version_test.go"
       ],
-      "area": "examples-workflows-specifications",
+      "area": "console-api-cli",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Full frozen CLI/help wildcard substantiates local commands and AUTO04 stable /api/v1 remote automation; no private Console fallback",
+        "Credential/profile precedence, normal TLS/mTLS, loopback-only plaintext/no redirects and no raw --token preserve transport/secret boundaries",
+        "Actual process tests enforce exit0\u20139, terminal polling/Ctrl-C distinction and idempotency/base fences"
+      ],
+      "implementation_and_authority": [
+        "cmd/jul/main.go",
+        "cmd/jul/remote_cli.go",
+        "cmd/jul/remote_usage.go",
+        "docs/remote-cli.md",
+        "internal/adminapi"
+      ],
+      "named_tests": [
+        "TestRemoteCLIActualProcessExitContractZeroThroughNine",
+        "TestRemoteCLIActualBinaryAgainstRealAdminRouteStack",
+        "TestRemoteExtendedUsage"
+      ],
+      "execution_evidence": [
+        "2026-10-13-d11-console-cli.md",
+        "evidence/2026-10-13-d11/console-cli-focused.log",
+        "evidence/2026-10-13-d11/console-api-owner.log",
+        "evidence/2026-10-13-d11/console-cli-owner.log",
+        "https://github.com/victornife/jul/pull/592",
+        "https://github.com/victornife/jul/pull/597",
+        "https://github.com/victornife/jul/actions/runs/38377283466"
+      ],
+      "limitations": [
+        "Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification",
+        "Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate",
+        "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending docs/d11-console-cli-515 publication",
+      "area_reconciliation": "CLI/help belongs to command/API owner; every original path retained, original denominator unchanged"
     },
     {
       "id": "D11-029",
@@ -890,15 +917,36 @@
       "area": "console-api-cli",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Native focusable controls and keyboard-enabled editor widgets use their relevant activation keys; Space is not promised for links",
+        "Modal focus trap/restore and Escape cancellation respect pending/disabled cancellation; WCAG2.2AA and full contrast audit remain unperformed boundaries"
+      ],
+      "implementation_and_authority": [
+        "internal/admin/ui/src/lib/useFocusTrap.ts",
+        "internal/admin/ui/src/components/ConfirmDialog.tsx",
+        "internal/admin/ui/src/test/focus-trap.test.tsx"
+      ],
+      "named_tests": [
+        "Vitest focus-trap initial/wrap/restore/self-gating cases"
+      ],
+      "execution_evidence": [
+        "2026-10-13-d11-console-cli.md",
+        "evidence/2026-10-13-d11/console-cli-focused.log",
+        "evidence/2026-10-13-d11/console-api-owner.log",
+        "evidence/2026-10-13-d11/console-cli-owner.log",
+        "https://github.com/victornife/jul/pull/592",
+        "https://github.com/victornife/jul/pull/597",
+        "https://github.com/victornife/jul/actions/runs/38377283466"
+      ],
+      "limitations": [
+        "Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification",
+        "Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate",
+        "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
     },
     {
       "id": "D11-031",
@@ -1018,15 +1066,38 @@
       "area": "console-api-cli",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Console operability is class-appropriate under ADR0014, not a UI requirement for every developer tool",
+        "Server owns semantics; curated forms preserve advanced fields and raw expert path; build-tag rejection/keyboard/size invariants remain"
+      ],
+      "implementation_and_authority": [
+        "docs/adr/0014-operability-surfaces.md",
+        "internal/admin/ui",
+        "internal/admin/route_catalog.go",
+        ".github/workflows/ci.yml"
+      ],
+      "named_tests": [
+        "TestStatusAPI",
+        "TestEveryExternalRouteAppearsInOpenAPIAndViceVersa"
+      ],
+      "execution_evidence": [
+        "2026-10-13-d11-console-cli.md",
+        "evidence/2026-10-13-d11/console-cli-focused.log",
+        "evidence/2026-10-13-d11/console-api-owner.log",
+        "evidence/2026-10-13-d11/console-cli-owner.log",
+        "https://github.com/victornife/jul/pull/592",
+        "https://github.com/victornife/jul/pull/597",
+        "https://github.com/victornife/jul/actions/runs/38377283466"
+      ],
+      "limitations": [
+        "Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification",
+        "Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate",
+        "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
     },
     {
       "id": "D11-035",
@@ -1073,15 +1144,36 @@
       "area": "console-api-cli",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Committed embedded React SPA has no Node runtime; maintainer Node/pnpm builds feed drift/initial250KB gzip gates",
+        "Old rich shell retired, separate supported minimal config GUI remains; SPA strict CSP/style nonce differs from legacy inline policy",
+        "Original cutover context remains historical rather than no-fallback claim or security certification"
+      ],
+      "implementation_and_authority": [
+        "internal/admin/console_v2.go",
+        "internal/admin/console_v2_stub.go",
+        "internal/admin/server.go",
+        ".github/workflows/ci.yml"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "2026-10-13-d11-console-cli.md",
+        "evidence/2026-10-13-d11/console-cli-focused.log",
+        "evidence/2026-10-13-d11/console-api-owner.log",
+        "evidence/2026-10-13-d11/console-cli-owner.log",
+        "https://github.com/victornife/jul/pull/592",
+        "https://github.com/victornife/jul/pull/597",
+        "https://github.com/victornife/jul/actions/runs/38377283466"
+      ],
+      "limitations": [
+        "Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification",
+        "Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate",
+        "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
     },
     {
       "id": "D11-037",
@@ -1163,15 +1255,34 @@
       "area": "console-api-cli",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Quick/Designer build the same typed location_set_transcode draft for POST patch preview/apply through Config review",
+        "No invented PATCH/api/config route or automatic apply; query prefill/field interdependence are bounded design rules"
+      ],
+      "implementation_and_authority": [
+        "internal/admin/ui/src/features/routes/TranscodeQuickEdit.tsx",
+        "internal/admin/ui/src/features/transcode/TranscodeDesignerPanel.tsx",
+        "internal/admin/patch_http.go"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "2026-10-13-d11-console-cli.md",
+        "evidence/2026-10-13-d11/console-cli-focused.log",
+        "evidence/2026-10-13-d11/console-api-owner.log",
+        "evidence/2026-10-13-d11/console-cli-owner.log",
+        "https://github.com/victornife/jul/pull/592",
+        "https://github.com/victornife/jul/pull/597",
+        "https://github.com/victornife/jul/actions/runs/38377283466"
+      ],
+      "limitations": [
+        "Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification",
+        "Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate",
+        "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
     },
     {
       "id": "D11-040",
@@ -1184,15 +1295,37 @@
       "area": "console-api-cli",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Delivered RBAC is config managed with one token per principal, SHA256 hash policy and configurable legacy default_role",
+        "API token issuance/one-time display/multi-token overlap remain future; hot policy affects fresh requests while captured generations retain policy",
+        "Raw/trust/adoption/object checks remain server authoritative; no encrypted-at-rest credential-store promise"
+      ],
+      "implementation_and_authority": [
+        "internal/rbac/policy.go",
+        "internal/rbac/token.go",
+        "internal/rbac/role.go",
+        "internal/admin/rbac.go",
+        "SECURITY.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "2026-10-13-d11-console-cli.md",
+        "evidence/2026-10-13-d11/console-cli-focused.log",
+        "evidence/2026-10-13-d11/console-api-owner.log",
+        "evidence/2026-10-13-d11/console-cli-owner.log",
+        "https://github.com/victornife/jul/pull/592",
+        "https://github.com/victornife/jul/pull/597",
+        "https://github.com/victornife/jul/actions/runs/38377283466"
+      ],
+      "limitations": [
+        "Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification",
+        "Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate",
+        "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
     },
     {
       "id": "D11-041",
@@ -2251,15 +2384,41 @@
       "area": "console-api-cli",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Current permission authority is Catalog/v1WriteCatalog with exact grants and object checks, not the old exhaustive-planning-matrix claim",
+        "Correct current token ID/storage/role permissions and lifecycle; #514 review complete without activating future phase targets",
+        "#595 and #602 are separately selected repairs; no accepted bug disposition or draft-as-merged claim"
+      ],
+      "implementation_and_authority": [
+        "internal/admin/route_catalog.go",
+        "internal/admin/route_catalog_v1_write.go",
+        "internal/rbac/permission.go",
+        "internal/rbac/role.go",
+        "internal/rbac/token.go",
+        "internal/admin/rbac.go"
+      ],
+      "named_tests": [
+        "TestCatalogExactlyOneAuthorizationMode",
+        "TestRouteTransportPolicyInventory"
+      ],
+      "execution_evidence": [
+        "2026-10-13-d11-console-cli.md",
+        "evidence/2026-10-13-d11/console-cli-focused.log",
+        "evidence/2026-10-13-d11/console-api-owner.log",
+        "evidence/2026-10-13-d11/console-cli-owner.log",
+        "https://github.com/victornife/jul/pull/592",
+        "https://github.com/victornife/jul/pull/597",
+        "https://github.com/victornife/jul/actions/runs/38377283466"
+      ],
+      "limitations": [
+        "Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification",
+        "Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate",
+        "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
     },
     {
       "id": "D11-073",
@@ -2272,15 +2431,38 @@
       "area": "console-api-cli",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "status": "reviewed",
+      "verdict": "accepted limitation",
+      "claims": [
+        "June substrate execution plan, initial maturity/file layout/API proposals and phase table are explicitly historical",
+        "Current replacement is Console guide, source catalogs/generated external API and feature manifest; historical plan is not current semantic API certification"
+      ],
+      "implementation_and_authority": [
+        "docs/console.md",
+        "internal/admin/route_catalog.go",
+        "docs/admin-api.md",
+        "docs/feature-status.yaml",
+        "docs/adr/0006-console-v2-stack.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "2026-10-13-d11-console-cli.md",
+        "evidence/2026-10-13-d11/console-cli-focused.log",
+        "evidence/2026-10-13-d11/console-api-owner.log",
+        "evidence/2026-10-13-d11/console-cli-owner.log",
+        "https://github.com/victornife/jul/pull/592",
+        "https://github.com/victornife/jul/pull/597",
+        "https://github.com/victornife/jul/actions/runs/38377283466"
+      ],
+      "limitations": [
+        "Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification",
+        "Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate",
+        "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending docs/d11-console-cli-515 publication",
+      "current_semantic_certification": false,
+      "current_replacement": "docs/console.md and current Catalog/generated external API"
     },
     {
       "id": "D11-074",
@@ -3567,15 +3749,45 @@
       "area": "console-api-cli",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
-      "open_defects": [],
-      "establishing_pr": null
+      "status": "reviewed",
+      "verdict": "defect filed/linked",
+      "claims": [
+        "Entire original admin/adminapi/apicontract wildcard retained: current/internal-vs-external routes, transport/auth/permissions, DTO/error/OpenAPI contracts and mutation/history/idempotency owner boundaries",
+        "#517 config/history/client coverage proof is path-scoped and source-bound; server authorization remains authoritative",
+        "#595 known-grant confirmation defect and #602 CSV/auth-failure gaps have retained reproducible corrections in separate PR597/603; integration still pending"
+      ],
+      "implementation_and_authority": [
+        "internal/admin",
+        "internal/adminapi",
+        "internal/apicontract",
+        "docs/admin-api.md",
+        "SECURITY.md"
+      ],
+      "named_tests": [
+        "TestEveryExternalRouteAppearsInOpenAPIAndViceVersa",
+        "TestErrorCatalogueIsFullyPublished",
+        "TestSchemasComeFromTheGoDTOs",
+        "TestCatalogExactlyOneAuthorizationMode"
+      ],
+      "execution_evidence": [
+        "2026-10-13-d11-console-cli.md",
+        "evidence/2026-10-13-d11/console-cli-focused.log",
+        "evidence/2026-10-13-d11/console-api-owner.log",
+        "evidence/2026-10-13-d11/console-cli-owner.log",
+        "https://github.com/victornife/jul/pull/592",
+        "https://github.com/victornife/jul/pull/597",
+        "https://github.com/victornife/jul/actions/runs/38377283466"
+      ],
+      "limitations": [
+        "Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification",
+        "Local broad AF_UNIX corpus failures remain failed; focused CLI execution excludes those scenarios and hosted source-bound evidence is separate",
+        "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
+      ],
+      "open_defects": [
+        "https://github.com/victornife/jul/issues/595",
+        "https://github.com/victornife/jul/issues/602"
+      ],
+      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
     },
     {
       "id": "D11-105",
@@ -4378,6 +4590,45 @@
         "https://github.com/victornife/jul/issues/516",
         "https://github.com/victornife/jul/issues/62"
       ]
+    },
+    {
+      "id": "D11-N004",
+      "current_paths": [
+        "docs/console.md"
+      ],
+      "area": "console-api-cli",
+      "responsible_owner": "Single-agent implementation reviewer; maintainer/assigned human owns independent acceptance",
+      "review_boundary": "Supplemental active consumer corrected by this area: build/CSP, known-grant confirmation, typed editing/history/audit; not a new file or every-line GUI security review",
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Node-free runtime/committed-asset build, separate minimal-GUI CSP, POST typed editors, terminal history persistence and no unconditional undo guarantee",
+        "Per-principal audit is delivered; #595 and #602 selected correction references preserve actual integration state"
+      ],
+      "implementation_and_authority": [
+        "internal/admin/server.go",
+        "internal/app/managed_apply_finalizer.go",
+        "internal/admin/managed_history.go",
+        "internal/admin/ui/src/features/config",
+        "internal/admin/ui/src/auth/PermissionProvider.tsx"
+      ],
+      "named_tests": [
+        "TestRecordManagedHistoryLiveWritesPreApply"
+      ],
+      "execution_evidence": [
+        "2026-10-13-d11-console-cli.md",
+        "https://github.com/victornife/jul/pull/597",
+        "https://github.com/victornife/jul/pull/603"
+      ],
+      "limitations": [
+        "Supplemental related consumer does not change the112originaldenominator",
+        "Pending requests/grant freshness and history advisory outcomes retain their actual contract; no whole-product certification"
+      ],
+      "open_defects": [
+        "https://github.com/victornife/jul/issues/595",
+        "https://github.com/victornife/jul/issues/602"
+      ],
+      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
     }
   ],
   "reviewer_spot_check": {
