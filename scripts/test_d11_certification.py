@@ -120,15 +120,58 @@ class DispositionContract(unittest.TestCase):
                 self.review(sampled_rows=sample)
                 self.assertTrue(any("original sample" in e for e in self.errors()))
 
-    def test_completed_state_requires_human_review_but_ready_packet_does_not(self):
+    def test_completed_state_requires_accepted_review_but_ready_packet_does_not(self):
         self.current["state"] = "ready_for_review"
         self.assertEqual(self.errors(), [])
         self.current["state"] = "completed"
-        self.assertTrue(any("actual human" in e for e in self.errors()))
+        self.assertTrue(any("accepted reviewer" in e for e in self.errors()))
         self.review(review_kind="agent-self-check")
         self.assertTrue(any("actual human" in e for e in self.errors()))
         self.review()
         self.assertEqual(self.errors(), [])
+
+    def test_explicitly_authorized_ai_review_preserves_its_nonhuman_identity(self):
+        self.current["state"] = "completed"
+        self.review(reviewer="GitHub Copilot", review_kind="maintainer-authorized-ai",
+                    independent_human_review=False,
+                    maintainer_authorization={"maintainer": "victornife", "status": "approved",
+                                             "reference": "https://github.com/victornife/jul/issues/515#issuecomment-1"})
+        self.assertEqual(self.errors(), [])
+
+    def test_ai_review_without_explicit_authorization_or_with_human_claim_is_rejected(self):
+        approval = {"maintainer": "victornife", "status": "approved",
+                    "reference": "https://github.com/victornife/jul/issues/515#issuecomment-1"}
+        for changes in ({}, {"maintainer_authorization": None},
+                        {"maintainer_authorization": {**approval, "status": "pending"}},
+                        {"maintainer_authorization": {**approval, "maintainer": "unknown"}},
+                        {"maintainer_authorization": {**approval, "reference": "unrecorded"}},
+                        {"maintainer_authorization": {**approval, "reference": 515}},
+                        {"maintainer_authorization": []},
+                        {"independent_human_review": True}, {"independent_human_review": None}):
+            with self.subTest(changes=changes):
+                self.review(reviewer="GitHub Copilot", review_kind="maintainer-authorized-ai",
+                            independent_human_review=False, maintainer_authorization=approval)
+                if not changes:
+                    self.current["reviewer_spot_check"].pop("maintainer_authorization")
+                else:
+                    self.current["reviewer_spot_check"].update(changes)
+                self.assertTrue(any("explicit maintainer" in e for e in self.errors()))
+
+    def test_authorized_ai_review_still_requires_original_sample_and_exact_source(self):
+        approval = {"maintainer": "victornife", "status": "approved",
+                    "reference": "https://github.com/victornife/jul/issues/515#issuecomment-1"}
+        for changes in ({"sampled_rows": ["D11-N001"]}, {"source": "main"}):
+            with self.subTest(changes=changes):
+                self.review(reviewer="GitHub Copilot", review_kind="maintainer-authorized-ai",
+                            independent_human_review=False, maintainer_authorization=approval, **changes)
+                self.assertTrue(self.errors())
+
+    def test_ai_identity_cannot_be_recorded_as_a_human_review(self):
+        for kind in ("maintainer-human", "maintainer-assigned-human"):
+            for identity in ({"reviewer": "GitHub Copilot"}, {"independent_human_review": False}):
+                with self.subTest(kind=kind, identity=identity):
+                    self.review(review_kind=kind, **identity)
+                    self.assertTrue(any("nonhuman reviewer" in error for error in self.errors()))
 
     def test_freeze_and_companion_cannot_rewrite_the_original_path_together(self):
         name = "2026-10-13-d11-original.json"

@@ -7,9 +7,9 @@
 > expiry/disable, attribution and prepared hot-reloaded authentication are built.
 > API issuance/revocation, multi-token overlap, one-time plaintext display and
 > usage metadata remain future work, as distinguished below.
-> The later #595 open-confirmation and #602 audit-contract regressions have
-> separately selected corrective work; these are not accepted limitations or a
-> claim that their PRs are merged. External identity remains Y3-02 horizon.
+> The later #595 open-confirmation and #602 audit-contract regressions are
+> repaired through merged PRs #597 and #603; original failing evidence is retained
+> in the D11 resolution ledger. External identity remains Y3-02 horizon.
 > Source catalogs own exhaustive mounted routes; future targets and the
 > historical phase plan are not mounted endpoints.
 
