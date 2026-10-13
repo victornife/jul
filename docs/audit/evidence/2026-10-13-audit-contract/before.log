@@ -1,0 +1,57 @@
+=== RUN   TestAuditCSVRetainsCredentialIdentityAdditively
+    audit_contract_followup_test.go:37: CSV schema/rows = [[id time actor operation resource result detail source_ip] [2 2026-10-13T11:37:36Z anonymous system.event system success  192.0.2.1] [1 2026-10-13T11:37:36Z csv-operator config.apply config success applied 192.0.2.1]]
+--- FAIL: TestAuditCSVRetainsCredentialIdentityAdditively (0.00s)
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_missing
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_invalid
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_disabled
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_expired
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_legacy_invalid
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/status_missing
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/status_invalid
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/status_disabled
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/status_expired
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/status_legacy_invalid
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_missing
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_invalid
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_disabled
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_expired
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_legacy_invalid
+    audit_contract_followup_test.go:92: missing/false failure identity: []
+--- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit (0.02s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_missing (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_invalid (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_disabled (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_expired (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_legacy_invalid (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/status_missing (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/status_invalid (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/status_disabled (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/status_expired (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/status_legacy_invalid (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_missing (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_invalid (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_disabled (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_expired (0.00s)
+    --- FAIL: TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_legacy_invalid (0.00s)
+=== RUN   TestSuccessfulAuthenticationAndAuthorizationDenialAreNotAuthFailures
+--- PASS: TestSuccessfulAuthenticationAndAuthorizationDenialAreNotAuthFailures (0.00s)
+FAIL
+FAIL	jul/internal/admin	0.052s
+FAIL
+
+expected_exit=1 actual_exit=1

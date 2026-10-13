@@ -976,6 +976,17 @@ Audit panel), so a change can be traced to the principal that made it without
 exposing any secret. By default they live in a bounded in-memory ring buffer
 (10,000 events) queryable at `GET /api/audit` and exportable as JSON/CSV.
 
+CSV appends `token_id` after the existing eight columns, preserving their order:
+`id,time,actor,operation,resource,result,detail,source_ip,token_id`.
+An event without an authenticated credential has an empty ID.
+Open-mode compatibility identities are projected as anonymous audit/history
+metadata, consistently with the current-identity endpoint.
+Credential rejections produce an `auth.fail` event with anonymous actor, socket-peer source
+and a fixed failure category; failed tokens, request data and client-supplied
+identity are not copied. Authentication success followed by authorization 403
+is not an authentication failure. Admission and transport gates still run
+before authentication, and this does not add token-management APIs.
+
 For compliance or incident review, set a durable sink so the trail survives
 restarts and ring-buffer overwrite:
 

@@ -1,0 +1,7 @@
+=== RUN   TestOpenAdminAuditDoesNotInventACredential
+    audit_contract_followup_test.go:164: managed attribution invents credential: {Operation:config.apply Resource:config Actor:shared TokenID:(legacy) TokenDigest: SourceIP:127.0.0.1 Idempotency:<nil> Baseline:<nil> Candidate:<nil> LiveGeneration:0 AuthGeneration: StartedAt:2026-10-13 12:40:49.704548853 +0000 UTC Deadline:0001-01-01 00:00:00 +0000 UTC RequestContext:context.Background.WithValue(rbac.contextKey, rbac.Identity)}
+    audit_contract_followup_test.go:173: identity/audit disagree in open mode: {Principal:anonymous Role:admin TokenID: Permissions:[status:read metrics:read config:read config:raw config:write config:apply config:trust config:adopt history:read history:raw history:rollback plugins:upload observability:read audit:read audit:export cache:purge reload:trigger admin:manage] Legacy:true} {ID:2 Time:2026-10-13 12:40:49.704618136 +0000 UTC Actor:shared TokenID:(legacy) Operation:open.test Resource:admin ResourceID: Selector: Result:success Detail: SourceIP:127.0.0.1}
+--- FAIL: TestOpenAdminAuditDoesNotInventACredential (0.00s)
+FAIL
+FAIL	jul/internal/admin	0.009s
+FAIL
