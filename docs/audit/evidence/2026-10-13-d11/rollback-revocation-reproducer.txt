@@ -1,0 +1,11 @@
+
+it("D11 reproducer: known permission revocation while rollback confirmation is open sends no mutation", async () => {
+  network((url) => url === "/api/config/rollback" ? json({error:"permission revoked"},403) : undefined);
+  const view=render(<Scope><HistoryPanel /></Scope>);
+  fireEvent.click(await screen.findByRole("button",{name:"Rollback"}));
+  await waitFor(()=>{expect(screen.getByRole("button",{name:"Roll back"})).toBeEnabled();});
+  view.rerender(<Scope permissions={["config:read"]}><HistoryPanel /></Scope>);
+  fireEvent.click(screen.getByRole("button",{name:"Roll back"}));
+  await waitFor(()=>{expect(screen.getByText("HTTP 403")).toBeInTheDocument();});
+  expect(mutations("/config/rollback")).toHaveLength(0);
+});

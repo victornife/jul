@@ -11,6 +11,13 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Verification
 
+- Begin D11's source-backed documentation certification with a frozen 230-row
+  inventory and one-to-one dispositions for 31 of the 112 unreviewed rows.
+  Correct configuration workload, authority-transition and connection-continuity
+  claims without changing TOML values or runtime behavior; retain environment
+  failures and separately filed fixture/UI defects. Other areas and the required
+  maintainer reviewer spot-check remain separate.
+
 - Add seven sequential GitHub CI deployment journeys for unchanged v2.2.0
   packages/frozen Docker source: hardened systemd WASM with private-chain trust,
   routed client and firewall rejection/recovery; pre-existing Windows ACLs;

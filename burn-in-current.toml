@@ -1,12 +1,14 @@
-# Track 2 burn-in config — CURRENT merged-Beta surface (JUL-AUD-004)
+# Track 2 burn-in config — September consolidated workload profile (JUL-AUD-004)
 #
 # burn-in-full.toml models the July feature set (Phase 2A). This profile
-# models everything merged since: trusted client identity, backend TLS trust,
+# configures selected September surfaces: trusted client identity, backend TLS trust,
 # RBAC, the egress allow-list, routing predicates/response-header policy/CORS,
 # generic resilience (admission/retry/circuit — shares burn-in-resilience.toml's
 # pools), HTTP-over-Unix upstreams, DNS service discovery, admin TLS, WASM
-# plugins, WAF and the L4 stream proxy — so a soak run actually exercises the
-# ~627-commit delta rather than only re-confirming July's evidence.
+# plugins, WAF and the L4 stream proxy. The -current HTTP mix exercises only
+# its named routes; RBAC, apply churn, L4, CORS denial/preflight and egress
+# denial require explicit additional clients/phases. This profile alone does
+# not certify the entire release or the post-GA obligations tracked by #590.
 #
 # Build:
 #   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul ./cmd/jul
@@ -19,10 +21,10 @@
 #   Window 5: go run scripts/stream-echo.go -port 55432
 #   Window 6: ./jul -config burn-in-current.toml
 #   Window 7: go run scripts/burn-in-load.go -duration <dur> -workers <n> -current \
-#               -health "http://127.0.0.1:8080/bounded/"
+#               -health "http://127.0.0.1:8080/bounded/" -admin "https://127.0.0.1:9090"
 #   Window 8: go run scripts/burn-in-stream-load.go -duration <dur> -workers <n> -target 127.0.0.1:15432
 #
-# Backend_tls is intentionally the one merged-Beta capability NOT re-exercised
+# Backend_tls is intentionally not fully re-exercised
 # here beyond a single pool (see the "secure" upstream below): its full
 # cross-protocol certification matrix (private CA, SNI override, expired/wrong-
 # name/untrusted failures, discovery-address churn) is #409's dedicated scope
@@ -32,7 +34,7 @@
 [global]
 log_level = "warn"
 
-# Managed authority (ADR 0019, merged Beta): required for -apply-churn's
+# Managed authority (ADR 0019, published Beta): required for -apply-churn's
 # repeated config-apply calls against the admin API to be accepted at all —
 # a file_owned server (the default) refuses every mutating endpoint.
 config_authority = "managed"
@@ -47,7 +49,7 @@ rotate_max_mb = 250
 rotate_keep = 5
 
 # ---------------------------------------------------------------------------
-# Admin: TLS-terminated listener (merged Beta, #336) + RBAC (opt-in, Phase 3)
+# Admin: TLS-terminated listener (published Beta, #336) + RBAC (opt-in, Phase 3)
 # with three named principals covering the predefined role ladder.
 # ---------------------------------------------------------------------------
 [admin]
@@ -80,7 +82,7 @@ console = true
   token = "burnin-admin-token-please-rotate-me-00001"
 
 # ---------------------------------------------------------------------------
-# Egress allow-list (opt-in hardening, never soaked before): constrains the
+# Egress allow-list (opt-in hardening; post-GA soak tracked by #590): constrains the
 # server's own auxiliary fetches. DNS discovery below resolves "localhost",
 # which this policy must explicitly permit.
 # ---------------------------------------------------------------------------

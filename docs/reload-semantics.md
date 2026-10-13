@@ -28,8 +28,11 @@
 > criteria](hot-reload-strategy.md). Selection never changes this document's
 > descriptive runtime truth ahead of implementation.
 
-Jul.IA applies supported configuration changes **without dropping
-connections**, but the entry path depends on `[global].config_authority`:
+Jul.IA applies supported configuration changes through a correlated reload
+transaction. Connection continuity depends on the protocol and bounded resource
+retirement contract described below; reload is not a universal promise that
+every established stream survives. The entry path depends on
+`[global].config_authority`:
 
 - **`managed` mode** — authenticated Console/API operations such as
   `POST /api/config/apply` run the full preflight before Jul writes the desired
@@ -127,9 +130,11 @@ by `[global].config_authority` (ADR 0019):
 | `managed` | Jul.IA owns the configuration file. Console/API writes are validated and persisted through the coordinator below. An external edit is never silently adopted — it becomes *drift*, resolved only through an explicit, authenticated adoption. |
 | `file_owned` (default) | An external file or GitOps pipeline owns the configuration file. SIGHUP and the file watcher behave exactly as described in this document. Every mutating admin endpoint is refused with `409 config_authority_read_only` before any side effect. |
 
-The field is `restart_required` and can only change through `stage_restart`;
-it cannot be hot-applied, because it moves ownership of persistence, history,
-and drift detection between subsystems wired at startup. **Omitted resolves
+The field is `restart_required`. In managed mode, change it through a complete
+`stage_restart` candidate; in file-owned mode, the external owner edits the file
+and restarts the process because admin mutations are disabled. It cannot be
+hot-applied: it moves ownership of persistence, history and drift detection
+between subsystems wired at startup. **Omitted resolves
 to `file_owned`** — this is a fixed default, never derived from
 `[admin].enabled` or any other field, chosen because a wrong `managed` default
 fails silently (SIGHUP becomes a no-op) while a wrong `file_owned` default

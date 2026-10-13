@@ -32,8 +32,9 @@ server_names = ["localhost"]
   [[servers.locations]]
   match = { type = "prefix", path = "/api/" }
   proxy_pass = "http://127.0.0.1:8081"
-  # NOTE: For real burn-in, replace python -m http.server with a Go stub or
-  # nginx backend. The toy Python server cannot sustain >50 concurrent workers.
+  # NOTE: Use scripts/burn-in-backend.go for the defined API workload. A
+  # generic static-file server does not supply the same API/fault contract;
+  # its worker-count performance is not a guaranteed harness property.
 
 [[servers]]
 listen = "127.0.0.1:8082"

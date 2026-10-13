@@ -1,0 +1,80 @@
+ok  	jul/internal/auth	3.861s
+ok  	jul/internal/cache	1.573s
+ok  	jul/internal/middleware	1.082s
+ok  	jul/internal/upstream	4.228s
+ok  	jul/internal/stream	1.585s
+ok  	jul/internal/transcode	0.921s
+ok  	jul/internal/plugins	34.028s
+2026/10/13 04:39:12 http: TLS handshake error from 127.0.0.1:39784: remote error: tls: bad certificate
+2026/10/13 04:39:12 http: TLS handshake error from 127.0.0.1:39810: remote error: tls: bad certificate
+2026/10/13 04:39:12 http: TLS handshake error from 127.0.0.1:39812: remote error: tls: bad certificate
+2026/10/13 04:39:12 http: TLS handshake error from 127.0.0.1:39842: remote error: tls: bad certificate
+2026/10/13 04:39:12 http: TLS handshake error from 127.0.0.1:39846: remote error: tls: bad certificate
+2026/10/13 04:39:12 http: TLS handshake error from 127.0.0.1:44402: read tcp 127.0.0.1:39441->127.0.0.1:44402: use of closed network connection
+2026/10/13 04:39:12 http: TLS handshake error from 127.0.0.1:45610: tls: client didn't provide a certificate
+2026/10/13 04:39:12 http: TLS handshake error from 127.0.0.1:53296: read tcp 127.0.0.1:37107->127.0.0.1:53296: use of closed network connection
+2026/10/13 04:39:12 http: TLS handshake error from 127.0.0.1:41566: remote error: tls: bad certificate
+2026/10/13 04:39:12 http: TLS handshake error from 127.0.0.1:41582: remote error: tls: bad certificate
+2026/10/13 04:39:12 http: TLS handshake error from 127.0.0.1:48918: remote error: tls: bad certificate
+2026/10/13 04:39:14 httputil: ReverseProxy read error during body copy: read tcp 127.0.0.1:54428->127.0.0.1:41827: i/o timeout
+2026/10/13 04:39:14 suppressing panic for copyResponse error in test; copy error: read tcp 127.0.0.1:54428->127.0.0.1:41827: i/o timeout
+--- FAIL: TestUnixHTTPClientCancellationIsHealthNeutral (0.00s)
+    failure_attribution_test.go:287: listen unix: listen unix /tmp/jul407-1623901590/backend.sock: socket: operation not permitted
+--- FAIL: TestFastCGIUnixSocketBackend (0.00s)
+    fastcgi_pool_test.go:191: listen unix /tmp/TestFastCGIUnixSocketBackend2764101107/001/fpm.sock: listen unix /tmp/TestFastCGIUnixSocketBackend2764101107/001/fpm.sock: socket: operation not permitted
+2026/10/13 04:39:14 httputil: ReverseProxy read error during body copy: stream error: stream ID 1; CANCEL
+2026/10/13 04:39:14 httputil: ReverseProxy read error during body copy: stream error: stream ID 1; CANCEL
+2026/10/13 04:39:14 httputil: ReverseProxy read error during body copy: client disconnected
+2026/10/13 04:39:18 httputil: ReverseProxy read error during body copy: read tcp 127.0.0.1:48446->127.0.0.1:44509: i/o timeout
+--- FAIL: TestProxyUnixHTTPAdmissionAndPendingCancellation (0.00s)
+    proxy_unix_resilience_test.go:59: listen unix: listen unix /tmp/jul407-1440443543/backend.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPCircuitRecoversWhenSocketAppears (0.08s)
+    proxy_unix_resilience_test.go:125: listen unix "/tmp/jul407-263573920/recover.sock": listen unix /tmp/jul407-263573920/recover.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPMaxConnectionsAreIsolatedPerBackend (0.00s)
+    proxy_unix_resilience_test.go:149: listen unix: listen unix /tmp/jul407-708842274/backend.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPWeightedRoundRobin (0.00s)
+    proxy_unix_resilience_test.go:199: listen unix: listen unix /tmp/jul407-2979146795/backend.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPLeastConnPrefersIdleBackend (0.00s)
+    proxy_unix_resilience_test.go:220: listen unix: listen unix /tmp/jul407-511661289/backend.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPKeepAliveAndGenerationRetirement (0.00s)
+    proxy_unix_resilience_test.go:265: listen unix "/tmp/jul407-490093660/keepalive.sock": listen unix /tmp/jul407-490093660/keepalive.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPRepeatedGenerationSwitchRetiresConnections (0.00s)
+    proxy_unix_resilience_test.go:307: listen unix "/tmp/jul407-746879428/a.sock": listen unix /tmp/jul407-746879428/a.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPPreservesHostAndForwardsBody (0.00s)
+    proxy_unix_test.go:72: listen unix: listen unix /tmp/jul407-2610711485/backend.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPExplicitHostOverride (0.00s)
+    proxy_unix_test.go:99: listen unix: listen unix /tmp/jul407-3624650032/backend.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPMultipleSocketsAreIsolated (0.00s)
+    proxy_unix_test.go:112: listen unix: listen unix /tmp/jul407-1247605860/backend.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPConcurrentSocketIsolation (0.00s)
+    proxy_unix_test.go:130: listen unix: listen unix /tmp/jul407-463369748/backend.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPMixedTCPRetry (0.00s)
+    proxy_unix_test.go:157: listen unix: listen unix /tmp/jul407-729047055/backend.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPRetryUnixToUnix (0.00s)
+    proxy_unix_test.go:215: listen unix: listen unix /tmp/jul407-2369472772/backend.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPServerSentEventsStreaming (0.00s)
+    proxy_unix_test.go:232: listen unix: listen unix /tmp/jul407-3558467/backend.sock: socket: operation not permitted
+--- FAIL: TestProxyUnixHTTPWebSocketPassthrough (0.00s)
+    proxy_unix_test.go:259: listen unix: listen unix /tmp/jul407-940600259/backend.sock: socket: operation not permitted
+2026/10/13 04:39:19 httputil: ReverseProxy read error during body copy: unexpected EOF
+2026/10/13 04:39:19 suppressing panic for copyResponse error in test; copy error: unexpected EOF
+2026/10/13 04:39:19 httputil: ReverseProxy read error during body copy: unexpected EOF
+2026/10/13 04:39:19 suppressing panic for copyResponse error in test; copy error: unexpected EOF
+2026/10/13 04:39:19 httputil: ReverseProxy read error during body copy: unexpected EOF
+2026/10/13 04:39:19 suppressing panic for copyResponse error in test; copy error: unexpected EOF
+2026/10/13 04:39:19 http: TLS handshake error from 127.0.0.1:42502: remote error: tls: bad certificate
+2026/10/13 04:39:19 http: TLS handshake error from 127.0.0.1:54434: remote error: tls: bad certificate
+FAIL
+FAIL	jul/internal/handler	6.731s
+--- FAIL: TestSnapshotResourceFieldsPopulated (0.02s)
+    stats_resources_test.go:192: RSSBytes = <nil>, want a positive value on this platform
+    stats_resources_test.go:201: OpenFDs = nil, want a value on this platform
+    stats_resources_test.go:208: CPUCores on the second snapshot = nil, want a computed rate
+FAIL
+FAIL	jul/internal/observability	0.712s
+ok  	jul/internal/tracing	0.004s
+ok  	jul/internal/affinity	0.381s
+ok  	jul/internal/migrate/nginx	0.050s
+ok  	jul/internal/rbac	0.002s
+ok  	jul/internal/waf	3.920s
+FAIL

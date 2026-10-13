@@ -1,0 +1,2 @@
+single TCP-stream Read: got=5 expected=19 err=<nil>; harness verdict would be failure
+remaining ReadFull: got=14 err=<nil>; combined payload is complete

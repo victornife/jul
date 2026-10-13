@@ -1,0 +1,5 @@
+ok  	jul/internal/config	1.074s
+ok  	jul/internal/lifecycle	0.309s
+ok  	jul/internal/configcontract	0.580s
+ok  	jul/internal/adminapi	0.008s
+ok  	jul/internal/apicontract	0.173s

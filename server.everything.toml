@@ -1,12 +1,13 @@
-# server.everything.toml — every Jul.IA feature enabled and configured at once.
+# server.everything.toml — broad synthetic feature demonstration.
 #
-# Purpose: a single config to exercise the whole feature surface for manual
+# Purpose: a single config for selected feature paths during manual
 # testing. It is deliberately not a production template — secrets are read
 # from testdata/ files and env vars, ports are non-privileged, and a couple of
 # blocks (ACME, Consul/Kubernetes discovery, FastCGI/uWSGI) reference services
 # this repo does not ship, so those specific paths will not fully succeed
-# end-to-end without that external service running. Every other block is
-# reachable against the companion scripts below.
+# end-to-end without that external service running. Other paths depend on the
+# companion fixtures below; loading this file does not prove every capability
+# or its positive/negative execution cases. See the feature manifest and guides.
 #
 # Build (every optional feature):
 #   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul ./cmd/jul

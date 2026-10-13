@@ -1,0 +1,36 @@
+FULL_TAGS="brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" scripts/config-check.sh
+== building full-tag binary for config-check
+== root configs
+-- ./burn-in-auth.toml
+-- ./burn-in-cache.toml
+-- ./burn-in-compression.toml
+-- ./burn-in-current.toml
+-- ./burn-in-full.toml
+-- ./burn-in-grpc.toml
+-- ./burn-in-http3.toml
+-- ./burn-in-phase2a.toml
+-- ./burn-in-ratelimit.toml
+-- ./burn-in-resilience.toml
+-- ./burn-in-stream.toml
+-- ./burn-in-waf.toml
+-- ./burn-in.toml
+-- ./dev-server.toml
+-- ./server.everything.toml
+-- ./server.full.apps.toml
+-- ./server.full.local.toml
+-- ./server.toml
+== examples/
+-- examples/auto-https/jul.toml
+-- examples/go-proxy/jul.toml
+-- examples/grpc-gateway/jul.toml
+-- examples/grpc-proxy/jul.toml
+-- examples/jwt-auth/jul.toml
+-- examples/l4/jul.toml
+-- examples/migrate/imported.toml
+-- examples/migrate/jul.toml
+-- examples/node-proxy/jul.toml
+-- /tmp/jul-signed-url-check.AxOULo/jul.toml
+-- examples/python-proxy/jul.toml
+-- examples/python-uwsgi/jul.toml
+-- examples/rust-proxy/jul.toml
+config-check: all shipped configs load cleanly
