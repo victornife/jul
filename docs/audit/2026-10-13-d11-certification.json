@@ -42,7 +42,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-002",
@@ -82,7 +82,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-003",
@@ -124,7 +124,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-004",
@@ -166,7 +166,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-005",
@@ -208,7 +208,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-006",
@@ -250,7 +250,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-007",
@@ -291,7 +291,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-008",
@@ -332,7 +332,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-009",
@@ -374,7 +374,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-010",
@@ -417,7 +417,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-011",
@@ -460,7 +460,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-012",
@@ -502,7 +502,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "current_semantic_certification": false,
       "document_status": "Historical design/context or conceptual material; not current shipped semantics",
       "current_replacement": [
@@ -550,7 +550,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-014",
@@ -594,7 +594,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-015",
@@ -636,7 +636,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-016",
@@ -2157,7 +2157,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-054",
@@ -2197,7 +2197,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-055",
@@ -2289,7 +2289,7 @@
       "open_defects": [
         "https://github.com/victornife/jul/issues/605"
       ],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-057",
@@ -2533,7 +2533,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-063",
@@ -2580,7 +2580,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-064",
@@ -2621,7 +2621,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-065",
@@ -2663,7 +2663,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-066",
@@ -2793,7 +2793,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "current_semantic_certification": false,
       "document_status": "Historical design/context or conceptual material; not current shipped semantics",
       "current_replacement": [
@@ -2842,7 +2842,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "current_semantic_certification": false,
       "document_status": "Historical design/context or conceptual material; not current shipped semantics",
       "current_replacement": [
@@ -2932,7 +2932,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-072",
@@ -3066,7 +3066,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-075",
@@ -3109,7 +3109,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "current_semantic_certification": false,
       "document_status": "Historical design/context or conceptual material; not current shipped semantics",
       "current_replacement": [
@@ -3159,7 +3159,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "current_semantic_certification": false,
       "document_status": "Historical design/context or conceptual material; not current shipped semantics",
       "current_replacement": [
@@ -3209,7 +3209,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "current_semantic_certification": false,
       "document_status": "Historical design/context or conceptual material; not current shipped semantics",
       "current_replacement": [
@@ -3259,7 +3259,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "current_semantic_certification": false,
       "document_status": "Historical design/context or conceptual material; not current shipped semantics",
       "current_replacement": [
@@ -3309,7 +3309,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "current_semantic_certification": false,
       "document_status": "Historical design/context or conceptual material; not current shipped semantics",
       "current_replacement": [
@@ -3357,7 +3357,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "current_semantic_certification": false,
       "document_status": "Historical design/context or conceptual material; not current shipped semantics",
       "current_replacement": [
@@ -3405,7 +3405,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "current_semantic_certification": false,
       "document_status": "Historical design/context or conceptual material; not current shipped semantics",
       "current_replacement": [
@@ -3453,7 +3453,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "current_semantic_certification": false,
       "document_status": "Historical design/context or conceptual material; not current shipped semantics",
       "current_replacement": [
@@ -3546,7 +3546,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "path_reconciliation": "The frozen original README engineering vision was preserved as engineering-context.md by merged #576; README now contains approved public wording. Both are retained; no denominator replacement."
     },
     {
@@ -3589,7 +3589,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "current_semantic_certification": false,
       "document_status": "Historical design/context or conceptual material; not current shipped semantics",
       "current_replacement": [
@@ -3677,7 +3677,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-088",
@@ -3756,7 +3756,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-090",
@@ -3877,7 +3877,7 @@
       "open_defects": [
         "https://github.com/victornife/jul/issues/594"
       ],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-093",
@@ -4039,7 +4039,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-097",
@@ -4081,7 +4081,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-098",
@@ -4123,7 +4123,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-099",
@@ -4201,7 +4201,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-101",
@@ -4241,7 +4241,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-102",
@@ -4283,7 +4283,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-103",
@@ -4325,7 +4325,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-104",
@@ -5342,7 +5342,7 @@
         "Evidence is source/build/platform scoped; documentation and numeric checks do not certify the whole product or advance feature maturity."
       ],
       "open_defects": [],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-109",
@@ -5445,7 +5445,7 @@
         "https://github.com/victornife/jul/issues/598",
         "https://github.com/victornife/jul/issues/605"
       ],
-      "establishing_pr": "pending C5 draft PR"
+      "establishing_pr": "https://github.com/victornife/jul/pull/607"
     },
     {
       "id": "D11-110",
@@ -5763,7 +5763,7 @@
         "2026-10-13-d11-examples-workflows.md",
         "evidence/2026-10-13-d11/c5-consumer-identities.json"
       ],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "named_tests": [],
       "open_defects": [],
       "id": "D11-N005",
@@ -5803,7 +5803,7 @@
         "2026-10-13-d11-examples-workflows.md",
         "evidence/2026-10-13-d11/c5-consumer-identities.json"
       ],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "named_tests": [],
       "open_defects": [],
       "id": "D11-N006",
@@ -5845,7 +5845,7 @@
         "2026-10-13-d11-examples-workflows.md",
         "evidence/2026-10-13-d11/c5-consumer-identities.json"
       ],
-      "establishing_pr": "pending C5 draft PR",
+      "establishing_pr": "https://github.com/victornife/jul/pull/607",
       "named_tests": [],
       "open_defects": [],
       "id": "D11-N007",
