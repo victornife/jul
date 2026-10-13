@@ -1,0 +1,35 @@
+{
+  "measured_source": "b705fb3463867101d68e072379da06b2ea540ffc",
+  "measured_tree": "e91be67c3c2a0c5f57eec61ec22e3fa46afbd69b",
+  "dependency_pr": 603,
+  "issue": 605,
+  "baseline_runtime": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc",
+  "profile_tags": 13,
+  "go": "1.27.2",
+  "platform": "Linux amd64",
+  "new_go_production_statements": 0,
+  "inherited_go_evidence": "PR603 source718bfaa9d9dc1a4157d26e30e8c9102c60334f25; not relabeled as this tooling execution",
+  "outcomes": {
+    "before": "4of8regressions fail as expected;exit1",
+    "after": "8regressions pass",
+    "sync": "13tags/defaults match",
+    "actual_waf_fuzz": "1xbounded smoke passed;notfullcorpus/soak",
+    "actual_waf_bench": "1xcompile/execute passed;notperformance measurement",
+    "docs": "2093/0",
+    "docs_fixtures": "passed",
+    "semantic_fixtures": "24passed",
+    "generated": "passed",
+    "hosted": "pending"
+  },
+  "sha256": {
+    "before.log": "07883fef4ebc024cbbcfeedf3e1d755f24c76ad5d91ff948cc6e056c813c8d8b",
+    "docs-tests.log": "6007716a568a85fadb31b3bf175ab99360e38731588b047067121954be3b6710",
+    "docs.log": "4c8bbffedef9c5eae5abf52e9a70809893ccd8a1c947ac3162eddf53bda8a5d7",
+    "generated.log": "2ff01d8cbb80e3dc08c6a352f547ada4a777da689ca86e018cae8a32eadad04b",
+    "real-bench.log": "96437b716695bc520f99c2b081824f2e7be6f2fadd58ab5791f87091b6d92b5d",
+    "real-fuzz.log": "c22513628021878d3c664eb10f6bd2e4680e4b4456f0027106c9ee702c000ecb",
+    "semantic.log": "70a1b1383cd2696a7d2d9d2efb5dc87dba81f9f303a0d4cec897cd16834028a1",
+    "sync.log": "307a78a1b226f43072ddfc0f3a9c9985cf4e7c8ec308e422c3d8af5dc466244a",
+    "tests.log": "6ac5e2a9fcab8dc4736bcb3e86e18870081297fd8523751bfeb268ca54f27863"
+  }
+}

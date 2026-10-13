@@ -1,0 +1,132 @@
+{
+  "boundary": "Actual approved merges verified separately from their prepared-head checks. Human D11 spot-check pending; #515 remains open.",
+  "merges": [
+    {
+      "pr": 593,
+      "head": "6b344a1f8b72c52497206dd6d4ff2e83cd9463ab",
+      "merge": "307a48bfbe53bc9ec6c5f489374518f5f62bcca1",
+      "tree": "dd36aaf8104a8dbe7e0bd8fd0dc2cc4fce2c47a7",
+      "verified": true
+    },
+    {
+      "pr": 592,
+      "head": "c8abc49e26a7d8704fb4bb6d4a4215710c407178",
+      "merge": "ec4e995b8bca9928653fd495174ecfc8617046bd",
+      "tree": "77c46b3dcb819e9ef0cbb5bb157950520d0d9276",
+      "verified": true
+    },
+    {
+      "pr": 597,
+      "head": "f93160823692d236286949ec6e2778f3e15b2c1c",
+      "merge": "1b5dc69fc359f63bbcf28c8f7459f2c1c79a75bf",
+      "tree": "d7363044d3365bc09f94b743c12a877c8de5f960",
+      "verified": true
+    },
+    {
+      "pr": 600,
+      "head": "7ffa34e42e958591917078e330f9a32449f52d00",
+      "merge": "5145857ab5e68b1f75f84b8cf13435b42a448bd8",
+      "tree": "8f6e3203f4d9e52cdc7260a8d4a082e4c13780c1",
+      "verified": true
+    },
+    {
+      "pr": 603,
+      "head": "d7952e49946de6fbc4c09d36abde4e1986b58648",
+      "merge": "ddaadb0599091f34cdd71ca7fa1f8d822048e36c",
+      "tree": "dee452415954272c41e33571ed5a6aae4d68eb1d",
+      "verified": true
+    },
+    {
+      "pr": 606,
+      "head": "5faa4c0a21f6f05e72f749894c579eb773438c99",
+      "merge": "3d997ef396d3985e10a8dced10dc3289ad706444",
+      "tree": "3bc2da1e4c0d5b8ce8315fbd161bd497141b5216",
+      "verified": true
+    }
+  ],
+  "latest_runtime_main": "3d997ef396d3985e10a8dced10dc3289ad706444",
+  "runtime_difference_from_tested606": [
+    "docs/audit-register.md"
+  ],
+  "refreshed_harness": {
+    "pr": 606,
+    "head": "5faa4c0a21f6f05e72f749894c579eb773438c99",
+    "ci_run": 38420640194,
+    "ci_job": 115376763000,
+    "ci_checkout": "eaed4407b2b2a9acf34a3c9148e7024beca121ba",
+    "ci_tree": "abfcf14c9e30e238e7647e5765d77857d4c23b9a",
+    "check_counts": {
+      "success": 61,
+      "skipped": 2
+    },
+    "artifacts": [
+      {
+        "id": 11827111748,
+        "name": "coverage-profile",
+        "digest": "sha256:c66f443a083116415547c194839f89df2421491929a17cdbd585f9a2731e151a",
+        "expired": false
+      },
+      {
+        "id": 11826903044,
+        "name": "website-browser-preview",
+        "digest": "sha256:92658ec62913b615933eeb1a76e07a87ed02fd9cad8f47166d373a616caaf771",
+        "expired": false
+      },
+      {
+        "id": 11826898936,
+        "name": "benchmark-results",
+        "digest": "sha256:a48a1693f8bd926222fb67e4bb560c0584361946ff2573a6d169b6bc0e7a21cb",
+        "expired": false
+      },
+      {
+        "id": 11826843192,
+        "name": "console-coverage-output",
+        "digest": "sha256:0da217e5c471b5a56595874c5c53ba4d4235e3b8f938d590cc1268bd17219bd7",
+        "expired": false
+      },
+      {
+        "id": 11826764053,
+        "name": "console-build-log-source",
+        "digest": "sha256:a3c9c1c7ba258f4f1e87920ad1e43217eb217b151ea3a732e58f8b03775dd9d0",
+        "expired": false
+      },
+      {
+        "id": 11826249651,
+        "name": "soak-results",
+        "digest": "sha256:5f20f4b42bf675a4dbed10f5d249e87972f3e1efb00683ff7175f50bab4adf9b",
+        "expired": false
+      },
+      {
+        "id": 11825919188,
+        "name": "console-build-log-released",
+        "digest": "sha256:49514c7f2364dbf85da40fe2faa3451a5a6e5fe28a59bc9acb92345ea6a35fcc",
+        "expired": false
+      }
+    ]
+  },
+  "hosted_feature_preflight": {
+    "source": "a155bf80aa5a43c85dc6480792e0f152fb53332e",
+    "run": 38421534243,
+    "job": 115379828106,
+    "conclusion": "success",
+    "log_observations": [
+      "2026-10-13T15:23:05.6468181Z a155bf80aa5a43c85dc6480792e0f152fb53332e",
+      "2026-10-13T15:23:05.6607200Z [command]/usr/bin/git checkout --progress --force a155bf80aa5a43c85dc6480792e0f152fb53332e",
+      "2026-10-13T15:23:05.9832708Z Note: switching to 'a155bf80aa5a43c85dc6480792e0f152fb53332e'.",
+      "2026-10-13T15:23:05.9913868Z [command]/usr/bin/git log -1 --format=%H",
+      "2026-10-13T15:23:05.9951430Z a155bf80aa5a43c85dc6480792e0f152fb53332e",
+      "2026-10-13T15:23:23.7980430Z   JUL_SOAK_SHA: a155bf80aa5a43c85dc6480792e0f152fb53332e",
+      "2026-10-13T15:23:44.5238712Z {\"baseline\": {\"proxy\": {\"fds\": 9, \"rss_kib\": 25152}, \"serve\": {\"fds\": 9, \"rss_kib\": 26172}}, \"binary_sha256\": \"e8d71d80830f28d6e84dafa967f6da348caf854b1f37b35ac5b7570d3b4a2b50\", \"elapsed_seconds\": 20.651, \"final\": {\"proxy\": {\"fds\": 7, \"rss_kib\": 28712}, \"serve\": {\"fds\": 8, \"rss_kib\": 26812}}, \"finished_utc\": \"2026-10-13T15:23:44Z\", \"lint_cycles\": 4, \"manifest_sha256\": \"7b6be1f7742c18350bc6f43d741de699bc578e0220b8870094eb50898f6094fb\", \"mode\": \"zero-config\", \"platform\": \"Linux-6.17.0-1022-azure-x86_64-with-glibc2.39\", \"python\": \"3.12.3\", \"requested_seconds\": 20, \"requests\": {\"proxy\": 387, \"serve\": 391}, \"result\": \"pass\", \"sha\": \"a155bf80aa5a43c85dc6480792e0f152fb53332e\", \"started_utc\": \"2026-10-13T15:23:23Z\"}",
+      "2026-10-13T15:24:04.6320094Z {\"binary_sha256\": \"e8d71d80830f28d6e84dafa967f6da348caf854b1f37b35ac5b7570d3b4a2b50\", \"candidates_sha256\": {\"blocking\": \"f2711d47e3e868d415f4133dea36e037096d04249f5485053b6608a294484337\", \"clean\": \"5ddda159d3e772df0aab5ca426ef33ef265b86cd450666afadaf07c21e75072a\"}, \"child_peak_rss_kib\": 47552, \"cycles\": 20, \"elapsed_seconds\": 20.037, \"finished_utc\": \"2026-10-13T15:24:04Z\", \"manifest_sha256\": \"8d29bf766acae78645505e035f0043d6adc6d4452423ae045e95a01ab102cdef\", \"mode\": \"importer\", \"platform\": \"Linux-6.17.0-1022-azure-x86_64-with-glibc2.39\", \"python\": \"3.12.3\", \"requested_seconds\": 20, \"result\": \"pass\", \"sha\": \"a155bf80aa5a43c85dc6480792e0f152fb53332e\", \"started_utc\": \"2026-10-13T15:23:44Z\"}"
+    ],
+    "artifacts": [
+      {
+        "id": 11826288912,
+        "name": "feature-soak-preflight",
+        "digest": "sha256:0eee4050777369c295e2959b7684edd23c8254cd1b4d5b8faf20e8d74bc7bdc3",
+        "expired": false
+      }
+    ],
+    "qualifying": "intentionally skipped; no hour campaign"
+  }
+}

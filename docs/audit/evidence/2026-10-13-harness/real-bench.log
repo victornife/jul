@@ -1,0 +1,15 @@
+== perf-gate harness
+   tags=brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf
+   benchtime=1x count=1
+   packages=./internal/waf
+
+goos: linux
+goarch: amd64
+pkg: jul/internal/waf
+cpu: AMD EPYC 9V74 80-Core Processor                
+BenchmarkWAF_NoRules-8          	       1	     98636 ns/op	   21120 B/op	     219 allocs/op
+BenchmarkWAF_CRSBlock_Pass-8    	       1	   1046230 ns/op	  243664 B/op	    2286 allocs/op
+BenchmarkWAF_CRSBlock_Block-8   	       1	   1428695 ns/op	 1001824 B/op	    3301 allocs/op
+BenchmarkWAF_CRSDetect_Pass-8   	       1	    494643 ns/op	  243648 B/op	    2287 allocs/op
+PASS
+ok  	jul/internal/waf	0.138s

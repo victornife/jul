@@ -104,7 +104,7 @@ class DispositionContract(unittest.TestCase):
 
     def review(self, **changes):
         self.current["reviewer_spot_check"] = {
-            "status": "completed", "reviewer": "assigned human", "source": "reviewed SHA",
+            "status": "completed", "reviewer": "assigned human", "source": "a" * 40,
             "result": "accepted", "sampled_rows": ["D11-001"], "review_kind": "maintainer-assigned-human", **changes}
 
     def test_only_actual_original_rows_count_toward_human_sample(self):
@@ -121,6 +121,35 @@ class DispositionContract(unittest.TestCase):
         self.review(review_kind="agent-self-check")
         self.assertTrue(any("actual human" in e for e in self.errors()))
         self.review()
+        self.assertEqual(self.errors(), [])
+
+    def test_freeze_and_companion_cannot_rewrite_the_original_path_together(self):
+        name = "2026-10-13-d11-original.json"
+        frozen = json.loads((self.audit / name).read_text())
+        frozen["frozen_rows"][0]["original_path"] = "invented replacement"
+        self.current["rows"][0]["original_path"] = "invented replacement"
+        self.write(name, frozen)
+        self.assertTrue(any("original historical ledger" in e for e in self.errors()))
+
+    def test_freeze_and_companion_cannot_replace_an_original_id_together(self):
+        name = "2026-10-13-d11-original.json"
+        frozen = json.loads((self.audit / name).read_text())
+        frozen["frozen_rows"][0]["id"] = "D11-999"
+        self.current["rows"][0]["id"] = "D11-999"
+        self.write(name, frozen)
+        self.assertTrue(any("original row IDs" in e for e in self.errors()))
+
+    def test_human_review_source_must_be_an_exact_git_identity(self):
+        for source in ("main", "reviewed SHA", "a" * 8, {"sha": "a" * 40}):
+            with self.subTest(source=source):
+                self.review(source=source)
+                self.assertTrue(any("full reviewed Git source" in e for e in self.errors()))
+
+    def test_explicit_source_move_preserves_original_identity_and_passes(self):
+        (self.root / "internal/config/schema.go").rename(self.root / "internal/config/renamed.go")
+        self.current["rows"][0].update(current_paths=["internal/config/renamed.go"],
+                                     implementation_and_authority=["internal/config/renamed.go"],
+                                     path_reconciliation="Original source moved; frozen wildcard and reason retained")
         self.assertEqual(self.errors(), [])
 
 

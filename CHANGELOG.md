@@ -9,7 +9,44 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Fixed
+
+- Propagate fuzz package/target discovery failures instead of reporting a false
+  smoke pass, and include WAF in the local benchmark default. Check both
+  harness defaults against the existing full profile and retain retry policy;
+  add actual-command failure/profile regressions (#605).
+
+- Preserve public credential IDs in audit CSV with an appended column, and
+  record anonymous authentication rejections through the existing audit owner
+  without credential/request data (#602). Retain response, authorization,
+  admission and durable-sink contracts; add real-route and JSON/CSV regressions.
+  Project credential-free open-mode audit/history as anonymous with no token ID,
+  preserving internal control/idempotency keys and valid legacy attribution.
+
+- Reject failed, empty or interrupted HTTP load-generator profiler captures;
+  retain complete existing files and remove partial downloads. Report capture
+  outcomes separately from traffic, preserve TLS verification and exit with
+  failure when any required snapshot is missing (#598). Add explicit-file
+  race regressions and include the tool in complete changed-Go coverage and
+  the normal Codecov upload. No release package or soak result is changed.
+
+- Recheck known Console grants in already-open rollback, live config apply and
+  restart-staging confirmations. Disable denied confirmation with a permission
+  explanation, preserve submitted outcomes, and require explicit confirmation
+  after grant recovery (#595).
+- Read complete TCP load-generator echoes across fragmented replies and verify
+  their contents. Report successful rounds separately from failed connections
+  and compute the connection success rate with consistent units (#594).
+
 ### Verification
+
+- Enforce Console coverage floors for configuration, history and the API client,
+  plus individual core apply-panel/reducer floors. Local console-check now runs
+  the same coverage gates as CI, preserving the existing global 58% statement
+  floor. Add meaningful network-boundary/UI regressions and independent gate
+  violation evidence; retain per-file/area reports and reject missing targets.
+  No gateway or Console runtime behavior, dependency, maturity or Go coverage
+  gate changes.
 
 - Reconcile nine original D11 Console/API/CLI rows and the related active
   Console guide. Correct token/permission/current-vs-future, embedded build/CSP,

@@ -4385,11 +4385,11 @@
         "internal/admin/apiv1_status_test.go",
         "internal/admin/apply_concurrency_legacy_test.go",
         "internal/admin/apply_concurrency_test.go",
-        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js",
-        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js.map",
+        "internal/admin/assets/dist/assets/CodeEditor-B-y7hQIU.js",
+        "internal/admin/assets/dist/assets/CodeEditor-B-y7hQIU.js.map",
         "internal/admin/assets/dist/assets/index-BBFvT2bh.css",
-        "internal/admin/assets/dist/assets/index-CTCwXmN5.js",
-        "internal/admin/assets/dist/assets/index-CTCwXmN5.js.map",
+        "internal/admin/assets/dist/assets/index-B126UQtA.js",
+        "internal/admin/assets/dist/assets/index-B126UQtA.js.map",
         "internal/admin/assets/dist/assets/query-BdSLN-Ub.js",
         "internal/admin/assets/dist/assets/query-BdSLN-Ub.js.map",
         "internal/admin/assets/dist/assets/rolldown-runtime-Bh1tDfsg.js",
@@ -4844,7 +4844,8 @@
         "evidence/2026-10-13-d11/console-cli-owner.log",
         "https://github.com/victornife/jul/pull/592",
         "https://github.com/victornife/jul/pull/597",
-        "https://github.com/victornife/jul/actions/runs/38377283466"
+        "https://github.com/victornife/jul/actions/runs/38377283466",
+        "https://github.com/victornife/jul/pull/597"
       ],
       "limitations": [
         "Source-backed named operator contracts and deterministic tests; not every-line security/GUI/WCAG/native-production certification",
@@ -4855,7 +4856,14 @@
         "https://github.com/victornife/jul/issues/595",
         "https://github.com/victornife/jul/issues/602"
       ],
-      "establishing_pr": "https://github.com/victornife/jul/pull/604"
+      "establishing_pr": "https://github.com/victornife/jul/pull/604",
+      "path_reconciliation": "Four original content-hashed embedded asset paths were renamed by the established Console build in selected repair PR597. Full original expansion remains in frozen JSON; all other original paths are retained. Explicit old-to-new mapping below; no wildcard or denominator narrowing.",
+      "path_changes": {
+        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js": "internal/admin/assets/dist/assets/CodeEditor-B-y7hQIU.js",
+        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js.map": "internal/admin/assets/dist/assets/CodeEditor-B-y7hQIU.js.map",
+        "internal/admin/assets/dist/assets/index-CTCwXmN5.js": "internal/admin/assets/dist/assets/index-B126UQtA.js",
+        "internal/admin/assets/dist/assets/index-CTCwXmN5.js.map": "internal/admin/assets/dist/assets/index-B126UQtA.js.map"
+      }
     },
     {
       "id": "D11-105",

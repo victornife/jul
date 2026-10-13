@@ -25,6 +25,13 @@ def check(root: Path, complete: bool = False) -> list[str]:
     unreviewed = [r for r in rows if r["disposition"] == "not reviewed"]
     if len(rows) != frozen["original_total"] or len(unreviewed) != frozen["original_unreviewed"]:
         errors.append("Original denominator changed")
+    original_identities = [(r["path_or_surface"], r["disposition"], r["reason_and_limit"]) for r in unreviewed]
+    frozen_identities = [(r["original_path"], r["original_disposition"], r["original_reason_and_limit"])
+                         for r in frozen["frozen_rows"]]
+    if frozen_identities != original_identities:
+        errors.append("Frozen row mapping no longer matches the original historical ledger")
+    if [r["id"] for r in frozen["frozen_rows"]] != [f"D11-{i:03}" for i in range(1, len(unreviewed) + 1)]:
+        errors.append("Frozen original row IDs were replaced or reordered")
     expected = {r["id"]: r for r in frozen["frozen_rows"]}
     actual = current["rows"]
     if len(actual) != len(expected) or {r["id"] for r in actual} != set(expected):
@@ -85,6 +92,9 @@ def check(root: Path, complete: bool = False) -> list[str]:
             errors.append("Completed reviewer spot-check lacks reviewer/source/10% original sample/result")
         if review.get("review_kind") not in {"maintainer-human", "maintainer-assigned-human"}:
             errors.append("Completed reviewer spot-check must identify an actual human review; agent preparation does not qualify")
+        source = review.get("source")
+        if not isinstance(source, str) or not re.fullmatch(r"[0-9a-f]{40}", source):
+            errors.append("Completed reviewer spot-check must pin a full reviewed Git source SHA")
     elif current.get("state") == "completed":
         errors.append("Completed D11 state requires the actual human reviewer spot-check")
     return errors

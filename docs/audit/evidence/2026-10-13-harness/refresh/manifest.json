@@ -1,0 +1,20 @@
+{
+  "measured_source": "39d82150f3598d9761abf34661cb9ff8c9f4a421",
+  "measured_tree": "dcd96fab4421d10fc113808778d66d3b931af73b",
+  "reason": "Refresh inherited audit source to the complete selected open-mode identity repair in PR603; original harness code unchanged",
+  "dependency_remote_head": "d7952e49946de6fbc4c09d36abde4e1986b58648",
+  "dependency_local_source": "57f89c408ddf5348fe4922fb873108770122e824",
+  "checks": {
+    "harness_tests": "8pass",
+    "profile_sync": "13tags/default consumers pass",
+    "bash_n": "both shell scripts pass",
+    "docs": "2093passed/0failed"
+  },
+  "new_go_production_statements": 0,
+  "inherited_complete_Go_measurement": "PR603 open-mode manifest:105/107=98.13%; not relabeled as a new harness coverage execution",
+  "sha256": {
+    "sync.log": "307a78a1b226f43072ddfc0f3a9c9985cf4e7c8ec308e422c3d8af5dc466244a",
+    "tests.log": "4a52a7b4c3536a21f4798435220b101c45da3cf0d0275fdf6ee88fe6c7b3881a",
+    "docs.log": "4c8bbffedef9c5eae5abf52e9a70809893ccd8a1c947ac3162eddf53bda8a5d7"
+  }
+}

@@ -169,7 +169,7 @@ console-build: console-check
 console-check:
 	cd $(CONSOLE_UI) && pnpm run typecheck
 	cd $(CONSOLE_UI) && pnpm run lint
-	cd $(CONSOLE_UI) && pnpm run test
+	cd $(CONSOLE_UI) && pnpm run test:coverage
 
 # Build frontend assets then the full Go binary with console tag.
 build-console: console-build

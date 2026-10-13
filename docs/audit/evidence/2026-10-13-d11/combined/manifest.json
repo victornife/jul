@@ -1,0 +1,27 @@
+{
+  "measured_source": "61b611c2b34df6165ccf18f1c065e86cc081d770",
+  "measured_tree": "5de76eee8d9d2e7ec0c7cfadeb6bc0fddd2c850d",
+  "complete_prior_area_head": "8036ee419c35519a24ac581ce3e6e3028223702f",
+  "original_rows": 112,
+  "supplemental_rows": 7,
+  "human_review": "pending; proposed16originals, actual minimum12",
+  "checks": {
+    "docs": "2229passed/0failed",
+    "docs_fixtures": "pass",
+    "semantic": "28fixtures;93% against90",
+    "generated": "pass",
+    "ledger_complete": "0errors",
+    "ledger_fixtures": "17pass"
+  },
+  "new_Go_production_statements": 0,
+  "current_paths_reconciled": "row104 explicitly maps four rebuilt content-hashed embedded assets; original freeze/TSV unchanged",
+  "review_source_guard": "full40hexGitSHA required only for actual completed human spot-check",
+  "evidence_sha256": {
+    "generated.log": "2ff01d8cbb80e3dc08c6a352f547ada4a777da689ca86e018cae8a32eadad04b",
+    "docs.log": "2adba58f6b93c7229b6d2044944ae1b6b5b25d2e22e01670e4f76249f44d08af",
+    "docs-tests.log": "d8eb051303df601f1031141f2e27238b438be286b36868d4ed3a0ff6c7c69373",
+    "ledger.log": "190751e0b043e17fcf28f2355d85c9297fdb96497b2fd99bf4bb85a843e06119",
+    "ledger-tests.log": "5bb8b40040770827862692d0ce2cfa7c8ec3ab7b70397aac34345606fd8842c6",
+    "semantic.log": "d92f5b65780205d2389389cfcf67ab081c2afd53737f0fedac2f2521817df6c5"
+  }
+}

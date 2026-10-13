@@ -1,0 +1,13 @@
+test_benchmark_default_executes_complete_profile (__main__.HarnessContracts.test_benchmark_default_executes_complete_profile) ... ok
+test_bounded_retry_recovers_without_changing_profile (__main__.HarnessContracts.test_bounded_retry_recovers_without_changing_profile) ... ok
+test_explicit_package_target_listing_failure_fails (__main__.HarnessContracts.test_explicit_package_target_listing_failure_fails) ... ok
+test_explicit_profile_overrides_are_preserved (__main__.HarnessContracts.test_explicit_profile_overrides_are_preserved) ... ok
+test_guard_rejects_each_real_consumer_drift (__main__.HarnessContracts.test_guard_rejects_each_real_consumer_drift) ... ok
+test_module_package_listing_failure_fails_before_fuzz (__main__.HarnessContracts.test_module_package_listing_failure_fails_before_fuzz) ... ok
+test_successful_package_without_targets_is_allowed (__main__.HarnessContracts.test_successful_package_without_targets_is_allowed) ... ok
+test_two_fuzz_failures_fail_the_harness (__main__.HarnessContracts.test_two_fuzz_failures_fail_the_harness) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.495s
+
+OK
