@@ -23,7 +23,7 @@
 
 | Shape | Config source | Admin "Apply" | Use when |
 | --- | --- | --- | --- |
-| **Editable** | The running server owns and rewrites `server.toml`. | Writes the new config + a history snapshot, then reloads. | You operate the server through the console and want one-click apply + rollback. |
+| **Editable** | The running server owns and rewrites `server.toml`. | Validates/persists config, then records the live result and history during terminal finalization; history failure is advisory. | You operate the server through the console and want one-click apply + rollback. |
 | **Read-only** | A provisioning pipeline (image build, GitOps, config-management) ships `server.toml`; the server only reads it. | Rejected — the config path is mounted read-only. | Golden-image / immutable-infrastructure deployments where config changes go through your pipeline, not the console. |
 
 In both shapes the binary runs **unprivileged** and the host filesystem is
@@ -39,7 +39,7 @@ consult (ADR 0019). The two line up directly:
 | Filesystem shape | `config_authority` | Result |
 | --- | --- | --- |
 | Editable | `managed` | Console/API writes are validated, persisted, and reloaded; an external edit to the mounted file becomes drift, resolved only through explicit adoption (supported external `POST /api/v1/config/adopt-external`, or the Console workflow). |
-| Read-only | `file_owned` (the default) | Every mutating admin endpoint is refused with `409 config_authority_read_only` before any side effect. SIGHUP and the file watcher behave exactly as before: an external edit — from your provisioning pipeline re-rendering the mount — is validated and adopted live or staged, same as today. |
+| Read-only | `file_owned` (the default) | Every mutating admin endpoint is refused with `409 config_authority_read_only` before any side effect. SIGHUP and the file watcher behave exactly as before: an external edit from your provisioning pipeline is validated and hot-applied where supported. Restart-bound edits remain on disk for an operator restart; they do not create a managed staged candidate. |
 
 **`config_authority` defaults to `file_owned` when omitted.** This is a fixed
 default, not derived from `admin.enabled` or any other field. The practical
@@ -78,7 +78,7 @@ The canonical paths (used by the bundled systemd units and Docker image):
 | Path | Holds | Editable | Read-only |
 | --- | --- | --- | --- |
 | `/etc/jul` | `server.toml` | read-write (admin rewrites it) | read-only |
-| `/var/lib/jul` | config **history** snapshots | read-write | not used (no history) |
+| `/var/lib/jul` | config **history** snapshots | read-write | no new mutation snapshots; existing configured history can remain readable |
 | `/var/cache/jul` | HTTP **disk cache** + **ACME** certificate cache | read-write | read-write |
 | `/var/log/jul` | access-log **file** sink output | read-write | read-write |
 
@@ -101,10 +101,14 @@ history_dir = "/var/lib/jul/history"
   cache_dir = "/var/cache/jul/acme"
 ```
 
-Config and history can carry inline credentials. Jul.IA writes both with mode
-`0o600` and replaces them atomically (temp file + rename), so a freshly written
-file is never world-readable and a crash mid-write leaves the previous complete
-file. See [SECURITY.md](../SECURITY.md#hardening-defaults--recommendations).
+Config and history can carry inline credentials. Jul.IA creates new files with
+mode `0o600` and replaces contents atomically (temp file + rename). An existing
+file's POSIX mode is preserved, including deliberately widened permissions; an
+Apply does not repair an insecure existing config mode. Provision and inspect
+those permissions before storing secrets. File data is synced before rename;
+directory syncing is best-effort where the platform supports it, and concurrent
+readers see complete old or new contents. Windows confidentiality depends on the
+actual inherited/effective ACLs, not POSIX mode bits. See [SECURITY.md](../SECURITY.md#hardening-defaults--recommendations).
 Prefer [secret references](secrets.md) over inline literals regardless.
 
 ## systemd (Linux)
@@ -510,11 +514,11 @@ readinessProbe:
 
 | Subsystem | Writes to | Notes |
 | --- | --- | --- |
-| Admin "Apply" | `/etc/jul/server.toml` | atomic (temp + rename), `0o600`, editable shape only |
-| Config history | `/var/lib/jul` | one snapshot per apply, pruned to `history_dir` retention, `0o600` |
+| Admin "Apply" | `/etc/jul/server.toml` | atomic (temp + rename), new-file mode `0o600`, existing mode preserved, editable shape only |
+| Config history | `/var/lib/jul` | terminal-finalization snapshots, pruned according to `history_keep`; raw snapshot mode `0o600`; failure is reported as advisory degradation |
 | HTTP disk cache | `/var/cache/jul` | cached response bodies |
 | ACME | `/var/cache/jul` | account key + issued certificates — back this up / persist it |
-| Access log (`file` sink) | `/var/log/jul` | rotated by size/age per `[observability.access_log]` |
+| Access log (`file` sink) | `/var/log/jul` | rotated by size and retained backup count per `[observability.access_log]` |
 
 See [reload-semantics.md](reload-semantics.md) for what an "Apply" guarantees
 and which changes need a restart, and the [status matrix](status.md) for feature
@@ -538,5 +542,7 @@ Measured in the #422 host-fault runs ([soak-evidence.md](soak-evidence.md)):
 - **Storage.** Bound the access log (`rotate_max_mb` × (`rotate_keep` + 1))
   and the disk cache (`disk_max_size`) so together they fit the filesystem
   with headroom. When storage is exhausted, access-log and disk-cache write
-  failures are logged (throttled), and a managed apply fails with
-  `storage_unavailable` without changing the configuration.
+  failures are logged (throttled), and a managed apply whose configuration persistence fails returns
+  `storage_unavailable` without changing the configuration. A separate history
+  finalization failure can follow a committed apply and is reported as advisory
+  degradation; it does not roll back that successful live change.

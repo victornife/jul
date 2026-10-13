@@ -3797,7 +3797,153 @@
       "establishing_pr": "https://github.com/victornife/jul/pull/596"
     }
   ],
-  "new_rows": [],
+  "new_rows": [
+    {
+      "original_disposition": "supplemental related active surface",
+      "original_reason_and_limit": "Added review surface for material D12/516 claims introduced or changed since the historical inventory; original 230/112 denominators remain unchanged",
+      "area": "deployment",
+      "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
+      "review_boundary": "Service/package/identity/trust/persistence/recovery claims and D12 evidence limits; not private-production certification",
+      "status": "reviewed",
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/deployment-contracts.log",
+        "evidence/2026-10-13-d11/deployment-reconciliation.log",
+        "evidence/2026-10-12-deployment/manifest.json",
+        "https://github.com/victornife/jul/actions/runs/38315192960",
+        "https://github.com/victornife/jul/actions/runs/38318455489",
+        "evidence/2026-10-13-d11/deployment-fixtures.log"
+      ],
+      "limitations": [
+        "Existing controlled CI labs, private three-certificate PKI, separate namespace sharing the host kernel and synthetic Windows ACL/registry fixtures; no private/enterprise/public-cloud host certification",
+        "macOS/four-profile and twelve-profile archive rows reconcile original native release run38185464698; new_native_execution=false",
+        "No fresh seven-journey execution or long-duration soak; release/tag/packages remain immutable b12e051139f652b400cff37d9f063f5637a7d550"
+      ],
+      "open_defects": [],
+      "establishing_pr": "https://github.com/victornife/jul/pull/599",
+      "id": "D11-N001",
+      "original_path": "docs/deployment.md",
+      "current_paths": [
+        "docs/deployment.md"
+      ],
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Editable managed versus file_owned read-only service identities/mounts; systemd interpreter under unchanged MDWE, Windows fresh versus pre-existing ACL grants and Docker derived-image trust/health/persistence",
+        "Corrected terminal history timing/advisory failure, history_keep retention, size/count log rotation and file_owned restart-bound external edits; history/config durability are different outcomes",
+        "New files use0600; existing POSIX modes are preserved and Windows confidentiality is controlled by effective ACLs; no automatic permission repair"
+      ],
+      "implementation_and_authority": [
+        "deploy/systemd",
+        "deploy/windows/install-service.ps1",
+        "deploy/windows/new-secure-data-dir.ps1",
+        "Dockerfile",
+        "internal/app/config_apply.go",
+        "internal/app/managed_apply_finalizer.go",
+        "internal/atomicfile/atomicfile.go"
+      ],
+      "named_tests": [
+        "TestManagedApplyFinalizationAdvisoryTracksHistoryDegradationAndClears",
+        "TestCoordinatorApplyRawValidationFailureNoWrite",
+        "TestWriteCreatesFileWithSecureMode",
+        "TestWritePreservesExistingMode",
+        "TestWriteReplacesContentAndLeavesNoTemp"
+      ]
+    },
+    {
+      "original_disposition": "supplemental related active surface",
+      "original_reason_and_limit": "Added review surface for material D12/516 claims introduced or changed since the historical inventory; original 230/112 denominators remain unchanged",
+      "area": "deployment",
+      "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
+      "review_boundary": "Service/package/identity/trust/persistence/recovery claims and D12 evidence limits; not private-production certification",
+      "status": "reviewed",
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/deployment-contracts.log",
+        "evidence/2026-10-13-d11/deployment-reconciliation.log",
+        "evidence/2026-10-12-deployment/manifest.json",
+        "https://github.com/victornife/jul/actions/runs/38315192960",
+        "https://github.com/victornife/jul/actions/runs/38318455489",
+        "evidence/2026-10-13-d11/deployment-fixtures.log"
+      ],
+      "limitations": [
+        "Existing controlled CI labs, private three-certificate PKI, separate namespace sharing the host kernel and synthetic Windows ACL/registry fixtures; no private/enterprise/public-cloud host certification",
+        "macOS/four-profile and twelve-profile archive rows reconcile original native release run38185464698; new_native_execution=false",
+        "No fresh seven-journey execution or long-duration soak; release/tag/packages remain immutable b12e051139f652b400cff37d9f063f5637a7d550"
+      ],
+      "open_defects": [],
+      "establishing_pr": "https://github.com/victornife/jul/pull/599",
+      "id": "D11-N002",
+      "original_path": "docs/deployment-journeys.md",
+      "current_paths": [
+        "docs/deployment-journeys.md"
+      ],
+      "verdict": "correct",
+      "claims": [
+        "Seven ordered existing execution procedures preserve source/checksum/profile/identity, TLS trust rejection, firewall recovery and native/package provenance",
+        "The runbook distinguishes disposable controlled CI from later operator-owned site verification and no new native executions for reconciliation"
+      ],
+      "implementation_and_authority": [
+        ".github/workflows/deployment-journeys-516.yml",
+        "scripts/systemd-deployment-e2e.py",
+        "scripts/docker-network-journey.py",
+        "scripts/windows-deployment-mime.py",
+        "scripts/reconcile-deployment-packages.py",
+        "scripts/test-windows-service.ps1",
+        "testdata/deployment-backend/main.go",
+        "scripts/test_deployment_lab.py",
+        "scripts/prepare-deployment-package.py"
+      ],
+      "named_tests": [
+        "TrustTests.test_valid_root_intermediate_leaf",
+        "TrustTests.test_wrong_ca_rejected",
+        "TrustTests.test_wrong_hostname_rejected",
+        "TrustTests.test_missing_intermediate_rejected"
+      ]
+    },
+    {
+      "original_disposition": "supplemental related active surface",
+      "original_reason_and_limit": "Added review surface for material D12/516 claims introduced or changed since the historical inventory; original 230/112 denominators remain unchanged",
+      "area": "deployment",
+      "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
+      "review_boundary": "Service/package/identity/trust/persistence/recovery claims and D12 evidence limits; not private-production certification",
+      "status": "reviewed",
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/deployment-contracts.log",
+        "evidence/2026-10-13-d11/deployment-reconciliation.log",
+        "evidence/2026-10-12-deployment/manifest.json",
+        "https://github.com/victornife/jul/actions/runs/38315192960",
+        "https://github.com/victornife/jul/actions/runs/38318455489"
+      ],
+      "limitations": [
+        "Existing controlled CI labs, private three-certificate PKI, separate namespace sharing the host kernel and synthetic Windows ACL/registry fixtures; no private/enterprise/public-cloud host certification",
+        "macOS/four-profile and twelve-profile archive rows reconcile original native release run38185464698; new_native_execution=false",
+        "No fresh seven-journey execution or long-duration soak; release/tag/packages remain immutable b12e051139f652b400cff37d9f063f5637a7d550"
+      ],
+      "open_defects": [],
+      "establishing_pr": "https://github.com/victornife/jul/pull/599",
+      "id": "D11-N003",
+      "original_path": "docs/audit/2026-10-12-deployment-journeys.md",
+      "current_paths": [
+        "docs/audit/2026-10-12-deployment-journeys.md"
+      ],
+      "verdict": "accepted limitation",
+      "claims": [
+        "Historical execution-source ledger and original raw verdicts/digests preserved; #575/516 completed integration is recorded by #62 and the active audit register, not relabeled as new execution"
+      ],
+      "implementation_and_authority": [
+        "docs/audit/evidence/2026-10-12-deployment/manifest.json",
+        ".github/workflows/deployment-journeys-516.yml",
+        "scripts/reconcile-deployment-packages.py",
+        "docs/audit-register.md"
+      ],
+      "named_tests": [],
+      "current_semantic_certification": false,
+      "document_status": "historical execution evidence; active close-out replacement is #62/#516 and audit-register",
+      "current_replacement": [
+        "docs/audit-register.md",
+        "https://github.com/victornife/jul/issues/516",
+        "https://github.com/victornife/jul/issues/62"
+      ]
+    }
+  ],
   "reviewer_spot_check": {
     "status": "pending",
     "reviewer": null,
