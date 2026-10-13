@@ -32,7 +32,7 @@ class DispositionContract(unittest.TestCase):
                    "frozen_rows": [frozen]})
         (self.audit / "run.txt").write_text("passed: source/profile identified\n")
         self.current = {"rows": [{**frozen, "responsible_owner": "config owner", "review_boundary": "config defaults",
-                    "verdict": "correct", "claims": ["fixed default"], "implementation_and_authority": ["internal/config/schema.go"],
+                    "status": "reviewed", "verdict": "correct", "claims": ["fixed default"], "implementation_and_authority": ["internal/config/schema.go"],
                     "named_tests": ["TestKnown"], "execution_evidence": ["run.txt"], "limitations": ["not production host"],
                     "establishing_pr": "https://github.com/victornife/jul/pull/1"}], "new_rows": [],
                     "reviewer_spot_check": {"status": "pending"}}
@@ -68,6 +68,13 @@ class DispositionContract(unittest.TestCase):
         self.current["rows"][0]["verdict"] = "defect filed/linked"
         self.assertTrue(any("owner link" in e for e in self.errors()))
 
+    def test_resolved_defect_preserves_original_review_and_failing_source(self):
+        self.current["rows"][0].update(verdict="defect filed/linked", open_defects=[],
+                                     resolved_defects=[{"issue": "https://github.com/victornife/jul/issues/1",
+                                                        "corrective_pr": "https://github.com/victornife/jul/pull/2",
+                                                        "reviewed_head": "a" * 40, "merge": "b" * 40}])
+        self.assertEqual(self.errors(), [])
+
     def test_pending_area_allowed_for_area_pr_but_not_final_packet(self):
         self.current["rows"][0]["verdict"] = None
         self.assertEqual(self.errors(complete=False), [])
@@ -76,6 +83,81 @@ class DispositionContract(unittest.TestCase):
     def test_completion_cannot_relabel_an_agent_check_as_a_reviewer_sample(self):
         self.current["reviewer_spot_check"] = {"status": "completed", "reviewer": None, "sampled_rows": []}
         self.assertTrue(any("spot-check" in e for e in self.errors()))
+
+    def test_unknown_original_id_cannot_replace_a_row_at_same_count(self):
+        self.current["rows"][0]["id"] = "D11-999"
+        self.assertTrue(any("denominator" in e for e in self.errors()))
+
+    def test_supplemental_ids_cannot_duplicate_or_overlap_original_ids(self):
+        row = dict(self.current["rows"][0], id="D11-N001")
+        self.current["new_rows"] = [row, dict(row)]
+        self.assertTrue(any("Supplemental" in e for e in self.errors()))
+        self.current["new_rows"] = [dict(row, id="D11-001")]
+        self.assertTrue(any("Supplemental" in e for e in self.errors()))
+
+    def test_missing_or_escaping_current_paths_are_rejected(self):
+        for path in ("missing.md", "../outside", "/absolute"):
+            with self.subTest(path=path):
+                self.current["rows"][0].update(current_paths=[path], path_reconciliation="moved")
+                self.assertTrue(any("invalid current path" in e for e in self.errors()))
+        self.current["rows"][0].update(current_paths=[], path_reconciliation="")
+        self.assertTrue(any("current paths missing" in e for e in self.errors()))
+
+    def test_pending_pr_and_row_status_do_not_establish_final_disposition(self):
+        self.current["rows"][0].update(establishing_pr="pending draft", status="pending")
+        errors = self.errors()
+        self.assertTrue(any("concrete reviewable PR" in e for e in errors))
+        self.assertTrue(any("nonfinal row status" in e for e in errors))
+
+    def review(self, **changes):
+        self.current["reviewer_spot_check"] = {
+            "status": "completed", "reviewer": "assigned human", "source": "a" * 40,
+            "result": "accepted", "sampled_rows": ["D11-001"], "review_kind": "maintainer-assigned-human", **changes}
+
+    def test_only_actual_original_rows_count_toward_human_sample(self):
+        for sample in (["D11-N001"], ["D11-999"], ["D11-001", "D11-N001"]):
+            with self.subTest(sample=sample):
+                self.review(sampled_rows=sample)
+                self.assertTrue(any("original sample" in e for e in self.errors()))
+
+    def test_completed_state_requires_human_review_but_ready_packet_does_not(self):
+        self.current["state"] = "ready_for_review"
+        self.assertEqual(self.errors(), [])
+        self.current["state"] = "completed"
+        self.assertTrue(any("actual human" in e for e in self.errors()))
+        self.review(review_kind="agent-self-check")
+        self.assertTrue(any("actual human" in e for e in self.errors()))
+        self.review()
+        self.assertEqual(self.errors(), [])
+
+    def test_freeze_and_companion_cannot_rewrite_the_original_path_together(self):
+        name = "2026-10-13-d11-original.json"
+        frozen = json.loads((self.audit / name).read_text())
+        frozen["frozen_rows"][0]["original_path"] = "invented replacement"
+        self.current["rows"][0]["original_path"] = "invented replacement"
+        self.write(name, frozen)
+        self.assertTrue(any("original historical ledger" in e for e in self.errors()))
+
+    def test_freeze_and_companion_cannot_replace_an_original_id_together(self):
+        name = "2026-10-13-d11-original.json"
+        frozen = json.loads((self.audit / name).read_text())
+        frozen["frozen_rows"][0]["id"] = "D11-999"
+        self.current["rows"][0]["id"] = "D11-999"
+        self.write(name, frozen)
+        self.assertTrue(any("original row IDs" in e for e in self.errors()))
+
+    def test_human_review_source_must_be_an_exact_git_identity(self):
+        for source in ("main", "reviewed SHA", "a" * 8, {"sha": "a" * 40}):
+            with self.subTest(source=source):
+                self.review(source=source)
+                self.assertTrue(any("full reviewed Git source" in e for e in self.errors()))
+
+    def test_explicit_source_move_preserves_original_identity_and_passes(self):
+        (self.root / "internal/config/schema.go").rename(self.root / "internal/config/renamed.go")
+        self.current["rows"][0].update(current_paths=["internal/config/renamed.go"],
+                                     implementation_and_authority=["internal/config/renamed.go"],
+                                     path_reconciliation="Original source moved; frozen wildcard and reason retained")
+        self.assertEqual(self.errors(), [])
 
 
 if __name__ == "__main__":
