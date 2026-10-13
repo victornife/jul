@@ -170,8 +170,7 @@ func (s *Server) recordAuditResourceSelector(r *http.Request, operation, resourc
 	}
 	var actor, tokenID string
 	if id, ok := rbac.IdentityFromContext(r.Context()); ok {
-		actor = id.Principal
-		tokenID = id.TokenID
+		actor, tokenID = auditIdentityFields(id)
 	}
 	s.audit.record(AuditEvent{
 		Time:       time.Now().UTC(),
@@ -185,6 +184,16 @@ func (s *Server) recordAuditResourceSelector(r *http.Request, operation, resourc
 		Detail:     detail,
 		SourceIP:   adminClientIP(r),
 	})
+}
+
+// Open-mode permission middleware retains its compatibility identity for
+// control/ownership keys. With no credential digest it must not invent an
+// authenticated actor or public credential ID in audit/history metadata.
+func auditIdentityFields(id rbac.Identity) (string, string) {
+	if id.Legacy && id.TokenDigest == "" {
+		return "anonymous", ""
+	}
+	return id.Principal, id.TokenID
 }
 
 // redactActor maps any actor value to a non-identifying label. The admin API
@@ -255,7 +264,7 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", "attachment; filename=\"audit.csv\"")
 		cw := csv.NewWriter(w)
-		_ = cw.Write([]string{"id", "time", "actor", "operation", "resource", "result", "detail", "source_ip"})
+		_ = cw.Write([]string{"id", "time", "actor", "operation", "resource", "result", "detail", "source_ip", "token_id"})
 		for _, ev := range events {
 			_ = cw.Write([]string{
 				strconv.FormatInt(ev.ID, 10),
@@ -266,6 +275,7 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 				ev.Result,
 				ev.Detail,
 				ev.SourceIP,
+				ev.TokenID,
 			})
 		}
 		cw.Flush()

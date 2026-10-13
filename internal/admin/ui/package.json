@@ -11,9 +11,10 @@
     "lint": "eslint . --cache",
     "test": "vitest run",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "node --test scripts/coverage-report.test.mjs && vitest run --coverage && node scripts/coverage-report.mjs",
     "e2e": "playwright test",
-    "e2e:ci": "playwright test --project=chromium --reporter=github"
+    "e2e:ci": "playwright test --project=chromium --reporter=github",
+    "test:coverage:probes": "python3 ../../../../scripts/probe-console-coverage.py"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",

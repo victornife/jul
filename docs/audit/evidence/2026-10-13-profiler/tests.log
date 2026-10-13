@@ -1,0 +1,40 @@
+=== RUN   TestProfileCaptureRejectsHTTPFailures
+=== RUN   TestProfileCaptureRejectsHTTPFailures/401
+=== RUN   TestProfileCaptureRejectsHTTPFailures/403
+=== RUN   TestProfileCaptureRejectsHTTPFailures/404
+=== RUN   TestProfileCaptureRejectsHTTPFailures/500
+=== RUN   TestProfileCaptureRejectsHTTPFailures/302
+--- PASS: TestProfileCaptureRejectsHTTPFailures (0.01s)
+    --- PASS: TestProfileCaptureRejectsHTTPFailures/401 (0.00s)
+    --- PASS: TestProfileCaptureRejectsHTTPFailures/403 (0.00s)
+    --- PASS: TestProfileCaptureRejectsHTTPFailures/404 (0.00s)
+    --- PASS: TestProfileCaptureRejectsHTTPFailures/500 (0.00s)
+    --- PASS: TestProfileCaptureRejectsHTTPFailures/302 (0.00s)
+=== RUN   TestProfileCaptureRejectsIncompleteAndEmptyBodies
+=== RUN   TestProfileCaptureRejectsIncompleteAndEmptyBodies/false
+=== RUN   TestProfileCaptureRejectsIncompleteAndEmptyBodies/true
+--- PASS: TestProfileCaptureRejectsIncompleteAndEmptyBodies (0.00s)
+    --- PASS: TestProfileCaptureRejectsIncompleteAndEmptyBodies/false (0.00s)
+    --- PASS: TestProfileCaptureRejectsIncompleteAndEmptyBodies/true (0.00s)
+=== RUN   TestProfileCaptureTransportTrustAndFilesystemFailures
+2026/10/13 06:10:32 http: TLS handshake error from 127.0.0.1:47490: remote error: tls: bad certificate
+--- PASS: TestProfileCaptureTransportTrustAndFilesystemFailures (0.06s)
+=== RUN   TestProfileCaptureTimeout
+--- PASS: TestProfileCaptureTimeout (0.10s)
+=== RUN   TestSnapshotsRejectRedirectWithoutFollowingIt
+Profile T0/goroutine FAILED: HTTP 302
+Profile T0/heap FAILED: HTTP 302
+--- PASS: TestSnapshotsRejectRedirectWithoutFollowingIt (0.00s)
+=== RUN   TestLoadProfileCompletionAndPreflight
+=== RUN   TestLoadProfileCompletionAndPreflight/success
+=== RUN   TestLoadProfileCompletionAndPreflight/forbidden
+=== RUN   TestLoadProfileCompletionAndPreflight/output_failure
+=== RUN   TestLoadProfileCompletionAndPreflight/health_failure
+--- PASS: TestLoadProfileCompletionAndPreflight (0.22s)
+    --- PASS: TestLoadProfileCompletionAndPreflight/success (0.12s)
+    --- PASS: TestLoadProfileCompletionAndPreflight/forbidden (0.11s)
+    --- PASS: TestLoadProfileCompletionAndPreflight/output_failure (0.00s)
+    --- PASS: TestLoadProfileCompletionAndPreflight/health_failure (0.00s)
+PASS
+coverage: 36.0% of statements
+ok  	command-line-arguments	1.419s	coverage: 36.0% of statements
