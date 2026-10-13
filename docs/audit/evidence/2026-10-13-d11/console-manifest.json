@@ -41,5 +41,8 @@
     "console-ledger-tests.log": "9ec9e3c52e7908b746c625587944c7e1eb71f90fc834fbb4527d510523684dd2",
     "console-ledger.log": "190751e0b043e17fcf28f2355d85c9297fdb96497b2fd99bf4bb85a843e06119",
     "console-semantic.log": "10f1a06cae0f6463e75893e803d10e47e338e666c1c43bcea241ce9a190c6524"
-  }
+  },
+  "area_source": "101dc8d0e2a15d244693f1bd92397fbe59d13c65",
+  "area_tree": "b5509c4076fdb2a0cb3945096f1acdbcb2efd866",
+  "establishing_pr": "https://github.com/victornife/jul/pull/604"
 }

@@ -866,7 +866,7 @@
         "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
       ],
       "open_defects": [],
-      "establishing_pr": "Pending docs/d11-console-cli-515 publication",
+      "establishing_pr": "https://github.com/victornife/jul/pull/604",
       "area_reconciliation": "CLI/help belongs to command/API owner; every original path retained, original denominator unchanged"
     },
     {
@@ -946,7 +946,7 @@
         "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
       ],
       "open_defects": [],
-      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
+      "establishing_pr": "https://github.com/victornife/jul/pull/604"
     },
     {
       "id": "D11-031",
@@ -1097,7 +1097,7 @@
         "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
       ],
       "open_defects": [],
-      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
+      "establishing_pr": "https://github.com/victornife/jul/pull/604"
     },
     {
       "id": "D11-035",
@@ -1173,7 +1173,7 @@
         "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
       ],
       "open_defects": [],
-      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
+      "establishing_pr": "https://github.com/victornife/jul/pull/604"
     },
     {
       "id": "D11-037",
@@ -1282,7 +1282,7 @@
         "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
       ],
       "open_defects": [],
-      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
+      "establishing_pr": "https://github.com/victornife/jul/pull/604"
     },
     {
       "id": "D11-040",
@@ -1325,7 +1325,7 @@
         "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
       ],
       "open_defects": [],
-      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
+      "establishing_pr": "https://github.com/victornife/jul/pull/604"
     },
     {
       "id": "D11-041",
@@ -2418,7 +2418,7 @@
         "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
       ],
       "open_defects": [],
-      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
+      "establishing_pr": "https://github.com/victornife/jul/pull/604"
     },
     {
       "id": "D11-073",
@@ -2460,7 +2460,7 @@
         "Runtime/Console corrections597/600/603 are separately reviewed and not merged; no new maturity, token-management API or long soak"
       ],
       "open_defects": [],
-      "establishing_pr": "Pending docs/d11-console-cli-515 publication",
+      "establishing_pr": "https://github.com/victornife/jul/pull/604",
       "current_semantic_certification": false,
       "current_replacement": "docs/console.md and current Catalog/generated external API"
     },
@@ -3787,7 +3787,7 @@
         "https://github.com/victornife/jul/issues/595",
         "https://github.com/victornife/jul/issues/602"
       ],
-      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
+      "establishing_pr": "https://github.com/victornife/jul/pull/604"
     },
     {
       "id": "D11-105",
@@ -4628,7 +4628,7 @@
         "https://github.com/victornife/jul/issues/595",
         "https://github.com/victornife/jul/issues/602"
       ],
-      "establishing_pr": "Pending docs/d11-console-cli-515 publication"
+      "establishing_pr": "https://github.com/victornife/jul/pull/604"
     }
   ],
   "reviewer_spot_check": {
