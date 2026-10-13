@@ -978,8 +978,10 @@ exposing any secret. By default they live in a bounded in-memory ring buffer
 
 CSV appends `token_id` after the existing eight columns, preserving their order:
 `id,time,actor,operation,resource,result,detail,source_ip,token_id`.
-An event without an authenticated credential has an empty ID. Credential
-rejections produce an `auth.fail` event with anonymous actor, socket-peer source
+An event without an authenticated credential has an empty ID.
+Open-mode compatibility identities are projected as anonymous audit/history
+metadata, consistently with the current-identity endpoint.
+Credential rejections produce an `auth.fail` event with anonymous actor, socket-peer source
 and a fixed failure category; failed tokens, request data and client-supplied
 identity are not copied. Authentication success followed by authorization 403
 is not an authentication failure. Admission and transport gates still run

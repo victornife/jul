@@ -14,6 +14,13 @@ pass. This evidence is synthetic and contains no live credential.
 
 ## Correction and boundaries
 
+A further regression found that open (no-credential) permission middleware
+reported `shared`/`(legacy)` audit and managed-history metadata, while the
+identity endpoint correctly reported `anonymous`. Audit identity projection now
+maps a credential-free compatibility identity to anonymous/empty-ID metadata.
+The internal control/idempotency identity and authorization policy are unchanged;
+valid legacy credentials and named identities keep their actual attribution.
+
 CSV appends `token_id` after the original eight columns. Their positions stay
 unchanged, empty identifiers remain empty, and JSON/CSV agree. Authentication
 rejection recording is owned by the common response helper used by all three

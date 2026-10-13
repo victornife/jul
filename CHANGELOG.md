@@ -20,6 +20,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   record anonymous authentication rejections through the existing audit owner
   without credential/request data (#602). Retain response, authorization,
   admission and durable-sink contracts; add real-route and JSON/CSV regressions.
+  Project credential-free open-mode audit/history as anonymous with no token ID,
+  preserving internal control/idempotency keys and valid legacy attribution.
 
 - Reject failed, empty or interrupted HTTP load-generator profiler captures;
   retain complete existing files and remove partial downloads. Report capture
