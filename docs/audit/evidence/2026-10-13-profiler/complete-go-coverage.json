@@ -1,0 +1,21 @@
+{
+  "covered": 69,
+  "total": 71,
+  "percent": 97.1830985915493,
+  "files": [
+    "scripts/burn-in-load.go",
+    "scripts/burn-in-stream-load.go"
+  ],
+  "uncovered": [
+    [
+      "scripts/burn-in-load.go",
+      "45.2,46.1",
+      1
+    ],
+    [
+      "scripts/burn-in-load.go",
+      "642.3,643.1",
+      1
+    ]
+  ]
+}

@@ -1899,7 +1899,9 @@ export function ConfigPanel() {
           title={`${configActionLabel("hot")}?`}
           confirmLabel={configActionLabel("hot")}
           busy={applyActive.isPending}
+          confirmDisabled={!canApplyPerm}
           onConfirm={() => {
+            if (!canApplyPerm) return;
             const operationID = operationIDRef.current;
             if (adminChangeError) {
               confirmAdminForOperation(operationID);
@@ -1918,6 +1920,9 @@ export function ConfigPanel() {
             applyPatch.reset();
           }}
         >
+          {!canApplyPerm && (
+            <p className="text-jul-warning">Requires the config:apply permission.</p>
+          )}
           {adminChangeError ? (
             <>
               <p>
@@ -1970,8 +1975,9 @@ export function ConfigPanel() {
           title={`${primaryActionLabel}?`}
           confirmLabel={primaryActionLabel}
           busy={applyStage.isPending}
-          confirmDisabled={applyStage.error instanceof ConfigConflictError}
+          confirmDisabled={!canApplyPerm || applyStage.error instanceof ConfigConflictError}
           onConfirm={() => {
+            if (!canApplyPerm) return;
             const operationID = operationIDRef.current;
             const confirmAdmin =
               applyStage.error instanceof ConfigAdminChangeError ||
@@ -1985,6 +1991,9 @@ export function ConfigPanel() {
             applyStage.reset();
           }}
         >
+          {!canApplyPerm && (
+            <p className="text-jul-warning">Requires the config:apply permission.</p>
+          )}
           {applyStage.error instanceof ConfigAdminChangeError ? (
             <>
               <p>

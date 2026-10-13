@@ -1,0 +1,19 @@
+=== RUN   TestEchoRoundFragmentedReply
+--- PASS: TestEchoRoundFragmentedReply (0.00s)
+=== RUN   TestEchoRoundRejectsTruncationAndWrongContents
+=== RUN   TestEchoRoundRejectsTruncationAndWrongContents/truncated
+=== RUN   TestEchoRoundRejectsTruncationAndWrongContents/wrong_contents
+--- PASS: TestEchoRoundRejectsTruncationAndWrongContents (0.00s)
+    --- PASS: TestEchoRoundRejectsTruncationAndWrongContents/truncated (0.00s)
+    --- PASS: TestEchoRoundRejectsTruncationAndWrongContents/wrong_contents (0.00s)
+=== RUN   TestEchoRoundWriteFailureAndDeadline
+--- PASS: TestEchoRoundWriteFailureAndDeadline (0.00s)
+=== RUN   TestLoadReportsConnectionRates
+=== RUN   TestLoadReportsConnectionRates/valid_fragmented_echoes
+=== RUN   TestLoadReportsConnectionRates/corrupt_echoes
+--- PASS: TestLoadReportsConnectionRates (0.20s)
+    --- PASS: TestLoadReportsConnectionRates/valid_fragmented_echoes (0.10s)
+    --- PASS: TestLoadReportsConnectionRates/corrupt_echoes (0.10s)
+PASS
+coverage: 86.7% of statements
+ok  	command-line-arguments	1.215s	coverage: 86.7% of statements

@@ -102,6 +102,13 @@ configuration apply, history rollback, plugin upload, cache purge, and audit
 export — are disabled with a short note explaining which permission is required,
 instead of letting the operator click through to a guaranteed 403.
 
+Already-open configuration apply, restart-staging and history rollback dialogs
+recheck the current known permission before confirmation. Revoking the required
+grant disables confirmation and shows its permission name; cancellation remains
+available unless a submitted operation is still pending. Restoring the grant
+does not submit anything automatically: the operator must confirm again. A
+submitted operation keeps its pending/result state when permissions change.
+
 Gating is a UX hint only; the **server remains authoritative** and authorizes
 every request. It fails open until the identity is known, so the console is never
 blanked during load or when running without RBAC, and a 403 is handled inline
@@ -987,6 +994,17 @@ non-secret **token ID** of the credential used (both shown as columns in the
 Audit panel), so a change can be traced to the principal that made it without
 exposing any secret. By default they live in a bounded in-memory ring buffer
 (10,000 events) queryable at `GET /api/audit` and exportable as JSON/CSV.
+
+CSV appends `token_id` after the existing eight columns, preserving their order:
+`id,time,actor,operation,resource,result,detail,source_ip,token_id`.
+An event without an authenticated credential has an empty ID.
+Open-mode compatibility identities are projected as anonymous audit/history
+metadata, consistently with the current-identity endpoint.
+Credential rejections produce an `auth.fail` event with anonymous actor, socket-peer source
+and a fixed failure category; failed tokens, request data and client-supplied
+identity are not copied. Authentication success followed by authorization 403
+is not an authentication failure. Admission and transport gates still run
+before authentication, and this does not add token-management APIs.
 
 For compliance or incident review, set a durable sink so the trail survives
 restarts and ring-buffer overwrite:

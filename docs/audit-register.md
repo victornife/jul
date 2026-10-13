@@ -8,8 +8,8 @@ live issue tracker.
 
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
-| [2026-10-08 admin security continuation](audit/2026-10-08-admin-security-continuation.md) | Post-#549 `33e946d0`; remediation #550 | Maintainer-accepted risk-focused #514 checklist, route/Console inventories, corrections and private finding dispositions | Scoped review complete; final exact-head CI and merge evidence required for closure; no every-line, advisory-publication or release certification |
-| [2026-10-06 admin route-policy foundation](audit/2026-10-06-admin-security-review.md) | Post-#548 `1b449614` | Targeted #514 boundary review and CI-enforced permission/transport inventory | Partial installment; full admin/Console line-level review and #514 remain open; no maturity or release certification |
+| [2026-10-08 admin security continuation](audit/2026-10-08-admin-security-continuation.md) | Post-#549 `33e946d0`; remediation #550 | Maintainer-accepted risk-focused #514 checklist, route/Console inventories, corrections and private finding dispositions | Scoped review completed through #550 (`8d45cfbf`); subsequent fixed v2.2.0 packages and advisory publication are recorded separately on #514; no every-line or independent-human certification |
+| [2026-10-06 admin route-policy foundation](audit/2026-10-06-admin-security-review.md) | Post-#548 `1b449614` | Targeted #514 boundary review and CI-enforced permission/transport inventory | Historical partial installment, superseded by the maintainer-accepted risk-focused #514 continuation and merged #550; the original every-line ambition is not retrospectively certified |
 | [2026-09-30 read-only product and technical audit](audit/jul-audit-report-2026-09-30.md) | Frozen candidate `3258f1a3`; delivery status appended against main `9bcc9333` on 2026-10-01 | Current post-release findings plus a dated implementation/PR status snapshot; not an exhaustive certification | Findings F-01–F-19 and original evidence remain pinned to their audited baseline; the addendum distinguishes merged work from green-but-pending PRs and open phase issues |
 
 ## Archived records
@@ -20,7 +20,7 @@ their current disposition belongs to the issue tracker and #62.
 
 | Record | Source baseline | Current role | Disposition |
 | --- | --- | --- | --- |
-| [2026-09-27 documentation review](audit/old/2026-09-27-documentation-review.md) | `36e0411a` at clean `main`; remediation on isolated branch | Historical **partial** documentation review and findings/coverage ledger; no exhaustive certification or 10/10 claim | D11 and remaining semantic review stay open; D12 has selected CI evidence in the current deployment ledger, with integration tracked by #516/#62 |
+| [2026-09-27 documentation review](audit/old/2026-09-27-documentation-review.md) | `36e0411a` at clean `main`; remediation on isolated branch | Historical **partial** documentation review and findings/coverage ledger; no exhaustive certification or 10/10 claim | D11 remains open under #515; D12 completed its selected controlled-CI scope through merged #575 (`39b93efb`) and closed #516; source/package and environment limits remain in the deployment ledger |
 | [2026-09-29 high-risk continuation](audit/old/2026-09-29-high-risk-continuation.md) | PR #482 head `bd8f5b0`; stacked PR #495 at `731fced8` | Targeted security and runtime boundary review; nine branch workflows passed on the exact PR head | Authentication ambiguity, admin mutation admission, bounded dependency and file reads; remaining scopes and verification limits explicit |
 | [2026-09-29 cache/WAF/plugin continuation](audit/old/2026-09-29-cache-waf-plugin-continuation.md) | Stacked after PR #495 head `731fced8` | Merged via #496; tree matches `ed302aae` | Conditional/cache timing and occupancy, WAF compilation input/deadline, plugin fetch/module/request integrity; other ledger rows remain open |
 | [2026-09-29 final high-impact batch](audit/old/2026-09-29-final-high-impact-batch.md) | Stacked tip `5a592d40` | Merged via #497; integrated tree matches that tip at `23c68d6f` | CGI/uWSGI framing, short stream writes, bounds and host routing; not a full audit |
@@ -33,6 +33,20 @@ their current disposition belongs to the issue tracker and #62.
 
 ## Current programme disposition
 
+- Stable [v2.2.0](https://github.com/victornife/jul/releases/tag/v2.2.0)
+  was published from immutable `b12e051139f652b400cff37d9f063f5637a7d550`.
+  The [GA decision](reviews/2026-10-12-ga-220.md) separately certifies the
+  existing CGC-ROUTE, CGC-RES and SEC-EGRESS bounded contracts. They remain
+  **GA-soak-pending / released**, criterion 5 false. The dedicated
+  [#590](https://github.com/victornife/jul/issues/590) owns that remaining soak;
+  short release/deployment checks are not substitutes.
+- The approved [public vision](vision/README.md) and canonical website were
+  published through [#576](https://github.com/victornife/jul/pull/576), merge
+  `f2d68fb74ff2a22061204dd03439914839c37d37`. The bounded consumer cleanup
+  [#591](https://github.com/victornife/jul/pull/591) merged as
+  `616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc`. These do not certify D11's
+  remaining 112 original unreviewed rows. #515/#517 are the selected hardening
+  pass; the live scope and integration/reviewer requirements remain in #62.
 - Stable [v2.1.0](https://github.com/victornife/jul/releases/tag/v2.1.0),
   published 2026-09-30 at `0951090a6fb7703769a15b4749be9664a9842c98`, includes the source-bound four-hour
   measurements and the #501 access-log ownership correction, followed by
@@ -60,8 +74,8 @@ their current disposition belongs to the issue tracker and #62.
   retain separate Beta maturity and now have `released` delivery in
   [status.md](status.md); release alone does not promote them to GA.
 - Generic resilience includes the cross-protocol failure-attribution
-  correction and is published Beta; feature-specific GA certification remains
-  a separate decision.
+  correction and its existing bounded contract is GA-soak-pending / released
+  under #527; no deferred resilience expansion is implied.
 - NGINX assessment, provenance and bounded include traversal are published
   Beta. #426/#365/#366/#367 added post-v2.0.0 migration translation/E2E
   evidence on `main`; #368 established the permanent migration-impact rule.
@@ -81,7 +95,8 @@ their current disposition belongs to the issue tracker and #62.
   AF_UNIX and registry MIME, followed by existing native macOS/archive
   reconciliation. The [deployment ledger](audit/2026-10-12-deployment-journeys.md)
   retains reports, failures, corrections and exact source/package identities;
-  #575/#516 track final integration. Disposable native fixtures, shared-kernel
+  #575 merged as `39b93efbe43e7dc89fcb36350b9761eb218dee53` and #516 is
+  closed/completed. Disposable native fixtures, shared-kernel
   namespaces and private lab PKI do not certify private production hosts,
   enterprise trust/ACL inventories, Internet/cloud firewall policy or long soak.
   This does not make the repository fully audited.
@@ -191,4 +206,4 @@ go test -tags grpc ./internal/transcode -run 'TestTranscodeReflectionWithReusedD
 go test -tags grpc ./internal/transcode -run TestTranscoderRetiredConnectionConcurrentReappearance -race -count=1
 ```
 
-For the authoritative reload contract, see [reload-semantics.md](reload-semantics.md). For current programme sequencing, see the [roadmap](roadmap/README.md) and #62; the combined audit remains the planning baseline and historical evidence source.
+For the authoritative reload contract, see [reload-semantics.md](reload-semantics.md). For current programme sequencing, see the [roadmap](roadmap/README.md) and #62; the combined audit remains historical evidence, while #62 owns current programme execution.

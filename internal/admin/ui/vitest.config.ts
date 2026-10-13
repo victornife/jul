@@ -6,6 +6,7 @@
 /// <reference types="vitest/config" />
 import { defineConfig, mergeConfig } from "vite";
 import viteConfig from "./vite.config";
+import coveragePolicy from "./coverage-policy.json";
 
 export default mergeConfig(
   viteConfig,
@@ -22,14 +23,12 @@ export default mergeConfig(
       execArgv: ["--no-experimental-webstorage"],
       coverage: {
         provider: "v8",
-        reporter: ["text", "html"],
+        reporter: ["text", "html", "json", "json-summary"],
         include: ["src/**/*.{ts,tsx}"],
         exclude: ["src/test/**", "src/**/*.d.ts"],
         thresholds: {
-          statements: 50,
-          branches: 45,
-          functions: 40,
-          lines: 50,
+          ...coveragePolicy.global,
+          ...coveragePolicy.paths,
         },
       },
     },

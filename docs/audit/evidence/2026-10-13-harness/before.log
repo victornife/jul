@@ -1,0 +1,52 @@
+test_benchmark_default_executes_complete_profile (__main__.HarnessContracts.test_benchmark_default_executes_complete_profile) ... FAIL
+test_bounded_retry_recovers_without_changing_profile (__main__.HarnessContracts.test_bounded_retry_recovers_without_changing_profile) ... ok
+test_explicit_package_target_listing_failure_fails (__main__.HarnessContracts.test_explicit_package_target_listing_failure_fails) ... FAIL
+test_explicit_profile_overrides_are_preserved (__main__.HarnessContracts.test_explicit_profile_overrides_are_preserved) ... ok
+test_guard_rejects_each_real_consumer_drift (__main__.HarnessContracts.test_guard_rejects_each_real_consumer_drift) ... FAIL
+test_module_package_listing_failure_fails_before_fuzz (__main__.HarnessContracts.test_module_package_listing_failure_fails_before_fuzz) ... FAIL
+test_successful_package_without_targets_is_allowed (__main__.HarnessContracts.test_successful_package_without_targets_is_allowed) ... ok
+test_two_fuzz_failures_fail_the_harness (__main__.HarnessContracts.test_two_fuzz_failures_fail_the_harness) ... ok
+
+======================================================================
+FAIL: test_benchmark_default_executes_complete_profile (__main__.HarnessContracts.test_benchmark_default_executes_complete_profile)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/jul-harness-before-w5usi3da/scripts/test_full_tag_harnesses.py", line 96, in test_benchmark_default_executes_complete_profile
+    self.assertEqual(calls[0][calls[0].index("-tags")+1], self.tags)
+AssertionError: 'brot[24 chars]l grpc http3 importer wasmplugins stream consul kubernetes' != 'brot[24 chars]l grpc http3 importer wasmplugins stream consul kubernetes waf'
+- brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes
++ brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf
+?                                                                                       ++++
+
+
+======================================================================
+FAIL: test_explicit_package_target_listing_failure_fails (__main__.HarnessContracts.test_explicit_package_target_listing_failure_fails)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/jul-harness-before-w5usi3da/scripts/test_full_tag_harnesses.py", line 69, in test_explicit_package_target_listing_failure_fails
+    self.assertEqual(result.returncode, 43, result.stdout+result.stderr)
+AssertionError: 0 != 43 : 
+
+======================================================================
+FAIL: test_guard_rejects_each_real_consumer_drift (__main__.HarnessContracts.test_guard_rejects_each_real_consumer_drift)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/jul-harness-before-w5usi3da/scripts/test_full_tag_harnesses.py", line 127, in test_guard_rejects_each_real_consumer_drift
+    self.assertNotEqual(result.returncode, 0)
+AssertionError: 0 == 0
+
+======================================================================
+FAIL: test_module_package_listing_failure_fails_before_fuzz (__main__.HarnessContracts.test_module_package_listing_failure_fails_before_fuzz)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/jul-harness-before-w5usi3da/scripts/test_full_tag_harnesses.py", line 63, in test_module_package_listing_failure_fails_before_fuzz
+    self.assertEqual(result.returncode, 42, result.stdout+result.stderr)
+AssertionError: 0 != 42 : synthetic package listing failure
+
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.435s
+
+FAILED (failures=4)
+
+expected_exit=1 actual_exit=1
