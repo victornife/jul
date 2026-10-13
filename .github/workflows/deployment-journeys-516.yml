@@ -66,7 +66,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/systemd-deployment-e2e.py --package-directory packages --ci-network --report systemd-network.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: journey-1-systemd
@@ -87,7 +87,7 @@ jobs:
           python-version: '3.13'
       - name: Execute frozen-source Docker network journey
         run: python scripts/docker-network-journey.py --report docker-network.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: journey-3-docker
@@ -121,7 +121,7 @@ jobs:
           ./scripts/test-windows-service.ps1 -Journey Unix -ReportPath windows-unix.json `
             -BinaryPath (Join-Path $package 'jul.exe') -InstallerPath (Join-Path $package 'install-service.ps1') `
             -ProvisionPath (Join-Path $package 'new-secure-data-dir.ps1') -BackendBinaryPath (Join-Path $PWD 'windows-backend.exe')
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: journey-4-windows-unix
@@ -151,7 +151,7 @@ jobs:
           ./scripts/test-windows-service.ps1 -Journey Mime -ReportPath windows-mime.json `
             -BinaryPath (Join-Path $package 'jul.exe') -InstallerPath (Join-Path $package 'install-service.ps1') `
             -ProvisionPath (Join-Path $package 'new-secure-data-dir.ps1')
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: journey-5-windows-mime
@@ -170,7 +170,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/reconcile-deployment-packages.py --scope macos --report macos-evidence.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: journey-6-macos
           path: macos-evidence.json
@@ -186,7 +186,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/reconcile-deployment-packages.py --scope all --report archive-evidence.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: journey-7-archives
           path: archive-evidence.json
@@ -214,7 +214,7 @@ jobs:
           ./scripts/test-windows-service.ps1 -Journey ExistingAcl -ReportPath windows-acl.json `
             -BinaryPath (Join-Path $package 'jul.exe') -InstallerPath (Join-Path $package 'install-service.ps1') `
             -ProvisionPath (Join-Path $package 'new-secure-data-dir.ps1')
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: journey-2-windows-acl
