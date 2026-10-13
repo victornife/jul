@@ -1,0 +1,164 @@
+=== RUN   TestABIV1Golden
+--- PASS: TestABIV1Golden (0.00s)
+=== RUN   TestABIV2Golden
+--- PASS: TestABIV2Golden (0.00s)
+=== RUN   TestABIV1HostModuleHasNoV2Surface
+--- PASS: TestABIV1HostModuleHasNoV2Surface (0.00s)
+=== RUN   TestNegotiateABIMatrix
+=== RUN   TestNegotiateABIMatrix/v1_historical_fixture
+=== RUN   TestNegotiateABIMatrix/v1_current_fixture
+=== RUN   TestNegotiateABIMatrix/v2_fixture
+=== RUN   TestNegotiateABIMatrix/v2_module_under_v1
+=== RUN   TestNegotiateABIMatrix/v1_module_under_v2
+=== RUN   TestNegotiateABIMatrix/v2_minimal_request-only
+=== RUN   TestNegotiateABIMatrix/v2_minimal_with_response
+=== RUN   TestNegotiateABIMatrix/v2_missing_handle_request
+=== RUN   TestNegotiateABIMatrix/v2_handle_request_wrong_type
+=== RUN   TestNegotiateABIMatrix/v2_marker_wrong_type
+=== RUN   TestNegotiateABIMatrix/v2_handle_response_wrong_type
+=== RUN   TestNegotiateABIMatrix/v2_importing_v1_host
+=== RUN   TestNegotiateABIMatrix/v2_importing_an_unknown_v2_function
+=== RUN   TestNegotiateABIMatrix/v1_spoofing_the_v2_marker
+=== RUN   TestNegotiateABIMatrix/v1_importing_the_v2_host
+=== RUN   TestNegotiateABIMatrix/unknown_abi
+--- PASS: TestNegotiateABIMatrix (1.87s)
+    --- PASS: TestNegotiateABIMatrix/v1_historical_fixture (0.55s)
+    --- PASS: TestNegotiateABIMatrix/v1_current_fixture (0.63s)
+    --- PASS: TestNegotiateABIMatrix/v2_fixture (0.63s)
+    --- PASS: TestNegotiateABIMatrix/v2_module_under_v1 (0.02s)
+    --- PASS: TestNegotiateABIMatrix/v1_module_under_v2 (0.02s)
+    --- PASS: TestNegotiateABIMatrix/v2_minimal_request-only (0.00s)
+    --- PASS: TestNegotiateABIMatrix/v2_minimal_with_response (0.00s)
+    --- PASS: TestNegotiateABIMatrix/v2_missing_handle_request (0.00s)
+    --- PASS: TestNegotiateABIMatrix/v2_handle_request_wrong_type (0.00s)
+    --- PASS: TestNegotiateABIMatrix/v2_marker_wrong_type (0.00s)
+    --- PASS: TestNegotiateABIMatrix/v2_handle_response_wrong_type (0.00s)
+    --- PASS: TestNegotiateABIMatrix/v2_importing_v1_host (0.00s)
+    --- PASS: TestNegotiateABIMatrix/v2_importing_an_unknown_v2_function (0.00s)
+    --- PASS: TestNegotiateABIMatrix/v1_spoofing_the_v2_marker (0.00s)
+    --- PASS: TestNegotiateABIMatrix/v1_importing_the_v2_host (0.00s)
+    --- PASS: TestNegotiateABIMatrix/unknown_abi (0.00s)
+=== RUN   TestHandlerTypeV2HasNoResponsePoint
+--- PASS: TestHandlerTypeV2HasNoResponsePoint (0.04s)
+=== RUN   TestReadModulePathAndInlineDigests
+--- PASS: TestReadModulePathAndInlineDigests (0.04s)
+=== RUN   TestReadModulePin
+--- PASS: TestReadModulePin (0.04s)
+=== RUN   TestReadModuleRejectsInvalidAndOversized
+--- PASS: TestReadModuleRejectsInvalidAndOversized (0.00s)
+=== RUN   TestReadModuleRejectsNonRegularPath
+--- PASS: TestReadModuleRejectsNonRegularPath (0.00s)
+=== RUN   TestReadModuleRejectsSparseOversizeBeforeReading
+--- PASS: TestReadModuleRejectsSparseOversizeBeforeReading (0.00s)
+=== RUN   TestKVQuotaSurvivesReload
+--- PASS: TestKVQuotaSurvivesReload (0.09s)
+=== RUN   TestKVQuotaConcurrentGenerationsShareBound
+--- PASS: TestKVQuotaConcurrentGenerationsShareBound (0.06s)
+=== RUN   TestResponsePhaseEchoMetadata
+--- PASS: TestResponsePhaseEchoMetadata (0.68s)
+=== RUN   TestResponsePhaseBodyReadAndReplace
+--- PASS: TestResponsePhaseBodyReadAndReplace (0.69s)
+=== RUN   TestResponsePhaseBodyUnavailableReasons
+=== RUN   TestResponsePhaseBodyUnavailableReasons/head
+=== RUN   TestResponsePhaseBodyUnavailableReasons/no_content
+=== RUN   TestResponsePhaseBodyUnavailableReasons/not_modified
+=== RUN   TestResponsePhaseBodyUnavailableReasons/partial
+=== RUN   TestResponsePhaseBodyUnavailableReasons/encoded
+=== RUN   TestResponsePhaseBodyUnavailableReasons/sse
+=== RUN   TestResponsePhaseBodyUnavailableReasons/grpc
+=== RUN   TestResponsePhaseBodyUnavailableReasons/mjpeg
+=== RUN   TestResponsePhaseBodyUnavailableReasons/accel
+=== RUN   TestResponsePhaseBodyUnavailableReasons/trailer
+=== RUN   TestResponsePhaseBodyUnavailableReasons/declared_too_large
+=== RUN   TestResponsePhaseBodyUnavailableReasons/buffered_too_large
+--- PASS: TestResponsePhaseBodyUnavailableReasons (0.66s)
+    --- PASS: TestResponsePhaseBodyUnavailableReasons/head (0.00s)
+    --- PASS: TestResponsePhaseBodyUnavailableReasons/no_content (0.00s)
+    --- PASS: TestResponsePhaseBodyUnavailableReasons/not_modified (0.00s)
+    --- PASS: TestResponsePhaseBodyUnavailableReasons/partial (0.00s)
+    --- PASS: TestResponsePhaseBodyUnavailableReasons/encoded (0.00s)
+    --- PASS: TestResponsePhaseBodyUnavailableReasons/sse (0.00s)
+    --- PASS: TestResponsePhaseBodyUnavailableReasons/grpc (0.00s)
+    --- PASS: TestResponsePhaseBodyUnavailableReasons/mjpeg (0.00s)
+    --- PASS: TestResponsePhaseBodyUnavailableReasons/accel (0.00s)
+    --- PASS: TestResponsePhaseBodyUnavailableReasons/trailer (0.00s)
+    --- PASS: TestResponsePhaseBodyUnavailableReasons/declared_too_large (0.00s)
+    --- PASS: TestResponsePhaseBodyUnavailableReasons/buffered_too_large (0.00s)
+=== RUN   TestResponsePhaseFlushSemantics
+--- PASS: TestResponsePhaseFlushSemantics (0.63s)
+=== RUN   TestResponsePhaseRequestsIdentityRepresentation
+--- PASS: TestResponsePhaseRequestsIdentityRepresentation (0.62s)
+=== RUN   TestResponsePhaseStatusMutation
+--- PASS: TestResponsePhaseStatusMutation (0.65s)
+=== RUN   TestResponsePhaseHeaderMutation
+--- PASS: TestResponsePhaseHeaderMutation (0.67s)
+=== RUN   TestResponsePhaseReject
+--- PASS: TestResponsePhaseReject (0.62s)
+=== RUN   TestResponsePhaseFailuresFailClosed
+=== RUN   TestResponsePhaseFailuresFailClosed/trap/meta
+=== RUN   TestResponsePhaseFailuresFailClosed/trap/body
+=== RUN   TestResponsePhaseFailuresFailClosed/loop/meta
+=== RUN   TestResponsePhaseFailuresFailClosed/loop/body
+=== RUN   TestResponsePhaseFailuresFailClosed/oob/meta
+=== RUN   TestResponsePhaseFailuresFailClosed/oob/body
+=== RUN   TestResponsePhaseFailuresFailClosed/wrong-phase/meta
+=== RUN   TestResponsePhaseFailuresFailClosed/wrong-phase/body
+=== RUN   TestResponsePhaseFailuresFailClosed/resp-badresult/meta
+=== RUN   TestResponsePhaseFailuresFailClosed/resp-badresult/body
+--- PASS: TestResponsePhaseFailuresFailClosed (0.90s)
+    --- PASS: TestResponsePhaseFailuresFailClosed/trap/meta (0.00s)
+    --- PASS: TestResponsePhaseFailuresFailClosed/trap/body (0.02s)
+    --- PASS: TestResponsePhaseFailuresFailClosed/loop/meta (0.11s)
+    --- PASS: TestResponsePhaseFailuresFailClosed/loop/body (0.10s)
+    --- PASS: TestResponsePhaseFailuresFailClosed/oob/meta (0.00s)
+    --- PASS: TestResponsePhaseFailuresFailClosed/oob/body (0.01s)
+    --- PASS: TestResponsePhaseFailuresFailClosed/wrong-phase/meta (0.00s)
+    --- PASS: TestResponsePhaseFailuresFailClosed/wrong-phase/body (0.00s)
+    --- PASS: TestResponsePhaseFailuresFailClosed/resp-badresult/meta (0.00s)
+    --- PASS: TestResponsePhaseFailuresFailClosed/resp-badresult/body (0.00s)
+=== RUN   TestResponsePhaseCancelledRequestFails
+--- PASS: TestResponsePhaseCancelledRequestFails (0.64s)
+=== RUN   TestRequestPhaseV2Contract
+--- PASS: TestRequestPhaseV2Contract (0.64s)
+=== RUN   TestHandlerTypeV2CannotSubscribe
+--- PASS: TestHandlerTypeV2CannotSubscribe (0.61s)
+=== RUN   TestResponsePhaseNestingOrder
+--- PASS: TestResponsePhaseNestingOrder (0.70s)
+=== RUN   TestResponsePhaseStateIsPerRequest
+--- PASS: TestResponsePhaseStateIsPerRequest (0.76s)
+=== RUN   TestResponsePhasePinsRequestGeneration
+--- PASS: TestResponsePhasePinsRequestGeneration (0.67s)
+=== RUN   TestResponsePhaseV1V2Replacement
+--- PASS: TestResponsePhaseV1V2Replacement (1.74s)
+=== RUN   TestResponsePhaseUpgradeIsObservedReadOnly
+--- PASS: TestResponsePhaseUpgradeIsObservedReadOnly (0.66s)
+=== RUN   TestResponsePhaseInterimAndNotReached
+--- PASS: TestResponsePhaseInterimAndNotReached (0.64s)
+=== RUN   TestResponsePhaseAbsorbsInducedAbort
+--- PASS: TestResponsePhaseAbsorbsInducedAbort (0.63s)
+=== RUN   TestClassifyResponse
+--- PASS: TestClassifyResponse (0.00s)
+=== RUN   TestV2ReloadUnderLoadAndChurnQuiesces
+--- PASS: TestV2ReloadUnderLoadAndChurnQuiesces (1.31s)
+=== RUN   TestV2RequestSurface
+=== RUN   TestV2RequestSurface/fetch_ok_and_truncated
+=== RUN   TestV2RequestSurface/egress_blocked
+=== RUN   TestV2RequestSurface/allow-list_blocked
+=== RUN   TestV2RequestSurface/transport_failure
+--- PASS: TestV2RequestSurface (3.12s)
+    --- PASS: TestV2RequestSurface/fetch_ok_and_truncated (0.61s)
+    --- PASS: TestV2RequestSurface/egress_blocked (0.61s)
+    --- PASS: TestV2RequestSurface/allow-list_blocked (0.60s)
+    --- PASS: TestV2RequestSurface/transport_failure (0.60s)
+=== RUN   TestV2RequestBodyReadErrorFailsBeforeDownstream
+--- PASS: TestV2RequestBodyReadErrorFailsBeforeDownstream (0.62s)
+=== RUN   TestV2FetchFailureLogOmitsGuestURLAndTransportError
+--- PASS: TestV2FetchFailureLogOmitsGuestURLAndTransportError (0.62s)
+=== RUN   TestV2ResponseSurface
+--- PASS: TestV2ResponseSurface (0.61s)
+=== RUN   TestV2HostCallsOutsideAnInvocation
+--- PASS: TestV2HostCallsOutsideAnInvocation (0.01s)
+=== RUN   TestV2ContractViolationsFailInvocation
+--- PASS: TestV2ContractViolationsFailInvocation (0.73s)
+PASS
+ok  	jul/internal/plugins	22.981s

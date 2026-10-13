@@ -33,6 +33,13 @@
 | 2026-08-24 | #332 landed, choosing the mechanism this record left open: `cacheWriter` stores the multiset difference between the header map at commit and the same map as it stood when the cache handler was entered, so `X-Request-ID` and the cache's own `X-Cache` — both pre-set before the handler runs — cancel out of a stored entry unless the handler overwrote them with a different value. §11's invariant is upgraded from the commit-boundary form to the unconditional one, as anticipated, with the residual this record predicted: the difference delivers no-leak, not fidelity, so a handler `Set`ting a field to the outer layer's exact value under-stores it, and a handler deleting an outer-set field sees it resurface on a later hit. Both are tested (`TestHandlerSettingTheOuterLayersExactValueIsNotStored`, `TestHandlerDeletingAnOuterHeaderIsResurrectedOnAHit`) rather than left to be rediscovered. Both hard merge gates on #146 are now satisfied. |
 | 2026-08-27 | **§6 corrected during #145's implementation, by the differential gate this record mandates.** The `/`-fold was unsound: it justified making `prefix "/"` an ordinary tier-2 candidate on the grounds that it "behaves exactly as the current `sr.fallback` does", but `sr.fallback` is consulted *after* the regex tier, so the fold would have let a `prefix "/"` location shadow every regex location in its block — the ordinary `location /` plus `location ~ \.php$` shape, already pinned by `TestLocationPrecedence`. The catch-all keeps its position as tier 4; everything the fold was for (enumerated candidate, fallthrough, predicates, first-declared wins) is unaffected. §6 also now states what the fold left implicit: a non-rooted path matches no tier, including tier 4, which is the property §2's `CONNECT` rule already assumed and which the old unconditional fallback did not provide. |
 
+> **Current reading (2026-10-13):** Context, pre-implementation tables and
+> implementation sequencing below record the dated design baseline. For current
+> delivered behavior and operator limits, use [the active guide](../core-http.md)
+> and [feature status](../feature-status.yaml). Routing, resilience and auxiliary
+> egress retain their separate #590 post-GA soak obligation; this review runs no
+> new long-duration campaign.
+
 ## Context
 
 Jul selects a location by path alone. `MatchConfig` has exactly two fields, `type` and `path`, and

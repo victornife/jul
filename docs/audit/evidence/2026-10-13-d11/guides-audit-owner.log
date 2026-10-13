@@ -1,0 +1,89 @@
+=== RUN   TestAuditSinkTransitionKeepsRingAndGlobalIDs
+--- PASS: TestAuditSinkTransitionKeepsRingAndGlobalIDs (0.00s)
+=== RUN   TestAuditSinkSamePathSharesPhysicalOwner
+--- PASS: TestAuditSinkSamePathSharesPhysicalOwner (0.00s)
+=== RUN   TestAuditSinkExactNoopDoesNotChurnGeneration
+--- PASS: TestAuditSinkExactNoopDoesNotChurnGeneration (0.00s)
+=== RUN   TestAuditSinkDisabledNoop
+--- PASS: TestAuditSinkDisabledNoop (0.00s)
+=== RUN   TestAuditSinkAbortPreservesExistingBytes
+--- PASS: TestAuditSinkAbortPreservesExistingBytes (0.00s)
+=== RUN   TestAuditSinkAbortRemovesCandidateOwnedEmptyArtifacts
+--- PASS: TestAuditSinkAbortRemovesCandidateOwnedEmptyArtifacts (0.00s)
+=== RUN   TestAuditSinkRejectsFinalSymlink
+--- PASS: TestAuditSinkRejectsFinalSymlink (0.00s)
+=== RUN   TestAuditSinkConcurrentCutoverExactlyOneDestination
+--- PASS: TestAuditSinkConcurrentCutoverExactlyOneDestination (0.09s)
+=== RUN   TestAuditSinkRotationCompatibilityAndRetention
+--- PASS: TestAuditSinkRotationCompatibilityAndRetention (0.01s)
+=== RUN   TestAuditSinkStatusRecoversOnSuccessfulWrite
+--- PASS: TestAuditSinkStatusRecoversOnSuccessfulWrite (0.00s)
+=== RUN   TestHistoryRetentionPrunesRawAndSidecarAsPair
+--- PASS: TestHistoryRetentionPrunesRawAndSidecarAsPair (0.00s)
+=== RUN   TestHistoryRetentionMetadataDeleteFailurePreservesPair
+--- PASS: TestHistoryRetentionMetadataDeleteFailurePreservesPair (0.00s)
+=== RUN   TestManagedHistorySnapshotUsesPublishedCandidateRetention
+--- PASS: TestManagedHistorySnapshotUsesPublishedCandidateRetention (0.00s)
+=== RUN   TestHistoryRetentionConcurrentSnapshotGetListPruneUpdateRaceClean
+--- PASS: TestHistoryRetentionConcurrentSnapshotGetListPruneUpdateRaceClean (0.04s)
+=== RUN   TestHistoryRetentionStagesThenPrunesOnlyAfterPublish
+--- PASS: TestHistoryRetentionStagesThenPrunesOnlyAfterPublish (0.00s)
+=== RUN   TestHistoryRetentionAbortAndIncreaseDeleteNothing
+--- PASS: TestHistoryRetentionAbortAndIncreaseDeleteNothing (0.00s)
+=== RUN   TestHistoryRetentionPruneFailureIsAdvisory
+time=2026-10-13T05:29:26.403-05:00 level=WARN msg="configuration history retention prune degraded after publish" error="remove history metadata: injected remove failure\nremove history metadata: injected remove failure"
+--- PASS: TestHistoryRetentionPruneFailureIsAdvisory (0.00s)
+=== RUN   TestHistoryRetentionConcurrentOperationsRaceClean
+--- PASS: TestHistoryRetentionConcurrentOperationsRaceClean (0.01s)
+=== RUN   TestAdminAuditSinkPatchSparseAndExplicitDisable
+--- PASS: TestAdminAuditSinkPatchSparseAndExplicitDisable (0.00s)
+=== RUN   TestAdminAuditSinkPatchRejectsNegativeAndEmptyPayload
+--- PASS: TestAdminAuditSinkPatchRejectsNegativeAndEmptyPayload (0.00s)
+=== RUN   TestResolveAuditSinkConfigCanonicalDefaultsAndValidation
+--- PASS: TestResolveAuditSinkConfigCanonicalDefaultsAndValidation (0.00s)
+=== RUN   TestAuditSinkRoundTripAtoBtoA
+--- PASS: TestAuditSinkRoundTripAtoBtoA (0.00s)
+=== RUN   TestAuditSinkAbortAndCommitAreIdempotent
+--- PASS: TestAuditSinkAbortAndCommitAreIdempotent (0.00s)
+=== RUN   TestAuditSinkShortWriteIsCountedAndRingSurvives
+--- PASS: TestAuditSinkShortWriteIsCountedAndRingSurvives (0.00s)
+=== RUN   TestAuditSinkInjectedWriteErrorIsCounted
+--- PASS: TestAuditSinkInjectedWriteErrorIsCounted (0.00s)
+=== RUN   TestAuditSinkCloseFailureIsAdvisoryToNewGeneration
+--- PASS: TestAuditSinkCloseFailureIsAdvisoryToNewGeneration (0.00s)
+=== RUN   TestAuditSinkBlockedWriteDoesNotBlockPublishAndEventuallyReleasesOldOwner
+--- PASS: TestAuditSinkBlockedWriteDoesNotBlockPublishAndEventuallyReleasesOldOwner (0.00s)
+=== RUN   TestAuditSinkBlockedCloseIsBoundedAndCompletesExactlyOnce
+--- PASS: TestAuditSinkBlockedCloseIsBoundedAndCompletesExactlyOnce (0.00s)
+=== RUN   TestAuditSinkShutdownTimeoutDefersReleaseToLastWrite
+--- PASS: TestAuditSinkShutdownTimeoutDefersReleaseToLastWrite (0.00s)
+=== RUN   TestAuditSinkIdentityRaceIsRejected
+--- PASS: TestAuditSinkIdentityRaceIsRejected (0.00s)
+=== RUN   TestAuditSinkRotationFailureAndRecoveryPath
+--- PASS: TestAuditSinkRotationFailureAndRecoveryPath (0.00s)
+=== RUN   TestAuditSinkCleanupFailureDoesNotLoseWrittenEvent
+--- PASS: TestAuditSinkCleanupFailureDoesNotLoseWrittenEvent (0.00s)
+=== RUN   TestAuditSinkRotationBoundariesAndBackupCollision
+--- PASS: TestAuditSinkRotationBoundariesAndBackupCollision (0.00s)
+=== RUN   TestAuditSinkRootOpenFailureIsTyped
+--- PASS: TestAuditSinkRootOpenFailureIsTyped (0.00s)
+=== RUN   TestAuditSinkOversizedEventFailsWithoutWriting
+--- PASS: TestAuditSinkOversizedEventFailsWithoutWriting (0.00s)
+=== RUN   TestAuditSinkRecoveredHealthPreservesLastFailure
+--- PASS: TestAuditSinkRecoveredHealthPreservesLastFailure (0.00s)
+=== RUN   TestAuditSinkRetiredCloseFailureIsHistoricalButNotActive
+--- PASS: TestAuditSinkRetiredCloseFailureIsHistoricalButNotActive (0.00s)
+=== RUN   TestAuditSinkRapidAtoBtoAReusesStillDrainingPhysicalOwner
+--- PASS: TestAuditSinkRapidAtoBtoAReusesStillDrainingPhysicalOwner (0.00s)
+=== RUN   TestAuditSinkReusedOwnerCarriesLateFailureIntoCurrentGeneration
+--- PASS: TestAuditSinkReusedOwnerCarriesLateFailureIntoCurrentGeneration (0.00s)
+=== RUN   TestAuditSinkSameOwnerPolicyPublishPreservesDegradationUntilSuccessfulWrite
+--- PASS: TestAuditSinkSameOwnerPolicyPublishPreservesDegradationUntilSuccessfulWrite (0.00s)
+=== RUN   TestAuditSinkWarningThrottleAccounting
+--- PASS: TestAuditSinkWarningThrottleAccounting (0.00s)
+=== RUN   TestAuditSinkEncodeFailureAdvancesTicketAndRingContinues
+--- PASS: TestAuditSinkEncodeFailureAdvancesTicketAndRingContinues (0.00s)
+=== RUN   TestReadyzDegradedOnAuditSinkFailure
+--- PASS: TestReadyzDegradedOnAuditSinkFailure (0.00s)
+PASS
+ok  	jul/internal/admin	1.216s

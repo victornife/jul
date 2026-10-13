@@ -163,8 +163,8 @@ fails authoritative build-tag preflight; it is never silently removed.
 The operation validates a copy before assigning, so a malformed late field
 cannot partially mutate earlier fields. Its audit/preview summary lists only
 changed field names. Compression changes remain hot-reloadable according to the
-canonical lifecycle registry. The current Traffic Controls form moves to this
-operation in #81; its existing guided TOML path remains supported meanwhile.
+canonical lifecycle registry. The current Traffic Controls form uses this
+operation through completed #81; its guided TOML path also remains supported.
 
 ## Benchmarks
 

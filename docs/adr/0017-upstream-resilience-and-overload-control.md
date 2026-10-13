@@ -14,6 +14,13 @@
   [ADR 0009](0009-two-tier-editing.md) (Console editing tiers),
   [ADR 0013](0013-project-operating-model-and-completeness.md) (portfolio entry)
 
+> **Current reading (2026-10-13):** Context, pre-implementation tables and
+> implementation sequencing below record the dated design baseline. For current
+> delivered behavior and operator limits, use [the active guide](../upstreams.md)
+> and [feature status](../feature-status.yaml). Routing, resilience and auxiliary
+> egress retain their separate #590 post-GA soak obligation; this review runs no
+> new long-duration campaign.
+
 ## Context
 
 Jul load-balances, health-checks, discovers and retries across backends. It does not bound how much

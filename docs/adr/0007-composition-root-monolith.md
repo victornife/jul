@@ -1,6 +1,6 @@
 # ADR 0007 — Composition-root monolith (`cmd/jul/main.go`)
 
-- **Status:** Accepted — composition-root extraction complete; `main.go` < 100 LOC (CQ-2 / #54, 2026-07-15)
+- **Status:** Accepted — composition-root extraction complete (CQ-2 / #54, 2026-07-15)
 - **Date:** 2026-06-30 (updated 2026-07-15)
 - **Deciders:** Jul.IA maintainers
 - **Applies to:** `cmd/jul/main.go`, runtime-initialization architecture
@@ -26,7 +26,7 @@ scheduled milestones (SEQ-04 and CQ-2 / #54):
 - **`HandlerFactory`** (`internal/app/factory.go`): per-reload handler-tree builder (middleware chain, action builders, generational teardown). *(CQ-2 / #54, 2026-07-15)*
 - **`app.Serve`** (`internal/app/serve.go`): full server orchestration (init, factory wiring, preflight, admin deps, server run, config file-watch). *(CQ-2 / #54, 2026-07-15)*
 
-`cmd/jul/main.go` is now **91 LOC** (flag parsing, config loading, subcommand dispatch, and a one-line `app.Serve` call). The `< 250 LOC` target is met. Five characterization tests for `HandlerFactory` were added in `internal/app/factory_test.go`.
+At the 2026-07-15 checkpoint, `cmd/jul/main.go` was **91 LOC** (flag parsing, config loading, subcommand dispatch, and a one-line `app.Serve` call). The historical `< 250 LOC` extraction target was met; these counts are not current source-size limits. Five characterization tests for `HandlerFactory` were added in `internal/app/factory_test.go`.
 
 ## Decision (original, 2026-06-30)
 
@@ -46,7 +46,7 @@ The original decision was "No refactor now" with a trigger condition. That trigg
 ## Consequences
 
 - **Positive:** `main.go` is now a thin CLI entry point; every composition-root concern is unit-testable without a full process boot. Adding a new cross-cutting feature requires touching `internal/app/`, not `cmd/jul/main.go`.
-- **Negative:** The orchestration logic in `internal/app/serve.go` (~320 LOC) is the new policy choke-point; it must be reviewed carefully on any cross-cutting change.
+- **Negative:** The orchestration logic in `internal/app/serve.go` (~320 LOC at that extraction checkpoint) is the new policy choke-point; it must be reviewed carefully on any cross-cutting change.
 - **Mitigation:** Any change to `serve.go` or `factory.go` requires both the lean and full CI profiles to pass, including the race-detector job.
 
 ## Related

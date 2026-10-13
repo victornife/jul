@@ -8,18 +8,18 @@
 
 ## Context
 
-`go.mod` contains:
+Before the in-tree fork resolved this debt, `go.mod` contained:
 
 ```go
 replace golang.org/x/tools => golang.org/x/tools v0.6.0
 ```
 
-The pin is necessary because `github.com/yookoala/gofast@v0.8.0` (FastCGI client
+The historical pin was necessary because `github.com/yookoala/gofast@v0.8.0` (FastCGI client
 library) imports `golang.org/x/tools/godoc/vfs`, which was removed in
 `x/tools v0.30.0+`.  The latest `x/tools` (v0.40.0 at time of writing) no longer
 ships `godoc/vfs`, so a plain `go get` or transitive update breaks the build.
 
-The comment in `go.mod` notes that this path is "not runtime except
+The former comment in `go.mod` noted that this path is "not runtime except
 gofast/vfs", i.e. the vulnerable surface is only through FastCGI/uWSGI
 configuration, not the core proxy path.
 
@@ -55,13 +55,14 @@ time.
 
 ## Consequences
 
-- We take **Option D now** and schedule a re-evaluation whenever a security
-  advisory is published that touches `x/tools v0.6.0` or when the FastCGI
-  feature is next touched.
-- The backlog item is linked from `go.mod` with a `TODO(ADR-0008)` comment.
+- The evaluated pin was replaced by the in-tree `third_party/gofast` fork.
+  Review local fork changes and retain vulnerability/build/handler gates; the
+  historical Option D and TODO are no longer the active disposition.
+- The risk discussion above records the original assessment, not a current
+  guarantee that a dependency has no vulnerabilities.
 
 ## Related
 
-- `go.mod` — `replace golang.org/x/tools` line
+- `go.mod` — local `replace github.com/yookoala/gofast => ./third_party/gofast`
 - `internal/handler/fastcgi.go` — the only importer of `gofast`
-- `internal/handler/uwsgi.go` — also uses `gofast`
+- `internal/handler/fastcgi.go` — also owns uWSGI protocol handling

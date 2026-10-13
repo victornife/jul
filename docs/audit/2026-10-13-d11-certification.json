@@ -911,15 +911,29 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Go owns the host runtime, native/WASM capabilities remain bounded edges; current runtime has no SQLite storage or image-codec dependency",
+        "Race execution requires an available C toolchain; original technology choices are policy, not proof of every optional feature"
+      ],
+      "implementation_and_authority": [
+        "go.mod",
+        "cmd/jul/main.go",
+        ".github/workflows/ci.yml",
+        "internal/plugins/stub.go"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-032",
@@ -932,15 +946,32 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Location actions select explicit native gRPC/transcoding adapters, not a universal protocol converter",
+        "GraphQL remains a future proposal; ADR0013 amends demand-only entry without activating a capability"
+      ],
+      "implementation_and_authority": [
+        "internal/router/router.go",
+        "internal/transcode",
+        "docs/feature-status.yaml",
+        "docs/adr/0013-project-operating-model-and-completeness.md"
+      ],
+      "named_tests": [
+        "TestTranscodedRetryIdempotencyMatrix"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/guides-transcode-contracts.log",
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-033",
@@ -953,15 +984,28 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "June Year2 Beta classification is historical; feature-status.yaml owns current delivery/maturity/soak",
+        "ADR0005 amends criterion5; short capture/race tests do not complete the mandatory long-soak obligation, and no status is promoted"
+      ],
+      "implementation_and_authority": [
+        "docs/feature-status.yaml",
+        "docs/adr/0005-soak-post-ga-gate.md",
+        "docs/adr/0013-project-operating-model-and-completeness.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-034",
@@ -995,15 +1039,28 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Soak remains mandatory after GA: per-feature minimum1h, consolidated minimum4h, recommended8h",
+        "Operability is class-appropriate under ADR0014; #590 owns routing/CORS, resilience and auxiliary-egress post-GA execution"
+      ],
+      "implementation_and_authority": [
+        "docs/adr/0014-operability-surfaces.md",
+        "docs/feature-status.yaml",
+        "docs/soak-procedures.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-036",
@@ -1037,15 +1094,28 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Composition-root and DI decisions remain architecture guidance; July main/serve line-count observations are explicitly historical",
+        "Current command entry delegates and serve composes owners, but source size is not represented as satisfying the old sub100-line target"
+      ],
+      "implementation_and_authority": [
+        "cmd/jul/main.go",
+        "internal/app/serve.go",
+        "internal/app/factory.go"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-038",
@@ -1058,15 +1128,29 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Current gofast v0.8.0 resolves to the maintained in-tree module via go.mod replace, with its own dependency contract",
+        "Original x/tools version/proposal and CVE assessment are historical; active FastCGI owner is fastcgi.go, not an absent uwsgi.go"
+      ],
+      "implementation_and_authority": [
+        "go.mod",
+        "third_party/gofast",
+        "internal/handler/fastcgi.go",
+        ".github/workflows/ci.yml"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-039",
@@ -1159,15 +1243,29 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "AGPL OSS floor covers standalone node, configuration and security fixes; commercial/fleet/external-identity proposals are additive horizons",
+        "Policy promises do not activate hosted licensing, federation or SSO; config/history/audit exports use existing portable server contracts"
+      ],
+      "implementation_and_authority": [
+        "LICENSE",
+        "docs/feature-status.yaml",
+        "internal/admin/apiv1_export.go",
+        "docs/adr/0013-project-operating-model-and-completeness.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-043",
@@ -1180,15 +1278,28 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Five portfolio lanes allow evidence-backed correctness/core work and explicitly bounded experiments without a universal customer-demand gate",
+        "Runtime dynamics are value-ranked; planned restarts are valid structural outcomes and the roadmap/#62 own actual order"
+      ],
+      "implementation_and_authority": [
+        "docs/operating-model.md",
+        "docs/specs/core-gateway-completeness.md",
+        "docs/roadmap/README.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-044",
@@ -1201,15 +1312,29 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Server owns config mutation/lifecycle semantics; runtime capabilities need Console/API, while migration/schema/remote automation can be CLI-first",
+        "Raw TOML is complete expert editing; curated forms preserve advanced fields and unsupported build capabilities fail before persistence"
+      ],
+      "implementation_and_authority": [
+        "internal/admin/patch_http.go",
+        "internal/configcontract",
+        "internal/admin/ui/src/features/config",
+        "docs/adr/0019-configuration-authority-generated-contracts-and-resource-identity.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-045",
@@ -1260,15 +1385,36 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Inbound canonical client identity and backend verified peer identity are distinct; direct peer is default and forwarded identity needs explicit trusted hops",
+        "Preimplementation/August comparison tables are historical; current UDP affinity uses socket-peer session identity, not original-client PROXYv2 DGRAM",
+        "Private roots/name/mTLS backend policies do not redefine HTTP Host or gRPC authority"
+      ],
+      "implementation_and_authority": [
+        "internal/clientaddr",
+        "internal/backendtls",
+        "internal/stream",
+        "docs/configuration.md",
+        "docs/configuration.md"
+      ],
+      "named_tests": [
+        "TestResolveTrustRoots",
+        "TestProbeUsesTheSameTrustAsLiveTraffic"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/guides-identity-resilience-affinity.log",
+        "evidence/2026-10-13-d11/guides-trust-route-storage.log",
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-047",
@@ -1281,15 +1427,36 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Current pool admission/circuit/retry uses shared owner and generation snapshots; health, open circuits, saturation and retry exclusions constrain eligibility",
+        "Application outcomes are not transport failure; unsafe/unreplayable requests are not automatically retried, and retry budget/attempt cap remain bounded",
+        "Original Context/timeline/proposal comparisons are dated design baseline rather than current missing-feature claims; #590 soak remains pending"
+      ],
+      "implementation_and_authority": [
+        "internal/upstream",
+        "internal/handler/proxy.go",
+        "internal/transcode/retry_test.go",
+        "docs/upstreams.md"
+      ],
+      "named_tests": [
+        "TestRetryableEligibilityMatrix",
+        "TestDoDoesNotRetryUnreplayableRequests",
+        "TestTranscodedUnaryDoesNotRetryApplicationErrors"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/guides-identity-resilience-affinity.log",
+        "evidence/2026-10-13-d11/guides-transcode-contracts.log",
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-048",
@@ -1302,15 +1469,32 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Current router combines bounded method/header/query predicates; ResponsePolicy/CORS surround policy/action responses and do not implement arbitrary expressions",
+        "Config bounds include16 predicate items,8 regexes/512-byte patterns,1024-byte predicate values,32 response operations and bounded CORS lists",
+        "Historical implementation sequence/tables are not current missing-capability evidence; preflight/header semantics are covered by actual router/middleware contracts"
+      ],
+      "implementation_and_authority": [
+        "internal/config",
+        "internal/router/router.go",
+        "internal/middleware",
+        "docs/configuration.md",
+        "docs/configuration.md"
+      ],
       "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/guides-trust-route-storage.log",
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-049",
@@ -1365,15 +1549,38 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Explicit per-plugin ABI negotiation preserves v1 and rejects mismatches before Publish; v2 request/response are separate pooled invocations",
+        "Response hooks sit inside WAF and outside cache; request state4KiB, added headers64KiB and reused max_response_body default8MiB bound mutation",
+        "Encoded/streaming/partial/upgraded bodies have explicit unavailability; no chunk callbacks, WebSocket frames or gRPC message transforms"
+      ],
+      "implementation_and_authority": [
+        "internal/plugins",
+        "internal/app/factory.go",
+        "testdata/plugins/abi-v1.golden",
+        "testdata/plugins/abi-v2.golden",
+        "docs/abi.md"
+      ],
+      "named_tests": [
+        "TestABIV1Golden",
+        "TestABIV2Golden",
+        "TestNegotiateABIMatrix",
+        "TestV2ResponseSurface",
+        "TestHandlerTypeV2HasNoResponsePoint"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/guides-plugin-contracts.log",
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-051",
@@ -1386,15 +1593,37 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "rendezvous_v1 uses deterministic integer weighted rankings and stable backend identities; health/circuit/capacity/retry eligibility still applies",
+        "Bounded client_ip/header/cookie keys have missing-key fallback; TCP selects per connection and UDP per socket-peer session",
+        "NGINX ip_hash/hash mapping is approximated, never exact placement parity; historical benchmark figures are not fresh measurements"
+      ],
+      "implementation_and_authority": [
+        "internal/affinity",
+        "internal/upstream/affinity_test.go",
+        "internal/stream",
+        "internal/migrate/nginx",
+        "docs/upstreams.md"
+      ],
+      "named_tests": [
+        "TestRendezvousV1GoldenVectors",
+        "TestConsistentHashRespectsCircuitAndHalfOpenProbes",
+        "TestConsistentHashRetryWalksRankedOrder"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/guides-identity-resilience-affinity.log",
+        "evidence/2026-10-13-d11/guides-migration-full.log",
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-052",
@@ -1407,15 +1636,31 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "All21 stable ADR numbers/headings/index entries are present; chronology is Date metadata, not identifier order",
+        "Original ADR0015 renumbering is explicit; docs/audit/old historical citations remain immutable"
+      ],
+      "implementation_and_authority": [
+        "scripts/docs-check.py",
+        "scripts/test_docs_check.py",
+        "docs/adr/0015-managed-apply-terminal-ledger.md"
+      ],
+      "named_tests": [
+        "test_check_adr_numbering_detects_duplicate_number",
+        "test_check_adr_numbering_detects_unindexed_record"
+      ],
+      "execution_evidence": [
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-053",
@@ -1470,15 +1715,36 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "audit_log/audit_max_size/audit_keep/audit_fail_closed/require_managed_mutations use prepared durable sink transitions and event-time destination selection",
+        "history_keep is independently hot and prunes after Publish, with advisory failure; history_dir and config authority are separate restart-bound fields",
+        "Durable sink failure can degrade health/readiness and gate mutations; it does not retrospectively change a completed traffic request"
+      ],
+      "implementation_and_authority": [
+        "internal/admin/audit_sink_runtime.go",
+        "internal/admin/audit_admin_runtime.go",
+        "docs/generated/config-lifecycle.json",
+        "scripts/semantic_drift.py"
+      ],
+      "named_tests": [
+        "TestAuditSinkConcurrentCutoverExactlyOneDestination",
+        "TestHistoryRetentionStagesThenPrunesOnlyAfterPublish",
+        "TestHistoryRetentionPruneFailureIsAdvisory",
+        "test_real_audit_history_retention_consumer_rejects_restart_drift"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/guides-audit-owner.log",
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-056",
@@ -1512,15 +1778,34 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Compression uses typed Traffic Controls completed in #81 plus guided/raw TOML; obsolete future-delivery wording removed",
+        "Encoding negotiation/build capabilities, status/body eligibility, weak-validator behavior and configured MIME filter own the actual response contract"
+      ],
+      "implementation_and_authority": [
+        "internal/middleware/compress.go",
+        "internal/middleware/compress_etag_test.go",
+        "internal/admin/ui/src/features",
+        "docs/configuration.md"
+      ],
+      "named_tests": [
+        "TestCompressionWeakensStrongETag",
+        "TestCompressedETagCannotSatisfyIfRange"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/guides-observation-owner.log",
+        "evidence/2026-10-13-d11/guides-trust-route-storage.log",
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-058",
@@ -1571,15 +1856,35 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Native gRPC uses resolved backend TLS policy (default platform roots), separating trust identity from authority, and supports consistent_hash alongside three earlier strategies",
+        "Proxying retains native protocol/stream behavior; transcoding is a separate action and excluded protocol claims remain explicit"
+      ],
+      "implementation_and_authority": [
+        "internal/handler/grpcproxy.go",
+        "internal/backendtls",
+        "internal/upstream",
+        "docs/configuration.md",
+        "docs/upstreams.md"
+      ],
+      "named_tests": [
+        "TestProbeGRPCTrustMatrix",
+        "TestHealthGRPCAuthorityPreservesTrust"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/guides-identity-resilience-affinity.log",
+        "evidence/2026-10-13-d11/guides-trust-route-storage.log",
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-060",
@@ -1592,15 +1897,35 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Unary retry eligibility combines protobuf idempotency with safe HTTP binding: UNKNOWN alone grants nothing, but GET/PUT/DELETE can retry; unsafe POST/PATCH UNKNOWN cannot",
+        "Backend connection replacement is workload identity/generation-scoped; nominal60s retired-cache eviction is not an instantaneous trust-revocation SLO",
+        "Resolved TLS policy owns roots/name/mTLS; streaming is not replayed as unary traffic"
+      ],
+      "implementation_and_authority": [
+        "internal/transcode",
+        "internal/backendtls",
+        "internal/upstream/retry.go"
+      ],
+      "named_tests": [
+        "TestTranscodedRetryIdempotencyMatrix",
+        "TestTranscodedUnaryDoesNotRetryApplicationErrors",
+        "TestTranscodedRetryHonoursAttemptCap",
+        "TestConnCacheEvictsAReplacedWorkloadOnReconcile"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/guides-transcode-contracts.log",
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-061",
@@ -1734,15 +2059,39 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "OTel http.target uses URL.Path without query, while host/path/user-agent may still contain sensitive values; raw Slog access records separately include query",
+        "Access-log fields are method,host,path,query,status,bytes,duration_ms,client_ip,request_id,user_agent plus conditional trust/result/reason/trace fields and slog envelope",
+        "stdout obeys global log level; configured file/syslog sinks emit info; Console-tail projection is not a promise of raw-sink redaction",
+        "Runnable check uses -config; collector, trust and writable paths remain external prerequisites"
+      ],
+      "implementation_and_authority": [
+        "internal/observability/tracing.go",
+        "internal/middleware/logging.go",
+        "internal/observability/logging.go",
+        "internal/observability/sinks.go",
+        "testdata/otel.toml"
+      ],
+      "named_tests": [
+        "TestSlogSinkOutput",
+        "TestAccessLogCapturesTraceID",
+        "TestDynamicRootSamplerUpdateCutover"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/guides-observation-owner.log",
+        "evidence/2026-10-13-d11/guides-access-fields.log",
+        "evidence/2026-10-13-d11/guides-otel-config.log",
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-067",
@@ -1841,15 +2190,34 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Dedicated security package floors are plugins69/rbac75/waf72 and missing profiles fail closed; admin catalog/transport inventory gates deny unauthorized routes",
+        "External conformance reports retain exact provenance: historicalH2 566/584 and currentH3 seven dependency exceptions/#569 do not certify fullRFC conformance",
+        "Coverage/security regressions supplement the accepted #514 risk review; private disclosure policy remains SECURITY.md"
+      ],
+      "implementation_and_authority": [
+        "scripts/security-package-coverage.json",
+        "scripts/check-package-coverage.py",
+        ".github/workflows/security-gates.yml",
+        ".github/workflows/conformance.yml",
+        "testdata/conformance/allowlist.yaml",
+        "SECURITY.md"
+      ],
+      "named_tests": [
+        "TestRouteTransportPolicyInventory"
+      ],
+      "execution_evidence": [
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-071",
@@ -2114,15 +2482,37 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "fixed in this PR",
+      "claims": [
+        "Named Unix upstreams implement plaintextHTTP1.1 with preserved Host and isolated opaque transport identity; TLS/h2c/directUnix proxy_pass remain rejected",
+        "Shared balancing/resilience now includes consistent_hash; connect checks dial Unix but HTTP-health checks on Unix pools remain unsupported",
+        "#407 hosted AF_UNIX/platform and #516 unchanged Windows-service evidence are source-bound; local environment AF_UNIX denial is a failure, not a pass"
+      ],
+      "implementation_and_authority": [
+        "internal/handler/proxy_unix_test.go",
+        "internal/upstream",
+        ".github/workflows/issue407-quality.yml",
+        "docs/audit/2026-10-12-deployment-journeys.md"
+      ],
+      "named_tests": [
+        "TestProxyUnixHTTPPreservesHostAndForwardsBody",
+        "TestProxyUnixHTTPRejectsHTTPSBeforeTraffic",
+        "TestProxyUnixHTTPGatewayErrorDoesNotExposePath"
+      ],
+      "execution_evidence": [
+        "2026-10-13-d11-guides.md",
+        "https://github.com/victornife/jul/actions/runs/38377283466",
+        "evidence/2026-10-13-d11/feature-tests-with-environment-failures.log",
+        "evidence/2026-10-12-deployment/manifest.json"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-084",
@@ -3501,15 +3891,39 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Frozen full wildcard remains intact: implementation references substantiate migration classification, upstream health/admission/retry/affinity, WASM ABI/resource bounds and WAF policy",
+        "No every-line security audit is claimed; source owning tests and normal CI establish only the enumerated operator contracts, and NGINX approximations stay explicit"
+      ],
+      "implementation_and_authority": [
+        "internal/migrate",
+        "internal/upstream",
+        "internal/plugins",
+        "internal/waf",
+        "docs/nginx-assessment.md",
+        "docs/abi.md",
+        "docs/upstreams.md"
+      ],
+      "named_tests": [
+        "TestRetryableEligibilityMatrix",
+        "TestABIV2Golden",
+        "TestRendezvousV1GoldenVectors"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/guides-identity-resilience-affinity.log",
+        "evidence/2026-10-13-d11/guides-plugin-contracts.log",
+        "evidence/2026-10-13-d11/guides-migration-full.log",
+        "2026-10-13-d11-guides.md"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-107",
@@ -3576,15 +3990,37 @@
       "area": "security-protocol-observability",
       "responsible_owner": "Single-agent D11 implementation reviewer; maintainer/assigned reviewer owns independent acceptance",
       "review_boundary": "Documented/operator-visible contracts for this surface; source substantiation, not an every-line code-security audit",
-      "status": "pending",
-      "verdict": null,
-      "claims": [],
-      "implementation_and_authority": [],
-      "named_tests": [],
-      "execution_evidence": [],
-      "limitations": [],
+      "status": "reviewed",
+      "verdict": "correct",
+      "claims": [
+        "Frozen full wildcard remains intact: observability logging/tracing/storage projections have explicit owners, bounded status fields and platform statfs implementations",
+        "Filesystem resource availability is distinct from storage write success and advisory history health; unavailable metrics are not numeric zero",
+        "Local broad process-resource test failed in this environment and is retained; focused contracts and unchanged-runtime hosted full suite are separate evidence"
+      ],
+      "implementation_and_authority": [
+        "internal/observability",
+        "internal/storagefs",
+        "docs/otel.md",
+        "docs/deployment.md"
+      ],
+      "named_tests": [
+        "TestSlogSinkOutput",
+        "TestDynamicRootSamplerUpdateCutover"
+      ],
+      "execution_evidence": [
+        "evidence/2026-10-13-d11/guides-trust-route-storage.log",
+        "evidence/2026-10-13-d11/guides-observation-owner.log",
+        "2026-10-13-d11-guides.md",
+        "https://github.com/victornife/jul/actions/runs/38377283466",
+        "evidence/2026-10-13-d11/feature-tests-with-environment-failures.log"
+      ],
+      "limitations": [
+        "Source-backed operator-contract review, not every-line code/security certification; named tests are linked to bounded owning contracts rather than blanket feature certification",
+        "Policy/design/history sections are explicitly separated from current implementation and maturity; no new soak, external provider certification or historical evidence relabeling"
+      ],
       "open_defects": [],
-      "establishing_pr": null
+      "establishing_pr": "Pending publication of docs/d11-guides-515",
+      "reviewed_runtime_source": "616f0ca0ec7ef3f7568ec8b11d0fc1c783df14bc"
     },
     {
       "id": "D11-108",

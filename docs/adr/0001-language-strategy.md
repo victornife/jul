@@ -11,9 +11,11 @@ Jul.IA is a single, statically-linked Go binary with **no cgo** (`CGO_ENABLED=0`
 trivial `GOOS`/`GOARCH` cross-compilation, and a *lean-by-default* build whose
 heavier features are opt-in behind build tags. That property is deliberate and
 recurring: the project chose [wazero](https://github.com/tetratelabs/wazero)
-(pure-Go WebAssembly), `modernc.org/sqlite` (pure-Go, CGO-free), pure-Go image
-codecs, and a hand-rolled PROXY-protocol parser specifically to avoid C
-toolchains and preserve the one-binary story.
+(pure-Go WebAssembly), pure-Go compression libraries, and a hand-rolled
+PROXY-protocol parser to avoid C toolchains and preserve the one-binary story.
+SQLite and image-transform examples below describe possible future choices;
+`modernc.org/sqlite` is not a current module dependency. The
+[feature manifest](../feature-status.yaml) records shipped capabilities.
 
 A natural question for a performance-sensitive proxy/gateway is whether the most
 CPU-intensive paths should be written in a systems language such as **Rust**.
@@ -55,9 +57,8 @@ native alternative is considered. Reach for Profile-Guided Optimization (PGO),
 - **FFI overhead often cancels the win.** Per-crossing cost (tens–hundreds of ns,
   plus scheduler constraints) erases the compute benefit for fine-grained calls.
 - **The single static binary is Jul.IA's headline differentiator.** cgo trades it
-  away for marginal gains on a workload that rarely needs them. (Tell: this repo
-  can't even run `-race` locally because there is no C toolchain on PATH — that
-  friction would become every contributor's daily build experience.)
+  away for marginal gains on a workload that rarely needs them. Race testing needs a C toolchain; the CI race lane provides one. The release
+  binary build remains CGO-free.
 - **WASM already gives us memory-safe, native-ish extensions** without touching
   the build story — users can write Rust guardrails/transforms/filters today.
 

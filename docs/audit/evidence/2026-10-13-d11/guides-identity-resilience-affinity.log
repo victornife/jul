@@ -1,0 +1,1006 @@
+=== RUN   TestDerive
+=== RUN   TestDerive/direct_deployment_has_no_policy_and_client_equals_peer
+=== RUN   TestDerive/untrusted_peer_ignores_forwarded_headers
+=== RUN   TestDerive/trusted_peer_without_headers_stays_on_the_peer
+=== RUN   TestDerive/single_trusted_proxy_with_xff
+=== RUN   TestDerive/multiple_proxies_strip_trusted_hops_right_to_left
+=== RUN   TestDerive/spoofed_leftmost_entries_are_not_reached
+=== RUN   TestDerive/all_asserted_hops_trusted_yields_the_leftmost
+=== RUN   TestDerive/forwarded_wins_over_xff_only_when_explicitly_enabled
+=== RUN   TestDerive/default_policy_ignores_a_client-supplied_forwarded_header
+=== RUN   TestDerive/configured_order_selects_xff_first
+=== RUN   TestDerive/malformed_selected_header_never_falls_through_to_the_other
+=== RUN   TestDerive/absent_forwarded_falls_through_to_xff
+=== RUN   TestDerive/obfuscated_hop_reached_by_the_walk_fails_closed
+=== RUN   TestDerive/unknown_hop_left_of_an_untrusted_address_is_never_reached
+=== RUN   TestDerive/hostnames_are_never_canonical_clients
+=== RUN   TestDerive/ipv6_client_through_an_ipv6_proxy
+=== RUN   TestDerive/ipv4-mapped_ipv6_peer_matches_an_ipv4_prefix
+=== RUN   TestDerive/port_in_an_xff_entry_is_not_guessed_at
+=== RUN   TestDerive/chain_longer_than_max_hops_fails_closed
+=== RUN   TestDerive/chain_exactly_at_max_hops_is_accepted
+=== RUN   TestDerive/repeated_header_lines_form_one_chain
+=== RUN   TestDerive/repeated_forwarded_lines_form_one_chain
+=== RUN   TestDerive/empty_header_list_keeps_peer_identity_for_a_trusted_peer
+=== RUN   TestDerive/two_for_parameters_in_one_element_are_ambiguous
+=== RUN   TestDerive/oversized_header_fails_closed_without_parsing
+=== RUN   TestDerive/single-host_trusted_proxy_entry
+--- PASS: TestDerive (0.00s)
+    --- PASS: TestDerive/direct_deployment_has_no_policy_and_client_equals_peer (0.00s)
+    --- PASS: TestDerive/untrusted_peer_ignores_forwarded_headers (0.00s)
+    --- PASS: TestDerive/trusted_peer_without_headers_stays_on_the_peer (0.00s)
+    --- PASS: TestDerive/single_trusted_proxy_with_xff (0.00s)
+    --- PASS: TestDerive/multiple_proxies_strip_trusted_hops_right_to_left (0.00s)
+    --- PASS: TestDerive/spoofed_leftmost_entries_are_not_reached (0.00s)
+    --- PASS: TestDerive/all_asserted_hops_trusted_yields_the_leftmost (0.00s)
+    --- PASS: TestDerive/forwarded_wins_over_xff_only_when_explicitly_enabled (0.00s)
+    --- PASS: TestDerive/default_policy_ignores_a_client-supplied_forwarded_header (0.00s)
+    --- PASS: TestDerive/configured_order_selects_xff_first (0.00s)
+    --- PASS: TestDerive/malformed_selected_header_never_falls_through_to_the_other (0.00s)
+    --- PASS: TestDerive/absent_forwarded_falls_through_to_xff (0.00s)
+    --- PASS: TestDerive/obfuscated_hop_reached_by_the_walk_fails_closed (0.00s)
+    --- PASS: TestDerive/unknown_hop_left_of_an_untrusted_address_is_never_reached (0.00s)
+    --- PASS: TestDerive/hostnames_are_never_canonical_clients (0.00s)
+    --- PASS: TestDerive/ipv6_client_through_an_ipv6_proxy (0.00s)
+    --- PASS: TestDerive/ipv4-mapped_ipv6_peer_matches_an_ipv4_prefix (0.00s)
+    --- PASS: TestDerive/port_in_an_xff_entry_is_not_guessed_at (0.00s)
+    --- PASS: TestDerive/chain_longer_than_max_hops_fails_closed (0.00s)
+    --- PASS: TestDerive/chain_exactly_at_max_hops_is_accepted (0.00s)
+    --- PASS: TestDerive/repeated_header_lines_form_one_chain (0.00s)
+    --- PASS: TestDerive/repeated_forwarded_lines_form_one_chain (0.00s)
+    --- PASS: TestDerive/empty_header_list_keeps_peer_identity_for_a_trusted_peer (0.00s)
+    --- PASS: TestDerive/two_for_parameters_in_one_element_are_ambiguous (0.00s)
+    --- PASS: TestDerive/oversized_header_fails_closed_without_parsing (0.00s)
+    --- PASS: TestDerive/single-host_trusted_proxy_entry (0.00s)
+=== RUN   TestDeriveUnparseablePeerFailsClosed
+--- PASS: TestDeriveUnparseablePeerFailsClosed (0.00s)
+=== RUN   TestAttributedSeparatesClientsFromUnresolvedHops
+=== RUN   TestAttributedSeparatesClientsFromUnresolvedHops/accepted
+=== RUN   TestAttributedSeparatesClientsFromUnresolvedHops/untrusted_peer
+=== RUN   TestAttributedSeparatesClientsFromUnresolvedHops/malformed
+=== RUN   TestAttributedSeparatesClientsFromUnresolvedHops/too_many_hops
+--- PASS: TestAttributedSeparatesClientsFromUnresolvedHops (0.00s)
+    --- PASS: TestAttributedSeparatesClientsFromUnresolvedHops/accepted (0.00s)
+    --- PASS: TestAttributedSeparatesClientsFromUnresolvedHops/untrusted_peer (0.00s)
+    --- PASS: TestAttributedSeparatesClientsFromUnresolvedHops/malformed (0.00s)
+    --- PASS: TestAttributedSeparatesClientsFromUnresolvedHops/too_many_hops (0.00s)
+=== RUN   TestNilPolicyTrustsNothing
+--- PASS: TestNilPolicyTrustsNothing (0.00s)
+=== RUN   TestNewPolicyRejectsUnusableInput
+=== RUN   TestNewPolicyRejectsUnusableInput/host_bits_set
+=== RUN   TestNewPolicyRejectsUnusableInput/not_an_address
+=== RUN   TestNewPolicyRejectsUnusableInput/empty_entry
+=== RUN   TestNewPolicyRejectsUnusableInput/unknown_header
+=== RUN   TestNewPolicyRejectsUnusableInput/duplicate_header
+=== RUN   TestNewPolicyRejectsUnusableInput/max_hops_beyond_the_limit
+--- PASS: TestNewPolicyRejectsUnusableInput (0.00s)
+    --- PASS: TestNewPolicyRejectsUnusableInput/host_bits_set (0.00s)
+    --- PASS: TestNewPolicyRejectsUnusableInput/not_an_address (0.00s)
+    --- PASS: TestNewPolicyRejectsUnusableInput/empty_entry (0.00s)
+    --- PASS: TestNewPolicyRejectsUnusableInput/unknown_header (0.00s)
+    --- PASS: TestNewPolicyRejectsUnusableInput/duplicate_header (0.00s)
+    --- PASS: TestNewPolicyRejectsUnusableInput/max_hops_beyond_the_limit (0.00s)
+=== RUN   TestPolicyOrderIndependence
+--- PASS: TestPolicyOrderIndependence (0.00s)
+=== RUN   TestContextAccessors
+--- PASS: TestContextAccessors (0.00s)
+=== RUN   TestFromContextRejectsForeignValue
+--- PASS: TestFromContextRejectsForeignValue (0.00s)
+=== RUN   TestSpoofedAndEnumStrings
+--- PASS: TestSpoofedAndEnumStrings (0.00s)
+=== RUN   TestParseForwardedElements
+=== RUN   TestParseForwardedElements/simple
+=== RUN   TestParseForwardedElements/quoted_ipv6_with_port
+=== RUN   TestParseForwardedElements/quoted_ipv6_without_port
+=== RUN   TestParseForwardedElements/ipv4_with_port
+=== RUN   TestParseForwardedElements/case_insensitive_parameter
+=== RUN   TestParseForwardedElements/other_parameters_ignored
+=== RUN   TestParseForwardedElements/multiple_elements_keep_order
+=== RUN   TestParseForwardedElements/obfuscated_identifier
+=== RUN   TestParseForwardedElements/unknown_identifier
+=== RUN   TestParseForwardedElements/element_without_for
+=== RUN   TestParseForwardedElements/empty_element
+=== RUN   TestParseForwardedElements/hostname_is_not_an_address
+=== RUN   TestParseForwardedElements/unbracketed_ipv6
+=== RUN   TestParseForwardedElements/bracketed_ipv4
+=== RUN   TestParseForwardedElements/zoned_address
+=== RUN   TestParseForwardedElements/escaped_quote_inside_value
+=== RUN   TestParseForwardedElements/comma_inside_quotes_is_not_a_separator
+=== RUN   TestParseForwardedElements/invalid_port
+=== RUN   TestParseForwardedElements/oversized_port
+=== RUN   TestParseForwardedElements/unterminated_quote
+=== RUN   TestParseForwardedElements/trailing_escape
+=== RUN   TestParseForwardedElements/parameter_without_value
+=== RUN   TestParseForwardedElements/duplicate_for
+--- PASS: TestParseForwardedElements (0.00s)
+    --- PASS: TestParseForwardedElements/simple (0.00s)
+    --- PASS: TestParseForwardedElements/quoted_ipv6_with_port (0.00s)
+    --- PASS: TestParseForwardedElements/quoted_ipv6_without_port (0.00s)
+    --- PASS: TestParseForwardedElements/ipv4_with_port (0.00s)
+    --- PASS: TestParseForwardedElements/case_insensitive_parameter (0.00s)
+    --- PASS: TestParseForwardedElements/other_parameters_ignored (0.00s)
+    --- PASS: TestParseForwardedElements/multiple_elements_keep_order (0.00s)
+    --- PASS: TestParseForwardedElements/obfuscated_identifier (0.00s)
+    --- PASS: TestParseForwardedElements/unknown_identifier (0.00s)
+    --- PASS: TestParseForwardedElements/element_without_for (0.00s)
+    --- PASS: TestParseForwardedElements/empty_element (0.00s)
+    --- PASS: TestParseForwardedElements/hostname_is_not_an_address (0.00s)
+    --- PASS: TestParseForwardedElements/unbracketed_ipv6 (0.00s)
+    --- PASS: TestParseForwardedElements/bracketed_ipv4 (0.00s)
+    --- PASS: TestParseForwardedElements/zoned_address (0.00s)
+    --- PASS: TestParseForwardedElements/escaped_quote_inside_value (0.00s)
+    --- PASS: TestParseForwardedElements/comma_inside_quotes_is_not_a_separator (0.00s)
+    --- PASS: TestParseForwardedElements/invalid_port (0.00s)
+    --- PASS: TestParseForwardedElements/oversized_port (0.00s)
+    --- PASS: TestParseForwardedElements/unterminated_quote (0.00s)
+    --- PASS: TestParseForwardedElements/trailing_escape (0.00s)
+    --- PASS: TestParseForwardedElements/parameter_without_value (0.00s)
+    --- PASS: TestParseForwardedElements/duplicate_for (0.00s)
+=== RUN   TestParseXFFEntries
+=== RUN   TestParseXFFEntries/single
+=== RUN   TestParseXFFEntries/spaces_trimmed
+=== RUN   TestParseXFFEntries/ipv6
+=== RUN   TestParseXFFEntries/ipv4-mapped_ipv6_normalized
+=== RUN   TestParseXFFEntries/port_is_not_standard
+=== RUN   TestParseXFFEntries/brackets_are_not_standard
+=== RUN   TestParseXFFEntries/zone_rejected
+=== RUN   TestParseXFFEntries/empty_entry
+=== RUN   TestParseXFFEntries/garbage_entry
+--- PASS: TestParseXFFEntries (0.00s)
+    --- PASS: TestParseXFFEntries/single (0.00s)
+    --- PASS: TestParseXFFEntries/spaces_trimmed (0.00s)
+    --- PASS: TestParseXFFEntries/ipv6 (0.00s)
+    --- PASS: TestParseXFFEntries/ipv4-mapped_ipv6_normalized (0.00s)
+    --- PASS: TestParseXFFEntries/port_is_not_standard (0.00s)
+    --- PASS: TestParseXFFEntries/brackets_are_not_standard (0.00s)
+    --- PASS: TestParseXFFEntries/zone_rejected (0.00s)
+    --- PASS: TestParseXFFEntries/empty_entry (0.00s)
+    --- PASS: TestParseXFFEntries/garbage_entry (0.00s)
+=== RUN   TestParseChainStopsAtTheHopLimit
+--- PASS: TestParseChainStopsAtTheHopLimit (0.00s)
+=== RUN   TestParsePrefix
+=== RUN   TestParsePrefix/ipv4_cidr
+=== RUN   TestParsePrefix/ipv6_cidr
+=== RUN   TestParsePrefix/bare_ipv4_becomes_a_host_prefix
+=== RUN   TestParsePrefix/bare_ipv6_becomes_a_host_prefix
+=== RUN   TestParsePrefix/surrounding_space
+=== RUN   TestParsePrefix/ipv4-mapped_bare_address_normalized
+--- PASS: TestParsePrefix (0.00s)
+    --- PASS: TestParsePrefix/ipv4_cidr (0.00s)
+    --- PASS: TestParsePrefix/ipv6_cidr (0.00s)
+    --- PASS: TestParsePrefix/bare_ipv4_becomes_a_host_prefix (0.00s)
+    --- PASS: TestParsePrefix/bare_ipv6_becomes_a_host_prefix (0.00s)
+    --- PASS: TestParsePrefix/surrounding_space (0.00s)
+    --- PASS: TestParsePrefix/ipv4-mapped_bare_address_normalized (0.00s)
+=== RUN   FuzzDerive
+=== RUN   FuzzDerive/seed#0
+=== RUN   FuzzDerive/seed#1
+=== RUN   FuzzDerive/seed#2
+=== RUN   FuzzDerive/seed#3
+=== RUN   FuzzDerive/seed#4
+=== RUN   FuzzDerive/seed#5
+=== RUN   FuzzDerive/seed#6
+=== RUN   FuzzDerive/seed#7
+=== RUN   FuzzDerive/seed#8
+=== RUN   FuzzDerive/seed#9
+=== RUN   FuzzDerive/seed#10
+=== RUN   FuzzDerive/seed#11
+=== RUN   FuzzDerive/seed#12
+=== RUN   FuzzDerive/seed#13
+--- PASS: FuzzDerive (0.00s)
+    --- PASS: FuzzDerive/seed#0 (0.00s)
+    --- PASS: FuzzDerive/seed#1 (0.00s)
+    --- PASS: FuzzDerive/seed#2 (0.00s)
+    --- PASS: FuzzDerive/seed#3 (0.00s)
+    --- PASS: FuzzDerive/seed#4 (0.00s)
+    --- PASS: FuzzDerive/seed#5 (0.00s)
+    --- PASS: FuzzDerive/seed#6 (0.00s)
+    --- PASS: FuzzDerive/seed#7 (0.00s)
+    --- PASS: FuzzDerive/seed#8 (0.00s)
+    --- PASS: FuzzDerive/seed#9 (0.00s)
+    --- PASS: FuzzDerive/seed#10 (0.00s)
+    --- PASS: FuzzDerive/seed#11 (0.00s)
+    --- PASS: FuzzDerive/seed#12 (0.00s)
+    --- PASS: FuzzDerive/seed#13 (0.00s)
+=== RUN   FuzzParsePrefix
+=== RUN   FuzzParsePrefix/seed#0
+=== RUN   FuzzParsePrefix/seed#1
+=== RUN   FuzzParsePrefix/seed#2
+=== RUN   FuzzParsePrefix/seed#3
+=== RUN   FuzzParsePrefix/seed#4
+=== RUN   FuzzParsePrefix/seed#5
+=== RUN   FuzzParsePrefix/seed#6
+--- PASS: FuzzParsePrefix (0.00s)
+    --- PASS: FuzzParsePrefix/seed#0 (0.00s)
+    --- PASS: FuzzParsePrefix/seed#1 (0.00s)
+    --- PASS: FuzzParsePrefix/seed#2 (0.00s)
+    --- PASS: FuzzParsePrefix/seed#3 (0.00s)
+    --- PASS: FuzzParsePrefix/seed#4 (0.00s)
+    --- PASS: FuzzParsePrefix/seed#5 (0.00s)
+    --- PASS: FuzzParsePrefix/seed#6 (0.00s)
+PASS
+ok  	jul/internal/clientaddr	1.019s
+=== RUN   TestAdmissionUnlimitedByDefault
+--- PASS: TestAdmissionUnlimitedByDefault (0.00s)
+=== RUN   TestAdmissionCapBoundary
+--- PASS: TestAdmissionCapBoundary (0.00s)
+=== RUN   TestAdmissionNoQueueByDefault
+--- PASS: TestAdmissionNoQueueByDefault (0.00s)
+=== RUN   TestAdmissionQueueFull
+--- PASS: TestAdmissionQueueFull (0.00s)
+=== RUN   TestAdmissionCancelReleasesQueueSlot
+--- PASS: TestAdmissionCancelReleasesQueueSlot (0.00s)
+=== RUN   TestAdmissionPendingTimeout
+--- PASS: TestAdmissionPendingTimeout (0.02s)
+=== RUN   TestAdmissionFIFOOrder
+--- PASS: TestAdmissionFIFOOrder (0.01s)
+=== RUN   TestAdmissionRetireWakesParkedWaiters
+--- PASS: TestAdmissionRetireWakesParkedWaiters (0.00s)
+=== RUN   TestAdmissionPoolCloseWakesParkedWaiters
+--- PASS: TestAdmissionPoolCloseWakesParkedWaiters (0.00s)
+=== RUN   TestAdmissionLimitDecreaseDrainsMonotonically
+--- PASS: TestAdmissionLimitDecreaseDrainsMonotonically (0.00s)
+=== RUN   TestAdmissionLimitIncreaseWakesWaiters
+--- PASS: TestAdmissionLimitIncreaseWakesWaiters (0.00s)
+=== RUN   TestAdmissionHandoffVersusCancel
+--- PASS: TestAdmissionHandoffVersusCancel (2.33s)
+=== RUN   TestAdmissionConcurrentPolicySwap
+--- PASS: TestAdmissionConcurrentPolicySwap (0.30s)
+=== RUN   TestAdmissionReleaseIsIdempotent
+--- PASS: TestAdmissionReleaseIsIdempotent (0.00s)
+=== RUN   TestAdmissionNoGoroutinePerWaiter
+--- PASS: TestAdmissionNoGoroutinePerWaiter (0.00s)
+=== RUN   TestConsistentHashIsDeterministicAndMatchesRendezvous
+--- PASS: TestConsistentHashIsDeterministicAndMatchesRendezvous (0.01s)
+=== RUN   TestConsistentHashIndependentOfOrderAndRebuild
+--- PASS: TestConsistentHashIndependentOfOrderAndRebuild (0.01s)
+=== RUN   TestConsistentHashMissingKeyUsesFallback
+=== RUN   TestConsistentHashMissingKeyUsesFallback/fallback=
+=== RUN   TestConsistentHashMissingKeyUsesFallback/fallback=round_robin
+=== RUN   TestConsistentHashMissingKeyUsesFallback/fallback=least_conn
+=== RUN   TestConsistentHashMissingKeyUsesFallback/fallback=weighted_round_robin
+--- PASS: TestConsistentHashMissingKeyUsesFallback (0.00s)
+    --- PASS: TestConsistentHashMissingKeyUsesFallback/fallback= (0.00s)
+    --- PASS: TestConsistentHashMissingKeyUsesFallback/fallback=round_robin (0.00s)
+    --- PASS: TestConsistentHashMissingKeyUsesFallback/fallback=least_conn (0.00s)
+    --- PASS: TestConsistentHashMissingKeyUsesFallback/fallback=weighted_round_robin (0.00s)
+=== RUN   TestConsistentHashMissingKeysDoNotPileUp
+--- PASS: TestConsistentHashMissingKeysDoNotPileUp (0.00s)
+=== RUN   TestConsistentHashSkipsUnhealthyAndReturnsOnRecovery
+--- PASS: TestConsistentHashSkipsUnhealthyAndReturnsOnRecovery (0.00s)
+=== RUN   TestConsistentHashRespectsCircuitAndHalfOpenProbes
+--- PASS: TestConsistentHashRespectsCircuitAndHalfOpenProbes (0.00s)
+=== RUN   TestConsistentHashSpillsPastSaturatedBackend
+--- PASS: TestConsistentHashSpillsPastSaturatedBackend (0.00s)
+=== RUN   TestConsistentHashRetryWalksRankedOrder
+--- PASS: TestConsistentHashRetryWalksRankedOrder (0.00s)
+=== RUN   TestConsistentHashDiscoveryRemapping
+    affinity_test.go:317: discovery 8->9: 11.02% remapped (ideal 11.11%)
+--- PASS: TestConsistentHashDiscoveryRemapping (0.42s)
+=== RUN   TestConsistentHashKeepsMappingAcrossFailedResolve
+--- PASS: TestConsistentHashKeepsMappingAcrossFailedResolve (0.00s)
+=== RUN   TestConsistentHashSnapshotsUseTheSameMapping
+--- PASS: TestConsistentHashSnapshotsUseTheSameMapping (0.00s)
+=== RUN   TestAffinityKeyExtractionAndHook
+--- PASS: TestAffinityKeyExtractionAndHook (0.00s)
+=== RUN   TestHashStatusAndRegistryShape
+--- PASS: TestHashStatusAndRegistryShape (0.00s)
+=== RUN   TestConsistentHashConcurrentSelectionUnderChurn
+--- PASS: TestConsistentHashConcurrentSelectionUnderChurn (0.03s)
+=== RUN   TestRendezvousPickKeyEmpty
+--- PASS: TestRendezvousPickKeyEmpty (0.00s)
+=== RUN   TestAmplificationUnderTotalOutage
+=== RUN   TestAmplificationUnderTotalOutage/sustained_load_holds_the_bound_to_within_the_free-retry_floor
+    amplification_test.go:59: inbound=100000 upstream_attempts=110003 amplification=1.10003x
+=== RUN   TestAmplificationUnderTotalOutage/low_volume_is_bounded_by_the_same_floor
+    amplification_test.go:85: inbound=1000 retries=103 amplification=1.1030x
+--- PASS: TestAmplificationUnderTotalOutage (0.34s)
+    --- PASS: TestAmplificationUnderTotalOutage/sustained_load_holds_the_bound_to_within_the_free-retry_floor (0.33s)
+    --- PASS: TestAmplificationUnderTotalOutage/low_volume_is_bounded_by_the_same_floor (0.00s)
+=== RUN   TestAnUnbudgetedPoolAmplifiesByTheAttemptCap
+    amplification_test.go:104: unbudgeted: inbound=200 upstream_attempts=600 amplification=3.00x
+--- PASS: TestAnUnbudgetedPoolAmplifiesByTheAttemptCap (0.00s)
+=== RUN   TestWatchInboundBodyAbsent
+--- PASS: TestWatchInboundBodyAbsent (0.00s)
+=== RUN   TestInboundBodyCleanRead
+--- PASS: TestInboundBodyCleanRead (0.00s)
+=== RUN   TestInboundBodyAttribution
+=== RUN   TestInboundBodyAttribution/invalid_byte_in_chunk_length
+=== RUN   TestInboundBodyAttribution/http:_request_body_too_large
+--- PASS: TestInboundBodyAttribution (0.00s)
+    --- PASS: TestInboundBodyAttribution/invalid_byte_in_chunk_length (0.00s)
+    --- PASS: TestInboundBodyAttribution/http:_request_body_too_large (0.00s)
+=== RUN   TestInboundBodyRetainsFirstError
+--- PASS: TestInboundBodyRetainsFirstError (0.00s)
+=== RUN   TestInboundBodyCancellationPrecedence
+--- PASS: TestInboundBodyCancellationPrecedence (0.00s)
+=== RUN   TestAttemptFailureAttributionMatrix
+=== RUN   TestAttemptFailureAttributionMatrix/success
+=== RUN   TestAttemptFailureAttributionMatrix/client_cancellation
+=== RUN   TestAttemptFailureAttributionMatrix/client_deadline
+=== RUN   TestAttemptFailureAttributionMatrix/Jul_retry_deadline
+=== RUN   TestAttemptFailureAttributionMatrix/backend_identity
+=== RUN   TestAttemptFailureAttributionMatrix/backend_timeout
+=== RUN   TestAttemptFailureAttributionMatrix/backend_transport
+=== RUN   TestAttemptFailureAttributionMatrix/Jul_out_of_descriptors
+--- PASS: TestAttemptFailureAttributionMatrix (0.00s)
+    --- PASS: TestAttemptFailureAttributionMatrix/success (0.00s)
+    --- PASS: TestAttemptFailureAttributionMatrix/client_cancellation (0.00s)
+    --- PASS: TestAttemptFailureAttributionMatrix/client_deadline (0.00s)
+    --- PASS: TestAttemptFailureAttributionMatrix/Jul_retry_deadline (0.00s)
+    --- PASS: TestAttemptFailureAttributionMatrix/backend_identity (0.00s)
+    --- PASS: TestAttemptFailureAttributionMatrix/backend_timeout (0.00s)
+    --- PASS: TestAttemptFailureAttributionMatrix/backend_transport (0.00s)
+    --- PASS: TestAttemptFailureAttributionMatrix/Jul_out_of_descriptors (0.00s)
+=== RUN   TestDeadlinePrecedenceDoesNotDependOnErrPublication
+--- PASS: TestDeadlinePrecedenceDoesNotDependOnErrPublication (0.00s)
+=== RUN   TestProtocolClassificationPreservesLifecycleOwnership
+--- PASS: TestProtocolClassificationPreservesLifecycleOwnership (0.00s)
+=== RUN   TestClientCancellationNeverTripsSharedBackendHealth
+=== RUN   TestClientCancellationNeverTripsSharedBackendHealth/max_fails_1
+=== RUN   TestClientCancellationNeverTripsSharedBackendHealth/max_fails_3
+--- PASS: TestClientCancellationNeverTripsSharedBackendHealth (0.00s)
+    --- PASS: TestClientCancellationNeverTripsSharedBackendHealth/max_fails_1 (0.00s)
+    --- PASS: TestClientCancellationNeverTripsSharedBackendHealth/max_fails_3 (0.00s)
+=== RUN   TestNeutralHalfOpenAttemptReturnsProbeSlot
+--- PASS: TestNeutralHalfOpenAttemptReturnsProbeSlot (0.00s)
+=== RUN   TestBackendApplicationResultClosesHalfOpenCircuit
+--- PASS: TestBackendApplicationResultClosesHalfOpenCircuit (0.00s)
+=== RUN   TestAttemptBodyCloseClassification
+=== RUN   TestAttemptBodyCloseClassification/client_cancellation
+=== RUN   TestAttemptBodyCloseClassification/Jul_attempt_cancellation
+=== RUN   TestAttemptBodyCloseClassification/backend_close_error
+=== RUN   TestAttemptBodyCloseClassification/incomplete_local_close
+--- PASS: TestAttemptBodyCloseClassification (0.00s)
+    --- PASS: TestAttemptBodyCloseClassification/client_cancellation (0.00s)
+    --- PASS: TestAttemptBodyCloseClassification/Jul_attempt_cancellation (0.00s)
+    --- PASS: TestAttemptBodyCloseClassification/backend_close_error (0.00s)
+    --- PASS: TestAttemptBodyCloseClassification/incomplete_local_close (0.00s)
+=== RUN   TestAttemptBodyPreservesReadWriteCloserAndClassifiesWriteFailure
+--- PASS: TestAttemptBodyPreservesReadWriteCloserAndClassifiesWriteFailure (0.00s)
+=== RUN   TestAttemptBodyCompleteReadIsSuccess
+--- PASS: TestAttemptBodyCompleteReadIsSuccess (0.00s)
+=== RUN   TestAttemptBodyDeclaredLengthTruncationIsBackendFailure
+--- PASS: TestAttemptBodyDeclaredLengthTruncationIsBackendFailure (0.00s)
+=== RUN   TestAttemptBodyEmptyResponseIsSuccess
+--- PASS: TestAttemptBodyEmptyResponseIsSuccess (0.00s)
+=== RUN   TestAttemptBodyReadCloseRaceCompletesExactlyOnce
+--- PASS: TestAttemptBodyReadCloseRaceCompletesExactlyOnce (0.00s)
+=== RUN   TestAttemptBodyReadFailureIsBackendFailure
+--- PASS: TestAttemptBodyReadFailureIsBackendFailure (0.00s)
+=== RUN   TestAttemptClassifierCoversTimeoutInterfaceAndInvalidProtocolReason
+--- PASS: TestAttemptClassifierCoversTimeoutInterfaceAndInvalidProtocolReason (0.00s)
+=== RUN   TestDoReleasesSuccessfulNonRetainedAttempt
+--- PASS: TestDoReleasesSuccessfulNonRetainedAttempt (0.00s)
+=== RUN   TestOwedBodyLength
+--- PASS: TestOwedBodyLength (0.00s)
+=== RUN   TestSelectionBoundsProbesUnderLeastConn
+--- PASS: TestSelectionBoundsProbesUnderLeastConn (0.00s)
+=== RUN   TestSelectionReselectsWhenTheClaimLoses
+--- PASS: TestSelectionReselectsWhenTheClaimLoses (0.00s)
+=== RUN   TestSelectionConcurrentProbesAcrossBackends
+--- PASS: TestSelectionConcurrentProbesAcrossBackends (0.00s)
+=== RUN   TestOpenCircuitIsNotReportedAsCapacity
+--- PASS: TestOpenCircuitIsNotReportedAsCapacity (0.00s)
+=== RUN   TestActiveHealthSuppressesProbing
+--- PASS: TestActiveHealthSuppressesProbing (0.00s)
+=== RUN   TestCircuitClosedAdmitsWithoutProbing
+--- PASS: TestCircuitClosedAdmitsWithoutProbing (0.00s)
+=== RUN   TestCircuitOpensOnlyAtThreshold
+--- PASS: TestCircuitOpensOnlyAtThreshold (0.00s)
+=== RUN   TestCircuitInterleavedSuccessResetsTheRun
+--- PASS: TestCircuitInterleavedSuccessResetsTheRun (0.00s)
+=== RUN   TestCircuitHalfOpenAdmitsExactlyMaxProbes
+--- PASS: TestCircuitHalfOpenAdmitsExactlyMaxProbes (0.00s)
+=== RUN   TestCircuitUnboundedProbesWhenZero
+--- PASS: TestCircuitUnboundedProbesWhenZero (0.00s)
+=== RUN   TestCircuitProbeSuccessCloses
+--- PASS: TestCircuitProbeSuccessCloses (0.00s)
+=== RUN   TestCircuitOnlyOneProbeClaimsTheRecovery
+--- PASS: TestCircuitOnlyOneProbeClaimsTheRecovery (0.00s)
+=== RUN   TestCircuitProbeFailureReopensIgnoringMaxFails
+--- PASS: TestCircuitProbeFailureReopensIgnoringMaxFails (0.00s)
+=== RUN   TestCircuitHungProbeRearms
+--- PASS: TestCircuitHungProbeRearms (0.00s)
+=== RUN   TestCircuitStaleResultsAreIgnored
+=== RUN   TestCircuitStaleResultsAreIgnored/stale_success_does_not_clear_live_failures
+=== RUN   TestCircuitStaleResultsAreIgnored/stale_failure_does_not_count_toward_a_fresh_run
+=== RUN   TestCircuitStaleResultsAreIgnored/an_unadmitted_result_is_discarded
+--- PASS: TestCircuitStaleResultsAreIgnored (0.00s)
+    --- PASS: TestCircuitStaleResultsAreIgnored/stale_success_does_not_clear_live_failures (0.00s)
+    --- PASS: TestCircuitStaleResultsAreIgnored/stale_failure_does_not_count_toward_a_fresh_run (0.00s)
+    --- PASS: TestCircuitStaleResultsAreIgnored/an_unadmitted_result_is_discarded (0.00s)
+=== RUN   TestCircuitForceCloseOutranksTrafficFailures
+--- PASS: TestCircuitForceCloseOutranksTrafficFailures (0.00s)
+=== RUN   TestCircuitReleaseProbeReturnsTheSlot
+--- PASS: TestCircuitReleaseProbeReturnsTheSlot (0.00s)
+=== RUN   TestCircuitConcurrentExpiryAdmitsExactlyMaxProbes
+=== RUN   TestCircuitConcurrentExpiryAdmitsExactlyMaxProbes/#00
+=== RUN   TestCircuitConcurrentExpiryAdmitsExactlyMaxProbes/#01
+=== RUN   TestCircuitConcurrentExpiryAdmitsExactlyMaxProbes/#02
+--- PASS: TestCircuitConcurrentExpiryAdmitsExactlyMaxProbes (0.02s)
+    --- PASS: TestCircuitConcurrentExpiryAdmitsExactlyMaxProbes/#00 (0.01s)
+    --- PASS: TestCircuitConcurrentExpiryAdmitsExactlyMaxProbes/#01 (0.01s)
+    --- PASS: TestCircuitConcurrentExpiryAdmitsExactlyMaxProbes/#02 (0.00s)
+=== RUN   TestCircuitConcurrentMixedTrafficHoldsInvariants
+--- PASS: TestCircuitConcurrentMixedTrafficHoldsInvariants (0.03s)
+=== RUN   TestCircuitModel
+--- PASS: TestCircuitModel (0.01s)
+=== RUN   TestClassifyDialError
+=== RUN   TestClassifyDialError/no_backend
+=== RUN   TestClassifyDialError/wrapped_no_backend
+=== RUN   TestClassifyDialError/context_deadline
+=== RUN   TestClassifyDialError/net_timeout
+=== RUN   TestClassifyDialError/connection_refused
+=== RUN   TestClassifyDialError/connection_refused,_message-only_(Windows)
+=== RUN   TestClassifyDialError/other
+--- PASS: TestClassifyDialError (0.00s)
+    --- PASS: TestClassifyDialError/no_backend (0.00s)
+    --- PASS: TestClassifyDialError/wrapped_no_backend (0.00s)
+    --- PASS: TestClassifyDialError/context_deadline (0.00s)
+    --- PASS: TestClassifyDialError/net_timeout (0.00s)
+    --- PASS: TestClassifyDialError/connection_refused (0.00s)
+    --- PASS: TestClassifyDialError/connection_refused,_message-only_(Windows) (0.00s)
+    --- PASS: TestClassifyDialError/other (0.00s)
+=== RUN   TestClassifyAdmissionError
+=== RUN   TestClassifyAdmissionError/overloaded
+=== RUN   TestClassifyAdmissionError/retired
+=== RUN   TestClassifyAdmissionError/context_canceled
+=== RUN   TestClassifyAdmissionError/falls_through_to_dial_classification
+=== RUN   TestClassifyAdmissionError/falls_through,_other
+--- PASS: TestClassifyAdmissionError (0.00s)
+    --- PASS: TestClassifyAdmissionError/overloaded (0.00s)
+    --- PASS: TestClassifyAdmissionError/retired (0.00s)
+    --- PASS: TestClassifyAdmissionError/context_canceled (0.00s)
+    --- PASS: TestClassifyAdmissionError/falls_through_to_dial_classification (0.00s)
+    --- PASS: TestClassifyAdmissionError/falls_through,_other (0.00s)
+=== RUN   TestMarkFailureReportsTripOnlyOnce
+--- PASS: TestMarkFailureReportsTripOnlyOnce (0.00s)
+=== RUN   TestMarkSuccessReportsRecoveryOnlyWhenDown
+--- PASS: TestMarkSuccessReportsRecoveryOnlyWhenDown (0.00s)
+=== RUN   TestHealthHookFiresOnlyOnPassiveTransition
+--- PASS: TestHealthHookFiresOnlyOnPassiveTransition (0.00s)
+=== RUN   TestAllowDialFailureLogThrottles
+--- PASS: TestAllowDialFailureLogThrottles (0.00s)
+=== RUN   TestDiscoveryResponseRejectsOversizedValidPrefix
+--- PASS: TestDiscoveryResponseRejectsOversizedValidPrefix (0.17s)
+=== RUN   TestDiscoveryResponsePropagatesReadError
+--- PASS: TestDiscoveryResponsePropagatesReadError (0.00s)
+=== RUN   TestDiscoveryResultFromRetiredEgressGenerationCannotOverwriteNewGeneration
+--- PASS: TestDiscoveryResultFromRetiredEgressGenerationCannotOverwriteNewGeneration (0.02s)
+=== RUN   TestDiscoveryWorkerGenerationChurnNoLeak
+--- PASS: TestDiscoveryWorkerGenerationChurnNoLeak (0.00s)
+=== RUN   TestTargetsToServers
+--- PASS: TestTargetsToServers (0.00s)
+=== RUN   TestNewPoolAllowsEmptyDiscoveryPool
+--- PASS: TestNewPoolAllowsEmptyDiscoveryPool (0.00s)
+=== RUN   TestStartDiscoveryAppliesTargets
+--- PASS: TestStartDiscoveryAppliesTargets (0.01s)
+=== RUN   TestStartDiscoveryKeepsLastGoodOnError
+--- PASS: TestStartDiscoveryKeepsLastGoodOnError (0.01s)
+=== RUN   TestStartDiscoveryStopsOnClose
+--- PASS: TestStartDiscoveryStopsOnClose (0.06s)
+=== RUN   TestDiscoveryEnabled
+--- PASS: TestDiscoveryEnabled (0.00s)
+=== RUN   TestNewDiscovererDNS
+--- PASS: TestNewDiscovererDNS (0.00s)
+=== RUN   TestRegistryRebuildsPoolOnDiscoveryChange
+--- PASS: TestRegistryRebuildsPoolOnDiscoveryChange (0.00s)
+=== RUN   TestRegistryDiscoveryPoolIdentityIncludesEgressGeneration
+--- PASS: TestRegistryDiscoveryPoolIdentityIncludesEgressGeneration (0.00s)
+=== RUN   TestRegistryEgressCandidateAbortClosesFreshDiscovererOnly
+--- PASS: TestRegistryEgressCandidateAbortClosesFreshDiscovererOnly (0.00s)
+=== RUN   TestHealthGRPCAuthorityPreservesTrust
+=== RUN   TestHealthGRPCAuthorityPreservesTrust/h2c
+=== RUN   TestHealthGRPCAuthorityPreservesTrust/TLS
+--- PASS: TestHealthGRPCAuthorityPreservesTrust (0.08s)
+    --- PASS: TestHealthGRPCAuthorityPreservesTrust/h2c (0.01s)
+    --- PASS: TestHealthGRPCAuthorityPreservesTrust/TLS (0.07s)
+=== RUN   TestProbeUsesTheSameTrustAsLiveTraffic
+=== RUN   TestProbeUsesTheSameTrustAsLiveTraffic/no_policy_cannot_verify_a_private_CA
+=== RUN   TestProbeUsesTheSameTrustAsLiveTraffic/the_pool's_policy_makes_the_backend_probeable
+2026/10/13 05:35:05 http: TLS handshake error from 127.0.0.1:60334: remote error: tls: bad certificate
+=== RUN   TestProbeUsesTheSameTrustAsLiveTraffic/a_policy_that_names_the_wrong_identity_still_fails
+2026/10/13 05:35:05 http: TLS handshake error from 127.0.0.1:60354: remote error: tls: bad certificate
+--- PASS: TestProbeUsesTheSameTrustAsLiveTraffic (0.02s)
+    --- PASS: TestProbeUsesTheSameTrustAsLiveTraffic/no_policy_cannot_verify_a_private_CA (0.00s)
+    --- PASS: TestProbeUsesTheSameTrustAsLiveTraffic/the_pool's_policy_makes_the_backend_probeable (0.00s)
+    --- PASS: TestProbeUsesTheSameTrustAsLiveTraffic/a_policy_that_names_the_wrong_identity_still_fails (0.00s)
+=== RUN   TestProbeAndLiveTrafficFailIdentically
+=== RUN   TestProbeAndLiveTrafficFailIdentically/the_identity_the_certificate_carries
+=== RUN   TestProbeAndLiveTrafficFailIdentically/an_identity_it_does_not_carry
+2026/10/13 05:35:05 http: TLS handshake error from 127.0.0.1:35640: remote error: tls: bad certificate
+2026/10/13 05:35:05 http: TLS handshake error from 127.0.0.1:35650: remote error: tls: bad certificate
+--- PASS: TestProbeAndLiveTrafficFailIdentically (0.02s)
+    --- PASS: TestProbeAndLiveTrafficFailIdentically/the_identity_the_certificate_carries (0.01s)
+    --- PASS: TestProbeAndLiveTrafficFailIdentically/an_identity_it_does_not_carry (0.01s)
+=== RUN   TestPoolIdentityIncludesTheBackendTLSPolicy
+--- PASS: TestPoolIdentityIncludesTheBackendTLSPolicy (0.00s)
+=== RUN   TestRegistryRejectsUnresolvablePolicy
+--- PASS: TestRegistryRejectsUnresolvablePolicy (0.00s)
+=== RUN   TestPrivateCABackendIsBothReachableAndHealthy
+--- PASS: TestPrivateCABackendIsBothReachableAndHealthy (0.03s)
+=== RUN   TestProbeGRPCStatusMapping
+--- PASS: TestProbeGRPCStatusMapping (0.01s)
+=== RUN   TestProbeGRPCTimeout
+--- PASS: TestProbeGRPCTimeout (0.15s)
+=== RUN   TestProbeGRPCTrustMatrix
+=== RUN   TestProbeGRPCTrustMatrix/no_policy_cannot_verify_a_private_CA
+=== RUN   TestProbeGRPCTrustMatrix/private_CA_with_the_right_name
+=== RUN   TestProbeGRPCTrustMatrix/private_CA_with_the_wrong_name
+=== RUN   TestProbeGRPCTrustMatrix/minimum_TLS_version_is_enforced
+--- PASS: TestProbeGRPCTrustMatrix (0.02s)
+    --- PASS: TestProbeGRPCTrustMatrix/no_policy_cannot_verify_a_private_CA (0.00s)
+    --- PASS: TestProbeGRPCTrustMatrix/private_CA_with_the_right_name (0.01s)
+    --- PASS: TestProbeGRPCTrustMatrix/private_CA_with_the_wrong_name (0.00s)
+    --- PASS: TestProbeGRPCTrustMatrix/minimum_TLS_version_is_enforced (0.01s)
+=== RUN   TestProbeGRPCMTLS
+=== RUN   TestProbeGRPCMTLS/no_client_certificate_fails_the_handshake
+=== RUN   TestProbeGRPCMTLS/a_valid_client_certificate_succeeds
+--- PASS: TestProbeGRPCMTLS (0.02s)
+    --- PASS: TestProbeGRPCMTLS/no_client_certificate_fails_the_handshake (0.01s)
+    --- PASS: TestProbeGRPCMTLS/a_valid_client_certificate_succeeds (0.01s)
+=== RUN   TestProbeGRPCDiscoveryIdentityStable
+--- PASS: TestProbeGRPCDiscoveryIdentityStable (0.02s)
+=== RUN   TestHealthCheckGRPCThresholds
+--- PASS: TestHealthCheckGRPCThresholds (0.01s)
+=== RUN   TestStartHealthChecksGRPCStopsOnClose
+--- PASS: TestStartHealthChecksGRPCStopsOnClose (0.03s)
+=== RUN   TestProbeGRPCChurnQuiescence
+--- PASS: TestProbeGRPCChurnQuiescence (0.36s)
+=== RUN   TestHealthHTTPHeadersAndHostEveryProbe
+--- PASS: TestHealthHTTPHeadersAndHostEveryProbe (0.00s)
+=== RUN   TestHealthConfigIdentityAndOwnership
+--- PASS: TestHealthConfigIdentityAndOwnership (0.00s)
+=== RUN   TestHealthProbeCancelledAndFencedOnPoolRetirement
+--- PASS: TestHealthProbeCancelledAndFencedOnPoolRetirement (0.00s)
+=== RUN   TestHealthProbeLivePoolStillReports
+--- PASS: TestHealthProbeLivePoolStillReports (0.00s)
+=== RUN   TestProbeGRPCNilSeamFailsClosed
+    health_test.go:58: grpc-tagged build: the seam is wired; covered by health_grpc_test.go's status matrix
+--- SKIP: TestProbeGRPCNilSeamFailsClosed (0.00s)
+=== RUN   TestHealthParamsDefaults
+--- PASS: TestHealthParamsDefaults (0.00s)
+=== RUN   TestStatusAllowed
+--- PASS: TestStatusAllowed (0.00s)
+=== RUN   TestHealthCheckHTTPTransitions
+--- PASS: TestHealthCheckHTTPTransitions (0.00s)
+=== RUN   TestHealthCheckClearsPassiveCooldown
+--- PASS: TestHealthCheckClearsPassiveCooldown (0.00s)
+=== RUN   TestHealthCheckExpectBody
+--- PASS: TestHealthCheckExpectBody (0.00s)
+=== RUN   TestHealthCheckRejectsOversizedBodyWithExpectedPrefix
+--- PASS: TestHealthCheckRejectsOversizedBodyWithExpectedPrefix (0.00s)
+=== RUN   TestHealthCheckTCP
+--- PASS: TestHealthCheckTCP (0.00s)
+=== RUN   TestStartHealthChecksStopsOnClose
+--- PASS: TestStartHealthChecksStopsOnClose (0.08s)
+=== RUN   TestBackendStateFollowsTheWorkloadNotTheAddress
+=== RUN   TestBackendStateFollowsTheWorkloadNotTheAddress/the_same_workload_keeps_its_state
+=== RUN   TestBackendStateFollowsTheWorkloadNotTheAddress/a_replacement_at_the_same_address_starts_clean
+--- PASS: TestBackendStateFollowsTheWorkloadNotTheAddress (0.00s)
+    --- PASS: TestBackendStateFollowsTheWorkloadNotTheAddress/the_same_workload_keeps_its_state (0.00s)
+    --- PASS: TestBackendStateFollowsTheWorkloadNotTheAddress/a_replacement_at_the_same_address_starts_clean (0.00s)
+=== RUN   TestBackendReuseWithoutProviderIdentity
+--- PASS: TestBackendReuseWithoutProviderIdentity (0.00s)
+=== RUN   TestBackendIdentityRemainsAddressBased
+--- PASS: TestBackendIdentityRemainsAddressBased (0.00s)
+=== RUN   TestDiscoveryChurnMatrix
+--- PASS: TestDiscoveryChurnMatrix (0.00s)
+=== RUN   TestWeightChangeStillAppliedInPlace
+--- PASS: TestWeightChangeStillAppliedInPlace (0.00s)
+=== RUN   TestUpdateBackendsPreservesState
+--- PASS: TestUpdateBackendsPreservesState (0.00s)
+=== RUN   TestUpdateBackendsRemovesAndAdds
+--- PASS: TestUpdateBackendsRemovesAndAdds (0.00s)
+=== RUN   TestWeightedRRPrunesRemovedBackends
+--- PASS: TestWeightedRRPrunesRemovedBackends (0.00s)
+=== RUN   TestWeightedRRPrunesAfterChurn
+--- PASS: TestWeightedRRPrunesAfterChurn (0.00s)
+=== RUN   TestUpdateBackendsWeightChangePreservesState
+--- PASS: TestUpdateBackendsWeightChangePreservesState (0.00s)
+=== RUN   TestWeightedRRReconvergesAfterWeightChange
+--- PASS: TestWeightedRRReconvergesAfterWeightChange (0.00s)
+=== RUN   TestCloseIdempotentAndSignalsDone
+--- PASS: TestCloseIdempotentAndSignalsDone (0.00s)
+=== RUN   TestUpdateBackendsConcurrentWithPick
+--- PASS: TestUpdateBackendsConcurrentWithPick (0.02s)
+=== RUN   TestReasonMappingIsExhaustive
+--- PASS: TestReasonMappingIsExhaustive (0.00s)
+=== RUN   TestOverloadIsNotRateLimiting
+--- PASS: TestOverloadIsNotRateLimiting (0.00s)
+=== RUN   TestUnavailableAndCircuitOpenShareAStatusButNotAReason
+--- PASS: TestUnavailableAndCircuitOpenShareAStatusButNotAReason (0.00s)
+=== RUN   TestReasonForClassifiesSentinels
+=== RUN   TestReasonForClassifiesSentinels/no_error
+=== RUN   TestReasonForClassifiesSentinels/overloaded
+=== RUN   TestReasonForClassifiesSentinels/retired_generation
+=== RUN   TestReasonForClassifiesSentinels/at_capacity
+=== RUN   TestReasonForClassifiesSentinels/no_backend
+=== RUN   TestReasonForClassifiesSentinels/wrapped_sentinel
+=== RUN   TestReasonForClassifiesSentinels/deadline
+=== RUN   TestReasonForClassifiesSentinels/plain_transport_failure
+=== RUN   TestReasonForClassifiesSentinels/unknown_authority
+=== RUN   TestReasonForClassifiesSentinels/hostname_mismatch
+=== RUN   TestReasonForClassifiesSentinels/invalid_certificate
+=== RUN   TestReasonForClassifiesSentinels/verification_error
+=== RUN   TestReasonForClassifiesSentinels/explicit_peer_identity_mismatch
+--- PASS: TestReasonForClassifiesSentinels (0.00s)
+    --- PASS: TestReasonForClassifiesSentinels/no_error (0.00s)
+    --- PASS: TestReasonForClassifiesSentinels/overloaded (0.00s)
+    --- PASS: TestReasonForClassifiesSentinels/retired_generation (0.00s)
+    --- PASS: TestReasonForClassifiesSentinels/at_capacity (0.00s)
+    --- PASS: TestReasonForClassifiesSentinels/no_backend (0.00s)
+    --- PASS: TestReasonForClassifiesSentinels/wrapped_sentinel (0.00s)
+    --- PASS: TestReasonForClassifiesSentinels/deadline (0.00s)
+    --- PASS: TestReasonForClassifiesSentinels/plain_transport_failure (0.00s)
+    --- PASS: TestReasonForClassifiesSentinels/unknown_authority (0.00s)
+    --- PASS: TestReasonForClassifiesSentinels/hostname_mismatch (0.00s)
+    --- PASS: TestReasonForClassifiesSentinels/invalid_certificate (0.00s)
+    --- PASS: TestReasonForClassifiesSentinels/verification_error (0.00s)
+    --- PASS: TestReasonForClassifiesSentinels/explicit_peer_identity_mismatch (0.00s)
+=== RUN   TestReasonForClassifiesNetTimeout
+--- PASS: TestReasonForClassifiesNetTimeout (0.00s)
+=== RUN   TestCancellationDistinguishesTheClientFromOurOwnDeadline
+--- PASS: TestCancellationDistinguishesTheClientFromOurOwnDeadline (0.00s)
+=== RUN   TestInboundDeadlineIsNotAttributedToTheBackend
+--- PASS: TestInboundDeadlineIsNotAttributedToTheBackend (0.00s)
+=== RUN   TestClientCancellationRecords499NotGatewayTimeout
+--- PASS: TestClientCancellationRecords499NotGatewayTimeout (0.00s)
+=== RUN   TestReasonForStopUsesTheDriversVerdict
+=== RUN   TestReasonForStopUsesTheDriversVerdict/budget
+=== RUN   TestReasonForStopUsesTheDriversVerdict/not_retryable
+=== RUN   TestReasonForStopUsesTheDriversVerdict/response_started
+=== RUN   TestReasonForStopUsesTheDriversVerdict/deadline
+=== RUN   TestReasonForStopUsesTheDriversVerdict/cancelled_by_the_client
+=== RUN   TestReasonForStopUsesTheDriversVerdict/cancelled_by_us
+=== RUN   TestReasonForStopUsesTheDriversVerdict/no_backend_keeps_the_underlying_why
+=== RUN   TestReasonForStopUsesTheDriversVerdict/no_backend_with_no_error
+=== RUN   TestReasonForStopUsesTheDriversVerdict/attempts_exhausted_falls_back_to_the_error
+=== RUN   TestReasonForStopUsesTheDriversVerdict/terminal_error_falls_back_to_the_error
+--- PASS: TestReasonForStopUsesTheDriversVerdict (0.00s)
+    --- PASS: TestReasonForStopUsesTheDriversVerdict/budget (0.00s)
+    --- PASS: TestReasonForStopUsesTheDriversVerdict/not_retryable (0.00s)
+    --- PASS: TestReasonForStopUsesTheDriversVerdict/response_started (0.00s)
+    --- PASS: TestReasonForStopUsesTheDriversVerdict/deadline (0.00s)
+    --- PASS: TestReasonForStopUsesTheDriversVerdict/cancelled_by_the_client (0.00s)
+    --- PASS: TestReasonForStopUsesTheDriversVerdict/cancelled_by_us (0.00s)
+    --- PASS: TestReasonForStopUsesTheDriversVerdict/no_backend_keeps_the_underlying_why (0.00s)
+    --- PASS: TestReasonForStopUsesTheDriversVerdict/no_backend_with_no_error (0.00s)
+    --- PASS: TestReasonForStopUsesTheDriversVerdict/attempts_exhausted_falls_back_to_the_error (0.00s)
+    --- PASS: TestReasonForStopUsesTheDriversVerdict/terminal_error_falls_back_to_the_error (0.00s)
+=== RUN   TestRetrySuppressionKeepsTheBackendsAnswer
+--- PASS: TestRetrySuppressionKeepsTheBackendsAnswer (0.00s)
+=== RUN   TestInvalidReasonIsNotAMember
+--- PASS: TestInvalidReasonIsNotAMember (0.00s)
+=== RUN   TestRegistryKeysPoolsByNameAndScheme
+--- PASS: TestRegistryKeysPoolsByNameAndScheme (0.00s)
+=== RUN   TestRegistryReusesPoolWithSameNameAndScheme
+--- PASS: TestRegistryReusesPoolWithSameNameAndScheme (0.00s)
+=== RUN   TestRegistrySnapshotPoolByScheme
+--- PASS: TestRegistrySnapshotPoolByScheme (0.00s)
+=== RUN   TestRegistryReusesUnchangedPool
+--- PASS: TestRegistryReusesUnchangedPool (0.00s)
+=== RUN   TestRegistryReplacesPoolOnStrategyChange
+--- PASS: TestRegistryReplacesPoolOnStrategyChange (0.00s)
+=== RUN   TestRegistryClosesRemovedPool
+--- PASS: TestRegistryClosesRemovedPool (0.00s)
+=== RUN   TestRegistryAbortKeepsLiveClosesStaged
+--- PASS: TestRegistryAbortKeepsLiveClosesStaged (0.00s)
+=== RUN   TestRegistryAbortDoesNotMutateLiveBackends
+--- PASS: TestRegistryAbortDoesNotMutateLiveBackends (0.00s)
+=== RUN   TestRegistryDedupsWithinBuild
+--- PASS: TestRegistryDedupsWithinBuild (0.00s)
+=== RUN   TestRegistryCloseAll
+--- PASS: TestRegistryCloseAll (0.00s)
+=== RUN   TestRegistryPreflightSeedsDiscoveryPool
+--- PASS: TestRegistryPreflightSeedsDiscoveryPool (0.00s)
+=== RUN   TestRegistryStartsHealthChecks
+--- PASS: TestRegistryStartsHealthChecks (0.01s)
+=== RUN   TestRegistryWiresPassiveHealthHookWithoutActiveChecks
+--- PASS: TestRegistryWiresPassiveHealthHookWithoutActiveChecks (0.00s)
+=== RUN   TestRegistrySnapshot
+--- PASS: TestRegistrySnapshot (0.00s)
+=== RUN   TestRegistryActivationDeferred
+--- PASS: TestRegistryActivationDeferred (0.03s)
+=== RUN   TestRegistryAbortBeforeActivateClosesFreshPool
+--- PASS: TestRegistryAbortBeforeActivateClosesFreshPool (0.00s)
+=== RUN   TestRegistryCandidateSnapshotUsesPendingServers
+--- PASS: TestRegistryCandidateSnapshotUsesPendingServers (0.00s)
+=== RUN   TestRegistryActivateSkipsReusedPools
+--- PASS: TestRegistryActivateSkipsReusedPools (0.00s)
+=== RUN   TestReloadRetunesTheBreakerWithoutForgettingIt
+--- PASS: TestReloadRetunesTheBreakerWithoutForgettingIt (0.00s)
+=== RUN   TestPoolRetirementIsReportedByName
+--- PASS: TestPoolRetirementIsReportedByName (0.00s)
+=== RUN   TestPoolRetirementWaitsForEverySchemeOfAName
+--- PASS: TestPoolRetirementWaitsForEverySchemeOfAName (0.00s)
+=== RUN   TestPoolDefaultsAreUnlimited
+--- PASS: TestPoolDefaultsAreUnlimited (0.00s)
+=== RUN   TestPerBackendLimitIsSelectionFilter
+--- PASS: TestPerBackendLimitIsSelectionFilter (0.00s)
+=== RUN   TestPerBackendLimitPrefersUnsaturatedBackend
+--- PASS: TestPerBackendLimitPrefersUnsaturatedBackend (0.00s)
+=== RUN   TestPoolPolicySwapPreservesCounters
+--- PASS: TestPoolPolicySwapPreservesCounters (0.00s)
+=== RUN   TestNewPoolRejectsIncoherentPolicy
+--- PASS: TestNewPoolRejectsIncoherentPolicy (0.00s)
+=== RUN   TestHealthProbeTransportIsExemptFromConnectionBound
+--- PASS: TestHealthProbeTransportIsExemptFromConnectionBound (0.00s)
+=== RUN   TestParseSocketAddressForms
+=== RUN   TestParseSocketAddressForms/unix:/run/php/php-fpm.sock
+=== RUN   TestParseSocketAddressForms/tcp://127.0.0.1:9000
+=== RUN   TestParseSocketAddressForms/127.0.0.1:9000
+=== RUN   TestParseSocketAddressForms/[::1]:9000
+--- PASS: TestParseSocketAddressForms (0.00s)
+    --- PASS: TestParseSocketAddressForms/unix:/run/php/php-fpm.sock (0.00s)
+    --- PASS: TestParseSocketAddressForms/tcp://127.0.0.1:9000 (0.00s)
+    --- PASS: TestParseSocketAddressForms/127.0.0.1:9000 (0.00s)
+    --- PASS: TestParseSocketAddressForms/[::1]:9000 (0.00s)
+=== RUN   TestNewBackendDerivesNetworkAndScheme
+--- PASS: TestNewBackendDerivesNetworkAndScheme (0.00s)
+=== RUN   TestUnixBackendIsSelectable
+--- PASS: TestUnixBackendIsSelectable (0.00s)
+=== RUN   TestUnixBackendSurvivesDiscoveryRoundTrip
+--- PASS: TestUnixBackendSurvivesDiscoveryRoundTrip (0.00s)
+=== RUN   TestCircuitStatusReportsTheOpenDeadlineAndProbeAllowance
+--- PASS: TestCircuitStatusReportsTheOpenDeadlineAndProbeAllowance (0.00s)
+=== RUN   TestCircuitStatusIsOverriddenByActiveHealth
+--- PASS: TestCircuitStatusIsOverriddenByActiveHealth (0.00s)
+=== RUN   TestBudgetStatusDoesNotConsumeTheAllowance
+--- PASS: TestBudgetStatusDoesNotConsumeTheAllowance (0.00s)
+=== RUN   TestBudgetStatusOnAnUnbudgetedPool
+--- PASS: TestBudgetStatusOnAnUnbudgetedPool (0.00s)
+=== RUN   TestPoolResilienceReportsLimitsCountsAndEveryBackend
+--- PASS: TestPoolResilienceReportsLimitsCountsAndEveryBackend (0.00s)
+=== RUN   TestPoolResilienceStateCountsMatchItsOwnBackendList
+--- PASS: TestPoolResilienceStateCountsMatchItsOwnBackendList (0.00s)
+=== RUN   TestRegistryResilienceReturnsNilForAnUnknownPool
+--- PASS: TestRegistryResilienceReturnsNilForAnUnknownPool (0.00s)
+=== RUN   TestRetryableEligibilityMatrix
+=== RUN   TestRetryableEligibilityMatrix/all_conditions_hold
+=== RUN   TestRetryableEligibilityMatrix/no_error_is_success
+=== RUN   TestRetryableEligibilityMatrix/response_started
+=== RUN   TestRetryableEligibilityMatrix/not_replayable
+=== RUN   TestRetryableEligibilityMatrix/terminal_error
+=== RUN   TestRetryableEligibilityMatrix/client_cancelled
+=== RUN   TestRetryableEligibilityMatrix/wrapped_cancellation_still_cancelled
+=== RUN   TestRetryableEligibilityMatrix/attempts_exhausted
+=== RUN   TestRetryableEligibilityMatrix/attempts_beyond_cap
+=== RUN   TestRetryableEligibilityMatrix/zero_cap_is_not_exhaustion
+=== RUN   TestRetryableEligibilityMatrix/deadline_spent
+=== RUN   TestRetryableEligibilityMatrix/deadline_overshot
+=== RUN   TestRetryableEligibilityMatrix/no_untried_backend
+=== RUN   TestRetryableEligibilityMatrix/budget_spent
+=== RUN   TestRetryableEligibilityMatrix/response_started_outranks_budget
+=== RUN   TestRetryableEligibilityMatrix/response_started_outranks_attempts
+=== RUN   TestRetryableEligibilityMatrix/not_replayable_outranks_deadline
+=== RUN   TestRetryableEligibilityMatrix/terminal_outranks_no_backend
+=== RUN   TestRetryableEligibilityMatrix/cancellation_outranks_attempts
+=== RUN   TestRetryableEligibilityMatrix/no_backend_outranks_budget
+=== RUN   TestRetryableEligibilityMatrix/success_outranks_everything
+--- PASS: TestRetryableEligibilityMatrix (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/all_conditions_hold (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/no_error_is_success (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/response_started (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/not_replayable (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/terminal_error (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/client_cancelled (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/wrapped_cancellation_still_cancelled (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/attempts_exhausted (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/attempts_beyond_cap (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/zero_cap_is_not_exhaustion (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/deadline_spent (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/deadline_overshot (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/no_untried_backend (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/budget_spent (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/response_started_outranks_budget (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/response_started_outranks_attempts (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/not_replayable_outranks_deadline (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/terminal_outranks_no_backend (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/cancellation_outranks_attempts (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/no_backend_outranks_budget (0.00s)
+    --- PASS: TestRetryableEligibilityMatrix/success_outranks_everything (0.00s)
+=== RUN   TestBudgetFloorAllowsRetryWithoutTraffic
+--- PASS: TestBudgetFloorAllowsRetryWithoutTraffic (0.00s)
+=== RUN   TestBudgetRatioIsExact
+=== RUN   TestBudgetRatioIsExact/p100_10%
+=== RUN   TestBudgetRatioIsExact/p100_0%
+=== RUN   TestBudgetRatioIsExact/p95_10%
+=== RUN   TestBudgetRatioIsExact/p9_10%
+=== RUN   TestBudgetRatioIsExact/p100_100%
+--- PASS: TestBudgetRatioIsExact (0.00s)
+    --- PASS: TestBudgetRatioIsExact/p100_10% (0.00s)
+    --- PASS: TestBudgetRatioIsExact/p100_0% (0.00s)
+    --- PASS: TestBudgetRatioIsExact/p95_10% (0.00s)
+    --- PASS: TestBudgetRatioIsExact/p9_10% (0.00s)
+    --- PASS: TestBudgetRatioIsExact/p100_100% (0.00s)
+=== RUN   TestBudgetWindowSlides
+--- PASS: TestBudgetWindowSlides (0.00s)
+=== RUN   TestBudgetSurvivesPolicySwap
+--- PASS: TestBudgetSurvivesPolicySwap (0.00s)
+=== RUN   TestBudgetAllowIsExactUnderConcurrency
+--- PASS: TestBudgetAllowIsExactUnderConcurrency (0.00s)
+=== RUN   TestBackoffIsBoundedAndJittered
+--- PASS: TestBackoffIsBoundedAndJittered (0.00s)
+=== RUN   TestBackoffStopsRatherThanSleepingIntoTheDeadline
+--- PASS: TestBackoffStopsRatherThanSleepingIntoTheDeadline (0.00s)
+=== RUN   TestDoDeadlineDominatesEveryAttempt
+--- PASS: TestDoDeadlineDominatesEveryAttempt (0.12s)
+=== RUN   TestDoStopsAtAttemptCap
+--- PASS: TestDoStopsAtAttemptCap (0.00s)
+=== RUN   TestDoTriesEveryDistinctBackendOnceByDefault
+--- PASS: TestDoTriesEveryDistinctBackendOnceByDefault (0.00s)
+=== RUN   TestDoDoesNotRetryUnreplayableRequests
+--- PASS: TestDoDoesNotRetryUnreplayableRequests (0.00s)
+=== RUN   TestDoReleasesEveryFailedAttempt
+--- PASS: TestDoReleasesEveryFailedAttempt (0.00s)
+=== RUN   TestDoRetainsTheSuccessfulBackend
+--- PASS: TestDoRetainsTheSuccessfulBackend (0.00s)
+=== RUN   TestDoBudgetStopsAmplification
+--- PASS: TestDoBudgetStopsAmplification (0.00s)
+=== RUN   TestRetrySafeMethod
+--- PASS: TestRetrySafeMethod (0.00s)
+=== RUN   TestRetryRequestForMergesLocationOverPool
+=== RUN   TestRetryRequestForMergesLocationOverPool/an_empty_override_inherits_every_pool_value
+=== RUN   TestRetryRequestForMergesLocationOverPool/set_values_win_field_by_field
+=== RUN   TestRetryRequestForMergesLocationOverPool/a_location_backoff_replaces_the_pool's_pair,_not_half_of_it
+=== RUN   TestRetryRequestForMergesLocationOverPool/a_location_backoff_with_no_ceiling_takes_the_default,_not_the_pool's
+--- PASS: TestRetryRequestForMergesLocationOverPool (0.00s)
+    --- PASS: TestRetryRequestForMergesLocationOverPool/an_empty_override_inherits_every_pool_value (0.00s)
+    --- PASS: TestRetryRequestForMergesLocationOverPool/set_values_win_field_by_field (0.00s)
+    --- PASS: TestRetryRequestForMergesLocationOverPool/a_location_backoff_replaces_the_pool's_pair,_not_half_of_it (0.00s)
+    --- PASS: TestRetryRequestForMergesLocationOverPool/a_location_backoff_with_no_ceiling_takes_the_default,_not_the_pool's (0.00s)
+=== RUN   TestRetryRequestForReadsThePolicyPerCall
+--- PASS: TestRetryRequestForReadsThePolicyPerCall (0.00s)
+=== RUN   TestRetryRequestForNilPool
+--- PASS: TestRetryRequestForNilPool (0.00s)
+=== RUN   TestOnBackoffReportsEveryWaitBeforeItHappens
+--- PASS: TestOnBackoffReportsEveryWaitBeforeItHappens (0.00s)
+=== RUN   TestOnBackoffIsOptional
+--- PASS: TestOnBackoffIsOptional (0.00s)
+=== RUN   TestPoolSnapshotPickUsesSnapshotBackends
+--- PASS: TestPoolSnapshotPickUsesSnapshotBackends (0.00s)
+=== RUN   TestPoolSnapshotPickFallsBackToLivePool
+--- PASS: TestPoolSnapshotPickFallsBackToLivePool (0.00s)
+=== RUN   TestDiscoveryConvergenceUpdatesPerRequestSnapshot
+--- PASS: TestDiscoveryConvergenceUpdatesPerRequestSnapshot (0.30s)
+=== RUN   TestPoolSnapshotBackendsCtxUsesSnapshot
+--- PASS: TestPoolSnapshotBackendsCtxUsesSnapshot (0.00s)
+=== RUN   TestPoolSnapshotBackendsCtxDynamic
+--- PASS: TestPoolSnapshotBackendsCtxDynamic (0.00s)
+=== RUN   TestPoolSnapshotRoundRobinAdvances
+--- PASS: TestPoolSnapshotRoundRobinAdvances (0.00s)
+=== RUN   TestPoolSnapshotWeightedRoundRobinNoRace
+--- PASS: TestPoolSnapshotWeightedRoundRobinNoRace (0.02s)
+=== RUN   TestPoolSnapshotFailoverSkipsTriedBackend
+--- PASS: TestPoolSnapshotFailoverSkipsTriedBackend (0.00s)
+=== RUN   TestSnapshotMapKeysByNameAndScheme
+--- PASS: TestSnapshotMapKeysByNameAndScheme (0.00s)
+=== RUN   TestWeightedRoundRobinStateIsLocalToBalancer
+--- PASS: TestWeightedRoundRobinStateIsLocalToBalancer (0.02s)
+=== RUN   TestPickExcludingReturnsErrorWhenAllAvailableExcluded
+--- PASS: TestPickExcludingReturnsErrorWhenAllAvailableExcluded (0.00s)
+=== RUN   TestStaticSnapshotFreezesBackends
+--- PASS: TestStaticSnapshotFreezesBackends (0.00s)
+=== RUN   TestDynamicSnapshotUsesLiveBackends
+--- PASS: TestDynamicSnapshotUsesLiveBackends (0.00s)
+=== RUN   TestStatsCountsBackendsByState
+--- PASS: TestStatsCountsBackendsByState (0.00s)
+=== RUN   TestStatsSeparatesCapacityFromHealth
+--- PASS: TestStatsSeparatesCapacityFromHealth (0.00s)
+=== RUN   TestTrackConnIsIdempotent
+--- PASS: TestTrackConnIsIdempotent (0.00s)
+=== RUN   TestRegistryStatsSumsSchemesOfOneName
+--- PASS: TestRegistryStatsSumsSchemesOfOneName (0.00s)
+=== RUN   TestRegistryAllResilienceCarriesLimits
+--- PASS: TestRegistryAllResilienceCarriesLimits (0.00s)
+=== RUN   TestCircuitHookReachesBackendsBuiltLater
+--- PASS: TestCircuitHookReachesBackendsBuiltLater (0.00s)
+=== RUN   TestCircuitHookReportsHalfOpen
+--- PASS: TestCircuitHookReportsHalfOpen (0.00s)
+=== RUN   TestRegistrySnapshotProjectsUnixNetworkSeparatelyFromAddress
+--- PASS: TestRegistrySnapshotProjectsUnixNetworkSeparatelyFromAddress (0.00s)
+=== RUN   TestRoundRobinDistribution
+--- PASS: TestRoundRobinDistribution (0.00s)
+=== RUN   TestWeightedDistribution
+--- PASS: TestWeightedDistribution (0.00s)
+=== RUN   TestLeastConn
+--- PASS: TestLeastConn (0.00s)
+=== RUN   TestPassiveHealthAndRecovery
+--- PASS: TestPassiveHealthAndRecovery (0.07s)
+=== RUN   TestAllDownReturnsError
+--- PASS: TestAllDownReturnsError (0.00s)
+=== RUN   TestBackendFailCountAndAvailable
+--- PASS: TestBackendFailCountAndAvailable (0.00s)
+=== RUN   TestPoolName
+--- PASS: TestPoolName (0.00s)
+=== RUN   FuzzAdmissionInterleavings
+=== RUN   FuzzAdmissionInterleavings/seed#0
+=== RUN   FuzzAdmissionInterleavings/seed#1
+=== RUN   FuzzAdmissionInterleavings/seed#2
+=== RUN   FuzzAdmissionInterleavings/seed#3
+--- PASS: FuzzAdmissionInterleavings (0.00s)
+    --- PASS: FuzzAdmissionInterleavings/seed#0 (0.00s)
+    --- PASS: FuzzAdmissionInterleavings/seed#1 (0.00s)
+    --- PASS: FuzzAdmissionInterleavings/seed#2 (0.00s)
+    --- PASS: FuzzAdmissionInterleavings/seed#3 (0.00s)
+=== RUN   FuzzBudgetWindowRotation
+=== RUN   FuzzBudgetWindowRotation/seed#0
+=== RUN   FuzzBudgetWindowRotation/seed#1
+=== RUN   FuzzBudgetWindowRotation/seed#2
+=== RUN   FuzzBudgetWindowRotation/205c0f3ea216c80d
+=== RUN   FuzzBudgetWindowRotation/9cffb3dfc519549e
+--- PASS: FuzzBudgetWindowRotation (0.00s)
+    --- PASS: FuzzBudgetWindowRotation/seed#0 (0.00s)
+    --- PASS: FuzzBudgetWindowRotation/seed#1 (0.00s)
+    --- PASS: FuzzBudgetWindowRotation/seed#2 (0.00s)
+    --- PASS: FuzzBudgetWindowRotation/205c0f3ea216c80d (0.00s)
+    --- PASS: FuzzBudgetWindowRotation/9cffb3dfc519549e (0.00s)
+PASS
+ok  	jul/internal/upstream	6.319s
+=== RUN   TestRendezvousV1GoldenVectors
+--- PASS: TestRendezvousV1GoldenVectors (0.00s)
+=== RUN   TestRankIsIndependentOfInputOrder
+--- PASS: TestRankIsIndependentOfInputOrder (0.01s)
+=== RUN   TestIdentityNormalization
+--- PASS: TestIdentityNormalization (0.00s)
+=== RUN   TestNegLog2PositiveAndMonotone
+--- PASS: TestNegLog2PositiveAndMonotone (0.16s)
+=== RUN   TestEqualWeightFastPathMatchesWeightedOrder
+--- PASS: TestEqualWeightFastPathMatchesWeightedOrder (0.00s)
+=== RUN   TestBetterIsATotalOrder
+--- PASS: TestBetterIsATotalOrder (0.00s)
+=== RUN   TestDistributionFollowsWeights
+=== RUN   TestDistributionFollowsWeights/equal-8
+=== RUN   TestDistributionFollowsWeights/weighted-1-2-3-4
+=== RUN   TestDistributionFollowsWeights/weighted-1-9
+=== RUN   TestDistributionFollowsWeights/weighted-large
+--- PASS: TestDistributionFollowsWeights (0.27s)
+    --- PASS: TestDistributionFollowsWeights/equal-8 (0.06s)
+    --- PASS: TestDistributionFollowsWeights/weighted-1-2-3-4 (0.07s)
+    --- PASS: TestDistributionFollowsWeights/weighted-1-9 (0.04s)
+    --- PASS: TestDistributionFollowsWeights/weighted-large (0.10s)
+=== RUN   TestMembershipChangesRemapMinimally
+    affinity_test.go:388: n=2 add one: 33.47% keys remapped (ideal 33.33%)
+    affinity_test.go:402: n=2 remove one: 49.93% keys remapped (ideal 50.00%)
+    affinity_test.go:418: n=2 weight 1->2 on one: 16.68% keys remapped (ideal 16.67%)
+    affinity_test.go:388: n=8 add one: 11.28% keys remapped (ideal 11.11%)
+    affinity_test.go:402: n=8 remove one: 12.60% keys remapped (ideal 12.50%)
+    affinity_test.go:418: n=8 weight 1->2 on one: 9.62% keys remapped (ideal 9.72%)
+    affinity_test.go:388: n=32 add one: 3.04% keys remapped (ideal 3.03%)
+    affinity_test.go:402: n=32 remove one: 3.09% keys remapped (ideal 3.12%)
+    affinity_test.go:418: n=32 weight 1->2 on one: 3.02% keys remapped (ideal 2.94%)
+--- PASS: TestMembershipChangesRemapMinimally (0.68s)
+=== RUN   TestRankPutsBestFirstAndIsAPermutation
+--- PASS: TestRankPutsBestFirstAndIsAPermutation (0.00s)
+=== RUN   TestSumBytesMatchesSum
+--- PASS: TestSumBytesMatchesSum (0.00s)
+=== RUN   TestClientIPKey
+--- PASS: TestClientIPKey (0.00s)
+=== RUN   TestClientIPKeyUsesTrustedProxyIdentity
+--- PASS: TestClientIPKeyUsesTrustedProxyIdentity (0.00s)
+=== RUN   TestHeaderKey
+--- PASS: TestHeaderKey (0.00s)
+=== RUN   TestCookieKey
+--- PASS: TestCookieKey (0.00s)
+=== RUN   TestFromAddr
+--- PASS: TestFromAddr (0.00s)
+=== RUN   TestZeroSourceAndStatusStrings
+--- PASS: TestZeroSourceAndStatusStrings (0.00s)
+=== RUN   TestKeyExtractionDoesNotAllocate
+--- PASS: TestKeyExtractionDoesNotAllocate (0.00s)
+=== RUN   FuzzRequestKey
+=== RUN   FuzzRequestKey/seed#0
+=== RUN   FuzzRequestKey/seed#1
+=== RUN   FuzzRequestKey/seed#2
+=== RUN   FuzzRequestKey/seed#3
+=== RUN   FuzzRequestKey/seed#4
+--- PASS: FuzzRequestKey (0.00s)
+    --- PASS: FuzzRequestKey/seed#0 (0.00s)
+    --- PASS: FuzzRequestKey/seed#1 (0.00s)
+    --- PASS: FuzzRequestKey/seed#2 (0.00s)
+    --- PASS: FuzzRequestKey/seed#3 (0.00s)
+    --- PASS: FuzzRequestKey/seed#4 (0.00s)
+PASS
+ok  	jul/internal/affinity	2.139s

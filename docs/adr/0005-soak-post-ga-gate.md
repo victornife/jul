@@ -35,8 +35,9 @@ blocker to a continuous post-GA stability gate.**
 1. A feature may be labeled **GA** once it satisfies criteria **1–4 and 6–9**:
    conformance matrix, published benchmarks, known-limitations list, a
    semver-guarded config/API contract, a runnable example + docs, a security /
-   threat note, fuzzing where parsing is involved, and a self-explanatory Console
-   surface.
+   threat note, fuzzing where parsing is involved, and the appropriate operability
+   surface under [ADR 0014](0014-operability-surfaces.md) (Console for runtime
+   operation; API/CLI for automation and migration).
 2. The soak test **remains mandatory**, but runs **after** the GA declaration as a
    standing gate. Each GA feature carries an explicit, openly-tracked soak status
    (in [docs/ga-push.md](../ga-push.md)). A soak **failure** on a GA feature is a

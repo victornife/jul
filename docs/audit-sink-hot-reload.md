@@ -1,6 +1,21 @@
 # Durable audit sink hot reload (HR-07C)
 
-Issue #160 makes only `admin.audit_log_file`, `admin.audit_log_rotate_max_mb`, and `admin.audit_log_rotate_keep` hot-reloadable. The in-memory audit ring, its bounded capacity/cursor, and the monotonic event-ID sequence remain process-lifetime state. `admin.history_dir`, `admin.history_keep`, `admin.enabled`, and `admin.listen` remain restart-bound.
+Issue #160 makes only `admin.audit_log_file`, `admin.audit_log_rotate_max_mb`, and `admin.audit_log_rotate_keep` hot-reloadable. The in-memory audit ring, its bounded capacity/cursor, and the monotonic event-ID sequence remain process-lifetime state. `admin.history_dir`, `admin.enabled`, and `admin.listen` remain restart-bound.
+`admin.history_keep` is independently hot-reloadable (#106/#159): retention is
+published with the admin runtime and tightening prunes only after Publish; a
+prune failure is advisory. It does not rebuild the history backend.
+
+| Path | Lifecycle | Subsystem |
+| --- | --- | --- |
+| `admin.audit_log_file` | `hot_reload` | `admin` |
+| `admin.audit_log_rotate_max_mb` | `hot_reload` | `admin` |
+| `admin.audit_log_rotate_keep` | `hot_reload` | `admin` |
+| `admin.history_keep` | `hot_reload` | `admin` |
+| `admin.history_dir` | `restart_required` | `admin` |
+| `admin.enabled` | `restart_required` | `admin` |
+| `admin.listen` | `restart_required` | `admin` |
+
+This table is checked against the generated lifecycle authority.
 
 ## Ownership and event linearization
 

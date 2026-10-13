@@ -45,9 +45,11 @@ Every feature carries one of these states (shown as a **Maturity** column in the
 | **GA** | Stable, documented, tested, supported |
 | **Deprecated** | Will be removed or replaced |
 
-Implemented-but-unhardened features are **Beta**, not GA. Accordingly, the
-delivered Year-2 features (Y2-01…Y2-05) are reclassified from "Delivered" to
-**Beta** until they meet the GA bar below.
+Implemented-but-unhardened features are **Beta**, not GA. Accordingly,
+the June 2026 decision reclassified then-delivered Year-2 features (Y2-01…Y2-05)
+from "Delivered" to **Beta** pending evidence. That is the historical transition,
+not their current maturity; [feature-status.yaml](../feature-status.yaml) owns
+today's per-feature maturity, release delivery and soak status.
 
 ### 2. GA bar (all criteria mandatory)
 

@@ -8,6 +8,13 @@
 
 ## Context
 
+**Current reading (2026-10-13):** the explicit-adapter boundary remains active.
+GraphQL is a future composition proposal, not a compiled capability. The
+original demand-only entry rule below is amended by
+[ADR 0013](0013-project-operating-model-and-completeness.md), which also permits
+an explicitly selected, bounded technical experiment. This does not activate
+GraphQL or promise universal conversion.
+
 Jul.IA's routing model is **location → action**: each route selects a bounded
 behavior (static serving, proxying, gRPC transcoding, redirect, deny, plugin
 handler, …). This fits *explicit, bounded* protocol adapters well. It fits a

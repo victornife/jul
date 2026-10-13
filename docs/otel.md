@@ -73,22 +73,30 @@ Both exporters support `insecure = true` for local development (plaintext).
 | `file` | When listed + `file` set | `text` (logfmt) or `json` | Size-based (`rotate_max_mb` / `rotate_keep`) |
 | `syslog` | When listed; Unix only | `text` or `json` | n/a |
 
-All sinks record at **info level** regardless of `[global].log_level`.
+File and syslog sinks record at **info level** regardless of
+`[global].log_level`. The stdout sink uses the global logger and its configured
+level filter. `enabled = false` stops access records without disabling traces,
+metrics or security/audit logging.
 
 ### Access-log fields
 
 | Field | Source | PII risk |
 | --- | --- | --- |
-| `ts` | Server clock | None |
-| `method`, `path`, `host` | Request line | **Medium** — `host` is client-controlled; `path` may contain tokens |
-| `remote_addr` | TCP peer | **Medium** — client IP |
-| `status`, `bytes_sent` | Response | None |
-| `duration_ms` | Server timing | None |
-| `upstream_addr`, `upstream_status` | Upstream | Low |
-| `cache` | Cache disposition | None |
-| `trace_id` | Active span context | Low — opaque identifier |
-| `error` | Request error | **High** — may leak internal paths or upstream errors |
-| `request_id` | `X-Request-ID` or generated | None |
+| `time`, `level`, `msg` | Logger envelope | None |
+| `method`, `path`, `host` | Request method, URL path and Host | Medium — path segments/Host may identify a user |
+| `query` | Raw request query string | High — query-only credentials can be recorded here |
+| `client_ip` | Canonical client address; direct peer by default | Medium — client IP |
+| `peer_ip` | Direct peer, only when different from `client_ip` | Medium — proxy topology |
+| `client_addr_source`, `client_addr_result` | Bounded identity-derivation enums; conditionally emitted | Low |
+| `status`, `bytes`, `duration_ms` | Response and server timing | None |
+| `upstream_reason` | Bounded failure taxonomy, only on upstream failure | Low — no raw address/error text |
+| `trace_id` | Active span context, when present | Low — cross-request correlation |
+| `request_id` | Bounded `X-Request-ID` or generated | Low — client-provided identifying values |
+| `user_agent` | Request User-Agent | Medium — client-controlled identifying text |
+
+This is the core `SlogSink` contract, not the redacted Console tail. There are no
+core `remote_addr`, `bytes_sent`, `upstream_addr`, `upstream_status`, `cache`, or
+raw `error` fields in this sink. See [access-log fields](observability.md#access-log-fields).
 
 ## Benchmarks
 
@@ -133,8 +141,13 @@ Tracing and access logs are powerful observability tools, but they are also
 persistent data sinks that can leak sensitive information:
 
 1. **PII in span attributes.** The server span records `url.path`, `server.address`,
-   and `user_agent.original`. If a request uses a URL like `/reset?token=abc123`,
-   the token is recorded verbatim in the span. Counter-measures: sanitise URLs
+   and `user_agent.original`. The server span uses `r.URL.Path`, so a query-only
+   token in `/reset?token=abc123` is not included in `url.path` or the span name.
+   Sensitive path segments such as `/reset/abc123`, host names and user agents
+   can still be recorded. The core access-log `path` omits the query string, but its separate `query`
+   field records it, so query-only credentials can leak through access logs.
+   The Console tail drops query strings; that does not redact file/stdout sinks.
+   Custom middleware and error messages have their own disclosure risks. Counter-measures: sanitise URLs
    before they reach the server (e.g. route tokens in headers); use `sample_ratio`
    < 1.0 to reduce exposure volume; configure the collector to redact sensitive
    attributes.
@@ -163,15 +176,17 @@ persistent data sinks that can leak sensitive information:
    an error message like `dial tcp 10.0.0.1:8080: connection refused`. If
    recorded in a span or access log, this leaks internal IP addresses and
    topology. Counter-measures: enable field redaction in the collector; review
-   access-log `error` field usage; avoid exposing raw error strings to untrusted
+   operator-log and custom-sink output; avoid exposing raw error strings to untrusted
    consumers.
 
 ## Runnable example
 
-`testdata/otel.toml` shows a production-ready tracing + access-log setup:
+`testdata/otel.toml` is a runnable lab tracing/access-log configuration. It
+requires a reachable collector, appropriate collector TLS/trust, and writable
+log storage; validating the TOML does not certify that external deployment:
 
 ```bash
-go run -tags otel ./cmd/jul -c testdata/otel.toml
+go run -tags otel ./cmd/jul -config testdata/otel.toml
 ```
 
 ## GA status
@@ -180,7 +195,7 @@ go run -tags otel ./cmd/jul -c testdata/otel.toml
 | --- | --- | --- |
 | 1 — Conformance / behaviour matrix | ✅ | Exporter/sink matrix above (exporters, span types, propagation, access-log fields with PII risk) |
 | 2 — Published benchmark numbers | ✅ | `BenchmarkTracingMiddleware`, `SeamChildSpan`, `W3CExtract` in `internal/observability/bench_test.go` |
-| 3 — Known-limitations list | ✅ | 4-item limitation list above |
+| 3 — Known-limitations list | ✅ | 3-item limitation list above |
 | 4 — Semver-guarded config/API contract | ✅ | v1 config freeze (cross-cutting) |
 | 5 — Long-running soak test | ✅ | soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | 6 — Runnable example + docs | ✅ | `testdata/otel.toml` + this doc + `docs/observability.md` |

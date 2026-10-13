@@ -1,0 +1,256 @@
+=== RUN   TestClientAddressInstallsIdentity
+=== RUN   TestClientAddressInstallsIdentity/trusted_proxy
+=== RUN   TestClientAddressInstallsIdentity/untrusted_peer
+=== RUN   TestClientAddressInstallsIdentity/no_header
+--- PASS: TestClientAddressInstallsIdentity (0.00s)
+    --- PASS: TestClientAddressInstallsIdentity/trusted_proxy (0.00s)
+    --- PASS: TestClientAddressInstallsIdentity/untrusted_peer (0.00s)
+    --- PASS: TestClientAddressInstallsIdentity/no_header (0.00s)
+=== RUN   TestClientAddressNilPolicyStillInstallsPeerIdentity
+--- PASS: TestClientAddressNilPolicyStillInstallsPeerIdentity (0.00s)
+=== RUN   TestClientAddressLogsAreBoundedAndRateLimited
+--- PASS: TestClientAddressLogsAreBoundedAndRateLimited (0.00s)
+=== RUN   TestClientAddressAcceptedRequestsAreNotLogged
+--- PASS: TestClientAddressAcceptedRequestsAreNotLogged (0.00s)
+=== RUN   TestClientAddressIsRaceFree
+--- PASS: TestClientAddressIsRaceFree (0.00s)
+=== RUN   TestCompressionWeakensStrongETag
+=== RUN   TestCompressionWeakensStrongETag/strong_becomes_weak_when_compressed
+=== RUN   TestCompressionWeakensStrongETag/weak_stays_weak
+=== RUN   TestCompressionWeakensStrongETag/absent_stays_absent
+=== RUN   TestCompressionWeakensStrongETag/identity_keeps_strong
+=== RUN   TestCompressionWeakensStrongETag/range_passthrough_keeps_strong
+--- PASS: TestCompressionWeakensStrongETag (0.00s)
+    --- PASS: TestCompressionWeakensStrongETag/strong_becomes_weak_when_compressed (0.00s)
+    --- PASS: TestCompressionWeakensStrongETag/weak_stays_weak (0.00s)
+    --- PASS: TestCompressionWeakensStrongETag/absent_stays_absent (0.00s)
+    --- PASS: TestCompressionWeakensStrongETag/identity_keeps_strong (0.00s)
+    --- PASS: TestCompressionWeakensStrongETag/range_passthrough_keeps_strong (0.00s)
+=== RUN   TestCompressedETagCannotSatisfyIfRange
+--- PASS: TestCompressedETagCannotSatisfyIfRange (0.00s)
+=== RUN   TestCompressionRespectsCacheControlNoTransform
+=== RUN   TestCompressionRespectsCacheControlNoTransform/request_directive
+=== RUN   TestCompressionRespectsCacheControlNoTransform/response_directive
+=== RUN   TestCompressionRespectsCacheControlNoTransform/case_insensitive_multiple_values
+--- PASS: TestCompressionRespectsCacheControlNoTransform (0.00s)
+    --- PASS: TestCompressionRespectsCacheControlNoTransform/request_directive (0.00s)
+    --- PASS: TestCompressionRespectsCacheControlNoTransform/response_directive (0.00s)
+    --- PASS: TestCompressionRespectsCacheControlNoTransform/case_insensitive_multiple_values (0.00s)
+=== RUN   TestCompressNegotiation
+=== RUN   TestCompressNegotiation/gzip
+=== RUN   TestCompressNegotiation/identity_only
+=== RUN   TestCompressNegotiation/unknown_only
+=== RUN   TestCompressNegotiation/q_zero
+=== RUN   TestCompressNegotiation/wildcard
+=== RUN   TestCompressNegotiation/no_header
+=== RUN   TestCompressNegotiation/with_params
+--- PASS: TestCompressNegotiation (0.00s)
+    --- PASS: TestCompressNegotiation/gzip (0.00s)
+    --- PASS: TestCompressNegotiation/identity_only (0.00s)
+    --- PASS: TestCompressNegotiation/unknown_only (0.00s)
+    --- PASS: TestCompressNegotiation/q_zero (0.00s)
+    --- PASS: TestCompressNegotiation/wildcard (0.00s)
+    --- PASS: TestCompressNegotiation/no_header (0.00s)
+    --- PASS: TestCompressNegotiation/with_params (0.00s)
+=== RUN   TestCompressMinSize
+--- PASS: TestCompressMinSize (0.00s)
+=== RUN   TestCompressMIMEGate
+--- PASS: TestCompressMIMEGate (0.00s)
+=== RUN   TestCompressionLargeThresholdStreamsWithoutGrowingProbe
+--- PASS: TestCompressionLargeThresholdStreamsWithoutGrowingProbe (0.00s)
+=== RUN   TestCompressNoDoubleEncode
+--- PASS: TestCompressNoDoubleEncode (0.00s)
+=== RUN   TestCompressNoDoubleEncodeWhenFirstCodingFieldEmpty
+--- PASS: TestCompressNoDoubleEncodeWhenFirstCodingFieldEmpty (0.00s)
+=== RUN   TestCompressNegotiatesLaterAcceptEncodingField
+--- PASS: TestCompressNegotiatesLaterAcceptEncodingField (0.00s)
+=== RUN   TestCompressMalformedAndConflictingWeightsDenyCoding
+=== RUN   TestCompressMalformedAndConflictingWeightsDenyCoding/gzip;q=oops
+=== RUN   TestCompressMalformedAndConflictingWeightsDenyCoding/gzip;q=2
+=== RUN   TestCompressMalformedAndConflictingWeightsDenyCoding/gzip;q=NaN
+=== RUN   TestCompressMalformedAndConflictingWeightsDenyCoding/gzip;q=0,_gzip;q=1
+=== RUN   TestCompressMalformedAndConflictingWeightsDenyCoding/gzip;q=1,_gzip;q=0
+=== RUN   TestCompressMalformedAndConflictingWeightsDenyCoding/gzip;foo
+--- PASS: TestCompressMalformedAndConflictingWeightsDenyCoding (0.00s)
+    --- PASS: TestCompressMalformedAndConflictingWeightsDenyCoding/gzip;q=oops (0.00s)
+    --- PASS: TestCompressMalformedAndConflictingWeightsDenyCoding/gzip;q=2 (0.00s)
+    --- PASS: TestCompressMalformedAndConflictingWeightsDenyCoding/gzip;q=NaN (0.00s)
+    --- PASS: TestCompressMalformedAndConflictingWeightsDenyCoding/gzip;q=0,_gzip;q=1 (0.00s)
+    --- PASS: TestCompressMalformedAndConflictingWeightsDenyCoding/gzip;q=1,_gzip;q=0 (0.00s)
+    --- PASS: TestCompressMalformedAndConflictingWeightsDenyCoding/gzip;foo (0.00s)
+=== RUN   TestCompressSkipsRange
+--- PASS: TestCompressSkipsRange (0.00s)
+=== RUN   TestCompressSkipsRepeatedRange
+--- PASS: TestCompressSkipsRepeatedRange (0.00s)
+=== RUN   TestCompressSSEFlush
+--- PASS: TestCompressSSEFlush (0.00s)
+=== RUN   TestCompressHijack
+--- PASS: TestCompressHijack (0.00s)
+=== RUN   TestCompressUnknownEncoderErrors
+--- PASS: TestCompressUnknownEncoderErrors (0.00s)
+=== RUN   TestCompressEncoderReuse
+--- PASS: TestCompressEncoderReuse (0.00s)
+=== RUN   TestCompressEmptyResponseHasVary
+--- PASS: TestCompressEmptyResponseHasVary (0.00s)
+=== RUN   TestCompressInterimResponseDoesNotLatchTheFinalStatus
+--- PASS: TestCompressInterimResponseDoesNotLatchTheFinalStatus (0.00s)
+=== RUN   TestCompressInterimThenImplicitOKStillCompresses
+--- PASS: TestCompressInterimThenImplicitOKStillCompresses (0.00s)
+=== RUN   TestCompressWriter101StillPassesThroughImmediately
+--- PASS: TestCompressWriter101StillPassesThroughImmediately (0.00s)
+=== RUN   TestAccessLogFanOut
+--- PASS: TestAccessLogFanOut (0.00s)
+=== RUN   TestAccessLogCapturesRequestID
+--- PASS: TestAccessLogCapturesRequestID (0.00s)
+=== RUN   TestAccessLogCapturesTraceID
+--- PASS: TestAccessLogCapturesTraceID (0.00s)
+=== RUN   TestAccessLogNoSinks
+--- PASS: TestAccessLogNoSinks (0.00s)
+=== RUN   TestAccessLogObservesRecoveredPanic
+--- PASS: TestAccessLogObservesRecoveredPanic (0.00s)
+=== RUN   TestAccessLogPicksUpAReasonSetByADownstreamHandler
+--- PASS: TestAccessLogPicksUpAReasonSetByADownstreamHandler (0.00s)
+=== RUN   TestCanonicalHTTPHost
+=== RUN   TestCanonicalHTTPHost/Example.COM
+=== RUN   TestCanonicalHTTPHost/__EXAMPLE.COM.:443__
+=== RUN   TestCanonicalHTTPHost/*.Tenant.EXAMPLE.
+=== RUN   TestCanonicalHTTPHost/192.168.1.1:9090
+=== RUN   TestCanonicalHTTPHost/[::1]
+=== RUN   TestCanonicalHTTPHost/[2001:DB8::1]:8080
+=== RUN   TestCanonicalHTTPHost/[::1]attacker:8080
+=== RUN   TestCanonicalHTTPHost/[::1
+=== RUN   TestCanonicalHTTPHost/[::1]:
+=== RUN   TestCanonicalHTTPHost/[::1]:invalid
+=== RUN   TestCanonicalHTTPHost/[::1]:65536
+=== RUN   TestCanonicalHTTPHost/example.com:
+=== RUN   TestCanonicalHTTPHost/example.com:bad
+=== RUN   TestCanonicalHTTPHost/example.com:-1
+=== RUN   TestCanonicalHTTPHost/example.com:99999
+=== RUN   TestCanonicalHTTPHost/example.com:999999999999999999999999999999999999
+=== RUN   TestCanonicalHTTPHost/example.com:0
+=== RUN   TestCanonicalHTTPHost/example.com:65535
+=== RUN   TestCanonicalHTTPHost/::1
+=== RUN   TestCanonicalHTTPHost/a..example.com
+=== RUN   TestCanonicalHTTPHost/.example.com
+=== RUN   TestCanonicalHTTPHost/a.example.com..
+=== RUN   TestCanonicalHTTPHost/:8080
+=== RUN   TestCanonicalHTTPHost/#00
+--- PASS: TestCanonicalHTTPHost (0.00s)
+    --- PASS: TestCanonicalHTTPHost/Example.COM (0.00s)
+    --- PASS: TestCanonicalHTTPHost/__EXAMPLE.COM.:443__ (0.00s)
+    --- PASS: TestCanonicalHTTPHost/*.Tenant.EXAMPLE. (0.00s)
+    --- PASS: TestCanonicalHTTPHost/192.168.1.1:9090 (0.00s)
+    --- PASS: TestCanonicalHTTPHost/[::1] (0.00s)
+    --- PASS: TestCanonicalHTTPHost/[2001:DB8::1]:8080 (0.00s)
+    --- PASS: TestCanonicalHTTPHost/[::1]attacker:8080 (0.00s)
+    --- PASS: TestCanonicalHTTPHost/[::1 (0.00s)
+    --- PASS: TestCanonicalHTTPHost/[::1]: (0.00s)
+    --- PASS: TestCanonicalHTTPHost/[::1]:invalid (0.00s)
+    --- PASS: TestCanonicalHTTPHost/[::1]:65536 (0.00s)
+    --- PASS: TestCanonicalHTTPHost/example.com: (0.00s)
+    --- PASS: TestCanonicalHTTPHost/example.com:bad (0.00s)
+    --- PASS: TestCanonicalHTTPHost/example.com:-1 (0.00s)
+    --- PASS: TestCanonicalHTTPHost/example.com:99999 (0.00s)
+    --- PASS: TestCanonicalHTTPHost/example.com:999999999999999999999999999999999999 (0.00s)
+    --- PASS: TestCanonicalHTTPHost/example.com:0 (0.00s)
+    --- PASS: TestCanonicalHTTPHost/example.com:65535 (0.00s)
+    --- PASS: TestCanonicalHTTPHost/::1 (0.00s)
+    --- PASS: TestCanonicalHTTPHost/a..example.com (0.00s)
+    --- PASS: TestCanonicalHTTPHost/.example.com (0.00s)
+    --- PASS: TestCanonicalHTTPHost/a.example.com.. (0.00s)
+    --- PASS: TestCanonicalHTTPHost/:8080 (0.00s)
+    --- PASS: TestCanonicalHTTPHost/#00 (0.00s)
+PASS
+ok  	jul/internal/middleware	0.024s
+testing: warning: no tests to run
+PASS
+ok  	jul/internal/clientaddr	0.007s [no tests to run]
+=== RUN   TestAccessFilePolicyChangeSharesOneWriter
+--- PASS: TestAccessFilePolicyChangeSharesOneWriter (0.00s)
+=== RUN   TestAccessFilePolicyChangeRotationDuringDrain
+--- PASS: TestAccessFilePolicyChangeRotationDuringDrain (0.09s)
+=== RUN   TestBuildAccessSinksDefaultsToStdout
+--- PASS: TestBuildAccessSinksDefaultsToStdout (0.00s)
+=== RUN   TestBuildAccessSinksDisabledOpensNothing
+--- PASS: TestBuildAccessSinksDisabledOpensNothing (0.00s)
+=== RUN   TestBuildAccessSinksRejectsExplicitEmptyEnabledSet
+--- PASS: TestBuildAccessSinksRejectsExplicitEmptyEnabledSet (0.00s)
+=== RUN   TestBuildAccessSinksRejectsEmptyFilePath
+--- PASS: TestBuildAccessSinksRejectsEmptyFilePath (0.00s)
+=== RUN   TestBuildAccessSinksDedupes
+--- PASS: TestBuildAccessSinksDedupes (0.00s)
+=== RUN   TestBuildAccessSinksFileText
+--- PASS: TestBuildAccessSinksFileText (0.00s)
+=== RUN   TestBuildAccessSinksFileJSON
+--- PASS: TestBuildAccessSinksFileJSON (0.00s)
+=== RUN   TestBuildAccessSinksFileRotationConfig
+--- PASS: TestBuildAccessSinksFileRotationConfig (0.00s)
+=== RUN   TestBuildAccessSinksSamePathGenerationsPreserveJSON
+--- PASS: TestBuildAccessSinksSamePathGenerationsPreserveJSON (0.01s)
+=== RUN   TestBuildAccessSinksSharedFileLeaseLifetime
+--- PASS: TestBuildAccessSinksSharedFileLeaseLifetime (0.00s)
+=== RUN   TestBuildAccessSinksCanonicalizationFailureUnwinds
+--- PASS: TestBuildAccessSinksCanonicalizationFailureUnwinds (0.00s)
+=== RUN   TestBuildAccessSinksUnknownSink
+--- PASS: TestBuildAccessSinksUnknownSink (0.00s)
+=== RUN   TestBuildAccessSinksRollsBackOnError
+--- PASS: TestBuildAccessSinksRollsBackOnError (0.00s)
+=== RUN   TestBuildAccessSinksFailedFileSinkLeavesNoRealFile
+--- PASS: TestBuildAccessSinksFailedFileSinkLeavesNoRealFile (0.00s)
+=== RUN   TestProbeWritableDirRejectsEmptyPath
+--- PASS: TestProbeWritableDirRejectsEmptyPath (0.00s)
+=== RUN   TestProbeWritableDirLeavesNoSentinelBehind
+--- PASS: TestProbeWritableDirLeavesNoSentinelBehind (0.00s)
+=== RUN   TestProbeWritableDirMkdirAllFailure
+--- PASS: TestProbeWritableDirMkdirAllFailure (0.00s)
+=== RUN   TestProbeWritableDirCreateTempFailure
+    sinks_test.go:393: running as root: file mode does not deny writes
+--- SKIP: TestProbeWritableDirCreateTempFailure (0.00s)
+=== RUN   TestProbeWritableDirCloseFailure
+--- PASS: TestProbeWritableDirCloseFailure (0.00s)
+=== RUN   TestProbeWritableDirRemoveFailure
+--- PASS: TestProbeWritableDirRemoveFailure (0.00s)
+=== RUN   TestAccessLogWriteFailuresAreReported
+--- PASS: TestAccessLogWriteFailuresAreReported (0.00s)
+=== RUN   TestDynamicRootSamplerDefensiveStates
+=== PAUSE TestDynamicRootSamplerDefensiveStates
+=== RUN   TestProcessSampleRatioPublishSeamWithoutTracingIsNoop
+--- PASS: TestProcessSampleRatioPublishSeamWithoutTracingIsNoop (0.00s)
+=== RUN   TestDynamicRootSamplerMatchesSDK
+=== PAUSE TestDynamicRootSamplerMatchesSDK
+=== RUN   TestDynamicRootSamplerUpdateCutover
+=== PAUSE TestDynamicRootSamplerUpdateCutover
+=== RUN   TestParentBasedKeepsLocalAndRemoteParentAuthority
+=== PAUSE TestParentBasedKeepsLocalAndRemoteParentAuthority
+=== RUN   TestDynamicRootSamplerConcurrentUpdate
+--- PASS: TestDynamicRootSamplerConcurrentUpdate (0.00s)
+=== RUN   TestTracerRatioUpdateKeepsProviderAndExistingTrace
+--- PASS: TestTracerRatioUpdateKeepsProviderAndExistingTrace (0.00s)
+=== RUN   TestProcessSampleRatioPublishSeam
+--- PASS: TestProcessSampleRatioPublishSeam (0.00s)
+=== RUN   TestLocalOTLPHTTPPipelineSurvivesRatioUpdates
+--- PASS: TestLocalOTLPHTTPPipelineSurvivesRatioUpdates (0.01s)
+=== RUN   TestMiddlewareExportsServerSpan
+--- PASS: TestMiddlewareExportsServerSpan (0.00s)
+=== RUN   TestMiddlewareW3CPropagation
+--- PASS: TestMiddlewareW3CPropagation (0.00s)
+=== RUN   TestMiddlewareSetsTraceIDInContext
+--- PASS: TestMiddlewareSetsTraceIDInContext (0.00s)
+=== CONT  TestDynamicRootSamplerDefensiveStates
+--- PASS: TestDynamicRootSamplerDefensiveStates (0.00s)
+=== CONT  TestDynamicRootSamplerMatchesSDK
+--- PASS: TestDynamicRootSamplerMatchesSDK (0.00s)
+=== CONT  TestParentBasedKeepsLocalAndRemoteParentAuthority
+=== CONT  TestDynamicRootSamplerUpdateCutover
+--- PASS: TestDynamicRootSamplerUpdateCutover (0.00s)
+=== RUN   TestParentBasedKeepsLocalAndRemoteParentAuthority/local_sampled
+=== RUN   TestParentBasedKeepsLocalAndRemoteParentAuthority/local_unsampled
+=== RUN   TestParentBasedKeepsLocalAndRemoteParentAuthority/remote_sampled
+=== RUN   TestParentBasedKeepsLocalAndRemoteParentAuthority/remote_unsampled
+--- PASS: TestParentBasedKeepsLocalAndRemoteParentAuthority (0.00s)
+    --- PASS: TestParentBasedKeepsLocalAndRemoteParentAuthority/local_sampled (0.00s)
+    --- PASS: TestParentBasedKeepsLocalAndRemoteParentAuthority/local_unsampled (0.00s)
+    --- PASS: TestParentBasedKeepsLocalAndRemoteParentAuthority/remote_sampled (0.00s)
+    --- PASS: TestParentBasedKeepsLocalAndRemoteParentAuthority/remote_unsampled (0.00s)
+PASS
+ok  	jul/internal/observability	0.123s

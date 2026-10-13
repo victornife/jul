@@ -11,6 +11,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Verification
 
+- Reconcile 24 original D11 protocol/security/plugin/observability rows against
+  current owners and bounded tests. Correct audit retention, access-log schema,
+  backend trust/retry and affinity consumers; distinguish historical ADR design
+  baselines from current delivery. Add a real-consumer semantic drift regression.
+  No Go runtime, public vision, maturity or long-soak change.
+
 - Reconcile the D11 deployment consumers with #516's original controlled-CI
   evidence. Correct existing-mode preservation, terminal history degradation,
   file-owned restart behavior and log rotation/retention claims. Preserve

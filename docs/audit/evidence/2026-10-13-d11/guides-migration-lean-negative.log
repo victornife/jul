@@ -1,0 +1,4 @@
+# jul/internal/migrate/nginx
+package jul/internal/migrate/nginx: build constraints exclude all Go files in /workspace/scratch/081a0d718172/jul-d11/internal/migrate/nginx
+FAIL	jul/internal/migrate/nginx [setup failed]
+FAIL
