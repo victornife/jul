@@ -6,6 +6,18 @@
 
 > Version 1.0 · Updated 2026-06-23
 >
+> **Current reading (2026-10-13): historical substrate execution plan.** The
+> embedded SPA is delivered; the initial maturity note, file layout, proposed
+> API spellings and phase checklist below describe the June design baseline,
+> not today's exhaustive mounted routes or feature maturity. The
+> [Console guide](../console.md), [route catalog](../../internal/admin/route_catalog.go),
+> generated external [admin API](../admin-api.md) and
+> [feature manifest](../feature-status.yaml) own those current contracts.
+> The old rich shell was retired; the separate minimal configuration GUI remains
+> supported in lean/disabled-Console mode and at `/config`/`/ui`, with its own
+> legacy CSP. This historical plan does not override #514's bounded risk review
+> or claim a fresh security/soak certification.
+>
 > Maturity note: Console (Y1-07) is **Beta**. This spec drives the substrate
 > migration that closes GA criteria ① (endpoint/panel matrix) and ⑦ (CSP/CSRF/auth)
 > and moves Console to **GA — soak pending**. Governed by

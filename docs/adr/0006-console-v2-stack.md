@@ -9,6 +9,14 @@
 
 ## Context
 
+**Current reading (2026-10-13):** the old rich `console.html` was replaced by the
+SPA. The distinct minimal `configUIPage` remains supported for lean builds and
+an explicitly disabled Console, and at `/config`/`/ui`. Its legacy inline-script
+CSP is separate from the SPA's strict script/style-nonce policy; the accepted
+#514 risk review does not certify all surfaces or remove this page. Current
+server behavior is in `internal/admin/server.go`; the original cutover sequence
+below is historical, not a claim that every minimal editor was removed.
+
 [docs/console.md](../console.md) promises that the Console "ships **inside the single
 binary** (no external assets, no Node build) and is gated by the `console` build
 tag." Today that promise is met by a single hand-written
@@ -65,8 +73,9 @@ rejustifying the technology choice here.
    by CodeMirror/React. Documented fallback if the nonce path proves impractical:
    `style-src 'self' 'unsafe-inline'`.
 7. **Migration shape.** A **big-bang cutover in a single release**, developed behind
-   the `console` build tag and a dev-only side route so trunk stays releasable on
-   v1 until the one cutover PR. There is **no** post-cutover v1 fallback.
+   the `console` build tag and a dev-only side route so trunk stayed releasable on
+   v1 until the cutover PR. The old rich v1 shell is retired; the separate minimal
+   configuration GUI remains supported as described in the current-reading note.
 
 This amends **only** invariants #4 and #5 of [ADR 0004](0004-console-ui-invariants.md)
 and refines the Console surface (ADR 0003 criterion 9). The *Operable by design*

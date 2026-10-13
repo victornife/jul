@@ -1,0 +1,30 @@
+test_api_internal_route_prose_is_ignored_but_supported_table_fails (__main__.SemanticDriftTests.test_api_internal_route_prose_is_ignored_but_supported_table_fails) ... ok
+test_api_query_is_stripped_and_wrong_method_fails (__main__.SemanticDriftTests.test_api_query_is_stripped_and_wrong_method_fails) ... ok
+test_api_templated_and_concrete_paths_pass_stale_v1_fails (__main__.SemanticDriftTests.test_api_templated_and_concrete_paths_pass_stale_v1_fails) ... ok
+test_capability_structured_and_prose_claims (__main__.SemanticDriftTests.test_capability_structured_and_prose_claims) ... ok
+test_clean_fixture_passes_and_repository_check_is_no_write (__main__.SemanticDriftTests.test_clean_fixture_passes_and_repository_check_is_no_write) ... ok
+test_cli_help_exit_contract_mismatch_and_empty_remote_surface (__main__.SemanticDriftTests.test_cli_help_exit_contract_mismatch_and_empty_remote_surface) ... ok
+test_cli_load_failure_is_actionable (__main__.SemanticDriftTests.test_cli_load_failure_is_actionable) ... ok
+test_cli_valid_nonexistent_command_and_exit_code_drift (__main__.SemanticDriftTests.test_cli_valid_nonexistent_command_and_exit_code_drift) ... ok
+test_config_and_lifecycle_use_nearby_toml_context_without_new_registry (__main__.SemanticDriftTests.test_config_and_lifecycle_use_nearby_toml_context_without_new_registry) ... ok
+test_config_bool_size_and_invalid_metadata_shape (__main__.SemanticDriftTests.test_config_bool_size_and_invalid_metadata_shape) ... ok
+test_config_default_and_allowed_value_drift (__main__.SemanticDriftTests.test_config_default_and_allowed_value_drift) ... ok
+test_config_unique_leaf_resolution_and_ambiguous_leaf_skip (__main__.SemanticDriftTests.test_config_unique_leaf_resolution_and_ambiguous_leaf_skip) ... ok
+test_current_authority_links_missing_surface_and_reference (__main__.SemanticDriftTests.test_current_authority_links_missing_surface_and_reference) ... ok
+test_deterministic_order_and_diagnostic_location (__main__.SemanticDriftTests.test_deterministic_order_and_diagnostic_location) ... ok
+test_feature_canonical_marker_and_explicit_feature_marker (__main__.SemanticDriftTests.test_feature_canonical_marker_and_explicit_feature_marker) ... ok
+test_feature_invalid_manifest_and_missing_yaml_are_actionable (__main__.SemanticDriftTests.test_feature_invalid_manifest_and_missing_yaml_are_actionable) ... ok
+test_feature_shared_guide_bare_maturity_is_intentionally_not_inferred (__main__.SemanticDriftTests.test_feature_shared_guide_bare_maturity_is_intentionally_not_inferred) ... ok
+test_helpers_edge_cases (__main__.SemanticDriftTests.test_helpers_edge_cases) ... ok
+test_lifecycle_dict_field_projection_is_supported (__main__.SemanticDriftTests.test_lifecycle_dict_field_projection_is_supported) ... ok
+test_lifecycle_unknown_path_class_subsystem_and_mismatch (__main__.SemanticDriftTests.test_lifecycle_unknown_path_class_subsystem_and_mismatch) ... ok
+test_load_cli_authority_success_and_failures (__main__.SemanticDriftTests.test_load_cli_authority_success_and_failures) ... ok
+test_metric_console_consumer_is_scanned_and_historical_is_not (__main__.SemanticDriftTests.test_metric_console_consumer_is_scanned_and_historical_is_not) ... ok
+test_metric_current_histogram_and_alias_pass_removed_fails (__main__.SemanticDriftTests.test_metric_current_histogram_and_alias_pass_removed_fails) ... ok
+test_metric_non_utf8_consumer_is_ignored (__main__.SemanticDriftTests.test_metric_non_utf8_consumer_is_ignored) ... ok
+test_real_audit_history_retention_consumer_rejects_restart_drift (__main__.SemanticDriftTests.test_real_audit_history_retention_consumer_rejects_restart_drift) ... ok
+
+----------------------------------------------------------------------
+Ran 25 tests in 0.057s
+
+OK

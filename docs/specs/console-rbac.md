@@ -1,24 +1,17 @@
 # Console RBAC — design spec (HP-02 / SEQ-09)
 
-> **Status:** Implemented (Phase 3), in security remediation. This document
-> remains the authoritative design and permission-matrix reference. The model
-> **built today** in `internal/rbac` and the admin server is: named principals,
-> predefined **and** custom roles, **one config-defined token per principal**
-> (with optional `expires_at` and `disabled`), per-principal audit attribution,
-> API-boundary enforcement, and a hot-reloaded prepared authentication policy.
-> **Runtime token management — multi-token principals, an API to issue/revoke/
-> rotate tokens, one-time plaintext display, and `last_used_at` hygiene — is the
-> future token-management target and is NOT yet implemented** (see [Current
-> implementation vs future token-management target](#current-implementation-vs-future-token-management-target)).
-> Atomicity of the hot-reload policy swap and self-lockout confirmation across
-> every mutation endpoint are the subjects of the active remediation pass; do
-> not treat RBAC as release-ready until that pass and its exact-head CI evidence
-> close. Precursor to roadmap **Y3-02** (SSO/SAML/OIDC); external identity
-> providers remain **out of scope** here and deferred to Y3-02.
->
-> The permission matrix below is **exhaustive** over every admin endpoint that
-> exists today. Rows marked *(future)* describe planned management endpoints that
-> are not yet mounted.
+> **Status:** Local-token RBAC implemented; #514's risk-focused review and
+> published release remediation are complete. This document is the design
+> reference; the current route/permission catalog is linked below. Named
+> principals, predefined/custom roles, one config-defined token per principal,
+> expiry/disable, attribution and prepared hot-reloaded authentication are built.
+> API issuance/revocation, multi-token overlap, one-time plaintext display and
+> usage metadata remain future work, as distinguished below.
+> The later #595 open-confirmation and #602 audit-contract regressions have
+> separately selected corrective work; these are not accepted limitations or a
+> claim that their PRs are merged. External identity remains Y3-02 horizon.
+> Source catalogs own exhaustive mounted routes; future targets and the
+> historical phase plan are not mounted endpoints.
 
 ## Contents
 
@@ -30,7 +23,7 @@
 - [Permissions](#permissions)
 - [Predefined roles](#predefined-roles)
 - [Custom roles](#custom-roles)
-- [Exhaustive permission matrix](#exhaustive-permission-matrix)
+- [Current permission authority](#current-permission-authority)
 - [Enforcement](#enforcement)
 - [Audit attribution](#audit-attribution)
 - [Configuration schema](#configuration-schema)
@@ -41,10 +34,10 @@
 
 ## Problem & goals
 
-The admin API and Console authenticate with a **single shared bearer token**
+Before local RBAC, the admin API and Console authenticated with a **single shared bearer token**
 (`[admin].token`). That token is an implicit super-user: anyone holding it can do
-everything, and the [audit log](../console.md) cannot attribute an action to a
-person. This blocks least-privilege operation, separation of duties, and
+everything, and the [audit log](../console.md) could not attribute an action to a
+person. This blocked least-privilege operation, separation of duties, and
 attributable change history — table stakes for a multi-operator, enterprise-facing
 posture.
 
@@ -137,18 +130,15 @@ Two kinds of principal, same model:
 
 Tokens are the only credential in HP-02 (external identity is Y3-02).
 
-- **Shape.** A high-entropy random secret (≥ 256 bits) with a fixed prefix for
-  recognizability and a short **public token id** (the first ~8 chars) used for
-  lookup and audit **without** revealing the secret, e.g.
-  `juladm_<tokenid>_<secret>`.
-- **At rest.** Only a **hash** of the secret is stored (SHA-256 is sufficient and
-  fast for high-entropy tokens; bcrypt's work factor is unnecessary here and would
-  add per-request latency). Config-supplied tokens are given as
-  [secret references](../secrets.md) and hashed in memory at load. One-time
-  plaintext display at creation is part of the future issuance API and does not
-  exist today (config tokens carry their own plaintext by reference).
-- **Lookup.** Index by token id, then `subtle.ConstantTimeCompare` the secret
-  hash — O(1) and timing-safe.
+- **Current shape and lookup.** Supply a high-entropy secret; there is no
+  required `juladm_` prefix. The policy hashes the complete bearer token, derives
+  its public ID from the first 12 hex characters of SHA-256, indexes that ID,
+  then confirms the full hash in constant time. The short ID is display metadata,
+  not the credential or a grant. A prefixed API-minted token was a future design.
+- **Storage.** The live policy holds hashes, while configuration resolution may
+  hold plaintext and referenced env/file/secret storage must be protected by the
+  operator. The runtime does not provide an encrypted-at-rest token store.
+  One-time plaintext display is part of future issuance, not current behavior.
 - **Lifecycle.** *Today* a principal has exactly one token supplied in config as
   a [secret reference](../secrets.md); it is revoked by setting `disabled` or an
   `expires_at` in the past and reloading. The lifecycle below is the **future
@@ -194,10 +184,14 @@ without the other.
 | --- | --- |
 | `status:read` | Runtime state: dashboards, runtime overview, stats, certificate inventory/expiry. |
 | `metrics:read` | Prometheus `/metrics` scrape. |
-| `config:read` | View configuration: raw TOML + structured projections (routes, apps/upstreams, TLS, security, streams, mTLS, plugins, wizard). |
+| `config:read` | View structured, secret-safe configuration projections. |
+| `config:raw` | Privileged complete current/candidate TOML readback, which may contain secrets. |
+| `config:trust` | Change inbound client-address trust policy in addition to the operation grant. |
+| `config:adopt` | Adopt an external/unadopted/drifted managed baseline in addition to the operation grant. |
 | `config:write` | **Author/preview** changes without persisting: validate, diff, structured-patch preview, route dry-run test, wizard generation, descriptor upload. |
 | `config:apply` | **Persist** configuration changes: apply, patch-apply, settings save. |
-| `history:read` | List/view configuration history snapshots. |
+| `history:read` | List history metadata and permitted secret-safe previews. |
+| `history:raw` | Retrieve a complete historical TOML snapshot, which may contain secrets. |
 | `history:rollback` | Roll back to a prior snapshot (persists). |
 | `plugins:upload` | Upload a `.wasm` plugin module. |
 | `observability:read` | Logs, request samples, failing routes, timeline, upstream/cert history, live event stream, Console self-health, search. |
@@ -205,12 +199,14 @@ without the other.
 | `audit:export` | Export the audit log (CSV/JSONL). |
 | `cache:purge` | Purge the response cache. |
 | `reload:trigger` | Trigger a hot reload. |
-| `admin:manage` | Manage RBAC (principals/roles/tokens), change admin-surface settings, and scrape runtime profiles (`/debug/pprof`). The highest-trust permission. |
+| `admin:manage` | Change admin/RBAC configuration and scrape enabled runtime profiles. Interactive token-management APIs remain future work. |
 
 Design notes:
 
-- **One permission gates one endpoint (per method).** No endpoint requires two
-  permissions; this keeps custom roles predictable.
+- **Route and object checks compose.** The catalog declares per-method grants,
+  authenticated/public modes or an explicit logical-OR permission set. Sensitive
+  configuration transitions can additionally require `config:trust`,
+  `config:adopt` or `admin:manage`; a base route grant does not bypass them.
 - **`config:write` vs `config:apply`** deliberately separate authoring from
   persisting, enabling a "propose, don't apply" role for review/approval flows.
 - **`admin:manage` is intentionally coarse** — RBAC administration, admin-listener
@@ -232,8 +228,9 @@ deployments never need a custom role.
 The read/write ladder maps directly onto the product ask:
 
 - **viewer = read.** No `write`, `apply`, `operate`, or `manage`.
-- **operator = read + write.** Everything except `admin:manage` (cannot change
-  tokens/roles or the admin listener).
+- **operator = ordinary read + write/operate.** It does not hold `admin:manage`,
+  `config:raw`, `history:raw`, `config:trust` or `config:adopt`. Custom roles can
+  grant distinct approved operations; the server still performs object checks.
 - **admin = read + write + manage.**
 
 ## Custom roles
@@ -326,7 +323,7 @@ principal with `legacy: true`; in open (loopback, no-token) mode it reports an
 unrestricted anonymous identity so the Console is not gated to nothing.
 
 The Console consumes this through a `PermissionProvider` (fetching `/api/admin/me`
-once and caching it), a `usePermission()` hook, and a `ForbiddenAction`
+and refreshing it periodically/on focus or forbidden responses), a `usePermission()` hook, and a `ForbiddenAction`
 component that explains why a control is unavailable. Gating **fails open until
 the identity is known** so the UI is never blanked during load or when running
 without RBAC — the server remains authoritative and still authorizes every
@@ -368,7 +365,7 @@ access-control posture without exposing any credential, principal name, or hash.
 - **Object-level guard.** The existing self-lockout guard
   (`adminLockoutChanges`) continues to prevent disabling admin reachability; RBAC
   adds that only `admin:manage` may change RBAC/admin settings, and the store
-  refuses to remove the **last** enabled `admin` principal (no lock-out).
+  rejects a policy with no surviving usable admin-capable identity.
 - **Deny-by-default everywhere.** A route with no declared permission is treated
   as `admin:manage` (fail-closed), so a newly added endpoint is never
   accidentally world-open. A CI test asserts every mounted route has an explicit
@@ -382,17 +379,19 @@ access-control posture without exposing any credential, principal name, or hash.
   scrubbing stay).
 - Attribution is **server-assigned** from the authenticated principal — never
   client-supplied — so it cannot be spoofed.
-- Authentication failures are audited as `actor="anonymous"` with the source IP
-  and token id prefix (if any), enabling brute-force detection.
+- Authentication-rejection recording is repaired separately in #602: anonymous
+  actor, source IP and fixed failure category, without copying credentials,
+  failed-token identifiers, request data or client-provided actor metadata.
 - The CSV/JSONL export schema gains a `token_id` column
-  (`id,time,actor,token_id,operation,resource,result,detail,source_ip`); readers
+  (`id,time,actor,operation,resource,result,detail,source_ip,token_id` after
+  the separately selected #602 correction); readers
   must tolerate the added column (append-only schema evolution).
 
 ## Configuration schema
 
 RBAC is configured under `[admin.rbac]`, with roles and principals as arrays.
-Tokens are supplied as [secret references](../secrets.md) in the config path, or
-minted via the API (Phase 3).
+Tokens are supplied through [secret references](../secrets.md) in config. API
+minting is a future target, not delivered Phase 3 behavior.
 
 ```toml
 [admin]
@@ -411,7 +410,7 @@ default_role = "admin"
 name        = "deployer"
 permissions = ["status:read", "config:read", "config:write", "config:apply", "reload:trigger"]
 
-# Principals + their token(s).
+# Principals, each with one config token.
 [[admin.principals]]
 name  = "alice"
 role  = "operator"
@@ -434,7 +433,7 @@ Schema types (Phase 1):
 | `admin.roles[].permissions` | []string | — | Validated against the catalog; wildcards allowed. |
 | `admin.principals[].name` | string | — | Unique; appears in audit. |
 | `admin.principals[].role` | string | — | Predefined or custom. |
-| `admin.principals[].token` | string (secret ref) | — | Hashed in memory at load. Multiple via `[[admin.principals.tokens]]` in Phase 2. |
+| `admin.principals[].token` | string (secret ref) | — | Hashed in the live policy at load. Multi-token arrays remain a future design. |
 | `admin.principals[].expires_at` | RFC 3339 | — | Optional per-token expiry (Phase 2 for multi-token). |
 | `admin.principals[].disabled` | bool | `false` | Deny without deleting. |
 
@@ -449,14 +448,15 @@ RBAC is **opt-in** and changes nothing until `admin.rbac.enabled = true`.
 
 | State | Behavior |
 | --- | --- |
-| RBAC off (default) | Exactly today: `[admin].token` is the all-or-nothing super-user; no token + loopback ⇒ open. Audit actor `"operator"`. |
+| RBAC off (default) | Exactly today: `[admin].token` is the all-or-nothing super-user; no token + loopback ⇒ open. Audit actor `"shared"` for a valid legacy credential, or `"anonymous"` in open mode. |
 | RBAC on, legacy token still set | The legacy token authenticates as a synthetic principal `shared` with `default_role` (default `admin`), so existing automation keeps working. A startup **warning** recommends migrating to named principals. Audit actor `"shared"`. |
 | RBAC on, no legacy token | Only named principals authenticate. Anonymous ⇒ 401 on every API (deny-by-default). |
 
 **Migration path (documented for operators):**
 
-1. Turn on `admin.rbac.enabled = true`, keep the legacy `[admin].token` → nothing
-   breaks (everyone is `admin` via `shared`).
+1. Turn on `admin.rbac.enabled = true` with a viable admin path and retain the
+   legacy token; it authenticates as `shared` with configured `default_role`
+   (default `admin`). Verify grants before migrating automation.
 2. Add named principals with least-privilege roles; hand out their tokens.
 3. Move automation to scoped tokens (`deployer`/custom), add `expires_at`.
 4. Remove the legacy `[admin].token`. Now every action is attributable and scoped.
@@ -468,13 +468,13 @@ future major may require named principals when RBAC is enabled.
 
 | Threat | Mitigation |
 | --- | --- |
-| Token theft | Least-privilege blast radius (a `viewer` token cannot apply); immediate revocation; short `expires_at` for automation; hashed at rest; never logged. |
+| Token theft | Least-privilege blast radius (a `viewer` token cannot apply); config disable/replacement plus successful hot reload; short `expires_at`; protect source secrets; no token values in audit. |
 | Privilege escalation | Only `admin:manage` may create/modify roles/principals; the store refuses to remove the last enabled `admin` and refuses to grant a permission the catalog doesn't define (fail-closed). |
 | Confused deputy / UI bypass | Enforcement is server-side; UI hiding is cosmetic. Every request is authorized independently. |
 | Audit spoofing | Attribution is server-assigned from the authenticated principal, not client input. |
 | Credential in logs/URLs | Bearer only in the `Authorization` header (no `?token=`); token secrets never audited; only token **ids** appear. |
-| Brute force | Per-principal (per-token) rate limiting extends the existing admin limiter; failed auth is audited with source IP. |
-| Timing attacks | Lookup by token id, then constant-time hash compare. |
+| Brute force | Existing admin admission limits are separate from authentication. Per-principal limiting is a future target; #602 repairs anonymous failure audit through the existing bounded ring/durable owner. |
+| Timing attacks | Hash the full bearer, lookup by derived public ID, then constant-time full-hash compare. |
 | Exposure beyond loopback | RBAC composes with mTLS on the admin listener (see [mtls.md](../mtls.md)); the two together are the recommended posture for a non-loopback admin surface. |
 | New endpoint added world-open | Deny-by-default: an unannotated route requires `admin:manage`, and a CI test fails if any mounted route lacks an explicit permission. |
 
@@ -484,7 +484,9 @@ for high-risk change control.
 
 ## Phased implementation plan
 
-Each phase is independently shippable, backward-compatible, and gated by tests.
+This is the original target decomposition, not a delivered-phase checklist.
+Current delivery is the implementation table above and the source catalog;
+future multi-token/management/per-principal-limit items below remain unimplemented.
 
 ### Phase 0 — Baseline (done)
 Single shared token; audit actor `"operator"`. No change.

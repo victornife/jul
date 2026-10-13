@@ -8,9 +8,9 @@ Console guarantees so they are testable and do not regress as panels grow.
 
 ## Keyboard operation
 
-Every interactive control in the Console is a real, focusable element (a
-`button`, `a`, `input`, `select`, or `textarea`) reachable with `Tab` /
-`Shift+Tab` and actionable with `Enter` / `Space`. The Console adds no
+Interactive controls use native focusable elements or keyboard-enabled editor
+widgets, reachable with `Tab` / `Shift+Tab` and their relevant keys (buttons and
+links use `Enter`; Space activates buttons). The Console adds no
 mouse-only affordances: anything you can click you can also reach and trigger
 from the keyboard.
 
@@ -19,7 +19,7 @@ from the keyboard.
 | `Ctrl/Cmd + K` | Open the command palette (jump to any primary destination) |
 | `↑` / `↓` | Move the selection within the command palette |
 | `Enter` | Activate the focused control / selected palette destination |
-| `Escape` | Dismiss the command palette, a drawer, or a confirmation dialog |
+| `Escape` | Dismiss the command palette, a drawer, or a confirmation dialog when cancellation is enabled; a pending mutation keeps its outcome visible |
 
 ## Dialogs trap and restore focus
 

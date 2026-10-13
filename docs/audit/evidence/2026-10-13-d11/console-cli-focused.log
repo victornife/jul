@@ -1,0 +1,330 @@
+=== RUN   TestCmdCapabilitiesReportsEveryOptionalTag
+--- PASS: TestCmdCapabilitiesReportsEveryOptionalTag (0.00s)
+=== RUN   TestDispatchSubcommand
+--- PASS: TestDispatchSubcommand (0.00s)
+=== RUN   TestCmdLintValid
+--- PASS: TestCmdLintValid (0.00s)
+=== RUN   TestCmdLintInvalid
+--- PASS: TestCmdLintInvalid (0.00s)
+=== RUN   TestCmdLintReportsSurvivingFileOwnedArtifacts
+--- PASS: TestCmdLintReportsSurvivingFileOwnedArtifacts (0.00s)
+=== RUN   TestCmdLintStrictWarnings
+--- PASS: TestCmdLintStrictWarnings (0.00s)
+=== RUN   TestCmdLintQuietPreservesStrictExitStatus
+--- PASS: TestCmdLintQuietPreservesStrictExitStatus (0.00s)
+=== RUN   TestCmdLintInfoDoesNotFailStrict
+--- PASS: TestCmdLintInfoDoesNotFailStrict (0.00s)
+=== RUN   TestCmdLintParseError
+--- PASS: TestCmdLintParseError (0.00s)
+=== RUN   TestCmdLintJSONSchema
+--- PASS: TestCmdLintJSONSchema (0.00s)
+=== RUN   TestCmdFmtStdout
+--- PASS: TestCmdFmtStdout (0.00s)
+=== RUN   TestCmdFmtOmitsReservedAndEmptyTables
+--- PASS: TestCmdFmtOmitsReservedAndEmptyTables (0.00s)
+=== RUN   TestCmdFmtWriteIdempotent
+--- PASS: TestCmdFmtWriteIdempotent (0.00s)
+=== RUN   TestCmdFmtDiffNoChange
+--- PASS: TestCmdFmtDiffNoChange (0.00s)
+=== RUN   TestCmdFmtDiffChanges
+--- PASS: TestCmdFmtDiffChanges (0.00s)
+=== RUN   TestCmdServeMissingConfig
+--- PASS: TestCmdServeMissingConfig (0.00s)
+=== RUN   TestCmdRunRequiresTarget
+--- PASS: TestCmdRunRequiresTarget (0.00s)
+=== RUN   TestCmdCheckInvalidNoJson
+--- PASS: TestCmdCheckInvalidNoJson (0.00s)
+=== RUN   TestCmdCheckInvalidJson
+--- PASS: TestCmdCheckInvalidJson (0.00s)
+=== RUN   TestCmdCheckValid
+--- PASS: TestCmdCheckValid (0.00s)
+=== RUN   TestCmdCheckInvalidNoJSON
+--- PASS: TestCmdCheckInvalidNoJSON (0.00s)
+=== RUN   TestCmdCheckInvalidJSON
+--- PASS: TestCmdCheckInvalidJSON (0.00s)
+=== RUN   TestCmdCheckValidQuiet
+--- PASS: TestCmdCheckValidQuiet (0.00s)
+=== RUN   TestCmdCheckRuntimePreflightFailure
+--- PASS: TestCmdCheckRuntimePreflightFailure (0.00s)
+=== RUN   TestCmdCheckRejectsMissingStaticRoot
+=== RUN   TestCmdCheckRejectsMissingStaticRoot/text
+=== RUN   TestCmdCheckRejectsMissingStaticRoot/json
+--- PASS: TestCmdCheckRejectsMissingStaticRoot (0.00s)
+    --- PASS: TestCmdCheckRejectsMissingStaticRoot/text (0.00s)
+    --- PASS: TestCmdCheckRejectsMissingStaticRoot/json (0.00s)
+=== RUN   TestCmdCheckTemplateSkipsStaticRoot
+--- PASS: TestCmdCheckTemplateSkipsStaticRoot (0.00s)
+=== RUN   TestCmdLintFailsOnInsecureBackendWithoutStrict
+--- PASS: TestCmdLintFailsOnInsecureBackendWithoutStrict (0.00s)
+=== RUN   TestCmdLintJSONCarriesInsecureBackendSeverity
+--- PASS: TestCmdLintJSONCarriesInsecureBackendSeverity (0.00s)
+=== RUN   TestDispatchDiagnosticsSubcommand
+--- PASS: TestDispatchDiagnosticsSubcommand (0.00s)
+=== RUN   TestCmdDoctorJSONAndValidation
+--- PASS: TestCmdDoctorJSONAndValidation (0.01s)
+=== RUN   TestCmdSupportBundleJSONAndPartialFailureExit
+--- PASS: TestCmdSupportBundleJSONAndPartialFailureExit (0.06s)
+=== RUN   TestCmdSupportBundleUsageAndExistingOutput
+--- PASS: TestCmdSupportBundleUsageAndExistingOutput (0.03s)
+=== RUN   TestDiagnosticCapabilitiesBuildProfileAndExtendedUsage
+--- PASS: TestDiagnosticCapabilitiesBuildProfileAndExtendedUsage (0.00s)
+=== RUN   TestCmdHealthcheckHealthy
+--- PASS: TestCmdHealthcheckHealthy (0.00s)
+=== RUN   TestCmdHealthcheckUnhealthyStatus
+--- PASS: TestCmdHealthcheckUnhealthyStatus (0.00s)
+=== RUN   TestCmdHealthcheckUnreachable
+--- PASS: TestCmdHealthcheckUnreachable (0.00s)
+=== RUN   TestCmdHealthcheckTimeout
+--- PASS: TestCmdHealthcheckTimeout (0.02s)
+=== RUN   TestCmdHealthcheckConfigDiscovery
+--- PASS: TestCmdHealthcheckConfigDiscovery (0.00s)
+=== RUN   TestCmdHealthcheckTLSConfigDiscoveryAndTrust
+2026/10/13 06:41:20 http: TLS handshake error from 127.0.0.1:39392: remote error: tls: bad certificate
+--- PASS: TestCmdHealthcheckTLSConfigDiscoveryAndTrust (0.06s)
+=== RUN   TestCmdHealthcheckTLSOptionsAndRedirect
+--- PASS: TestCmdHealthcheckTLSOptionsAndRedirect (0.00s)
+=== RUN   TestCmdHealthcheckRejectsUnboundedOrUnsafeInvocation
+--- PASS: TestCmdHealthcheckRejectsUnboundedOrUnsafeInvocation (0.00s)
+=== RUN   TestCmdHealthcheckMTLSClientCertificate
+2026/10/13 06:41:20 http: TLS handshake error from 127.0.0.1:60954: tls: client didn't provide a certificate
+--- PASS: TestCmdHealthcheckMTLSClientCertificate (0.02s)
+=== RUN   TestCmdHealthcheckAddrOverride
+--- PASS: TestCmdHealthcheckAddrOverride (0.00s)
+=== RUN   TestCmdHealthcheckConfigMissing
+--- PASS: TestCmdHealthcheckConfigMissing (0.00s)
+=== RUN   TestCmdHealthcheckAdminDisabled
+--- PASS: TestCmdHealthcheckAdminDisabled (0.00s)
+=== RUN   TestCmdHealthcheckBadFlag
+--- PASS: TestCmdHealthcheckBadFlag (0.00s)
+=== RUN   TestCmdHealthcheckJSON
+=== RUN   TestCmdHealthcheckJSON/healthy
+=== RUN   TestCmdHealthcheckJSON/unhealthy
+--- PASS: TestCmdHealthcheckJSON (0.00s)
+    --- PASS: TestCmdHealthcheckJSON/healthy (0.00s)
+    --- PASS: TestCmdHealthcheckJSON/unhealthy (0.00s)
+=== RUN   TestCmdHealthcheckQuiet
+=== RUN   TestCmdHealthcheckQuiet/healthy_is_silent
+=== RUN   TestCmdHealthcheckQuiet/unhealthy_is_silent
+--- PASS: TestCmdHealthcheckQuiet (0.00s)
+    --- PASS: TestCmdHealthcheckQuiet/healthy_is_silent (0.00s)
+    --- PASS: TestCmdHealthcheckQuiet/unhealthy_is_silent (0.00s)
+=== RUN   TestCmdHealthcheckDispatch
+flag provided but not defined: -nope
+Usage of healthcheck:
+  -addr string
+    	override the admin host:port to probe (keeps the endpoint path)
+  -ca-file string
+    	additional PEM CA bundle for an HTTPS probe
+  -client-cert string
+    	mTLS client certificate for an HTTPS probe
+  -client-key string
+    	mTLS client private key for an HTTPS probe
+  -config string
+    	config file used to discover the admin listen address (default "server.toml")
+  -json
+    	emit the result as JSON
+  -quiet
+    	suppress output; report only via the exit code
+  -ready
+    	probe readiness (/readyz) instead of liveness (/healthz)
+  -timeout duration
+    	overall request timeout (default 3s)
+  -url string
+    	probe this full URL instead of discovering it from the config
+--- PASS: TestCmdHealthcheckDispatch (0.00s)
+=== RUN   TestCmdImportAssessmentHumanNoWrite
+--- PASS: TestCmdImportAssessmentHumanNoWrite (0.01s)
+=== RUN   TestCmdImportAssessmentJSONOnly
+--- PASS: TestCmdImportAssessmentJSONOnly (0.01s)
+=== RUN   TestCmdImportReportAndGeneratedConfig
+--- PASS: TestCmdImportReportAndGeneratedConfig (0.01s)
+=== RUN   TestCmdImportReportBlockingStillWritesCandidate
+--- PASS: TestCmdImportReportBlockingStillWritesCandidate (0.01s)
+=== RUN   TestCmdImportAssessmentOutputConflicts
+--- PASS: TestCmdImportAssessmentOutputConflicts (0.00s)
+=== RUN   TestCmdImportAssessmentParseAndIOExitCodes
+--- PASS: TestCmdImportAssessmentParseAndIOExitCodes (0.00s)
+=== RUN   TestCmdImportAssessmentDoesNotEchoSecret
+--- PASS: TestCmdImportAssessmentDoesNotEchoSecret (0.01s)
+=== RUN   TestCmdImportAssessmentSchemaV2RelativePaths
+--- PASS: TestCmdImportAssessmentSchemaV2RelativePaths (0.01s)
+=== RUN   TestCmdImportAssessmentAbsolutePathsRequireExplicitFlag
+--- PASS: TestCmdImportAssessmentAbsolutePathsRequireExplicitFlag (0.01s)
+=== RUN   TestCmdImportAssessmentSourceOrder
+--- PASS: TestCmdImportAssessmentSourceOrder (0.01s)
+=== RUN   TestCmdImportAssessmentRejectsInvalidPathStyle
+--- PASS: TestCmdImportAssessmentRejectsInvalidPathStyle (0.00s)
+=== RUN   TestCmdImportAssessmentRejectsSourceOrderWithoutHumanMode
+--- PASS: TestCmdImportAssessmentRejectsSourceOrderWithoutHumanMode (0.00s)
+=== RUN   TestImportAssessmentExitTable
+=== RUN   TestImportAssessmentExitTable/nil
+=== RUN   TestImportAssessmentExitTable/ready
+=== RUN   TestImportAssessmentExitTable/blocking
+=== RUN   TestImportAssessmentExitTable/invalid
+=== RUN   TestImportAssessmentExitTable/approx_non-strict
+=== RUN   TestImportAssessmentExitTable/approx_strict
+=== RUN   TestImportAssessmentExitTable/lint_strict
+--- PASS: TestImportAssessmentExitTable (0.00s)
+    --- PASS: TestImportAssessmentExitTable/nil (0.00s)
+    --- PASS: TestImportAssessmentExitTable/ready (0.00s)
+    --- PASS: TestImportAssessmentExitTable/blocking (0.00s)
+    --- PASS: TestImportAssessmentExitTable/invalid (0.00s)
+    --- PASS: TestImportAssessmentExitTable/approx_non-strict (0.00s)
+    --- PASS: TestImportAssessmentExitTable/approx_strict (0.00s)
+    --- PASS: TestImportAssessmentExitTable/lint_strict (0.00s)
+=== RUN   TestCmdImportStrictApproximation
+--- PASS: TestCmdImportStrictApproximation (0.01s)
+=== RUN   TestCmdImportOutputAndReportIOFailures
+--- PASS: TestCmdImportOutputAndReportIOFailures (0.01s)
+=== RUN   TestCmdImportUsageConflictMatrix
+--- PASS: TestCmdImportUsageConflictMatrix (0.00s)
+=== RUN   TestCmdImportHumanAssessmentReady
+--- PASS: TestCmdImportHumanAssessmentReady (0.01s)
+=== RUN   TestCmdImportIncludeUsageValidation
+=== RUN   TestCmdImportIncludeUsageValidation/source_order_without_assess
+=== RUN   TestCmdImportIncludeUsageValidation/invalid_path_style
+=== RUN   TestCmdImportIncludeUsageValidation/root_without_traversal
+=== RUN   TestCmdImportIncludeUsageValidation/conflicting_root_aliases
+=== RUN   TestCmdImportIncludeUsageValidation/zero_depth
+=== RUN   TestCmdImportIncludeUsageValidation/zero_files
+=== RUN   TestCmdImportIncludeUsageValidation/zero_file_bytes
+=== RUN   TestCmdImportIncludeUsageValidation/zero_total_bytes
+=== RUN   TestCmdImportIncludeUsageValidation/zero_glob_matches
+--- PASS: TestCmdImportIncludeUsageValidation (0.00s)
+    --- PASS: TestCmdImportIncludeUsageValidation/source_order_without_assess (0.00s)
+    --- PASS: TestCmdImportIncludeUsageValidation/invalid_path_style (0.00s)
+    --- PASS: TestCmdImportIncludeUsageValidation/root_without_traversal (0.00s)
+    --- PASS: TestCmdImportIncludeUsageValidation/conflicting_root_aliases (0.00s)
+    --- PASS: TestCmdImportIncludeUsageValidation/zero_depth (0.00s)
+    --- PASS: TestCmdImportIncludeUsageValidation/zero_files (0.00s)
+    --- PASS: TestCmdImportIncludeUsageValidation/zero_file_bytes (0.00s)
+    --- PASS: TestCmdImportIncludeUsageValidation/zero_total_bytes (0.00s)
+    --- PASS: TestCmdImportIncludeUsageValidation/zero_glob_matches (0.00s)
+=== RUN   TestCmdImportFollowIncludesJSONAndConfig
+--- PASS: TestCmdImportFollowIncludesJSONAndConfig (0.01s)
+=== RUN   TestCmdImportIncompleteTraversalDoesNotWrite
+--- PASS: TestCmdImportIncompleteTraversalDoesNotWrite (0.00s)
+=== RUN   TestCmdImportFollowIncludesDefaultRootAndHuman
+--- PASS: TestCmdImportFollowIncludesDefaultRootAndHuman (0.00s)
+=== RUN   TestCmdImportNginxToFile
+--- PASS: TestCmdImportNginxToFile (0.01s)
+=== RUN   TestCmdImportNginxToStdout
+--- PASS: TestCmdImportNginxToStdout (0.01s)
+=== RUN   TestCmdImportUnknownSource
+--- PASS: TestCmdImportUnknownSource (0.00s)
+=== RUN   TestCmdImportMissingFile
+--- PASS: TestCmdImportMissingFile (0.00s)
+=== RUN   TestCmdImportNginxGolden
+--- PASS: TestCmdImportNginxGolden (0.01s)
+=== RUN   TestRemoteDispatchEmptyAndCommonClientError
+--- PASS: TestRemoteDispatchEmptyAndCommonClientError (0.00s)
+=== RUN   TestParseRemoteFlagFailureAndPermissionWarning
+--- PASS: TestParseRemoteFlagFailureAndPermissionWarning (0.00s)
+=== RUN   TestCommandUsageBranches
+--- PASS: TestCommandUsageBranches (0.00s)
+=== RUN   TestRemoteExtendedUsage
+--- PASS: TestRemoteExtendedUsage (0.00s)
+=== RUN   TestRemoteDispatchSurface
+error: --config is required (use - for stdin)
+error: exactly one of --config or --history-id is required
+error: --base-version is required
+error: --base-version is required
+error: connect: Get "http://127.0.0.1:1/api/v1/status": dial tcp 127.0.0.1:1: connect: connection refused
+error: --history-id is required
+error: connect: Get "http://127.0.0.1:1/api/v1/config/export": dial tcp 127.0.0.1:1: connect: connection refused
+error: connect: Get "http://127.0.0.1:1/api/v1/status": dial tcp 127.0.0.1:1: connect: connection refused
+--- PASS: TestRemoteDispatchSurface (0.00s)
+=== RUN   TestRemotePlanAndDiffJSON
+--- PASS: TestRemotePlanAndDiffJSON (0.00s)
+=== RUN   TestRemoteStatusAndApplyLookup
+--- PASS: TestRemoteStatusAndApplyLookup (0.00s)
+=== RUN   TestRemoteAPIErrorExitClassesAndJSON
+=== RUN   TestRemoteAPIErrorExitClassesAndJSON/validation_failed
+=== RUN   TestRemoteAPIErrorExitClassesAndJSON/invalid_request
+=== RUN   TestRemoteAPIErrorExitClassesAndJSON/stale_base_version
+=== RUN   TestRemoteAPIErrorExitClassesAndJSON/config_authority_read_only
+=== RUN   TestRemoteAPIErrorExitClassesAndJSON/forbidden
+=== RUN   TestRemoteAPIErrorExitClassesAndJSON/rate_limited
+=== RUN   TestRemoteAPIErrorExitClassesAndJSON/internal_error
+--- PASS: TestRemoteAPIErrorExitClassesAndJSON (0.01s)
+    --- PASS: TestRemoteAPIErrorExitClassesAndJSON/validation_failed (0.00s)
+    --- PASS: TestRemoteAPIErrorExitClassesAndJSON/invalid_request (0.00s)
+    --- PASS: TestRemoteAPIErrorExitClassesAndJSON/stale_base_version (0.00s)
+    --- PASS: TestRemoteAPIErrorExitClassesAndJSON/config_authority_read_only (0.00s)
+    --- PASS: TestRemoteAPIErrorExitClassesAndJSON/forbidden (0.00s)
+    --- PASS: TestRemoteAPIErrorExitClassesAndJSON/rate_limited (0.00s)
+    --- PASS: TestRemoteAPIErrorExitClassesAndJSON/internal_error (0.00s)
+=== RUN   TestRemoteUsageFailuresAreMachineReadable
+--- PASS: TestRemoteUsageFailuresAreMachineReadable (0.00s)
+=== RUN   TestRemoteCLIActualBinaryAgainstRealAdminRouteStack
+=== RUN   TestRemoteCLIActualBinaryAgainstRealAdminRouteStack/status
+=== RUN   TestRemoteCLIActualBinaryAgainstRealAdminRouteStack/plan
+=== RUN   TestRemoteCLIActualBinaryAgainstRealAdminRouteStack/diagnostics
+--- PASS: TestRemoteCLIActualBinaryAgainstRealAdminRouteStack (1.05s)
+    --- PASS: TestRemoteCLIActualBinaryAgainstRealAdminRouteStack/status (0.01s)
+    --- PASS: TestRemoteCLIActualBinaryAgainstRealAdminRouteStack/plan (0.01s)
+    --- PASS: TestRemoteCLIActualBinaryAgainstRealAdminRouteStack/diagnostics (0.01s)
+=== RUN   TestRemoteCLIActualProcessExitContractZeroThroughNine
+=== RUN   TestRemoteCLIActualProcessExitContractZeroThroughNine/validation
+=== RUN   TestRemoteCLIActualProcessExitContractZeroThroughNine/usage_request
+=== RUN   TestRemoteCLIActualProcessExitContractZeroThroughNine/conflict
+=== RUN   TestRemoteCLIActualProcessExitContractZeroThroughNine/authority
+=== RUN   TestRemoteCLIActualProcessExitContractZeroThroughNine/auth
+=== RUN   TestRemoteCLIActualProcessExitContractZeroThroughNine/rate_limit
+=== RUN   TestRemoteCLIActualProcessExitContractZeroThroughNine/server
+=== RUN   TestRemoteCLIActualProcessExitContractZeroThroughNine/live
+=== RUN   TestRemoteCLIActualProcessExitContractZeroThroughNine/staged
+=== RUN   TestRemoteCLIActualProcessExitContractZeroThroughNine/degraded
+--- PASS: TestRemoteCLIActualProcessExitContractZeroThroughNine (0.76s)
+    --- PASS: TestRemoteCLIActualProcessExitContractZeroThroughNine/validation (0.01s)
+    --- PASS: TestRemoteCLIActualProcessExitContractZeroThroughNine/usage_request (0.01s)
+    --- PASS: TestRemoteCLIActualProcessExitContractZeroThroughNine/conflict (0.01s)
+    --- PASS: TestRemoteCLIActualProcessExitContractZeroThroughNine/authority (0.01s)
+    --- PASS: TestRemoteCLIActualProcessExitContractZeroThroughNine/auth (0.01s)
+    --- PASS: TestRemoteCLIActualProcessExitContractZeroThroughNine/rate_limit (0.01s)
+    --- PASS: TestRemoteCLIActualProcessExitContractZeroThroughNine/server (0.01s)
+    --- PASS: TestRemoteCLIActualProcessExitContractZeroThroughNine/live (0.01s)
+    --- PASS: TestRemoteCLIActualProcessExitContractZeroThroughNine/staged (0.01s)
+    --- PASS: TestRemoteCLIActualProcessExitContractZeroThroughNine/degraded (0.01s)
+=== RUN   TestCmdRunServeSmoke
+time=2026-10-13T06:41:22.710-05:00 level=INFO msg="starting Jul.IA" version=dev config=<test:run-serve-smoke>
+time=2026-10-13T06:41:22.718-05:00 level=INFO msg=listening addr=127.0.0.1:39279 tls=false http3=false
+time=2026-10-13T06:41:22.744-05:00 level=INFO msg=access method=GET host=127.0.0.1:39279 path=/smoke.html query="" status=200 bytes=14 duration_ms=7.209 client_ip=127.0.0.1 request_id=781c704393d021ca user_agent=Go-http-client/1.1
+time=2026-10-13T06:41:22.744-05:00 level=INFO msg=access method=GET host=127.0.0.1:39279 path=/smoke.html query="" status=200 bytes=14 duration_ms=0.126 client_ip=127.0.0.1 request_id=0e3aeeb9081901d9 user_agent=Go-http-client/1.1
+time=2026-10-13T06:41:22.745-05:00 level=INFO msg="shutdown signal received, draining connections"
+time=2026-10-13T06:41:22.745-05:00 level=INFO msg="shutdown complete"
+--- PASS: TestCmdRunServeSmoke (0.04s)
+=== RUN   TestCmdRunProxySmoke
+time=2026-10-13T06:41:22.746-05:00 level=INFO msg="starting Jul.IA" version=dev config=<test:run-proxy-smoke>
+time=2026-10-13T06:41:22.753-05:00 level=INFO msg=listening addr=127.0.0.1:41629 tls=false http3=false
+time=2026-10-13T06:41:22.773-05:00 level=INFO msg=access method=GET host=127.0.0.1:41629 path=/ query="" status=200 bytes=16 duration_ms=0.901 client_ip=127.0.0.1 request_id=dfc91d91a584ea2e user_agent=Go-http-client/1.1
+time=2026-10-13T06:41:22.774-05:00 level=INFO msg=access method=GET host=127.0.0.1:41629 path=/ query="" status=200 bytes=16 duration_ms=0.526 client_ip=127.0.0.1 request_id=98d90980d589bf9b user_agent=Go-http-client/1.1
+time=2026-10-13T06:41:22.774-05:00 level=INFO msg="shutdown signal received, draining connections"
+time=2026-10-13T06:41:22.775-05:00 level=INFO msg="shutdown complete"
+--- PASS: TestCmdRunProxySmoke (0.03s)
+=== RUN   TestCmdVersionText
+--- PASS: TestCmdVersionText (0.00s)
+=== RUN   TestCmdVersionJSON
+--- PASS: TestCmdVersionJSON (0.00s)
+=== RUN   TestCmdCompletionAllShells
+=== RUN   TestCmdCompletionAllShells/fish
+=== RUN   TestCmdCompletionAllShells/powershell
+=== RUN   TestCmdCompletionAllShells/pwsh
+=== RUN   TestCmdCompletionAllShells/bash
+=== RUN   TestCmdCompletionAllShells/zsh
+--- PASS: TestCmdCompletionAllShells (0.00s)
+    --- PASS: TestCmdCompletionAllShells/fish (0.00s)
+    --- PASS: TestCmdCompletionAllShells/powershell (0.00s)
+    --- PASS: TestCmdCompletionAllShells/pwsh (0.00s)
+    --- PASS: TestCmdCompletionAllShells/bash (0.00s)
+    --- PASS: TestCmdCompletionAllShells/zsh (0.00s)
+=== RUN   TestCmdCompletionErrors
+--- PASS: TestCmdCompletionErrors (0.00s)
+=== RUN   TestDispatchVersionAndCompletion
+Usage of version:
+  -json
+    	emit the version report as JSON
+Usage of completion:
+--- PASS: TestDispatchVersionAndCompletion (0.00s)
+PASS
+ok  	jul/cmd/jul	3.296s

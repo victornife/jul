@@ -8,10 +8,10 @@
 
 ## Context
 
-The admin API and Console authenticate with a **single shared bearer token**
+The original pre-RBAC admin API and Console authenticated with a **single shared bearer token**
 (`[admin].token`), compared in constant time in `internal/admin/server.go`. That
 token is an implicit super-user, and the [audit log](../console.md) hard-codes the
-actor to `"operator"` — it cannot attribute an action to a person. This blocks
+actor to `"operator"` — it could not attribute an action to a person. This blocked
 least-privilege operation, separation of duties, and attributable change history,
 which an enterprise-facing posture requires.
 
@@ -22,12 +22,14 @@ exist, how tokens are issued/revoked, and how to stay backward-compatible.
 
 ## Decision
 
-Adopt a **local, config-and-API-managed RBAC model** enforced at the admin API
-boundary. External identity providers stay out of scope (Y3-02).
+Adopt a **local, config-managed RBAC model** enforced at the admin API boundary.
+Named principals, custom/predefined roles and one config token per principal are
+delivered. Interactive API token management remains the future target in the
+spec, not part of that delivery. External identity remains out of scope (Y3-02).
 
 1. **Principals → one role → a permission set.** A principal is a named identity
    (human or automation). A role is a set of `"<resource>:<action>"` permissions.
-   Enforcement is **deny-by-default** at the server; the UI only hides.
+   Enforcement is **deny-by-default** at the server; the UI hides or disables.
 
 2. **Predefined roles cover the common cases:** `viewer` (read), `operator`
    (read + write/apply/operate, but not admin-surface), `admin` (`*`), and an
@@ -41,17 +43,20 @@ boundary. External identity providers stay out of scope (Y3-02).
 4. **Read vs write is the action axis,** and `write` (author/preview) is separable
    from `apply` (persist) so approval/two-key workflows are expressible.
 
-5. **Scoped, revocable, rotatable tokens, hashed at rest** (SHA-256 of a
-   high-entropy secret; constant-time compare; plaintext shown once). Config
-   supplies tokens via [secret references](../secrets.md); Phase 3 mints them via
-   an `admin:manage`-gated API. Revocation is immediate.
+5. **Scoped, config-revocable tokens.** Config supplies one token per principal
+   through [secret references](../secrets.md). The policy hashes it in memory
+   using SHA-256 and compares in constant time; referenced storage still needs
+   operator protection. Replace/disable it in config and successfully hot reload
+   for fresh requests to use the new policy. API issuance, one-time display,
+   overlapping multi-token rotation and immediate API revocation remain future
+   work. A request already holding an authentication snapshot retains it.
 
 6. **Per-principal audit attribution.** `AuditEvent.Actor` becomes the principal
    name; a `token_id` records the credential. Attribution is server-assigned.
 
 7. **Backward-compatible and phased.** RBAC is opt-in (`admin.rbac.enabled`, off by
-   default). When on, the legacy shared token maps to a compatibility `admin`
-   principal so nothing breaks during migration. See the
+   default). When on, the legacy shared token maps to the `shared` principal with
+   configured `default_role` (default `admin`). See the
    [phased plan](../specs/console-rbac.md#phased-implementation-plan).
 
 The **exhaustive permission matrix** (every admin endpoint → required permission →
@@ -75,9 +80,9 @@ a guard that fails if any mounted route lacks an explicit permission.
 ## Consequences
 
 - **Positive:** least-privilege multi-operator use; attributable audit; scoped
-  automation tokens with rotation/expiry; deny-by-default closes the "new endpoint
+  automation tokens with config replacement/expiry; deny-by-default closes the "new endpoint
   is accidentally open" gap; a clean bridge to Y3-02.
-- **Negative / cost:** new config surface (`[admin.rbac]`) and a token store; the
+- **Negative / cost:** new config surface (`[admin.rbac]`) and an in-memory policy; the
   audit schema gains a `token_id` column (append-only evolution); the Console gains
   role-gated UI (Phase 3). Mitigated by shipping opt-in and phased.
 - **Invariant:** the server is the source of truth; the UI never grants. A route

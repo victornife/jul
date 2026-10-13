@@ -48,6 +48,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   No gateway or Console runtime behavior, dependency, maturity or Go coverage
   gate changes.
 
+- Reconcile nine original D11 Console/API/CLI rows and the related active
+  Console guide. Correct token/permission/current-vs-future, embedded build/CSP,
+  patch method and terminal-history claims. Reuse #517 coverage proof with its
+  actual source; link selected confirmation/audit corrections separately.
+  Preserve local AF_UNIX failures, historical plans and human-review boundary.
+
 - Reconcile 24 original D11 protocol/security/plugin/observability rows against
   current owners and bounded tests. Correct audit retention, access-log schema,
   backend trust/retry and affinity consumers; distinguish historical ADR design

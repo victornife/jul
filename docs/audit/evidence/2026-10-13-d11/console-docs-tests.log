@@ -1,0 +1,24 @@
+FAIL /tmp/tmpv_88tbd2/docs/index.md:118 — feature SEC-EGRESS status mismatch: index=`GA-soak-pending` / `merged`, manifest=`GA-soak-pending` / `released`
+FAIL /tmp/tmp3zw2a5c1/docs/audit-register.md:0 — finding R9-01 appears as both Resolved and Open in audit-register.md — remove or archive the stale entry
+FAIL /tmp/tmplr2d5h0l/docs/specs/year-3.md:0 — missing horizon banner: 'Concept horizon — not committed'
+FAIL /tmp/tmplr2d5h0l/docs/specs/year-4.md:0 — missing horizon banner: 'Concept horizon — not committed'
+FAIL /tmp/tmplr2d5h0l/docs/specs/year-5.md:0 — missing horizon banner: 'Concept horizon — not committed'
+FAIL /tmp/tmpfuo39owa/docs/roadmap/README.md:7 — active roadmap broken link: missing.md
+FAIL /tmp/tmpuaqjub0z/docs/roadmap/README.md:8 — duplicate active roadmap ID: HP-01
+FAIL /tmp/tmpzyhnfkpb/docs/roadmap/README.md:8 — active roadmap ID HP-03 also appears as delivered
+FAIL /tmp/tmpd5zd9zyd/internal/lifecycle/registry.go:0 — closed-world violation: 2 schema leaves, 1 registry entries, 0 exemptions — every public leaf needs exactly one disposition
+FAIL /tmp/tmp8dngedpt/internal/lifecycle/registry.go:0 — restart_required path 'admin.listen' is not startup-consumed; the reload gate would ignore it
+FAIL /tmp/tmp34hue0k5/internal/lifecycle/registry.go:0 — path 'admin.listen' uses undocumented subsystem 'mystery'
+FAIL /tmp/tmp90ngwok2/internal/lifecycle/registry.go:0 — path 'admin.listen' has no reason
+FAIL /tmp/tmpt35fnfs9/docs/config-lifecycle.yaml:0 — YAML version 1 does not match the metadata version 2
+FAIL /tmp/tmpsugl7gl2/docs/reload-semantics.md:0 — restart-required subsystem 'cache' is not mentioned in reload-semantics.md — keep the conceptual doc in sync with the registry
+FAIL /tmp/tmpzqxj80vd/README.md:0 — README claims every shipped feature is GA while the manifest contains non-GA entries
+FAIL /tmp/tmpt48up8on/docs/index.md:0 — feature F-1 canonical guide 'feature.md' is not linked from docs/index.md
+FAIL /tmp/tmpt48up8on/docs/index.md:0 — feature F-1 (Feature one) needs exactly one index status row; found 0
+FAIL /tmp/tmpw9de8kur/docs/feature-status.yaml:0 — feature F-1 (Feature one) delivery mismatch: YAML=merged, status.md=candidate
+FAIL /tmp/tmp55pkc8rd/README.md:0 — README Go version 1.26.5 disagrees with go.mod 1.26.6
+FAIL /tmp/tmpou9dcuz9/docs/compatibility.md:0 — header 1.1 / 2026-08-04 is older than changelog 1.6 / 2026-08-19
+FAIL /tmp/tmpb_y_w6nk/docs/status.md:9 — duplicate heading 'Repeated'; first declared on line 5
+FAIL /tmp/tmplmg9ks16/docs/status.md:0 — legacy status section remains: Beta (shipped; remaining GA gaps)
+FAIL /tmp/tmp0thi9zw7/docs/parser.md:1 — documented fuzz target FuzzMissing does not exist in ./internal/parser
+OK
