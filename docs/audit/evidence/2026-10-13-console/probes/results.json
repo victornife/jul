@@ -1,0 +1,107 @@
+[
+  {
+    "path": "src/features/config/**",
+    "metric": "statements",
+    "intended_floor": 80,
+    "temporary_floor": 86,
+    "measured": 85.05,
+    "exit_code": 1,
+    "tests_pass": true,
+    "only_intended_threshold_fails": true,
+    "unchanged_global_counts": true,
+    "diagnostics": [
+      "ERROR: Coverage for statements (85.05%) does not meet \"src/features/config/**\" threshold (86%)"
+    ],
+    "log": "1-statements.log"
+  },
+  {
+    "path": "src/features/config/**",
+    "metric": "branches",
+    "intended_floor": 70,
+    "temporary_floor": 75,
+    "measured": 74.59,
+    "exit_code": 1,
+    "tests_pass": true,
+    "only_intended_threshold_fails": true,
+    "unchanged_global_counts": true,
+    "diagnostics": [
+      "ERROR: Coverage for branches (74.59%) does not meet \"src/features/config/**\" threshold (75%)"
+    ],
+    "log": "1-branches.log"
+  },
+  {
+    "path": "src/features/history/**",
+    "metric": "statements",
+    "intended_floor": 80,
+    "temporary_floor": 91,
+    "measured": 90.9,
+    "exit_code": 1,
+    "tests_pass": true,
+    "only_intended_threshold_fails": true,
+    "unchanged_global_counts": true,
+    "diagnostics": [
+      "ERROR: Coverage for statements (90.9%) does not meet \"src/features/history/**\" threshold (91%)"
+    ],
+    "log": "2-statements.log"
+  },
+  {
+    "path": "src/api/client.ts",
+    "metric": "statements",
+    "intended_floor": 80,
+    "temporary_floor": 83,
+    "measured": 82.81,
+    "exit_code": 1,
+    "tests_pass": true,
+    "only_intended_threshold_fails": true,
+    "unchanged_global_counts": true,
+    "diagnostics": [
+      "ERROR: Coverage for statements (82.81%) does not meet \"src/api/client.ts\" threshold (83%)"
+    ],
+    "log": "3-statements.log"
+  },
+  {
+    "path": "src/api/client.ts",
+    "metric": "branches",
+    "intended_floor": 70,
+    "temporary_floor": 77,
+    "measured": 76.36,
+    "exit_code": 1,
+    "tests_pass": true,
+    "only_intended_threshold_fails": true,
+    "unchanged_global_counts": true,
+    "diagnostics": [
+      "ERROR: Coverage for branches (76.36%) does not meet \"src/api/client.ts\" threshold (77%)"
+    ],
+    "log": "3-branches.log"
+  },
+  {
+    "path": "src/features/config/ConfigPanel.tsx",
+    "metric": "statements",
+    "intended_floor": 80,
+    "temporary_floor": 82,
+    "measured": 81.58,
+    "exit_code": 1,
+    "tests_pass": true,
+    "only_intended_threshold_fails": true,
+    "unchanged_global_counts": true,
+    "diagnostics": [
+      "ERROR: Coverage for statements (81.58%) does not meet \"src/features/config/ConfigPanel.tsx\" threshold (82%)"
+    ],
+    "log": "4-statements.log"
+  },
+  {
+    "path": "src/features/config/configMutationMachine.ts",
+    "metric": "statements",
+    "intended_floor": 80,
+    "temporary_floor": 90,
+    "measured": 89.47,
+    "exit_code": 1,
+    "tests_pass": true,
+    "only_intended_threshold_fails": true,
+    "unchanged_global_counts": true,
+    "diagnostics": [
+      "ERROR: Coverage for statements (89.47%) does not meet \"src/features/config/configMutationMachine.ts\" threshold (90%)"
+    ],
+    "log": "5-statements.log"
+  }
+]

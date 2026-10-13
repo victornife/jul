@@ -708,10 +708,9 @@ jobs:
       run:
         working-directory: internal/admin/ui
     env:
-      # Current console statement coverage baseline is ~58%. The previous 70%
-      # floor was unreachable without a dedicated test expansion; lowering it
-      # to the measured baseline keeps the gate useful while the UI test suite
-      # is backfilled.
+      # Retain the pre-existing global 58% floor. Vitest coverage-policy.json
+      # enforces the same floor locally plus aggregate config/history/client
+      # floors and individual core apply-file floors (#517).
       COVERAGE_FLOOR: "58"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -754,8 +753,10 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: console-coverage-output
-          path: internal/admin/ui/coverage-output.txt
-          if-no-files-found: ignore
+          path: |
+            internal/admin/ui/coverage-output.txt
+            internal/admin/ui/coverage/
+          if-no-files-found: error
 
   console-e2e:
     name: console e2e (browser smoke)
