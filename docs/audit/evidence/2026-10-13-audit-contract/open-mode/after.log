@@ -1,0 +1,531 @@
+=== RUN   TestManagedApplyGet_DisabledOrExpiredCredential401
+=== RUN   TestManagedApplyGet_DisabledOrExpiredCredential401/disabled
+=== RUN   TestManagedApplyGet_DisabledOrExpiredCredential401/expired
+--- PASS: TestManagedApplyGet_DisabledOrExpiredCredential401 (0.00s)
+    --- PASS: TestManagedApplyGet_DisabledOrExpiredCredential401/disabled (0.00s)
+    --- PASS: TestManagedApplyGet_DisabledOrExpiredCredential401/expired (0.00s)
+=== RUN   TestManagedApplyGet_BlockedRBAC503
+--- PASS: TestManagedApplyGet_BlockedRBAC503 (0.00s)
+=== RUN   TestManagedApplyGet_RollbackOnlyScoped
+=== RUN   TestManagedApplyGet_RollbackOnlyScoped/rollback_only_reads_own_rollback
+=== RUN   TestManagedApplyGet_RollbackOnlyScoped/rollback_only_denied_unrelated_apply
+=== RUN   TestManagedApplyGet_RollbackOnlyScoped/rollback_only_denied_foreign_rollback
+=== RUN   TestManagedApplyGet_RollbackOnlyScoped/history_read_only_forbidden
+=== RUN   TestManagedApplyGet_RollbackOnlyScoped/status_read_reads_any
+=== RUN   TestManagedApplyGet_RollbackOnlyScoped/admin_reads_any
+--- PASS: TestManagedApplyGet_RollbackOnlyScoped (0.01s)
+    --- PASS: TestManagedApplyGet_RollbackOnlyScoped/rollback_only_reads_own_rollback (0.00s)
+    --- PASS: TestManagedApplyGet_RollbackOnlyScoped/rollback_only_denied_unrelated_apply (0.00s)
+    --- PASS: TestManagedApplyGet_RollbackOnlyScoped/rollback_only_denied_foreign_rollback (0.00s)
+    --- PASS: TestManagedApplyGet_RollbackOnlyScoped/history_read_only_forbidden (0.00s)
+    --- PASS: TestManagedApplyGet_RollbackOnlyScoped/status_read_reads_any (0.00s)
+    --- PASS: TestManagedApplyGet_RollbackOnlyScoped/admin_reads_any (0.00s)
+=== RUN   TestManagedApplyGet_OwnershipDenialBodyIsHonest
+--- PASS: TestManagedApplyGet_OwnershipDenialBodyIsHonest (0.01s)
+=== RUN   TestManagedApplyGet_ResponseRules
+=== RUN   TestManagedApplyGet_ResponseRules/terminal
+=== RUN   TestManagedApplyGet_ResponseRules/pending
+=== RUN   TestManagedApplyGet_ResponseRules/finalizing
+=== RUN   TestManagedApplyGet_ResponseRules/unknown
+=== RUN   TestManagedApplyGet_ResponseRules/invalid
+--- PASS: TestManagedApplyGet_ResponseRules (0.01s)
+    --- PASS: TestManagedApplyGet_ResponseRules/terminal (0.00s)
+    --- PASS: TestManagedApplyGet_ResponseRules/pending (0.00s)
+    --- PASS: TestManagedApplyGet_ResponseRules/finalizing (0.00s)
+    --- PASS: TestManagedApplyGet_ResponseRules/unknown (0.00s)
+    --- PASS: TestManagedApplyGet_ResponseRules/invalid (0.00s)
+=== RUN   TestManagedApplyGet_TerminalBody
+--- PASS: TestManagedApplyGet_TerminalBody (0.00s)
+=== RUN   TestManagedApplyGet_FinalizingBody
+--- PASS: TestManagedApplyGet_FinalizingBody (0.00s)
+=== RUN   TestManagedApplyGet_FailFinalizationBody
+--- PASS: TestManagedApplyGet_FailFinalizationBody (0.00s)
+=== RUN   TestManagedApplyGet_LookupMetric
+=== RUN   TestManagedApplyGet_LookupMetric/terminal
+=== RUN   TestManagedApplyGet_LookupMetric/pending
+=== RUN   TestManagedApplyGet_LookupMetric/finalizing
+=== RUN   TestManagedApplyGet_LookupMetric/missing
+=== RUN   TestManagedApplyGet_LookupMetric/invalid
+--- PASS: TestManagedApplyGet_LookupMetric (0.00s)
+    --- PASS: TestManagedApplyGet_LookupMetric/terminal (0.00s)
+    --- PASS: TestManagedApplyGet_LookupMetric/pending (0.00s)
+    --- PASS: TestManagedApplyGet_LookupMetric/finalizing (0.00s)
+    --- PASS: TestManagedApplyGet_LookupMetric/missing (0.00s)
+    --- PASS: TestManagedApplyGet_LookupMetric/invalid (0.00s)
+=== RUN   TestManagedApplyGet_LookupMetricMissingRegistry
+--- PASS: TestManagedApplyGet_LookupMetricMissingRegistry (0.00s)
+=== RUN   TestManagedApplyGet_NilRegistry
+--- PASS: TestManagedApplyGet_NilRegistry (0.00s)
+=== RUN   TestManagedApplyGet_AnyPermissionAuthorizes
+=== RUN   TestManagedApplyGet_AnyPermissionAuthorizes/status_read_viewer
+=== RUN   TestManagedApplyGet_AnyPermissionAuthorizes/config_apply_automation
+=== RUN   TestManagedApplyGet_AnyPermissionAuthorizes/unrelated_permission
+=== RUN   TestManagedApplyGet_AnyPermissionAuthorizes/no_token
+--- PASS: TestManagedApplyGet_AnyPermissionAuthorizes (0.00s)
+    --- PASS: TestManagedApplyGet_AnyPermissionAuthorizes/status_read_viewer (0.00s)
+    --- PASS: TestManagedApplyGet_AnyPermissionAuthorizes/config_apply_automation (0.00s)
+    --- PASS: TestManagedApplyGet_AnyPermissionAuthorizes/unrelated_permission (0.00s)
+    --- PASS: TestManagedApplyGet_AnyPermissionAuthorizes/no_token (0.00s)
+=== RUN   TestManagedApplyGet_ForbiddenBodyListsAcceptedPermissions
+--- PASS: TestManagedApplyGet_ForbiddenBodyListsAcceptedPermissions (0.00s)
+=== RUN   TestManagedApplyFinalizationRejectsOperationMismatch
+--- PASS: TestManagedApplyFinalizationRejectsOperationMismatch (0.00s)
+=== RUN   TestV1IdempotencyMetadataAndFallbackBranches
+=== RUN   TestV1IdempotencyMetadataAndFallbackBranches/no_key
+=== RUN   TestV1IdempotencyMetadataAndFallbackBranches/invalid_key
+=== RUN   TestV1IdempotencyMetadataAndFallbackBranches/missing_principal
+=== RUN   TestV1IdempotencyMetadataAndFallbackBranches/malformed_query
+=== RUN   TestV1IdempotencyMetadataAndFallbackBranches/fingerprint_empty_path_and_operation_fallback
+=== RUN   TestV1IdempotencyMetadataAndFallbackBranches/idempotent_request_requires_ledger
+=== RUN   TestV1IdempotencyMetadataAndFallbackBranches/no_key_executes_canonical_handler
+--- PASS: TestV1IdempotencyMetadataAndFallbackBranches (0.00s)
+    --- PASS: TestV1IdempotencyMetadataAndFallbackBranches/no_key (0.00s)
+    --- PASS: TestV1IdempotencyMetadataAndFallbackBranches/invalid_key (0.00s)
+    --- PASS: TestV1IdempotencyMetadataAndFallbackBranches/missing_principal (0.00s)
+    --- PASS: TestV1IdempotencyMetadataAndFallbackBranches/malformed_query (0.00s)
+    --- PASS: TestV1IdempotencyMetadataAndFallbackBranches/fingerprint_empty_path_and_operation_fallback (0.00s)
+    --- PASS: TestV1IdempotencyMetadataAndFallbackBranches/idempotent_request_requires_ledger (0.00s)
+    --- PASS: TestV1IdempotencyMetadataAndFallbackBranches/no_key_executes_canonical_handler (0.00s)
+=== RUN   TestV1IdempotencyKeyGrammar
+--- PASS: TestV1IdempotencyKeyGrammar (0.00s)
+=== RUN   TestV1IdempotencyRejectsDuplicateKeyBeforeMutation
+--- PASS: TestV1IdempotencyRejectsDuplicateKeyBeforeMutation (0.00s)
+=== RUN   TestV1IdempotencyRejectsExplicitEmptyKeyBeforeMutation
+--- PASS: TestV1IdempotencyRejectsExplicitEmptyKeyBeforeMutation (0.00s)
+=== RUN   TestManagedApplyRegistryRetainsPrivateIdempotencyBinding
+--- PASS: TestManagedApplyRegistryRetainsPrivateIdempotencyBinding (0.00s)
+=== RUN   TestV1IdempotencyPendingThenTerminalReplay
+--- PASS: TestV1IdempotencyPendingThenTerminalReplay (0.00s)
+=== RUN   TestV1IdempotencyUsesPrincipalAcrossCredentialRotation
+--- PASS: TestV1IdempotencyUsesPrincipalAcrossCredentialRotation (0.00s)
+=== RUN   TestV1IdempotencyConcurrentDuplicateExecutesOnce
+--- PASS: TestV1IdempotencyConcurrentDuplicateExecutesOnce (0.00s)
+=== RUN   TestV1IdempotencyBootAndEvictionBoundReplay
+--- PASS: TestV1IdempotencyBootAndEvictionBoundReplay (0.00s)
+=== RUN   TestV1IdempotencyRejectsMalformedQueryBeforeExecution
+--- PASS: TestV1IdempotencyRejectsMalformedQueryBeforeExecution (0.00s)
+=== RUN   TestAuditCSVRetainsCredentialIdentityAdditively
+--- PASS: TestAuditCSVRetainsCredentialIdentityAdditively (0.00s)
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_missing
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_invalid
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_disabled
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_expired
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_legacy_invalid
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/status_missing
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/status_invalid
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/status_disabled
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/status_expired
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/status_legacy_invalid
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_missing
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_invalid
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_disabled
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_expired
+=== RUN   TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_legacy_invalid
+--- PASS: TestAuthenticationRejectionsProduceAnonymousAudit (0.06s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_missing (0.00s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_invalid (0.01s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_disabled (0.00s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_expired (0.00s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/admin/me_legacy_invalid (0.00s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/status_missing (0.00s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/status_invalid (0.00s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/status_disabled (0.00s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/status_expired (0.00s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/status_legacy_invalid (0.01s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_missing (0.00s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_invalid (0.00s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_disabled (0.00s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_expired (0.00s)
+    --- PASS: TestAuthenticationRejectionsProduceAnonymousAudit//api/v1/config/pending-restart_legacy_invalid (0.00s)
+=== RUN   TestSuccessfulAuthenticationAndAuthorizationDenialAreNotAuthFailures
+--- PASS: TestSuccessfulAuthenticationAndAuthorizationDenialAreNotAuthFailures (0.00s)
+=== RUN   TestOpenAdminAuditDoesNotInventACredential
+--- PASS: TestOpenAdminAuditDoesNotInventACredential (0.00s)
+=== RUN   TestValidLegacyAuditKeepsCredentialIdentity
+--- PASS: TestValidLegacyAuditKeepsCredentialIdentity (0.00s)
+=== RUN   TestAuditSinkTransitionKeepsRingAndGlobalIDs
+--- PASS: TestAuditSinkTransitionKeepsRingAndGlobalIDs (0.00s)
+=== RUN   TestAuditSinkSamePathSharesPhysicalOwner
+--- PASS: TestAuditSinkSamePathSharesPhysicalOwner (0.00s)
+=== RUN   TestAuditSinkExactNoopDoesNotChurnGeneration
+--- PASS: TestAuditSinkExactNoopDoesNotChurnGeneration (0.00s)
+=== RUN   TestAuditSinkDisabledNoop
+--- PASS: TestAuditSinkDisabledNoop (0.00s)
+=== RUN   TestAuditSinkAbortPreservesExistingBytes
+--- PASS: TestAuditSinkAbortPreservesExistingBytes (0.00s)
+=== RUN   TestAuditSinkAbortRemovesCandidateOwnedEmptyArtifacts
+--- PASS: TestAuditSinkAbortRemovesCandidateOwnedEmptyArtifacts (0.00s)
+=== RUN   TestAuditSinkRejectsFinalSymlink
+--- PASS: TestAuditSinkRejectsFinalSymlink (0.00s)
+=== RUN   TestAuditSinkConcurrentCutoverExactlyOneDestination
+--- PASS: TestAuditSinkConcurrentCutoverExactlyOneDestination (0.12s)
+=== RUN   TestAuditSinkRotationCompatibilityAndRetention
+--- PASS: TestAuditSinkRotationCompatibilityAndRetention (0.01s)
+=== RUN   TestAuditSinkStatusRecoversOnSuccessfulWrite
+--- PASS: TestAuditSinkStatusRecoversOnSuccessfulWrite (0.00s)
+=== RUN   TestAuditLogDurableSinkWritesJSONL
+--- PASS: TestAuditLogDurableSinkWritesJSONL (0.00s)
+=== RUN   TestAuditLogDurableSinkPersistsRedacted
+--- PASS: TestAuditLogDurableSinkPersistsRedacted (0.00s)
+=== RUN   TestAuditLogNoSinkWhenPathEmpty
+--- PASS: TestAuditLogNoSinkWhenPathEmpty (0.00s)
+=== RUN   TestAuditLogSinkOpenFailureSurfacesDegradedStatus
+--- PASS: TestAuditLogSinkOpenFailureSurfacesDegradedStatus (0.00s)
+=== RUN   TestAuditLogHealthyStatusWhenWritable
+--- PASS: TestAuditLogHealthyStatusWhenWritable (0.00s)
+=== RUN   TestAuthSnapshot_EnabledToDisabled_NoAnonymousWindow
+--- PASS: TestAuthSnapshot_EnabledToDisabled_NoAnonymousWindow (0.22s)
+=== RUN   TestAuthSnapshot_DisabledToEnabled_PolicyFailureBlocks
+--- PASS: TestAuthSnapshot_DisabledToEnabled_PolicyFailureBlocks (0.00s)
+=== RUN   TestAuthSnapshot_LegacyToRBAC_NoLegacyFallback
+--- PASS: TestAuthSnapshot_LegacyToRBAC_NoLegacyFallback (0.00s)
+=== RUN   TestAuthSnapshot_RBACToLegacy_NoRBACResidue
+--- PASS: TestAuthSnapshot_RBACToLegacy_NoRBACResidue (0.00s)
+=== RUN   TestAuthSnapshot_PrincipalExpiryBoundary
+--- PASS: TestAuthSnapshot_PrincipalExpiryBoundary (0.00s)
+=== RUN   TestAuthSnapshot_ConcurrentReadsAlwaysConsistent
+--- PASS: TestAuthSnapshot_ConcurrentReadsAlwaysConsistent (0.07s)
+=== RUN   TestAuditPublishDoesNotWaitForPhysicalWriterMutex
+--- PASS: TestAuditPublishDoesNotWaitForPhysicalWriterMutex (0.00s)
+=== RUN   TestAuditWriteFailureKeepsRingAndAdvancesGlobalID
+--- PASS: TestAuditWriteFailureKeepsRingAndAdvancesGlobalID (0.00s)
+=== RUN   TestAuditPrepareFailureDoesNotPoisonHealthyLiveSink
+--- PASS: TestAuditPrepareFailureDoesNotPoisonHealthyLiveSink (0.00s)
+=== RUN   TestAuditDisableClearsActiveDegradationAndRingContinues
+--- PASS: TestAuditDisableClearsActiveDegradationAndRingContinues (0.00s)
+=== RUN   TestAuditSinkRoundTripAtoBtoA
+--- PASS: TestAuditSinkRoundTripAtoBtoA (0.00s)
+=== RUN   TestAuditSinkAbortAndCommitAreIdempotent
+--- PASS: TestAuditSinkAbortAndCommitAreIdempotent (0.00s)
+=== RUN   TestAuditSinkShortWriteIsCountedAndRingSurvives
+--- PASS: TestAuditSinkShortWriteIsCountedAndRingSurvives (0.00s)
+=== RUN   TestAuditSinkInjectedWriteErrorIsCounted
+--- PASS: TestAuditSinkInjectedWriteErrorIsCounted (0.00s)
+=== RUN   TestAuditSinkCloseFailureIsAdvisoryToNewGeneration
+--- PASS: TestAuditSinkCloseFailureIsAdvisoryToNewGeneration (0.00s)
+=== RUN   TestAuditSinkBlockedWriteDoesNotBlockPublishAndEventuallyReleasesOldOwner
+--- PASS: TestAuditSinkBlockedWriteDoesNotBlockPublishAndEventuallyReleasesOldOwner (0.00s)
+=== RUN   TestAuditSinkBlockedCloseIsBoundedAndCompletesExactlyOnce
+--- PASS: TestAuditSinkBlockedCloseIsBoundedAndCompletesExactlyOnce (0.00s)
+=== RUN   TestAuditSinkShutdownTimeoutDefersReleaseToLastWrite
+--- PASS: TestAuditSinkShutdownTimeoutDefersReleaseToLastWrite (0.00s)
+=== RUN   TestAuditSinkIdentityRaceIsRejected
+--- PASS: TestAuditSinkIdentityRaceIsRejected (0.00s)
+=== RUN   TestAuditSinkRotationFailureAndRecoveryPath
+--- PASS: TestAuditSinkRotationFailureAndRecoveryPath (0.00s)
+=== RUN   TestAuditSinkCleanupFailureDoesNotLoseWrittenEvent
+--- PASS: TestAuditSinkCleanupFailureDoesNotLoseWrittenEvent (0.00s)
+=== RUN   TestAuditSinkRotationBoundariesAndBackupCollision
+--- PASS: TestAuditSinkRotationBoundariesAndBackupCollision (0.01s)
+=== RUN   TestAuditSinkRootOpenFailureIsTyped
+--- PASS: TestAuditSinkRootOpenFailureIsTyped (0.00s)
+=== RUN   TestAuditSinkOversizedEventFailsWithoutWriting
+--- PASS: TestAuditSinkOversizedEventFailsWithoutWriting (0.00s)
+=== RUN   TestAuditSinkRecoveredHealthPreservesLastFailure
+--- PASS: TestAuditSinkRecoveredHealthPreservesLastFailure (0.00s)
+=== RUN   TestAuditSinkRetiredCloseFailureIsHistoricalButNotActive
+--- PASS: TestAuditSinkRetiredCloseFailureIsHistoricalButNotActive (0.00s)
+=== RUN   TestAuditSinkRapidAtoBtoAReusesStillDrainingPhysicalOwner
+--- PASS: TestAuditSinkRapidAtoBtoAReusesStillDrainingPhysicalOwner (0.00s)
+=== RUN   TestAuditSinkReusedOwnerCarriesLateFailureIntoCurrentGeneration
+--- PASS: TestAuditSinkReusedOwnerCarriesLateFailureIntoCurrentGeneration (0.00s)
+=== RUN   TestAuditSinkSameOwnerPolicyPublishPreservesDegradationUntilSuccessfulWrite
+--- PASS: TestAuditSinkSameOwnerPolicyPublishPreservesDegradationUntilSuccessfulWrite (0.00s)
+=== RUN   TestAuditSinkWarningThrottleAccounting
+--- PASS: TestAuditSinkWarningThrottleAccounting (0.00s)
+=== RUN   TestAuditSinkEncodeFailureAdvancesTicketAndRingContinues
+--- PASS: TestAuditSinkEncodeFailureAdvancesTicketAndRingContinues (0.00s)
+=== RUN   TestManagedApplyFinalizationAdvisoryNonReadiness
+--- PASS: TestManagedApplyFinalizationAdvisoryNonReadiness (0.01s)
+=== RUN   TestManagedApplyBindsAbsoluteDeadlineFromServingReloadTimeout
+--- PASS: TestManagedApplyBindsAbsoluteDeadlineFromServingReloadTimeout (0.01s)
+=== RUN   TestManagedApplyDeadlineOmittedWithoutServingTimeout
+--- PASS: TestManagedApplyDeadlineOmittedWithoutServingTimeout (0.01s)
+=== RUN   TestManagedApplyRegistryIdempotencyGuardBranches
+--- PASS: TestManagedApplyRegistryIdempotencyGuardBranches (0.00s)
+=== RUN   TestManagedApplyRegistryFinalizationRejectsIncompleteMode
+--- PASS: TestManagedApplyRegistryFinalizationRejectsIncompleteMode (0.00s)
+=== RUN   TestManagedApplyRegistry_PendingSurvivesPruning
+--- PASS: TestManagedApplyRegistry_PendingSurvivesPruning (0.00s)
+=== RUN   TestManagedApplyRegistry_DuplicateFinalization
+--- PASS: TestManagedApplyRegistry_DuplicateFinalization (0.00s)
+=== RUN   TestManagedApplyRegistry_OutOfOrderCompletion
+--- PASS: TestManagedApplyRegistry_OutOfOrderCompletion (0.00s)
+=== RUN   TestManagedApplyRegistry_LatestAndGet
+--- PASS: TestManagedApplyRegistry_LatestAndGet (0.00s)
+=== RUN   TestManagedApplyRegistry_InvalidIDs
+--- PASS: TestManagedApplyRegistry_InvalidIDs (0.00s)
+=== RUN   TestManagedApplyRegistry_IDMismatch
+--- PASS: TestManagedApplyRegistry_IDMismatch (0.00s)
+=== RUN   TestManagedApplyRegistry_Concurrent
+--- PASS: TestManagedApplyRegistry_Concurrent (0.00s)
+=== RUN   TestManagedApplyRegistry_RetainsWithinCapacity
+--- PASS: TestManagedApplyRegistry_RetainsWithinCapacity (0.00s)
+=== RUN   TestManagedApplyRegistryAbortPendingOnlyRemovesPendingReservation
+--- PASS: TestManagedApplyRegistryAbortPendingOnlyRemovesPendingReservation (0.00s)
+=== RUN   TestRecordManagedHistoryLiveWritesPreApply
+--- PASS: TestRecordManagedHistoryLiveWritesPreApply (0.00s)
+=== RUN   TestRecordManagedHistoryDegradedWritesPreApply
+--- PASS: TestRecordManagedHistoryDegradedWritesPreApply (0.00s)
+=== RUN   TestRecordManagedHistoryRestoredWritesNothing
+--- PASS: TestRecordManagedHistoryRestoredWritesNothing (0.00s)
+=== RUN   TestRecordManagedHistoryRestorationFailedWritesRecovery
+--- PASS: TestRecordManagedHistoryRestorationFailedWritesRecovery (0.00s)
+=== RUN   TestRecordManagedHistoryStageWritesPreApply
+--- PASS: TestRecordManagedHistoryStageWritesPreApply (0.00s)
+=== RUN   TestRecordManagedHistoryEmptyPrevWritesNothing
+--- PASS: TestRecordManagedHistoryEmptyPrevWritesNothing (0.00s)
+=== RUN   TestRecordManagedHistoryRawSnapshotAlwaysRetrievable
+--- PASS: TestRecordManagedHistoryRawSnapshotAlwaysRetrievable (0.00s)
+=== RUN   TestAuditRecordAndFilter
+--- PASS: TestAuditRecordAndFilter (0.00s)
+=== RUN   TestAuditRedactsSensitiveDetail
+--- PASS: TestAuditRedactsSensitiveDetail (0.00s)
+=== RUN   TestAuditExportCSV
+--- PASS: TestAuditExportCSV (0.00s)
+=== RUN   TestAuditExportJSONDefault
+--- PASS: TestAuditExportJSONDefault (0.00s)
+=== RUN   TestManagedApplyRecordsPluginModuleChanges
+--- PASS: TestManagedApplyRecordsPluginModuleChanges (0.00s)
+=== RUN   TestCatalogNoRouteDefaultsToPublic
+--- PASS: TestCatalogNoRouteDefaultsToPublic (0.00s)
+=== RUN   TestCatalogExactlyOneAuthorizationMode
+--- PASS: TestCatalogExactlyOneAuthorizationMode (0.00s)
+=== RUN   TestCatalogPermissionsInCatalog
+--- PASS: TestCatalogPermissionsInCatalog (0.00s)
+=== RUN   TestCatalogNoDuplicatePatterns
+--- PASS: TestCatalogNoDuplicatePatterns (0.00s)
+=== RUN   TestCatalogAllSpecsHaveHandler
+--- PASS: TestCatalogAllSpecsHaveHandler (0.00s)
+=== RUN   TestCatalogAllSpecsHaveMethods
+--- PASS: TestCatalogAllSpecsHaveMethods (0.00s)
+=== RUN   TestCatalogPlannedRestartHasPermissions
+--- PASS: TestCatalogPlannedRestartHasPermissions (0.00s)
+=== RUN   TestCatalogMethodPermissionsCoverAllMethods
+--- PASS: TestCatalogMethodPermissionsCoverAllMethods (0.00s)
+=== RUN   TestCatalogHandlerMethodsMatchCatalog
+=== RUN   TestCatalogHandlerMethodsMatchCatalog//api/config/raw_DELETE
+=== RUN   TestCatalogHandlerMethodsMatchCatalog//api/config/settings_DELETE
+=== RUN   TestCatalogHandlerMethodsMatchCatalog//api/config/history/{id}_POST
+=== RUN   TestCatalogHandlerMethodsMatchCatalog//api/history/get_PUT
+--- PASS: TestCatalogHandlerMethodsMatchCatalog (0.01s)
+    --- PASS: TestCatalogHandlerMethodsMatchCatalog//api/config/raw_DELETE (0.00s)
+    --- PASS: TestCatalogHandlerMethodsMatchCatalog//api/config/settings_DELETE (0.00s)
+    --- PASS: TestCatalogHandlerMethodsMatchCatalog//api/config/history/{id}_POST (0.00s)
+    --- PASS: TestCatalogHandlerMethodsMatchCatalog//api/history/get_PUT (0.00s)
+=== RUN   TestCatalogPublicOnlyApproved
+--- PASS: TestCatalogPublicOnlyApproved (0.00s)
+=== RUN   TestCatalogAdminManageGuardOnAdminRoutes
+--- PASS: TestCatalogAdminManageGuardOnAdminRoutes (0.00s)
+=== RUN   TestCatalogOwnsMuxRegistrations
+--- PASS: TestCatalogOwnsMuxRegistrations (0.18s)
+=== RUN   TestRouteTransportPolicyInventory
+=== RUN   TestRouteTransportPolicyInventory/GET_/healthz
+=== RUN   TestRouteTransportPolicyInventory/GET_/readyz
+=== RUN   TestRouteTransportPolicyInventory/GET_/
+=== RUN   TestRouteTransportPolicyInventory/HEAD_/
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/status
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/capabilities
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/config
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/config/pending-restart
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/config/applies/{apply_id}
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/config/history
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/routes
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/routes/{route_id}
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/upstreams
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/upstreams/{name}
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/listeners
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/listeners/{addr}/client_address
+=== RUN   TestRouteTransportPolicyInventory/PATCH_/api/v1/listeners/{addr}/client_address
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/streams
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/config/export
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/v1/config/history/{id}/diff
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/admin/me
+=== RUN   TestRouteTransportPolicyInventory/GET_/metrics
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/stats
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/status
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/runtime/overview
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/routes
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/apps
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/upstreams
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/upstreams/{name}/resilience
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/certs
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/tls
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/security
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/traffic-controls
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/plugins
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/streams
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/mtls
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/search
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/events
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/config
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/raw
+=== RUN   TestRouteTransportPolicyInventory/PUT_/api/config/raw
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/config/settings
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/settings
+=== RUN   TestRouteTransportPolicyInventory/PUT_/api/config/settings
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/config/pending-restart
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/authority/refresh
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/config/applies/{id}
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/config/history
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/config/history/{id}
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/config/history/{id}/diff
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/validate
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/preview
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/diff
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/patch
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/patch/preview
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/patch/candidate
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/routes/test
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/wizard
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/wizard/generate
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/transcode/descriptor-upload
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/apply
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/patch/apply
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/listeners
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/listeners/{addr}/client_address
+=== RUN   TestRouteTransportPolicyInventory/PATCH_/api/listeners/{addr}/client_address
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/pending-restart/discard
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/config/adopt-external/preview
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/adopt-external/preview
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/adopt-external
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/history
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/history/get
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/history/get
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/history/rollback
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/config/rollback
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/plugins/upload
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/observability/requests
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/observability/failing-routes
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/observability/timeline
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/observability/upstream-history
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/observability/cert-history
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/observability/logs
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/observability/logs/stream
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/admin/health
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/admin/client-errors
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/audit
+=== RUN   TestRouteTransportPolicyInventory/GET_/api/audit/export
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/audit/export
+=== RUN   TestRouteTransportPolicyInventory/POST_/cache/purge
+=== RUN   TestRouteTransportPolicyInventory/POST_/reload
+=== RUN   TestRouteTransportPolicyInventory/GET_/debug/pprof/
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/v1/config/validate
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/v1/config/plan
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/v1/routes/test
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/v1/config/patch
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/v1/config/apply
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/v1/config/patch/apply
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/v1/config/rollback
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/v1/config/adopt-external/preview
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/v1/config/adopt-external
+=== RUN   TestRouteTransportPolicyInventory/POST_/api/v1/config/pending-restart/discard
+--- PASS: TestRouteTransportPolicyInventory (0.06s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/healthz (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/readyz (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/ (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/HEAD_/ (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/status (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/capabilities (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/config (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/config/pending-restart (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/config/applies/{apply_id} (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/config/history (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/routes (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/routes/{route_id} (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/upstreams (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/upstreams/{name} (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/listeners (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/listeners/{addr}/client_address (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/PATCH_/api/v1/listeners/{addr}/client_address (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/streams (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/config/export (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/v1/config/history/{id}/diff (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/admin/me (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/metrics (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/stats (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/status (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/runtime/overview (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/routes (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/apps (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/upstreams (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/upstreams/{name}/resilience (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/certs (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/tls (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/security (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/traffic-controls (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/plugins (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/streams (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/mtls (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/search (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/events (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/config (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/raw (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/PUT_/api/config/raw (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/config/settings (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/settings (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/PUT_/api/config/settings (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/config/pending-restart (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/authority/refresh (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/config/applies/{id} (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/config/history (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/config/history/{id} (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/config/history/{id}/diff (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/validate (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/preview (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/diff (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/patch (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/patch/preview (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/patch/candidate (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/routes/test (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/wizard (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/wizard/generate (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/transcode/descriptor-upload (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/apply (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/patch/apply (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/listeners (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/listeners/{addr}/client_address (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/PATCH_/api/listeners/{addr}/client_address (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/pending-restart/discard (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/config/adopt-external/preview (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/adopt-external/preview (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/adopt-external (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/history (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/history/get (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/history/get (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/history/rollback (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/config/rollback (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/plugins/upload (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/observability/requests (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/observability/failing-routes (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/observability/timeline (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/observability/upstream-history (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/observability/cert-history (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/observability/logs (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/observability/logs/stream (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/admin/health (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/admin/client-errors (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/audit (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/api/audit/export (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/audit/export (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/cache/purge (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/reload (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/GET_/debug/pprof/ (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/v1/config/validate (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/v1/config/plan (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/v1/routes/test (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/v1/config/patch (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/v1/config/apply (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/v1/config/patch/apply (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/v1/config/rollback (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/v1/config/adopt-external/preview (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/v1/config/adopt-external (0.00s)
+    --- PASS: TestRouteTransportPolicyInventory/POST_/api/v1/config/pending-restart/discard (0.00s)
+=== RUN   TestAuditLogHealthyForDisabledConfig
+--- PASS: TestAuditLogHealthyForDisabledConfig (0.00s)
+=== RUN   TestAuditWriteHealthWithoutDurableSink
+--- PASS: TestAuditWriteHealthWithoutDurableSink (0.00s)
+PASS
+coverage: 20.7% of statements
+ok  	jul/internal/admin	2.204s	coverage: 20.7% of statements

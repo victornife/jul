@@ -138,3 +138,63 @@ func TestSuccessfulAuthenticationAndAuthorizationDenialAreNotAuthFailures(t *tes
 		t.Fatalf("false authentication failures: %+v", events)
 	}
 }
+
+func TestOpenAdminAuditDoesNotInventACredential(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	request := func(method, path string) *http.Request {
+		r := httptest.NewRequest(method, path, nil)
+		r.RemoteAddr = "127.0.0.1:12345"
+		return r
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, request(http.MethodGet, "/api/admin/me"))
+	var identity identityResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &identity); err != nil {
+		t.Fatal(err)
+	}
+	rr = httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, request(http.MethodPost, "/cache/purge"))
+	// A configured cache is unnecessary for the actual auth middleware; attach
+	// the existing recorder after it to exercise both control entry paths.
+	for _, h := range []http.Handler{
+		s.requirePermission(rbac.ConfigApply, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.recordAudit(r, "open.test", "admin", "success", "") })),
+		s.requireAnyPermission([]rbac.Permission{rbac.ConfigApply}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := applyRequestContext(r, ApplyOperationConfigApply)
+			if ctx.Actor != identity.Principal || ctx.TokenID != "" {
+				t.Errorf("managed attribution invents credential: %+v", ctx)
+			}
+			s.recordAudit(r, "open.test", "admin", "success", "")
+		})),
+	} {
+		h.ServeHTTP(httptest.NewRecorder(), request(http.MethodPost, "/"))
+	}
+	events := s.audit.snapshot("open.test", "", 0)
+	if len(events) != 2 {
+		t.Fatalf("open-mode audits = %d, want2", len(events))
+	}
+	for _, event := range events {
+		if identity.Principal != "anonymous" || event.Actor != identity.Principal || event.TokenID != "" {
+			t.Fatalf("identity/audit disagree in open mode: %+v %+v", identity, event)
+		}
+	}
+}
+
+func TestValidLegacyAuditKeepsCredentialIdentity(t *testing.T) {
+	const token = "synthetic-valid-legacy-audit-control-001"
+	s := newTestServer(t, config.AdminConfig{Token: token}, Deps{})
+	h := s.requirePermission(rbac.ConfigApply, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := applyRequestContext(r, ApplyOperationConfigApply)
+		if ctx.Actor != "shared" || ctx.TokenID != "(legacy)" || ctx.TokenDigest == "" {
+			t.Error("valid legacy managed identity lost")
+		}
+		s.recordAudit(r, "legacy.test", "admin", "success", "")
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	events := s.audit.snapshot("legacy.test", "", 0)
+	if rr.Code != 200 || len(events) != 1 || events[0].Actor != "shared" || events[0].TokenID != "(legacy)" {
+		t.Fatalf("valid legacy attribution changed: status%d events%+v", rr.Code, events)
+	}
+}

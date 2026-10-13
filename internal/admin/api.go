@@ -487,8 +487,7 @@ func applyRequestContext(r *http.Request, op ApplyOperation) ApplyRequestContext
 		RequestContext: r.Context(),
 	}
 	if id, ok := rbac.IdentityFromContext(r.Context()); ok {
-		ctx.Actor = id.Principal
-		ctx.TokenID = id.TokenID
+		ctx.Actor, ctx.TokenID = auditIdentityFields(id)
 		ctx.TokenDigest = id.TokenDigest
 	}
 	return ctx
