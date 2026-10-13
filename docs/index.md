@@ -29,6 +29,12 @@ inside the immutable release archives. They do not close the partial-audit ledge
 
 ## New to Jul.IA?
 
+- **[Our vision and mission](vision/README.md)** — the problem we address,
+  our principles, the gateway available today and the sharing experience we
+  are building toward.
+- **[Brief vision](vision/brief.md)** — the compact introduction.
+- **[Practical guide](practical-guide.md)** — what you can use, what you
+  need to bring, alternatives, connectivity choices and first steps.
 - **[README](../README.md)** — product scope, installation and capability
   overview.
 - **[Getting started](getting-started.md)** — zero-config, static, proxy and TLS
@@ -155,7 +161,9 @@ delivery row where inheriting an older GA label would be misleading.
   standalone-product boundary.
 - **[Operating model](operating-model.md)** — portfolio, evidence, WIP and
   experiment rules.
-- **[Engineering specs](specs/)** and **[vision](vision/README.md)**.
+- **[Engineering specs](specs/)** and
+  **[engineering context](vision/engineering-context.md)** — retained
+  architectural commitments and the earlier engineering vision.
 - **[Contributing](../CONTRIBUTING.md)** and **[changelog](../CHANGELOG.md)**.
 
 ## Build tags

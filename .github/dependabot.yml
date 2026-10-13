@@ -1,6 +1,7 @@
 # Dependabot keeps the supply chain current so the CI/release hardening
 # (govulncheck, SBOM, provenance) stays meaningful over time. It tracks three
-# ecosystems: pinned GitHub Actions, the Go module graph, and the Docker base
+# ecosystems: pinned GitHub Actions, the Go module graph, the website's Python
+# build dependency, and the Docker base
 # images. The Dockerfile pins each base image by tag AND @sha256 digest for
 # reproducible builds; Dependabot bumps those digests so the pins never go stale.
 version: 2
@@ -33,3 +34,8 @@ updates:
         update-types:
           - version-update:semver-major
           - version-update:semver-minor
+
+  - package-ecosystem: pip
+    directory: /website
+    schedule:
+      interval: weekly
