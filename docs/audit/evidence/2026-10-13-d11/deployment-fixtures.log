@@ -1,0 +1,9 @@
+test_missing_intermediate_rejected (__main__.TrustTests.test_missing_intermediate_rejected) ... ok
+test_valid_root_intermediate_leaf (__main__.TrustTests.test_valid_root_intermediate_leaf) ... ok
+test_wrong_ca_rejected (__main__.TrustTests.test_wrong_ca_rejected) ... ok
+test_wrong_hostname_rejected (__main__.TrustTests.test_wrong_hostname_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.957s
+
+OK

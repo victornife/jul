@@ -11,6 +11,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Verification
 
+- Reconcile the D11 deployment consumers with #516's original controlled-CI
+  evidence. Correct existing-mode preservation, terminal history degradation,
+  file-owned restart behavior and log rotation/retention claims. Preserve
+  original package/native executions and private-PKI/shared-kernel/ACL limits;
+  no fresh seven-journey campaign or runtime change.
+
 - Begin D11's source-backed documentation certification with a frozen 230-row
   inventory and one-to-one dispositions for 31 of the 112 unreviewed rows.
   Correct configuration workload, authority-transition and connection-continuity

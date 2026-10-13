@@ -1,0 +1,70 @@
+=== RUN   TestFileOwnedConfigStateDesiredAheadFromExternalDivergence
+--- PASS: TestFileOwnedConfigStateDesiredAheadFromExternalDivergence (0.00s)
+=== RUN   TestFileOwnedConfigStateInvalidWhenFileFailsToParse
+--- PASS: TestFileOwnedConfigStateInvalidWhenFileFailsToParse (0.00s)
+=== RUN   TestFileOwnedConfigStateInvalidWhenFileFailsValidation
+--- PASS: TestFileOwnedConfigStateInvalidWhenFileFailsValidation (0.00s)
+=== RUN   TestFileOwnedConfigStateCleanForValidFileOrNoConfigPath
+--- PASS: TestFileOwnedConfigStateCleanForValidFileOrNoConfigPath (0.00s)
+=== RUN   TestCoordinatorApplyRawSuccess
+--- PASS: TestCoordinatorApplyRawSuccess (0.00s)
+=== RUN   TestCoordinatorApplyRawRejectsExternalWriteInCASWindow
+--- PASS: TestCoordinatorApplyRawRejectsExternalWriteInCASWindow (0.01s)
+=== RUN   TestCoordinatorApplyRawSucceedsWhenNoExternalWrite
+--- PASS: TestCoordinatorApplyRawSucceedsWhenNoExternalWrite (0.00s)
+=== RUN   TestCoordinatorApplyRawValidationFailureNoWrite
+--- PASS: TestCoordinatorApplyRawValidationFailureNoWrite (0.00s)
+=== RUN   TestCoordinatorApplyRawRestartRequiredCanStage
+--- PASS: TestCoordinatorApplyRawRestartRequiredCanStage (0.00s)
+=== RUN   TestCoordinatorApplyRawRestoresOnSubmitFailure
+--- PASS: TestCoordinatorApplyRawRestoresOnSubmitFailure (0.00s)
+=== RUN   TestCoordinatorApplyRawRestoresOnPrePublishFailure
+--- PASS: TestCoordinatorApplyRawRestoresOnPrePublishFailure (0.01s)
+=== RUN   TestCoordinatorApplyRawRetainsFileOnPostPublishDegradation
+--- PASS: TestCoordinatorApplyRawRetainsFileOnPostPublishDegradation (0.01s)
+=== RUN   TestCoordinatorApplyRawUsesServingReloadTimeout
+--- PASS: TestCoordinatorApplyRawUsesServingReloadTimeout (0.01s)
+=== RUN   TestCoordinatorApplyRawSerialized
+--- PASS: TestCoordinatorApplyRawSerialized (0.00s)
+=== RUN   TestCoordinatorApplyRawBlocksHotWhenPlannedRestartPending
+--- PASS: TestCoordinatorApplyRawBlocksHotWhenPlannedRestartPending (0.00s)
+=== RUN   TestCoordinatorApplyRawBlocksHotWhenExternalDivergenceSet
+--- PASS: TestCoordinatorApplyRawBlocksHotWhenExternalDivergenceSet (0.00s)
+=== RUN   TestManagedApplyFinalizationAdvisoryTracksHistoryDegradationAndClears
+--- PASS: TestManagedApplyFinalizationAdvisoryTracksHistoryDegradationAndClears (0.02s)
+PASS
+ok  	jul/internal/app	0.079s
+=== RUN   TestFileOwnedDeniesRawApplyBeforeSideEffect
+--- PASS: TestFileOwnedDeniesRawApplyBeforeSideEffect (0.00s)
+=== RUN   TestFileOwnedDeniesSettingsApply
+--- PASS: TestFileOwnedDeniesSettingsApply (0.00s)
+=== RUN   TestFileOwnedDeniesPatchApply
+--- PASS: TestFileOwnedDeniesPatchApply (0.00s)
+=== RUN   TestFileOwnedDeniesRollbackBeforeSideEffect
+--- PASS: TestFileOwnedDeniesRollbackBeforeSideEffect (0.00s)
+=== RUN   TestFileOwnedDeniesDiscardPendingRestartBeforeHistoryRead
+--- PASS: TestFileOwnedDeniesDiscardPendingRestartBeforeHistoryRead (0.00s)
+=== RUN   TestFileOwnedAllowsPreviewAndStatus
+--- PASS: TestFileOwnedAllowsPreviewAndStatus (0.01s)
+=== RUN   TestFileOwnedPreviewNeverMintsRouteID
+--- PASS: TestFileOwnedPreviewNeverMintsRouteID (0.01s)
+=== RUN   TestFileOwnedDenialObservesMetricHook
+--- PASS: TestFileOwnedDenialObservesMetricHook (0.00s)
+=== RUN   TestManagedModeAllowsMutation
+--- PASS: TestManagedModeAllowsMutation (0.00s)
+=== RUN   TestWritePluginUploadFileRejectsUnavailableAndSpecialDestinations
+--- PASS: TestWritePluginUploadFileRejectsUnavailableAndSpecialDestinations (0.00s)
+=== RUN   TestWritePluginUploadFileCleansTempOnCreateFailure
+--- PASS: TestWritePluginUploadFileCleansTempOnCreateFailure (0.00s)
+PASS
+ok  	jul/internal/admin	0.030s
+=== RUN   TestWriteCreatesFileWithSecureMode
+--- PASS: TestWriteCreatesFileWithSecureMode (0.00s)
+=== RUN   TestWritePreservesExistingMode
+--- PASS: TestWritePreservesExistingMode (0.00s)
+=== RUN   TestWriteReplacesContentAndLeavesNoTemp
+--- PASS: TestWriteReplacesContentAndLeavesNoTemp (0.00s)
+=== RUN   TestWriteFailsWhenDirMissing
+--- PASS: TestWriteFailsWhenDirMissing (0.00s)
+PASS
+ok  	jul/internal/atomicfile	0.004s
