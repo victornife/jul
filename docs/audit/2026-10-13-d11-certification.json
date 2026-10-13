@@ -353,7 +353,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-017",
@@ -391,7 +391,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-018",
@@ -430,7 +430,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-019",
@@ -466,10 +466,11 @@
       ],
       "limitations": [
         "Source/contract review and deterministic tests; config-check loads with full tags and skip-static-roots, not proof of every enabled external integration or long-duration stability",
-        "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
+        "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification",
+        "pprof capture uses normal TLS verification and requires trusted lab PKI plus admin.pprof; HTTP workload success does not prove capture succeeded"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-020",
@@ -508,7 +509,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-021",
@@ -547,7 +548,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-022",
@@ -585,7 +586,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-023",
@@ -623,7 +624,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-024",
@@ -668,7 +669,7 @@
       "open_defects": [
         "https://github.com/victornife/jul/issues/594"
       ],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-025",
@@ -710,7 +711,7 @@
       "open_defects": [
         "https://github.com/victornife/jul/issues/594"
       ],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-026",
@@ -748,7 +749,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-027",
@@ -785,7 +786,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-028",
@@ -876,7 +877,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-030",
@@ -1145,7 +1146,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-042",
@@ -1246,7 +1247,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-046",
@@ -1351,7 +1352,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-050",
@@ -1557,7 +1558,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-059",
@@ -1636,7 +1637,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-062",
@@ -1757,7 +1758,8 @@
       "status": "reviewed",
       "verdict": "fixed in this PR",
       "claims": [
-        "Managed preflight/restoration versus file_owned external swap; no_change before Prepare, pinned serving reload-timeout budget, exact-ID finalization, stage/discard CAS and resource retirement; fixed opening universal connection-survival claim"
+        "Managed preflight/restoration versus file_owned external swap; no_change before Prepare, pinned serving reload-timeout budget, exact-ID finalization, stage/discard CAS and resource retirement; fixed opening universal connection-survival claim",
+        "Legacy rl_<sequence> lookup remains accepted; unknown IDs return404; new operations use instance-scoped IDs"
       ],
       "implementation_and_authority": [
         "internal/app/config_apply.go",
@@ -1770,19 +1772,21 @@
         "TestCoordinatorApplyRawRestartRequiredCanStage",
         "TestCoordinatorApplyRawRestoresOnSubmitFailure",
         "TestManagedApplyEnforcesSingleReloadTimeoutBudget",
-        "TestManagedApplyGet_ResponseRules"
+        "TestManagedApplyGet_ResponseRules",
+        "TestParseManagedApplyIDStructure"
       ],
       "execution_evidence": [
         "evidence/2026-10-13-d11/config-check.log",
         "evidence/2026-10-13-d11/contract-tests.log",
-        "evidence/2026-10-13-d11/config-runtime-tests.log"
+        "evidence/2026-10-13-d11/config-runtime-tests.log",
+        "evidence/2026-10-13-d11/legacy-id-contract.log"
       ],
       "limitations": [
         "Source/contract review and deterministic tests; config-check loads with full tags and skip-static-roots, not proof of every enabled external integration or long-duration stability",
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-068",
@@ -2199,7 +2203,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-087",
@@ -2258,7 +2262,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-089",
@@ -2317,7 +2321,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-091",
@@ -2356,7 +2360,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-092",
@@ -2415,7 +2419,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-094",
@@ -2497,7 +2501,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-096",
@@ -2597,7 +2601,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-100",
@@ -3305,7 +3309,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-106",
@@ -3716,7 +3720,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-111",
@@ -3753,7 +3757,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     },
     {
       "id": "D11-112",
@@ -3790,7 +3794,7 @@
         "Synthetic secrets/PKI and CWD-relative example resources are deployment prerequisites, not production certification"
       ],
       "open_defects": [],
-      "establishing_pr": "configuration area PR (pending publication)"
+      "establishing_pr": "https://github.com/victornife/jul/pull/596"
     }
   ],
   "new_rows": [],

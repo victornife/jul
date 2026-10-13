@@ -246,7 +246,7 @@ rules:
 
 | Condition | Status |
 |---|---|
-| malformed ID (not `rl_<instance>_<sequence>`) | `400 Bad Request` |
+| malformed ID (neither `rl_<instance>_<sequence>` nor legacy `rl_<sequence>`) | `400 Bad Request` |
 | unknown or evicted ID | `404 Not Found` |
 | record present, still `pending` | `202 Accepted` with `state=pending` |
 | record present, `finalizing` | `202 Accepted` with `state=finalizing` |
@@ -262,6 +262,10 @@ Each pending record also carries the **absolute transaction deadline** (see
 [Reload timeout and deadlines](#reload-timeout-and-deadlines-globalreload_timeout)),
 so the Console can render a deadline-aware "finalization expected by …" hint and
 switch to a past-deadline message when the poll expires.
+
+**Legacy IDs.** The lookup parser still accepts `rl_<sequence>` for compatibility.
+This does not manufacture a record: an unknown legacy ID returns `404`, just as
+an unknown instance-scoped ID does. New operations use instance-scoped IDs.
 
 **Retention.** Terminal results are retained for at least **512 entries or one
 hour**, whichever keeps more recent results; pending and finalizing records are
