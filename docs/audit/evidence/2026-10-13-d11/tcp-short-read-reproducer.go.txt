@@ -1,0 +1,13 @@
+package main
+import("fmt"; "net"; "io")
+func main() {
+ a,b:=net.Pipe(); defer a.Close(); defer b.Close()
+ payload:=[]byte("stream-echo-payload")
+ firstWritten:=make(chan struct{})
+ go func(){ b.Write(payload[:5]); close(firstWritten); b.Write(payload[5:]) }()
+ buf:=make([]byte,len(payload)); n,err:=a.Read(buf)
+ fmt.Printf("single TCP-stream Read: got=%d expected=%d err=%v; harness verdict would be failure\n",n,len(payload),err)
+ <-firstWritten
+ remaining,err:=io.ReadFull(a,buf[n:]);fmt.Printf("remaining ReadFull: got=%d err=%v; combined payload is complete\n",remaining,err)
+ if n!=5 || remaining!=len(payload)-5 || err!=nil { panic("unexpected fixture result") }
+}

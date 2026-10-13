@@ -1,0 +1,86 @@
+exit=3
+NGINX migration assessment: nginx.conf
+schema: 2
+source policy: relative paths, includes disabled, 1 file(s), 1263 byte(s), complete=true
+status: manual_action_required
+results: 26 supported, 2 approximated, 3 ignored, 1 blocking, 1 informational
+
+BLOCKING:
+  nginx.conf:52:13 [http > server[api.example.com @ :443] > location[/]] proxy_set_header (NGX_LOCATION_PROXY_HEADER): backend request-header policy is not translated
+    guidance: GUIDE_HEADER_POLICY_MANUAL
+
+APPROXIMATED:
+  nginx.conf:18:9 [http > upstream[app] > server#3] server (NGX_UPSTREAM_SERVER_DOWN): backend marked down is omitted from the generated pool
+    targets: upstreams[].servers[]
+    guidance: GUIDE_MANUAL_REVIEW
+  nginx.conf:34 [http > server[example.com,www.example.com @ :80] > location[~* \.(jpg|png|css|js)$]] location (NGX_LOCATION_MATCH): location modifier has precedence or case-sensitivity semantics Jul cannot preserve exactly
+    targets: servers[].locations[].match
+    guidance: GUIDE_LOCATION_REVIEW
+
+IGNORED:
+  nginx.conf:4:1 [main] user (NGX_MAIN_USER): process user selection remains a deployment-manager responsibility
+  nginx.conf:5:1 [main] worker_processes (NGX_MAIN_WORKERS): NGINX worker-process settings do not apply to Jul's Go runtime
+  nginx.conf:8:5 [events] worker_connections (NGX_EVENTS_CONNECTIONS): NGINX worker connection limits do not map to Jul
+
+SUPPORTED:
+  nginx.conf:12:5 [http] gzip (NGX_HTTP_GZIP): gzip enablement is translated
+    targets: compression.enabled
+  nginx.conf:15:9 [http > upstream[app]] least_conn (NGX_UPSTREAM_LEAST_CONN): least-connections balancing is translated
+    targets: upstreams[].strategy
+  nginx.conf:16:9 [http > upstream[app] > server] server (NGX_UPSTREAM_SERVER): upstream backend is translated
+    targets: upstreams[].servers[]
+  nginx.conf:17:9 [http > upstream[app] > server#2] server (NGX_UPSTREAM_SERVER): upstream backend is translated
+    targets: upstreams[].servers[]
+  nginx.conf:19 [http > upstream[app]] upstream (NGX_HTTP_UPSTREAM): upstream block is translated
+    targets: upstreams[]
+  nginx.conf:23:9 [http > server[example.com,www.example.com @ :80]] listen (NGX_SERVER_LISTEN): listener address is translated
+    targets: servers[].listen, servers[].tls.enabled
+  nginx.conf:24:9 [http > server[example.com,www.example.com @ :80]] server_name (NGX_SERVER_NAME): server names are translated
+    targets: servers[].server_names
+  nginx.conf:25:9 [http > server[example.com,www.example.com @ :80]] root (NGX_SERVER_ROOT): server root is translated through a static location
+    targets: servers[].locations[].root
+  nginx.conf:26:9 [http > server[example.com,www.example.com @ :80]] index (NGX_SERVER_INDEX): index files are translated
+    targets: servers[].locations[].index
+  nginx.conf:29:13 [http > server[example.com,www.example.com @ :80] > location[/]] try_files (NGX_LOCATION_TRY_FILES): try_files is translated
+    targets: servers[].locations[].try_files
+  nginx.conf:30 [http > server[example.com,www.example.com @ :80] > location[/]] location (NGX_SERVER_LOCATION): location block is translated
+    targets: servers[].locations[]
+  nginx.conf:33:13 [http > server[example.com,www.example.com @ :80] > location[~* \.(jpg|png|css|js)$]] root (NGX_LOCATION_ROOT): location root is translated
+    targets: servers[].locations[].root
+  nginx.conf:37:13 [http > server[example.com,www.example.com @ :80] > location[/old-page]] return (NGX_LOCATION_RETURN): return action is translated
+    targets: servers[].locations[].redirect, servers[].locations[].return
+  nginx.conf:38 [http > server[example.com,www.example.com @ :80] > location[/old-page]] location (NGX_SERVER_LOCATION): location block is translated
+    targets: servers[].locations[]
+  nginx.conf:39 [http > server[example.com,www.example.com @ :80]] server (NGX_HTTP_SERVER): server block is translated
+    targets: servers[]
+  nginx.conf:43:9 [http > server[api.example.com @ :443]] listen (NGX_SERVER_LISTEN): listener address is translated
+    targets: servers[].listen, servers[].tls.enabled
+  nginx.conf:44:9 [http > server[api.example.com @ :443]] server_name (NGX_SERVER_NAME): server names are translated
+    targets: servers[].server_names
+  nginx.conf:46:9 [http > server[api.example.com @ :443]] ssl_certificate (NGX_SERVER_TLS_CERT): TLS certificate reference is translated
+    targets: servers[].tls.cert
+  nginx.conf:47:9 [http > server[api.example.com @ :443]] ssl_certificate_key (NGX_SERVER_TLS_KEY): TLS key reference is translated
+    targets: servers[].tls.key
+  nginx.conf:48:9 [http > server[api.example.com @ :443]] ssl_protocols (NGX_SERVER_TLS_PROTOCOLS): supported TLS protocol floor is translated
+    targets: servers[].tls.min_version
+  nginx.conf:51:13 [http > server[api.example.com @ :443] > location[/]] proxy_pass (NGX_LOCATION_PROXY_PASS): proxy target is translated
+    targets: servers[].locations[].proxy_pass
+  nginx.conf:53 [http > server[api.example.com @ :443] > location[/]] location (NGX_SERVER_LOCATION): location block is translated
+    targets: servers[].locations[]
+  nginx.conf:56:13 [http > server[api.example.com @ :443] > location[/healthz]] return (NGX_LOCATION_RETURN): return action is translated
+    targets: servers[].locations[].redirect, servers[].locations[].return
+  nginx.conf:57 [http > server[api.example.com @ :443] > location[/healthz]] location (NGX_SERVER_LOCATION): location block is translated
+    targets: servers[].locations[]
+  nginx.conf:58 [http > server[api.example.com @ :443]] server (NGX_HTTP_SERVER): server block is translated
+    targets: servers[]
+  nginx.conf:59 [http] http (NGX_MAIN_HTTP): HTTP configuration is translated
+
+INFORMATIONAL:
+  nginx.conf:9 [events] events (NGX_MAIN_EVENTS): events block is process-level context and is not emitted into Jul configuration
+
+GUIDANCE:
+  GUIDE_HEADER_POLICY_MANUAL — Port header policy explicitly: Configure a bounded static Jul request/response header policy and preserve any authentication or cookie semantics explicitly.
+  GUIDE_LOCATION_REVIEW — Review location and path semantics: Compare location precedence and backend-received paths, then adjust Jul match and rewrite configuration explicitly.
+  GUIDE_MANUAL_REVIEW — Review this semantic difference manually: Inspect the source location, compare the intended NGINX behavior with the generated Jul target, and configure or test the missing behavior before cutover.
+
+candidate validation: valid (0 error(s), 2 warning(s))

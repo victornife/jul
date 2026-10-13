@@ -23,7 +23,7 @@ an end in itself. The objective is narrower:
 A safe staged restart remains a valid final architecture for rare or structural
 changes.
 
-## Current lifecycle baseline
+## Historical final-tranche lifecycle baseline
 
 The final bounded tranche was audited from
 `main@bb95de16119102c8fd23e11c908f131d2323a6ab`, whose generated inventory was
@@ -31,7 +31,7 @@ The final bounded tranche was audited from
 `new_listener_only`, 4 `ignored_deprecated`, and 3
 `validation_rejected_reserved`.
 
-After the bounded #106 implementation, the same 302 leaves are intentionally
+At the bounded #106 implementation checkpoint, the same 302 leaves were intentionally
 classified as **256 `hot_reload`, 32 `restart_required`, 7 `new_listener_only`,
 4 `ignored_deprecated`, and 3 `validation_rejected_reserved`**. The three live
 promotions are `rate_limit.max_conns`, `admin.history_keep`, and

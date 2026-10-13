@@ -1,8 +1,9 @@
 # Track 2 burn-in config — upstream resilience / admission isolated soak (#287)
 #
-# Exercises every admission path at once under sustained load so the properties
-# that only fail over hours are visible: bounded memory, a flat goroutine count,
-# and correct accounting for streams that outlive many reloads.
+# Configures bounded/unlimited HTTP and a bounded TCP pool. The commands below
+# exercise HTTP fault traffic and repeated TCP echo connections, not gRPC/UDP
+# admission, HTTP SSE, or multi-hour connections spanning reloads. Those need
+# their own declared clients/phases; enabling a pool is not execution evidence.
 #
 # Build:
 #   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul ./cmd/jul
@@ -12,7 +13,7 @@
 #   Window 2: go run scripts/burn-in-backend.go -port 8082
 #   Window 3: go run scripts/stream-echo.go -port 55432        (TCP echo for the L4 pool)
 #   Window 4: ./jul -config burn-in-resilience.toml
-#   Window 5: go run scripts/burn-in-load.go -duration 24h -workers 64 -health "http://127.0.0.1:8080/bounded/"
+#   Window 5: go run scripts/burn-in-load.go -duration 24h -workers 64 -fault -health "http://127.0.0.1:8080/bounded/"
 #   Window 6: go run scripts/burn-in-stream-load.go -duration 24h -workers 16 -target 127.0.0.1:15432
 #
 # What to watch, and what would falsify the design:
@@ -22,8 +23,9 @@
 #   * go_goroutines must be flat across hours: a pending request parks the
 #     inbound goroutine and creates none of its own, so a queue that grows the
 #     count means that property broke.
-#   * process_resident_memory_bytes must plateau. A parked request is roughly
-#     7.5 KB of live heap, so the queue's contribution is bounded and visible.
+#   * process_resident_memory_bytes must plateau. Per-request live heap is workload- and
+#     build-dependent; measure the queue contribution instead of treating the
+#     historical 7.5 KB estimate as a guaranteed runtime bound.
 #   * A long-lived stream must hold exactly one slot for its whole life and
 #     release it once, across reloads.
 

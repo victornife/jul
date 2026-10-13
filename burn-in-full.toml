@@ -1,5 +1,8 @@
-# Track 2 burn-in config - FULL Phase 2A (ALL features simultaneously)
-# Tests: TLS + mTLS + proxy + cache + rate-limit + WAF + auth + compression + upstream health-checks + OTel
+# Track 2 burn-in config - July / Phase 2A consolidation (selected HTTP/TLS paths)
+# Configures TLS + mTLS + proxy + cache + rate-limit + WAF + auth + compression
+# + upstream health-checks + OTel. The -full HTTP mix does not exercise native
+# gRPC, L4 or every later feature. A five-minute invocation is a smoke test,
+# not ADR 0005's consolidated stability gate.
 #
 # Build:
 #   go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf" -o jul.exe ./cmd/jul

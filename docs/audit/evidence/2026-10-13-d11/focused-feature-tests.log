@@ -1,0 +1,90 @@
+=== RUN   TestAccessLogReasonIsBoundedToTheEnum
+--- PASS: TestAccessLogReasonIsBoundedToTheEnum (0.00s)
+=== RUN   TestAccessLogOmitsTheReasonOnSuccess
+--- PASS: TestAccessLogOmitsTheReasonOnSuccess (0.00s)
+=== RUN   TestUWSGIRetriesDialFailureOntoAnotherBackend
+--- PASS: TestUWSGIRetriesDialFailureOntoAnotherBackend (0.00s)
+=== RUN   TestUWSGINoRetryOnceTheResponseHasStarted
+--- PASS: TestUWSGINoRetryOnceTheResponseHasStarted (0.00s)
+=== RUN   TestUWSGIRetryReplaysTheBody
+--- PASS: TestUWSGIRetryReplaysTheBody (0.00s)
+=== RUN   TestUWSGIDownstreamWriteFailurePreservesPriorHealth
+--- PASS: TestUWSGIDownstreamWriteFailurePreservesPriorHealth (0.00s)
+=== RUN   TestUWSGIClientCancellationDuringResponseIsHealthNeutral
+--- PASS: TestUWSGIClientCancellationDuringResponseIsHealthNeutral (0.00s)
+=== RUN   TestUWSGIMalformedResponseStillTripsCircuit
+--- PASS: TestUWSGIMalformedResponseStillTripsCircuit (0.00s)
+=== RUN   TestUWSGIHonoursConnectTimeout
+--- PASS: TestUWSGIHonoursConnectTimeout (0.00s)
+=== RUN   TestUWSGIReleasesAdmissionOnBackendFailure
+--- PASS: TestUWSGIReleasesAdmissionOnBackendFailure (0.00s)
+=== RUN   TestUWSGIRejectsOversizedVarBeforeFraming
+--- PASS: TestUWSGIRejectsOversizedVarBeforeFraming (0.00s)
+=== RUN   TestUWSGIReplacesClientIdentityAssertions
+--- PASS: TestUWSGIReplacesClientIdentityAssertions (0.00s)
+=== RUN   TestUWSGIHandlerRoundTrip
+--- PASS: TestUWSGIHandlerRoundTrip (0.00s)
+=== RUN   TestGRPCProxyBackendTLSVerification
+=== RUN   TestGRPCProxyBackendTLSVerification/no_policy_cannot_verify_a_private_CA
+=== RUN   TestGRPCProxyBackendTLSVerification/private_CA_with_the_right_name
+=== RUN   TestGRPCProxyBackendTLSVerification/private_CA_with_the_wrong_name
+=== RUN   TestGRPCProxyBackendTLSVerification/matching_peer_identity
+=== RUN   TestGRPCProxyBackendTLSVerification/non-matching_peer_identity_fails_after_a_valid_chain
+=== RUN   TestGRPCProxyBackendTLSVerification/insecure_bypass_reaches_the_backend
+--- PASS: TestGRPCProxyBackendTLSVerification (0.03s)
+    --- PASS: TestGRPCProxyBackendTLSVerification/no_policy_cannot_verify_a_private_CA (0.02s)
+    --- PASS: TestGRPCProxyBackendTLSVerification/private_CA_with_the_right_name (0.00s)
+    --- PASS: TestGRPCProxyBackendTLSVerification/private_CA_with_the_wrong_name (0.00s)
+    --- PASS: TestGRPCProxyBackendTLSVerification/matching_peer_identity (0.00s)
+    --- PASS: TestGRPCProxyBackendTLSVerification/non-matching_peer_identity_fails_after_a_valid_chain (0.00s)
+    --- PASS: TestGRPCProxyBackendTLSVerification/insecure_bypass_reaches_the_backend (0.00s)
+=== RUN   TestGRPCProxyUsesTheUpstreamPolicy
+--- PASS: TestGRPCProxyUsesTheUpstreamPolicy (0.00s)
+=== RUN   TestGRPCProxyRefusesToDowngradeToH2C
+--- PASS: TestGRPCProxyRefusesToDowngradeToH2C (0.00s)
+=== RUN   TestGRPCProxyUnreadableMaterialFailsTheBuild
+--- PASS: TestGRPCProxyUnreadableMaterialFailsTheBuild (0.00s)
+=== RUN   TestGRPCTranscodeResolvesBackendTLS
+=== RUN   TestGRPCTranscodeResolvesBackendTLS/policy_comes_from_the_transcode_target's_pool
+=== RUN   TestGRPCTranscodeResolvesBackendTLS/a_location_block_overrides_the_pool's
+=== RUN   TestGRPCTranscodeResolvesBackendTLS/unreadable_material_fails_the_build
+=== RUN   TestGRPCTranscodeResolvesBackendTLS/no_block_keeps_the_previous_defaults
+--- PASS: TestGRPCTranscodeResolvesBackendTLS (0.00s)
+    --- PASS: TestGRPCTranscodeResolvesBackendTLS/policy_comes_from_the_transcode_target's_pool (0.00s)
+    --- PASS: TestGRPCTranscodeResolvesBackendTLS/a_location_block_overrides_the_pool's (0.00s)
+    --- PASS: TestGRPCTranscodeResolvesBackendTLS/unreadable_material_fails_the_build (0.00s)
+    --- PASS: TestGRPCTranscodeResolvesBackendTLS/no_block_keeps_the_previous_defaults (0.00s)
+=== RUN   TestGRPCHealthEjectsAndRecoversRealBackend
+--- PASS: TestGRPCHealthEjectsAndRecoversRealBackend (0.09s)
+=== RUN   TestGRPCHealthNamedServiceIndependence
+--- PASS: TestGRPCHealthNamedServiceIndependence (0.01s)
+=== RUN   TestGRPCProxyZeroBackendDiscoveryNoPanic
+--- PASS: TestGRPCProxyZeroBackendDiscoveryNoPanic (0.00s)
+=== RUN   TestGRPCProxyUnary
+--- PASS: TestGRPCProxyUnary (0.00s)
+=== RUN   TestGRPCProxyServerStream
+--- PASS: TestGRPCProxyServerStream (0.00s)
+=== RUN   TestProxyAdmissionRejectsOverLimit
+--- PASS: TestProxyAdmissionRejectsOverLimit (0.00s)
+=== RUN   TestProxyAdmissionReleasesOnEveryPath
+=== RUN   TestProxyAdmissionReleasesOnEveryPath/success
+=== RUN   TestProxyAdmissionReleasesOnEveryPath/backend_unreachable
+--- PASS: TestProxyAdmissionReleasesOnEveryPath (0.00s)
+    --- PASS: TestProxyAdmissionReleasesOnEveryPath/success (0.00s)
+    --- PASS: TestProxyAdmissionReleasesOnEveryPath/backend_unreachable (0.00s)
+=== RUN   TestProxyAdmissionQueuesThenServes
+--- PASS: TestProxyAdmissionQueuesThenServes (0.00s)
+=== RUN   TestProxyForwardsRequestAndHeaders
+--- PASS: TestProxyForwardsRequestAndHeaders (0.00s)
+=== RUN   TestProxyBadGateway
+--- PASS: TestProxyBadGateway (0.00s)
+PASS
+ok  	jul/internal/handler	0.164s
+=== RUN   TestMetricContractMatchesCollectors
+--- PASS: TestMetricContractMatchesCollectors (0.00s)
+=== RUN   TestAccessLogWriteFailuresAreReported
+--- PASS: TestAccessLogWriteFailuresAreReported (0.00s)
+=== RUN   TestTracingCompiledTrue
+--- PASS: TestTracingCompiledTrue (0.00s)
+PASS
+ok  	jul/internal/observability	0.009s

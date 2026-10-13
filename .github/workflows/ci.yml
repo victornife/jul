@@ -674,6 +674,10 @@ jobs:
         run: python scripts/docs-check.py
       - name: run docs-check unit tests
         run: python scripts/test_docs_check.py
+      - name: validate D11 inventory and evidence contract
+        run: |
+          python scripts/check-d11-certification.py
+          python scripts/test_d11_certification.py
       - name: run coverage-gate move filter unit tests
         run: python scripts/test_strip_moved_lines.py
       - name: run conformance reporter unit tests

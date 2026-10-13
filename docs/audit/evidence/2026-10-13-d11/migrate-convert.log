@@ -1,0 +1,15 @@
+exit=3
+warning: servers[0] (listen ":80"): listener is reachable from other hosts and sets no read_timeout, write_timeout, send_timeout, proxy_read_timeout or proxy_send_timeout; a slow client or stalled backend can hold a connection indefinitely
+    hint: set send_timeout for stalled downstream writes, proxy_read_timeout/proxy_send_timeout on proxied locations (inactivity bounds, safe for streams), and read_timeout where no route takes long uploads; see docs/core-http.md#recommended-limits-for-internet-facing-listeners
+warning: servers[1] (listen ":443"): listener is reachable from other hosts and sets no read_timeout, write_timeout, send_timeout, proxy_read_timeout or proxy_send_timeout; a slow client or stalled backend can hold a connection indefinitely
+    hint: set send_timeout for stalled downstream writes, proxy_read_timeout/proxy_send_timeout on proxied locations (inactivity bounds, safe for streams), and read_timeout where no route takes long uploads; see docs/core-http.md#recommended-limits-for-internet-facing-listeners
+wrote /tmp/jul-example-candidate.toml
+
+imported examples/migrate/nginx.conf: 2 server(s), 1 upstream(s), 5 location(s), 0 stream(s)
+
+1 directive(s) not translated (port manually):
+  line 52: proxy_set_header - only the complete static WebSocket upgrade trio is recognized
+
+notes:
+  - location ~* "\\.(jpg|png|css|js)$" at line 34: case-insensitive regex mapped to regex (case sensitivity not preserved)
+  - upstream app: server 10.0.0.3:8080 (line 18) is marked down and was omitted

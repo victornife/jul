@@ -1,0 +1,6 @@
+=== RUN   TestBootScopedAndLegacyIDsValid
+--- PASS: TestBootScopedAndLegacyIDsValid (0.00s)
+=== RUN   TestParseManagedApplyIDStructure
+--- PASS: TestParseManagedApplyIDStructure (0.00s)
+PASS
+ok  	jul/internal/admin	0.015s

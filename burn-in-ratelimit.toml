@@ -27,7 +27,8 @@ token = "burnintoken"
 [rate_limit]
 enabled = true
 # IP-keyed so all localhost traffic shares one bucket.
-# rate=150/s, burst=300 gives a mix of ~60% 200 / ~40% 429 with 50 workers.
+# rate=150/s, burst=300 bounds the bucket; the 200/429 ratio depends on
+# actual offered load and host/backend speed, not the worker count alone.
 key = "ip"
 rate = 150
 burst = 300
