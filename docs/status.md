@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.20 · Updated 2026-10-12
+> Version 2.21 · Updated 2026-10-13
 >
 > Stable v2.2.0 is published. The two newly shipped Beta rows now have `released`
 > delivery; their maturity and GA criteria remain unchanged. The separately
@@ -63,8 +63,10 @@ not inherit an older GA row merely because it lives in the same package or guide
 
 - **Published release:** stable [`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0)
   is the current published release at `b12e051139f652b400cff37d9f063f5637a7d550`.
-  [#480](https://github.com/victornife/jul/issues/480) records its scope,
-  source-bound runtime review, package verification and residuals.
+  [Release and native package verification](release.md#published-v220-verification)
+  record its exact-source artifacts and execution limits;
+  [#527](https://github.com/victornife/jul/issues/527) records the bounded GA
+  decisions. #480's v2.1.0 runtime review remains historical evidence.
   Historical `v2.0.0` at `d56f5ceaf7ddb8a3875cbe6e27c9540db4130f75`
   remains certified by [#425](https://github.com/victornife/jul/issues/425).
   `v2.0.0-rc.1` is an independently verified prerelease at
@@ -90,12 +92,15 @@ not inherit an older GA row merely because it lives in the same package or guide
 
 - **Response cache:** #134 completed integrated recertification; the released
   cache record retains GA.
-- **Resilience:** admission, retry and circuit controls are published in
-  v2.0.0 as Beta. The cross-protocol failure-attribution correction is included;
-  feature-specific GA criteria remain open.
-- **Routing, configuration authority, generated contracts and NGINX
-  assessment:** published in v2.0.0 as separately tracked Beta capabilities;
-  none inherits the older core/importer GA maturity.
+- **Routing, resilience and auxiliary egress:** the bounded CGC-ROUTE,
+  CGC-RES and SEC-EGRESS contracts are independently GA — soak pending under
+  #527 and published in v2.2.0. Criterion 5 remains open under
+  [#590](https://github.com/victornife/jul/issues/590); no new long-running
+  stability evidence is claimed. Application-outcome retries #406 remain
+  deferred, and auxiliary egress is not a global firewall.
+- **Configuration authority, generated contracts and NGINX assessment:**
+  published in v2.0.0 as separately tracked Beta capabilities; none inherits
+  the older core/importer GA maturity.
 - **Admin TLS/mTLS, external API, remote CLI, selected runtime-policy hot
   reload, HTTP-over-Unix upstreams, local diagnostics and support bundles:**
   published in v2.0.0 with separate Beta maturity. The reduced remote
@@ -240,14 +245,18 @@ v2.0.0 or v2.1.0. Publication does not complete the unchecked GA criteria.
 
 ## Soak tracking (post-GA gate)
 
-Criterion 5 for the features previously GA — soak pending. A soak failure is a
-release-blocking regression. This historical tracking table mirrors the
-[GA push soak table](ga-push.md#soak-tracking-post-ga-gate-per-adr-0005).
+Criterion 5 remains pending for CGC-ROUTE, CGC-RES and SEC-EGRESS under
+[#590](https://github.com/victornife/jul/issues/590). A soak failure is a
+release-blocking regression. The older completed rows retain their historical
+evidence from the [GA push soak table](ga-push.md#soak-tracking-post-ga-gate-per-adr-0005).
 Dated soak runs and where the CI/release artifacts are published are recorded in
 the [soak evidence log](soak-evidence.md).
 
 | Feature | GA on | Soak status |
 | --- | --- | --- |
+| Request predicates, response headers and CORS (CGC-ROUTE) | 2026-10-12 | Pending under [#590](https://github.com/victornife/jul/issues/590); criterion 5 remains false. |
+| Upstream resilience (CGC-RES) | 2026-10-12 | Pending under [#590](https://github.com/victornife/jul/issues/590); criterion 5 remains false. |
+| Auxiliary egress allow-list (SEC-EGRESS) | 2026-10-12 | Pending under [#590](https://github.com/victornife/jul/issues/590); criterion 5 remains false. |
 | Core HTTP | 2026-06-21 | ✅ soaked 8h windows 2026-07-04 (90.4M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | TLS + automatic HTTPS (Y1-01) | 2026-06-21 | ✅ soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err, 25% TLS traffic mix) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | Authentication (Y1-04) | 2026-06-21 | ✅ soaked 1h windows 2026-07-04 (929K req, 0% err, pprof-verified) — [evidence](soak-evidence.md#2026-07-04--auth-soak-local-windows-1-hour-50-workers) |
@@ -274,6 +283,7 @@ the [soak evidence log](soak-evidence.md).
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-10-13 | 2.21 | Reconciled current release references and routing/resilience/egress notices with the existing manifest; linked the pending post-GA stability work. No maturity, delivery or criterion changed. | [feature-status.yaml](feature-status.yaml); [#527](https://github.com/victornife/jul/issues/527); [#590](https://github.com/victornife/jul/issues/590) |
 | 2026-09-30 | 2.19 | Manifest reconciliation (#512): every n/a criterion on a GA row is explained (criterion 8 = no custom parser; others in row notes); Y1-09 criterion 8 and Y1-10 criterion 9 corrected from n/a to met with their fuzz and Console evidence; shipped surfaces without a row get explicit relationships (PROXY-protocol ingest on CGC-IN; error pages, Request ID and `worker_threads` on core-http; audit log, history and rollback on Y1-07) or the new Beta DEPLOY-PKG row (systemd, Windows service, Docker image, `jul healthcheck`); the Y1-06 gap is explained. No maturity changes. | [feature-status.yaml](feature-status.yaml); [#512](https://github.com/victornife/jul/issues/512) |
 | 2026-09-30 | 2.18 | Reconciled published stable v2.1.0 at `0951090a`: seven shipped Beta entries move `merged` to `released`, with maturity and GA criteria unchanged. Actual package verification and execution limits are recorded; this documentation update is post-tag. | [feature-status.yaml](feature-status.yaml); [release.md](release.md#published-v210-verification); [#480](https://github.com/victornife/jul/issues/480) |
 | 2026-09-29 | 2.16 | Recorded the proposed v2.1.0 freeze. Post-v2.0.0 rows stay `merged` and Beta until the tag is published. #434 is no-go. | [feature-status.yaml](feature-status.yaml); [compatibility.md](compatibility.md) |

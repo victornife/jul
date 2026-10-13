@@ -1,16 +1,20 @@
 # Jul.IA — Roadmap
 
-> Version 2.20 · Updated 2026-10-12
+> Version 2.21 · Updated 2026-10-13
 >
 > This roadmap owns the **durable portfolio sequence**. It deliberately does
 > not duplicate volatile READY/NEXT/blocked issue state. The current issue-level
 > execution tracker is [#62](https://github.com/victornife/jul/issues/62), while
 > feature maturity and delivery live in [status.md](../status.md).
 
-Jul.IA's active objective is a coherent, production-quality standalone
-single-node edge and protocol gateway. Correctness and security may interrupt
-any later investment. Distributed control planes and category expansion remain
-separate decisions rather than implicit completion requirements.
+Jul.IA's standalone single-node edge and protocol gateway is the foundation of
+our [public vision](../vision/README.md): making software easier to publish,
+protect and share on infrastructure users choose. The
+[sharing programme #579](https://github.com/victornife/jul/issues/579) maps that
+ambition to bounded operational work and separately gated future designs.
+Correctness and security may interrupt any later investment. Distributed
+control planes and category expansion remain separate decisions rather than
+implicit completion requirements.
 
 ## Sources of truth
 
@@ -20,6 +24,7 @@ separate decisions rather than implicit completion requirements.
 | What is GA, Beta, merged, candidate, released, or soaked? | [Feature status](../status.md) and [`feature-status.yaml`](../feature-status.yaml) |
 | What is being worked on now? | [Programme tracker #62](https://github.com/victornife/jul/issues/62) |
 | What is the durable order of investment? | This roadmap |
+| How does the sharing vision connect to user outcomes? | [Public vision](../vision/README.md) and [sharing programme #579](https://github.com/victornife/jul/issues/579) |
 | Which dated audit is current or superseded? | [Audit register](../audit-register.md) |
 
 ## Portfolio lanes
@@ -35,19 +40,26 @@ separate decisions rather than implicit completion requirements.
 
 ## Current execution sequence
 
-After stable v2.1.0 publication, the durable sequence is: keep #434, #456
-and the other unactivated candidates deferred; do not start another feature
-tranche from release housekeeping; let #62 record live execution. This page
-does not replace that tracker.
+Stable v2.2.0 is published. The selected remediation, release and seven
+deployment journeys are complete; their evidence retains its original source
+and environment limits. The remaining documentation certification is
+[#515](https://github.com/victornife/jul/issues/515), and the three independently
+certified routing, resilience and auxiliary-egress contracts retain their
+post-GA stability obligation under
+[#590](https://github.com/victornife/jul/issues/590).
 
-The durable current sequence is summarized in the active operating roadmap below. Exact issue-level status remains in #62.
+The sharing programme proceeds from an application-facing contract to verified
+standalone, private-network and restricted-browser compositions, then recovery,
+portability and usability evidence before guided operation. Provider-backed
+audience management and group-to-group research keep their own design and
+activation gates. Exact issue selection, dependencies and blockers remain in
+[#62](https://github.com/victornife/jul/issues/62) and its linked children.
 
-The published v2.1.0 closure includes the integrated audit stack and the access-log
-ownership correction, with source-bound evidence and its post-fix impact review.
-The release and twelve-package verification completed the stage-10 release
-gate; they did not activate a new feature tranche. The bounded same-path rotation-policy follow-up,
-[#502](https://github.com/victornife/jul/issues/502), is fixed on `main` after the tag (unreleased); D11/D12 and the partial
-audit ledger remain separate work, even after a stable publication.
+#434, #456 and the other unactivated gateway candidates remain deferred. The
+programme does not make AI Gateway, fleet operation or another category an
+automatic next phase. Completed #502's same-path log-rotation correction is
+included in v2.2.0; #516's completed deployment journeys do not close #515's
+remaining semantic-review ledger.
 
 ## Active operating roadmap
 
@@ -57,13 +69,13 @@ audit ledger remain separate work, even after a stable publication.
 | **1 — Correctness foundation** | Strict config, protocol/security corrections, cache recertification and quality gates | Complete for the selected tranche; new defects still interrupt later stages |
 | **2 — Lifecycle and structured configuration** | Closed-world lifecycle authority, transactional apply/stage/rollback, typed workflows | Complete |
 | **3 — Trust boundaries** | Canonical client identity and consistent backend TLS/mTLS identity | Complete; GA with stable v2.0.0 (#409) |
-| **4 — Routing and response policy** | Method/header/query predicates, response headers, CORS and typed operation surfaces | Published in v2.0.0 as a separate Beta capability; older Core HTTP GA does not promote it |
-| **5 — Generic resilience** | Admission, queue/connection bounds, retry budget/deadline/backoff, circuit state and bounded operations evidence | #287/#144 closed; published in v2.0.0 as Beta. Further feature-specific GA evidence remains a separate decision |
+| **4 — Routing and response policy** | Method/header/query predicates, response headers, CORS and typed operation surfaces | The bounded CGC-ROUTE contract is independently GA — soak pending under #527, published in v2.2.0; #590 owns its remaining stability gate |
+| **5 — Generic resilience** | Admission, queue/connection bounds, retry budget/deadline/backoff, circuit state and bounded operations evidence | The bounded CGC-RES contract is independently GA — soak pending under #527, published in v2.2.0; #590 owns its remaining stability gate. Application-outcome classification #406 remains deferred |
 | **6 — Configuration authority and automation** | Managed/file-owned authority, generated contracts, supported external API, thin remote CLI | #150/#151 closed; authority, versioned external API and remote CLI published in v2.0.0 as separately tracked Beta capabilities |
 | **7 — Selected runtime dynamics** | Value-ranked runtime changes and truthful restart boundaries | Bounded tranche complete (#88); selected changes published as Beta. Further hot reload requires an explicit value trigger |
 | **8 — Migration and diagnostics** | NGINX assessment, evidence, support bundle and `jul doctor` | Base assessment/diagnostics published in v2.0.0 as Beta. #426/#365/#366/#367, the #368 migration-impact rule, #422 and Wave 6 shipped in v2.1.0. Optional full corpus remains #456 CANDIDATE/LATER. #434 is no-go for this release. [#480](https://github.com/victornife/jul/issues/480) records exact-SHA certification. |
 | **9 — One bounded experiment** | AI Gateway or another explicitly approved category | #162 remains deferred under #113; no experiment activated by the v2.0.0 release |
-| **10 — Integrated closure** | Exact-SHA verification, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Stable v2.1.0 published from frozen 0951090a; final-source gates, source-bound post-fix runtime review and actual package verification recorded under #480. Older v2.0.0 certification remains under #425/#421. Residual audit work and #502 are separate, not closed by publication |
+| **10 — Integrated closure** | Exact-SHA verification, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Stable v2.2.0 published from frozen b12e0511; release/package verification and bounded GA decisions recorded under #514/#527, with deployment evidence under completed #516. #515 and #590 remain separate; historical v2.1.0 and v2.0.0 evidence retain their source identities |
 
 For exact issue state, child decomposition, active pull requests and sequencing,
 read #62. This table changes only when the durable portfolio boundary or stage
@@ -89,6 +101,9 @@ outcome changes.
 - Published additions with Beta maturity keep their own entries in
   [feature status](../status.md), separate from older GA rows. Stable publication
   changes delivery, not maturity or unmet GA criteria.
+- #527 independently certified the bounded routing, resilience and
+  auxiliary-egress contracts for v2.2.0 as GA — soak pending. #590 owns their
+  remaining criterion-5 evidence; no new soak is claimed by this roadmap update.
 - The versioned external Admin API and remote CLI are published Beta surfaces;
   Console-only routes remain outside the external contract unless explicitly
   classified and generated into OpenAPI.
@@ -108,6 +123,17 @@ outcome changes.
   remains in #62, not in this table.
 
 ## Published stable checkpoint
+
+Stable [`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0)
+was published 2026-10-11 at
+`b12e051139f652b400cff37d9f063f5637a7d550`. The
+[release and native package verification](../release.md#published-v220-verification)
+record twelve archives, signed attestations, six native hosts and bounded
+startup/upgrade/rollback evidence. The post-tag
+[#516 deployment journeys](https://github.com/victornife/jul/issues/516) are
+separate controlled-lab evidence and did not alter those packages.
+
+### Historical published checkpoints
 
 Stable [`v2.1.0`](https://github.com/victornife/jul/releases/tag/v2.1.0)
 was published 2026-09-30 at `0951090a6fb7703769a15b4749be9664a9842c98`.
