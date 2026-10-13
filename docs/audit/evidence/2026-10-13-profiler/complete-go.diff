@@ -1,0 +1,526 @@
+diff --git a/scripts/burn-in-load.go b/scripts/burn-in-load.go
+index 85b7491..83bc036 100644
+--- a/scripts/burn-in-load.go
++++ b/scripts/burn-in-load.go
+@@ -0,0 +22,1 @@
++	"path/filepath"
+@@ -0,0 +45,1 @@
++	os.Exit(runLoad())
+@@ -0,0 +47,2 @@
++
++func runLoad() int {
+@@ -0,0 +100,1 @@
++		return 1
+@@ -0,0 +105,3 @@
++	if err := os.MkdirAll(*pprofDir, 0755); err != nil {
++		fmt.Println("Profile capture FAILED: cannot create output directory")
++		return 1
+@@ -0,0 +112,1 @@
++	captureOK := snapPProf(*adminURL, *pprofDir, "T0", *adminToken)
+@@ -0,0 +574,4 @@
++	endCaptureOK := snapPProf(*adminURL, *pprofDir, "Tend", *adminToken)
++	if !captureOK || !endCaptureOK {
++		fmt.Println("Profile capture FAILED: traffic results above do not establish complete profile capture")
++		return 1
+@@ -0,0 +579,2 @@
++	fmt.Printf("All four profiles saved to %s/\n", *pprofDir)
++	return 0
+@@ -0,0 +596,5 @@
++func snapPProf(admin, dir, suffix, token string) bool {
++	// Keep normal TLS verification and bound downloads independently of traffic.
++	client := &http.Client{
++		Timeout:       10 * time.Second,
++		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+@@ -0,0 +602,4 @@
++	ok := true
++	for _, name := range []string{"goroutine", "heap"} {
++		path := filepath.Join(dir, name+"-"+suffix+".out")
++		err := captureProfile(client, admin+"/debug/pprof/"+name+"?debug=1", path, token)
+@@ -0,0 +607,4 @@
++			fmt.Printf("Profile %s/%s FAILED: %v\n", suffix, name, err)
++			ok = false
++		} else {
++			fmt.Printf("Profile %s/%s saved\n", suffix, name)
+@@ -0,0 +613,5 @@
++	return ok
++}
++
++func captureProfile(client *http.Client, url, path, token string) error {
++	req, err := http.NewRequest(http.MethodGet, url, nil)
+@@ -0,0 +619,2 @@
++		return fmt.Errorf("invalid profile request")
++	}
+@@ -0,0 +622,16 @@
++	resp, err := client.Do(req)
++	if err != nil {
++		// Do not print URLs, headers, response bodies, or wrapped transport errors.
++		return fmt.Errorf("profile request failed (transport, TLS or timeout)")
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode != http.StatusOK {
++		return fmt.Errorf("HTTP %d", resp.StatusCode)
++	}
++	f, err := os.CreateTemp(filepath.Dir(path), ".pprof-*")
++	if err != nil {
++		return fmt.Errorf("cannot create temporary profile")
++	}
++	defer os.Remove(f.Name())
++	n, err := io.Copy(f, resp.Body)
++	if err != nil || n == 0 {
+@@ -0,0 +639,9 @@
++		return fmt.Errorf("incomplete profile download or write")
++	}
++	if err := f.Close(); err != nil {
++		return fmt.Errorf("cannot close profile file")
++	}
++	if err := os.Rename(f.Name(), path); err != nil {
++		return fmt.Errorf("cannot publish profile file")
++	}
++	return nil
+diff --git a/scripts/burn-in-load_test.go b/scripts/burn-in-load_test.go
+index 0000000..1274b1d
+--- /dev/null
++++ b/scripts/burn-in-load_test.go
+@@ -0,0 +1,224 @@
++//go:build ignore
++
++package main
++
++import (
++	"flag"
++	"fmt"
++	"io"
++	"net/http"
++	"net/http/httptest"
++	"net/http/pprof"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++)
++
++func TestProfileCaptureRejectsHTTPFailures(t *testing.T) {
++	for _, status := range []int{401, 403, 404, 500, 302} {
++		t.Run(fmt.Sprint(status), func(t *testing.T) {
++			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				if r.Header.Get("Authorization") != "Bearer synthetic-profile-token" {
++					t.Error("missing profile authorization")
++				}
++				w.WriteHeader(status)
++				fmt.Fprint(w, "synthetic forbidden body")
++			}))
++			defer server.Close()
++			dir := t.TempDir()
++			path := filepath.Join(dir, "heap-T0.out")
++			if err := os.WriteFile(path, []byte("previous complete profile"), 0600); err != nil {
++				t.Fatal(err)
++			}
++			err := captureProfile(server.Client(), server.URL, path, "synthetic-profile-token")
++			if err == nil || err.Error() != fmt.Sprintf("HTTP %d", status) {
++				t.Fatalf("got %v, want HTTP status failure", err)
++			}
++			assertProfileFiles(t, dir, "heap-T0.out", "previous complete profile")
++		})
++	}
++}
++
++func TestProfileCaptureRejectsIncompleteAndEmptyBodies(t *testing.T) {
++	for _, truncated := range []bool{false, true} {
++		t.Run(fmt.Sprint(truncated), func(t *testing.T) {
++			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				if truncated {
++					w.Header().Set("Content-Length", "100")
++					fmt.Fprint(w, "partial profile")
++				}
++			}))
++			defer server.Close()
++			dir := t.TempDir()
++			err := captureProfile(server.Client(), server.URL, filepath.Join(dir, "heap.out"), "secret")
++			if err == nil || !strings.Contains(err.Error(), "incomplete") {
++				t.Fatalf("accepted incomplete/empty profile: %v", err)
++			}
++			assertProfileFiles(t, dir, "", "")
++		})
++	}
++}
++
++func TestProfileCaptureTransportTrustAndFilesystemFailures(t *testing.T) {
++	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "complete profile") }))
++	defer server.Close()
++	dir := t.TempDir()
++	path := filepath.Join(dir, "heap.out")
++	if err := captureProfile(&http.Client{Timeout: time.Second}, server.URL, path, "secret"); err == nil {
++		t.Fatal("untrusted TLS profile accepted")
++	}
++	assertProfileFiles(t, dir, "", "")
++	if err := captureProfile(server.Client(), server.URL, filepath.Join(dir, "missing", "heap.out"), "secret"); err == nil || !strings.Contains(err.Error(), "temporary") {
++		t.Fatalf("output creation failure: %v", err)
++	}
++	if err := os.Mkdir(path, 0700); err != nil {
++		t.Fatal(err)
++	}
++	if err := captureProfile(server.Client(), server.URL, path, "secret"); err == nil || !strings.Contains(err.Error(), "publish") {
++		t.Fatalf("publication failure: %v", err)
++	}
++	assertProfileFiles(t, dir, "heap.out", "")
++	if err := captureProfile(server.Client(), ":bad secret URL", path, "secret"); err == nil || strings.Contains(err.Error(), "secret") {
++		t.Fatalf("invalid request diagnostic: %v", err)
++	}
++	if err := os.Remove(path); err != nil {
++		t.Fatal(err)
++	}
++	if err := captureProfile(server.Client(), server.URL, path, "secret"); err != nil {
++		t.Fatal(err)
++	}
++	assertProfileFiles(t, dir, "heap.out", "complete profile")
++}
++
++func TestProfileCaptureTimeout(t *testing.T) {
++	entered := make(chan struct{})
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		close(entered)
++		<-r.Context().Done()
++	}))
++	defer server.Close()
++	dir := t.TempDir()
++	err := captureProfile(&http.Client{Timeout: 100 * time.Millisecond}, server.URL, filepath.Join(dir, "heap.out"), "secret")
++	<-entered
++	if err == nil || !strings.Contains(err.Error(), "timeout") {
++		t.Fatalf("timeout: %v", err)
++	}
++	assertProfileFiles(t, dir, "", "")
++}
++
++func TestSnapshotsRejectRedirectWithoutFollowingIt(t *testing.T) {
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if r.URL.Path == "/redirected" {
++			t.Error("profile redirect followed")
++		}
++		http.Redirect(w, r, "/redirected", http.StatusFound)
++	}))
++	defer server.Close()
++	dir := t.TempDir()
++	if snapPProf(server.URL, dir, "T0", "synthetic-token") {
++		t.Fatal("redirected captures reported success")
++	}
++	assertProfileFiles(t, dir, "", "")
++}
++
++func assertProfileFiles(t *testing.T, dir, name, content string) {
++	t.Helper()
++	files, err := os.ReadDir(dir)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if name == "" {
++		if len(files) != 0 {
++			t.Fatalf("partial files remain: %v", files)
++		}
++		return
++	}
++	if len(files) != 1 || files[0].Name() != name {
++		t.Fatalf("unexpected output files: %v", files)
++	}
++	if !files[0].IsDir() {
++		got, err := os.ReadFile(filepath.Join(dir, name))
++		if err != nil || string(got) != content {
++			t.Fatalf("profile changed: %q, %v", got, err)
++		}
++	}
++}
++
++func TestLoadProfileCompletionAndPreflight(t *testing.T) {
++	for _, mode := range []string{"success", "forbidden", "output failure", "health failure"} {
++		t.Run(mode, func(t *testing.T) {
++			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				switch {
++				case r.URL.Path == "/healthz" && mode == "health failure":
++					w.WriteHeader(503)
++				case strings.HasPrefix(r.URL.Path, "/debug/pprof/"):
++					if r.Header.Get("Authorization") != "Bearer synthetic-profile-token" {
++						t.Error("wrong profile token")
++					}
++					if mode == "forbidden" {
++						w.WriteHeader(403)
++						fmt.Fprint(w, "synthetic forbidden body")
++					} else {
++						pprof.Handler(strings.TrimPrefix(r.URL.Path, "/debug/pprof/")).ServeHTTP(w, r)
++					}
++				default:
++					fmt.Fprint(w, "OK")
++				}
++			}))
++			defer server.Close()
++			dir := t.TempDir()
++			if mode == "output failure" {
++				dir = filepath.Join(dir, "existing-file")
++				if err := os.WriteFile(dir, []byte("keep"), 0600); err != nil {
++					t.Fatal(err)
++				}
++			}
++			args, flags, stdout := os.Args, flag.CommandLine, os.Stdout
++			defer func() { os.Args, flag.CommandLine, os.Stdout = args, flags, stdout }()
++			flag.CommandLine = flag.NewFlagSet("profile-test", flag.ContinueOnError)
++			os.Args = []string{"profile-test", "-duration=100ms", "-workers=1", "-base=" + server.URL, "-tls=" + server.URL, "-health=" + server.URL + "/healthz", "-admin=" + server.URL, "-out=" + dir, "-authUser=", "-adminToken=synthetic-profile-token"}
++			reader, writer, err := os.Pipe()
++			if err != nil {
++				t.Fatal(err)
++			}
++			os.Stdout = writer
++			code := runLoad()
++			writer.Close()
++			os.Stdout = stdout
++			output, err := io.ReadAll(reader)
++			reader.Close()
++			if err != nil {
++				t.Fatal(err)
++			}
++			text := string(output)
++			if strings.Contains(text, "synthetic-profile-token") || strings.Contains(text, "synthetic forbidden body") {
++				t.Fatalf("capture diagnostic leaks synthetic secret/body: %s", text)
++			}
++			if mode == "success" {
++				if code != 0 || !strings.Contains(text, "All four profiles saved") || !strings.Contains(text, "Total requests") {
++					t.Fatalf("successful completion: code=%d\n%s", code, text)
++				}
++				for _, suffix := range []string{"T0", "Tend"} {
++					for _, name := range []string{"goroutine", "heap"} {
++						body, err := os.ReadFile(filepath.Join(dir, name+"-"+suffix+".out"))
++						if err != nil || !strings.Contains(string(body), "profile:") {
++							t.Fatalf("missing real %s profile: %v", name, err)
++						}
++					}
++				}
++			} else {
++				if code != 1 || strings.Contains(text, "All four profiles saved") {
++					t.Fatalf("false successful capture: code=%d\n%s", code, text)
++				}
++				if mode == "forbidden" {
++					if strings.Count(text, "FAILED: HTTP 403") != 4 || !strings.Contains(text, "Total requests") {
++						t.Fatalf("capture/traffic outcomes not distinct:\n%s", text)
++					}
++					assertProfileFiles(t, dir, "", "")
++				}
++			}
++		})
++	}
++}
+diff --git a/scripts/burn-in-stream-load.go b/scripts/burn-in-stream-load.go
+index 8bb8379..582ccc5 100644
+--- a/scripts/burn-in-stream-load.go
++++ b/scripts/burn-in-stream-load.go
+@@ -0,0 +9,1 @@
++	"bytes"
+@@ -0,0 +12,1 @@
++	"io"
+@@ -0,0 +20,18 @@
++// echoRound reads one complete reply: TCP does not preserve write boundaries.
++func echoRound(conn net.Conn, payload, readBuf []byte) error {
++	n, err := conn.Write(payload)
++	if err != nil {
++		return err
++	}
++	if n != len(payload) {
++		return io.ErrShortWrite
++	}
++	if _, err := io.ReadFull(conn, readBuf); err != nil {
++		return err
++	}
++	if !bytes.Equal(readBuf, payload) {
++		return fmt.Errorf("echo reply differs from payload")
++	}
++	return nil
++}
++
+@@ -0,0 +88,1 @@
++					if err := echoRound(conn, payload, readBuf); err != nil {
+@@ -0,0 +139,2 @@
++	fmt.Printf("Successful rounds : %d\n", s)
++	fmt.Printf("Failed conns : %d\n", f)
+@@ -0,0 +143,1 @@
++		fmt.Printf("Success rate : %.2f%%\n", float64(t-f)/float64(t)*100)
+diff --git a/scripts/burn-in-stream-load_test.go b/scripts/burn-in-stream-load_test.go
+index 0000000..aa3614e
+--- /dev/null
++++ b/scripts/burn-in-stream-load_test.go
+@@ -0,0 +1,179 @@
++//go:build ignore
++
++package main
++
++import (
++	"bytes"
++	"errors"
++	"flag"
++	"fmt"
++	"io"
++	"net"
++	"os"
++	"strings"
++	"sync"
++	"testing"
++	"time"
++)
++
++func TestEchoRoundFragmentedReply(t *testing.T) {
++	client, server := net.Pipe()
++	defer client.Close()
++	defer server.Close()
++	payload := []byte("complete echo reply")
++	done := make(chan error, 1)
++	go func() {
++		buf := make([]byte, len(payload))
++		if _, err := io.ReadFull(server, buf); err != nil {
++			done <- err
++			return
++		}
++		// Each Pipe write blocks until its fragment is consumed, guaranteeing
++		// distinct reads without scheduling assumptions or sleeps.
++		for _, part := range [][]byte{buf[:5], buf[5:10], buf[10:]} {
++			if _, err := server.Write(part); err != nil {
++				done <- err
++				return
++			}
++		}
++		done <- nil
++	}()
++	buf := make([]byte, len(payload))
++	if err := echoRound(client, payload, buf); err != nil {
++		t.Fatal(err)
++	}
++	if !bytes.Equal(buf, payload) {
++		t.Fatalf("reply = %q", buf)
++	}
++	if err := <-done; err != nil {
++		t.Fatal(err)
++	}
++}
++
++func TestEchoRoundRejectsTruncationAndWrongContents(t *testing.T) {
++	for _, tc := range []struct {
++		name, reply string
++		wantEOF     bool
++	}{{"truncated", "part", true}, {"wrong contents", "xxxxxxx", false}} {
++		t.Run(tc.name, func(t *testing.T) {
++			client, server := net.Pipe()
++			defer client.Close()
++			go func() {
++				defer server.Close()
++				_, _ = io.ReadFull(server, make([]byte, 7))
++				_, _ = server.Write([]byte(tc.reply))
++			}()
++			err := echoRound(client, []byte("payload"), make([]byte, 7))
++			if tc.wantEOF {
++				if !errors.Is(err, io.ErrUnexpectedEOF) {
++					t.Fatalf("got %v, want unexpected EOF", err)
++				}
++			} else if err == nil || !strings.Contains(err.Error(), "differs") {
++				t.Fatalf("got %v, want content mismatch", err)
++			}
++		})
++	}
++}
++
++type shortWriteConn struct{ net.Conn }
++
++func (shortWriteConn) Write(b []byte) (int, error) { return len(b) - 1, nil }
++
++func TestEchoRoundWriteFailureAndDeadline(t *testing.T) {
++	client, server := net.Pipe()
++	server.Close()
++	defer client.Close()
++	if err := echoRound(client, []byte("payload"), make([]byte, 7)); err == nil {
++		t.Fatal("closed connection accepted")
++	}
++	if err := echoRound(shortWriteConn{client}, []byte("payload"), make([]byte, 7)); !errors.Is(err, io.ErrShortWrite) {
++		t.Fatalf("short write: %v", err)
++	}
++	client, server = net.Pipe()
++	defer client.Close()
++	defer server.Close()
++	go func() { _, _ = io.ReadFull(server, make([]byte, 7)) }()
++	if err := client.SetReadDeadline(time.Now().Add(-time.Second)); err != nil {
++		t.Fatal(err)
++	}
++	err := echoRound(client, []byte("payload"), make([]byte, 7))
++	var timeout net.Error
++	if !errors.As(err, &timeout) || !timeout.Timeout() {
++		t.Fatalf("got %v, want timeout", err)
++	}
++}
++
++func TestLoadReportsConnectionRates(t *testing.T) {
++	for _, corrupt := range []bool{false, true} {
++		t.Run(map[bool]string{false: "valid fragmented echoes", true: "corrupt echoes"}[corrupt], func(t *testing.T) {
++			listener, err := net.Listen("tcp", "127.0.0.1:0")
++			if err != nil {
++				t.Fatal(err)
++			}
++			var handlers sync.WaitGroup
++			accepted := make(chan struct{})
++			go func() {
++				defer close(accepted)
++				for {
++					conn, err := listener.Accept()
++					if err != nil {
++						return
++					}
++					handlers.Add(1)
++					go func() {
++						defer handlers.Done()
++						defer conn.Close()
++						buf := make([]byte, len("stream-echo-0-payload-data-chunk"))
++						for {
++							if _, err := io.ReadFull(conn, buf); err != nil {
++								return
++							}
++							if corrupt {
++								buf[0] ^= 1
++							}
++							if _, err := conn.Write(buf[:5]); err != nil {
++								return
++							}
++							if _, err := conn.Write(buf[5:]); err != nil {
++								return
++							}
++						}
++					}()
++				}
++			}()
++			args, flags, stdout := os.Args, flag.CommandLine, os.Stdout
++			defer func() { os.Args, flag.CommandLine, os.Stdout = args, flags, stdout }()
++			flag.CommandLine = flag.NewFlagSet("stream-test", flag.ContinueOnError)
++			os.Args = []string{"stream-test", "-duration=100ms", "-workers=1", "-target=" + listener.Addr().String()}
++			reader, writer, err := os.Pipe()
++			if err != nil {
++				t.Fatal(err)
++			}
++			os.Stdout = writer
++			main()
++			writer.Close()
++			os.Stdout = stdout
++			output, err := io.ReadAll(reader)
++			reader.Close()
++			listener.Close()
++			<-accepted
++			handlers.Wait()
++			if err != nil {
++				t.Fatal(err)
++			}
++			var total, failed, rounds int
++			for _, line := range strings.Split(string(output), "\n") {
++				_, _ = fmt.Sscanf(line, "Total conns  : %d", &total)
++				_, _ = fmt.Sscanf(line, "Failed conns : %d", &failed)
++				_, _ = fmt.Sscanf(line, "Echo rounds  : %d", &rounds)
++			}
++			if total == 0 || (corrupt && (failed == 0 || rounds != 0)) || (!corrupt && (failed != 0 || rounds == 0)) {
++				t.Fatalf("incorrect counters:\n%s", output)
++			}
++			want := fmt.Sprintf("Success rate : %.2f%%", float64(total-failed)/float64(total)*100)
++			if !strings.Contains(string(output), want) {
++				t.Fatalf("want %q in output:\n%s", want, output)
++			}
++		})
++	}
++}

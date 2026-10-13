@@ -1,0 +1,70 @@
+{
+  "measured_source": "de7cea69f866bf4d9ec50d0a5061c88813a232fc",
+  "measured_tree": "1997ca78fb903495f4c4e50494401a1d786767a9",
+  "initial_audit_correction_source": "718bfaa9d9dc1a4157d26e30e8c9102c60334f25",
+  "complete_changed_go": {
+    "covered": 105,
+    "total": 107,
+    "percent": 98.13084112149532,
+    "files": [
+      "internal/admin/api.go",
+      "internal/admin/audit.go",
+      "internal/admin/rbac.go",
+      "scripts/burn-in-load.go",
+      "scripts/burn-in-stream-load.go"
+    ],
+    "uncovered": [
+      [
+        "scripts/burn-in-load.go",
+        "45.2,46.1",
+        1
+      ],
+      [
+        "scripts/burn-in-load.go",
+        "642.3,643.1",
+        1
+      ]
+    ]
+  },
+  "correction_alone": {
+    "covered": 36,
+    "total": 36,
+    "percent": 100.0,
+    "files": [
+      "internal/admin/api.go",
+      "internal/admin/audit.go",
+      "internal/admin/rbac.go"
+    ],
+    "uncovered": []
+  },
+  "load_profiles": "../http-load.cover and ../stream-load.cover retain their unchanged source/run identity; their Go files are unchanged",
+  "go": "1.27.2",
+  "outcomes": {
+    "open_before": "fails actual identity/audit mismatch",
+    "open_after": "passes under race; valid-legacy control retained",
+    "full_tag_owner": "admin/rbac race passed",
+    "lean_owner": "passed",
+    "docs": "2092/0",
+    "docs_fixtures": "passed",
+    "semantic_fixtures": "24passed",
+    "generated": "passed",
+    "idempotency/control_identity": "unchanged; existing owner regressions pass",
+    "hosted": "pending final revised head"
+  },
+  "sha256": {
+    "admin.cover": "caebff7758d9aa5ed500f6a45817d143933de2c32114d626443b4e95d607d645",
+    "after.log": "5d1686fc55a9a4a6ccaaca448710b4d64c273bdb6a551fb736c4520fbb82bd65",
+    "before.log": "82721a1b21b0bc432f3ad28b537350871ad3443691d05ad46aec8ee07e9efb73",
+    "complete-go-coverage.json": "6d86ecb9220ec269ce8da7159f3cd062f24470ea67a34602458f025486ba63fa",
+    "complete-go.diff": "906bc03971b7aa0453309638a725237b91a231e9b5371d68475afbd4da6f019a",
+    "corrective-go-coverage.json": "9ea9750273b47802352de535c161d054c32df2bdcc22491ff74bb198bd28e558",
+    "corrective-go.diff": "0c7c846fce9c95fea81700b83dc938b3540e17d8bbaf785a6aecf744fd5f5e9c",
+    "docs-tests.log": "d6e37e02a23816a29066393333703a6dd3d21c874cd7f0119e92721f71b4705c",
+    "docs.log": "4650b93164848a0a81fe73dfb2799c0f913ea545b11fe8da16cc00225ade76b3",
+    "full-owner.log": "19db308fc270fb8e7c2e5130e38c0e9ae33466fd8e6bf409d8a59d1e96619f5b",
+    "generated.log": "2ff01d8cbb80e3dc08c6a352f547ada4a777da689ca86e018cae8a32eadad04b",
+    "lean-owner.log": "67e79fa29f763a4f8f5b94bbae8e5f4b2c4c877d4debc9545f3a908b25adbc70",
+    "semantic.log": "146f54f13d383eba290e4e6f6e7cfbccf4b4945bbdf24472217bc4f87627dac3",
+    "vet.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

@@ -172,7 +172,12 @@ func writeRBACUnavailable(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func writeUnauthenticated(w http.ResponseWriter, r *http.Request, reason string) {
+func (s *Server) writeUnauthenticated(w http.ResponseWriter, r *http.Request, reason string) {
+	detail := "no valid credential"
+	if reason != "" {
+		detail = "credential disabled or expired"
+	}
+	s.recordAudit(r, "auth.fail", "admin", "failure", detail)
 	w.Header().Set("WWW-Authenticate", "Bearer")
 	if _, external := externalContract(r.Context()); external {
 		msg := "No valid credential was presented."
@@ -226,11 +231,11 @@ func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http
 			bearer := adminAuthorization(r)
 			authID, err := snap.policy.Authenticate(bearer, now)
 			if err == rbac.ErrDisabled {
-				writeUnauthenticated(w, r, "The principal is disabled or expired.")
+				s.writeUnauthenticated(w, r, "The principal is disabled or expired.")
 				return
 			}
 			if err != nil {
-				writeUnauthenticated(w, r, "")
+				s.writeUnauthenticated(w, r, "")
 				return
 			}
 			if !snap.policy.Authorize(authID, perm) {
@@ -240,7 +245,7 @@ func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http
 			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), authID)))
 		default:
 			if !checkLegacyToken(r, snap.cfg.Token) {
-				writeUnauthenticated(w, r, "")
+				s.writeUnauthenticated(w, r, "")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), legacyIdentity(snap.cfg.Token))))
@@ -260,11 +265,11 @@ func (s *Server) requireAnyPermission(perms []rbac.Permission, next http.Handler
 			bearer := adminAuthorization(r)
 			authID, err := snap.policy.Authenticate(bearer, now)
 			if err == rbac.ErrDisabled {
-				writeUnauthenticated(w, r, "The principal is disabled or expired.")
+				s.writeUnauthenticated(w, r, "The principal is disabled or expired.")
 				return
 			}
 			if err != nil {
-				writeUnauthenticated(w, r, "")
+				s.writeUnauthenticated(w, r, "")
 				return
 			}
 			for _, perm := range perms {
@@ -276,7 +281,7 @@ func (s *Server) requireAnyPermission(perms []rbac.Permission, next http.Handler
 			writeForbiddenAny(w, r, perms, authID)
 		default:
 			if !checkLegacyToken(r, snap.cfg.Token) {
-				writeUnauthenticated(w, r, "")
+				s.writeUnauthenticated(w, r, "")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), legacyIdentity(snap.cfg.Token))))
@@ -296,17 +301,17 @@ func (s *Server) authWithRBAC(next http.Handler) http.Handler {
 			bearer := adminAuthorization(r)
 			id, err := snap.policy.Authenticate(bearer, now)
 			if err == rbac.ErrDisabled {
-				writeUnauthenticated(w, r, "The principal is disabled or expired.")
+				s.writeUnauthenticated(w, r, "The principal is disabled or expired.")
 				return
 			}
 			if err != nil {
-				writeUnauthenticated(w, r, "")
+				s.writeUnauthenticated(w, r, "")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), id)))
 		case authModeLegacy:
 			if !checkLegacyToken(r, snap.cfg.Token) {
-				writeUnauthenticated(w, r, "")
+				s.writeUnauthenticated(w, r, "")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(rbac.WithIdentity(r.Context(), legacyIdentity(snap.cfg.Token))))

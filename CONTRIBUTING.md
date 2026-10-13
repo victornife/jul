@@ -39,7 +39,7 @@ technical merit aligned with the project's vision.
    **What `ci-pr` does not cover** (still requires a CI push):
    - repository-wide coverage floor enforcement
    - Windows / macOS platform lanes
-   - frontend typecheck/lint/unit tests (run `make console-check` separately)
+   - frontend typecheck/lint/coverage tests (run `make console-check` separately)
    - Playwright E2E
    - benchmark / fuzz / soak smoke
 
@@ -78,6 +78,27 @@ toolchain), the coverage floors, `govulncheck`, or the bench/fuzz/soak smoke
 jobs — those still run in CI, and you should run `make ci-full` /
 `make vulncheck-full` before a release-sensitive change. A green pre-push is a
 good signal, not a guarantee the full CI will pass.
+
+### Console coverage gates
+
+`make console-check` runs typecheck, lint and the full Vitest coverage command
+once. `pnpm --dir internal/admin/ui run test` remains the fast plain-test path.
+The existing global statement floor is 58% in both local and CI coverage;
+branches/functions/lines remain 45/40/50. The owning
+[`coverage-policy.json`](internal/admin/ui/coverage-policy.json) additionally
+enforces aggregate config/client >=80% statements and >=70% branches, history
+>=80% statements, plus individual ConfigPanel/reducer >=80% statement floors.
+These exact-file gates prevent helper coverage from masking the core apply flow.
+
+The report companion fails on empty production matches, missing target files or
+missing summary/raw reports. It writes per-file/global/area counts to
+`internal/admin/ui/coverage/contract-summary.json`. The normal coverage command
+also tests those failure boundaries. For an independent enforcement proof, run
+`pnpm --dir internal/admin/ui run test:coverage:probes`; it temporarily raises
+one named metric at a time, requires the full suite to pass and only that gate
+to fail, restores the policy and reruns the unmodified gate. See the
+[dated evidence](docs/audit/2026-10-13-console-coverage.md). Never exclude a
+hard-to-test target, ignore statements or lower a floor to obtain a pass.
 
 ### Security-package gates
 

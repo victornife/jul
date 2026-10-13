@@ -19,6 +19,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,6 +42,10 @@ func logErrorOnce(errStr string) {
 }
 
 func main() {
+	os.Exit(runLoad())
+}
+
+func runLoad() int {
 	var (
 		duration     = flag.Duration("duration", 5*time.Minute, "How long to run")
 		workers      = flag.Int("workers", 50, "Number of concurrent workers")
@@ -92,16 +97,19 @@ func main() {
 	fmt.Println("Pre-flight health check...")
 	if err := healthCheck(*healthURL); err != nil {
 		fmt.Printf("Health check FAILED: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	fmt.Println("Health OK: 200")
 
 	// Ensure artifacts dir
-	os.MkdirAll(*pprofDir, 0755)
+	if err := os.MkdirAll(*pprofDir, 0755); err != nil {
+		fmt.Println("Profile capture FAILED: cannot create output directory")
+		return 1
+	}
 
 	// T+0 pprof snapshots
 	fmt.Println("Capturing T+0 pprof snapshots...")
-	snapPProf(*adminURL, *pprofDir, "T0", *adminToken)
+	captureOK := snapPProf(*adminURL, *pprofDir, "T0", *adminToken)
 
 	// Load client certificate for mTLS (TLS :8443) if available.
 	var tlsConfig *tls.Config
@@ -563,8 +571,13 @@ func main() {
 
 	// T+end pprof snapshots
 	fmt.Println("Capturing T+end pprof snapshots...")
-	snapPProf(*adminURL, *pprofDir, "Tend", *adminToken)
-	fmt.Printf("Artifacts saved to %s/\n", *pprofDir)
+	endCaptureOK := snapPProf(*adminURL, *pprofDir, "Tend", *adminToken)
+	if !captureOK || !endCaptureOK {
+		fmt.Println("Profile capture FAILED: traffic results above do not establish complete profile capture")
+		return 1
+	}
+	fmt.Printf("All four profiles saved to %s/\n", *pprofDir)
+	return 0
 }
 
 func healthCheck(url string) error {
@@ -580,28 +593,58 @@ func healthCheck(url string) error {
 	return nil
 }
 
-func snapPProf(admin, dir, suffix, token string) {
-	urls := map[string]string{
-		"goroutine": admin + "/debug/pprof/goroutine?debug=1",
-		"heap":      admin + "/debug/pprof/heap?debug=1",
+func snapPProf(admin, dir, suffix, token string) bool {
+	// Keep normal TLS verification and bound downloads independently of traffic.
+	client := &http.Client{
+		Timeout:       10 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	for name, u := range urls {
-		req, err := http.NewRequest("GET", u, nil)
+	ok := true
+	for _, name := range []string{"goroutine", "heap"} {
+		path := filepath.Join(dir, name+"-"+suffix+".out")
+		err := captureProfile(client, admin+"/debug/pprof/"+name+"?debug=1", path, token)
 		if err != nil {
-			continue
+			fmt.Printf("Profile %s/%s FAILED: %v\n", suffix, name, err)
+			ok = false
+		} else {
+			fmt.Printf("Profile %s/%s saved\n", suffix, name)
 		}
-		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			continue
-		}
-		f, _ := os.Create(fmt.Sprintf("%s/%s-%s.out", dir, name, suffix))
-		if f != nil {
-			_, _ = f.ReadFrom(resp.Body)
-			f.Close()
-		}
-		resp.Body.Close()
 	}
+	return ok
+}
+
+func captureProfile(client *http.Client, url, path, token string) error {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("invalid profile request")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		// Do not print URLs, headers, response bodies, or wrapped transport errors.
+		return fmt.Errorf("profile request failed (transport, TLS or timeout)")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".pprof-*")
+	if err != nil {
+		return fmt.Errorf("cannot create temporary profile")
+	}
+	defer os.Remove(f.Name())
+	n, err := io.Copy(f, resp.Body)
+	if err != nil || n == 0 {
+		f.Close()
+		return fmt.Errorf("incomplete profile download or write")
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("cannot close profile file")
+	}
+	if err := os.Rename(f.Name(), path); err != nil {
+		return fmt.Errorf("cannot publish profile file")
+	}
+	return nil
 }
 
 var maliciousSQLPayloads = []string{

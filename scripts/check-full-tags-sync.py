@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that FULL_TAGS in Makefile and .github/workflows/ci.yml stay in sync."""
+"""Verify FULL_TAGS and the benchmark/fuzz default consumers stay in sync."""
 import re
 import sys
 from pathlib import Path
@@ -41,7 +41,14 @@ def main() -> int:
         print(f"  ci.yml:   {ci}", file=sys.stderr)
         return 1
 
-    print(f"OK: FULL_TAGS in sync ({len(mk.split())} tags)")
+    for name in ("bench.sh", "fuzz.sh"):
+        path = ROOT / "scripts" / name
+        match = re.search(r'^DEFAULT_TAGS="([^"]+)"$', path.read_text(), re.MULTILINE)
+        if match is None or match.group(1) != mk:
+            print(f"ERROR: scripts/{name} default tags mismatch FULL_TAGS", file=sys.stderr)
+            return 1
+
+    print(f"OK: FULL_TAGS and benchmark/fuzz defaults in sync ({len(mk.split())} tags)")
     return 0
 
 

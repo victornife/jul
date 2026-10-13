@@ -1,0 +1,27 @@
+{
+  "global": {
+    "statements": 58,
+    "branches": 45,
+    "functions": 40,
+    "lines": 50
+  },
+  "paths": {
+    "src/features/config/**": {
+      "statements": 80,
+      "branches": 70
+    },
+    "src/features/history/**": {
+      "statements": 80
+    },
+    "src/api/client.ts": {
+      "statements": 80,
+      "branches": 70
+    },
+    "src/features/config/ConfigPanel.tsx": {
+      "statements": 80
+    },
+    "src/features/config/configMutationMachine.ts": {
+      "statements": 80
+    }
+  }
+}

@@ -1,0 +1,10 @@
+=== RUN   TestD11SnapshotRejectsForbiddenProfile
+Profile T0/goroutine FAILED: HTTP 403
+Profile T0/heap FAILED: HTTP 403
+    reproducer_test.go:12: heap-T0.out: err=open /tmp/TestD11SnapshotRejectsForbiddenProfile2277190943/001/heap-T0.out: no such file or directory body=""
+    reproducer_test.go:12: goroutine-T0.out: err=open /tmp/TestD11SnapshotRejectsForbiddenProfile2277190943/001/goroutine-T0.out: no such file or directory body=""
+--- PASS: TestD11SnapshotRejectsForbiddenProfile (0.00s)
+PASS
+ok  	command-line-arguments	0.007s
+
+expected_exit=0 actual_exit=0
