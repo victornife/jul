@@ -140,9 +140,12 @@ release, with no CVE requested. Private synthetic evidence remains restricted.
 
 macOS 13+ is required. The seven exact #569 HTTP/3 exceptions remain visible;
 raw 42/49 h3spec and skipped 0-RTT limits are not full RFC conformance.
-The three separately approved GA contracts remain **soak pending**. No extra
-long-running soak, overall coverage target or maturity promotion for other Beta
-features is claimed. This post-tag publication-status documentation does not
+The three separately approved GA contracts were **soak pending at publication**.
+Their eight-hour post-GA gate completed on 2026-10-14 under
+[the source-bound #590 review](reviews/2026-10-14-ga-soak-590-results.md),
+with the collector failure and authorised supplement preserved. No overall
+coverage target or maturity promotion for other Beta features is claimed.
+This post-tag publication-status documentation does not
 change packaged READMEs or previous release/runtime evidence.
 
 ## Published v2.1.0 verification

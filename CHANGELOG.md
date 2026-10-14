@@ -40,6 +40,16 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Verification
 
+- Complete criterion 5 for exactly routing/CORS, generic resilience and
+  auxiliary egress under #590: eight continuous hours on the unchanged full
+  v2.2.0 package, zero unexpected workload failures and all declared resource/
+  phase/leak limits met. Retain the original collector's sample-count failure
+  and review 37 authorised read-only same-process supplemental scrapes against
+  unchanged thresholds. Publish bounded sanitised evidence/digests, correct
+  sampler deadline drift and add rejection/scheduling/fixture regressions.
+  These three rows become GA/soaked; all other rows, packages/tags and historical
+  evidence are unchanged.
+
 - Enforce Console coverage floors for configuration, history and the API client,
   plus individual core apply-panel/reducer floors. Local console-check now runs
   the same coverage gates as CI, preserving the existing global 58% statement

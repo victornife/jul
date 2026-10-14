@@ -103,6 +103,75 @@ make config-check            # every shipped .toml still loads
 
 All three must pass before proceeding to a real-binary run.
 
+## Issue 590 eight-hour real-package candidate
+
+CGC-ROUTE, CGC-RES and SEC-EGRESS have a separate
+[predeclared contract](reviews/2026-10-14-ga-soak-590.md). The generic current
+profile does not cover its required phases. Use the actual full v2.2.0
+download, not a rebuilt current-main product. A short run is only preflight.
+
+On an authorised always-awake Linux host, create an owner-only work directory
+outside the repository. Select `arm64` for aarch64 or `amd64` for x86_64:
+
+```sh
+WORK=$(mktemp -d /tmp/jul-ga590.XXXXXX)
+ARCH=arm64
+gh release download v2.2.0 --repo victornife/jul \
+  --pattern "*linux_${ARCH}_full.tar.gz*" \
+  --pattern SHA256SUMS --dir "$WORK"
+python3 -m venv "$WORK/venv"
+"$WORK/venv/bin/pip" install -r scripts/ga-soak-requirements.txt
+go build -o "$WORK/grpc-backend" scripts/grpc-echo-server.go
+"$WORK/venv/bin/python" -m unittest discover -s scripts -p test_ga_soak.py -v
+"$WORK/venv/bin/python" scripts/ga-soak.py --arch "$ARCH" \
+  --package-directory "$WORK" --grpc-backend "$WORK/grpc-backend" \
+  --seconds 120 --out "$WORK/preflight"
+```
+
+The harness reuses the release package verifier for checksums, native clean
+identity, capabilities and both **binary** attestations. `gh` must be
+authenticated for attestation retrieval. Inspect the short result and every
+phase before using eight hours of runner time. Preflight failures remain in
+their original directories; use a new directory after correcting a fixture.
+
+Start the long run only with explicit host/time/resource authorisation:
+
+```sh
+systemd-run --user --unit=jul-ga590-8h \
+  --setenv=PATH="$PATH" \
+  --property=CPUQuota=200% --property=MemoryMax=2G \
+  --property=MemorySwapMax=0 --property=TasksMax=256 \
+  --property=WorkingDirectory="$(pwd)" \
+  "$WORK/venv/bin/python" "$(pwd)/scripts/ga-soak.py" --arch "$ARCH" \
+  --package-directory "$WORK" --grpc-backend "$WORK/grpc-backend" \
+  --seconds 28800 --out "$WORK/eight-hour"
+systemctl --user status jul-ga590-8h --no-pager
+```
+
+Use a unique unit name for each attempt. Verify `live.json` advances and test
+the declared loopback listener. The host and user service manager must remain
+running; WSL sleep/shutdown invalidates continuity. This procedure does not
+alter sleep settings or automatically restart a failed process. Do not stop
+an unrelated existing unit.
+The explicit PATH is important when `gh` is installed outside the system
+directories. If logout must not stop the user service manager, obtain approval
+before enabling user lingering with `loginctl enable-linger`.
+
+The sampler uses absolute ten-second deadlines so scrape work does not
+accumulate in the cadence. The original #590 run predates that correction:
+its count failure and separately authorised same-process observer remain in
+[the completed review](reviews/2026-10-14-ga-soak-590-results.md).
+Never change a threshold or silently overwrite the original verdict. A
+supplement requires explicit authorisation, frozen source/process/clock
+identity, separate raw records/digests and a documented impact review.
+
+After eight measured hours plus quiescence/cleanup, inspect `result.json`,
+`failure.json` if present, `digests.json`, and the unit's `Result`,
+`ExecMainStatus` and `MemoryPeak`. A running service or a zero client error
+count alone is not acceptance. Keep `private-runtime/` private; publish only
+sanitised bounded measurements/digests. Follow the contract's reviewed
+documentation/manifest/issue closure steps; the harness never promotes rows.
+
 ## Feature-specific Y1-08 and Y1-09 candidates
 
 `scripts/feature-soak.py` supplies real-binary Linux workloads for the two

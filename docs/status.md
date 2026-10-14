@@ -1,10 +1,10 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.21 · Updated 2026-10-13
+> Version 2.22 · Updated 2026-10-14
 >
 > Stable v2.2.0 is published. The two newly shipped Beta rows now have `released`
 > delivery; their maturity and GA criteria remain unchanged. The separately
-> approved #527 contracts remain GA-soak-pending. This is a post-tag status
+> approved #527 contracts are GA/soaked after the source-bound #590 review. This is a post-tag status
 > update, not a change to immutable packages or historical soak evidence.
 
 The current published source is `b12e051139f652b400cff37d9f063f5637a7d550`, with
@@ -93,10 +93,11 @@ not inherit an older GA row merely because it lives in the same package or guide
 - **Response cache:** #134 completed integrated recertification; the released
   cache record retains GA.
 - **Routing, resilience and auxiliary egress:** the bounded CGC-ROUTE,
-  CGC-RES and SEC-EGRESS contracts are independently GA — soak pending under
-  #527 and published in v2.2.0. Criterion 5 remains open under
-  [#590](https://github.com/victornife/jul/issues/590); no new long-running
-  stability evidence is claimed. Application-outcome retries #406 remain
+  CGC-RES and SEC-EGRESS contracts are independently GA/soaked under
+  #527/#590, with eight-hour evidence on unchanged full v2.2.0 source.
+  The [reviewed collection deviation](reviews/2026-10-14-ga-soak-590-results.md)
+  retains the original count failure and 37 authorised supplemental scrapes;
+  all unchanged gates pass over 2,888 samples. Application-outcome retries #406 remain
   deferred, and auxiliary egress is not a global firewall.
 - **Configuration authority, generated contracts and NGINX assessment:**
   published in v2.0.0 as separately tracked Beta capabilities; none inherits
@@ -185,6 +186,9 @@ Released and soaked capabilities that satisfy all applicable GA criteria.
 | Configuration reload transaction | reload-tx | core | `soaked` | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |
 | Trusted client address (client_address) | CGC-IN | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [configuration.md](configuration.md) |
 | Backend TLS trust (backend_tls) | UT-BE | core · `grpc` | `soaked` | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [upstreams.md](upstreams.md) |
+| Auxiliary egress allow-list | SEC-EGRESS | core | `soaked` | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [egress.md](egress.md) |
+| Request predicates, response headers, and CORS | CGC-ROUTE | core | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
+| Upstream resilience (admission, retry, circuit) | CGC-RES | core · `grpc` · `stream` | `soaked` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [upstreams.md](upstreams.md) |
 
 ## GA — soak pending
 
@@ -193,15 +197,12 @@ long-running post-GA soak gate.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| Auxiliary egress allow-list | SEC-EGRESS | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [egress.md](egress.md) |
-| Request predicates, response headers, and CORS | CGC-ROUTE | core | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
-| Upstream resilience (admission, retry, circuit) | CGC-RES | core · `grpc` · `stream` | `released` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [upstreams.md](upstreams.md) |
+| *(none)* | — | — | — | — | — | — | — | — | — | — | — | — | — |
 
-These three bounded contracts are promoted for v2.2.0 under #527; the
-[decision and evidence](reviews/2026-10-12-ga-220.md) keep criterion 5 pending
-under ADR 0005. No new long-running soak or maturity change for other rows is
-claimed. Apps now exposes effective resilience limits and live pressure/budget
-state through the existing readback API.
+The three bounded #527 contracts completed criterion 5 under the
+[source-bound #590 decision](reviews/2026-10-14-ga-soak-590-results.md).
+No maturity change for other rows is claimed. Apps exposes effective resilience
+limits and live pressure/budget state through the existing readback API.
 
 ## Beta
 
@@ -245,18 +246,19 @@ v2.0.0 or v2.1.0. Publication does not complete the unchecked GA criteria.
 
 ## Soak tracking (post-GA gate)
 
-Criterion 5 remains pending for CGC-ROUTE, CGC-RES and SEC-EGRESS under
-[#590](https://github.com/victornife/jul/issues/590). A soak failure is a
-release-blocking regression. The older completed rows retain their historical
+Criterion 5 is complete for CGC-ROUTE, CGC-RES and SEC-EGRESS under
+[#590](https://github.com/victornife/jul/issues/590), with the original collector
+failure preserved and an authorised same-process collection supplement reviewed.
+A product soak regression remains release-blocking. The older completed rows retain their historical
 evidence from the [GA push soak table](ga-push.md#soak-tracking-post-ga-gate-per-adr-0005).
 Dated soak runs and where the CI/release artifacts are published are recorded in
 the [soak evidence log](soak-evidence.md).
 
 | Feature | GA on | Soak status |
 | --- | --- | --- |
-| Request predicates, response headers and CORS (CGC-ROUTE) | 2026-10-12 | Pending under [#590](https://github.com/victornife/jul/issues/590); criterion 5 remains false. |
-| Upstream resilience (CGC-RES) | 2026-10-12 | Pending under [#590](https://github.com/victornife/jul/issues/590); criterion 5 remains false. |
-| Auxiliary egress allow-list (SEC-EGRESS) | 2026-10-12 | Pending under [#590](https://github.com/victornife/jul/issues/590); criterion 5 remains false. |
+| Request predicates, response headers and CORS (CGC-ROUTE) | 2026-10-12 | ✅ Eight hours on full v2.2.0 source b12e0511; criterion 5 completed 2026-10-14 — [review and deviation](reviews/2026-10-14-ga-soak-590-results.md). |
+| Upstream resilience (CGC-RES) | 2026-10-12 | ✅ Same continuous eight-hour workload; bounded HTTP/native-gRPC/TCP scope — [review and deviation](reviews/2026-10-14-ga-soak-590-results.md). |
+| Auxiliary egress allow-list (SEC-EGRESS) | 2026-10-12 | ✅ Same continuous eight-hour workload; auxiliary auth/discovery scope, not backend egress — [review and deviation](reviews/2026-10-14-ga-soak-590-results.md). |
 | Core HTTP | 2026-06-21 | ✅ soaked 8h windows 2026-07-04 (90.4M req, 0% err) — [evidence](soak-evidence.md#2026-07-04--track-2-extended-burn-in-local-windows-8-hours-50-workers) |
 | TLS + automatic HTTPS (Y1-01) | 2026-06-21 | ✅ soaked via Phase 2A 8h windows 2026-07-05 (2.12M req, 0% err, 25% TLS traffic mix) — [evidence](soak-evidence.md#2026-07-05--phase-2a-consolidated-burn-in-completed-local-8-hours-50-workers-all-features) |
 | Authentication (Y1-04) | 2026-06-21 | ✅ soaked 1h windows 2026-07-04 (929K req, 0% err, pprof-verified) — [evidence](soak-evidence.md#2026-07-04--auth-soak-local-windows-1-hour-50-workers) |
@@ -283,6 +285,7 @@ the [soak evidence log](soak-evidence.md).
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-10-14 | 2.22 | Completed criterion 5 for exactly routing, resilience and auxiliary egress after eight continuous hours on full v2.2.0; retain the primary count failure and reviewed, authorised supplemental collection. Other rows and immutable packages are unchanged. | [feature-status.yaml](feature-status.yaml); [#590 decision](reviews/2026-10-14-ga-soak-590-results.md) |
 | 2026-10-13 | 2.21 | Reconciled current release references and routing/resilience/egress notices with the existing manifest; linked the pending post-GA stability work. No maturity, delivery or criterion changed. | [feature-status.yaml](feature-status.yaml); [#527](https://github.com/victornife/jul/issues/527); [#590](https://github.com/victornife/jul/issues/590) |
 | 2026-09-30 | 2.19 | Manifest reconciliation (#512): every n/a criterion on a GA row is explained (criterion 8 = no custom parser; others in row notes); Y1-09 criterion 8 and Y1-10 criterion 9 corrected from n/a to met with their fuzz and Console evidence; shipped surfaces without a row get explicit relationships (PROXY-protocol ingest on CGC-IN; error pages, Request ID and `worker_threads` on core-http; audit log, history and rollback on Y1-07) or the new Beta DEPLOY-PKG row (systemd, Windows service, Docker image, `jul healthcheck`); the Y1-06 gap is explained. No maturity changes. | [feature-status.yaml](feature-status.yaml); [#512](https://github.com/victornife/jul/issues/512) |
 | 2026-09-30 | 2.18 | Reconciled published stable v2.1.0 at `0951090a`: seven shipped Beta entries move `merged` to `released`, with maturity and GA criteria unchanged. Actual package verification and execution limits are recorded; this documentation update is post-tag. | [feature-status.yaml](feature-status.yaml); [release.md](release.md#published-v210-verification); [#480](https://github.com/victornife/jul/issues/480) |

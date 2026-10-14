@@ -99,13 +99,15 @@ Jul.IA published stable
 [`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0) at
 **2026-10-11T23:49:52Z**, from immutable source
 `b12e051139f652b400cff37d9f063f5637a7d550`. The selected remediation is complete;
-the three bounded #527 contracts are GA with their post-GA soak gate pending.
+the three bounded #527 contracts are GA/soaked after the
+[source-bound eight-hour #590 review](docs/reviews/2026-10-14-ga-soak-590-results.md),
+including its retained collector failure and authorised supplement.
 All twelve actual release archives passed signed identity/checksum/SPDX and
 native startup/upgrade/rollback checks across six OS/architecture hosts. See
 [published verification](docs/release.md#published-v220-verification).
 Darwin packages require macOS 13+. Seven exact inherited HTTP/3 exceptions
-remain tracked under #569; no complete RFC conformance or new long-running soak
-is claimed. The two #514 advisories were disclosed after fixed packages verified.
+remain tracked under #569; no complete RFC conformance or blanket soak
+certification is claimed. The two #514 advisories were disclosed after fixed packages verified.
 Historical [v2.1.0 verification](docs/release.md#published-v210-verification)
 and source-bound soak evidence remain intact. These web-documentation updates
 are post-tag and do not modify the immutable archives. No deferred candidate,
@@ -127,8 +129,8 @@ human view and evidence matrix are in [`docs/status.md`](docs/status.md).
 
 | Classification | Current examples |
 | --- | --- |
-| **GA · soaked** | Core HTTP, released TLS/ACME and mTLS, authentication, cache, compression, rate limiting, health checks, service discovery, released gRPC/L4/WASM/WAF/observability capabilities, Console, secrets, reload transaction, trusted client address, backend TLS trust, zero-config/lint and the base single-file NGINX importer. The last two have [scoped post-release soak evidence](docs/soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features). |
-| **GA · soak pending** | Bounded auxiliary egress, method/header/query routing, response-header policy/CORS and upstream admission/retry/circuit contracts, promoted for v2.2.0 under [the #527 decision](docs/reviews/2026-10-12-ga-220.md); no new soak claimed |
+| **GA · soaked** | Core HTTP, released TLS/ACME and mTLS, authentication, cache, compression, rate limiting, health checks, service discovery, released gRPC/L4/WASM/WAF/observability capabilities, Console, secrets, reload transaction, trusted client address, backend TLS trust, zero-config/lint and the base single-file NGINX importer. The last two have [scoped post-release soak evidence](docs/soak-evidence.md#2026-09-28--feature-specific-exact-head-one-hour-soaks-pr-482-head-9ab87c1--criterion-5-met-for-scoped-features). The bounded routing/CORS, resilience and auxiliary-egress contracts have their own [eight-hour v2.2.0 evidence](docs/reviews/2026-10-14-ga-soak-590-results.md). |
+| **GA · soak pending** | None currently recorded in the manifest. |
 | **Beta · released in v2.0.0** | Configuration authority/generated contracts, NGINX assessment/provenance/include traversal, diagnostics, admin TLS, external API/CLI, selected hot reload and Unix HTTP upstreams |
 | **Beta · released in v2.1.0** | gRPC Health/Check probes, resource and storage headroom, serving WAF policy visibility, Console diagnostics guidance, WASM ABI v2 response phase, consistent-hash affinity, client-certificate policy hot reload, and the post-v2.0.0 NGINX translation/E2E evidence |
 | **Beta · released in v2.2.0** | Downstream write-inactivity timeout and bounded per-route metrics/charts; publication does not complete their open GA criteria |
@@ -160,7 +162,7 @@ a `full` release artifact to enable all optional capabilities.
 | **Reverse proxy** | `proxy_pass` to a concrete URL or a named upstream; named upstreams may use `unix:/path.sock` backends for plaintext HTTP; per-location connect/read/send timeouts; custom upstream headers with variable expansion |
 | **WebSocket & SSE** | Transparent passthrough of `Connection: Upgrade` (HTTP `101`) connections — text and binary frames spliced bidirectionally (Apollo GraphQL subscriptions, Socket.IO) — and `text/event-stream` / chunked responses streamed per write, never buffered (Node/Python SSE) |
 | **Load balancing** | `round_robin`, `weighted_round_robin`, `least_conn`, and deterministic `consistent_hash` affinity (client IP, header or cookie key) across an upstream pool. `consistent_hash` is Beta, released in v2.1.0 |
-| **Health & failover** | Released passive/active health checking and GA (soak-pending) resilience controls: bounded admission and pending work, per-backend capacity, retry attempts/deadline/backoff/budget, and an explicit closed/open/half-open circuit model. The gRPC Health/Check probe remains Beta, released in v2.1.0. See [upstreams.md](docs/upstreams.md) and [health.md](docs/health.md). |
+| **Health & failover** | Released passive/active health checking and GA/soaked resilience controls: bounded admission and pending work, per-backend capacity, retry attempts/deadline/backoff/budget, and an explicit closed/open/half-open circuit model. The gRPC Health/Check probe remains Beta, released in v2.1.0. See [upstreams.md](docs/upstreams.md) and [health.md](docs/health.md). |
 | **Service discovery** | Resolve an upstream's backends dynamically and refresh the pool live without a reload (`[upstreams.discovery]`): **DNS** A/AAAA and **DNS SRV** in every build, plus **Consul** and **Kubernetes** EndpointSlices behind the `consul`/`kubernetes` build tags — failed or empty resolves keep the last-good backends |
 | **Backend trust** | One normalized `backend_tls` policy for private/system roots, backend client certificates, SNI/verified names, minimum TLS and peer identities across HTTP, native gRPC, transcoding/reflection and active health probes. GA (#409). |
 | **Upstream resilience** | Pool-scoped admission and retry budget state, location-overridable stateless controls, bounded queueing, protocol-aware lifetime accounting, and one per-backend circuit state machine reused by HTTP, gRPC, FastCGI/uWSGI and L4 TCP. Integrated closure remains tracked separately. |
@@ -178,7 +180,7 @@ a `full` release artifact to enable all optional capabilities.
 | **TLS** | TLS 1.2/1.3 termination per server block, configurable minimum version, optional HTTP→HTTPS redirect |
 | **Automatic HTTPS** | ACME certificate issuance and auto-renewal using the configured exclusive HTTP-01 or TLS-ALPN-01 challenge, with on-disk account/certificate cache — opt-in `acme` build tag |
 | **HTTP/3** | HTTP/3 over QUIC on the same address (UDP), sharing the complete server TLS/mTLS policy and certificate provider, advertised through `Alt-Svc`; static certificate-file changes remain restart-bound — opt-in `http3` build tag |
-| **Routing & response policy** | Deterministic exact/prefix/regex precedence, method/header/query predicates, rewrites, ordered response-header add/set/remove operations, and bounded CORS/preflight handling. The existing predicate/response-policy contract is GA (soak pending) for v2.2.0. |
+| **Routing & response policy** | Deterministic exact/prefix/regex precedence, method/header/query predicates, rewrites, ordered response-header add/set/remove operations, and bounded CORS/preflight handling. The existing predicate/response-policy contract is GA/soaked for v2.2.0. |
 | **Virtual hosts** | Multiple `server_names` per listener; multiple listen addresses |
 | **Limits & timeouts** | `client_max_body_size`, header size caps, read/write/idle/header timeouts (per-server, location overrides for body size) |
 | **Redirects** | `return`, `redirect`, and `deny` (403) location actions; custom error pages |

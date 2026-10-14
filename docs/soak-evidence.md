@@ -28,6 +28,86 @@ requests to configured routes. Its duration cannot establish zero-config/lint
 workloads and dated qualifying runs. The historical v1.28.0 table below used
 “soaked” for a short release smoke and does not override this requirement.
 
+## 2026-10-14 issue 590 eight-hour result and collection review
+
+Exactly **CGC-ROUTE, CGC-RES and SEC-EGRESS** completed criterion 5 on unchanged
+full v2.2.0 source `b12e051139f652b400cff37d9f063f5637a7d550`. The measured
+window was 2026-10-13 22:37:42 UTC to 2026-10-14 06:37:42 UTC, **28,800.008
+seconds**, with one Jul process, zero unexpected workload failures and all
+25 phases repeated at least 480 times. Final quieting/profiles completed at
+06:39:45 UTC.
+
+The original collector **failed solely for count**, retaining 2,851 samples
+instead of the declared 2,881 because scrape overhead accumulated in its
+relative scheduler. Its service exit 1, original result and failure are
+preserved. Before the active deadline, the maintainer authorised a separate
+read-only collector; its 37 actual same-process scrapes produce **2,888**
+samples without changing any threshold, workload, product source or quiet
+measurement. The [source-bound impact review and decision](reviews/2026-10-14-ga-soak-590-results.md)
+accept this bounded collection deviation, not a product regression waiver.
+
+The maximum gap was 10.307 seconds. RSS peaked at 52.03 MiB; primary and augmented
+final-four-hour slopes were 0.228/0.225 MiB/hour. Heap/goroutines stayed bounded;
+all three final quiet samples recorded 16 FDs, 29 goroutines and zero active/
+pending admission. All 248 metric series were present in the warmup union; no
+cardinality growth occurred. All archive digests and four nonempty profiles
+verified; 311,167 retained access records were valid JSON.
+
+The [bounded public evidence](audit/evidence/2026-10-14-ga590/review.json)
+retains both verdicts, source/digests, phase counts, limits and independent
+resource results, with sanitised timed metrics. Private raw configuration,
+history, profiles and access records are not published. The maintained sampler
+now uses absolute deadlines; twenty deterministic tests and a corrected
+60-second real-package rerun passed. That rerun is a harness check, not a
+relabeled long run.
+
+Shared WSL2/loopback, mock discovery, native h2c/TCP and auxiliary-only egress
+limits remain explicit. No other Beta row, optional feature, package/tag or
+historical result changes. NGINX migration is not applicable; #406/#522 remain
+deferred. #590/#62 own PR/check/merged identity and final issue closure.
+
+## 2026-10-14 issue 590 campaign preparation (historical)
+
+The maintainer selected an eight-hour real-package campaign for **only**
+CGC-ROUTE, CGC-RES and SEC-EGRESS. The
+[pre-run contract](reviews/2026-10-14-ga-soak-590.md) fixes package/harness/host
+identities, continuously repeated phases, numeric limits, private evidence
+handling and the reviewed closure boundary before long execution.
+
+The ARM64 full v2.2.0 package's aggregate/individual checksums, native clean
+source/profile metadata and binary provenance/SPDX attestations passed the
+existing release verifier. Runtime source remains
+`b12e051139f652b400cff37d9f063f5637a7d550`; the harness is pinned separately.
+The authorised shared WSL2 host has a two-CPU/2-GiB service budget and a
+2-GiB evidence cap. The maintainer approved user lingering for logout survival
+and will keep the Windows/WSL host awake.
+
+Seventeen deterministic acceptance/rejection tests passed. Focused existing
+configuration/egress/auth/HTTP/gRPC/upstream/TCP contract tests passed.
+The one-second in-tree smoke, the existing reproduction smoke and shipped
+configuration checks passed. These are **preflight**, not criterion-5 evidence.
+
+Retained unsuccessful preparation attempts include a capability-key mismatch
+(`stream_proxy`, not `stream`), missing fixture OPTIONS support, truncated
+response buffering assumptions, and native gRPC overload's documented HTTP
+503-to-UNAVAILABLE mapping. A later 120-second real-package preflight passed.
+The strengthened final fixture adds active-health recovery, an independent
+unbudgeted replay-boundary pool and DNS denial under policy tightening.
+Its first unattended attempt failed before startup because the service's PATH
+could not find `gh`; the successor sets PATH explicitly and retains the failure.
+The next preflight correctly rejected a health fixture whose failure dispatch
+was in the wrong handler branch; that fixture was corrected and given a direct
+response regression test. The corrected successor has exercised every declared
+phase with no unexpected failure and a responsive readiness endpoint; final
+preflight quiescence still gates the eight-hour start.
+No product source/package fix or passing eight-hour result is claimed here.
+
+The unattended successor runs the final short preflight, then starts the
+eight-hour window **only if that preflight exits successfully**. It does not
+automatically edit documentation/maturity or close issues. See #590 for live
+attempt/decision records. At this preparation checkpoint all three criterion-5 values remained false until
+complete source-bound evidence passes review; historical evidence is unchanged.
+
 ## Predeclared v2.1.0 integrated soak contract
 
 This section is the pass/fail contract for the one RC-equivalent real-binary

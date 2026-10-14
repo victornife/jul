@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.21 · Updated 2026-10-13
+> Version 2.22 · Updated 2026-10-14
 >
 > This roadmap owns the **durable portfolio sequence**. It deliberately does
 > not duplicate volatile READY/NEXT/blocked issue state. The current issue-level
@@ -44,9 +44,9 @@ Stable v2.2.0 is published. The selected remediation, release and seven
 deployment journeys are complete; their evidence retains its original source
 and environment limits. The remaining documentation certification is
 [#515](https://github.com/victornife/jul/issues/515), and the three independently
-certified routing, resilience and auxiliary-egress contracts retain their
-post-GA stability obligation under
-[#590](https://github.com/victornife/jul/issues/590).
+certified routing, resilience and auxiliary-egress contracts completed their
+post-GA stability obligation under the
+[source-bound #590 review](../reviews/2026-10-14-ga-soak-590-results.md).
 
 The sharing programme proceeds from an application-facing contract to verified
 standalone, private-network and restricted-browser compositions, then recovery,
@@ -69,8 +69,8 @@ remaining semantic-review ledger.
 | **1 — Correctness foundation** | Strict config, protocol/security corrections, cache recertification and quality gates | Complete for the selected tranche; new defects still interrupt later stages |
 | **2 — Lifecycle and structured configuration** | Closed-world lifecycle authority, transactional apply/stage/rollback, typed workflows | Complete |
 | **3 — Trust boundaries** | Canonical client identity and consistent backend TLS/mTLS identity | Complete; GA with stable v2.0.0 (#409) |
-| **4 — Routing and response policy** | Method/header/query predicates, response headers, CORS and typed operation surfaces | The bounded CGC-ROUTE contract is independently GA — soak pending under #527, published in v2.2.0; #590 owns its remaining stability gate |
-| **5 — Generic resilience** | Admission, queue/connection bounds, retry budget/deadline/backoff, circuit state and bounded operations evidence | The bounded CGC-RES contract is independently GA — soak pending under #527, published in v2.2.0; #590 owns its remaining stability gate. Application-outcome classification #406 remains deferred |
+| **4 — Routing and response policy** | Method/header/query predicates, response headers, CORS and typed operation surfaces | The bounded CGC-ROUTE contract is independently GA/soaked under #527/#590 on full v2.2.0 source; the original collector failure and authorised supplement remain in its review |
+| **5 — Generic resilience** | Admission, queue/connection bounds, retry budget/deadline/backoff, circuit state and bounded operations evidence | The bounded CGC-RES contract is independently GA/soaked under #527/#590 on full v2.2.0 source. Application-outcome classification #406 and ejection #522 remain deferred |
 | **6 — Configuration authority and automation** | Managed/file-owned authority, generated contracts, supported external API, thin remote CLI | #150/#151 closed; authority, versioned external API and remote CLI published in v2.0.0 as separately tracked Beta capabilities |
 | **7 — Selected runtime dynamics** | Value-ranked runtime changes and truthful restart boundaries | Bounded tranche complete (#88); selected changes published as Beta. Further hot reload requires an explicit value trigger |
 | **8 — Migration and diagnostics** | NGINX assessment, evidence, support bundle and `jul doctor` | Base assessment/diagnostics published in v2.0.0 as Beta. #426/#365/#366/#367, the #368 migration-impact rule, #422 and Wave 6 shipped in v2.1.0. Optional full corpus remains #456 CANDIDATE/LATER. #434 is no-go for this release. [#480](https://github.com/victornife/jul/issues/480) records exact-SHA certification. |
@@ -102,8 +102,10 @@ outcome changes.
   [feature status](../status.md), separate from older GA rows. Stable publication
   changes delivery, not maturity or unmet GA criteria.
 - #527 independently certified the bounded routing, resilience and
-  auxiliary-egress contracts for v2.2.0 as GA — soak pending. #590 owns their
-  remaining criterion-5 evidence; no new soak is claimed by this roadmap update.
+  auxiliary-egress contracts for v2.2.0 as GA — soak pending at publication.
+  Their criterion-5 gate subsequently completed under the
+  [eight-hour #590 review](../reviews/2026-10-14-ga-soak-590-results.md);
+  no other feature inherits that evidence.
 - The versioned external Admin API and remote CLI are published Beta surfaces;
   Console-only routes remain outside the external contract unless explicitly
   classified and generated into OpenAPI.

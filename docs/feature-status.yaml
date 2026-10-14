@@ -505,58 +505,58 @@ features:
   name: Auxiliary egress allow-list
   tags:
   - core
-  maturity: GA-soak-pending
-  delivery: released
+  maturity: GA
+  delivery: soaked
   doc: egress.md
   criteria:
     1: true
     2: null
     3: true
     4: true
-    5: false
+    5: true
     6: true
     7: true
     8: null
     9: true
-  notes: 'Promoted under #527 for v2.2.0: bounded auxiliary-fetch contract and Security operability certified in reviews/2026-10-12-ga-220.md. Not a global firewall. ADR 0005 post-GA soak remains pending; no new soak is claimed.'
+  notes: 'Promoted under #527 for v2.2.0; criterion 5 completed under #590 on 2026-10-14 for unchanged full package source b12e051139f652b400cff37d9f063f5637a7d550. Eight continuous hours; original 2851-sample count failure retained, with 37 authorised same-process supplemental scrapes and all unchanged gates passing over 2888 samples. Source-bound decision and collection impact review: reviews/2026-10-14-ga-soak-590-results.md. Bounded auxiliary-fetch contract only; not a global firewall.'
 - id: CGC-ROUTE
   name: Request predicates, response headers, and CORS
   tags:
   - core
-  maturity: GA-soak-pending
-  delivery: released
+  maturity: GA
+  delivery: soaked
   doc: core-http.md
   criteria:
     1: true
     2: true
     3: true
     4: true
-    5: false
+    5: true
     6: true
     7: true
     8: null
     9: true
-  notes: 'Promoted independently of Core HTTP under #527 for v2.2.0: existing predicate/header/CORS contract certified in reviews/2026-10-12-ga-220.md. No full NGINX parity or new routing language. ADR 0005 post-GA soak remains pending.'
+  notes: 'Promoted independently of Core HTTP under #527 for v2.2.0; criterion 5 completed under #590 on 2026-10-14 for unchanged full package source b12e051139f652b400cff37d9f063f5637a7d550. Eight continuous hours with repeated predicates, ordered headers, CORS and policy publish/rollback; original count failure and authorised supplemental collection are preserved in reviews/2026-10-14-ga-soak-590-results.md. No full NGINX parity, new routing language or inherited certification of additive features.'
 - id: CGC-RES
   name: Upstream resilience (admission, retry, circuit)
   tags:
   - core
   - grpc
   - stream
-  maturity: GA-soak-pending
-  delivery: released
+  maturity: GA
+  delivery: soaked
   doc: upstreams.md
   criteria:
     1: true
     2: true
     3: true
     4: true
-    5: false
+    5: true
     6: true
     7: true
     8: true
     9: true
-  notes: 'Promoted under #527 for v2.2.0: existing admission/retry/circuit contract and Apps effective-limit/pressure/circuit/retry-budget readback certified in reviews/2026-10-12-ga-220.md. Outcome-aware retries remain deferred. ADR 0005 post-GA soak remains pending.'
+  notes: 'Promoted under #527 for v2.2.0; criterion 5 completed under #590 on 2026-10-14 for unchanged full package source b12e051139f652b400cff37d9f063f5637a7d550. Eight continuous hours of bounded HTTP/native-gRPC/TCP admission, retries/deadlines/budget, cancellation, circuit/health and fault/recovery; original count failure and authorised supplemental collection reviewed in reviews/2026-10-14-ga-soak-590-results.md. Outcome-aware retries #406 and ejection #522 remain deferred; no active-stream replay, UDP or transcoding claim.'
 - id: AUTO-AUTH
   name: Configuration authority and managed drift
   tags:
