@@ -24,12 +24,13 @@ discovered correctness/security findings still pre-empt the roadmap.
   diagnostics/support bundles. Publication
   does not supply their missing feature-specific GA or soak evidence. The older
   admin, core HTTP and base NGINX importer GA rows cover their own contracts.
-- **GA with post-GA soak pending for v2.2.0:** the bounded routing/CORS,
-  resilience and auxiliary-egress contracts are independently certified under
-  [#527's decision](reviews/2026-10-12-ga-220.md). Criterion 5 remains pending;
-  [#590](https://github.com/victornife/jul/issues/590) owns the remaining
-  source-bound stability evidence. No new soak, universal retry policy or
-  global egress firewall is claimed.
+- **GA/soaked on the full v2.2.0 source:** the bounded routing/CORS,
+  resilience and auxiliary-egress contracts were independently certified under
+  [#527's decision](reviews/2026-10-12-ga-220.md) and completed criterion 5 under
+  [#590's eight-hour review](reviews/2026-10-14-ga-soak-590-results.md).
+  The original collector count failure and authorised same-process supplement
+  remain in that source-bound evidence. Other features and deployment paths do
+  not inherit it; no universal retry policy or global egress firewall is claimed.
 - **GA in stable `v2.0.0`:** trusted client address and backend TLS trust were
   separately certified under #409; their manifest delivery is `soaked`.
 - **Published in stable `v2.1.0`, still Beta / `released`:**

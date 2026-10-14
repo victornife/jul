@@ -42,24 +42,34 @@ implicit completion requirements.
 
 Stable v2.2.0 is published. The selected remediation, release and seven
 deployment journeys are complete; their evidence retains its original source
-and environment limits. The remaining documentation certification is
-[#515](https://github.com/victornife/jul/issues/515), and the three independently
-certified routing, resilience and auxiliary-egress contracts completed their
+and environment limits. Documentation certification
+[#515](https://github.com/victornife/jul/issues/515) and Console confidence
+[#517](https://github.com/victornife/jul/issues/517) are complete. The D11 closure
+records maintainer-authorised AI review and acceptance, without claiming an
+independent human review. The three independently certified routing, resilience
+and auxiliary-egress contracts completed their
 post-GA stability obligation under the
 [source-bound #590 review](../reviews/2026-10-14-ga-soak-590-results.md).
 
 The sharing programme proceeds from an application-facing contract to verified
 standalone, private-network and restricted-browser compositions, then recovery,
-portability and usability evidence before guided operation. Provider-backed
-audience management and group-to-group research keep their own design and
-activation gates. Exact issue selection, dependencies and blockers remain in
+portability, [two verified application recipes](https://github.com/victornife/jul/issues/613)
+and independent first-use evidence before guided operation. The reference
+compositions must demonstrate a public portal and restricted dashboard on one
+instance, with bounded resource measurements. The recipes connect our
+[published examples](../examples/README.md) to reproducible dashboard and media
+outcomes; the illustrations themselves do not certify integrations. Value
+comparisons include actual operating effort, equivalent capabilities and dated
+cost assumptions. Provider-backed audience management and group-to-group
+research keep their own design and activation gates. Exact issue selection,
+impact, effort, rationale, dependencies and blockers remain in
 [#62](https://github.com/victornife/jul/issues/62) and its linked children.
 
 #434, #456 and the other unactivated gateway candidates remain deferred. The
 programme does not make AI Gateway, fleet operation or another category an
 automatic next phase. Completed #502's same-path log-rotation correction is
-included in v2.2.0; #516's completed deployment journeys do not close #515's
-remaining semantic-review ledger.
+included in v2.2.0. Completed #515/#516/#517/#590 each retain their own bounded
+evidence; none certifies every application, host or provider path.
 
 ## Active operating roadmap
 
@@ -75,7 +85,7 @@ remaining semantic-review ledger.
 | **7 — Selected runtime dynamics** | Value-ranked runtime changes and truthful restart boundaries | Bounded tranche complete (#88); selected changes published as Beta. Further hot reload requires an explicit value trigger |
 | **8 — Migration and diagnostics** | NGINX assessment, evidence, support bundle and `jul doctor` | Base assessment/diagnostics published in v2.0.0 as Beta. #426/#365/#366/#367, the #368 migration-impact rule, #422 and Wave 6 shipped in v2.1.0. Optional full corpus remains #456 CANDIDATE/LATER. #434 is no-go for this release. [#480](https://github.com/victornife/jul/issues/480) records exact-SHA certification. |
 | **9 — One bounded experiment** | AI Gateway or another explicitly approved category | #162 remains deferred under #113; no experiment activated by the v2.0.0 release |
-| **10 — Integrated closure** | Exact-SHA verification, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Stable v2.2.0 published from frozen b12e0511; release/package verification and bounded GA decisions recorded under #514/#527, with deployment evidence under completed #516. #515 and #590 remain separate; historical v2.1.0 and v2.0.0 evidence retain their source identities |
+| **10 — Integrated closure** | Exact-SHA verification, protocol/failure matrix, lean/full gates, E2E, soak and release evidence | Stable v2.2.0 published from frozen b12e0511; release/package verification and bounded GA decisions recorded under #514/#527. Deployment #516, documentation #515, Console confidence #517 and post-GA #590 are completed with separate review/source/environment limits; historical v2.1.0 and v2.0.0 evidence retain their source identities |
 
 For exact issue state, child decomposition, active pull requests and sequencing,
 read #62. This table changes only when the durable portfolio boundary or stage

@@ -11,6 +11,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Fixed
 
+- Reconcile completed documentation/Console hardening and the three bounded
+  post-GA contracts in roadmap and limitation notices. Link the planned verified
+  application recipes (#613), mixed public/private isolation and concrete
+  resource/value evidence into the sharing sequence. This is documentation and
+  backlog preparation; no sharing feature, runtime or maturity change.
+
 - Propagate fuzz package/target discovery failures instead of reporting a false
   smoke pass, and include WAF in the local benchmark default. Check both
   harness defaults against the existing full profile and retain retry policy;
