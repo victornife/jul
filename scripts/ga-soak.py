@@ -5,11 +5,9 @@ import argparse
 import concurrent.futures
 import hashlib
 import http.client
-import http.server
 import importlib.util
 import importlib.metadata
 import json
-import math
 import os
 from pathlib import Path
 import platform
@@ -17,38 +15,21 @@ import secrets
 import shutil
 import signal
 import socket
-import socketserver
 import subprocess
 import threading
 import time
 
-import h2.config
-import h2.connection
-import h2.events
 import h2.exceptions
-
-SOURCE = "b12e051139f652b400cff37d9f063f5637a7d550"
-FEATURES = ["CGC-ROUTE", "CGC-RES", "SEC-EGRESS"]
-REQUIRED = {
-    "routing", "cors", "http", "grpc", "l4", "auth_allow", "auth_deny", "auth_dns",
-    "discovery", "pressure", "retry_budget", "retry_deadline", "circuit_recovery", "health_recovery", "unsafe_post",
-    "committed_response", "client_cancel", "grpc_pressure_cancel", "l4_pressure",
-    "l4_fault_recovery", "tighten", "dns_deny", "invalid_candidate", "rollback", "redirect",
-}
-LIMITS = {
-    "sample_seconds": 10, "max_gap_seconds": 25, "cycle_seconds": 60,
-    "max_cycle_gap_seconds": 90, "warmup_seconds": 600,
-    "rss_ceiling_bytes": 1024 << 20, "rss_growth_bytes": 128 << 20,
-    "rss_slope_bytes_per_hour": 16 << 20, "heap_growth_bytes": 128 << 20,
-    "goroutine_growth": 96, "fd_growth": 8, "series_growth": 128,
-    "series_ceiling": 3000, "artifact_ceiling_bytes": 2 << 30,
-    "quiet_seconds": 120,
-}
+from ga_soak_contract import (
+    API_CONFIG, AUTH_DENIED_ROUTE, AUTH_DNS_ROUTE, AUTH_ROUTE, AUTH_TIGHT_ROUTE, BEARER_PREFIX,
+    CLEAN_ROUTE, CORS_ROUTE, DISCOVERY_COUNTER, DISCOVERY_ROUTE, FEATURES, HEALTH_ROUTE,
+    LIMITS, PAYLOAD, PREDICATE_ROUTE, REQUIRED, SOURCE, evaluate, metrics, require,
+)
+from ga_soak_contract import slope as slope
+from ga_soak_fixtures import Fixture, grpc_request, request
 
 
-def require(condition, message):
-    if not condition:
-        raise RuntimeError(message)
+
 
 
 def digest(path):
@@ -77,7 +58,8 @@ def write_json(path, value):
 
 
 def command(*args, timeout=180, env=None):
-    result = subprocess.run(list(map(str, args)), capture_output=True, text=True, timeout=timeout, env=env)
+    # Only operator-owned harness executables; no shell or request-derived commands.
+    result = subprocess.run(list(map(str, args)), shell=False, capture_output=True, text=True, timeout=timeout, env=env)
     require(result.returncode == 0, f"{Path(str(args[0])).name} failed ({result.returncode}): {result.stderr[-1000:]}")
     return result.stdout
 
@@ -88,274 +70,16 @@ def port():
         return reservation.getsockname()[1]
 
 
-def request(address, path, method="GET", data=None, headers=None, timeout=3):
-    connection = http.client.HTTPConnection(address, timeout=timeout)
-    try:
-        connection.request(method, path, body=data, headers=headers or {})
-        response = connection.getresponse()
-        return response.status, response.read(), response.getheaders()
-    finally:
-        connection.close()
 
 
-def grpc_request(address, *, hold=False, message=b"soak", timeout=3):
-    sock = socket.create_connection(("127.0.0.1", address), timeout=timeout)
-    connection = h2.connection.H2Connection(config=h2.config.H2Configuration(
-        client_side=True, header_encoding="utf-8"))
-    connection.initiate_connection()
-    connection.send_headers(1, [
-        (":method", "POST"), (":scheme", "http"), (":authority", "localhost"),
-        (":path", "/echo.EchoService/Echo"), ("content-type", "application/grpc"),
-        ("te", "trailers"),
-    ])
-    if not hold:
-        require(len(message) < 128, "fixture protobuf string must fit one varint byte")
-        protobuf = b"\x0a" + bytes([len(message)]) + message
-        connection.send_data(1, b"\x00" + len(protobuf).to_bytes(4, "big") + protobuf, end_stream=True)
-    sock.sendall(connection.data_to_send())
-    if hold:
-        return sock, connection
-    body = b""
-    status = None
-    http_status = None
-    try:
-        while True:
-            data = sock.recv(65536)
-            require(data, "gRPC connection closed without final trailers")
-            for event in connection.receive_data(data):
-                if isinstance(event, (h2.events.ResponseReceived, h2.events.TrailersReceived)):
-                    for name, value in event.headers:
-                        if name == "grpc-status":
-                            status = int(value)
-                        if name == ":status":
-                            http_status = int(value)
-                if isinstance(event, h2.events.DataReceived):
-                    body += event.data
-                    connection.acknowledge_received_data(event.flow_controlled_length, event.stream_id)
-                if isinstance(event, h2.events.StreamReset):
-                    raise RuntimeError(f"unexpected gRPC reset {event.error_code}")
-                if isinstance(event, h2.events.StreamEnded):
-                    return http_status, status, body
-            pending = connection.data_to_send()
-            if pending:
-                sock.sendall(pending)
-    finally:
-        sock.close()
 
 
-def metrics(raw):
-    result = {}
-    for line in raw.decode().splitlines():
-        if not line or line.startswith("#"):
-            continue
-        key, value = line.rsplit(" ", 1)
-        if "_bucket{" not in key:
-            result[key] = float(value)
-    for key in ("process_resident_memory_bytes", "go_goroutines", "go_memstats_heap_inuse_bytes",
-                "process_open_fds"):
-        require(key in result and math.isfinite(result[key]), f"missing/invalid metric {key}")
-    return result
 
 
-def slope(samples, key):
-    origin = samples[0]["elapsed"]
-    xs = [(sample["elapsed"] - origin) / 3600 for sample in samples]
-    ys = [sample["metrics"][key] for sample in samples]
-    mean_x, mean_y = sum(xs) / len(xs), sum(ys) / len(ys)
-    denominator = sum((x - mean_x) ** 2 for x in xs)
-    require(denominator > 0, "insufficient time span for resource trend")
-    return sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / denominator
 
 
-def evaluate(manifest, samples, events, quiet):
-    errors = []
-    elapsed = samples[-1]["elapsed"] if samples else 0
-    if elapsed < manifest["seconds"]:
-        errors.append("measured duration shorter than declared duration")
-    if len(samples) < math.floor(manifest["seconds"] / LIMITS["sample_seconds"]) + 1:
-        errors.append("required sample count missing")
-    if not samples or samples[0]["elapsed"] > LIMITS["max_gap_seconds"]:
-        errors.append("initial measured sample missing")
-    if any(b["elapsed"] - a["elapsed"] > LIMITS["max_gap_seconds"]
-           or b["elapsed"] <= a["elapsed"] for a, b in zip(samples, samples[1:])):
-        errors.append("recording gap/non-monotonic time")
-    for name in REQUIRED:
-        times = [event["elapsed"] for event in events if event["name"] == name and event["ok"]]
-        if not times:
-            errors.append(f"missing phase: {name}")
-        elif (times[0] > LIMITS["max_cycle_gap_seconds"]
-              or elapsed - times[-1] > LIMITS["max_cycle_gap_seconds"]
-              or any(b - a > LIMITS["max_cycle_gap_seconds"] for a, b in zip(times, times[1:]))):
-            errors.append(f"phase not continuously repeated: {name}")
-    if any(not event["ok"] for event in events):
-        errors.append("unexpected workload failure")
-    warmup = min(LIMITS["warmup_seconds"], manifest["seconds"] / 3)
-    warm = [sample for sample in samples if sample["elapsed"] <= warmup]
-    active = [sample for sample in samples if sample["elapsed"] >= warmup]
-    if not warm or len(active) < 2:
-        errors.append("insufficient resource samples")
-    else:
-        baseline = {key: max(sample["metrics"][key] for sample in warm)
-                    for key in ("process_resident_memory_bytes", "go_memstats_heap_inuse_bytes",
-                                "go_goroutines", "process_open_fds")}
-        for key, limit in (("process_resident_memory_bytes", LIMITS["rss_growth_bytes"]),
-                           ("go_memstats_heap_inuse_bytes", LIMITS["heap_growth_bytes"]),
-                           ("go_goroutines", LIMITS["goroutine_growth"])):
-            if max(sample["metrics"][key] for sample in active) > baseline[key] + limit:
-                errors.append(f"post-warmup growth: {key}")
-        if max(sample["metrics"]["process_resident_memory_bytes"] for sample in samples) > LIMITS["rss_ceiling_bytes"]:
-            errors.append("RSS ceiling exceeded")
-        tail = [sample for sample in active if sample["elapsed"] >= manifest["seconds"] / 2]
-        if manifest["seconds"] >= 3600 and (
-                len(tail) < 2 or slope(tail, "process_resident_memory_bytes") > LIMITS["rss_slope_bytes_per_hour"]):
-            errors.append("RSS trend exceeded/unavailable")
-        initial_series = set().union(*(sample["metrics"] for sample in warm))
-        all_series = set().union(*(sample["metrics"] for sample in samples))
-        if len(all_series) > min(LIMITS["series_ceiling"], len(initial_series) + LIMITS["series_growth"]):
-            errors.append("metric cardinality exceeded")
-        if len(quiet) < 3 or quiet[-1]["elapsed"] - quiet[0]["elapsed"] < 20:
-            errors.append("final quiescent evidence missing")
-        else:
-            for sample in quiet:
-                values = sample["metrics"]
-                if values["process_open_fds"] > baseline["process_open_fds"] + LIMITS["fd_growth"]:
-                    errors.append("quiescent FD growth")
-                if values["go_goroutines"] > baseline["go_goroutines"] + LIMITS["goroutine_growth"]:
-                    errors.append("quiescent goroutine growth")
-                if any(value != 0 for key, value in values.items()
-                       if key.startswith(("jul_upstream_active_requests{", "jul_upstream_pending_requests{"))):
-                    errors.append("quiescent admission leak")
-    return {"passed": not errors, "criterion_5_candidate": not errors and manifest["seconds"] >= 28800,
-            "measured_seconds": elapsed, "samples": len(samples), "errors": sorted(set(errors)),
-            "resource_trend_assessed": manifest["seconds"] >= 3600,
-            "features": FEATURES, "automatic_promotion": False}
 
 
-class Fixture:
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.counts = {}
-        self.discovery_port = 0
-        self.redirect = False
-        self.tcp_fault = False
-        self.healthy = True
-        self.servers = []
-
-    def count(self, name):
-        with self.lock:
-            self.counts[name] = self.counts.get(name, 0) + 1
-
-    def snapshot(self):
-        with self.lock:
-            return dict(self.counts)
-
-    def http(self, host, role):
-        fixture = self
-
-        class Handler(http.server.BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.1"
-
-            def do_POST(self):
-                self.do_GET()
-
-            def do_OPTIONS(self):
-                self.do_GET()
-
-            def do_GET(self):
-                path = self.path.split("?", 1)[0]
-                fixture.count(role + ":" + path)
-                if role == "forbidden":
-                    self.reply(200, b"forbidden-contact")
-                elif role == "control" and path.startswith("/v1/health/service/"):
-                    if fixture.redirect:
-                        self.reply(302, b"", {"Location": "http://127.0.0.2:1/blocked"})
-                    else:
-                        self.reply(200, json.dumps([{"Service": {"ID": "soak",
-                            "Address": "127.0.0.1", "Port": fixture.discovery_port,
-                            "Weights": {"Passing": 1}}}]).encode())
-                elif role in ("control", "auth"):
-                    original = self.headers.get("X-Forwarded-Uri", "")
-                    if "redirect" in original:
-                        self.reply(302, b"", {"Location": "http://127.0.0.2:1/blocked"})
-                    elif "reject" in original:
-                        self.reply(403, b"")
-                    else:
-                        self.reply(200, b"")
-                elif path.endswith(("/reset", "/unsafe")):
-                    if self.command == "POST":
-                        self.rfile.read(int(self.headers.get("Content-Length", "0")))
-                    self.connection.shutdown(socket.SHUT_RDWR)
-                    self.connection.close()
-                    self.close_connection = True
-                elif path.endswith("/committed"):
-                    self.send_response(200)
-                    self.send_header("Content-Length", "8192")
-                    self.end_headers()
-                    self.wfile.write(b"x" * 4096)
-                    self.wfile.flush()
-                    time.sleep(0.05)
-                    self.connection.shutdown(socket.SHUT_RDWR)
-                    self.close_connection = True
-                else:
-                    if path == "/health" and not fixture.healthy:
-                        self.reply(503, b"")
-                        return
-                    if path.endswith("/slow"):
-                        time.sleep(1)
-                    self.reply(200, b"soak590\n", {"X-Powered-By": "fixture"})
-
-            def reply(self, status, body, headers=None):
-                self.send_response(status)
-                self.send_header("Content-Length", str(len(body)))
-                for name, value in (headers or {}).items():
-                    self.send_header(name, value)
-                self.end_headers()
-                try:
-                    self.wfile.write(body)
-                except (BrokenPipeError, ConnectionResetError):
-                    fixture.count("client_cancelled")
-
-            def log_message(self, *_):
-                pass
-
-        class IPv6Server(http.server.ThreadingHTTPServer):
-            address_family = socket.AF_INET6
-
-        server_type = IPv6Server if ":" in host else http.server.ThreadingHTTPServer
-        server = server_type((host, 0), Handler)
-        self.servers.append(server)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        return server.server_port
-
-    def tcp(self):
-        fixture = self
-
-        class Echo(socketserver.BaseRequestHandler):
-            def handle(self):
-                fixture.count("tcp_connections")
-                if fixture.tcp_fault:
-                    return
-                self.request.settimeout(90)
-                while True:
-                    try:
-                        data = self.request.recv(1024)
-                        if not data:
-                            return
-                        self.request.sendall(data)
-                        fixture.count("tcp_rounds")
-                    except (TimeoutError, ConnectionResetError, BrokenPipeError):
-                        return
-
-        server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Echo)
-        server.daemon_threads = True
-        self.servers.append(server)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        return server.server_address[1]
-
-    def close(self):
-        for server in self.servers:
-            server.shutdown()
-            server.server_close()
 
 
 def configuration(ports, runtime):
@@ -436,10 +160,10 @@ service = "soak"
 listen = "127.0.0.1:{ports["http"]}"
 server_names = ["localhost"]
 '''
-    for path, pool in (("/clean/", "clean"), ("/pressure/", "pressure"),
+    for path, pool in ((CLEAN_ROUTE, "clean"), ("/pressure/", "pressure"),
                        ("/retry/", "retry"), ("/circuit/", "circuit"), ("/deadline/", "deadline"),
-                       ("/replay/", "replay"), ("/healthprobe/", "health"),
-                       ("/discovery/", "discovery")):
+                       ("/replay/", "replay"), (HEALTH_ROUTE, "health"),
+                       (DISCOVERY_ROUTE, "discovery")):
         raw += f'\n[[servers.locations]]\nmatch = {{type = "prefix", path = "{path}"}}\nproxy_pass = "http://{pool}"\n'
     raw += '''
 [[servers.locations]]
@@ -481,10 +205,10 @@ allowed_methods = ["GET", "POST"]
 allowed_headers = ["X-Tenant"]
 max_age = "1m"
 '''
-    for path, host, p in (("/auth/", "[::1]", ports["auth"]),
-                          ("/auth-dns/", "localhost", ports["auth_dns"]),
-                          ("/auth-tight/", "127.0.0.3", ports["control"]),
-                          ("/auth-denied/", "127.0.0.2", ports["forbidden"])):
+    for path, host, p in ((AUTH_ROUTE, "[::1]", ports["auth"]),
+                          (AUTH_DNS_ROUTE, "localhost", ports["auth_dns"]),
+                          (AUTH_TIGHT_ROUTE, "127.0.0.3", ports["control"]),
+                          (AUTH_DENIED_ROUTE, "127.0.0.2", ports["forbidden"])):
         raw += f'''
 [[servers.locations]]
 match = {{type = "prefix", path = "{path}"}}
@@ -547,11 +271,11 @@ class Run:
             self.halt.set()
 
     def api(self, path, data=None, content_type=None, expected=200):
-        headers = {"Authorization": "Bearer " + self.token}
+        headers = {"Authorization": BEARER_PREFIX + self.token}
         if content_type:
             headers["Content-Type"] = content_type
         status, body, _ = request(f'127.0.0.1:{self.ports["admin"]}', path,
-                                  "POST" if data is not None else "GET", data, headers)
+                                  method="POST" if data is not None else "GET", data=data, headers=headers)
         require(status == expected, f"admin {path.split('?')[0]} HTTP {status}, expected {expected}")
         return json.loads(body) if body else None
 
@@ -559,13 +283,13 @@ class Run:
         status, body, headers = request(f'127.0.0.1:{self.ports["http"]}', path, **kwargs)
         require(status == expected, f"{path}: HTTP {status}, expected {expected}")
         if expected == 200:
-            require(body == b"soak590\n", f"{path}: response body mismatch")
+            require(body == PAYLOAD, f"{path}: response body mismatch")
         return body, headers
 
     def launch(self, name, *args, env=None):
         log = (self.out / (name + ".log")).open("w")
         self.logs.append(log)
-        proc = subprocess.Popen(list(map(str, args)), stdout=log, stderr=subprocess.STDOUT,
+        proc = subprocess.Popen(list(map(str, args)), shell=False, stdout=log, stderr=subprocess.STDOUT,
                                 cwd=self.runtime, env=env)
         self.procs.append(proc)
         return proc
@@ -627,7 +351,8 @@ class Run:
         }
         harness = self.out / "harness"
         harness.mkdir()
-        for name in ("ga-soak.py", "ga-soak-requirements.txt", "test_ga_soak.py",
+        for name in ("ga-soak.py", "ga_soak_contract.py", "ga_soak_fixtures.py",
+                     "ga-soak-requirements.txt", "test_ga_soak.py",
                      "verify-release-packages.py", "grpc-echo-server.go"):
             shutil.copyfile(Path(__file__).with_name(name), harness / name)
         self.manifest["harness_files"] = {path.name: digest(path) for path in harness.iterdir()}
@@ -640,7 +365,7 @@ class Run:
             require(all(proc.poll() is None for proc in self.procs), "process exited during startup")
             try:
                 self.api("/readyz")
-                self.http("/clean/")
+                self.http(CLEAN_ROUTE)
                 break
             except (OSError, http.client.HTTPException):
                 require(time.monotonic() < deadline, "startup timeout")
@@ -664,57 +389,57 @@ class Run:
         profiles = {}
         for name in ("heap", "goroutine"):
             status, body, _ = request(f'127.0.0.1:{self.ports["admin"]}', "/debug/pprof/" + name,
-                                      headers={"Authorization": "Bearer " + self.token}, timeout=10)
+                                      headers={"Authorization": BEARER_PREFIX + self.token}, timeout=10)
             require(status == 200 and len(body) > 100, f"{stage} {name} profile unavailable")
             (self.runtime / (stage + "-" + name + ".pprof")).write_bytes(body)
             profiles[name] = {"bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()}
         write_json(self.out / (stage + "-profiles.json"), {"utc": utc(), "profiles": profiles})
 
     def tcp_round(self, sock):
-        sock.sendall(b"soak590\n")
+        sock.sendall(PAYLOAD)
         body = b""
         while len(body) < 8:
             part = sock.recv(8 - len(body))
             require(part, "TCP echo connection unexpectedly closed")
             body += part
-        require(body == b"soak590\n", "TCP echo body mismatch")
+        require(body == PAYLOAD, "TCP echo body mismatch")
 
     def steady(self):
         try:
             while not self.halt.is_set():
                 with self.lock:
-                    _, headers = self.http("/route/item?version=v2", headers={"X-Tenant": "public"})
+                    _, headers = self.http(PREDICATE_ROUTE, headers={"X-Tenant": "public"})
                     values = [value for name, value in headers if name.lower() == "x-order"]
                     require(values == ["first", "second"], "ordered response policy mismatch")
                     require(not any(name.lower() == "x-powered-by" for name, _ in headers), "removed header escaped")
                     require(dict(headers).get("X-Generation") == self.generation, "response generation mismatch")
                     for path, method, headers, expected in (
-                        ("/route/item?version=v2", "POST", {"X-Tenant": "public"}, 203),
+                        (PREDICATE_ROUTE, "POST", {"X-Tenant": "public"}, 203),
                         ("/route/item?version=v1", "GET", {"X-Tenant": "public"}, 203),
-                        ("/route/item?version=v2", "GET", {"X-Tenant": "private"}, 203),
+                        (PREDICATE_ROUTE, "GET", {"X-Tenant": "private"}, 203),
                         ("/route/long/item", "GET", {}, 202), ("/missing", "GET", {}, 404),
                     ):
                         self.http(path, expected, method=method, headers=headers)
                     self.event("routing")
                     for origin, grant in (("https://soak.example", True), ("https://denied.example", False)):
-                        _, headers = self.http("/cors/", headers={"Origin": origin})
+                        _, headers = self.http(CORS_ROUTE, headers={"Origin": origin})
                         require(("Access-Control-Allow-Origin" in dict(headers)) == grant, "CORS grant mismatch")
-                    self.http("/cors/", 204, method="OPTIONS", headers={"Origin": "https://soak.example",
+                    self.http(CORS_ROUTE, 204, method="OPTIONS", headers={"Origin": "https://soak.example",
                         "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "X-Tenant"})
-                    _, headers = self.http("/cors/", method="OPTIONS", headers={"Origin": "https://denied.example",
+                    _, headers = self.http(CORS_ROUTE, method="OPTIONS", headers={"Origin": "https://denied.example",
                         "Access-Control-Request-Method": "DELETE"})
                     require("Access-Control-Allow-Origin" not in dict(headers), "denied preflight granted")
                     self.event("cors")
-                    self.http("/clean/")
+                    self.http(CLEAN_ROUTE)
                     self.event("http")
-                    self.http("/auth/")
+                    self.http(AUTH_ROUTE)
                     self.http("/auth/reject", 403)
                     self.event("auth_allow")
-                    self.http("/auth-denied/", 503)
+                    self.http(AUTH_DENIED_ROUTE, 503)
                     self.event("auth_deny")
-                    self.http("/auth-dns/")
+                    self.http(AUTH_DNS_ROUTE)
                     self.event("auth_dns")
-                    self.http("/discovery/")
+                    self.http(DISCOVERY_ROUTE)
                     self.event("discovery")
                     http_status, status, body = grpc_request(self.ports["grpc"])
                     require(http_status == 200 and status == 0
@@ -727,18 +452,18 @@ class Run:
             self.event("steady_failure", False, error=str(error))
 
     def apply(self, raw):
-        before = self.api("/api/config")
+        before = self.api(API_CONFIG)
         result = self.api("/api/config/apply?base_version=" + before["base_version"], raw.encode(), "application/toml")
         require(result.get("ok"), "apply rejected or incomplete")
-        require(self.api("/api/config")["raw"] == raw, "applied readback differs")
+        require(self.api(API_CONFIG)["raw"] == raw, "applied readback differs")
 
     def continuing_traffic(self):
         try:
             while not self.halt.is_set():
-                _, headers = self.http("/route/item?version=v2", headers={"X-Tenant": "public"})
+                _, headers = self.http(PREDICATE_ROUTE, headers={"X-Tenant": "public"})
                 require(dict(headers).get("X-Generation") in ("baseline", "tight"), "unknown live policy generation")
-                self.http("/auth/")
-                self.http("/auth-denied/", 503)
+                self.http(AUTH_ROUTE)
+                self.http(AUTH_DENIED_ROUTE, 503)
                 self.event("traffic_during_phases")
                 self.halt.wait(0.2)
         except (OSError, http.client.HTTPException, RuntimeError) as error:
@@ -749,161 +474,189 @@ class Run:
         require(isinstance(pools, list) and pools, f"missing {name} resilience state")
         return pools[0]
 
+    def pressure_phase(self):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            jobs = [executor.submit(request, f'127.0.0.1:{self.ports["http"]}', "/pressure/slow")
+                    for _ in range(4)]
+            time.sleep(0.1)
+            state = self.pool("pressure")
+            require(state["active"] == 1 and state["pending"] == 1, "pressure did not fill declared bounds")
+            statuses = [job.result()[0] for job in jobs]
+            require(statuses.count(200) == 1 and statuses.count(503) == 3, "pressure status attribution mismatch")
+        self.event("pressure", statuses=statuses, active=state["active"], pending=state["pending"])
+
+    def retry_phase(self):
+        for _ in range(20):
+            self.http("/retry/ok")
+        for _ in range(15):
+            self.http("/retry/reset", 502)
+        budget = self.pool("retry")["retry_budget"]
+        require(budget["remaining"] == 0 and budget["retries"] > 0, "retry budget not exercised/exhausted")
+        self.event("retry_budget", budget=budget)
+        started = time.monotonic()
+        self.http("/deadline/slow", 504)
+        elapsed = time.monotonic() - started
+        require(0.1 <= elapsed <= 0.8, f"Jul-owned retry deadline outside bound: {elapsed}")
+        self.event("retry_deadline", seconds=elapsed)
+
+    def replay_phase(self):
+        before = self.fixture.snapshot()
+        self.http("/replay/unsafe", 502, method="POST", data=b"unsafe-body")
+        after = self.fixture.snapshot()
+        attempts = sum(after.get(key, 0) - before.get(key, 0)
+                       for key in ("backend_a:/replay/unsafe", "backend_b:/replay/unsafe"))
+        require(attempts == 1, "unsafe POST replayed")
+        self.event("unsafe_post", attempts=attempts)
+        before = self.fixture.snapshot()
+        try:
+            self.http("/replay/committed")
+        except http.client.IncompleteRead as error:
+            # An aborted net/http write may leave its final buffered bytes unsent.
+            require(0 < len(error.partial) <= 4096
+                    and error.partial == b"x" * len(error.partial), "committed response prefix changed")
+            delivered = len(error.partial)
+        else:
+            raise RuntimeError("partial committed response was silently completed")
+        after = self.fixture.snapshot()
+        attempts = sum(after.get(key, 0) - before.get(key, 0)
+                       for key in ("backend_a:/replay/committed", "backend_b:/replay/committed"))
+        require(attempts == 1, "committed response replayed")
+        self.event("committed_response", attempts=attempts, delivered_bytes=delivered)
+
+    def health_phase(self):
+        self.http("/circuit/reset", 502)
+        require(self.pool("circuit")["by_state"].get("circuit_open", 0) == 1, "circuit did not open")
+        time.sleep(1.2)
+        self.http("/circuit/ok")
+        require(self.pool("circuit")["by_state"].get("available", 0) == 1, "circuit did not recover")
+        self.event("circuit_recovery")
+        self.fixture.healthy = False
+        time.sleep(1.2)
+        require(self.pool("health")["eligible"] == 0, "active health did not exclude backend")
+        self.http(HEALTH_ROUTE, 503)
+        self.fixture.healthy = True
+        time.sleep(1.2)
+        self.http(HEALTH_ROUTE)
+        require(self.pool("health")["eligible"] == 1, "active health did not recover backend")
+        self.event("health_recovery")
+        sock = socket.create_connection(("127.0.0.1", self.ports["http"]), timeout=3)
+        sock.sendall(b"GET /pressure/slow HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        time.sleep(0.1)
+        sock.close()
+        time.sleep(1.1)
+        state = self.pool("pressure")
+        require(state["active"] == 0 and state["pending"] == 0, "client cancellation leaked admission")
+        self.event("client_cancel")
+
+    def l4_phase(self):
+        held = socket.create_connection(("127.0.0.1", self.ports["l4"]), timeout=3)
+        try:
+            self.tcp_round(held)
+            over = socket.create_connection(("127.0.0.1", self.ports["l4"]), timeout=3)
+            try:
+                try:
+                    over.sendall(b"x")
+                    require(over.recv(1) == b"", "over-limit L4 connection served")
+                except ConnectionResetError:
+                    pass
+            finally:
+                over.close()
+        finally:
+            held.close()
+        self.event("l4_pressure")
+        self.fixture.tcp_fault = True
+        fault = socket.create_connection(("127.0.0.1", self.ports["l4fault"]), timeout=3)
+        try:
+            try:
+                fault.sendall(b"x")
+                require(fault.recv(1) == b"", "injected L4 fault unexpectedly echoed")
+            except ConnectionResetError:
+                pass
+        finally:
+            fault.close()
+            self.fixture.tcp_fault = False
+        time.sleep(1.2)
+        recovered = socket.create_connection(("127.0.0.1", self.ports["l4fault"]), timeout=3)
+        try:
+            self.tcp_round(recovered)
+        finally:
+            recovered.close()
+        self.event("l4_fault_recovery")
+
+    def redirect_phase(self):
+        self.http("/auth/redirect", 302)
+        self.fixture.redirect = True
+        before = self.fixture.snapshot().get(DISCOVERY_COUNTER, 0)
+        time.sleep(2.2)
+        require(self.fixture.snapshot().get(DISCOVERY_COUNTER, 0) > before,
+                "discovery redirect was not requested")
+        self.http(DISCOVERY_ROUTE)
+        self.fixture.redirect = False
+        self.event("redirect")
+
+    def tighten_phase(self):
+        original = self.api(API_CONFIG)["raw"]
+        tight = original.replace(
+            'allow = ["127.0.0.1/32", "127.0.0.3/32", "::1/128"]',
+            'allow = ["::1/128"]').replace('value = "baseline"', 'value = "tight"')
+        self.apply(tight)
+        self.generation = "tight"
+        _, headers = self.http(PREDICATE_ROUTE, headers={"X-Tenant": "public"})
+        require(dict(headers).get("X-Generation") == "tight", "routing policy did not publish")
+        self.http(AUTH_TIGHT_ROUTE, 503)
+        self.http(AUTH_DNS_ROUTE, 503)
+        self.event("dns_deny")
+        time.sleep(1.2)
+        before = self.fixture.snapshot().get(DISCOVERY_COUNTER, 0)
+        self.fixture.discovery_port = self.ports["backend_b"]
+        time.sleep(2.2)
+        require(self.fixture.snapshot().get(DISCOVERY_COUNTER, 0) == before,
+                "tightened discovery reused previous-generation connection")
+        state = self.pool("discovery")
+        require(all(backend["address"] == f'127.0.0.1:{self.ports["backend_a"]}'
+                    for backend in state["backends"]), "blocked discovery changed last-good set")
+        self.event("tighten", discovery_backends=len(state["backends"]))
+        return original, tight
+
+    def invalid_candidate_phase(self, tight):
+        before_config = self.api(API_CONFIG)
+        status, _, _ = request(f'127.0.0.1:{self.ports["admin"]}', "/api/config/apply",
+            method="POST", data=tight.replace('"::1/128"', '"http://invalid"').encode(),
+            headers={"Authorization": BEARER_PREFIX + self.token, "Content-Type": "application/toml"})
+        require(status in (400, 422), f"invalid candidate HTTP {status}")
+        require(self.api(API_CONFIG)["base_version"] == before_config["base_version"],
+                "rejected candidate changed generation")
+        self.http(AUTH_TIGHT_ROUTE, 503)
+        self.event("invalid_candidate", status=status)
+
+    def rollback_phase(self, original):
+        history = self.api("/api/config/history")
+        require(history, "rollback snapshot missing")
+        self.api("/api/config/rollback", json.dumps({"id": history[0]["id"]}).encode(), "application/json")
+        require(self.api(API_CONFIG)["raw"] == original, "rollback did not restore exact policy")
+        self.generation = "baseline"
+        self.fixture.discovery_port = self.ports["backend_a"]
+        self.http(AUTH_TIGHT_ROUTE)
+        _, headers = self.http(PREDICATE_ROUTE, headers={"X-Tenant": "public"})
+        require(dict(headers).get("X-Generation") == "baseline", "routing rollback did not publish")
+        self.tcp_round(self.long_tcp)
+        self.event("rollback")
+
     def phases(self):
         try:
             while not self.halt.is_set():
                 cycle_start = time.monotonic()
                 with self.lock:
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-                        jobs = [executor.submit(request, f'127.0.0.1:{self.ports["http"]}', "/pressure/slow")
-                                for _ in range(4)]
-                        time.sleep(0.1)
-                        state = self.pool("pressure")
-                        require(state["active"] == 1 and state["pending"] == 1, "pressure did not fill declared bounds")
-                        statuses = [job.result()[0] for job in jobs]
-                        require(statuses.count(200) == 1 and statuses.count(503) == 3, "pressure status attribution mismatch")
-                    self.event("pressure", statuses=statuses, active=state["active"], pending=state["pending"])
-                    for _ in range(20):
-                        self.http("/retry/ok")
-                    for _ in range(15):
-                        self.http("/retry/reset", 502)
-                    budget = self.pool("retry")["retry_budget"]
-                    require(budget["remaining"] == 0 and budget["retries"] > 0, "retry budget not exercised/exhausted")
-                    self.event("retry_budget", budget=budget)
-                    started = time.monotonic()
-                    self.http("/deadline/slow", 504)
-                    elapsed = time.monotonic() - started
-                    require(0.1 <= elapsed <= 0.8, f"Jul-owned retry deadline outside bound: {elapsed}")
-                    self.event("retry_deadline", seconds=elapsed)
-                    before = self.fixture.snapshot()
-                    self.http("/replay/unsafe", 502, method="POST", data=b"unsafe-body")
-                    after = self.fixture.snapshot()
-                    attempts = sum(after.get(key, 0) - before.get(key, 0)
-                                   for key in ("backend_a:/replay/unsafe", "backend_b:/replay/unsafe"))
-                    require(attempts == 1, "unsafe POST replayed")
-                    self.event("unsafe_post", attempts=attempts)
-                    before = self.fixture.snapshot()
-                    try:
-                        self.http("/replay/committed")
-                    except http.client.IncompleteRead as error:
-                        # An aborted net/http write may leave its final buffered bytes unsent.
-                        require(0 < len(error.partial) <= 4096
-                                and error.partial == b"x" * len(error.partial), "committed response prefix changed")
-                        delivered = len(error.partial)
-                    else:
-                        raise RuntimeError("partial committed response was silently completed")
-                    after = self.fixture.snapshot()
-                    attempts = sum(after.get(key, 0) - before.get(key, 0)
-                                   for key in ("backend_a:/replay/committed", "backend_b:/replay/committed"))
-                    require(attempts == 1, "committed response replayed")
-                    self.event("committed_response", attempts=attempts, delivered_bytes=delivered)
-                    self.http("/circuit/reset", 502)
-                    require(self.pool("circuit")["by_state"].get("circuit_open", 0) == 1, "circuit did not open")
-                    time.sleep(1.2)
-                    self.http("/circuit/ok")
-                    require(self.pool("circuit")["by_state"].get("available", 0) == 1, "circuit did not recover")
-                    self.event("circuit_recovery")
-                    self.fixture.healthy = False
-                    time.sleep(1.2)
-                    require(self.pool("health")["eligible"] == 0, "active health did not exclude backend")
-                    self.http("/healthprobe/", 503)
-                    self.fixture.healthy = True
-                    time.sleep(1.2)
-                    self.http("/healthprobe/")
-                    require(self.pool("health")["eligible"] == 1, "active health did not recover backend")
-                    self.event("health_recovery")
-                    sock = socket.create_connection(("127.0.0.1", self.ports["http"]), timeout=3)
-                    sock.sendall(b"GET /pressure/slow HTTP/1.1\r\nHost: localhost\r\n\r\n")
-                    time.sleep(0.1)
-                    sock.close()
-                    time.sleep(1.1)
-                    state = self.pool("pressure")
-                    require(state["active"] == 0 and state["pending"] == 0, "client cancellation leaked admission")
-                    self.event("client_cancel")
+                    self.pressure_phase()
+                    self.retry_phase()
+                    self.replay_phase()
+                    self.health_phase()
                     self.grpc_pressure()
-                    held = socket.create_connection(("127.0.0.1", self.ports["l4"]), timeout=3)
-                    try:
-                        self.tcp_round(held)
-                        over = socket.create_connection(("127.0.0.1", self.ports["l4"]), timeout=3)
-                        try:
-                            try:
-                                over.sendall(b"x")
-                                require(over.recv(1) == b"", "over-limit L4 connection served")
-                            except ConnectionResetError:
-                                pass
-                        finally:
-                            over.close()
-                    finally:
-                        held.close()
-                    self.event("l4_pressure")
-                    self.fixture.tcp_fault = True
-                    fault = socket.create_connection(("127.0.0.1", self.ports["l4fault"]), timeout=3)
-                    try:
-                        try:
-                            fault.sendall(b"x")
-                            require(fault.recv(1) == b"", "injected L4 fault unexpectedly echoed")
-                        except ConnectionResetError:
-                            pass
-                    finally:
-                        fault.close()
-                        self.fixture.tcp_fault = False
-                    time.sleep(1.2)
-                    recovered = socket.create_connection(("127.0.0.1", self.ports["l4fault"]), timeout=3)
-                    try:
-                        self.tcp_round(recovered)
-                    finally:
-                        recovered.close()
-                    self.event("l4_fault_recovery")
-                    self.http("/auth/redirect", 302)
-                    self.fixture.redirect = True
-                    before = self.fixture.snapshot().get("control:/v1/health/service/soak", 0)
-                    time.sleep(2.2)
-                    require(self.fixture.snapshot().get("control:/v1/health/service/soak", 0) > before,
-                            "discovery redirect was not requested")
-                    self.http("/discovery/")
-                    self.fixture.redirect = False
-                    self.event("redirect")
-                    original = self.api("/api/config")["raw"]
-                    tight = original.replace(
-                        'allow = ["127.0.0.1/32", "127.0.0.3/32", "::1/128"]',
-                        'allow = ["::1/128"]').replace('value = "baseline"', 'value = "tight"')
-                    self.apply(tight)
-                    self.generation = "tight"
-                    _, headers = self.http("/route/item?version=v2", headers={"X-Tenant": "public"})
-                    require(dict(headers).get("X-Generation") == "tight", "routing policy did not publish")
-                    self.http("/auth-tight/", 503)
-                    self.http("/auth-dns/", 503)
-                    self.event("dns_deny")
-                    time.sleep(1.2)
-                    before = self.fixture.snapshot().get("control:/v1/health/service/soak", 0)
-                    self.fixture.discovery_port = self.ports["backend_b"]
-                    time.sleep(2.2)
-                    require(self.fixture.snapshot().get("control:/v1/health/service/soak", 0) == before,
-                            "tightened discovery reused previous-generation connection")
-                    state = self.pool("discovery")
-                    require(all(backend["address"] == f'127.0.0.1:{self.ports["backend_a"]}'
-                                for backend in state["backends"]), "blocked discovery changed last-good set")
-                    self.event("tighten", discovery_backends=len(state["backends"]))
-                    before_config = self.api("/api/config")
-                    status, _, _ = request(f'127.0.0.1:{self.ports["admin"]}', "/api/config/apply",
-                        "POST", tight.replace('"::1/128"', '"http://invalid"').encode(),
-                        {"Authorization": "Bearer " + self.token, "Content-Type": "application/toml"})
-                    require(status in (400, 422), f"invalid candidate HTTP {status}")
-                    require(self.api("/api/config")["base_version"] == before_config["base_version"],
-                            "rejected candidate changed generation")
-                    self.http("/auth-tight/", 503)
-                    self.event("invalid_candidate", status=status)
-                    history = self.api("/api/config/history")
-                    require(history, "rollback snapshot missing")
-                    self.api("/api/config/rollback", json.dumps({"id": history[0]["id"]}).encode(), "application/json")
-                    require(self.api("/api/config")["raw"] == original, "rollback did not restore exact policy")
-                    self.generation = "baseline"
-                    self.fixture.discovery_port = self.ports["backend_a"]
-                    self.http("/auth-tight/")
-                    _, headers = self.http("/route/item?version=v2", headers={"X-Tenant": "public"})
-                    require(dict(headers).get("X-Generation") == "baseline", "routing rollback did not publish")
-                    self.tcp_round(self.long_tcp)
-                    self.event("rollback")
+                    self.l4_phase()
+                    self.redirect_phase()
+                    original, tight = self.tighten_phase()
+                    self.invalid_candidate_phase(tight)
+                    self.rollback_phase(original)
                     require(not any(key.startswith("forbidden:") for key in self.fixture.snapshot()),
                             "denied auxiliary destination received bytes")
                 self.halt.wait(max(0, LIMITS["cycle_seconds"] - (time.monotonic() - cycle_start)))
@@ -936,7 +689,7 @@ class Run:
     def sample(self, quiet=False):
         require(all(proc.poll() is None for proc in self.procs), "unexpected process exit")
         status, raw, _ = request(f'127.0.0.1:{self.ports["admin"]}', "/metrics",
-                                headers={"Authorization": "Bearer " + self.token})
+                                headers={"Authorization": BEARER_PREFIX + self.token})
         require(status == 200, f"metrics HTTP {status}")
         elapsed = time.monotonic() - self.start
         sample = {"utc": utc(), "elapsed": elapsed, "walltime": time.time(),
@@ -959,34 +712,59 @@ class Run:
             "artifact_bytes": size, "jul_pid": self.jul.pid, "ports": self.ports,
             "unexpected_failures": sum(not e["ok"] for e in self.events)})
 
+    def measure_workload(self):
+        self.sample()
+        for work in (self.steady, self.phases, self.continuing_traffic):
+            thread = threading.Thread(target=work, daemon=True)
+            self.threads.append(thread)
+            thread.start()
+        deadline = self.start + self.args.seconds
+        next_sample = self.start + LIMITS["sample_seconds"]
+        while time.monotonic() < deadline and not self.halt.is_set():
+            self.halt.wait(max(0, min(next_sample, deadline) - time.monotonic()))
+            self.sample()
+            next_sample += LIMITS["sample_seconds"]
+        self.halt.set()
+        for thread in self.threads:
+            thread.join(timeout=30)
+            require(not thread.is_alive(), "workload worker did not stop")
+        self.long_tcp.close()
+        self.long_tcp = None
+
+    def quiesce(self):
+        quiet_end = time.monotonic() + (0 if any(not e["ok"] for e in self.events) else LIMITS["quiet_seconds"])
+        while time.monotonic() < quiet_end:
+            time.sleep(LIMITS["sample_seconds"])
+            self.sample(quiet=True)
+
+    def cleanup(self):
+        if self.long_tcp:
+            self.long_tcp.close()
+        self.halt.set()
+        for proc in reversed(self.procs):
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+        self.fixture.close()
+        for log in self.logs:
+            log.close()
+        if self.out.exists():
+            files = {str(path.relative_to(self.out)): digest(path) for path in self.out.rglob("*")
+                     if path.is_file() and path.name != "digests.json"}
+            write_json(self.out / "digests.json", files)
+
     def execute(self):
         require(not self.out.exists(), "refusing to overwrite a run directory")
         try:
             self.prepare()
             signal.signal(signal.SIGTERM, lambda *_: self.halt.set())
             signal.signal(signal.SIGINT, lambda *_: self.halt.set())
-            self.sample()
-            for work in (self.steady, self.phases, self.continuing_traffic):
-                thread = threading.Thread(target=work, daemon=True)
-                self.threads.append(thread)
-                thread.start()
-            deadline = self.start + self.args.seconds
-            next_sample = self.start + LIMITS["sample_seconds"]
-            while time.monotonic() < deadline and not self.halt.is_set():
-                self.halt.wait(max(0, min(next_sample, deadline) - time.monotonic()))
-                self.sample()
-                next_sample += LIMITS["sample_seconds"]
-            self.halt.set()
-            for thread in self.threads:
-                thread.join(timeout=30)
-                require(not thread.is_alive(), "workload worker did not stop")
-            self.long_tcp.close()
-            self.long_tcp = None
-            quiet_end = time.monotonic() + (0 if any(not e["ok"] for e in self.events)
-                                           else LIMITS["quiet_seconds"])
-            while time.monotonic() < quiet_end:
-                time.sleep(LIMITS["sample_seconds"])
-                self.sample(quiet=True)
+            self.measure_workload()
+            self.quiesce()
             self.profile("Tend")
             result = evaluate(self.manifest, self.samples, self.events, self.quiet[-3:])
             result["finished_utc"] = utc()
@@ -998,24 +776,7 @@ class Run:
                                                   "criterion_5_candidate": False})
             raise
         finally:
-            if self.long_tcp:
-                self.long_tcp.close()
-            self.halt.set()
-            for proc in reversed(self.procs):
-                if proc.poll() is None:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait(timeout=5)
-            self.fixture.close()
-            for log in self.logs:
-                log.close()
-            if self.out.exists():
-                files = {str(path.relative_to(self.out)): digest(path) for path in self.out.rglob("*")
-                         if path.is_file() and path.name != "digests.json"}
-                write_json(self.out / "digests.json", files)
+            self.cleanup()
 
 
 def main():

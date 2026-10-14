@@ -2,7 +2,9 @@
 
 import importlib.util
 import json
+import hashlib
 from pathlib import Path
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -16,6 +18,23 @@ REVIEW_SPEC.loader.exec_module(REVIEW)
 
 
 class AcceptanceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.frozen_directory = tempfile.TemporaryDirectory(prefix="jul-frozen-contract-")
+        bundle = Path(__file__).resolve().parents[1] / "docs/audit/evidence/2026-10-14-ga590/executed-harness.tar.gz"
+        with tarfile.open(bundle) as archive:
+            data = archive.extractfile("ga-soak.py").read()
+        assert hashlib.sha256(data).hexdigest() == REVIEW.FROZEN_HARNESS
+        path = Path(cls.frozen_directory.name) / "ga-soak.py"
+        path.write_bytes(data)
+        spec = importlib.util.spec_from_file_location("frozen_contract", path)
+        cls.frozen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.frozen)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.frozen_directory.cleanup()
+
     def setUp(self):
         self.manifest = {"seconds": 28800}
         values = {
@@ -32,7 +51,10 @@ class AcceptanceTests(unittest.TestCase):
         self.quiet = [{"elapsed": second, "metrics": dict(values)} for second in (28900, 28910, 28920)]
 
     def evaluate(self):
-        return SOAK.evaluate(self.manifest, self.samples, self.events, self.quiet)
+        actual = SOAK.evaluate(self.manifest, self.samples, self.events, self.quiet)
+        expected = self.frozen.evaluate(self.manifest, self.samples, self.events, self.quiet)
+        self.assertEqual(actual, expected, "maintained contract differs from the frozen executed gates")
+        return actual
 
     def test_complete_fixed_contract_is_candidate_not_automatic_promotion(self):
         result = self.evaluate()

@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 FROZEN_HARNESS = "2d251f12e67065a4b74d72f293f361001456af81f73aeb7cab82bbcc5f4cdd40"
+DIGESTS_FILE = "digests.json"
 PUBLIC_METRICS = (
     "process_resident_memory_bytes", "process_open_fds", "go_goroutines", "go_memstats_heap_inuse_bytes",
     "jul_upstream_", "jul_egress_", "jul_auth_decisions_total", "jul_grpc_proxy_streams_total",
@@ -31,7 +32,7 @@ def records(path):
 
 
 def verify_files(directory):
-    listed = json.loads((directory / "digests.json").read_text())
+    listed = json.loads((directory / DIGESTS_FILE).read_text())
     for name, expected in listed.items():
         path = (directory / name).resolve()
         require(path.is_relative_to(directory.resolve()), "artifact path escapes evidence directory")
@@ -173,8 +174,8 @@ def review(primary, supplemental, out):
                          "metrics": {key: value for key, value in sample["metrics"].items()
                                      if key.startswith(PUBLIC_METRICS)}}
                 compressed.write((json.dumps(value, sort_keys=True) + "\n").encode())
-    (out / "digests.json").write_text(json.dumps({
-        path.name: digest(path) for path in out.iterdir() if path.name != "digests.json"
+    (out / DIGESTS_FILE).write_text(json.dumps({
+        path.name: digest(path) for path in out.iterdir() if path.name != DIGESTS_FILE
     }, indent=2, sort_keys=True) + "\n")
     print(json.dumps({"original": original, "augmented": augmented, "supplemental_samples": len(extra),
                       "retained_access_records": log_records, "export": str(out)}, sort_keys=True))

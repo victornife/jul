@@ -8,6 +8,7 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import sys
 import time
 
 
@@ -51,10 +52,19 @@ def collect(primary, out):
     harness = Path(__file__).with_name("ga-soak.py")
     require(sha256(harness) == manifest["harness_sha256"], "primary parser source changed")
     shutil.copyfile(harness, out / "primary-harness.py")
+    for name in ("ga_soak_contract.py", "ga_soak_fixtures.py"):
+        if name in manifest["harness_files"]:
+            source = harness.with_name(name)
+            require(sha256(source) == manifest["harness_files"][name], f"primary helper source changed: {name}")
+            shutil.copyfile(source, out / name)
     shutil.copyfile(__file__, out / "collector.py")
     spec = importlib.util.spec_from_file_location("primary_harness", out / "primary-harness.py")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.path.insert(0, str(out))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.pop(0)
     metadata = {
         "purpose": "additional real scrapes from the same continuously exercised process",
         "authorisation": "maintainer approved supplemental collection before the active window ended",

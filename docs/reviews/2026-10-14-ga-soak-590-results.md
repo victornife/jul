@@ -114,6 +114,16 @@ A corrected 60-second actual-package rerun also passed all phases and quieting,
 with seven expected samples and no errors. That rerun verifies the harness
 correction; it is not renamed as the eight-hour product run.
 
+PR quality feedback subsequently separated the maintained acceptance contract
+and protocol fixtures into small helpers and split the phase/lifecycle
+coordinator into bounded methods. Every acceptance test now compares the
+maintained verdict with the actual frozen executed evaluator; all twenty tests
+and a fresh real-package 60-second workload/quieting rerun passed. The original
+archives, executed source bundle and published measurements are unchanged.
+Subprocesses use explicit argument vectors with `shell=False`, exclusively for
+operator-owned harness executables; no HTTP request supplies a command. The
+wildcard-bind scanner match is a negative test assertion, not a listener.
+
 The documentation-only main advance to `7ff7e25e` during the campaign changed
 neither the runtime package nor the retained executed harness. No unknown-source
 product code inherits these measurements.

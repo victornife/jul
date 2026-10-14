@@ -6,6 +6,7 @@ on:
     paths:
       - 'scripts/feature-soak.py'
       - 'scripts/ga-soak*.py'
+      - 'scripts/ga_soak_*.py'
       - 'scripts/ga-soak-requirements.txt'
       - 'scripts/test_ga_soak.py'
       - '.github/workflows/feature-soak.yml'
