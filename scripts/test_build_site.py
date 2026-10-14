@@ -28,7 +28,7 @@ class SiteTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("# Jul.IA — Title\n\n## A section\n\nCanonical prose.\n", encoding="utf-8")
         assets = self.root / "docs" / "assets"
-        assets.mkdir()
+        assets.mkdir(exist_ok=True)
         (assets / "logo.png").write_bytes(b"logo fixture")
         shutil.copytree(site.ROOT / "website", self.root / "website")
         self.brief = self.root / site.PAGES[0].source
@@ -163,12 +163,80 @@ printf '<h1>Hello</h1>\\n'
         with patch.object(site, "ROOT", self.root), patch.object(sys, "argv", ["build-site.py"]):
             with contextlib.redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(site.main(), 0)
-            self.assertIn("Built and validated 5 canonical pages", output.getvalue())
+            self.assertIn("Built and validated 6 canonical pages", output.getvalue())
             self.brief.unlink()
             with contextlib.redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(site.main(), 1)
             self.assertIn("Site build failed:", output.getvalue())
 
+
+
+    def test_examples_images_and_phone_diagrams_publish_as_local_assets(self):
+        page = next(page for page in site.PAGES if page.source == site.EXAMPLES_SOURCE)
+        directory = self.root / "docs/examples/assets"
+        directory.mkdir()
+        for name in ("scene photo.webp", "sharing-map.svg", "sharing-map-mobile.svg"):
+            (directory / name).write_bytes(name.encode())
+        (self.root / page.source).write_text('''# Examples — My apps. My people.
+
+Canonical introduction.
+
+![An everyday scene](assets/scene%20photo.webp)
+
+## One gateway
+
+![Sharing map](assets/sharing-map.svg)
+''')
+        output = site.build(self.root)
+        rendered = (output / page.output).read_text()
+        self.assertIn('src="../assets/examples/scene%20photo.webp"', rendered)
+        self.assertIn('srcset="../assets/examples/sharing-map-mobile.svg"', rendered)
+        self.assertIn('alt="Sharing map"', rendered)
+        self.assertEqual((output / "assets/examples/scene photo.webp").read_bytes(), b"scene photo.webp")
+        (directory / "scene photo.webp").write_bytes(b"Updated picture")
+        site.build(self.root)
+        self.assertEqual((output / "assets/examples/scene photo.webp").read_bytes(), b"Updated picture")
+        self.assertIn("Canonical introduction.", rendered)
+
+    def test_missing_phone_diagram_blocks_publication(self):
+        directory = self.root / "docs/examples/assets"
+        directory.mkdir()
+        (directory / "sensor-flow.svg").write_text("<svg/>")
+        (self.root / site.EXAMPLES_SOURCE).write_text(
+            "# Examples — Sensors\n\n## A section\n\n![Sensors](assets/sensor-flow.svg)\n")
+        with self.assertRaisesRegex(ValueError, "broken output link"):
+            site.build(self.root)
+
+    def test_artwork_provenance_remains_a_repository_document(self):
+        directory = self.root / "docs/examples/assets"
+        directory.mkdir()
+        (directory / "ARTWORK.md").write_text("# Artwork\n")
+        (self.root / site.EXAMPLES_SOURCE).write_text(
+            "# Examples — Artwork\n\n## A section\n\n[Artwork](assets/ARTWORK.md)\n")
+        output = site.build(self.root)
+        rendered = (output / "examples/index.html").read_text()
+        self.assertIn(f"{site.REPOSITORY}/blob/main/docs/examples/assets/ARTWORK.md", rendered)
+        self.assertFalse((output / "assets/examples/ARTWORK.md").exists())
+
+    def test_all_pages_keep_existing_navigation_and_add_examples_after_vision(self):
+        output = site.build(self.root)
+        for page in site.PAGES:
+            parser = site.Text()
+            rendered = (output / page.output).read_text()
+            start = rendered.index('<nav aria-label="Main navigation">')
+            end = rendered.index("</nav>", start)
+            parser.feed(rendered[start:end])
+            labels = parser.parts
+            self.assertEqual(labels, ["Our vision", "Examples", "Practical guide",
+                                      "Documentation", "Get started", "GitHub ↗"])
+            self.assertIn(f'href="{site.relative_url(page.output, "examples/index.html")}"', rendered)
+
+    def test_raw_responsive_images_cannot_bypass_asset_validation(self):
+        for value in ["missing.svg", "javascript:alert(1)", "//example.org/image.svg", "missing.svg,"]:
+            with self.subTest(value=value):
+                self.brief.write_text(f'# Title\n\n<source srcset="{value}">\n')
+                with self.assertRaises(ValueError):
+                    site.build(self.root)
 
 if __name__ == "__main__":
     unittest.main()

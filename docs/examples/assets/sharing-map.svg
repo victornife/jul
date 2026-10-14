@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 690" role="img" aria-labelledby="title desc"><title id="title">One Jul.IA instance, several applications</title><desc id="desc">An example request path. Family, a team or public visitors use a chosen connection to reach Jul.IA. Configured routes lead to separately running media and sensor applications or static website files served directly. Access policies require configuration.</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#174e3b"/></marker></defs><style>text{font-family:Arial,sans-serif;fill:#193c32}.label{font-size:20px;font-weight:700}.small{font-size:16px;fill:#546b61}.tiny{font-size:14px;fill:#546b61}.light{fill:white}.arrow{fill:none;stroke:#174e3b;stroke-width:2.5;marker-end:url(#arrow)}.card{fill:#fffdf6;stroke:#bdd0c1;stroke-width:1.5}</style><rect width="800" height="690" rx="20" fill="#fffdf6"/>
+<text x="400" y="35" text-anchor="middle" class="small">People reach the services you choose to share</text>
+<rect x="40" y="58" width="220" height="68" rx="14" class="card"/><text x="150" y="86" text-anchor="middle" class="label">You + family</text><text x="150" y="110" text-anchor="middle" class="tiny">For example: your media</text>
+<rect x="290" y="58" width="220" height="68" rx="14" class="card"/><text x="400" y="86" text-anchor="middle" class="label">Your team</text><text x="400" y="110" text-anchor="middle" class="tiny">For example: a dashboard</text>
+<rect x="540" y="58" width="220" height="68" rx="14" class="card"/><text x="650" y="86" text-anchor="middle" class="label">Public visitors</text><text x="650" y="110" text-anchor="middle" class="tiny">If you publish a website</text>
+<path d="M150 126 V162" class="arrow"/><path d="M400 126 V162" class="arrow"/><path d="M650 126 V162" class="arrow"/>
+<rect x="40" y="168" width="720" height="76" rx="14" fill="#e8f0e5" stroke="#bdd0c1"/>
+<text x="400" y="197" text-anchor="middle" class="label">A connection suited to each audience</text>
+<text x="400" y="225" text-anchor="middle" class="small">Private networking · a configured tunnel · a reachable server</text>
+<path d="M400 244 V302" class="arrow"/>
+<rect x="22" y="282" width="756" height="375" rx="20" fill="none" stroke="#bdd0c1" stroke-dasharray="7 6"/>
+<rect x="42" y="269" width="223" height="27" fill="#fffdf6"/><text x="48" y="289" class="small">Your computer or homelab</text>
+<rect x="65" y="311" width="670" height="163" rx="18" fill="#174e3b"/>
+<text x="400" y="346" text-anchor="middle" class="label light" style="font-size:27px">Jul.IA — your application gateway</text>
+<text x="400" y="375" text-anchor="middle" class="small light">Routes and gateway controls you configure</text>
+<path d="M288 397 V451 M512 397 V451" stroke="#81a991"/>
+<text x="175" y="420" text-anchor="middle" class="small light">Media route</text><text x="175" y="445" text-anchor="middle" class="tiny light">Restricted access</text>
+<text x="400" y="420" text-anchor="middle" class="small light">Dashboard route</text><text x="400" y="445" text-anchor="middle" class="tiny light">Restricted access</text>
+<text x="625" y="420" text-anchor="middle" class="small light">Website route</text><text x="625" y="445" text-anchor="middle" class="tiny light">Public, if chosen</text>
+<path d="M175 474 V523" class="arrow"/><path d="M400 474 V523" class="arrow"/><path d="M625 474 V523" class="arrow"/>
+<rect x="65" y="531" width="220" height="87" rx="14" class="card"/><text x="175" y="562" text-anchor="middle" class="label">Media application</text><text x="175" y="589" text-anchor="middle" class="tiny">Library + playback</text>
+<rect x="290" y="531" width="220" height="87" rx="14" class="card"/><text x="400" y="562" text-anchor="middle" class="label">Sensor application</text><text x="400" y="589" text-anchor="middle" class="tiny">Readings + alerts</text>
+<rect x="515" y="531" width="220" height="87" rx="14" class="card"/><text x="625" y="562" text-anchor="middle" class="label">Static website files</text><text x="625" y="589" text-anchor="middle" class="tiny">Served directly by Jul.IA</text>
+<text x="400" y="645" text-anchor="middle" class="tiny">Dynamic apps can also run on other machines the gateway can reach.</text>
+<text x="400" y="682" text-anchor="middle" class="tiny">Example only. Keep admin access private; configure each service's permissions.</text></svg>
