@@ -13,7 +13,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from string import Template
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
-from xml.etree.ElementTree import Element
+from xml.etree.ElementTree import Element, SubElement
 
 import markdown
 from markdown.extensions import Extension
@@ -33,11 +33,21 @@ class Page:
 PAGES = (
     Page("docs/vision/brief.md", "index.html", "Open-source application gateway"),
     Page("docs/vision/README.md", "vision/index.html", "Our vision"),
+    Page("docs/examples/README.md", "examples/index.html", "Examples"),
     Page("docs/practical-guide.md", "guide/index.html", "Practical guide"),
     Page("docs/getting-started.md", "get-started/index.html", "Get started"),
     Page("docs/index.md", "docs/index.html", "Documentation"),
 )
 OUTPUTS = {page.source: page.output for page in PAGES}
+EXAMPLES_SOURCE = "docs/examples/README.md"
+IMAGE_SUFFIXES = {".png", ".svg", ".webp"}
+
+
+def asset_output(source: str) -> str | None:
+    """Publish the example images locally rather than linking to a blob page."""
+    if source.startswith("docs/examples/assets/") and Path(source).suffix in IMAGE_SUFFIXES:
+        return "assets/examples/" + source.removeprefix("docs/examples/assets/")
+    return None
 
 
 def relative_url(output: str, target: str) -> str:
@@ -69,7 +79,10 @@ def resolve_link(root: Path, page: Page, url: str) -> str:
         if index.is_file():
             source = index.relative_to(root.resolve()).as_posix()
 
-    if source in OUTPUTS:
+    asset = asset_output(source)
+    if asset:
+        path = quote(relative_url(page.output, asset), safe="/")
+    elif source in OUTPUTS:
         path = relative_url(page.output, OUTPUTS[source])
     else:
         kind = "tree" if target.is_dir() else "blob"
@@ -105,6 +118,113 @@ class RepositoryLinks(Treeprocessor):
                     node.insert(index, wrapper)
 
 
+class ExamplesLayout(Treeprocessor):
+    """Present canonical Markdown as cards and figures without duplicating prose."""
+
+    def __init__(self, md, links: RepositoryLinks):
+        super().__init__(md)
+        self.links = links
+
+    @staticmethod
+    def groups(nodes):
+        """Keep every node while grouping H3 sections for the visual cards."""
+        intro, groups, current = [], [], None
+        for node in nodes:
+            if node.tag == "h3":
+                current = [node]
+                groups.append(current)
+            elif current is None:
+                intro.append(node)
+            else:
+                current.append(node)
+        return intro, groups
+
+    def run(self, element):
+        for table in element.iter("table"):
+            labels = ["".join(th.itertext()) for th in table.findall("./thead/tr/th")]
+            for row in table.findall("./tbody/tr"):
+                for cell, label in zip(row, labels):
+                    cell.set("data-label", label)
+
+        # A picture keeps one alt text while selecting the readable phone diagram.
+        for parent in list(element.iter()):
+            for index, node in list(enumerate(parent)):
+                if node.tag != "img" or not node.get("src", "").endswith(
+                        ("/sharing-map.svg", "/sensor-flow.svg")):
+                    continue
+                source = node.get("src")
+                picture = Element("picture", {"class": "diagram-picture"})
+                SubElement(picture, "source", {"media": "(max-width: 680px)",
+                           "srcset": source.removesuffix(".svg") + "-mobile.svg"})
+                parent.remove(node)
+                picture.append(node)
+                parent.insert(index, picture)
+
+        intro, sections, current = [], [], None
+        for node in list(element):
+            if node.tag == "h2":
+                current = [node]
+                sections.append(current)
+            elif current is None:
+                intro.append(node)
+            else:
+                current.append(node)
+        element[:] = []
+        hero = SubElement(element, "section", {"class": "hero", "aria-labelledby": "page-title"})
+        copy = SubElement(hero, "div", {"class": "hero-text"})
+        SubElement(copy, "p", {"class": "eyebrow"}).text = "Examples · Jul.IA"
+        heading = SubElement(copy, "h1", {"id": "page-title"})
+        title = self.links.heading.removeprefix("Examples — ")
+        first, separator, rest = title.partition(". ")
+        heading.text = first + "." if separator else title
+        if separator:
+            SubElement(heading, "br")
+            SubElement(heading, "span").text = rest
+        image_index = next((index for index, node in enumerate(intro)
+                            if node.tag == "p" and node.find("img") is not None), len(intro))
+        copy.extend(intro[:image_index])
+        if image_index < len(intro):
+            art = SubElement(hero, "div", {"class": "hero-art"})
+            art.extend(intro[image_index:])
+        scenario_id = next((nodes[0].get("id") for nodes in sections
+                            if "".join(nodes[0].itertext()) == "Five things you could do"), None)
+        if scenario_id:
+            action = SubElement(copy, "a", {"class": "button", "href": "#" + scenario_id})
+            action.text = "Find your first project "
+            SubElement(action, "span", {"aria-hidden": "true"}).text = "↓"
+
+        for nodes in sections:
+            title, *content = nodes
+            identifier = title.attrib.pop("id")
+            title.set("id", identifier + "-title")
+            section = SubElement(element, "section", {"id": identifier,
+                                 "class": "page-section section-" + identifier,
+                                 "aria-labelledby": title.get("id")})
+            head = SubElement(section, "div", {"class": "section-heading"})
+            head.append(title)
+            if identifier == "five-things-you-could-do":
+                before, cards = self.groups(content)
+                section.extend(before)
+                grid = SubElement(section, "div", {"class": "scenario-grid"})
+                for number, card in enumerate(cards, 1):
+                    article = SubElement(grid, "article", {"class": f"scenario scenario-{number}"})
+                    SubElement(article, "span", {"class": "scenario-number"}).text = f"{number:02}"
+                    article.extend(card)
+            elif identifier == "more-possibilities":
+                before, cards = self.groups(content)
+                section.extend(before)
+                after = []
+                if cards and cards[-1][-1].tag == "p" and "".join(
+                        cards[-1][-1].itertext()).startswith("These are possibilities"):
+                    after.append(cards[-1].pop())
+                grid = SubElement(section, "div", {"class": "possibility-grid"})
+                for card in cards:
+                    SubElement(grid, "article").extend(card)
+                section.extend(after)
+            else:
+                section.extend(content)
+
+
 class LinkExtension(Extension):
     def __init__(self, root: Path, page: Page):
         super().__init__()
@@ -115,6 +235,8 @@ class LinkExtension(Extension):
         self.processor = RepositoryLinks(md, self.root, self.page)
         # Remove the source H1 before TOC generates anchors; the template owns H1.
         md.treeprocessors.register(self.processor, "repository-links", 6)
+        if self.page.source == EXAMPLES_SOURCE:
+            md.treeprocessors.register(ExamplesLayout(md, self.processor), "examples-layout", 4)
 
 
 class Text(HTMLParser):
@@ -141,6 +263,12 @@ class OutputLinks(HTMLParser):
         for key in ("href", "src"):
             if values.get(key):
                 self.links.append(values[key])
+        if values.get("srcset"):
+            for item in values["srcset"].split(","):
+                fields = item.strip().split()
+                if not fields:
+                    raise ValueError("empty responsive image candidate")
+                self.links.append(fields[0])
 
 
 def validate_output(output: Path) -> None:
@@ -170,6 +298,9 @@ def validate_output(output: Path) -> None:
 
 
 def render_page(root: Path, page: Page, template: Template) -> str:
+    examples = page.source == EXAMPLES_SOURCE
+    if examples:
+        template = Template((root / "website" / "examples.html").read_text(encoding="utf-8"))
     extension = LinkExtension(root, page)
     renderer = markdown.Markdown(extensions=["fenced_code", "tables", "toc", extension],
                                  output_format="html")
@@ -180,6 +311,7 @@ def render_page(root: Path, page: Page, template: Template) -> str:
 
     nav = []
     for label, target in (("Our vision", "vision/index.html"),
+                          ("Examples", "examples/index.html"),
                           ("Practical guide", "guide/index.html"),
                           ("Documentation", "docs/index.html"),
                           ("Get started", "get-started/index.html")):
@@ -204,9 +336,10 @@ def render_page(root: Path, page: Page, template: Template) -> str:
     return template.substitute(
         document_title=html.escape("Jul.IA — " + page.label),
         description=html.escape(description, quote=True),
-        page_class="home" if home else "reading",
+        page_class="examples" if examples else "home" if home else "reading",
         home_url=relative_url(page.output, "index.html"),
         stylesheet_url=relative_url(page.output, "assets/site.css"),
+        examples_stylesheet_url=relative_url(page.output, "assets/examples.css"),
         icon_url=relative_url(page.output, "assets/logo.png"),
         label=html.escape(page.label),
         heading=html.escape(heading),
@@ -232,7 +365,17 @@ def build(root: Path | None = None) -> Path:
     assets = output / "assets"
     assets.mkdir(exist_ok=True)
     shutil.copyfile(root / "website" / "site.css", assets / "site.css")
+    shutil.copyfile(root / "website" / "examples.css", assets / "examples.css")
     shutil.copyfile(root / "docs" / "assets" / "logo.png", assets / "logo.png")
+    for source in sorted((root / "docs" / "examples" / "assets").rglob("*")):
+        if source.is_file():
+            target = asset_output(source.relative_to(root).as_posix())
+            if target:
+                if not source.resolve().is_relative_to(root.resolve()):
+                    raise ValueError(f"{source}: asset leaves the repository")
+                destination = output / target
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
     (output / ".nojekyll").write_text("", encoding="utf-8")
     (output / "sources.json").write_text(json.dumps(OUTPUTS, indent=2) + "\n", encoding="utf-8")
     validate_output(output)

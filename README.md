@@ -37,6 +37,7 @@ software, with advanced capabilities and control over their infrastructure and
 dependencies, while reducing unnecessary cost and complexity.
 
 **[Our vision](docs/vision/README.md)** ·
+**[Examples](docs/examples/README.md)** ·
 **[Practical guide](docs/practical-guide.md)** ·
 **[Get started](docs/getting-started.md)**
 

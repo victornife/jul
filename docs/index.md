@@ -33,6 +33,8 @@ inside the immutable release archives. They do not close the partial-audit ledge
   our principles, the gateway available today and the sharing experience we
   are building toward.
 - **[Brief vision](vision/brief.md)** — the compact introduction.
+- **[Examples](examples/README.md)** — illustrated ideas for families, homelabs,
+  small teams and communities, with clear application and gateway responsibilities.
 - **[Practical guide](practical-guide.md)** — what you can use, what you
   need to bring, alternatives, connectivity choices and first steps.
 - **[README](../README.md)** — product scope, installation and capability

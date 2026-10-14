@@ -8,6 +8,7 @@ analytics. The gateway's build and runtime dependencies are unchanged.
 | --- | --- |
 | Homepage | [Brief vision](../docs/vision/brief.md) |
 | Our vision | [Longer vision and mission](../docs/vision/README.md) |
+| Examples | [Illustrated use cases](../docs/examples/README.md) |
 | Practical guide | [Practical guide](../docs/practical-guide.md) |
 | Get started | [Getting started](../docs/getting-started.md) |
 | Documentation | [Documentation index](../docs/index.md) |
@@ -16,6 +17,13 @@ Links between these pages stay within the website. Other repository references
 lead to their canonical GitHub files or directories. Relative site URLs support
 both a project subpath and a custom domain. The existing logo is copied from
 [docs/assets/logo.png](../docs/assets/logo.png).
+
+Examples uses the same header and keeps all existing navigation links. Its
+cards and figures are rendered from the canonical Markdown, with illustrations
+and editable SVG diagrams copied from `docs/examples/assets` to the site.
+Phone layouts keep diagram labels readable; image references remain relative
+under both `/jul/` and a custom domain. Artwork provenance is recorded in
+[ARTWORK.md](../docs/examples/assets/ARTWORK.md).
 
 ## Build and preview locally
 
@@ -37,7 +45,7 @@ missing assets, broken anchors and unsafe link schemes fail publication. The
 tests cover source updates, navigation, tables, literal command examples and
 failure boundaries.
 
-The repository's existing Console browser-smoke job also checks all five site
+The repository's existing Console browser-smoke job also checks all six site
 pages at desktop and mobile widths, keyboard access, images and navigation
 under the `/jul/` project path. It reuses the Console's locked Playwright
 dependency and retains screenshots in the `website-browser-preview` artifact.

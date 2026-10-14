@@ -1,0 +1,136 @@
+/* Presentation for the canonical Examples page; shared navigation stays in site.css. */
+.examples {
+  --green: #174e3b;
+  --ink: #193c32;
+  --muted: #5b6c61;
+  --paper: #faf9f2;
+  --line: #d9e2d6;
+  --sage: #e9f0e5;
+  background: var(--paper);
+}
+.examples main { max-width: 1260px; padding: 0 36px; }
+.examples .header-inner { max-width: 1260px; padding: 20px 36px; }
+.examples-prose { font-size: 17px; line-height: 1.7; }
+.examples-prose p { margin: 0 0 17px; }
+.examples-prose h1, .examples-prose h2, .examples-prose h3 { letter-spacing: -.035em; }
+.examples-prose h1 { max-width: none; font-size: clamp(42px, 4vw, 58px); margin: 0 0 26px; font-weight: 750; line-height: 1.13; }
+.examples-prose h1 span { color: #357453; }
+.examples-prose h2 { font-size: clamp(29px, 3vw, 43px); margin: 0 0 24px; max-width: 800px; line-height: 1.13; }
+.examples-prose h3 { font-size: 24px; line-height: 1.25; margin: 14px 0 21px; }
+.examples-prose strong { font-weight: 720; }
+.examples-prose .eyebrow { font-size: 12px; letter-spacing: .14em; font-weight: 800; color: #668069; margin: 0 0 15px; }
+.examples-prose .hero { padding: 52px 0 56px; display: grid; grid-template-columns: .92fr 1.08fr; align-items: center; gap: 44px; }
+.examples-prose .hero-text > p:not(.eyebrow) { font-size: 18px; line-height: 1.65; max-width: 500px; }
+.examples .hero-art { display: block; }
+.examples .hero-art p { margin: 0; }
+.examples .hero-art img { width: 100%; display: block; border-radius: 24px; aspect-ratio: 4/3; object-fit: cover; box-shadow: none; }
+.examples .hero-art em { display: block; font-size: 13px; color: var(--muted); padding: 12px 4px; }
+.examples-prose .button { display: inline-flex; gap: 24px; background: var(--green); color: white; padding: 14px 22px; border-radius: 10px; font-size: 15px; font-weight: 700; margin-top: 10px; }
+.examples-prose .button:hover { color: white; background: #306e50; }
+.page-section { padding: 48px 0; border-top: 1px solid var(--line); scroll-margin-top: 20px; }
+.page-section > p { max-width: 850px; }
+.section-heading { margin-bottom: 24px; }
+.diagram-picture { display: block; max-width: 960px; margin: 24px auto 16px; }
+.page-section > p:has(> .diagram-picture) { max-width: none; margin: 0; }
+.diagram-picture > img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 16px; }
+.section-one-gateway-several-useful-applications > p:has(> em),
+.section-a-sensor-dashboard-explained > p:has(> em) { max-width: 860px; margin: 12px auto 18px; text-align: center; font-size: 14px; color: var(--muted); }
+.scenario-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 22px; align-items: stretch; }
+.scenario { grid-column: span 2; background: #fffdf7; border: 1px solid var(--line); border-radius: 18px; padding: 26px; overflow: hidden; }
+.scenario-number { font-size: 14px; letter-spacing: .1em; font-weight: 800; color: #618467; }
+.scenario h3 { min-height: 3.75em; font-size: 24px; }
+.scenario p { font-size: 16px; line-height: 1.7; }
+.scenario img { display: block; width: 100%; height: auto; aspect-ratio: 16/9; object-fit: cover; border-radius: 12px; }
+.scenario p:has(img) { margin-bottom: 22px; }
+.scenario-1, .scenario-2 { grid-column: span 3; }
+.scenario-1 h3, .scenario-2 h3 { font-size: 27px; min-height: 2.5em; }
+.section-what-do-you-need-to-start { background: var(--sage); border-radius: 22px; padding: 38px 34px; margin: 28px 0; border: 0; }
+.section-what-do-you-need-to-start ol { padding-left: 24px; max-width: 900px; }
+.examples-prose li { margin: 14px 0; padding-left: 8px; }
+.examples-prose .table-scroll { overflow-x: auto; max-width: 100%; margin: 24px 0; border: 0; border-radius: 0; }
+.examples-prose table { width: 100%; border-collapse: collapse; font-size: 15px; line-height: 1.55; text-align: left; }
+.examples-prose th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; background: var(--sage); padding: 15px 17px; color: var(--green); }
+.examples-prose td { padding: 16px 17px; border-bottom: 1px solid var(--line); }
+.examples-prose th, .examples-prose td { vertical-align: top; min-width: 0; }
+.examples-prose td:first-child { font-weight: 650; }
+.examples-prose table tbody tr:last-child td { border-bottom: 0; }
+.section-what-do-you-need-to-start th { background: #dce8d8; }
+.possibility-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 25px; margin: 28px 0; }
+.possibility-grid article { background: #fffdf7; border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+.possibility-grid h3 { font-size: 21px; margin: 5px 0 15px; }
+.possibility-grid table { font-size: 14px; }
+.possibility-grid th, .possibility-grid td { padding: 12px 8px; }
+.possibility-grid th:first-child, .possibility-grid td:first-child { width: 40%; }
+.section-small-audience-serious-capabilities table { min-width: 650px; }
+.section-build-a-setup-you-can-look-after { padding: 30px; border-radius: 18px; border: 1px solid var(--line); background: #f0f2e9; margin: 24px 0; }
+.section-build-a-setup-you-can-look-after h2 { font-size: 30px; }
+.section-start-small-grow-on-your-terms { max-width: 900px; }
+.section-pick-something-you-would-use-tomorrow { background: var(--green); color: #fffdf6; padding: 38px 34px; border-radius: 22px; margin: 0 0 48px; border: 0; }
+.section-pick-something-you-would-use-tomorrow a { color: #d3eacb; }
+.section-pick-something-you-would-use-tomorrow p:last-child { font-size: 23px; margin: 28px 0 0; }
+.examples-prose img { max-width: 100%; }
+@media (max-width: 960px) {
+  .examples-prose .hero { gap: 25px; grid-template-columns: 1fr 1fr; }
+  .examples main { padding: 0 24px; }
+  .possibility-grid { grid-template-columns: 1fr; }
+  .possibility-grid article { padding: 24px; }
+  .possibility-grid table { font-size: 15px; }
+  .examples .hero-art img { aspect-ratio: 1/1; }
+  .examples-prose .hero-text > p:not(.eyebrow) { font-size: 16px; }
+}
+@media (max-width: 960px) and (min-width: 681px) {
+  .scenario-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scenario { grid-column: span 1; }
+  .scenario h3 { min-height: 2.5em; }
+  .scenario-1 h3, .scenario-2 h3 { min-height: 3.75em; }
+  .scenario-5 { grid-column: 1/-1; display: grid; grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr); column-gap: 22px; align-content: start; }
+  .scenario-5 .scenario-number, .scenario-5 h3 { grid-column: 1/-1; }
+  .scenario-5 h3 { min-height: 0; }
+  .scenario-5 p:has(img) { grid-column: 1; grid-row: 3/span 3; align-self: start; margin: 0; }
+  .scenario-5 p:not(:has(img)) { grid-column: 2; margin: 0 0 14px; }
+}
+@media (max-width: 680px) {
+  .examples .header-inner { padding: 17px 20px; }
+  .examples main { padding: 0 20px; }
+  .examples-prose { font-size: 16px; }
+  .examples-prose .hero { display: flex; flex-direction: column; align-items: stretch; padding: 35px 0; gap: 28px; }
+  .examples-prose .hero-text > p:not(.eyebrow) { font-size: 17px; }
+  .examples .hero-art img { aspect-ratio: 16/9; }
+  .examples .hero-art em { padding: 9px 0; }
+  .page-section { padding: 32px 0; }
+  .diagram-picture { margin: 20px auto 14px; }
+  .diagram-picture > img { border-radius: 10px; }
+  .scenario-grid { grid-template-columns: 1fr; gap: 18px; }
+  .scenario, .scenario-1, .scenario-2 { grid-column: auto; padding: 20px; }
+  .scenario h3, .scenario-1 h3, .scenario-2 h3 { min-height: 0; font-size: 24px; }
+  .section-what-do-you-need-to-start, .section-pick-something-you-would-use-tomorrow { padding: 28px 20px; margin-left: -4px; margin-right: -4px; }
+  .section-build-a-setup-you-can-look-after { padding: 23px; }
+  .section-heading { margin-bottom: 20px; }
+  .section-what-do-you-need-to-start table,
+  .section-small-audience-serious-capabilities table,
+  .section-existing-applications-to-explore table { min-width: 0; }
+  .section-what-do-you-need-to-start thead,
+  .section-small-audience-serious-capabilities thead,
+  .section-existing-applications-to-explore thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .section-what-do-you-need-to-start tbody,
+  .section-small-audience-serious-capabilities tbody,
+  .section-existing-applications-to-explore tbody { display: block; }
+  .section-what-do-you-need-to-start tr,
+  .section-small-audience-serious-capabilities tr,
+  .section-existing-applications-to-explore tr { display: block; padding: 18px 0; border-bottom: 1px solid #cad8c5; }
+  .section-what-do-you-need-to-start td,
+  .section-small-audience-serious-capabilities td,
+  .section-existing-applications-to-explore td { display: block; border: 0; padding: 8px 0; }
+  .section-what-do-you-need-to-start td:before,
+  .section-small-audience-serious-capabilities td:before,
+  .section-existing-applications-to-explore td:before { content: attr(data-label); display: block; font-size: 11px; text-transform: uppercase; font-weight: 800; letter-spacing: .07em; color: #668069; margin-bottom: 4px; }
+  .section-what-do-you-need-to-start td:first-child,
+  .section-small-audience-serious-capabilities td:first-child { font-size: 18px; }
+  .section-existing-applications-to-explore td:first-child { font-size: 20px; }
+}
+@media print {
+  .examples .hero-art { display: none; }
+  .examples-prose .hero, .scenario-grid, .possibility-grid { display: block; }
+  .scenario { break-inside: avoid; margin-bottom: 1rem; }
+  .examples main { padding: 0; max-width: none; }
+}

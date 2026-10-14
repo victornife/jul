@@ -8,6 +8,7 @@ on:
       - 'website/**'
       - 'scripts/build-site.py'
       - 'scripts/test_build_site.py'
+      - 'scripts/test-site.cjs'
       - '.github/workflows/website.yml'
   push:
     branches: [main]
@@ -16,6 +17,7 @@ on:
       - 'website/**'
       - 'scripts/build-site.py'
       - 'scripts/test_build_site.py'
+      - 'scripts/test-site.cjs'
       - '.github/workflows/website.yml'
   workflow_dispatch:
 
