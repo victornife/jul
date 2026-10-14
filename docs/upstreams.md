@@ -1,6 +1,6 @@
 # Upstreams and backend trust
 
-> **Maturity and delivery:** the pool/balancing/health foundation and `backend_tls` are GA/soaked in published v2.0.0. The existing admission/retry/circuit contract is independently GA (soak pending) for v2.2.0 under [the #527 decision](reviews/2026-10-12-ga-220.md). Consistent-hash affinity remains Beta and shipped in v2.1.0. See [status.md](status.md) and [Reload behaviour](#reload-behaviour).
+> **Maturity and delivery:** the pool/balancing/health foundation and `backend_tls` are GA/soaked in published v2.0.0. The existing admission/retry/circuit contract is independently GA/soaked for v2.2.0 under [the #527 decision](reviews/2026-10-12-ga-220.md) and [source-bound eight-hour #590 review](reviews/2026-10-14-ga-soak-590-results.md), including the retained collector failure and authorised supplement. Consistent-hash affinity remains Beta and shipped in v2.1.0. See [status.md](status.md) and [Reload behaviour](#reload-behaviour).
 
 An `[[upstreams]]` block is a named pool of backends with a balancing strategy,
 passive and optional active health checking, optional dynamic discovery, and —
@@ -64,7 +64,8 @@ proxy_pass = "https://inventory"
 > explicit and decides the concurrency, pending, connection, retry-budget and half-open controls that
 > extend it. Admission, retry budget and half-open controls shipped in v2.0.0
 > as Beta; #527 certifies the bounded contract as GA for v2.2.0 while retaining
-> its pending post-GA soak gate.
+> its then-pending post-GA soak gate, completed by the source-bound
+> [#590 review](reviews/2026-10-14-ga-soak-590-results.md).
 
 > **Who can use a pool.** `proxy_pass`, `grpc_transcode.target`, `fastcgi_pass` and `uwsgi_pass` all
 > accept a named upstream, so FastCGI and uWSGI routes are pool members with the same load balancing,

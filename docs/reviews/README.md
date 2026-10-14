@@ -1,6 +1,6 @@
 # Reviews & decision log
 
-> Version 1.6 · Updated 2026-07-19
+> Version 1.7 · Updated 2026-10-14
 
 > **Historical July checkpoint:** findings from Rounds 5–13 were resolved and
 > tracked in [`docs/audit-register.md`](../audit-register.md). The point-in-time
@@ -21,6 +21,14 @@ ADR and to the vision / roadmap / specs change it produced.
 Reviewed documents are archived verbatim (with a dated **Reviewed** acknowledgement
 header); they are never silently edited. Decisions are recorded below and, when
 durable, promoted to an [ADR](../adr/).
+
+## Later source-bound decisions
+
+| Date | Review | Scope |
+| --- | --- | --- |
+| 2026-10-14 | [Eight-hour #590 result and collection review](2026-10-14-ga-soak-590-results.md) | Completes criterion 5 for exactly routing/CORS, resilience and auxiliary egress on unchanged full v2.2.0; preserves the original count failure and authorised supplement |
+| 2026-10-14 | [#590 pre-run contract](2026-10-14-ga-soak-590.md) | Fixed source/host/workload/threshold declaration, retained separately from results |
+| 2026-10-12 | [v2.2.0 bounded GA decision](2026-10-12-ga-220.md) | Original #527 publication decision; criterion 5 was pending at publication |
 
 ## Reviewed inputs (archived)
 

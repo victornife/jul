@@ -1,0 +1,533 @@
+{
+  "augmented_evaluation": {
+    "automatic_promotion": false,
+    "criterion_5_candidate": true,
+    "errors": [],
+    "features": [
+      "CGC-ROUTE",
+      "CGC-RES",
+      "SEC-EGRESS"
+    ],
+    "measured_seconds": 28800.008060553,
+    "passed": true,
+    "resource_trend_assessed": true,
+    "samples": 2888
+  },
+  "augmented_resources": {
+    "active_max": {
+      "go_goroutines": 71.0,
+      "go_memstats_heap_inuse_bytes": 16359424.0,
+      "process_open_fds": 37.0,
+      "process_resident_memory_bytes": 54554624.0
+    },
+    "all_series": 248,
+    "max_sample_gap_seconds": 10.306353989006311,
+    "quiet": [
+      {
+        "elapsed": 28901.203435100997,
+        "metrics": {
+          "go_goroutines": 29.0,
+          "go_memstats_heap_inuse_bytes": 12738560.0,
+          "jul_upstream_active_requests{pool=\"circuit\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"clean\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"deadline\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"discovery\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"grpc\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"health\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"pressure\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"replay\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"retry\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"circuit\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"clean\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"deadline\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"discovery\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"grpc\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"health\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"pressure\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"replay\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"retry\"}": 0.0,
+          "process_open_fds": 16.0,
+          "process_resident_memory_bytes": 53624832.0
+        }
+      },
+      {
+        "elapsed": 28911.340417828,
+        "metrics": {
+          "go_goroutines": 29.0,
+          "go_memstats_heap_inuse_bytes": 13041664.0,
+          "jul_upstream_active_requests{pool=\"circuit\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"clean\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"deadline\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"discovery\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"grpc\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"health\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"pressure\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"replay\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"retry\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"circuit\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"clean\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"deadline\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"discovery\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"grpc\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"health\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"pressure\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"replay\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"retry\"}": 0.0,
+          "process_open_fds": 16.0,
+          "process_resident_memory_bytes": 53624832.0
+        }
+      },
+      {
+        "elapsed": 28921.46182231,
+        "metrics": {
+          "go_goroutines": 29.0,
+          "go_memstats_heap_inuse_bytes": 13467648.0,
+          "jul_upstream_active_requests{pool=\"circuit\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"clean\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"deadline\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"discovery\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"grpc\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"health\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"pressure\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"replay\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"retry\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"circuit\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"clean\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"deadline\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"discovery\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"grpc\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"health\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"pressure\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"replay\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"retry\"}": 0.0,
+          "process_open_fds": 16.0,
+          "process_resident_memory_bytes": 53624832.0
+        }
+      }
+    ],
+    "rss_final_half_slope_bytes_per_hour": 235957.26225596352,
+    "warmup_max": {
+      "go_goroutines": 67.0,
+      "go_memstats_heap_inuse_bytes": 12869632.0,
+      "process_open_fds": 34.0,
+      "process_resident_memory_bytes": 48140288.0
+    },
+    "warmup_series": 248
+  },
+  "automatic_promotion": false,
+  "binary_sha256": "f7ff8425a2e07f0ee55bdf1abc38fce4f8e9e421b8706250f7e8999689d2c17f",
+  "budget": {
+    "cpu_max": "200000 100000",
+    "cpu_quota": "200%",
+    "enforced": true,
+    "evidence_max_bytes": 2147483648,
+    "memory_max": "2147483648",
+    "memory_max_bytes": 2147483648
+  },
+  "collection_deviation": "Authorised read-only supplemental scrapes of the same continuous process; primary count failure remains unchanged. No threshold or product workload changed.",
+  "declared_seconds": 28800,
+  "features": [
+    "CGC-ROUTE",
+    "CGC-RES",
+    "SEC-EGRESS"
+  ],
+  "final_fixture_counts": {
+    "auth:/check": 322787,
+    "backend_a:/auth-dns/": 64226,
+    "backend_a:/auth-tight/": 480,
+    "backend_a:/auth/": 193855,
+    "backend_a:/clean/": 64227,
+    "backend_a:/cors/": 192678,
+    "backend_a:/discovery/": 63635,
+    "backend_a:/pressure/slow": 960,
+    "backend_a:/replay/unsafe": 480,
+    "backend_a:/retry/ok": 4800,
+    "backend_a:/retry/reset": 5760,
+    "backend_a:/route/item": 194815,
+    "backend_b:/circuit/ok": 480,
+    "backend_b:/circuit/reset": 480,
+    "backend_b:/deadline/slow": 480,
+    "backend_b:/discovery/": 1071,
+    "backend_b:/health": 28801,
+    "backend_b:/healthprobe/": 480,
+    "backend_b:/replay/committed": 480,
+    "backend_b:/retry/ok": 4800,
+    "backend_b:/retry/reset": 5280,
+    "client_cancelled": 967,
+    "control:/check": 480,
+    "control:/v1/health/service/soak": 28440,
+    "tcp_connections": 1441,
+    "tcp_rounds": 65667
+  },
+  "finished_utc": "2026-10-14T06:39:45Z",
+  "harness_files": {
+    "ga-soak-requirements.txt": "9353ecc28a66d7ac2c74716f54b6195f7021227f4d792b70d39bf16423d58959",
+    "ga-soak.py": "2d251f12e67065a4b74d72f293f361001456af81f73aeb7cab82bbcc5f4cdd40",
+    "grpc-echo-server.go": "22887ff6d3275868eb16bf18897c655a1ffa25922ea50fd32ea8d5495d94b7bf",
+    "test_ga_soak.py": "77f3c4ff730714bed8db572be582c735420e59362f8c44262367e94e1670156f",
+    "verify-release-packages.py": "192108ed002cf19c089fa85fe5039e3096781641a7793c4053c2819dd6376337"
+  },
+  "host_boot_sha256": "03e85a88b5f89fe3f69425eef50288e92aa7d9cfb3716b8d61741025a853c408",
+  "host_class": "shared ARM64 WSL2 Linux; loopback clients",
+  "jul_pid": 106073,
+  "limitations": [
+    "WSL2 shared-host loopback topology; any >25s recording gap fails",
+    "gRPC native h2c, TCP L4; no UDP/transcoding/stream replay certification",
+    "mock Consul protocol consumer, not a real Consul cluster",
+    "system localhost DNS only; no controlled authoritative DNS/rebinding claim",
+    "forward-auth redirect relay and discovery non-following, not JWKS redirect certification",
+    "#406 outcome retry and #522 ejection remain deferred",
+    "private profiles/config/history/logs are not public attachments"
+  ],
+  "limits": {
+    "artifact_ceiling_bytes": 2147483648,
+    "cycle_seconds": 60,
+    "fd_growth": 8,
+    "goroutine_growth": 96,
+    "heap_growth_bytes": 134217728,
+    "max_cycle_gap_seconds": 90,
+    "max_gap_seconds": 25,
+    "quiet_seconds": 120,
+    "rss_ceiling_bytes": 1073741824,
+    "rss_growth_bytes": 134217728,
+    "rss_slope_bytes_per_hour": 16777216,
+    "sample_seconds": 10,
+    "series_ceiling": 3000,
+    "series_growth": 128,
+    "warmup_seconds": 600
+  },
+  "original_evaluation": {
+    "automatic_promotion": false,
+    "criterion_5_candidate": false,
+    "errors": [
+      "required sample count missing"
+    ],
+    "features": [
+      "CGC-ROUTE",
+      "CGC-RES",
+      "SEC-EGRESS"
+    ],
+    "measured_seconds": 28800.008060553,
+    "passed": false,
+    "resource_trend_assessed": true,
+    "samples": 2851
+  },
+  "original_verdict_preserved": true,
+  "package": {
+    "archive": "jul_v2.2.0_linux_arm64_full.tar.gz",
+    "checksums": "passed",
+    "metadata": {
+      "arch": "arm64",
+      "build_date": "2026-10-11T23:14:04Z",
+      "commit": "b12e051139f652b400cff37d9f063f5637a7d550",
+      "dirty": false,
+      "go_version": "go1.27.2",
+      "os": "linux",
+      "product": "Jul.IA",
+      "version": "v2.2.0"
+    },
+    "provenance": "passed",
+    "sbom": "passed",
+    "sha256": "07d468c3e92232b0174cbdc66cd2abbb507719e332b3f60a5dfc60b22f172998"
+  },
+  "phase_coverage": {
+    "auth_allow": {
+      "count": 64226,
+      "first_elapsed": 0.1098993999985396,
+      "last_elapsed": 28800.260886654996,
+      "max_gap_seconds": 14.773457734998374
+    },
+    "auth_deny": {
+      "count": 64226,
+      "first_elapsed": 0.11126389999844832,
+      "last_elapsed": 28800.261324154995,
+      "max_gap_seconds": 14.773987925997062
+    },
+    "auth_dns": {
+      "count": 64226,
+      "first_elapsed": 0.11532339999757824,
+      "last_elapsed": 28800.262176155,
+      "max_gap_seconds": 14.777182103000086
+    },
+    "circuit_recovery": {
+      "count": 480,
+      "first_elapsed": 3.016662304999045,
+      "last_elapsed": 28743.143554230996,
+      "max_gap_seconds": 60.31721341999946
+    },
+    "client_cancel": {
+      "count": 480,
+      "first_elapsed": 6.628900003997842,
+      "last_elapsed": 28746.758303528997,
+      "max_gap_seconds": 60.326569655997446
+    },
+    "committed_response": {
+      "count": 480,
+      "first_elapsed": 1.8092829029992572,
+      "last_elapsed": 28741.936003179002,
+      "max_gap_seconds": 60.305599589999474
+    },
+    "cors": {
+      "count": 64226,
+      "first_elapsed": 0.10202079999726266,
+      "last_elapsed": 28800.257641554996,
+      "max_gap_seconds": 14.845927303998906
+    },
+    "discovery": {
+      "count": 64226,
+      "first_elapsed": 0.12057739999727346,
+      "last_elapsed": 28800.262920054996,
+      "max_gap_seconds": 14.777857590001076
+    },
+    "dns_deny": {
+      "count": 480,
+      "first_elapsed": 10.523665582997637,
+      "last_elapsed": 28750.713802215996,
+      "max_gap_seconds": 60.325060160997964
+    },
+    "grpc": {
+      "count": 64226,
+      "first_elapsed": 0.1251702999979898,
+      "last_elapsed": 28800.264450854997,
+      "max_gap_seconds": 14.778450367000914
+    },
+    "grpc_pressure_cancel": {
+      "count": 480,
+      "first_elapsed": 7.038680900997861,
+      "last_elapsed": 28747.173089337997,
+      "max_gap_seconds": 60.328028460004134
+    },
+    "health_recovery": {
+      "count": 480,
+      "first_elapsed": 5.424876208999194,
+      "last_elapsed": 28745.553602202,
+      "max_gap_seconds": 60.324928043999535
+    },
+    "http": {
+      "count": 64226,
+      "first_elapsed": 0.10524449999866192,
+      "last_elapsed": 28800.258953554996,
+      "max_gap_seconds": 14.823210602997278
+    },
+    "invalid_candidate": {
+      "count": 480,
+      "first_elapsed": 13.94219576499745,
+      "last_elapsed": 28754.158800415,
+      "max_gap_seconds": 60.348330335000355
+    },
+    "l4": {
+      "count": 64226,
+      "first_elapsed": 0.12592959999892628,
+      "last_elapsed": 28800.264779654997,
+      "max_gap_seconds": 14.778413063999324
+    },
+    "l4_fault_recovery": {
+      "count": 480,
+      "first_elapsed": 8.244183994997002,
+      "last_elapsed": 28748.384124164997,
+      "max_gap_seconds": 60.32955636100087
+    },
+    "l4_pressure": {
+      "count": 480,
+      "first_elapsed": 7.040667200999451,
+      "last_elapsed": 28747.177013038,
+      "max_gap_seconds": 60.328200559000834
+    },
+    "pressure": {
+      "count": 480,
+      "first_elapsed": 1.1341379019977467,
+      "last_elapsed": 28741.283827511998,
+      "max_gap_seconds": 60.190596371998254
+    },
+    "redirect": {
+      "count": 480,
+      "first_elapsed": 10.44843288300035,
+      "last_elapsed": 28750.636048113996,
+      "max_gap_seconds": 60.33211026099889
+    },
+    "retry_budget": {
+      "count": 480,
+      "first_elapsed": 1.6014373019970662,
+      "last_elapsed": 28741.728977621,
+      "max_gap_seconds": 60.302565086007235
+    },
+    "retry_deadline": {
+      "count": 480,
+      "first_elapsed": 1.7538298029976431,
+      "last_elapsed": 28741.881932889995,
+      "max_gap_seconds": 60.302576289999706
+    },
+    "rollback": {
+      "count": 480,
+      "first_elapsed": 14.002880564999941,
+      "last_elapsed": 28754.231212616996,
+      "max_gap_seconds": 60.419509035000374
+    },
+    "routing": {
+      "count": 64226,
+      "first_elapsed": 0.01150959999722545,
+      "last_elapsed": 28800.169711754,
+      "max_gap_seconds": 14.85546662100387
+    },
+    "tighten": {
+      "count": 480,
+      "first_elapsed": 13.925838666000345,
+      "last_elapsed": 28754.121618114,
+      "max_gap_seconds": 60.31880883700069
+    },
+    "unsafe_post": {
+      "count": 480,
+      "first_elapsed": 1.756456202998379,
+      "last_elapsed": 28741.883931688997,
+      "max_gap_seconds": 60.30334939000022
+    }
+  },
+  "primary_harness_sha256": "2d251f12e67065a4b74d72f293f361001456af81f73aeb7cab82bbcc5f4cdd40",
+  "primary_manifest_sha256": "0f97cac485d2ed02e5bcd0618bf43c76635bbccccbca724f363225b57f3c5b5a",
+  "primary_resources": {
+    "active_max": {
+      "go_goroutines": 71.0,
+      "go_memstats_heap_inuse_bytes": 16359424.0,
+      "process_open_fds": 37.0,
+      "process_resident_memory_bytes": 54554624.0
+    },
+    "all_series": 248,
+    "max_sample_gap_seconds": 10.306353989006311,
+    "quiet": [
+      {
+        "elapsed": 28901.203435100997,
+        "metrics": {
+          "go_goroutines": 29.0,
+          "go_memstats_heap_inuse_bytes": 12738560.0,
+          "jul_upstream_active_requests{pool=\"circuit\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"clean\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"deadline\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"discovery\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"grpc\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"health\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"pressure\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"replay\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"retry\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"circuit\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"clean\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"deadline\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"discovery\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"grpc\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"health\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"pressure\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"replay\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"retry\"}": 0.0,
+          "process_open_fds": 16.0,
+          "process_resident_memory_bytes": 53624832.0
+        }
+      },
+      {
+        "elapsed": 28911.340417828,
+        "metrics": {
+          "go_goroutines": 29.0,
+          "go_memstats_heap_inuse_bytes": 13041664.0,
+          "jul_upstream_active_requests{pool=\"circuit\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"clean\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"deadline\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"discovery\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"grpc\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"health\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"pressure\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"replay\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"retry\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"circuit\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"clean\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"deadline\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"discovery\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"grpc\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"health\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"pressure\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"replay\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"retry\"}": 0.0,
+          "process_open_fds": 16.0,
+          "process_resident_memory_bytes": 53624832.0
+        }
+      },
+      {
+        "elapsed": 28921.46182231,
+        "metrics": {
+          "go_goroutines": 29.0,
+          "go_memstats_heap_inuse_bytes": 13467648.0,
+          "jul_upstream_active_requests{pool=\"circuit\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"clean\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"deadline\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"discovery\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"grpc\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"health\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"pressure\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"replay\"}": 0.0,
+          "jul_upstream_active_requests{pool=\"retry\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"circuit\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"clean\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"deadline\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"discovery\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"grpc\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"health\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"pressure\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"replay\"}": 0.0,
+          "jul_upstream_pending_requests{pool=\"retry\"}": 0.0,
+          "process_open_fds": 16.0,
+          "process_resident_memory_bytes": 53624832.0
+        }
+      }
+    ],
+    "rss_final_half_slope_bytes_per_hour": 239402.90488180344,
+    "warmup_max": {
+      "go_goroutines": 67.0,
+      "go_memstats_heap_inuse_bytes": 12869632.0,
+      "process_open_fds": 34.0,
+      "process_resident_memory_bytes": 48140288.0
+    },
+    "warmup_series": 248
+  },
+  "profile_metadata": {
+    "T0": {
+      "profiles": {
+        "goroutine": {
+          "bytes": 4490,
+          "sha256": "ef0d13c0cd3acf8fccca05eada2354a6366542bb9eba99fffd7e2a96336b09bc"
+        },
+        "heap": {
+          "bytes": 8119,
+          "sha256": "9a27658768ee72712887c43b15f263c61aa6293bcf32cde202beb6b52437646a"
+        }
+      },
+      "utc": "2026-10-13T22:37:42Z"
+    },
+    "Tend": {
+      "profiles": {
+        "goroutine": {
+          "bytes": 4606,
+          "sha256": "86c8e8cd9fe054068375050b7da83082f1ad688023ed100688402db4a5d292c8"
+        },
+        "heap": {
+          "bytes": 139554,
+          "sha256": "0b79c4a754de455cfe8105cf8bc7b398719bc6acb0c79d6abc25ecddc44ffd38"
+        }
+      },
+      "utc": "2026-10-14T06:39:43Z"
+    }
+  },
+  "retained_access_window": {
+    "complete_request_archive": false,
+    "reason_counts": {
+      "client_cancelled": 294,
+      "proxy_overloaded": 392,
+      "upstream_connect_failed": 1666,
+      "upstream_timeout": 98,
+      "upstream_unavailable": 98
+    },
+    "valid_json_records": 311167
+  },
+  "review_sha256": "65d280eb7fe0c4dadf502ffaf6f55207c57b92583c76175ba697d88e62539a2c",
+  "runtime_source": "b12e051139f652b400cff37d9f063f5637a7d550",
+  "started_utc": "2026-10-13T22:37:42Z",
+  "supplemental_collector_sha256": "a5049af875c3335db03f5433ecb39bcf2e27d4773cf70b51966ba04c803e1e9e",
+  "supplemental_samples": 37,
+  "unexpected_events": 0
+}

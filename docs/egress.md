@@ -1,8 +1,10 @@
 # Egress allow-list
 
-The bounded auxiliary-fetch contract is GA (soak pending) for v2.2.0 under
-[the #527 decision](reviews/2026-10-12-ga-220.md). This does not expand its
-security boundary or relabel historical/consolidated soak evidence. The current
+The bounded auxiliary-fetch contract is GA/soaked for v2.2.0 under
+[the #527 decision](reviews/2026-10-12-ga-220.md) and
+[the source-bound eight-hour #590 review](reviews/2026-10-14-ga-soak-590-results.md).
+The original collector failure and authorised supplement remain visible.
+This does not expand its security boundary or relabel historical evidence. The current
 limitations and Security-panel denial visibility below remain part of the
 stable contract.
 

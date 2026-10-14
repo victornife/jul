@@ -279,17 +279,21 @@ and none is planned. This is a stated decision, not an omission:
 
 Under #527 the maintainer promotes the existing bounded routing/CORS,
 upstream admission/retry/circuit and auxiliary-egress surfaces to GA with
-their post-GA soak gate explicitly pending. Their documented configuration
+their post-GA soak gate explicitly pending at publication. That gate completed
+on 2026-10-14 under [the source-bound #590 review](reviews/2026-10-14-ga-soak-590-results.md),
+which preserves the original collector failure and authorised supplemental
+measurements. Their documented configuration
 keys, types, defaults, lifecycle meanings, metrics and observable behavior
 are stable within v2 under this policy. The immutable v2.2.0 source/tag is
 the publication baseline. New optional features do not inherit GA by proximity.
 
 The [per-feature decision](reviews/2026-10-12-ga-220.md) records evidence,
-operability, non-goals and pending stability gates. Schema/value/lifecycle
+operability, non-goals and the original pending stability gates. Schema/value/lifecycle
 drift tests and the focused v2.2.0 configuration guard protect accepted
 configurations. Internal Console endpoints are not promoted into the external
 API contract. No full NGINX parity, new retry outcome taxonomy, global firewall
-or complete SSRF guarantee is included. No long-running soak is claimed.
+or complete SSRF guarantee is included. The later eight-hour review applies
+only to these three bounded contracts on unchanged full v2.2.0 source.
 
 Compatibility promises attach to a released contract, not merely to code merged
 on `main`. `implemented`, `merged`, and `candidate` capabilities may be usable
