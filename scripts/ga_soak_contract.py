@@ -1,6 +1,7 @@
 """Fixed #590 acceptance contract, shared by the workload and evidence readers."""
 
 import math
+from pathlib import Path
 
 SOURCE = "b12e051139f652b400cff37d9f063f5637a7d550"
 FEATURES = ["CGC-ROUTE", "CGC-RES", "SEC-EGRESS"]
@@ -148,3 +149,14 @@ def evaluate(manifest, samples, events, quiet):
             "measured_seconds": elapsed, "samples": len(samples), "errors": sorted(set(errors)),
             "resource_trend_assessed": manifest["seconds"] >= 3600,
             "features": FEATURES, "automatic_promotion": False}
+
+
+def resource_budget():
+    group = next(line.split("::", 1)[1] for line in Path("/proc/self/cgroup").read_text().splitlines()
+                 if line.startswith("0::"))
+    directory = Path("/sys/fs/cgroup") / group.lstrip("/")
+    cpu = (directory / "cpu.max").read_text().split()
+    memory = (directory / "memory.max").read_text().strip()
+    return {"cpu_max": " ".join(cpu), "memory_max": memory,
+            "enforced": cpu[0] != "max" and int(cpu[0]) / int(cpu[1]) <= 2
+            and memory != "max" and int(memory) <= 2 << 30}

@@ -121,8 +121,13 @@ maintained verdict with the actual frozen executed evaluator; all twenty tests
 and a fresh real-package 60-second workload/quieting rerun passed. The original
 archives, executed source bundle and published measurements are unchanged.
 Subprocesses use explicit argument vectors with `shell=False`, exclusively for
-operator-owned harness executables; no HTTP request supplies a command. The
-wildcard-bind scanner match is a negative test assertion, not a listener.
+operator-owned harness executables; no HTTP request supplies a command. Those
+three necessary subprocess statements and the negative wildcard-bind assertion
+have narrowly scoped, rule-specific false-positive annotations with adjacent
+trust-boundary explanations, not a global scanner/category exclusion. Additional
+argument-vector tests pass; the source-fingerprint setup check now raises rather
+than using an optimisable `assert`. All 22 tests pass normally and under `-O`;
+the targeted Bandit scan has no reported findings.
 
 The documentation-only main advance to `7ff7e25e` during the campaign changed
 neither the runtime package nor the retained executed harness. No unknown-source
@@ -165,7 +170,8 @@ the durable public record above contains their identities and digests.
 
 | Command | Result |
 | --- | --- |
-| `python -m unittest discover -s scripts -p test_ga_soak.py -v` | Passed: 20 deterministic tests, including scheduling and invalid supplemental identities |
+| `python -m unittest discover -s scripts -p test_ga_soak.py -v` | Passed: 22 deterministic tests, including scheduling, invalid supplemental identities and argv-only execution |
+| `python -O -m unittest discover -s scripts -p test_ga_soak.py` | Passed: all 22 tests; fingerprint guards remain active with optimised bytecode |
 | `GOMAXPROCS=2 go test -p 2 -tags 'grpc stream consul' ./internal/configcontract ./internal/config ./internal/egress ./internal/auth ./internal/handler ./internal/upstream ./internal/stream -run 'Test(GA220ExistingConfigurationContract\|Scenario\|TCPAdmission\|Egress\|ClientRedirect\|Registry.*Egress\|ContextCancellation\|Resilience\|CrossProtocol\|GRPC.*Accounting\|Proxy.*Retry)' -count=1` | Passed: all eight scoped packages, including the exact GA configuration contract |
 | `python3 -m pytest -q scripts/test_docs_check.py scripts/test_semantic_drift.py` | Passed: 61 tests and two subtests |
 | `GOMAXPROCS=2 SOAK_DURATION=1s SOAK_WORKERS=2 make soak` | Passed: cache, HTTP and UDP-churn smoke; not long-run evidence |

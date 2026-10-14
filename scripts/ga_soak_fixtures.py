@@ -12,7 +12,10 @@ import h2.config
 import h2.connection
 import h2.events
 
-from ga_soak_contract import PAYLOAD, require
+from ga_soak_contract import (
+    AUTH_DENIED_ROUTE, AUTH_DNS_ROUTE, AUTH_ROUTE, AUTH_TIGHT_ROUTE, CLEAN_ROUTE,
+    DISCOVERY_ROUTE, HEALTH_ROUTE, PAYLOAD, require,
+)
 
 REDIRECT_HEADERS = {"Location": "http://127.0.0.2:1/blocked"}
 
@@ -221,3 +224,161 @@ class Fixture:
         for server in self.servers:
             server.shutdown()
             server.server_close()
+
+
+def configuration(ports, runtime):
+    q = json.dumps
+    raw = f'''[global]
+log_level = "warn"
+config_authority = "managed"
+[admin]
+enabled = true
+console = false
+listen = "127.0.0.1:{ports["admin"]}"
+token = "${{env:JUL_GA_SOAK_TOKEN}}"
+history_dir = {q(str(runtime / "history"))}
+history_keep = 10
+pprof = true
+rate_limit_read_per_min = 6000
+rate_limit_apply_per_min = 300
+[observability.access_log]
+sinks = ["file"]
+file = {q(str(runtime / "access.log"))}
+format = "json"
+rotate_max_mb = 16
+rotate_keep = 4
+[egress]
+enabled = true
+allow = ["127.0.0.1/32", "127.0.0.3/32", "::1/128"]
+'''
+    for name, addresses, extra in (
+        ("clean", [ports["backend_a"]], "max_active_requests = 4"),
+        ("pressure", [ports["backend_a"]], '''max_active_requests = 1
+max_active_per_backend = 1
+max_pending_requests = 1
+pending_timeout = "200ms"
+max_connections_per_backend = 1'''),
+        ("retry", [ports["backend_a"], ports["backend_b"]], '''max_active_requests = 4
+retry_attempts = 2
+retry_deadline = "500ms"
+retry_backoff_initial = "5ms"
+retry_backoff_max = "10ms"
+retry_budget_percent = 10
+max_fails = 10000'''),
+        ("circuit", [ports["backend_b"]], '''max_active_requests = 2
+max_fails = 1
+fail_timeout = "1s"
+circuit_half_open_probes = 1'''),
+        ("deadline", [ports["backend_b"]], '''max_active_requests = 2
+retry_deadline = "150ms"
+max_fails = 10000'''),
+        ("replay", [ports["backend_a"], ports["backend_b"]], "max_active_requests = 2\nretry_attempts = 2\nmax_fails = 10000"),
+        ("health", [ports["backend_b"]], "max_active_requests = 2"),
+        ("grpc", [ports["grpc_backend"]], "max_active_requests = 1\nmax_pending_requests = 1\npending_timeout = \"200ms\""),
+        ("l4", [ports["tcp_backend"]], "max_active_requests = 2\nfail_timeout = \"1s\""),
+        ("l4fault", [ports["tcp_backend"]], "max_active_requests = 1\nfail_timeout = \"1s\""),
+    ):
+        raw += f'\n[[upstreams]]\nname = "{name}"\nservers = {q(["127.0.0.1:" + str(p) for p in addresses])}\n'
+        raw += "[upstreams.resilience]\n" + extra + "\n"
+        if name == "health":
+            raw += '''[upstreams.health_check]
+enabled = true
+type = "http"
+path = "/health"
+interval = "1s"
+timeout = "200ms"
+healthy_threshold = 1
+unhealthy_threshold = 1
+'''
+    raw += f'''
+[[upstreams]]
+name = "discovery"
+servers = ["127.0.0.1:{ports["backend_a"]}"]
+[upstreams.discovery]
+type = "consul"
+refresh = "1s"
+[upstreams.discovery.consul]
+address = "http://127.0.0.3:{ports["control"]}"
+service = "soak"
+[[servers]]
+listen = "127.0.0.1:{ports["http"]}"
+server_names = ["localhost"]
+'''
+    for path, pool in ((CLEAN_ROUTE, "clean"), ("/pressure/", "pressure"),
+                       ("/retry/", "retry"), ("/circuit/", "circuit"), ("/deadline/", "deadline"),
+                       ("/replay/", "replay"), (HEALTH_ROUTE, "health"),
+                       (DISCOVERY_ROUTE, "discovery")):
+        raw += f'\n[[servers.locations]]\nmatch = {{type = "prefix", path = "{path}"}}\nproxy_pass = "http://{pool}"\n'
+    raw += '''
+[[servers.locations]]
+proxy_pass = "http://clean"
+[servers.locations.match]
+type = "exact"
+path = "/route/item"
+methods = ["GET"]
+headers = [{name = "X-Tenant", op = "exact", value = "public"}]
+query = [{name = "version", op = "exact", value = "v2"}]
+[[servers.locations.response_headers]]
+op = "set"
+name = "X-Order"
+value = "first"
+[[servers.locations.response_headers]]
+op = "add"
+name = "X-Order"
+value = "second"
+[[servers.locations.response_headers]]
+op = "remove"
+name = "X-Powered-By"
+[[servers.locations.response_headers]]
+op = "set"
+name = "X-Generation"
+value = "baseline"
+[[servers.locations]]
+match = {type = "prefix", path = "/route/long/"}
+return = 202
+[[servers.locations]]
+match = {type = "regex", path = "^/route/"}
+return = 203
+[[servers.locations]]
+match = {type = "prefix", path = "/cors/"}
+proxy_pass = "http://clean"
+[servers.locations.cors]
+enabled = true
+allowed_origins = ["https://soak.example"]
+allowed_methods = ["GET", "POST"]
+allowed_headers = ["X-Tenant"]
+max_age = "1m"
+'''
+    for path, host, p in ((AUTH_ROUTE, "[::1]", ports["auth"]),
+                          (AUTH_DNS_ROUTE, "localhost", ports["auth_dns"]),
+                          (AUTH_TIGHT_ROUTE, "127.0.0.3", ports["control"]),
+                          (AUTH_DENIED_ROUTE, "127.0.0.2", ports["forbidden"])):
+        raw += f'''
+[[servers.locations]]
+match = {{type = "prefix", path = "{path}"}}
+proxy_pass = "http://clean"
+[servers.locations.auth.forward_auth]
+url = "http://{host}:{p}/check"
+timeout = "500ms"
+'''
+    raw += f'''
+[[servers.locations]]
+match = {{type = "prefix", path = "/"}}
+return = 404
+[[servers]]
+listen = "127.0.0.1:{ports["grpc"]}"
+h2c = true
+[[servers.locations]]
+match = {{type = "prefix", path = "/"}}
+grpc = true
+proxy_pass = "http://grpc"
+[[stream]]
+listen = "127.0.0.1:{ports["l4"]}"
+proxy_pass = "l4"
+idle_timeout = "2m"
+[[stream]]
+listen = "127.0.0.1:{ports["l4fault"]}"
+proxy_pass = "l4fault"
+idle_timeout = "2m"
+'''
+    return raw

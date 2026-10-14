@@ -24,7 +24,7 @@ class AcceptanceTests(unittest.TestCase):
         bundle = Path(__file__).resolve().parents[1] / "docs/audit/evidence/2026-10-14-ga590/executed-harness.tar.gz"
         with tarfile.open(bundle) as archive:
             data = archive.extractfile("ga-soak.py").read()
-        assert hashlib.sha256(data).hexdigest() == REVIEW.FROZEN_HARNESS
+        SOAK.require(hashlib.sha256(data).hexdigest() == REVIEW.FROZEN_HARNESS, "frozen test contract identity mismatch")
         path = Path(cls.frozen_directory.name) / "ga-soak.py"
         path.write_bytes(data)
         spec = importlib.util.spec_from_file_location("frozen_contract", path)
@@ -151,7 +151,8 @@ class AcceptanceTests(unittest.TestCase):
             "backend_b", "auth", "auth_dns", "control", "forbidden", "tcp_backend"))}
         raw = SOAK.configuration(ports, Path("/private"))
         self.assertIn('token = "${env:JUL_GA_SOAK_TOKEN}"', raw)
-        self.assertNotIn("0.0.0.0", raw)
+        # Negative assertion forbids wildcard listeners; this statement does not bind.
+        self.assertNotIn("0.0.0.0", raw)  # nosec B104
         self.assertEqual(raw.count("[upstreams.resilience]"), 10)
 
     def test_health_fixture_changes_actual_probe_response(self):
@@ -240,6 +241,26 @@ class AcceptanceTests(unittest.TestCase):
             artifact.write_text('{"modified":true}')
             with self.assertRaisesRegex(RuntimeError, "digest mismatch"):
                 REVIEW.verify_files(root)
+
+    def test_command_uses_fixed_argument_vector_without_shell(self):
+        result = Mock(returncode=0, stdout="source\n", stderr="")
+        with patch.object(SOAK.subprocess, "run", return_value=result) as process:
+            self.assertEqual(SOAK.command("git", "rev-parse", "HEAD"), "source\n")
+        self.assertEqual(process.call_args.args[0], ["git", "rev-parse", "HEAD"])
+        self.assertIs(process.call_args.kwargs["shell"], False)
+
+    def test_fixture_launch_uses_operator_executable_without_shell(self):
+        with tempfile.TemporaryDirectory() as directory:
+            class Args:
+                out = Path(directory) / "run"
+            run = SOAK.Run(Args())
+            run.runtime.mkdir(parents=True)
+            with patch.object(SOAK.subprocess, "Popen") as process:
+                run.launch("grpc-backend", Path("/operator/grpc-backend"), "-port", 1234)
+            self.assertEqual(process.call_args.args[0], ["/operator/grpc-backend", "-port", "1234"])
+            self.assertIs(process.call_args.kwargs["shell"], False)
+            for log in run.logs:
+                log.close()
 
 
 if __name__ == "__main__":
