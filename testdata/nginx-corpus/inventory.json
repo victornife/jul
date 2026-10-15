@@ -85,7 +85,7 @@
   "classes": [
     {
       "name": "approximated",
-      "count": 13
+      "count": 15
     },
     {
       "name": "blocking",
@@ -119,7 +119,7 @@
     },
     {
       "name": "performance",
-      "count": 10
+      "count": 12
     },
     {
       "name": "routing",
@@ -214,6 +214,14 @@
     {
       "name": "NGX_LOCATION_CACHE",
       "count": 2
+    },
+    {
+      "name": "NGX_LOCATION_CACHE_LOCK",
+      "count": 1
+    },
+    {
+      "name": "NGX_LOCATION_CACHE_LOCK_TIMEOUT",
+      "count": 1
     },
     {
       "name": "NGX_LOCATION_CACHE_VALID",

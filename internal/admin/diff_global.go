@@ -63,6 +63,8 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 		d.cover("cache.default_ttl")
 		d.cover("cache.stale_while_revalidate")
 		d.cover("cache.stale_if_error")
+		d.cover("cache.lock")
+		d.cover("cache.lock_timeout")
 		return
 	}
 	if !a.Enabled {
@@ -87,6 +89,16 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	if b.StaleIfError != a.StaleIfError {
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: durStr(b.StaleIfError), After: durStr(a.StaleIfError), Detail: "Change cache stale-if-error window"}, "cache sif")
 	}
+	if b.Lock != a.Lock {
+		action := "Enable"
+		if !a.Lock {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "cache", Name: "global", Detail: action + " cache fill lock"}, "cache lock")
+	}
+	if b.LockTimeout != a.LockTimeout {
+		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: durStr(b.LockTimeout), After: durStr(a.LockTimeout), Detail: "Change cache fill-lock timeout"}, "cache lock_timeout")
+	}
 	d.cover("cache.enabled")
 	d.cover("cache.memory_max_size")
 	d.cover("cache.disk_path")
@@ -94,6 +106,8 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	d.cover("cache.default_ttl")
 	d.cover("cache.stale_while_revalidate")
 	d.cover("cache.stale_if_error")
+	d.cover("cache.lock")
+	d.cover("cache.lock_timeout")
 }
 
 // diffGlobalCompression compares the [compression] block.

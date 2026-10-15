@@ -485,7 +485,7 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 			if len(cp) > 0 {
 				t.applyProxyCache(&loc, cp[0])
 			}
-		case "proxy_cache_valid":
+		case "proxy_cache_valid", "proxy_cache_lock", "proxy_cache_lock_timeout":
 			// consumed by the http-level cache pre-pass in translateHTTP
 		case "if":
 			t.report.skip(c, "location-level if is not translated")

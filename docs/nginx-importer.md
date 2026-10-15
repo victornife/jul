@@ -169,7 +169,8 @@ the Jul request path.
 | `expires`, `types`, `default_type` | ✅ (bounded) | See [common idioms](#common-idioms-expiration-and-mime-523); unsupported expiration forms block. |
 | Exact WebSocket upgrade trio | informational | `proxy_http_version 1.1`, `proxy_set_header Upgrade $http_upgrade`, and `proxy_set_header Connection upgrade` together with a usable `proxy_pass` use native HTTP/1.1 upgrades. Missing/changed/duplicated elements and arbitrary headers remain blocking. |
 | `proxy_buffering off` | ✅ | Sets `proxy_buffering = false`, forcing immediate flush per proxy write. `on` is blocking. |
-| `proxy_next_upstream`, `proxy_cache_lock` | ❌ | Deferred application-outcome retry (#406) and cache fill-lock (#525) capabilities. |
+| `proxy_next_upstream` | ❌ | Deferred application-outcome retry (#406) capability. |
+| `proxy_cache_lock`, `proxy_cache_lock_timeout` | ⚠️ (`on` / positive duration) / ignored (`off`) / ❌ (`proxy_cache_lock_age`) | `proxy_cache_lock on` and `proxy_cache_lock_timeout <time>` map to process-wide `[cache].lock` and `[cache].lock_timeout` when a single cache zone resolves (`NGX_LOCATION_CACHE_LOCK`, `NGX_LOCATION_CACHE_LOCK_TIMEOUT`); `proxy_cache_lock off` is ignored (`NGX_LOCATION_CACHE_LOCK_OFF`); `proxy_cache_lock_age` is blocking (`NGX_LOCATION_CACHE_LOCK_AGE`) because Jul never hands off an active fill to start a second competing cache fill. |
 | `alias` | ⚠️ | Maps to `root`; NGINX prefix-stripping semantics differ. |
 | `return` | ✅ | Status and redirect preserved; response body text is not. |
 | `rewrite` | ✅ | Pattern, replacement, and recognized flags are preserved. |
@@ -431,7 +432,9 @@ whole file names that same zone:
 | `proxy_cache_valid [<codes>] <time>;` where `<codes>` is empty or a subset of nginx's own default cacheable set (`200`, `301`, `302`) | `[cache].default_ttl` (approximated: Jul only applies it when the upstream sends no explicit `Cache-Control`/`Expires`, while nginx's own default behavior is comparable but not identical depending on `proxy_ignore_headers`) |
 | More than one distinct zone declared, or a `proxy_cache` referencing an undeclared zone | ❌ — a genuine architectural mismatch, not a scope gap; every offending reference is reported |
 | `proxy_cache_bypass`, `proxy_no_cache`, `proxy_cache_key`, `proxy_ignore_headers` | ❌ — expression-driven or would silently change Jul's always-honored `Cache-Control`/`Expires` behavior |
-| `proxy_cache_min_uses`, `proxy_cache_lock*`, `proxy_cache_background_update` | ignored — no Jul equivalent knob |
+| `proxy_cache_lock on;`, `proxy_cache_lock_timeout <time>;` | ⚠️ — maps to process-wide `[cache].lock = true` and `[cache].lock_timeout` when consistent across the configuration (`NGX_LOCATION_CACHE_LOCK`, `NGX_LOCATION_CACHE_LOCK_TIMEOUT`); `proxy_cache_lock off;` is ignored (`NGX_LOCATION_CACHE_LOCK_OFF`) |
+| `proxy_cache_lock_age <time>;` | ❌ — blocking (`NGX_LOCATION_CACHE_LOCK_AGE`); Jul keeps the leader's fill lock until the leader completes or cancels rather than starting a second competing cache fill after a lock-age timer |
+| `proxy_cache_min_uses`, `proxy_cache_background_update` | ignored — no Jul equivalent knob |
 | `proxy_cache_revalidate`, `proxy_cache_use_stale` | ⚠️ — Jul's background revalidation/stale-serving is unconditional and cannot be selectively disabled |
 
 The `keys_zone=name:size` size bounds nginx's in-memory *key/metadata* index,

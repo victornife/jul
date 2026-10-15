@@ -373,6 +373,9 @@ func (c *Config) applyDefaultsWithPresence(tracingSampleRatioPresent bool) {
 			c.Cache.DiskMaxSize = Size(512 << 20) // 512 MiB
 		}
 	}
+	if c.Cache.Lock && c.Cache.LockTimeout == 0 {
+		c.Cache.LockTimeout = Duration(5 * time.Second)
+	}
 
 	// Resolve compression enabled state:
 	//   - Explicit enabled=true  → always active.

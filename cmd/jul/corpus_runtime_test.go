@@ -569,6 +569,9 @@ func TestNGINXCorpusCacheRealE2E(t *testing.T) {
 	if !cfg.Cache.Enabled {
 		t.Fatalf("cache-runtime: candidate [cache].enabled = false, want true")
 	}
+	if !cfg.Cache.Lock || cfg.Cache.LockTimeout.Std() != 3*time.Second {
+		t.Fatalf("cache-runtime: candidate [cache] lock=%v lock_timeout=%s, want true and 3s", cfg.Cache.Lock, cfg.Cache.LockTimeout.Std())
+	}
 	// The fixture's disk_path looks like a real deployment path (proving the
 	// proxy_cache_path -> [cache].disk_path translation), but this process
 	// cannot write there; rewrite it to a writable temp directory exactly as

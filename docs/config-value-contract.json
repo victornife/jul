@@ -257,6 +257,14 @@
       "active_when": "always"
     },
     {
+      "go_field": "CacheConfig.LockTimeout",
+      "path": "cache.lock_timeout",
+      "kind": "duration",
+      "constraint": "non-negative; requires cache.lock = true when positive",
+      "zero_semantics": "omitted/zero defaults to 5s when lock is enabled",
+      "active_when": "cache.enabled = true and cache.lock = true"
+    },
+    {
       "go_field": "CacheConfig.MemoryMaxSize",
       "path": "cache.memory_max_size",
       "kind": "size",

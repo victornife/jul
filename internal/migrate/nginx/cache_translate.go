@@ -33,13 +33,28 @@ type cacheTTLCandidate struct {
 	line int
 }
 
+// cacheLockCandidate is one recognized `proxy_cache_lock` occurrence.
+type cacheLockCandidate struct {
+	enabled bool
+	line    int
+}
+
+// cacheLockTimeoutCandidate is one recognized `proxy_cache_lock_timeout`
+// occurrence.
+type cacheLockTimeoutCandidate struct {
+	timeout config.Duration
+	line    int
+}
+
 // cacheCollector accumulates every cache-related directive found anywhere in
 // the http block during the pre-pass, before any per-location decision is
 // made.
 type cacheCollector struct {
-	zones map[string]cacheZoneDef
-	uses  []cacheUse
-	ttls  []cacheTTLCandidate
+	zones        map[string]cacheZoneDef
+	uses         []cacheUse
+	ttls         []cacheTTLCandidate
+	locks        []cacheLockCandidate
+	lockTimeouts []cacheLockTimeoutCandidate
 }
 
 // httpCacheResolution is the single globally-resolved proxy_cache zone and
@@ -56,11 +71,15 @@ type cacheCollector struct {
 // matching declaration, or more than one distinct zone actually in use) is
 // left untranslated and reported, never guessed.
 type httpCacheResolution struct {
-	zoneName string
-	def      cacheZoneDef
-	hasZone  bool
-	ttl      config.Duration
-	hasTTL   bool
+	zoneName       string
+	def            cacheZoneDef
+	hasZone        bool
+	ttl            config.Duration
+	hasTTL         bool
+	lock           bool
+	hasLock        bool
+	lockTimeout    config.Duration
+	hasLockTimeout bool
 }
 
 // resolveHTTPCache walks the http block's full server/location subtree once,
@@ -88,6 +107,10 @@ func (t *translator) resolveHTTPCache(kids []ngx.IDirective) httpCacheResolution
 							collectCacheUse(lc, col)
 						case "proxy_cache_valid":
 							collectCacheValid(lc, col)
+						case "proxy_cache_lock":
+							collectCacheLock(lc, col)
+						case "proxy_cache_lock_timeout":
+							collectCacheLockTimeout(lc, col)
 						}
 					}
 				}
@@ -173,6 +196,47 @@ func collectCacheValid(c ngx.IDirective, col *cacheCollector) {
 	col.ttls = append(col.ttls, cacheTTLCandidate{ttl: ttl, line: c.GetLine()})
 }
 
+func collectCacheLock(c ngx.IDirective, col *cacheCollector) {
+	enabled, ok := parseCacheLock(paramValues(c))
+	if !ok {
+		return
+	}
+	col.locks = append(col.locks, cacheLockCandidate{enabled: enabled, line: c.GetLine()})
+}
+
+func collectCacheLockTimeout(c ngx.IDirective, col *cacheCollector) {
+	timeout, ok := parseCacheLockTimeout(paramValues(c))
+	if !ok {
+		return
+	}
+	col.lockTimeouts = append(col.lockTimeouts, cacheLockTimeoutCandidate{timeout: timeout, line: c.GetLine()})
+}
+
+func parseCacheLock(params []string) (bool, bool) {
+	if len(params) != 1 {
+		return false, false
+	}
+	switch strings.ToLower(strings.TrimSpace(params[0])) {
+	case "on":
+		return true, true
+	case "off":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func parseCacheLockTimeout(params []string) (config.Duration, bool) {
+	if len(params) != 1 {
+		return 0, false
+	}
+	d, ok := parseNginxDuration(params[0])
+	if !ok || d <= 0 {
+		return 0, false
+	}
+	return d, true
+}
+
 // parseSimpleCacheValidTime recognizes the bounded proxy_cache_valid forms
 // Jul's single default_ttl can represent: a bare time, or a time preceded
 // only by status codes drawn from nginx's own default cacheable set (200,
@@ -245,6 +309,38 @@ func (t *translator) resolveCacheCollector(col *cacheCollector) httpCacheResolut
 			t.report.note("multiple conflicting proxy_cache_valid values were found across the configuration; [cache].default_ttl was left unset")
 		}
 	}
+
+	if len(col.locks) > 0 {
+		agree := true
+		first := col.locks[0].enabled
+		for _, c := range col.locks[1:] {
+			if c.enabled != first {
+				agree = false
+				break
+			}
+		}
+		if agree {
+			res.lock, res.hasLock = first, true
+		} else {
+			t.report.note("multiple conflicting proxy_cache_lock values were found across the configuration; [cache].lock was left unset")
+		}
+	}
+
+	if len(col.lockTimeouts) > 0 {
+		agree := true
+		first := col.lockTimeouts[0].timeout
+		for _, c := range col.lockTimeouts[1:] {
+			if c.timeout != first {
+				agree = false
+				break
+			}
+		}
+		if agree {
+			res.lockTimeout, res.hasLockTimeout = first, true
+		} else {
+			t.report.note("multiple conflicting proxy_cache_lock_timeout values were found across the configuration; [cache].lock_timeout was left unset")
+		}
+	}
 	return res
 }
 
@@ -264,6 +360,14 @@ func (t *translator) applyHTTPCacheConfig(out *config.Config) {
 	}
 	if t.httpCache.hasTTL {
 		out.Cache.DefaultTTL = t.httpCache.ttl
+	}
+	if t.httpCache.hasLock && t.httpCache.lock {
+		out.Cache.Lock = true
+		if t.httpCache.hasLockTimeout {
+			out.Cache.LockTimeout = t.httpCache.lockTimeout
+		}
+	} else if t.httpCache.hasLockTimeout {
+		t.report.note("proxy_cache_lock_timeout was left unset because proxy_cache_lock is not enabled")
 	}
 }
 

@@ -6,6 +6,7 @@ package admin
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 	"jul/internal/lifecycle"
@@ -302,13 +303,29 @@ func TestDiffGlobalCacheCompressionRateLimit(t *testing.T) {
 		RateLimit:   config.RateLimitConfig{Enabled: true, Rate: 100, Burst: 100},
 	}
 	after := &config.Config{
-		Cache:       config.CacheConfig{Enabled: true, DiskPath: "/var/cache"},
+		Cache:       config.CacheConfig{Enabled: true, DiskPath: "/var/cache", Lock: true, LockTimeout: config.Duration(3 * time.Second)},
 		Compression: config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip", "br"}},
 		RateLimit:   config.RateLimitConfig{Enabled: false},
 	}
 	d := diffConfigs(before, after)
 	if !diffHas(d, "Change cache disk path") {
 		t.Errorf("expected cache disk change, got %+v", d)
+	}
+	if !diffHas(d, "Enable cache fill lock") {
+		t.Errorf("expected cache fill-lock enable, got %+v", d)
+	}
+	if !diffHas(d, "Change cache fill-lock timeout") {
+		t.Errorf("expected cache fill-lock timeout change, got %+v", d)
+	}
+	if dDisable := diffConfigs(after, before); !diffHas(dDisable, "Disable cache fill lock") {
+		t.Errorf("expected cache fill-lock disable, got %+v", dDisable)
+	}
+	cacheOff := &config.Config{Cache: config.CacheConfig{Enabled: false}}
+	if dEnableCache := diffConfigs(cacheOff, after); !diffHas(dEnableCache, "Enable the response cache") {
+		t.Errorf("expected cache enable entry, got %+v", dEnableCache)
+	}
+	if dDisableCache := diffConfigs(after, cacheOff); !diffHas(dDisableCache, "Disable the response cache") {
+		t.Errorf("expected cache disable entry, got %+v", dDisableCache)
 	}
 	if !diffHas(d, "Change compression encoders") {
 		t.Errorf("expected compression encoders change, got %+v", d)

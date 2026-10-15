@@ -46,6 +46,10 @@ type Cache struct {
 	reMu  sync.Mutex
 	calls map[revalidateKey]*revalidateCall // in-flight revalidations
 
+	fillMu     sync.Mutex
+	fills      map[string]*fillCall // in-flight cold-miss fills (#525)
+	onFillLock func(outcome string)
+
 	// varyMu serializes the read-modify-write of a base resource's variant
 	// membership stub. Publishing a variant and recording it in the stub must be
 	// one step, or two concurrent variant writes lose one another's membership
@@ -122,6 +126,7 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 	c := &Cache{
 		log:   logger,
 		calls: make(map[revalidateKey]*revalidateCall),
+		fills: make(map[string]*fillCall),
 	}
 	pol := policyFromConfig(cfg)
 	c.policy.Store(&pol)
@@ -445,32 +450,48 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 
 		k := key(r)
 		now := c.clock()
-		if e, effKey, ok := c.lookup(k, r); ok && e.matchesVary(r) {
-			switch reuseDecision(e, r, reqPolicy, now) {
-			case reuseHit:
-				span.SetString("cache.status", "HIT")
-				span.End()
-				c.serve(w, r, e, stateHit, now)
-				return
-			case reuseStale:
-				span.SetString("cache.status", "STALE")
-				span.End()
-				c.serve(w, r, e, stateStale, now)
-				// Start the background refresh before returning, so the lease
-				// is taken while this request still holds its generation.
-				c.startRevalidate(effKey, r, next, e)
-				return
-			case reuseValidate:
-				span.SetString("cache.status", "VALIDATE")
-				span.End()
-				c.validateAndServe(w, r, next, e, effKey, now)
-				return
-			}
+		effKey, served := c.serveCachedIfReusable(w, r, next, k, reqPolicy, now, span)
+		if served {
+			return
+		}
+		pol := c.Policy()
+		if pol.Lock {
+			c.fillOrWait(w, r, next, k, effKey, reqPolicy, pol, span, effKey == k)
+			return
 		}
 		span.SetString("cache.status", "MISS")
 		span.End()
-		c.fetchAndStore(w, r, next, now)
+		c.fetchAndStoreWithPolicy(w, r, next, now, pol, nil)
 	})
+}
+
+func (c *Cache) serveCachedIfReusable(w http.ResponseWriter, r *http.Request, next http.Handler, base string, reqPolicy requestPolicy, now time.Time, span tracing.Span) (effKey string, served bool) {
+	e, effKey, ok := c.lookup(base, r)
+	if !ok || !e.matchesVary(r) {
+		return effKey, false
+	}
+	switch reuseDecision(e, r, reqPolicy, now) {
+	case reuseHit:
+		span.SetString("cache.status", "HIT")
+		span.End()
+		c.serve(w, r, e, stateHit, now)
+		return effKey, true
+	case reuseStale:
+		span.SetString("cache.status", "STALE")
+		span.End()
+		c.serve(w, r, e, stateStale, now)
+		// Start the background refresh before returning, so the lease
+		// is taken while this request still holds its generation.
+		c.startRevalidate(effKey, r, next, e)
+		return effKey, true
+	case reuseValidate:
+		span.SetString("cache.status", "VALIDATE")
+		span.End()
+		c.validateAndServe(w, r, next, e, effKey, now)
+		return effKey, true
+	default:
+		return effKey, false
+	}
 }
 
 // bypass forwards the request with the untouched writer and stores nothing.
@@ -552,7 +573,21 @@ func (c *Cache) serveUnsafe(w http.ResponseWriter, r *http.Request, next http.Ha
 // wrapper, so enabling the cache neither removes nor invents an optional
 // ResponseWriter interface.
 func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.Handler, now time.Time) {
-	cw := &cacheWriter{ResponseWriter: w, limit: c.Policy().MaxEntryBytes, acct: c.newCaptureAccount()}
+	c.fetchAndStoreWithPolicy(w, r, next, now, c.Policy(), nil)
+}
+
+func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, next http.Handler, now time.Time, pol CachePolicy, onAbandon func()) bool {
+	cw := &cacheWriter{
+		ResponseWriter: w,
+		limit:          pol.MaxEntryBytes,
+		acct:           c.newCaptureAccount(),
+		onAbandon:      onAbandon,
+	}
+	if onAbandon != nil {
+		cw.headerCheck = func(code int, h http.Header) bool {
+			return c.headerStorable(r, code, h, c.clock(), pol)
+		}
+	}
 	defer cw.acct.release()
 	w.Header().Set("X-Cache", stateMiss)
 	// Captured after X-Cache is set, so that field cancels out of the stored
@@ -561,8 +596,8 @@ func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.
 	cw.entrySnapshot = cloneHeader(w.Header())
 	next.ServeHTTP(respwriter.Wrap(cw, w), r)
 
-	if !cw.storable() {
-		return
+	if !cw.storable() || cw.writeErr != nil || r.Context().Err() != nil {
+		return false
 	}
 	// cw.snapshot, not w.Header(): layers outside the cache (compression in
 	// particular) mutate the shared header map after cacheWriter.WriteHeader
@@ -576,9 +611,11 @@ func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.
 	if h == nil {
 		h = w.Header()
 	}
-	if e := c.buildEntry(r, cw.status, h, cw.buf.Bytes(), now); e != nil {
+	if e := c.buildEntryWithPolicy(r, cw.status, h, cw.buf.Bytes(), now, pol); e != nil {
 		c.store(key(r), r, e)
+		return true
 	}
+	return false
 }
 
 // startRevalidate launches the background refresh of a stale entry. It must be
@@ -735,8 +772,33 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req *http.Reque
 // buildEntry constructs a cacheable Entry, or nil if the response must not be
 // stored.
 func (c *Cache) buildEntry(r *http.Request, status int, h http.Header, body []byte, now time.Time) *Entry {
+	return c.buildEntryWithPolicy(r, status, h, body, now, c.Policy())
+}
+
+func (c *Cache) headerStorable(r *http.Request, status int, h http.Header, now time.Time, pol CachePolicy) bool {
 	p := parseResponsePolicy(h)
-	ttl, swr, ok := c.freshness(status, h, p, now)
+	if _, _, ok := c.freshnessWithPolicy(status, h, p, now, pol); !ok {
+		return false
+	}
+	if hasHeaderField(r.Header, "Authorization") && !p.sharedAuthStorable() {
+		return false
+	}
+	for _, name := range varyFields(h) {
+		if name == "*" {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Cache) buildEntryWithPolicy(r *http.Request, status int, h http.Header, body []byte, now time.Time, pol CachePolicy) *Entry {
+	if r.Method != http.MethodHead {
+		if cl := declaredLength(h); cl >= 0 && int64(len(body)) != cl {
+			return nil
+		}
+	}
+	p := parseResponsePolicy(h)
+	ttl, swr, ok := c.freshnessWithPolicy(status, h, p, now, pol)
 	if !ok {
 		return nil
 	}
@@ -848,7 +910,10 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, e *Entry, state st
 // resolves to zero, which makes the response uncacheable rather than silently
 // falling through to a longer lifetime.
 func (c *Cache) freshness(status int, h http.Header, p responsePolicy, now time.Time) (ttl, swr time.Duration, ok bool) {
-	pol := c.Policy()
+	return c.freshnessWithPolicy(status, h, p, now, c.Policy())
+}
+
+func (c *Cache) freshnessWithPolicy(status int, h http.Header, p responsePolicy, now time.Time, pol CachePolicy) (ttl, swr time.Duration, ok bool) {
 	if !cacheableStatus[status] {
 		return 0, 0, false
 	}

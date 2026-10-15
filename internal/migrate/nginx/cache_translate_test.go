@@ -179,6 +179,122 @@ func TestApplyHTTPCacheConfig(t *testing.T) {
 			t.Errorf("got %+v", out.Cache)
 		}
 	})
+	t.Run("zone with lock and lock_timeout", func(t *testing.T) {
+		tr := &translator{httpCache: httpCacheResolution{
+			hasZone:        true,
+			zoneName:       "z",
+			def:            cacheZoneDef{path: "/var/cache"},
+			hasLock:        true,
+			lock:           true,
+			hasLockTimeout: true,
+			lockTimeout:    config.Duration(4 * time.Second),
+		}}
+		out := &config.Config{}
+		tr.applyHTTPCacheConfig(out)
+		if !out.Cache.Lock || out.Cache.LockTimeout.Std() != 4*time.Second {
+			t.Errorf("got %+v", out.Cache)
+		}
+	})
+	t.Run("lock_timeout without lock enabled leaves timeout unset with note", func(t *testing.T) {
+		tr := &translator{httpCache: httpCacheResolution{
+			hasZone:        true,
+			zoneName:       "z",
+			def:            cacheZoneDef{path: "/var/cache"},
+			hasLockTimeout: true,
+			lockTimeout:    config.Duration(4 * time.Second),
+		}}
+		out := &config.Config{}
+		tr.applyHTTPCacheConfig(out)
+		if out.Cache.Lock || out.Cache.LockTimeout != 0 {
+			t.Errorf("expected lock and lock_timeout unset, got %+v", out.Cache)
+		}
+		if !hasNote(&tr.report, "proxy_cache_lock_timeout was left unset") {
+			t.Errorf("expected note for lock_timeout without lock, got %+v", tr.report.Notes)
+		}
+	})
+}
+
+func TestResolveCacheCollectorLockAndLockTimeout(t *testing.T) {
+	t.Run("consistent lock and lock_timeout", func(t *testing.T) {
+		tr := &translator{}
+		col := &cacheCollector{
+			locks:        []cacheLockCandidate{{enabled: true, line: 1}, {enabled: true, line: 2}},
+			lockTimeouts: []cacheLockTimeoutCandidate{{timeout: config.Duration(3 * time.Second), line: 1}, {timeout: config.Duration(3 * time.Second), line: 2}},
+		}
+		res := tr.resolveCacheCollector(col)
+		if !res.hasLock || !res.lock || !res.hasLockTimeout || res.lockTimeout.Std() != 3*time.Second {
+			t.Fatalf("got %+v", res)
+		}
+	})
+	t.Run("conflicting lock and lock_timeout emit notes", func(t *testing.T) {
+		tr := &translator{}
+		col := &cacheCollector{
+			locks:        []cacheLockCandidate{{enabled: true, line: 1}, {enabled: false, line: 2}},
+			lockTimeouts: []cacheLockTimeoutCandidate{{timeout: config.Duration(3 * time.Second), line: 1}, {timeout: config.Duration(6 * time.Second), line: 2}},
+		}
+		res := tr.resolveCacheCollector(col)
+		if res.hasLock || res.hasLockTimeout {
+			t.Fatalf("expected neither resolved on conflict, got %+v", res)
+		}
+		if !hasNote(&tr.report, "conflicting proxy_cache_lock") {
+			t.Errorf("missing conflicting lock note: %+v", tr.report.Notes)
+		}
+		if !hasNote(&tr.report, "conflicting proxy_cache_lock_timeout") {
+			t.Errorf("missing conflicting lock_timeout note: %+v", tr.report.Notes)
+		}
+	})
+	t.Run("translate and assess end-to-end location lock directives", func(t *testing.T) {
+		src := `
+http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m;
+  server {
+    listen 8080;
+    location / {
+      proxy_cache z;
+      proxy_cache_lock on;
+      proxy_cache_lock_timeout 4s;
+      proxy_pass http://127.0.0.1:9000;
+    }
+  }
+}`
+		cfg, rep := translate(t, src)
+		if len(rep.Skipped) != 0 {
+			t.Fatalf("unexpected skips: %+v", rep.Skipped)
+		}
+		if !cfg.Cache.Lock || cfg.Cache.LockTimeout.Std() != 4*time.Second {
+			t.Fatalf("translated cache = %+v, want Lock=true LockTimeout=4s", cfg.Cache)
+		}
+		assessment, _ := assessString(t, src)
+		var sawLock, sawTimeout bool
+		for _, r := range assessment.Results {
+			if r.Code == "NGX_LOCATION_CACHE_LOCK" && r.Class == AssessmentApproximated {
+				sawLock = true
+			}
+			if r.Code == "NGX_LOCATION_CACHE_LOCK_TIMEOUT" && r.Class == AssessmentApproximated {
+				sawTimeout = true
+			}
+		}
+		if !sawLock || !sawTimeout {
+			t.Fatalf("missing lock assessment results: %+v", assessment.Results)
+		}
+
+		invalidSrc := `
+http {
+  server {
+    listen 8080;
+    location / {
+      proxy_cache_lock invalid;
+      proxy_cache_lock_timeout 0s;
+      proxy_cache_lock_age 5s;
+      proxy_pass http://127.0.0.1:9000;
+    }
+  }
+}`
+		invAssess, _ := assessString(t, invalidSrc)
+		if !invAssess.HasBlocking() {
+			t.Fatalf("expected blocking findings for invalid lock directives and proxy_cache_lock_age: %+v", invAssess.Results)
+		}
+	})
 }
 
 func TestApplyProxyCache(t *testing.T) {

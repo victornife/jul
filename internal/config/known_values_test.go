@@ -127,6 +127,8 @@ func TestValidateRejectsInvalidCacheCompressionAndAdminScalars(t *testing.T) {
 		{"cache ttl", func(c *Config) { c.Cache.DefaultTTL = -1 }, `[cache].default_ttl`},
 		{"cache swr", func(c *Config) { c.Cache.StaleWhileRevalidate = -1 }, `[cache].stale_while_revalidate`},
 		{"cache sie", func(c *Config) { c.Cache.StaleIfError = -1 }, `[cache].stale_if_error`},
+		{"cache lock timeout negative", func(c *Config) { c.Cache.Lock = true; c.Cache.LockTimeout = -1 }, `[cache].lock_timeout`},
+		{"cache lock timeout without lock", func(c *Config) { c.Cache.Lock = false; c.Cache.LockTimeout = Duration(time.Second) }, `[cache].lock_timeout`},
 		{"compression min size", func(c *Config) { c.Compression = CompressionConfig{Enabled: Bool(false), MinSize: -1} }, `[compression].min_size`},
 		{"history keep disabled admin", func(c *Config) { c.Admin.HistoryKeep = -1 }, `[admin].history_keep`},
 		{"event connections", func(c *Config) { c.Admin.MaxEventConns = -1 }, `[admin].max_event_conns`},
@@ -159,6 +161,24 @@ func TestValidatePreservesDocumentedZeroAndDisableSemantics(t *testing.T) {
 	cfg.Admin.RateLimitApplyPerMin = -1
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("documented zero/disabled semantics rejected: %v", err)
+	}
+
+	parsed, err := Parse([]byte(`
+[cache]
+enabled = true
+lock = true
+
+[[servers]]
+listen = "127.0.0.1:8080"
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 200
+`))
+	if err != nil {
+		t.Fatalf("Parse cache.lock default: %v", err)
+	}
+	if !parsed.Cache.Lock || parsed.Cache.LockTimeout.Std() != 5*time.Second {
+		t.Fatalf("parsed cache = %+v, want Lock=true and LockTimeout=5s", parsed.Cache)
 	}
 }
 

@@ -12,9 +12,9 @@ import (
 // CachePolicy is the immutable snapshot of scalar cache behavior that
 // hot-reloads independently of the memory/disk store objects (#92): the
 // default freshness lifetime, the stale-while-revalidate and stale-if-error
-// grace windows, and the per-entry capture limit. Every cache decision loads
-// exactly one snapshot, so it never mixes values from two different
-// configurations.
+// grace windows, the per-entry capture limit, and cold-miss fill locking (#525).
+// Every cache decision loads exactly one snapshot, so it never mixes values
+// from two different configurations.
 type CachePolicy struct {
 	DefaultTTL           time.Duration
 	StaleWhileRevalidate time.Duration
@@ -25,14 +25,27 @@ type CachePolicy struct {
 	// decoupling it would be a new capability, not a hot-reload of an existing
 	// one (#92 scope item 5 — characterized, not changed).
 	MaxEntryBytes int64
+	// Lock enables per-key cold-miss fill coalescing (#525 Part 1).
+	Lock bool
+	// LockTimeout bounds how long a cold-miss waiter blocks for an active fill
+	// leader before falling through to an uncached origin fetch.
+	LockTimeout time.Duration
 }
 
+const defaultLockTimeout = 5 * time.Second
+
 func policyFromConfig(cfg config.CacheConfig) CachePolicy {
+	lockTimeout := cfg.LockTimeout.Std()
+	if cfg.Lock && lockTimeout <= 0 {
+		lockTimeout = defaultLockTimeout
+	}
 	return CachePolicy{
 		DefaultTTL:           cfg.DefaultTTL.Std(),
 		StaleWhileRevalidate: cfg.StaleWhileRevalidate.Std(),
 		StaleIfError:         cfg.StaleIfError.Std(),
 		MaxEntryBytes:        cfg.MemoryMaxSize.Bytes(),
+		Lock:                 cfg.Lock,
+		LockTimeout:          lockTimeout,
 	}
 }
 

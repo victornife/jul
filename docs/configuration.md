@@ -1220,11 +1220,12 @@ error-tolerant serving (`stale_if_error`).
 Enable `[cache].enabled` globally, then opt individual locations in with
 `cache = true`. Cache entries survive config reloads but are lost on restart
 unless `disk_path` is configured. `memory_max_size`, `disk_max_size`,
-`default_ttl`, `stale_while_revalidate`, and `stale_if_error` are all
-hot-reloadable (#92): a change applies atomically at the next successful
-reload, resizing the memory/disk stores in place (evicting strict LRU
-entries/files immediately if a cap is lowered) without resetting counters or
-rebuilding the cache. `enabled` and `disk_path` remain restart-required.
+`default_ttl`, `stale_while_revalidate`, `stale_if_error`, `lock`, and
+`lock_timeout` are all hot-reloadable (#92, #525 Part 1): a change applies
+atomically at the next successful reload, resizing the memory/disk stores in
+place (evicting strict LRU entries/files immediately if a cap is lowered)
+without resetting counters or rebuilding the cache. `enabled` and `disk_path`
+remain restart-required.
 
 ```toml
 [cache]
@@ -1235,6 +1236,8 @@ disk_max_size = "1g"
 default_ttl = "120s"
 stale_while_revalidate = "60s"
 stale_if_error = "30s"
+lock = true
+lock_timeout = "5s"
 ```
 
 | Key | Type | Description |
@@ -1246,6 +1249,8 @@ stale_if_error = "30s"
 | `default_ttl` | duration | Used when upstream gives no explicit freshness |
 | `stale_while_revalidate` | duration | Serve stale entries while refreshing asynchronously |
 | `stale_if_error` | duration | Extend stale serving when a background revalidation encounters an upstream error (5xx or timeout) |
+| `lock` | bool | Coalesce concurrent cold misses per cache key so one leader fetches and captures from the origin while compatible waiters block up to `lock_timeout` (default `false`); see [cache.md](cache.md#cold-miss-fill-locking) |
+| `lock_timeout` | duration | Maximum wait for an active cold-miss fill before falling through to an uncached origin request (defaults to `5s` when `lock = true`; setting a positive value with `lock = false` is rejected) |
 
 Per-location caching also requires `cache = true` on the location. See
 [docs/cache.md](cache.md) for the two-tier model, on-disk format, and

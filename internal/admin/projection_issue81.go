@@ -67,6 +67,8 @@ type CompleteCacheProjection struct {
 	DefaultTTL           string `json:"default_ttl"`
 	StaleWhileRevalidate string `json:"stale_while_revalidate"`
 	StaleIfError         string `json:"stale_if_error"`
+	Lock                 bool   `json:"lock"`
+	LockTimeout          string `json:"lock_timeout"`
 }
 
 // ServerLimitsProjection is the smallest adjacent safe projection needed to
@@ -166,6 +168,8 @@ func projectCacheSettings(c *config.Config) *CompleteCacheProjection {
 		DefaultTTL:           string(mustMarshal(c.Cache.DefaultTTL.MarshalText())),
 		StaleWhileRevalidate: string(mustMarshal(c.Cache.StaleWhileRevalidate.MarshalText())),
 		StaleIfError:         string(mustMarshal(c.Cache.StaleIfError.MarshalText())),
+		Lock:                 c.Cache.Lock,
+		LockTimeout:          string(mustMarshal(c.Cache.LockTimeout.MarshalText())),
 	}
 }
 
