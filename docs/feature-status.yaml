@@ -364,8 +364,8 @@ features:
     directives, mandatory validation, authenticated reuse, invalidation, Vary membership, 304 merge and Range bypass. #134
     published the executable matrix, refreshed six benchmarks, added a zero-error focused correctness soak and found no unresolved
     P0/P1 cache defect. Criterion 8 is satisfied by adversarial Cache-Control parser coverage. Additive post-v2.2.0 cold-miss fill
-    locking (#525 Part 1) is unreleased and does not inherit this GA/soaked certification; disk-streamed capture (#525 Part 2) and
-    range-aware caching (#442) remain separate. See docs/cache.md and the 2026-08-07
+    locking (#525 Part 1) and disk-streamed large-object capture (#525 Part 2) are unreleased and do not inherit this GA/soaked
+    certification; range-aware caching (#442) remains separate. See docs/cache.md and the 2026-08-07
     audit record.
 
     '

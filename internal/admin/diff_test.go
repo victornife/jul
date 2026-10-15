@@ -303,13 +303,16 @@ func TestDiffGlobalCacheCompressionRateLimit(t *testing.T) {
 		RateLimit:   config.RateLimitConfig{Enabled: true, Rate: 100, Burst: 100},
 	}
 	after := &config.Config{
-		Cache:       config.CacheConfig{Enabled: true, DiskPath: "/var/cache", Lock: true, LockTimeout: config.Duration(3 * time.Second)},
+		Cache:       config.CacheConfig{Enabled: true, DiskPath: "/var/cache", MaxEntrySize: config.Size(128 << 20), Lock: true, LockTimeout: config.Duration(3 * time.Second)},
 		Compression: config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip", "br"}},
 		RateLimit:   config.RateLimitConfig{Enabled: false},
 	}
 	d := diffConfigs(before, after)
 	if !diffHas(d, "Change cache disk path") {
 		t.Errorf("expected cache disk change, got %+v", d)
+	}
+	if !diffHas(d, "Change cache maximum entry size") {
+		t.Errorf("expected cache max_entry_size change, got %+v", d)
 	}
 	if !diffHas(d, "Enable cache fill lock") {
 		t.Errorf("expected cache fill-lock enable, got %+v", d)

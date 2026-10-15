@@ -359,6 +359,7 @@ func TestCacheScalarPolicyIsHot(t *testing.T) {
 		"cache.disk_max_size",
 		"cache.lock",
 		"cache.lock_timeout",
+		"cache.max_entry_size",
 		"cache.memory_max_size",
 		"cache.stale_if_error",
 		"cache.stale_while_revalidate",

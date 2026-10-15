@@ -11,6 +11,20 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Disk-streamed large-object cache capture and serving (`[cache].max_entry_size`,
+  #525 Part 2, ADR 0023): decouples the maximum cacheable response body size
+  from `memory_max_size` when `disk_path` is enabled (up to `disk_max_size`,
+  defaulting to `memory_max_size` when unset or `0`, hot-reloadable). Responses
+  larger than `memory_max_size` and within `max_entry_size` stream directly to
+  same-directory temporary files during origin transfer (both declared
+  `Content-Length` and unknown-length chunked spills) without body-sized heap
+  allocation, publish atomically in the `JULDCH02` trailer-framed disk format
+  with metadata-only lookup and startup rehydration, enforce a concurrent
+  temporary-disk capture budget bounded by `disk_max_size`
+  (`jul_cache_capture_skipped_total{reason="budget"}`), and stream disk-backed
+  cache hits in 32 KiB chunks under reference-counted active-reader file leases
+  that survive concurrent eviction, invalidation, purge and replacement.
+
 - Opt-in cold-miss cache fill locking (`[cache].lock` and `[cache].lock_timeout`,
   #525 Part 1): coalesces concurrent cold misses per cache key so one leader
   fetches and captures from the origin while compatible waiters block up to
@@ -21,8 +35,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   cancellations release waiters promptly. Exports bounded
   `jul_cache_fill_locks_total{outcome}` metrics and maps NGINX
   `proxy_cache_lock` / `proxy_cache_lock_timeout` as approximated while keeping
-  `proxy_cache_lock_age` blocking. Disk-streamed capture (#525 Part 2) and
-  range-aware caching (#442) remain separate.
+  `proxy_cache_lock_age` blocking. Range-aware caching (#442) remains separate.
 
 - Optional external Console OIDC authentication (#441): one discovered provider,
   Authorization Code + PKCE S256, bounded HttpOnly sessions, exact subject/group

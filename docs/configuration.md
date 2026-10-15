@@ -1219,9 +1219,9 @@ error-tolerant serving (`stale_if_error`).
 
 Enable `[cache].enabled` globally, then opt individual locations in with
 `cache = true`. Cache entries survive config reloads but are lost on restart
-unless `disk_path` is configured. `memory_max_size`, `disk_max_size`,
-`default_ttl`, `stale_while_revalidate`, `stale_if_error`, `lock`, and
-`lock_timeout` are all hot-reloadable (#92, #525 Part 1): a change applies
+unless `disk_path` is configured. `memory_max_size`, `max_entry_size`,
+`disk_max_size`, `default_ttl`, `stale_while_revalidate`, `stale_if_error`,
+`lock`, and `lock_timeout` are all hot-reloadable (#92, #525): a change applies
 atomically at the next successful reload, resizing the memory/disk stores in
 place (evicting strict LRU entries/files immediately if a cap is lowered)
 without resetting counters or rebuilding the cache. `enabled` and `disk_path`
@@ -1231,6 +1231,7 @@ remain restart-required.
 [cache]
 enabled = true
 memory_max_size = "128m"
+max_entry_size = "256m"
 disk_path = "./jul-data/cache"
 disk_max_size = "1g"
 default_ttl = "120s"
@@ -1243,9 +1244,10 @@ lock_timeout = "5s"
 | Key | Type | Description |
 | --- | ---- | ----------- |
 | `enabled` | bool | Master switch |
-| `memory_max_size` | size | In-memory tier cap. Also the largest cacheable object (in either tier) and the budget shared by all in-flight response captures; see [cache.md](cache.md#capture-memory) |
+| `memory_max_size` | size | In-memory tier cap and the budget shared by all in-flight memory response captures; also the default `max_entry_size` when `max_entry_size` is unset; see [cache.md](cache.md#capture-memory-and-temporary-disk-budgets) |
+| `max_entry_size` | size | Maximum single-response body size eligible for caching (defaults to `memory_max_size` when unset or `0`; may exceed `memory_max_size` up to `disk_max_size` when `disk_path` is configured, streaming bodies `> memory_max_size` directly to the disk tier; see [ADR 0023](adr/0023-large-object-disk-streamed-cache.md)) |
 | `disk_path` | string | Enables the disk overflow tier when set |
-| `disk_max_size` | size | Disk tier cap |
+| `disk_max_size` | size | Disk tier cap (and temporary-file budget for concurrent disk-streamed captures) |
 | `default_ttl` | duration | Used when upstream gives no explicit freshness |
 | `stale_while_revalidate` | duration | Serve stale entries while refreshing asynchronously |
 | `stale_if_error` | duration | Extend stale serving when a background revalidation encounters an upstream error (5xx or timeout) |

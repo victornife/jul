@@ -4,6 +4,7 @@ log_level = "info"
 [cache]
 enabled                = true
 memory_max_size        = "128MB"
+max_entry_size         = "256MB"
 disk_path              = "/var/cache/jul/http"
 disk_max_size          = "2GB"
 default_ttl            = "5m"

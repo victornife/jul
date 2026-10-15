@@ -372,6 +372,9 @@ func (c *Config) applyDefaultsWithPresence(tracingSampleRatioPresent bool) {
 		if c.Cache.DiskPath != "" && c.Cache.DiskMaxSize == 0 {
 			c.Cache.DiskMaxSize = Size(512 << 20) // 512 MiB
 		}
+		if c.Cache.MaxEntrySize == 0 {
+			c.Cache.MaxEntrySize = c.Cache.MemoryMaxSize
+		}
 	}
 	if c.Cache.Lock && c.Cache.LockTimeout == 0 {
 		c.Cache.LockTimeout = Duration(5 * time.Second)

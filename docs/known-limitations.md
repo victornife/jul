@@ -365,19 +365,25 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
 - **Variant membership is capped at 64 per base resource.** Past the cap the
   oldest variant is deleted, so a resource with more than 64 live variants will
   churn.
-- **Mandatory validation buffers the origin's answer** instead of streaming it,
-  because the status must be known before deciding whether to serve the stored
-  body. An answer larger than `memory_max_size`, or one that turns out to be a
-  stream, costs one extra origin request and is then streamed normally.
-- **Objects larger than `memory_max_size` are never cached, in either tier.**
-  Capture always happens in memory, so a large `disk_max_size` does not admit
-  bigger objects (#525 Part 2 tracks disk-streamed capture). Such responses are
-  streamed and counted in `jul_cache_capture_skipped_total{reason="oversize"}`.
-  In-flight captures share one budget equal to `memory_max_size`; a miss that
-  would exceed it is streamed uncaptured and counted as `reason="budget"`
-  (#505). Cold-miss fill coalescing (`[cache].lock = true`, #525 Part 1) is
-  process-local and opt-in; a waiter whose `lock_timeout` expires falls through
-  to an uncached origin fetch so it never competes with the active fill leader.
+- **Mandatory validation buffers or streams the origin's answer to temporary
+  storage** before deciding whether to serve the stored body (`304`) or the
+  replacement representation (`200`). An answer larger than `max_entry_size`, or
+  one that turns out to be an event stream, costs one extra origin request and
+  is then streamed normally.
+- **Objects larger than `max_entry_size` are never cached, in either tier.**
+  `[cache].max_entry_size` defaults to `memory_max_size` when unset, and may be
+  configured up to `disk_max_size` when `disk_path` is enabled so objects
+  between `memory_max_size` and `max_entry_size` stream directly to and from the
+  disk tier without body-sized heap allocation (#525 Part 2, [ADR 0023](adr/0023-large-object-disk-streamed-cache.md)).
+  Responses exceeding `max_entry_size` are streamed uncaptured and counted in
+  `jul_cache_capture_skipped_total{reason="oversize"}`. In-flight memory
+  captures share a budget equal to `memory_max_size` and in-flight temporary
+  disk captures share a budget equal to `disk_max_size`; a miss that would
+  exceed its tier's capture budget is streamed uncaptured and counted as
+  `reason="budget"` (#505, #525 Part 2). Cold-miss fill coalescing
+  (`[cache].lock = true`, #525 Part 1) is process-local and opt-in; a waiter
+  whose `lock_timeout` expires falls through to an uncached origin fetch so it
+  never competes with the active fill leader.
 - **Disk tier is best-effort.** A disk-write failure does not error the request;
   the entry serves from memory or the upstream.
 - **No distributed / shared cache.** Cache state is local to the single Jul.IA
@@ -780,8 +786,9 @@ it does not override origin storage-cache eligibility or implement targeted
 CDN/Surrogate/X-Accel cache controls. Generated CORS preflights keep their
 dedicated policy. Application-outcome retries (#406) remain deferred/blocking.
 For #525, Part 1 cold-miss fill locking (`[cache].lock` and
-`[cache].lock_timeout`) is implemented, opt-in and unreleased, while Part 2
-disk-streamed large-object capture remains pending; NGINX `proxy_cache_lock`
+`[cache].lock_timeout`) and Part 2 disk-streamed large-object capture
+(`[cache].max_entry_size`, `JULDCH02` trailer-framed disk store) are
+implemented, opt-in and unreleased; NGINX `proxy_cache_lock`
 and `proxy_cache_lock_timeout` translate as approximated across `http`,
 `server`, and `location` scopes only when all cache-enabled locations share
 compatible effective values (including NGINX's `off` and `5s` defaults), while

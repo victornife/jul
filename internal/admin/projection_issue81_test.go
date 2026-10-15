@@ -51,6 +51,7 @@ enabled = false
 memory_max_size = "73m"
 disk_path = "/var/lib/jul/cache"
 disk_max_size = "5g"
+max_entry_size = "256m"
 default_ttl = "71s"
 stale_while_revalidate = "13s"
 stale_if_error = "29s"
@@ -86,7 +87,7 @@ path = "/"
 	}
 	if got.Cache == nil || got.Cache.Enabled || got.Cache.MemoryMaxSize != "73m" ||
 		got.Cache.MemoryMax != "73m" || got.Cache.DiskPath != "/var/lib/jul/cache" ||
-		got.Cache.DiskMaxSize != "5g" || got.Cache.DefaultTTL != "1m11s" ||
+		got.Cache.DiskMaxSize != "5g" || got.Cache.MaxEntrySize != "256m" || got.Cache.DefaultTTL != "1m11s" ||
 		got.Cache.StaleWhileRevalidate != "13s" || got.Cache.StaleIfError != "29s" ||
 		!got.Cache.Lock || got.Cache.LockTimeout != "7s" {
 		t.Fatalf("cache projection is incomplete: %#v", got.Cache)

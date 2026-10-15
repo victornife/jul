@@ -60,6 +60,7 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 		d.cover("cache.memory_max_size")
 		d.cover("cache.disk_path")
 		d.cover("cache.disk_max_size")
+		d.cover("cache.max_entry_size")
 		d.cover("cache.default_ttl")
 		d.cover("cache.stale_while_revalidate")
 		d.cover("cache.stale_if_error")
@@ -79,6 +80,9 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	}
 	if b.DiskMaxSize != a.DiskMaxSize {
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: sizeStr(b.DiskMaxSize), After: sizeStr(a.DiskMaxSize), Detail: "Change cache disk size"}, "cache disk size")
+	}
+	if b.MaxEntrySize != a.MaxEntrySize {
+		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: sizeStr(b.MaxEntrySize), After: sizeStr(a.MaxEntrySize), Detail: "Change cache maximum entry size"}, "cache max_entry_size")
 	}
 	if b.DefaultTTL != a.DefaultTTL {
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: durStr(b.DefaultTTL), After: durStr(a.DefaultTTL), Detail: "Change cache default TTL"}, "cache ttl")
@@ -103,6 +107,7 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	d.cover("cache.memory_max_size")
 	d.cover("cache.disk_path")
 	d.cover("cache.disk_max_size")
+	d.cover("cache.max_entry_size")
 	d.cover("cache.default_ttl")
 	d.cover("cache.stale_while_revalidate")
 	d.cover("cache.stale_if_error")

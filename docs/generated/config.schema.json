@@ -392,6 +392,13 @@
           "x-jul-conditional-default": "5s (when cache.lock)",
           "x-jul-constraint": "non-negative; requires cache.lock = true when positive"
         },
+        "max_entry_size": {
+          "description": "MaxEntrySize is the maximum cacheable response body size across both tiers",
+          "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
+          "type": "string",
+          "x-jul-conditional-default": "memory_max_size (when cache.enabled)",
+          "x-jul-constraint": "non-negative; at most memory_max_size when disk_path is unset, or at most disk_max_size when disk_path is set"
+        },
         "memory_max_size": {
           "description": "MemoryMaxSize is the in-memory tier cap",
           "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",

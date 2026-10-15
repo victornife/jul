@@ -135,6 +135,7 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		if err != nil {
 			return nil, err
 		}
+		d.onSkip = c.captureSkipped
 		c.disk = d
 	}
 	c.mem = newMemStore(cfg.MemoryMaxSize.Bytes(), func(key string, e *Entry) {
@@ -194,8 +195,11 @@ func (c *Cache) get(key string) (*Entry, bool) {
 		return e, true
 	}
 	if c.disk != nil {
-		if e, ok := c.disk.get(key); ok {
-			c.mem.set(key, e) // promote
+		memCap := c.Policy().MemoryCapBytes()
+		if e, ok := c.disk.getWithMemCap(key, memCap); ok {
+			if e.diskBody == nil {
+				c.mem.set(key, e) // promote memory-eligible entry
+			}
 			return e, true
 		}
 	}
@@ -203,7 +207,14 @@ func (c *Cache) get(key string) (*Entry, bool) {
 }
 
 func (c *Cache) set(key string, e *Entry) {
-	c.mem.set(key, e)
+	if e != nil && e.diskBody != nil {
+		c.mem.del(key)
+	} else {
+		c.mem.set(key, e)
+	}
+	if c.disk != nil {
+		c.disk.set(key, e)
+	}
 }
 
 // Delete removes a single key from both tiers. When the key holds a Vary stub,
@@ -293,9 +304,29 @@ func (c *Cache) lookup(base string, r *http.Request) (*Entry, string, bool) {
 // stub under the base key records both the varied field names and every variant
 // key the resource owns, so a later invalidation can remove all of them.
 func (c *Cache) store(base string, r *http.Request, e *Entry) {
+	c.storeCaptured(base, r, e, nil)
+}
+
+func (c *Cache) setCaptured(k string, e *Entry, stream *diskStreamCapture) bool {
+	if stream == nil {
+		c.set(k, e)
+		return true
+	}
+	if c.disk == nil {
+		return false
+	}
+	blob, ok := c.disk.publishStream(k, e, stream)
+	if !ok {
+		return false
+	}
+	e.diskBody = blob
+	c.mem.del(k)
+	return true
+}
+
+func (c *Cache) storeCaptured(base string, r *http.Request, e *Entry, stream *diskStreamCapture) bool {
 	if len(e.Vary) == 0 {
-		c.set(base, e)
-		return
+		return c.setCaptured(base, e, stream)
 	}
 	vk := variantKey(base, e.Vary, r)
 
@@ -305,11 +336,14 @@ func (c *Cache) store(base string, r *http.Request, e *Entry) {
 	stub := c.stubFor(base, e.Vary)
 	// The variant is published before the stub that points at it, so a lookup
 	// following a freshly listed key always finds an entry there.
-	c.set(vk, e)
+	if !c.setCaptured(vk, e, stream) {
+		return false
+	}
 	if evicted := stub.addVariant(vk); evicted != "" {
 		c.delOne(evicted)
 	}
 	c.set(base, stub)
+	return true
 }
 
 // stubFor returns the membership stub to publish for base. An existing stub with
@@ -466,32 +500,41 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 }
 
 func (c *Cache) serveCachedIfReusable(w http.ResponseWriter, r *http.Request, next http.Handler, base string, reqPolicy requestPolicy, now time.Time, span tracing.Span) (effKey string, served bool) {
-	e, effKey, ok := c.lookup(base, r)
-	if !ok || !e.matchesVary(r) {
-		return effKey, false
+	for attempt := 0; attempt < 2; attempt++ {
+		var e *Entry
+		var ok bool
+		e, effKey, ok = c.lookup(base, r)
+		if !ok || !e.matchesVary(r) {
+			return effKey, false
+		}
+		switch reuseDecision(e, r, reqPolicy, now) {
+		case reuseHit:
+			if !c.serve(w, r, e, stateHit, now) {
+				continue
+			}
+			span.SetString("cache.status", "HIT")
+			span.End()
+			return effKey, true
+		case reuseStale:
+			if !c.serve(w, r, e, stateStale, now) {
+				continue
+			}
+			span.SetString("cache.status", "STALE")
+			span.End()
+			// Start the background refresh before returning, so the lease
+			// is taken while this request still holds its generation.
+			c.startRevalidate(effKey, r, next, e)
+			return effKey, true
+		case reuseValidate:
+			span.SetString("cache.status", "VALIDATE")
+			span.End()
+			c.validateAndServe(w, r, next, e, effKey, now)
+			return effKey, true
+		default:
+			return effKey, false
+		}
 	}
-	switch reuseDecision(e, r, reqPolicy, now) {
-	case reuseHit:
-		span.SetString("cache.status", "HIT")
-		span.End()
-		c.serve(w, r, e, stateHit, now)
-		return effKey, true
-	case reuseStale:
-		span.SetString("cache.status", "STALE")
-		span.End()
-		c.serve(w, r, e, stateStale, now)
-		// Start the background refresh before returning, so the lease
-		// is taken while this request still holds its generation.
-		c.startRevalidate(effKey, r, next, e)
-		return effKey, true
-	case reuseValidate:
-		span.SetString("cache.status", "VALIDATE")
-		span.End()
-		c.validateAndServe(w, r, next, e, effKey, now)
-		return effKey, true
-	default:
-		return effKey, false
-	}
+	return effKey, false
 }
 
 // bypass forwards the request with the untouched writer and stores nothing.
@@ -580,15 +623,16 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 	cw := &cacheWriter{
 		ResponseWriter: w,
 		limit:          pol.MaxEntryBytes,
+		memLimit:       pol.MemoryCapBytes(),
+		memBudgetLimit: pol.MemoryMaxBytes,
+		disk:           c.disk,
 		acct:           c.newCaptureAccount(),
 		onAbandon:      onAbandon,
 	}
-	if onAbandon != nil {
-		cw.headerCheck = func(code int, h http.Header) bool {
-			return c.headerStorable(r, code, h, c.clock(), pol)
-		}
+	cw.headerCheck = func(code int, h http.Header) bool {
+		return c.headerStorable(r, code, h, c.clock(), pol)
 	}
-	defer cw.acct.release()
+	defer cw.releaseCapture()
 	w.Header().Set("X-Cache", stateMiss)
 	// Captured after X-Cache is set, so that field cancels out of the stored
 	// entry the same way any other outer-layer pre-set field does (#332),
@@ -611,9 +655,8 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 	if h == nil {
 		h = w.Header()
 	}
-	if e := c.buildEntryWithPolicy(r, cw.status, h, cw.buf.Bytes(), now, pol); e != nil {
-		c.store(key(r), r, e)
-		return true
+	if e := c.buildEntryFromCapture(r, cw.status, h, cw.buf.Bytes(), cw.bodyLen, cw.diskStream != nil, now, pol); e != nil {
+		return c.storeCaptured(key(r), r, e, cw.diskStream)
 	}
 	return false
 }
@@ -704,8 +747,9 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req *http.Reque
 		call.finish(nil, outcomeCanceled, context.Canceled)
 	}()
 
-	rec := &recorder{header: http.Header{}, limit: c.Policy().MaxEntryBytes, acct: c.newCaptureAccount()}
-	defer rec.acct.release()
+	pol := c.Policy()
+	rec := c.newRecorder(pol)
+	defer rec.releaseCapture()
 	next.ServeHTTP(rec, req)
 	now := c.clock()
 
@@ -757,15 +801,25 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req *http.Reque
 		c.observeRevalidation(outcomeUncacheable)
 
 	default:
-		e := c.buildEntry(req, rec.status, rec.header, rec.body.Bytes(), now)
-		if e == nil {
+		e := c.buildEntryFromCapture(req, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
+		if e == nil || !c.storeCaptured(key(req), req, e, rec.diskStream) {
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return
 		}
-		c.store(key(req), req, e)
 		call.finish(e, outcomeStored, nil)
 		c.observeRevalidation(outcomeStored)
+	}
+}
+
+func (c *Cache) newRecorder(pol CachePolicy) *recorder {
+	return &recorder{
+		header:         http.Header{},
+		limit:          pol.MaxEntryBytes,
+		memLimit:       pol.MemoryCapBytes(),
+		memBudgetLimit: pol.MemoryMaxBytes,
+		disk:           c.disk,
+		acct:           c.newCaptureAccount(),
 	}
 }
 
@@ -792,8 +846,12 @@ func (c *Cache) headerStorable(r *http.Request, status int, h http.Header, now t
 }
 
 func (c *Cache) buildEntryWithPolicy(r *http.Request, status int, h http.Header, body []byte, now time.Time, pol CachePolicy) *Entry {
+	return c.buildEntryFromCapture(r, status, h, body, int64(len(body)), false, now, pol)
+}
+
+func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header, body []byte, bodyLen int64, streamBacked bool, now time.Time, pol CachePolicy) *Entry {
 	if r.Method != http.MethodHead {
-		if cl := declaredLength(h); cl >= 0 && int64(len(body)) != cl {
+		if cl := declaredLength(h); cl >= 0 && bodyLen != cl {
 			return nil
 		}
 	}
@@ -818,10 +876,15 @@ func (c *Cache) buildEntryWithPolicy(r *http.Request, status int, h http.Header,
 	// again here, and the Age header Jul reports would understate its real age.
 	created := now.Add(-initialAge(h, now))
 
+	var copiedBody []byte
+	if !streamBacked {
+		copiedBody = append([]byte(nil), body...)
+	}
+
 	e := &Entry{
 		Status:             status,
 		Header:             stored,
-		Body:               append([]byte(nil), body...),
+		Body:               copiedBody,
 		CreatedAt:          created,
 		ExpiresAt:          created.Add(ttl),
 		StaleUntil:         created.Add(ttl + swr),
@@ -869,7 +932,21 @@ func initialAge(h http.Header, now time.Time) time.Duration {
 }
 
 // serve writes a cached entry to the client, honoring conditional requests.
-func (c *Cache) serve(w http.ResponseWriter, r *http.Request, e *Entry, state string, now time.Time) {
+// For disk-backed entries it acquires a reader lease before committing headers
+// and streams the body in fixed 32 KiB chunks without loading the whole object
+// into memory.
+func (c *Cache) serve(w http.ResponseWriter, r *http.Request, e *Entry, state string, now time.Time) bool {
+	modified := !notModified(r, e)
+	var bodyReader BodyReader
+	if modified && r.Method != http.MethodHead && e.diskBody != nil {
+		var err error
+		bodyReader, err = e.OpenBody()
+		if err != nil {
+			return false
+		}
+		defer func() { _ = bodyReader.Close() }()
+	}
+
 	h := w.Header()
 	// Set on the first value, Add on the rest: a stored multi-value field is
 	// still reproduced in full, but a stored field cannot stack beside a value
@@ -893,14 +970,19 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, e *Entry, state st
 	h.Set("Age", strconv.Itoa(age))
 	h.Set("X-Cache", state)
 
-	if notModified(r, e) {
+	if !modified {
 		w.WriteHeader(http.StatusNotModified)
-		return
+		return true
 	}
 	w.WriteHeader(e.Status)
 	if r.Method != http.MethodHead {
-		_, _ = w.Write(e.Body)
+		if bodyReader != nil {
+			_, _ = copyWithPooledBuffer(w, bodyReader)
+		} else {
+			_, _ = w.Write(e.Body)
+		}
 	}
+	return true
 }
 
 // freshness decides whether a response is cacheable and for how long.

@@ -10,6 +10,29 @@
 | Report location | Original working copy: `/home/victornf/jul-audit-20260930/jul-audit-report-2026-09-30.md`; publication target: `docs/audit/jul-audit-report-2026-09-30.md` |
 | Post-audit baseline note | After the report was written, `main` moved to `f036b063` (PR #501: access-log writer sharing, a dependency security floor, docs). A read-only diff (8 files: `internal/observability/sinks.go` + test, CHANGELOG, three docs, Console lockfiles) shows no change to any file behind F-01–F-19, except `docs/known-limitations.md` line shifts: the cited L242 is now L238 and L510 is now L506. All findings still apply at `f036b063`. The Y1-10 access-log sink change itself was not re-reviewed. |
 
+## Delivery scope addendum — 2026-10-15 (#525 Part 2)
+
+This addendum supersedes the `#525 Part 2` pending note in the `#525 Part 1`
+addendum below:
+
+- **#525 Part 2 (disk-streamed large-object capture):** implemented on `main`
+  as opt-in, unreleased functionality governed by [ADR 0023](../adr/0023-large-object-disk-streamed-cache.md).
+  Adds `[cache].max_entry_size` (classified `hot_reload`, defaulting to
+  `memory_max_size` when unset or `0`, validated against `memory_max_size`,
+  `disk_max_size`, and `disk_path`), streams cacheable responses larger than
+  `memory_max_size` and up to `max_entry_size` directly to temporary files under
+  `disk_path` (for both declared `Content-Length` and chunked/unknown-length
+  spills) without body-sized heap allocation, publishes entries in the
+  `JULDCH02` trailer-framed disk format with metadata-only startup rehydration
+  and lookup, bounds concurrent temporary disk captures by `disk_max_size`
+  (`jul_cache_capture_skipped_total{reason="budget"}`), and serves disk-backed
+  hits in 32 KiB chunks under reference-counted active-reader file leases
+  (`.jul-cache-retired-*` rename + deferred unlink on last close) across
+  eviction, invalidation, purge, and replacement.
+- **#442 range-caching activation gate** remains a separate subsequent phase.
+  This addendum records `#525 Part 2` implementation scope, not release
+  publication, soak completion, or a GA maturity promotion.
+
 ## Delivery scope addendum — 2026-10-15 (#525 Part 1)
 
 This addendum supersedes the deferred `#525` fill-lock status in the 2026-10-09

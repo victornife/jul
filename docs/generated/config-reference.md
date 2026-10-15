@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 345 configurable leaves.
+Coverage: 346 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -771,6 +771,22 @@ LockTimeout bounds how long a concurrent cold miss waits for an active fill lead
 | Constraint | non-negative; requires cache.lock = true when positive |
 | Zero/empty semantics | omitted/zero defaults to 5s when lock is enabled |
 | Active when | cache.enabled = true and cache.lock = true |
+
+## `cache.max_entry_size` {#cache-max_entry_size}
+
+MaxEntrySize is the maximum cacheable response body size across both tiers.
+
+| | |
+| --- | --- |
+| Type | `size` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| Default (conditional) | memory_max_size (when cache.enabled) |
+| Constraint | non-negative; at most memory_max_size when disk_path is unset, or at most disk_max_size when disk_path is set |
+| Zero/empty semantics | omitted/zero defaults to memory_max_size when enabled |
+| Active when | always |
 
 ## `cache.memory_max_size` {#cache-memory_max_size}
 
