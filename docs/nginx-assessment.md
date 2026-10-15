@@ -387,13 +387,17 @@ The complete static HTTP/1.1 WebSocket trio is informational
 Proxy buffering off maps to explicit immediate flushing
 (`NGX_LOCATION_PROXY_BUFFERING`); on blocks. Positive server body limits and
 static HTTP gzip types are supported; unlimited zero body size is blocking.
-send_timeout retains its shipped protocol approximation. Application-outcome
-retry stays blocking under its existing deferred policy. `proxy_cache_lock on`
-and `proxy_cache_lock_timeout` map as approximated (`NGX_LOCATION_CACHE_LOCK`,
-`NGX_LOCATION_CACHE_LOCK_TIMEOUT`) onto process-wide `[cache].lock` and
-`[cache].lock_timeout` (#525 Part 1), `proxy_cache_lock off` is ignored
-(`NGX_LOCATION_CACHE_LOCK_OFF`), and `proxy_cache_lock_age` is blocking
-(`NGX_LOCATION_CACHE_LOCK_AGE`).
+send_timeout retains its shipped protocol approximation. Application-outcome retry stays blocking under its existing deferred policy.
+`proxy_cache_lock` and `proxy_cache_lock_timeout` are classified at `http`,
+`server`, and `location` scopes (`NGX_{HTTP,SERVER,LOCATION}_CACHE_LOCK`,
+`NGX_{HTTP,SERVER,LOCATION}_CACHE_LOCK_TIMEOUT`, and `NGX_*_CACHE_LOCK_OFF` for
+explicit `off`) and resolved via `http → server → location` inheritance (with
+NGINX defaults `off` and `5s`) across all cache-enabled locations (#525 Part 1):
+compatible effective values map as approximated onto `[cache].lock` and
+`[cache].lock_timeout`, whereas mixed effective values across cache-enabled
+locations emit a blocking `NGX_CACHE_LOCK_CONFLICT` finding and leave the
+settings untranslated. `proxy_cache_lock_age` is blocking in every context
+(`NGX_{HTTP,SERVER,LOCATION}_CACHE_LOCK_AGE`).
 
 See [exact behavior and candidate pruning](nginx-importer.md#common-idioms-expiration-and-mime-523).
 No readiness, score or equivalence claim is inferred from directive spelling alone.

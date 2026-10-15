@@ -778,8 +778,15 @@ Modified-time, daily @time, variable, epoch/max and millisecond/fractional
 forms remain blocking. Native expires is a downstream response policy;
 it does not override origin storage-cache eligibility or implement targeted
 CDN/Surrogate/X-Accel cache controls. Generated CORS preflights keep their
-dedicated policy. Application-outcome retries (#406) and cache fill locks
-(#525) remain deferred/blocking.
+dedicated policy. Application-outcome retries (#406) remain deferred/blocking.
+For #525, Part 1 cold-miss fill locking (`[cache].lock` and
+`[cache].lock_timeout`) is implemented, opt-in and unreleased, while Part 2
+disk-streamed large-object capture remains pending; NGINX `proxy_cache_lock`
+and `proxy_cache_lock_timeout` translate as approximated across `http`,
+`server`, and `location` scopes only when all cache-enabled locations share
+compatible effective values (including NGINX's `off` and `5s` defaults), while
+mixed per-location effective values (`NGX_CACHE_LOCK_CONFLICT`) and
+`proxy_cache_lock_age` remain blocking.
 
 MIME tables are bounded static maps with global/server/location inheritance,
 replacement and empty-table clearing. Explicit migrated tables bypass host
