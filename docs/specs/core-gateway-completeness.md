@@ -309,9 +309,12 @@ A location can define:
 
 - application authorization remains upstream-owned beyond configured gateway
   policy;
-- no OIDC/SAML/SCIM/browser-login service;
+- no application OIDC/browser-login gateway, SAML/SCIM or hosted identity service;
 - no automatic certificate-to-application-role mapping;
 - no distributed identity session store.
+
+The separately selected [admin Console OIDC](../admin-oidc.md) capability is
+unreleased Beta and inherits none of this core-completeness/GA evidence.
 
 ## 9. WAF, rate limiting, compression and cache
 

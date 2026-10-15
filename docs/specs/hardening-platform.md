@@ -30,6 +30,10 @@ to committed roadmap features — notably **HP-02 Console RBAC** feeds
 [Y3-02 (Console RBAC + SSO/SAML/OIDC)](../roadmap/). The backlog table lives in
 [roadmap/README.md](../roadmap/); this spec is the design source-of-truth behind it.
 
+The maintainer separately activated #441: bounded [admin Console OIDC](../admin-oidc.md)
+is now an unreleased Beta addition to those roles. Broader SSO/SAML and identity
+governance remain horizon work; HP-02's original local-token evidence is unchanged.
+
 | ID | Item | Precursor to | Phase mapping | Effort |
 | --- | --- | --- | --- | --- |
 | HP-01 | Reload observability / operator diagnostics (`reload_timeout`, result shape) | — | Partially delivered; Phase 2 remediation completes it | M |
@@ -123,10 +127,11 @@ proactive Console permission gating (controls disabled with the missing permissi
 explained), per-principal audit attribution, atomic hot policy swap, and last-admin
 lockout protection. The legacy shared token remains supported (maps to a synthetic
 `shared` admin principal) for gradual migration. Proven by a route/role matrix, a
-real-server role-matrix E2E, and browser gating scenarios. **External identity
-(OIDC/SSO) stays [Y3-02](../roadmap/) horizon.**
+real-server role-matrix E2E, and browser gating scenarios. The separately selected
+[OIDC tranche](../admin-oidc.md) adds bounded browser authentication as unreleased
+Beta; broader SSO/SAML remains [Y3-02](../roadmap/) horizon.
 
-**Current state.** The console authenticates with one constant-time-compared admin
+**Original problem (before Phase 3).** The console authenticated with one constant-time-compared admin
 token (`server.go`); there is one implicit super-user. The
 [audit log](../console.md) records actions but cannot attribute them to a person.
 
@@ -163,7 +168,7 @@ revocation takes effect immediately.
 Y3-02 SSO/SAML/OIDC direction (RBAC is the local-token precursor).
 
 **Risks.** scope creep toward full IdP — keep HP-02 to local principals/roles;
-external identity stays Y3-02.
+the selected OIDC tranche maps into the existing roles without widening HP-02.
 
 ---
 

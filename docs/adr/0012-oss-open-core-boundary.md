@@ -66,6 +66,11 @@ enroll in (bring-your-own-node model).
 - **Support, training, and certification** — professional services layered on
 top of the open-source binary.
 
+The bounded standard [admin Console OIDC tranche](0022-admin-console-oidc.md)
+was explicitly selected for the standalone AGPL binary in #441. It remains
+available without a commercial gate. The examples above do not reserve that
+shipped capability for a future paid offering or authorize removing it.
+
 These layers are allowed to be commercial because they are additive: a user who
 never pays still has a complete, secure, standalone edge server.
 

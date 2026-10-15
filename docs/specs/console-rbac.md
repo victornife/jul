@@ -539,8 +539,10 @@ server truth; management endpoints reject non-`admin:manage`.
 revocation is immediate.
 
 ### Phase 4 — External identity (bridge to Y3-02, out of HP-02 scope)
-OIDC/SAML/SSO → principal/role mapping; group→role binding. Tracked under
-[Y3-02](../roadmap/); RBAC's role model is the local-token precursor it maps onto.
+The separately activated [OIDC tranche](../admin-oidc.md) implements bounded
+browser authentication and exact subject/group-to-role binding as unreleased
+Beta under #441. It maps into this existing role model. Broader SSO/SAML and
+identity governance remain [Y3-02](../roadmap/) horizon work outside HP-02.
 
 ## Open questions
 

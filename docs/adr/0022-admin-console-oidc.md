@@ -82,9 +82,9 @@ this ADR does not confer certification by itself. The bounded in-repository
 protocol code is a permanent maintenance responsibility, not a general OAuth SDK.
 
 On linux/amd64 with Go 1.27.2, `-trimpath -buildvcs=false` and the repository's
-full tag set, the initial implementation increases the lean binary from
-25,314,775 to 25,454,076 bytes (+139,301, 0.55%) and the full binary from
-60,452,641 to 60,608,561 bytes (+155,920, 0.26%), compared with starting main
+full tag set, implementation `34a53041bbe0a773907cf7485cccfc6cbe56ba22`
+increases the lean binary from 25,314,775 to 25,454,364 bytes (+139,589, 0.55%)
+and the full binary from 60,452,641 to 60,610,993 bytes (+158,352, 0.26%), compared with starting main
 `de1a81a9bac976be7408e889dadc39a9619cfdd6`. These are unstripped local builds,
 not release artifact sizes; embedded Console assets are included only in full.
 
