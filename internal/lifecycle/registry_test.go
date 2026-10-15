@@ -357,6 +357,8 @@ func TestCacheScalarPolicyIsHot(t *testing.T) {
 	for _, path := range []string{
 		"cache.default_ttl",
 		"cache.disk_max_size",
+		"cache.lock",
+		"cache.lock_timeout",
 		"cache.memory_max_size",
 		"cache.stale_if_error",
 		"cache.stale_while_revalidate",

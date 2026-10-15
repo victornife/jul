@@ -179,6 +179,295 @@ func TestApplyHTTPCacheConfig(t *testing.T) {
 			t.Errorf("got %+v", out.Cache)
 		}
 	})
+	t.Run("zone with lock and lock_timeout", func(t *testing.T) {
+		tr := &translator{httpCache: httpCacheResolution{
+			hasZone:        true,
+			zoneName:       "z",
+			def:            cacheZoneDef{path: "/var/cache"},
+			hasLock:        true,
+			lock:           true,
+			hasLockTimeout: true,
+			lockTimeout:    config.Duration(4 * time.Second),
+		}}
+		out := &config.Config{}
+		tr.applyHTTPCacheConfig(out)
+		if !out.Cache.Lock || out.Cache.LockTimeout.Std() != 4*time.Second {
+			t.Errorf("got %+v", out.Cache)
+		}
+	})
+}
+
+func TestResolveCacheCollectorLockAndLockTimeout(t *testing.T) {
+	t.Run("consistent effective lock and timeout across cached locations", func(t *testing.T) {
+		tr := &translator{}
+		col := &cacheCollector{
+			locLocks: []cachedLocationLock{
+				{lock: true, lockLine: 1, timeout: config.Duration(3 * time.Second), timeoutLine: 2},
+				{lock: true, lockLine: 1, timeout: config.Duration(3 * time.Second), timeoutLine: 2},
+			},
+		}
+		res := tr.resolveCacheCollector(col)
+		if !res.hasLock || !res.lock || !res.hasLockTimeout || res.lockTimeout.Std() != 3*time.Second {
+			t.Fatalf("got %+v", res)
+		}
+	})
+
+	t.Run("http scope inherited by cached locations with default 5s timeout", func(t *testing.T) {
+		src := `
+http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m;
+  proxy_cache_lock on;
+  server {
+    listen 8080;
+    location /a {
+      proxy_cache z;
+      proxy_pass http://127.0.0.1:9000;
+    }
+    location /b {
+      proxy_cache z;
+      proxy_pass http://127.0.0.1:9000;
+    }
+    location /uncached {
+      proxy_pass http://127.0.0.1:9000;
+    }
+  }
+}`
+		cfg, rep := translate(t, src)
+		if len(rep.Skipped) != 0 {
+			t.Fatalf("unexpected skips: %+v", rep.Skipped)
+		}
+		if !cfg.Cache.Lock || cfg.Cache.LockTimeout.Std() != 5*time.Second {
+			t.Fatalf("translated cache = %+v, want Lock=true LockTimeout=5s", cfg.Cache)
+		}
+		assessment, _ := assessString(t, src)
+		if assessment.HasBlocking() {
+			t.Fatalf("unexpected blocking findings: %+v", assessment.Results)
+		}
+		if !hasAssessmentCode(assessment, "NGX_HTTP_CACHE_LOCK") {
+			t.Fatalf("missing NGX_HTTP_CACHE_LOCK in %+v", assessment.Results)
+		}
+	})
+
+	t.Run("server scope inherited by cached locations with explicit timeout and uncached location", func(t *testing.T) {
+		src := `
+http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m;
+  server {
+    listen 8080;
+    proxy_cache_lock on;
+    proxy_cache_lock_timeout 6s;
+    location /cached {
+      proxy_cache z;
+      proxy_pass http://127.0.0.1:9000;
+    }
+    location /explicit-off {
+      proxy_cache off;
+      proxy_cache_lock off;
+      proxy_pass http://127.0.0.1:9000;
+    }
+  }
+}`
+		cfg, rep := translate(t, src)
+		if len(rep.Skipped) != 0 {
+			t.Fatalf("unexpected skips: %+v", rep.Skipped)
+		}
+		if !cfg.Cache.Lock || cfg.Cache.LockTimeout.Std() != 6*time.Second {
+			t.Fatalf("translated cache = %+v, want Lock=true LockTimeout=6s", cfg.Cache)
+		}
+		assessment, _ := assessString(t, src)
+		if assessment.HasBlocking() || !hasAssessmentCode(assessment, "NGX_SERVER_CACHE_LOCK") || !hasAssessmentCode(assessment, "NGX_SERVER_CACHE_LOCK_TIMEOUT") {
+			t.Fatalf("unexpected assessment results: %+v", assessment.Results)
+		}
+	})
+
+	t.Run("location override of http off to on in sole cached location", func(t *testing.T) {
+		src := `
+http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m;
+  proxy_cache_lock off;
+  proxy_cache_lock_timeout 9s;
+  server {
+    listen 8080;
+    location / {
+      proxy_cache z;
+      proxy_cache_lock on;
+      proxy_cache_lock_timeout 4s;
+      proxy_pass http://127.0.0.1:9000;
+    }
+  }
+}`
+		cfg, rep := translate(t, src)
+		if len(rep.Skipped) != 0 {
+			t.Fatalf("unexpected skips: %+v", rep.Skipped)
+		}
+		if !cfg.Cache.Lock || cfg.Cache.LockTimeout.Std() != 4*time.Second {
+			t.Fatalf("translated cache = %+v, want Lock=true LockTimeout=4s", cfg.Cache)
+		}
+	})
+
+	t.Run("location override of http on to off in sole cached location leaves lock disabled with note for timeout", func(t *testing.T) {
+		src := `
+http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m;
+  proxy_cache_lock on;
+  proxy_cache_lock_timeout 4s;
+  server {
+    listen 8080;
+    location / {
+      proxy_cache z;
+      proxy_cache_lock off;
+      proxy_pass http://127.0.0.1:9000;
+    }
+  }
+}`
+		cfg, rep := translate(t, src)
+		if cfg.Cache.Lock || cfg.Cache.LockTimeout != 0 {
+			t.Fatalf("expected lock and lock_timeout unset when effective lock is off, got %+v", cfg.Cache)
+		}
+		if !hasNote(rep, "effective proxy_cache_lock is off") {
+			t.Fatalf("expected note when timeout is present with effective lock off, got %+v", rep.Notes)
+		}
+	})
+
+	t.Run("one cached location lock on and another cached location omitted default off is blocking conflict", func(t *testing.T) {
+		src := `
+http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m;
+  server {
+    listen 8080;
+    location /locked {
+      proxy_cache z;
+      proxy_cache_lock on;
+      proxy_pass http://127.0.0.1:9000;
+    }
+    location /unlocked-by-default {
+      proxy_cache z;
+      proxy_pass http://127.0.0.1:9000;
+    }
+  }
+}`
+		cfg, rep := translate(t, src)
+		if cfg.Cache.Lock || cfg.Cache.LockTimeout != 0 {
+			t.Fatalf("expected global lock left untranslated on mixed effective lock, got %+v", cfg.Cache)
+		}
+		if !hasSkip(rep, "effective proxy_cache_lock") {
+			t.Fatalf("expected skip for mixed effective lock, got %+v", rep.Skipped)
+		}
+		assessment, _ := assessString(t, src)
+		if !assessment.HasBlocking() || !hasAssessmentCode(assessment, "NGX_CACHE_LOCK_CONFLICT") {
+			t.Fatalf("expected blocking NGX_CACHE_LOCK_CONFLICT finding, got %+v", assessment.Results)
+		}
+	})
+
+	t.Run("http lock on with one cached location overriding timeout and another inheriting 5s default is blocking conflict", func(t *testing.T) {
+		src := `
+http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m;
+  proxy_cache_lock on;
+  server {
+    listen 8080;
+    location /fast-timeout {
+      proxy_cache z;
+      proxy_cache_lock_timeout 2s;
+      proxy_pass http://127.0.0.1:9000;
+    }
+    location /default-5s-timeout {
+      proxy_cache z;
+      proxy_pass http://127.0.0.1:9000;
+    }
+  }
+}`
+		cfg, rep := translate(t, src)
+		if cfg.Cache.Lock || cfg.Cache.LockTimeout != 0 {
+			t.Fatalf("expected global lock and timeout left untranslated on mixed effective timeout, got %+v", cfg.Cache)
+		}
+		if !hasSkip(rep, "effective proxy_cache_lock_timeout") {
+			t.Fatalf("expected skip for mixed effective timeout, got %+v", rep.Skipped)
+		}
+		assessment, _ := assessString(t, src)
+		if !assessment.HasBlocking() || !hasAssessmentCode(assessment, "NGX_CACHE_LOCK_CONFLICT") {
+			t.Fatalf("expected blocking NGX_CACHE_LOCK_CONFLICT finding, got %+v", assessment.Results)
+		}
+	})
+
+	t.Run("http lock on with one cached location explicitly setting 5s and another inheriting 5s default is compatible", func(t *testing.T) {
+		src := `
+http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m;
+  proxy_cache_lock on;
+  server {
+    listen 8080;
+    location /explicit-5s {
+      proxy_cache z;
+      proxy_cache_lock_timeout 5s;
+      proxy_pass http://127.0.0.1:9000;
+    }
+    location /implicit-5s {
+      proxy_cache z;
+      proxy_pass http://127.0.0.1:9000;
+    }
+  }
+}`
+		cfg, rep := translate(t, src)
+		if len(rep.Skipped) != 0 {
+			t.Fatalf("unexpected skips: %+v", rep.Skipped)
+		}
+		if !cfg.Cache.Lock || cfg.Cache.LockTimeout.Std() != 5*time.Second {
+			t.Fatalf("expected Lock=true LockTimeout=5s, got %+v", cfg.Cache)
+		}
+	})
+
+	t.Run("proxy_cache_lock_age and invalid lock directives block at http server and location scopes", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			src  string
+			code string
+		}{
+			{
+				name: "http lock_age",
+				src:  "http { proxy_cache_lock_age 5s; server { listen 8080; location / { return 200; } } }",
+				code: "NGX_HTTP_CACHE_LOCK_AGE",
+			},
+			{
+				name: "server lock_age",
+				src:  "http { server { listen 8080; proxy_cache_lock_age 5s; location / { return 200; } } }",
+				code: "NGX_SERVER_CACHE_LOCK_AGE",
+			},
+			{
+				name: "location lock_age",
+				src:  "http { server { listen 8080; location / { proxy_cache_lock_age 5s; return 200; } } }",
+				code: "NGX_LOCATION_CACHE_LOCK_AGE",
+			},
+			{
+				name: "invalid lock and timeout",
+				src: `http {
+  proxy_cache_path /var/cache/jul keys_zone=z:10m;
+  server {
+    listen 8080;
+    location / {
+      proxy_cache;
+      proxy_cache z;
+      proxy_cache_lock invalid;
+      proxy_cache_lock_timeout 0s;
+      proxy_pass http://127.0.0.1:9000;
+    }
+  }
+}`,
+				code: "NGX_LOCATION_CACHE_LOCK",
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				cfg, _ := translate(t, tc.src)
+				if cfg.Cache.Lock || cfg.Cache.LockTimeout != 0 {
+					t.Fatalf("expected lock unset on invalid/blocking input, got %+v", cfg.Cache)
+				}
+				invAssess, _ := assessString(t, tc.src)
+				if !invAssess.HasBlocking() || !hasAssessmentCode(invAssess, tc.code) {
+					t.Fatalf("expected blocking %s in %+v", tc.code, invAssess.Results)
+				}
+			})
+		}
+	})
 }
 
 func TestApplyProxyCache(t *testing.T) {

@@ -54,6 +54,8 @@ disk_max_size = "5g"
 default_ttl = "71s"
 stale_while_revalidate = "13s"
 stale_if_error = "29s"
+lock = true
+lock_timeout = "7s"
 
 [[servers]]
 listen = "127.0.0.1:8080"
@@ -85,7 +87,8 @@ path = "/"
 	if got.Cache == nil || got.Cache.Enabled || got.Cache.MemoryMaxSize != "73m" ||
 		got.Cache.MemoryMax != "73m" || got.Cache.DiskPath != "/var/lib/jul/cache" ||
 		got.Cache.DiskMaxSize != "5g" || got.Cache.DefaultTTL != "1m11s" ||
-		got.Cache.StaleWhileRevalidate != "13s" || got.Cache.StaleIfError != "29s" {
+		got.Cache.StaleWhileRevalidate != "13s" || got.Cache.StaleIfError != "29s" ||
+		!got.Cache.Lock || got.Cache.LockTimeout != "7s" {
 		t.Fatalf("cache projection is incomplete: %#v", got.Cache)
 	}
 

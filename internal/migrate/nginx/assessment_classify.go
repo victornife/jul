@@ -146,6 +146,10 @@ func classifyDirective(context AssessmentContext, d ngx.IDirective, facts walkFa
 			return classifyProxyCache(params)
 		case context == ContextLocation && name == "proxy_cache_valid":
 			return classifyProxyCacheValid(params)
+		case (context == ContextHTTP || context == ContextServer || context == ContextLocation) && name == "proxy_cache_lock":
+			return classifyProxyCacheLock(context, params)
+		case (context == ContextHTTP || context == ContextServer || context == ContextLocation) && name == "proxy_cache_lock_timeout":
+			return classifyProxyCacheLockTimeout(context, params)
 		case context == ContextLocation && name == "proxy_connect_timeout":
 			return classifyLocationDuration("proxy_connect_timeout", "NGX_LOCATION_PROXY_CONNECT_TIMEOUT", params)
 		case context == ContextLocation && name == "proxy_read_timeout":
@@ -405,6 +409,32 @@ func classifyProxyCacheValid(params []string) capability {
 		return blocking("NGX_LOCATION_CACHE_VALID_UNSUPPORTED", RiskPerformance, "proxy_cache_valid uses per-status-code times, the \"any\" keyword, or a malformed time; Jul has one default_ttl")
 	}
 	return capabilityRegistry[capabilityKey{ContextLocation, "proxy_cache_valid"}]
+}
+
+// classifyProxyCacheLock recognizes `proxy_cache_lock on|off;` at http,
+// server, or location scope, reusing parseCacheLock so the assessment and
+// translator agree on valid forms.
+func classifyProxyCacheLock(context AssessmentContext, params []string) capability {
+	capEntry := capabilityRegistry[capabilityKey{context, "proxy_cache_lock"}]
+	enabled, ok := parseCacheLock(params)
+	if !ok {
+		return blocking(capEntry.code, RiskPerformance, "proxy_cache_lock requires a single on or off value")
+	}
+	if !enabled {
+		return ignored(capEntry.code+"_OFF", RiskPerformance, "explicit proxy_cache_lock off matches Jul's default of disabled cold-miss fill locking")
+	}
+	return capEntry
+}
+
+// classifyProxyCacheLockTimeout recognizes `proxy_cache_lock_timeout <time>;`
+// at http, server, or location scope, reusing parseCacheLockTimeout so the
+// assessment and translator agree.
+func classifyProxyCacheLockTimeout(context AssessmentContext, params []string) capability {
+	capEntry := capabilityRegistry[capabilityKey{context, "proxy_cache_lock_timeout"}]
+	if _, ok := parseCacheLockTimeout(params); !ok {
+		return blocking(capEntry.code, RiskPerformance, "proxy_cache_lock_timeout requires a positive representable duration (supported units: ms, s, m, h)")
+	}
+	return capEntry
 }
 
 // classifyLocationDuration judges an HTTP location's proxy_connect_timeout/
@@ -920,6 +950,12 @@ func (w *assessmentWalker) addTranslationSynthetic(rep *Report) {
 			w.assessment.Results = append(w.assessment.Results, syntheticResult(
 				"NGX_CACHE_ZONE_CONFLICT", AssessmentBlocking, AssessmentError, RiskSecurity,
 				ContextLocation, "proxy_cache", f.Line,
+				f.Reason,
+			))
+		case (f.Name == "proxy_cache_lock" || f.Name == "proxy_cache_lock_timeout") && strings.Contains(f.Reason, "effective proxy_cache_lock"):
+			w.assessment.Results = append(w.assessment.Results, syntheticResult(
+				"NGX_CACHE_LOCK_CONFLICT", AssessmentBlocking, AssessmentError, RiskPerformance,
+				ContextLocation, f.Name, f.Line,
 				f.Reason,
 			))
 		}

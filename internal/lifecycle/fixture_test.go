@@ -350,6 +350,8 @@ func fullConfig() *config.Config {
 			DefaultTTL:           config.Duration(300 * time.Second),
 			StaleWhileRevalidate: config.Duration(60 * time.Second),
 			StaleIfError:         config.Duration(300 * time.Second),
+			Lock:                 true,
+			LockTimeout:          config.Duration(5 * time.Second),
 		},
 		Compression: config.CompressionConfig{
 			Enabled:       config.Bool(true),

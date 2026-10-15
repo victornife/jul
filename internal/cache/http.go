@@ -6,6 +6,7 @@ package cache
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"net"
 	"net/http"
 	"strconv"
@@ -113,8 +114,11 @@ type cacheWriter struct {
 	// noStore marks a response that can never be stored whatever its headers
 	// say: the connection was hijacked, the status is a protocol switch, or the
 	// body is a live event stream.
-	noStore  bool
-	hijacked bool
+	noStore     bool
+	hijacked    bool
+	writeErr    error
+	headerCheck func(code int, h http.Header) bool
+	onAbandon   func()
 	// snapshot is the multiset difference between the response header map at
 	// WriteHeader and entrySnapshot, taken before delegating to the outer
 	// ResponseWriter. Every wrapper from here to the real connection shares one
@@ -133,6 +137,12 @@ type cacheWriter struct {
 	entrySnapshot http.Header
 }
 
+func (w *cacheWriter) notifyAbandon() {
+	if w.onAbandon != nil {
+		w.onAbandon()
+	}
+}
+
 // dropCapture abandons the captured response. It is called the moment the
 // response is known to be unstorable, so a long-lived stream never accumulates
 // bytes that will only be discarded.
@@ -140,6 +150,7 @@ func (w *cacheWriter) dropCapture() {
 	w.noStore = true
 	w.buf = bytes.Buffer{}
 	w.acct.release()
+	w.notifyAbandon()
 }
 
 // abandonCapture stops buffering a response that will not be stored and frees
@@ -148,6 +159,7 @@ func (w *cacheWriter) abandonCapture(reason string) {
 	w.tooBig = true
 	w.buf = bytes.Buffer{}
 	w.acct.skip(reason)
+	w.notifyAbandon()
 }
 
 // storable reports whether the captured response may be considered for storage.
@@ -186,6 +198,8 @@ func (w *cacheWriter) WriteHeader(code int) {
 		w.dropCapture()
 	} else if !w.noStore && declaredLength(w.Header()) > w.limit {
 		w.abandonCapture(captureSkipOversize)
+	} else if w.headerCheck != nil && !w.headerCheck(code, w.snapshot) {
+		w.notifyAbandon()
 	}
 	w.ResponseWriter.WriteHeader(code)
 }
@@ -207,7 +221,12 @@ func (w *cacheWriter) Write(p []byte) (int, error) {
 			w.buf.Write(p)
 		}
 	}
-	return w.ResponseWriter.Write(p)
+	n, err := w.ResponseWriter.Write(p)
+	if err != nil && !errors.Is(err, http.ErrBodyNotAllowed) {
+		w.writeErr = err
+		w.dropCapture()
+	}
+	return n, err
 }
 
 // Flush passes through to the underlying writer. respwriter.Wrap exposes it only

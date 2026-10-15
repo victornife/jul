@@ -58,21 +58,24 @@ type Metrics struct {
 	// cacheCaptureSkipped counts cacheable responses streamed without being
 	// captured for storage (#505), labeled by a closed reason set.
 	cacheCaptureSkipped *prometheus.CounterVec
-	compressed          *prometheus.CounterVec
-	ratelimited         *prometheus.CounterVec
-	clientAddrDerived   *prometheus.CounterVec
-	authDecisions       *prometheus.CounterVec
-	upstreamUp          *prometheus.GaugeVec
-	upstreamBackends    *prometheus.GaugeVec
-	admissionRejected   *prometheus.CounterVec
-	retryAttempts       *prometheus.CounterVec
-	retryBudgetDenied   *prometheus.CounterVec
-	circuitTransitions  *prometheus.CounterVec
-	affinityKeys        *prometheus.CounterVec
-	transportRetired    *prometheus.CounterVec
-	resilience          *resilienceCollector
-	cache               *cacheCollector
-	storage             *storageCollector
+	// cacheFillLocks counts cold-miss fill-lock events (#525 Part 1), labeled by
+	// a closed outcome set.
+	cacheFillLocks     *prometheus.CounterVec
+	compressed         *prometheus.CounterVec
+	ratelimited        *prometheus.CounterVec
+	clientAddrDerived  *prometheus.CounterVec
+	authDecisions      *prometheus.CounterVec
+	upstreamUp         *prometheus.GaugeVec
+	upstreamBackends   *prometheus.GaugeVec
+	admissionRejected  *prometheus.CounterVec
+	retryAttempts      *prometheus.CounterVec
+	retryBudgetDenied  *prometheus.CounterVec
+	circuitTransitions *prometheus.CounterVec
+	affinityKeys       *prometheus.CounterVec
+	transportRetired   *prometheus.CounterVec
+	resilience         *resilienceCollector
+	cache              *cacheCollector
+	storage            *storageCollector
 	// upstreamCapacity is #431's separate, un-scraped capacity source; see
 	// SetUpstreamCapacitySource.
 	upstreamCapacity atomic.Pointer[UpstreamStatsSource]
@@ -309,6 +312,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_cache_capture_skipped_total",
 			Help: "Responses streamed without being captured for cache storage, labeled by reason (oversize/budget).",
 		}, []string{"reason"}),
+		cacheFillLocks: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_cache_fill_locks_total",
+			Help: "Cold-miss cache fill-lock events, labeled by bounded outcome (wait/reused/not_reusable/uncacheable/timeout/canceled).",
+		}, []string{"outcome"}),
 		compressed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_http_response_compressed_total",
 			Help: "Responses compressed by the edge, labeled by content coding.",
@@ -580,6 +587,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.cacheEvents,
 		m.cacheRevalidations,
 		m.cacheCaptureSkipped,
+		m.cacheFillLocks,
 		m.compressed,
 		m.ratelimited,
 		m.clientAddrDerived,
@@ -783,6 +791,14 @@ func (m *Metrics) ObserveCacheRevalidation(outcome string) {
 // capture-skip observer.
 func (m *Metrics) ObserveCacheCaptureSkipped(reason string) {
 	m.cacheCaptureSkipped.WithLabelValues(reason).Inc()
+}
+
+// ObserveCacheFillLock records one cold-miss fill-lock event. outcome is one
+// of the cache package's bounded constants ("wait", "reused", "not_reusable",
+// "uncacheable", "timeout", "canceled") — never a cache key, path, host, user
+// identity, or error string.
+func (m *Metrics) ObserveCacheFillLock(outcome string) {
+	m.cacheFillLocks.WithLabelValues(outcome).Inc()
 }
 
 // ObserveRateLimited records that a request was rejected by rate limiting. kind

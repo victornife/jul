@@ -11,6 +11,19 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Opt-in cold-miss cache fill locking (`[cache].lock` and `[cache].lock_timeout`,
+  #525 Part 1): coalesces concurrent cold misses per cache key so one leader
+  fetches and captures from the origin while compatible waiters block up to
+  `lock_timeout` (default `5s`), then re-evaluate lookup, `Vary`, freshness and
+  shared-cache `Authorization` rules before reuse. Timed-out waiters fall
+  through to an uncached origin fetch without competing cache publication;
+  non-cacheable responses, origin errors, capture skips, early EOF and
+  cancellations release waiters promptly. Exports bounded
+  `jul_cache_fill_locks_total{outcome}` metrics and maps NGINX
+  `proxy_cache_lock` / `proxy_cache_lock_timeout` as approximated while keeping
+  `proxy_cache_lock_age` blocking. Disk-streamed capture (#525 Part 2) and
+  range-aware caching (#442) remain separate.
+
 - Optional external Console OIDC authentication (#441): one discovered provider,
   Authorization Code + PKCE S256, bounded HttpOnly sessions, exact subject/group
   mapping into existing Jul RBAC, CSRF protection, local logout, audit and local

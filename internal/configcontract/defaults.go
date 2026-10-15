@@ -139,6 +139,7 @@ var ConditionalDefaultOverrides = map[string]string{
 	"admin.oidc.max_transactions": "128 (when admin.oidc.enabled)",
 	"admin.oidc.clock_skew":       "60s (when admin.oidc.enabled)",
 	"admin.console":               "true (when admin.enabled)",
+	"cache.lock_timeout":          "5s (when cache.lock)",
 }
 
 // DefaultFor returns the documented unconditional default for path, as

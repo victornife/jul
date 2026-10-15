@@ -389,6 +389,8 @@ func cacheEntries() []Entry {
 	out = append(out, hotGroup(SubCache, reasonCacheScalarPolicyHot,
 		"cache.default_ttl",
 		"cache.disk_max_size",
+		"cache.lock",
+		"cache.lock_timeout",
 		"cache.memory_max_size",
 		"cache.stale_if_error",
 		"cache.stale_while_revalidate",

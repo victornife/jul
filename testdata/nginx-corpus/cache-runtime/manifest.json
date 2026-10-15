@@ -115,6 +115,22 @@
       },
       {
         "source": "nginx.conf",
+        "code": "NGX_LOCATION_CACHE_LOCK",
+        "class": "approximated",
+        "risk": "performance",
+        "context": "location",
+        "directive": "proxy_cache_lock"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_CACHE_LOCK_TIMEOUT",
+        "class": "approximated",
+        "risk": "performance",
+        "context": "location",
+        "directive": "proxy_cache_lock_timeout"
+      },
+      {
+        "source": "nginx.conf",
         "code": "NGX_LOCATION_PROXY_PASS",
         "class": "supported",
         "risk": "routing",
@@ -132,6 +148,8 @@
       "disk_path = '/var/cache/jul-fixture/cache-runtime'",
       "enabled = true",
       "listen = ':18101'",
+      "lock = true",
+      "lock_timeout = '3s'",
       "name = 'cache_runtime_pool'",
       "proxy_pass = 'http://cache_runtime_pool'"
     ]

@@ -7,10 +7,16 @@ package nginx
 
 import (
 	"strings"
+	"time"
 
 	"jul/internal/config"
 
 	ngx "github.com/tufanbarisyildirim/gonginx/config"
+)
+
+const (
+	nginxDefaultCacheLock        = false
+	nginxDefaultCacheLockTimeout = config.Duration(5 * time.Second)
 )
 
 // cacheZoneDef is one declared `proxy_cache_path` zone (http-level).
@@ -33,13 +39,44 @@ type cacheTTLCandidate struct {
 	line int
 }
 
+// cacheLockScope holds the effective inherited lock state at http, server, or
+// location scope. NGINX defaults are proxy_cache_lock off and
+// proxy_cache_lock_timeout 5s.
+type cacheLockScope struct {
+	lock               bool
+	lockLine           int
+	timeout            config.Duration
+	timeoutLine        int
+	hasExplicitTimeout bool
+	invalid            bool
+}
+
+func defaultCacheLockScope() cacheLockScope {
+	return cacheLockScope{
+		lock:    nginxDefaultCacheLock,
+		timeout: nginxDefaultCacheLockTimeout,
+	}
+}
+
+// cachedLocationLock records the effective inherited lock configuration of one
+// cache-enabled location (`proxy_cache <zone>;`).
+type cachedLocationLock struct {
+	lock               bool
+	lockLine           int
+	timeout            config.Duration
+	timeoutLine        int
+	hasExplicitTimeout bool
+}
+
 // cacheCollector accumulates every cache-related directive found anywhere in
 // the http block during the pre-pass, before any per-location decision is
 // made.
 type cacheCollector struct {
-	zones map[string]cacheZoneDef
-	uses  []cacheUse
-	ttls  []cacheTTLCandidate
+	zones       map[string]cacheZoneDef
+	uses        []cacheUse
+	ttls        []cacheTTLCandidate
+	locLocks    []cachedLocationLock
+	lockInvalid bool
 }
 
 // httpCacheResolution is the single globally-resolved proxy_cache zone and
@@ -56,11 +93,15 @@ type cacheCollector struct {
 // matching declaration, or more than one distinct zone actually in use) is
 // left untranslated and reported, never guessed.
 type httpCacheResolution struct {
-	zoneName string
-	def      cacheZoneDef
-	hasZone  bool
-	ttl      config.Duration
-	hasTTL   bool
+	zoneName       string
+	def            cacheZoneDef
+	hasZone        bool
+	ttl            config.Duration
+	hasTTL         bool
+	lock           bool
+	hasLock        bool
+	lockTimeout    config.Duration
+	hasLockTimeout bool
 }
 
 // resolveHTTPCache walks the http block's full server/location subtree once,
@@ -70,6 +111,7 @@ type httpCacheResolution struct {
 // http block, including ones that appear later in the source.
 func (t *translator) resolveHTTPCache(kids []ngx.IDirective) httpCacheResolution {
 	col := &cacheCollector{zones: map[string]cacheZoneDef{}}
+	httpLock := t.applyScopeLockDirectives(kids, defaultCacheLockScope(), col)
 	for _, c := range kids {
 		switch c.GetName() {
 		case "proxy_cache_path":
@@ -77,24 +119,82 @@ func (t *translator) resolveHTTPCache(kids []ngx.IDirective) httpCacheResolution
 		case "proxy_cache_valid":
 			collectCacheValid(c, col)
 		case "server":
-			for _, sc := range children(c) {
+			srvKids := children(c)
+			srvLock := t.applyScopeLockDirectives(srvKids, httpLock, col)
+			for _, sc := range srvKids {
 				switch sc.GetName() {
 				case "proxy_cache_valid":
 					collectCacheValid(sc, col)
 				case "location":
-					for _, lc := range children(sc) {
-						switch lc.GetName() {
-						case "proxy_cache":
-							collectCacheUse(lc, col)
-						case "proxy_cache_valid":
-							collectCacheValid(lc, col)
-						}
+					locKids := children(sc)
+					locLock := t.applyScopeLockDirectives(locKids, srvLock, col)
+					if collectLocationCache(locKids, col) {
+						col.locLocks = append(col.locLocks, cachedLocationLock{
+							lock:               locLock.lock,
+							lockLine:           locLock.lockLine,
+							timeout:            locLock.timeout,
+							timeoutLine:        locLock.timeoutLine,
+							hasExplicitTimeout: locLock.hasExplicitTimeout,
+						})
 					}
 				}
 			}
 		}
 	}
 	return t.resolveCacheCollector(col)
+}
+
+func (t *translator) applyScopeLockDirectives(kids []ngx.IDirective, inherited cacheLockScope, col *cacheCollector) cacheLockScope {
+	scope := inherited
+	for _, c := range kids {
+		switch c.GetName() {
+		case "proxy_cache_lock":
+			enabled, ok := parseCacheLock(paramValues(c))
+			if !ok {
+				t.report.skip(c, "proxy_cache_lock requires a single on or off value")
+				scope.invalid = true
+				col.lockInvalid = true
+				continue
+			}
+			scope.lock = enabled
+			scope.lockLine = c.GetLine()
+		case "proxy_cache_lock_timeout":
+			timeout, ok := parseCacheLockTimeout(paramValues(c))
+			if !ok {
+				t.report.skip(c, "proxy_cache_lock_timeout requires a positive representable duration")
+				scope.invalid = true
+				col.lockInvalid = true
+				continue
+			}
+			scope.timeout = timeout
+			scope.timeoutLine = c.GetLine()
+			scope.hasExplicitTimeout = true
+		case "proxy_cache_lock_age":
+			t.report.skip(c, "proxy_cache_lock_age is not translated; Jul does not hand off an in-flight cold-miss fill")
+			scope.invalid = true
+			col.lockInvalid = true
+		}
+	}
+	return scope
+}
+
+func collectLocationCache(locKids []ngx.IDirective, col *cacheCollector) (enabled bool) {
+	for _, lc := range locKids {
+		switch lc.GetName() {
+		case "proxy_cache":
+			collectCacheUse(lc, col)
+			params := paramValues(lc)
+			if len(params) == 0 {
+				enabled = false
+				continue
+			}
+			name := strings.TrimSpace(params[0])
+			enabled = name != "" && name != "off" && !strings.Contains(name, "$")
+		case "proxy_cache_valid":
+			collectCacheValid(lc, col)
+		}
+	}
+	return enabled
 }
 
 func (t *translator) collectCacheZone(c ngx.IDirective, col *cacheCollector) {
@@ -173,6 +273,31 @@ func collectCacheValid(c ngx.IDirective, col *cacheCollector) {
 	col.ttls = append(col.ttls, cacheTTLCandidate{ttl: ttl, line: c.GetLine()})
 }
 
+func parseCacheLock(params []string) (bool, bool) {
+	if len(params) != 1 {
+		return false, false
+	}
+	switch strings.ToLower(strings.TrimSpace(params[0])) {
+	case "on":
+		return true, true
+	case "off":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func parseCacheLockTimeout(params []string) (config.Duration, bool) {
+	if len(params) != 1 {
+		return 0, false
+	}
+	d, ok := parseNginxDuration(params[0])
+	if !ok || d <= 0 {
+		return 0, false
+	}
+	return d, true
+}
+
 // parseSimpleCacheValidTime recognizes the bounded proxy_cache_valid forms
 // Jul's single default_ttl can represent: a bare time, or a time preceded
 // only by status codes drawn from nginx's own default cacheable set (200,
@@ -245,6 +370,55 @@ func (t *translator) resolveCacheCollector(col *cacheCollector) httpCacheResolut
 			t.report.note("multiple conflicting proxy_cache_valid values were found across the configuration; [cache].default_ttl was left unset")
 		}
 	}
+
+	if !col.lockInvalid && len(col.locLocks) > 0 {
+		allOn, allOff := true, true
+		for _, l := range col.locLocks {
+			if l.lock {
+				allOff = false
+			} else {
+				allOn = false
+			}
+		}
+		switch {
+		case !allOn && !allOff:
+			reported := map[int]bool{}
+			for _, l := range col.locLocks {
+				if l.lockLine > 0 && !reported[l.lockLine] {
+					reported[l.lockLine] = true
+					t.report.skipNamed("proxy_cache_lock", l.lockLine, "cache-enabled locations do not share a single effective proxy_cache_lock state (including inherited/default off); Jul has one process-wide [cache].lock")
+				}
+			}
+		case allOn:
+			firstTimeout := col.locLocks[0].timeout
+			sameTimeout := true
+			for _, l := range col.locLocks[1:] {
+				if l.timeout != firstTimeout {
+					sameTimeout = false
+					break
+				}
+			}
+			if sameTimeout {
+				res.lock, res.hasLock = true, true
+				res.lockTimeout, res.hasLockTimeout = firstTimeout, true
+			} else {
+				reported := map[int]bool{}
+				for _, l := range col.locLocks {
+					if l.timeoutLine > 0 && !reported[l.timeoutLine] {
+						reported[l.timeoutLine] = true
+						t.report.skipNamed("proxy_cache_lock_timeout", l.timeoutLine, "cache-enabled locations do not share a single effective proxy_cache_lock_timeout (including the 5s NGINX default); Jul has one process-wide [cache].lock_timeout")
+					}
+				}
+			}
+		case allOff:
+			for _, l := range col.locLocks {
+				if l.hasExplicitTimeout {
+					t.report.note("proxy_cache_lock_timeout was left unset because effective proxy_cache_lock is off")
+					break
+				}
+			}
+		}
+	}
 	return res
 }
 
@@ -264,6 +438,12 @@ func (t *translator) applyHTTPCacheConfig(out *config.Config) {
 	}
 	if t.httpCache.hasTTL {
 		out.Cache.DefaultTTL = t.httpCache.ttl
+	}
+	if t.httpCache.hasLock && t.httpCache.lock {
+		out.Cache.Lock = true
+		if t.httpCache.hasLockTimeout {
+			out.Cache.LockTimeout = t.httpCache.lockTimeout
+		}
 	}
 }
 

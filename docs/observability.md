@@ -171,6 +171,7 @@ metric dimension rather than request-handling behavior.
 | `jul_cache_entries` | Gauge | `tier` | Released `v2.0.0` | Current entry count in a cache tier, labeled by tier (`memory`/`disk`). |
 | `jul_cache_events_total` | Counter | `state` | Released `v1.32.0` | Response cache outcomes, labeled by state (HIT/MISS/STALE/BYPASS). |
 | `jul_cache_evictions_total` | Counter | `tier` | Released `v2.0.0` | Cumulative LRU-capacity evictions from a cache tier since startup, labeled by tier (`memory`/`disk`). Explicit invalidation is not an eviction and is not counted here. |
+| `jul_cache_fill_locks_total` | Counter | `outcome` | Merged / release pending | Cold-miss cache fill-lock events (#525 Part 1), labeled by bounded outcome (`wait`, `reused`, `not_reusable`, `uncacheable`, `timeout`, `canceled`). |
 | `jul_cache_max_bytes` | Gauge | `tier` | Released `v2.0.0` | Configured byte cap for a cache tier, labeled by tier (`memory`/`disk`). |
 | `jul_cache_revalidations_total` | Counter | `outcome` | Released `v2.0.0` | Cache validation and revalidation decisions, labeled by bounded outcome (`stored`, `not_modified`, `uncacheable`, `origin_error`, `canceled`, `panic`, `no_lease`, `deduplicated`). |
 | `jul_config_authority_denied_total` | Counter | `reason` | Released `v2.0.0` | Mutating configuration requests refused because the process is `file_owned` (ADR 0019 §15), labeled by the bounded operation name — never a path or actor. |

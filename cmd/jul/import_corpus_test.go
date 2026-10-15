@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -361,6 +362,7 @@ func startCorpusTCPBackends(t *testing.T, cfg *config.Config) func() {
 // X-Corpus-Backend-Id (upstream/weighted-distribution evidence), and echoes
 // a WebSocket connection so the same backend also serves WebSocket fixtures.
 func corpusBackendHandler(id string) http.Handler {
+	var lockOriginCalls atomic.Int32
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Corpus-Backend-Id", id)
 		if isCorpusWebSocketUpgrade(r) {
@@ -369,6 +371,10 @@ func corpusBackendHandler(id string) http.Handler {
 		}
 		w.Header().Set("Cache-Control", "max-age=60")
 		switch r.URL.Path {
+		case "/cache-lock-coalesce":
+			seq := lockOriginCalls.Add(1)
+			time.Sleep(120 * time.Millisecond)
+			w.Header().Set("X-Origin-Call-Count", fmt.Sprintf("%d", seq))
 		case "/targeted-overrides-no-store", "/targeted-unknown":
 			w.Header().Set("Cache-Control", "no-store")
 			policy := "max-age=600"

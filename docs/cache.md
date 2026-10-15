@@ -23,6 +23,7 @@ benchmarks below were refreshed against the corrected implementation.
 - [Shared-cache contract](#shared-cache-contract)
 - [Targeted CDN cache control](#targeted-cdn-cache-control)
 - [Freshness and stale-while-revalidate](#freshness-and-stale-while-revalidate)
+- [Cold-miss fill locking](#cold-miss-fill-locking)
 - [Background revalidation lifecycle](#background-revalidation-lifecycle)
 - [Entry immutability](#entry-immutability)
 - [Upgrades, streaming and ResponseWriter transparency](#upgrades-streaming-and-responsewriter-transparency)
@@ -62,6 +63,8 @@ disk_max_size          = "4GB"
 default_ttl            = "5m"
 stale_while_revalidate = "30s"
 stale_if_error         = "300s"   # keep serving stale on upstream 5xx
+lock                   = true     # coalesce concurrent cold misses per key
+lock_timeout           = "5s"     # fall through uncached after 5s wait
 ```
 
 Per-location opt-in is still required:
@@ -515,6 +518,65 @@ stale_if_error         = "300s"
 > `stale_if_error` only applies when a stale entry exists and a background
 > revalidation is attempted. It does not create cache entries on its own.
 
+## Cold-miss fill locking
+
+When a popular uncached URL receives a burst of concurrent requests, default
+cache behavior forwards every miss to the origin in parallel. Enabling
+`[cache].lock = true` coalesces concurrent cold misses per cache key so only one
+request fetches and captures from the origin while compatible followers wait up
+to `[cache].lock_timeout` (#525 Part 1; disk-streamed capture of objects larger
+than `memory_max_size` remains tracked separately under #525 Part 2, and
+range-aware caching remains gated under #442):
+
+- **Leader selection and parallel keys.** The first cold miss for a cache key
+  becomes the fill leader and performs the origin fetch and capture. Unrelated
+  cache keys execute in parallel and never block each other.
+- **Default timeout (`5s`).** When `lock = true` and `lock_timeout` is omitted
+  or zero, `lock_timeout` defaults to `5s`. This matches NGINX's
+  `proxy_cache_lock_timeout 5s` default and Jul's 5s sub-operation convention
+  (such as `plugins.*.fetch_timeout` and `health_check.interval`), while
+  remaining below the 10s reload/connect/auth defaults. Setting a positive
+  `lock_timeout` when `lock = false` is rejected as an inconsistent
+  configuration.
+- **Waiter re-evaluation (never blind reuse).** When the leader finishes, every
+  woken waiter repeats the full lookup, `Vary` header matching, freshness
+  evaluation, and RFC 9111 §3.5 shared-cache `Authorization` checks against the
+  published entry:
+  - If the entry is compatible and fresh (or servable under `stale_while_revalidate`
+    or synchronous validation), the waiter serves it (`X-Cache: HIT`, `STALE`, or
+    `REVALIDATED`) and records `jul_cache_fill_locks_total{outcome="reused"}`.
+  - If the leader published a response whose `Vary` headers or shared-cache
+    `Authorization` policy cannot satisfy the waiter, the waiter never receives
+    the leader's representation; it records `outcome="not_reusable"` and
+    proceeds to normal miss handling. When a cold fill newly discovers a `Vary`
+    header set, waiters that share a different variant key coalesce once on that
+    variant key so each distinct variant issues one origin request.
+- **Prompt release on non-cacheable or failed fills.** If the leader's response
+  status or headers are uncacheable (`no-store`, `private`, `Set-Cookie`,
+  `Vary: *`, `5xx`, `text/event-stream`), if capture is abandoned for size or
+  in-flight budget (`oversize` or `budget`), if the origin closes early before
+  delivering the declared `Content-Length`, or if the leader cancels,
+  disconnects, or panics, all waiting followers are released immediately
+  (`outcome="uncacheable"`) without waiting for `lock_timeout` or for a slow
+  uncacheable body to finish streaming.
+- **Timeout fall-through without competing cache publication.** If
+  `lock_timeout` elapses while the leader is still fetching, the waiter records
+  `outcome="timeout"` and falls through to an uncached origin request
+  (`X-Cache: MISS`). That fallback streams directly to the client without
+  allocating a capture buffer or publishing to the store, so it cannot overwrite
+  or interfere with the active fill leader.
+- **Waiter cancellation.** If a waiting client cancels its own request context,
+  only that waiter exits (`outcome="canceled"`); the leader and any remaining
+  waiters continue normally.
+- **Credential-free lock keys and labels.** When no `Vary` stub exists yet, the
+  lock key is the primary cache key (`METHOD host URI`), which contains no
+  headers. When a `Vary` stub exists, the variant key is hashed with SHA-256
+  before indexing the lock table, so raw `Authorization`, `Cookie`, or other
+  header values never appear in lock keys, logs, or metric labels.
+- **Hot reload coherence.** Both `cache.lock` and `cache.lock_timeout` are
+  `hot_reload` fields. Each miss loads one immutable `CachePolicy` snapshot at
+  entry and uses that snapshot for the duration of the operation.
+
 ## Background revalidation lifecycle
 
 A background refresh is **owned by the handler generation that started it**. This
@@ -599,9 +661,12 @@ purge both tiers, then resume traffic.
 
 `jul_cache_revalidations_total{outcome}` counts refresh decisions with a fixed
 label set: `stored`, `not_modified`, `uncacheable`, `origin_error`, `canceled`,
-`panic`, `no_lease`, `deduplicated`. No cache key, URL, host, generation id or
-error string is ever used as a label. Structured logs carry only the bounded
-operation name, the generation id and a bounded reason.
+`panic`, `no_lease`, `deduplicated`. `jul_cache_fill_locks_total{outcome}`
+counts cold-miss fill-lock events with a fixed label set: `wait`, `reused`,
+`not_reusable`, `uncacheable`, `timeout`, `canceled`. No cache key, URL, host,
+user identity, generation id or error string is ever used as a label. Structured
+logs carry only the bounded operation name, the generation id and a bounded
+reason.
 
 Live occupancy of each configured tier is exported as four gauges/counters,
 labeled by `tier` (`memory`/`disk`; the disk series is absent when no

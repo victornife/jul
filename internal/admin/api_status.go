@@ -255,6 +255,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		if c.Cache.DiskPath != "" {
 			cacheDetail += " + disk overflow"
 		}
+		if c.Cache.Lock {
+			cacheDetail += "; fill lock"
+		}
 		if cacheLocs > 0 {
 			cacheDetail += "; " + countUnit(cacheLocs, "location") + " opt-in"
 		}

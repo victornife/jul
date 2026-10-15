@@ -105,7 +105,7 @@ func (t *translator) translateHTTP(d ngx.IDirective, out *config.Config) {
 			t.report.skip(c, "include not followed; import each included file separately")
 		case "map", "geo", "split_clients":
 			t.report.skip(c, c.GetName()+" blocks are not supported")
-		case "proxy_cache_path", "proxy_cache_valid":
+		case "proxy_cache_path", "proxy_cache_valid", "proxy_cache_lock", "proxy_cache_lock_timeout", "proxy_cache_lock_age":
 			// consumed by the cache pre-pass above
 		default:
 			if isRealIPDirective(c.GetName()) {
@@ -241,6 +241,8 @@ func (t *translator) translateServer(d ngx.IDirective, out *config.Config) {
 			}
 		case "ssl_verify_depth", "ssl_trusted_certificate":
 			// no Jul equivalent knob; already reported ignored by the assessment
+		case "proxy_cache_valid", "proxy_cache_lock", "proxy_cache_lock_timeout", "proxy_cache_lock_age":
+			// consumed by the http-level cache pre-pass in translateHTTP
 		case "return":
 			serverReturn = cp
 			serverReturnLine = c.GetLine()
@@ -485,7 +487,7 @@ func (t *translator) translateLocation(d ngx.IDirective, serverRoot string, serv
 			if len(cp) > 0 {
 				t.applyProxyCache(&loc, cp[0])
 			}
-		case "proxy_cache_valid":
+		case "proxy_cache_valid", "proxy_cache_lock", "proxy_cache_lock_timeout", "proxy_cache_lock_age":
 			// consumed by the http-level cache pre-pass in translateHTTP
 		case "if":
 			t.report.skip(c, "location-level if is not translated")

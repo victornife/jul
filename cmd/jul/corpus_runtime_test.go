@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -569,6 +570,9 @@ func TestNGINXCorpusCacheRealE2E(t *testing.T) {
 	if !cfg.Cache.Enabled {
 		t.Fatalf("cache-runtime: candidate [cache].enabled = false, want true")
 	}
+	if !cfg.Cache.Lock || cfg.Cache.LockTimeout.Std() != 3*time.Second {
+		t.Fatalf("cache-runtime: candidate [cache] lock=%v lock_timeout=%s, want true and 3s", cfg.Cache.Lock, cfg.Cache.LockTimeout.Std())
+	}
 	// The fixture's disk_path looks like a real deployment path (proving the
 	// proxy_cache_path -> [cache].disk_path translation), but this process
 	// cannot write there; rewrite it to a writable temp directory exactly as
@@ -662,6 +666,66 @@ func TestNGINXCorpusCacheRealE2E(t *testing.T) {
 	}
 	if fourthBody != want {
 		t.Fatalf("post-bypass request body mismatch: got %d bytes, want %d bytes matching the stored entry", len(fourthBody), len(want))
+	}
+
+	// Verify that the translated proxy_cache_lock / proxy_cache_lock_timeout
+	// actually coalesces concurrent cold misses to one origin request through
+	// the live Jul instance.
+	const concurrentMisses = 8
+	type coalesceResult struct {
+		cacheState string
+		originCall string
+		body       string
+		err        error
+	}
+	results := make([]coalesceResult, concurrentMisses)
+	startGate := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < concurrentMisses; i++ {
+		idx := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-startGate
+			resp, reqErr := client.Get(baseURL + "/cache-lock-coalesce")
+			if reqErr != nil {
+				results[idx] = coalesceResult{err: reqErr}
+				return
+			}
+			body := readAndClose(resp)
+			results[idx] = coalesceResult{
+				cacheState: resp.Header.Get("X-Cache"),
+				originCall: resp.Header.Get("X-Origin-Call-Count"),
+				body:       body,
+			}
+		}()
+	}
+	close(startGate)
+	wg.Wait()
+	client.CloseIdleConnections()
+
+	var coalesceMisses, coalesceHits int
+	for i, res := range results {
+		if res.err != nil {
+			t.Fatalf("coalesced request %d failed: %v", i, res.err)
+		}
+		if res.originCall != "1" {
+			t.Fatalf("coalesced request %d X-Origin-Call-Count = %q, want \"1\" (expected a single origin fetch)", i, res.originCall)
+		}
+		if res.body != want {
+			t.Fatalf("coalesced request %d body mismatch: got %d bytes, want %d", i, len(res.body), len(want))
+		}
+		switch res.cacheState {
+		case "MISS":
+			coalesceMisses++
+		case "HIT":
+			coalesceHits++
+		default:
+			t.Fatalf("coalesced request %d X-Cache = %q, want MISS or HIT", i, res.cacheState)
+		}
+	}
+	if coalesceMisses != 1 || coalesceHits != concurrentMisses-1 {
+		t.Fatalf("coalesced cold misses produced %d MISS and %d HIT, want 1 MISS and %d HIT", coalesceMisses, coalesceHits, concurrentMisses-1)
 	}
 }
 

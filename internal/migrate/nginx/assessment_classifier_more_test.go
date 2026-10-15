@@ -78,6 +78,46 @@ func TestClassifyProxyCacheValid(t *testing.T) {
 	}
 }
 
+func TestClassifyProxyCacheLockAndTimeout(t *testing.T) {
+	contexts := []AssessmentContext{ContextHTTP, ContextServer, ContextLocation}
+	lockTests := []struct {
+		name   string
+		params []string
+		want   AssessmentClass
+	}{
+		{"on", []string{"on"}, AssessmentApproximated},
+		{"off", []string{"off"}, AssessmentIgnored},
+		{"missing", nil, AssessmentBlocking},
+		{"extra arg", []string{"on", "extra"}, AssessmentBlocking},
+		{"invalid", []string{"maybe"}, AssessmentBlocking},
+	}
+	for _, ctx := range contexts {
+		for _, tt := range lockTests {
+			t.Run(string(ctx)+"/lock/"+tt.name, func(t *testing.T) {
+				assertCapabilityClass(t, classifyProxyCacheLock(ctx, tt.params), tt.want)
+			})
+		}
+	}
+
+	timeoutTests := []struct {
+		name   string
+		params []string
+		want   AssessmentClass
+	}{
+		{"valid", []string{"3s"}, AssessmentApproximated},
+		{"missing", nil, AssessmentBlocking},
+		{"zero", []string{"0s"}, AssessmentBlocking},
+		{"malformed", []string{"nope"}, AssessmentBlocking},
+	}
+	for _, ctx := range contexts {
+		for _, tt := range timeoutTests {
+			t.Run(string(ctx)+"/timeout/"+tt.name, func(t *testing.T) {
+				assertCapabilityClass(t, classifyProxyCacheLockTimeout(ctx, tt.params), tt.want)
+			})
+		}
+	}
+}
+
 func TestClassifyLocationDuration(t *testing.T) {
 	tests := []struct {
 		name   string

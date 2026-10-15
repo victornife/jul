@@ -234,10 +234,14 @@ func validateCacheValues(c CacheConfig) []error {
 		{"[cache].default_ttl", c.DefaultTTL},
 		{"[cache].stale_while_revalidate", c.StaleWhileRevalidate},
 		{"[cache].stale_if_error", c.StaleIfError},
+		{"[cache].lock_timeout", c.LockTimeout},
 	} {
 		if err := validateNonNegativeDuration(check.path, check.value); err != nil {
 			errs = append(errs, err)
 		}
+	}
+	if c.LockTimeout > 0 && !c.Lock {
+		errs = append(errs, fmt.Errorf("[cache].lock_timeout: %s requires [cache].lock = true", c.LockTimeout.Std()))
 	}
 	return errs
 }

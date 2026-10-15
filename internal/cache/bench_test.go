@@ -165,3 +165,24 @@ func BenchmarkCacheVariantInvalidation(b *testing.B) {
 		c.Delete(key(base))
 	}
 }
+
+func BenchmarkCacheColdMissFillLockCoalesced(b *testing.B) {
+	c, _ := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(64 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		Lock:          true,
+		LockTimeout:   config.Duration(5 * time.Second),
+	}, nil)
+	h := c.Handler(benchNext)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "http://example.com/coalesced-hot", nil)
+			h.ServeHTTP(rec, req)
+		}
+	})
+}

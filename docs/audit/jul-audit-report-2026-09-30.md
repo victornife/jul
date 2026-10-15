@@ -10,6 +10,30 @@
 | Report location | Original working copy: `/home/victornf/jul-audit-20260930/jul-audit-report-2026-09-30.md`; publication target: `docs/audit/jul-audit-report-2026-09-30.md` |
 | Post-audit baseline note | After the report was written, `main` moved to `f036b063` (PR #501: access-log writer sharing, a dependency security floor, docs). A read-only diff (8 files: `internal/observability/sinks.go` + test, CHANGELOG, three docs, Console lockfiles) shows no change to any file behind F-01–F-19, except `docs/known-limitations.md` line shifts: the cited L242 is now L238 and L510 is now L506. All findings still apply at `f036b063`. The Y1-10 access-log sink change itself was not re-reviewed. |
 
+## Delivery scope addendum — 2026-10-15 (#525 Part 1)
+
+This addendum supersedes the deferred `#525` fill-lock status in the 2026-10-09
+addendum below, while preserving all historical audit and release records.
+
+- **#525 Part 1 (cold-miss fill lock)** is implemented on `main` / PR #616 as an
+  opt-in, unreleased capability (`[cache].lock` and `[cache].lock_timeout`,
+  defaulting to `5s` when `lock = true`, both classified `hot_reload`), with
+  waiter re-evaluation of `Vary`, freshness and RFC 9111 §3.5 `Authorization`
+  rules, uncached timeout fall-through, prompt release on uncacheable/failed
+  fills, and bounded `jul_cache_fill_locks_total{outcome}` metrics.
+- **NGINX migration (`proxy_cache_lock*`):** `proxy_cache_lock` and
+  `proxy_cache_lock_timeout` are classified across `http`, `server`, and
+  `location` scopes and resolved via `http → server → location` inheritance
+  (with NGINX defaults `off` and `5s`) across all cache-enabled locations.
+  Compatible effective values map as `approximated` onto `[cache].lock` and
+  `[cache].lock_timeout`; mixed effective values across cache-enabled locations
+  produce a blocking `NGX_CACHE_LOCK_CONFLICT` finding; `proxy_cache_lock_age`
+  remains blocking in every context.
+- **#525 Part 2 (disk-streamed large-object capture + ADR)** and the **#442
+  range-caching activation gate** remain pending. This addendum records Part 1
+  implementation scope, not release publication, soak completion, or a GA
+  maturity promotion.
+
 ## Delivery scope addendum — 2026-10-10 (#524 / #520)
 
 The selected P-26/P-19 implementation adds bounded secret-aware HTTP probe

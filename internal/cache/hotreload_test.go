@@ -50,12 +50,22 @@ func TestCacheUpdateInstallsPolicyAtomically(t *testing.T) {
 		DefaultTTL:           config.Duration(2 * time.Hour),
 		StaleWhileRevalidate: config.Duration(90 * time.Second),
 		StaleIfError:         config.Duration(5 * time.Minute),
+		Lock:                 true,
+		LockTimeout:          config.Duration(3 * time.Second),
 	}
 	c.PrepareCacheUpdate(cand).Commit()
 
 	got := c.Policy()
-	if got.DefaultTTL != 2*time.Hour || got.StaleWhileRevalidate != 90*time.Second || got.StaleIfError != 5*time.Minute || got.MaxEntryBytes != 2<<20 {
-		t.Fatalf("policy after commit = %+v, want DefaultTTL=2h SWR=90s SIE=5m MaxEntryBytes=%d", got, int64(2<<20))
+	if got.DefaultTTL != 2*time.Hour || got.StaleWhileRevalidate != 90*time.Second || got.StaleIfError != 5*time.Minute || got.MaxEntryBytes != 2<<20 || !got.Lock || got.LockTimeout != 3*time.Second {
+		t.Fatalf("policy after commit = %+v, want DefaultTTL=2h SWR=90s SIE=5m MaxEntryBytes=%d Lock=true LockTimeout=3s", got, int64(2<<20))
+	}
+}
+
+func TestCacheLockTimeoutDefaultWhenOmitted(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20), Lock: true})
+	got := c.Policy()
+	if !got.Lock || got.LockTimeout != defaultLockTimeout {
+		t.Fatalf("policy = %+v, want Lock=true LockTimeout=%s", got, defaultLockTimeout)
 	}
 }
 

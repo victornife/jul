@@ -1339,6 +1339,14 @@ type CacheConfig struct {
 	// remains servable for this additional duration from the point of failure,
 	// shielding clients from backend outages.
 	StaleIfError Duration `toml:"stale_if_error"`
+	// Lock coalesces concurrent cold misses for the same cache key so one
+	// leader request fetches and captures from the origin while compatible
+	// waiters block up to LockTimeout. Disabled by default.
+	Lock bool `toml:"lock,omitempty"`
+	// LockTimeout bounds how long a concurrent cold miss waits for an active
+	// fill leader before falling through to an uncached origin fetch. Zero or
+	// omitted defaults to 5s when lock is enabled.
+	LockTimeout Duration `toml:"lock_timeout,omitempty"`
 }
 
 // AdminConfig configures the separate admin/observability listener. It binds

@@ -153,7 +153,7 @@ func TestStatusAPI(t *testing.T) {
 		Compression:   config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip", "br"}},
 		Observability: config.ObservabilityConfig{Metrics: config.MetricsConfig{RouteLabel: true}},
 		RateLimit:     config.RateLimitConfig{Enabled: true, Rate: 100},
-		Cache:         config.CacheConfig{Enabled: true},
+		Cache:         config.CacheConfig{Enabled: true, Lock: true, LockTimeout: config.Duration(5 * time.Second)},
 		Admin:         config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090"},
 	}
 	s := newTestServer(t, config.AdminConfig{}, Deps{

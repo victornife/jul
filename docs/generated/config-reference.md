@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 343 configurable leaves.
+Coverage: 345 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -743,6 +743,34 @@ Enabled turns on the two-tier response cache.
 | Subsystem | `cache` |
 | Why | the response cache backend is created once at startup and retains its counters and LRU state across reloads |
 | Flags | startup-consumed |
+
+## `cache.lock` {#cache-lock}
+
+Lock coalesces concurrent cold misses for the same cache key so one leader request fetches and captures from the origin while compatible waiters block up to LockTimeout.
+
+| | |
+| --- | --- |
+| Type | `bool` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+
+## `cache.lock_timeout` {#cache-lock_timeout}
+
+LockTimeout bounds how long a concurrent cold miss waits for an active fill leader before falling through to an uncached origin fetch.
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| Default (conditional) | 5s (when cache.lock) |
+| Constraint | non-negative; requires cache.lock = true when positive |
+| Zero/empty semantics | omitted/zero defaults to 5s when lock is enabled |
+| Active when | cache.enabled = true and cache.lock = true |
 
 ## `cache.memory_max_size` {#cache-memory_max_size}
 
