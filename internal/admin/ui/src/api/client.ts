@@ -161,6 +161,7 @@ function parseRetryAfter(resp: Response): number | undefined {
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = authToken.get();
   const headers = new Headers(init?.headers);
+  headers.set("X-Jul-Console", "1");
   headers.set("Accept", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const resp = await fetch(`/api${path}`, { ...init, headers });
@@ -1299,6 +1300,7 @@ export function fetchRoutes(): Promise<RouteProjection[]> {
 export async function fetchCurrentConfigVersion(): Promise<string | undefined> {
   const token = authToken.get();
   const headers = new Headers({ Accept: "application/json" });
+  headers.set("X-Jul-Console", "1");
   if (token) headers.set("Authorization", `Bearer ${token}`);
   try {
     const resp = await fetch("/api/routes", { headers });
@@ -1358,6 +1360,18 @@ export function fetchSecurity(): Promise<SecurityProjection> {
   return api<unknown>("/security").then((d) => SecurityProjectionSchema.parse(d));
 }
 
+// OIDC browser plumbing deliberately sends no local bearer token: cookies and
+// bearer credentials must never be presented together.
+export async function fetchOIDCConfiguration(): Promise<{ enabled: boolean; provider_name?: string | undefined } | null> {
+ const response = await fetch("/auth/oidc/status", { credentials: "same-origin" });
+ if (!response.ok) return null;
+ return z.object({ enabled: z.boolean(), provider_name: z.string().optional() }).parse(await response.json());
+}
+export async function logoutOIDC(): Promise<boolean> {
+ const response = await fetch("/auth/oidc/logout", { method: "POST", credentials: "same-origin", headers: { "X-Jul-Console": "1" } });
+ return response.ok;
+}
+
 // ── Current identity (GET /api/admin/me) ─────────────────────────────────────
 //
 // IdentitySchema mirrors admin.identityResponse: the secret-free view of the
@@ -1371,6 +1385,8 @@ export const IdentitySchema = z.object({
   token_id: z.string().optional().default(""),
   permissions: z.array(z.string()),
   legacy: z.boolean(),
+  authentication: z.string().optional(),
+  session_expires_at: z.string().optional(),
 });
 export type Identity = z.infer<typeof IdentitySchema>;
 
@@ -1413,6 +1429,7 @@ export function fetchStats(): Promise<StatsSnapshot> {
  */
 export async function purgeCache(key?: string): Promise<void> {
   const headers = new Headers();
+  headers.set("X-Jul-Console", "1");
   headers.set("Accept", "application/json");
   const token = authToken.get();
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -1466,6 +1483,7 @@ export async function rollback(
   baseVersion?: string,
 ): Promise<ApplyResult> {
   const headers = new Headers({ "Content-Type": "application/json", Accept: "application/json" });
+  headers.set("X-Jul-Console", "1");
   const token = authToken.get();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const query = confirmAdmin ? "?confirm_admin=true" : "";
@@ -1519,6 +1537,7 @@ export function fetchPendingRestart(): Promise<PendingRestartResponse> {
  */
 export async function discardPendingRestart(): Promise<ApplyResult> {
   const headers = new Headers();
+  headers.set("X-Jul-Console", "1");
   headers.set("Accept", "application/json");
   const token = authToken.get();
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -2075,6 +2094,7 @@ export async function previewRawConfig(
     "Content-Type": "application/toml",
     "X-Jul-Base-Version": baseVersion,
   });
+  headers.set("X-Jul-Console", "1");
   const token = authToken.get();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const resp = await fetch("/api/config/preview", {
@@ -2136,6 +2156,7 @@ export type PatchResult = z.infer<typeof PatchResultSchema>;
  */
 export async function patchConfig(patch: ConfigPatch): Promise<PatchResult> {
   const headers = new Headers();
+  headers.set("X-Jul-Console", "1");
   headers.set("Accept", "application/json");
   headers.set("Content-Type", "application/json");
   const token = authToken.get();
@@ -2171,6 +2192,7 @@ export async function patchConfigBatch(
   baseVersion?: string,
 ): Promise<PatchResult> {
   const headers = new Headers();
+  headers.set("X-Jul-Console", "1");
   headers.set("Accept", "application/json");
   headers.set("Content-Type", "application/json");
   const token = authToken.get();
@@ -2225,6 +2247,7 @@ export async function fetchPatchCandidate(
   baseVersion?: string,
 ): Promise<PatchCandidate> {
   const headers = new Headers();
+  headers.set("X-Jul-Console", "1");
   headers.set("Accept", "application/json");
   headers.set("Content-Type", "application/json");
   const token = authToken.get();
@@ -2487,6 +2510,7 @@ export type ManagedApplyLookup =
  */
 export async function fetchManagedApply(id: string): Promise<ManagedApplyLookup> {
   const headers = new Headers();
+  headers.set("X-Jul-Console", "1");
   headers.set("Accept", "application/json");
   headers.set("Cache-Control", "no-store");
   const token = authToken.get();
@@ -2627,6 +2651,7 @@ export async function applyConfig(
   mode: ApplyMode = "hot",
 ): Promise<ApplyResult> {
   const headers = new Headers();
+  headers.set("X-Jul-Console", "1");
   headers.set("Accept", "application/json");
   headers.set("Content-Type", "application/toml");
   const token = authToken.get();
@@ -2754,6 +2779,7 @@ export async function applyPatchBatch(
   confirmAdmin = false,
 ): Promise<PatchApplyResult> {
   const headers = new Headers();
+  headers.set("X-Jul-Console", "1");
   headers.set("Accept", "application/json");
   headers.set("Content-Type", "application/json");
   const token = authToken.get();
@@ -3036,6 +3062,7 @@ export function reportClientError(input: {
 }): void {
   const token = authToken.get();
   const headers = new Headers();
+  headers.set("X-Jul-Console", "1");
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
   void fetch("/api/admin/client-errors", {
@@ -3058,6 +3085,10 @@ export const AuditEventSchema = z.object({
   // from the presented token. It is safe to display and never contains secret
   // bytes. Optional for compatibility with events recorded before attribution.
   token_id: z.string().optional().default(""),
+  // Captured at admission; optional for records predating administrator OIDC.
+  provider_name: z.string().optional(),
+  role: z.string().optional(),
+  permissions: z.array(z.string()).optional(),
   operation: z.string(),
   resource: z.string().optional(),
   result: z.string(),
@@ -3102,6 +3133,7 @@ export async function downloadAuditExport(
   filter: AuditFilter = {},
 ): Promise<void> {
   const headers = new Headers();
+  headers.set("X-Jul-Console", "1");
   const token = authToken.get();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const resp = await fetch(auditExportUrl(format, filter), { headers });
@@ -3187,6 +3219,7 @@ async function streamEvents(
   while (!signalAborted(signal)) {
     try {
       const headers = new Headers();
+  headers.set("X-Jul-Console", "1");
       headers.set("Accept", "text/event-stream");
       const token = authToken.get();
       if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -3286,6 +3319,7 @@ export async function uploadPluginWasm(file: File): Promise<PluginUploadResponse
   form.append("wasm", file);
   const token = authToken.get();
   const headers = new Headers();
+  headers.set("X-Jul-Console", "1");
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const resp = await fetch("/api/plugins/upload", { method: "POST", headers, body: form });
   if (!resp.ok) {
@@ -3330,6 +3364,7 @@ export async function uploadTranscodeDescriptor(file: File): Promise<TranscodeDe
   const form = new FormData();
   form.append("descriptor", file);
   const headers = new Headers();
+  headers.set("X-Jul-Console", "1");
   const token = authToken.get();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const resp = await fetch("/api/transcode/descriptor-upload", {

@@ -357,6 +357,7 @@ func (c *Config) applyDefaultsWithPresence(tracingSampleRatioPresent bool) {
 				c.Admin.AuditLogRotateKeep = 14
 			}
 		}
+		DefaultAdminOIDC(&c.Admin.OIDC)
 		// RBAC defaults (P3-01). RBAC is disabled by default. When enabled,
 		// default_role defaults to "admin" for the legacy compatibility principal.
 		if c.Admin.RBAC.Enabled && c.Admin.RBAC.DefaultRole == "" {

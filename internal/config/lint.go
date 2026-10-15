@@ -232,6 +232,9 @@ func Lint(c *Config) []Diagnostic {
 			Hint:     `reference a secret instead, e.g. token = "${env:JUL_ADMIN_TOKEN}" or "${file:/run/secrets/admin-token}"`,
 		})
 	}
+	if c.Admin.OIDC.ClientSecret != "" && !containsSecretRef(c.Admin.OIDC.ClientSecret) {
+		diags = append(diags, Diagnostic{Severity: SeverityWarning, Field: "[admin.oidc].client_secret", Message: "OIDC client secret is a literal value", Hint: "use an env, file or secret reference"})
+	}
 	// Warn when RBAC principal tokens are literal values (SEC-1). Principal
 	// tokens are high-entropy secrets and should be sourced from the environment
 	// or a file to avoid committing them to the config file.

@@ -71,6 +71,13 @@ type RouteSpec struct {
 //
 // Ordering: public → unauthenticated-safe → read-only → write → mutating.
 var Catalog = []RouteSpec{
+	// OIDC protocol endpoints must be reachable before login. Each handler
+	// enforces its own exact method, browser binding and CSRF contract. Logout
+	// is also usable to clear an expired session, without granting API access.
+	{Pattern: "/auth/oidc/status", Methods: []string{http.MethodGet}, Public: true, Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleOIDCStatus) }},
+	{Pattern: "/auth/oidc/login", Methods: []string{http.MethodPost}, Public: true, Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleOIDCLogin) }},
+	{Pattern: "/auth/oidc/callback", Methods: []string{http.MethodGet}, Public: true, Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleOIDCCallback) }},
+	{Pattern: "/auth/oidc/logout", Methods: []string{http.MethodPost}, Public: true, Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleOIDCLogout) }},
 	// ── Public (no authentication required) ──────────────────────────────────
 	// /healthz and /readyz keep their current unversioned paths and are
 	// declared external there: moving a liveness probe under /api/v1 would

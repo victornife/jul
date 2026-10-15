@@ -1,6 +1,6 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.22 · Updated 2026-10-14
+> Version 2.23 · Updated 2026-10-15
 >
 > Stable v2.2.0 is published. The two newly shipped Beta rows now have `released`
 > delivery; their maturity and GA criteria remain unchanged. The separately
@@ -218,6 +218,7 @@ v2.0.0 or v2.1.0. Publication does not complete the unchecked GA criteria.
 | Generated configuration contracts and route identity | AUTO-CONTRACT | core | `released` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | n/a | [generated/config-reference.md](generated/config-reference.md) |
 | NGINX migration assessment, provenance, and includes | MIG-ASSESS | `importer` | `released` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ✅ | [nginx-assessment.md](nginx-assessment.md) |
 | Local diagnostics and support bundles | OPS-DIAG | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [diagnostics.md](diagnostics.md) |
+| External admin Console OIDC | ADMIN-OIDC | core · `console` | `merged` | ✅ | ☐ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [admin-oidc.md](admin-oidc.md) |
 | Admin listener TLS and client authentication | ADMIN-TLS | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [deployment.md](deployment.md) |
 | Versioned external admin API | AUTO-API | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [admin-api.md](admin-api.md) |
 | Remote automation CLI | AUTO-CLI | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [remote-cli.md](remote-cli.md) |

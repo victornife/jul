@@ -1,0 +1,24 @@
+# Synthetic provider-neutral example; never put real credentials in this file.
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token = "${env:JUL_RECOVERY_TOKEN}"
+[admin.rbac]
+enabled = true
+[admin.oidc]
+enabled = true
+provider_name = "Company identity"
+issuer = "https://identity.example.com/realms/company"
+client_id = "jul-console"
+client_secret = "${env:JUL_OIDC_CLIENT_SECRET}"
+callback_url = "https://admin.example.com/auth/oidc/callback"
+scopes = ["openid"]
+session_idle = "15m"
+session_absolute = "8h"
+max_sessions = 1024
+max_transactions = 128
+clock_skew = "60s"
+[[admin.oidc.subjects]]
+subject = "exact-provider-subject"
+principal = "alice"
+role = "viewer"

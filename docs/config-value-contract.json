@@ -140,6 +140,46 @@
       "active_when": "always"
     },
     {
+      "go_field": "AdminOIDCConfig.ClockSkew",
+      "path": "admin.oidc.clock_skew",
+      "kind": "duration",
+      "constraint": "0..120s",
+      "zero_semantics": "omitted/zero defaults to 60s",
+      "active_when": "admin OIDC enabled"
+    },
+    {
+      "go_field": "AdminOIDCConfig.MaxSessions",
+      "path": "admin.oidc.max_sessions",
+      "kind": "integer",
+      "constraint": "1..65536",
+      "zero_semantics": "omitted/zero defaults to 1024",
+      "active_when": "admin OIDC enabled"
+    },
+    {
+      "go_field": "AdminOIDCConfig.MaxTransactions",
+      "path": "admin.oidc.max_transactions",
+      "kind": "integer",
+      "constraint": "1..1024",
+      "zero_semantics": "omitted/zero defaults to 128",
+      "active_when": "admin OIDC enabled"
+    },
+    {
+      "go_field": "AdminOIDCConfig.SessionAbsolute",
+      "path": "admin.oidc.session_absolute",
+      "kind": "duration",
+      "constraint": "idle <= absolute <= 24h",
+      "zero_semantics": "omitted/zero defaults to 8h",
+      "active_when": "admin OIDC enabled"
+    },
+    {
+      "go_field": "AdminOIDCConfig.SessionIdle",
+      "path": "admin.oidc.session_idle",
+      "kind": "duration",
+      "constraint": "1m <= idle <= absolute",
+      "zero_semantics": "omitted/zero defaults to 15m",
+      "active_when": "admin OIDC enabled"
+    },
+    {
       "go_field": "AdminTLSConfig.MinVersion",
       "path": "admin.tls.min_version",
       "kind": "enum",

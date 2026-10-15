@@ -38,7 +38,7 @@
     {
       "name": "jul_auth_decisions_total",
       "type": "counter",
-      "help": "Access-control decisions, labeled by method (cidr/basic/jwt/forward) and result (allow/deny).",
+      "help": "Access-control decisions, labeled by method (cidr/basic/jwt/forward/oidc) and result (allow/deny).",
       "labels": [
         "method",
         "result"

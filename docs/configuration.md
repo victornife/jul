@@ -1992,3 +1992,8 @@ See [exact statuses and migration forms](nginx-importer.md#common-idioms-expirat
 
 Run the repository example from the repository root:
 `jul check -config testdata/expiration-mime.toml`.
+
+
+## Admin OIDC
+
+The optional `[admin.oidc]` block configures one external Console provider; it requires enabled `[admin.rbac]` and a local admin recovery credential. Exact issuer/client/callback, subject/group mapping and bounded session settings are covered by the [OIDC guide](admin-oidc.md) and generated reference. Changes publish with the existing immutable authentication snapshot and invalidate prior browser sessions when authentication policy changes. This does not change application-route authentication or NGINX migration.

@@ -32,6 +32,10 @@ func (s *Server) routes() http.Handler {
 			h = s.requirePermission(spec.Permission, spec.Handler(s))
 		}
 
+		if !spec.Public {
+			h = s.guardOIDCCredentials(h)
+		}
+
 		// Admission precedes authentication/authorization but follows the outer
 		// secure-transport gate. External contract setup wraps admission so an
 		// early 429 already has a server-minted request id and the v1 envelope.

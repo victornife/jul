@@ -331,6 +331,10 @@ type ManagedApplyCompletion struct {
 // root. All fields are optional; endpoints degrade gracefully when a
 // dependency is nil.
 type Deps struct {
+	// OIDCClient is the application-owned generation-aware auth egress client.
+	OIDCClient *http.Client
+	// ObserveOIDCLogin receives only fixed allow/deny outcomes, never identity labels.
+	ObserveOIDCLogin func(string)
 	// Product is the commercial product name shown in the GUI (e.g. "Jul.IA").
 	Product string
 	// Version is the running build version shown in the GUI.
@@ -1606,7 +1610,7 @@ func (s *Server) handleConsoleV2() http.Handler {
 				return
 			}
 		}
-		s.serveConsoleV2Index(w, indexHTML)
+		s.serveConsoleV2Index(w, r, indexHTML)
 	})
 }
 
@@ -1615,7 +1619,7 @@ func (s *Server) handleConsoleV2() http.Handler {
 // document CSP advertises a nonce that the editor stamps onto them; the SPA
 // reads it from the injected <meta name="csp-nonce"> tag. The shell is marked
 // no-store so each load gets a distinct nonce.
-func (s *Server) serveConsoleV2Index(w http.ResponseWriter, indexHTML []byte) {
+func (s *Server) serveConsoleV2Index(w http.ResponseWriter, r *http.Request, indexHTML []byte) {
 	nonce := newStyleNonce()
 	body := bytes.Replace(indexHTML,
 		[]byte("<head>"),
@@ -1623,6 +1627,13 @@ func (s *Server) serveConsoleV2Index(w http.ResponseWriter, indexHTML []byte) {
 		1)
 	s.writeSecurityHeadersNonce(w, nonce)
 	h := w.Header()
+	if s.requestAdminSnapshot(r).oidc != nil {
+		// no-referrer makes a browser form POST's Origin opaque ("null").
+		// Preserve the initiating origin for exact-origin login protection,
+		// while still suppressing referrers on every cross-origin request.
+		// Protocol redirects/callbacks independently retain no-referrer.
+		h.Set("Referrer-Policy", "same-origin")
+	}
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)

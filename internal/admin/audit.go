@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"jul/internal/rbac"
 )
@@ -26,12 +28,17 @@ const auditCap = 10000
 // secret values, tokens, Authorization headers, cookies, or request/response
 // bodies (Milestone 6.6 redaction rule).
 type AuditEvent struct {
-	ID        int64     `json:"id"`
-	Time      time.Time `json:"time"`
-	Actor     string    `json:"actor"`              // authenticated principal or "anonymous"
-	TokenID   string    `json:"token_id,omitempty"` // public credential identifier, if known
-	Operation string    `json:"operation"`          // e.g. config.apply, config.rollback, auth.fail
-	Resource  string    `json:"resource,omitempty"` // affected resource, if any
+	ID      int64     `json:"id"`
+	Time    time.Time `json:"time"`
+	Actor   string    `json:"actor"`              // authenticated principal or "anonymous"
+	TokenID string    `json:"token_id,omitempty"` // public credential identifier, if known
+	// Authentication metadata is captured from the admitted request identity,
+	// never reconstructed from current configuration or raw provider claims.
+	ProviderName string   `json:"provider_name,omitempty"`
+	Role         string   `json:"role,omitempty"`
+	Permissions  []string `json:"permissions,omitempty"` // concrete effective Jul catalogue grants
+	Operation    string   `json:"operation"`             // e.g. config.apply, config.rollback, auth.fail
+	Resource     string   `json:"resource,omitempty"`    // affected resource, if any
 	// ResourceID is a durable resource identity touched by this event (ADR
 	// 0019 §4/§5), when one is known — e.g. a route_id a patch batch minted
 	// or referenced. It is distinct from Resource (a free-form label like
@@ -129,6 +136,7 @@ func (a *auditLog) snapshot(opFilter, resultFilter string, limit int) []AuditEve
 	for i := 0; i < n; i++ {
 		idx := (a.next - 1 - i + len(a.buf)) % len(a.buf)
 		ev := a.buf[idx]
+		ev.Permissions = slices.Clone(ev.Permissions)
 		if opFilter != "" && !strings.HasPrefix(ev.Operation, opFilter) {
 			continue
 		}
@@ -168,22 +176,45 @@ func (s *Server) recordAuditResourceSelector(r *http.Request, operation, resourc
 	if s.audit == nil {
 		return
 	}
-	var actor, tokenID string
+	var actor, tokenID, providerName, role string
+	var permissions []string
 	if id, ok := rbac.IdentityFromContext(r.Context()); ok {
 		actor, tokenID = auditIdentityFields(id)
+		if !id.Legacy || id.TokenDigest != "" {
+			providerName, role = id.ProviderName, id.Role
+			// Expand only the finite local catalogue, including wildcards. This
+			// bounds the record and freezes custom-role grants at admission.
+			for _, p := range rbac.Catalog() {
+				if id.Has(p) {
+					permissions = append(permissions, string(p))
+				}
+			}
+		}
 	}
 	s.audit.record(AuditEvent{
-		Time:       time.Now().UTC(),
-		Actor:      actor,
-		TokenID:    tokenID,
-		Operation:  operation,
-		Resource:   resource,
-		ResourceID: resourceID,
-		Selector:   selector,
-		Result:     result,
-		Detail:     detail,
-		SourceIP:   adminClientIP(r),
+		Time:         time.Now().UTC(),
+		Actor:        actor,
+		TokenID:      tokenID,
+		ProviderName: providerName,
+		Role:         role,
+		Permissions:  permissions,
+		Operation:    operation,
+		Resource:     resource,
+		ResourceID:   resourceID,
+		Selector:     selector,
+		Result:       result,
+		Detail:       detail,
+		SourceIP:     adminClientIP(r),
 	})
+}
+
+// Configured labels are metadata, not free-text claims. Reject malformed or
+// oversized labels rather than persist control characters or unbounded data.
+func auditLabel(value string, maxBytes int) string {
+	if len(value) > maxBytes || strings.ContainsFunc(value, unicode.IsControl) {
+		return "[redacted]"
+	}
+	return value
 }
 
 // Open-mode permission middleware retains its compatibility identity for
@@ -264,7 +295,7 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", "attachment; filename=\"audit.csv\"")
 		cw := csv.NewWriter(w)
-		_ = cw.Write([]string{"id", "time", "actor", "operation", "resource", "result", "detail", "source_ip", "token_id"})
+		_ = cw.Write([]string{"id", "time", "actor", "operation", "resource", "result", "detail", "source_ip", "token_id", "provider_name", "role", "permissions"})
 		for _, ev := range events {
 			_ = cw.Write([]string{
 				strconv.FormatInt(ev.ID, 10),
@@ -276,6 +307,9 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 				ev.Detail,
 				ev.SourceIP,
 				ev.TokenID,
+				ev.ProviderName,
+				ev.Role,
+				strings.Join(ev.Permissions, " "),
 			})
 		}
 		cw.Flush()

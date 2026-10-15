@@ -40,6 +40,8 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
 | [0020](0020-wasm-abi-v2-response-phase.md) | `jul-abi/v2`: a bounded post-upstream response phase | Accepted | 2026-09-26 |
 | [0021](0021-consistent-hash-affinity.md) | Deterministic consistent-hash affinity (`rendezvous_v1`) | Accepted | 2026-09-26 |
 
+| [0022](0022-admin-console-oidc.md) | External Console OIDC through existing Jul RBAC | Accepted — Beta/unreleased | 2026-10-15 |
+
 ## Reading order
 
 - **What the product is and how work enters it:** [0013](0013-project-operating-model-and-completeness.md),

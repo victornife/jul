@@ -60,6 +60,125 @@
           "type": "integer",
           "x-jul-constraint": "non-negative"
         },
+        "oidc": {
+          "additionalProperties": false,
+          "properties": {
+            "callback_url": {
+              "description": "CallbackURL is the exact registered absolute /auth/oidc/callback URL",
+              "type": "string"
+            },
+            "client_id": {
+              "description": "ClientID is the registered OIDC relying-party client identifier",
+              "type": "string"
+            },
+            "client_secret": {
+              "description": "ClientSecret is optional; use an env/file/secret reference for confidential clients",
+              "type": "string",
+              "x-jul-secret": true
+            },
+            "clock_skew": {
+              "description": "ClockSkew is time-claim leeway (default 60s, maximum 120s)",
+              "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "type": "string",
+              "x-jul-conditional-default": "60s (when admin.oidc.enabled)",
+              "x-jul-constraint": "0..120s"
+            },
+            "enabled": {
+              "description": "Enabled activates Code + PKCE login; RBAC and local recovery remain required",
+              "type": "boolean"
+            },
+            "group_claim": {
+              "description": "GroupClaim names one flat string-array ID-token claim, including namespaced names",
+              "type": "string"
+            },
+            "groups": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "group": {
+                    "description": "Group is the exact, case-sensitive group value",
+                    "type": "string"
+                  },
+                  "role": {
+                    "description": "Role names an existing predefined or custom Jul RBAC role",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "issuer": {
+              "description": "Issuer is the exact discovery and ID-token issuer, without query or fragment",
+              "type": "string"
+            },
+            "max_sessions": {
+              "description": "MaxSessions bounds live in-memory sessions; exhaustion denies new login",
+              "maximum": 65536,
+              "minimum": 1,
+              "type": "integer",
+              "x-jul-conditional-default": "1024 (when admin.oidc.enabled)",
+              "x-jul-constraint": "1..65536"
+            },
+            "max_transactions": {
+              "description": "MaxTransactions bounds simultaneous five-minute login transactions",
+              "maximum": 1024,
+              "minimum": 1,
+              "type": "integer",
+              "x-jul-conditional-default": "128 (when admin.oidc.enabled)",
+              "x-jul-constraint": "1..1024"
+            },
+            "provider_name": {
+              "description": "ProviderName is the bounded human-readable login label",
+              "type": "string",
+              "x-jul-conditional-default": "OpenID Connect (when admin.oidc.enabled)"
+            },
+            "scopes": {
+              "description": "Scopes is a bounded set containing openid; offline_access is forbidden",
+              "items": {
+                "type": "string"
+              },
+              "type": "array",
+              "x-jul-conditional-default": "[openid] (when admin.oidc.enabled)"
+            },
+            "session_absolute": {
+              "description": "SessionAbsolute is the absolute session lifetime (default 8h, maximum 24h)",
+              "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "type": "string",
+              "x-jul-conditional-default": "8h (when admin.oidc.enabled)",
+              "x-jul-constraint": "idle <= absolute <= 24h"
+            },
+            "session_idle": {
+              "description": "SessionIdle is the maximum session inactivity interval (default 15m)",
+              "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "type": "string",
+              "x-jul-conditional-default": "15m (when admin.oidc.enabled)",
+              "x-jul-constraint": "1m <= idle <= absolute"
+            },
+            "subjects": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "principal": {
+                    "description": "Principal is a stable configured audit name, never taken from email/display claims",
+                    "type": "string"
+                  },
+                  "role": {
+                    "description": "Role names an existing predefined or custom Jul RBAC role",
+                    "type": "string"
+                  },
+                  "subject": {
+                    "description": "Subject is the exact, case-sensitive, non-empty OIDC sub claim",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
         "plugin_upload_dir": {
           "description": "PluginUploadDir is the directory where uploaded .wasm files are stored when operators use the Console Plugins panel upload feature",
           "type": "string"

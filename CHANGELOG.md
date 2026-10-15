@@ -9,6 +9,19 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Added
+
+- Optional external Console OIDC authentication (#441): one discovered provider,
+  Authorization Code + PKCE S256, bounded HttpOnly sessions, exact subject/group
+  mapping into existing Jul RBAC, CSRF protection, local logout, audit and local
+  token recovery. Audit persists captured provider, principal, effective role
+  and concrete permissions across JSON/CSV exports and the durable sink.
+  Authentication-policy Publish invalidates prior sessions.
+  Beta/unreleased; provider evidence is explicit, Meta's current discovery is
+  unsupported, and application sharing, SAML/SCIM and generic provider API-token
+  authentication remain outside scope. NGINX migration is unaffected.
+
+
 ### Fixed
 
 - Reconcile completed documentation/Console hardening and the three bounded

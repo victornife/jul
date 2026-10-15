@@ -9,7 +9,7 @@
 > usage metadata remain future work, as distinguished below.
 > The later #595 open-confirmation and #602 audit-contract regressions are
 > repaired through merged PRs #597 and #603; original failing evidence is retained
-> in the D11 resolution ledger. External identity remains Y3-02 horizon.
+> in the D11 resolution ledger. [External admin OIDC](../admin-oidc.md) is a separate unreleased Beta addition governed by ADR 0022.
 > Source catalogs own exhaustive mounted routes; future targets and the
 > historical phase plan are not mounted endpoints.
 
@@ -55,7 +55,7 @@ posture.
 
 **Non-goals (deferred to Y3-02)**
 
-- External IdPs (OIDC/SAML/SSO), group→role mapping, SCIM provisioning.
+- SAML/SCIM and generic identity governance. The separately selected [OIDC tranche](../admin-oidc.md) authenticates browsers and maps exact subjects/groups into these roles; it introduces no permission authority.
 - Per-object scoping *beyond* resource verbs (e.g., "operator, but only for
   `listen = :8443`"). The model is designed to allow this later (see
   [Open questions](#open-questions)) but Phase 1–3 keep grants resource-wide.
@@ -128,7 +128,7 @@ Two kinds of principal, same model:
 
 ## Tokens (credentials)
 
-Tokens are the only credential in HP-02 (external identity is Y3-02).
+Local tokens are HP-02 credentials. The separate [admin OIDC tranche](../admin-oidc.md) adds browser sessions; automation keeps scoped local tokens.
 
 - **Current shape and lookup.** Supply a high-entropy secret; there is no
   required `juladm_` prefix. The policy hashes the complete bearer token, derives
@@ -382,10 +382,13 @@ access-control posture without exposing any credential, principal name, or hash.
 - Authentication-rejection recording is repaired separately in #602: anonymous
   actor, source IP and fixed failure category, without copying credentials,
   failed-token identifiers, request data or client-provided actor metadata.
-- The CSV/JSONL export schema gains a `token_id` column
-  (`id,time,actor,operation,resource,result,detail,source_ip,token_id` after
-  the separately selected #602 correction); readers
-  must tolerate the added column (append-only schema evolution).
+- The CSV export retains `token_id` in position nine (the #602 correction),
+  followed by the #441 additions `provider_name,role,permissions`:
+  `id,time,actor,operation,resource,result,detail,source_ip,token_id,provider_name,role,permissions`.
+  JSON/JSONL retain the same additive metadata. Permissions are concrete local
+  catalogue grants captured with the request identity, including custom roles
+  and group-derived OIDC users; CSV joins them with spaces. Readers must tolerate
+  appended columns and historical JSON records without these optional fields.
 
 ## Configuration schema
 
@@ -539,8 +542,10 @@ server truth; management endpoints reject non-`admin:manage`.
 revocation is immediate.
 
 ### Phase 4 — External identity (bridge to Y3-02, out of HP-02 scope)
-OIDC/SAML/SSO → principal/role mapping; group→role binding. Tracked under
-[Y3-02](../roadmap/); RBAC's role model is the local-token precursor it maps onto.
+The separately activated [OIDC tranche](../admin-oidc.md) implements bounded
+browser authentication and exact subject/group-to-role binding as unreleased
+Beta under #441. It maps into this existing role model. Broader SSO/SAML and
+identity governance remain [Y3-02](../roadmap/) horizon work outside HP-02.
 
 ## Open questions
 

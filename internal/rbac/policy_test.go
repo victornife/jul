@@ -216,3 +216,29 @@ func TestValidateTokenOK(t *testing.T) {
 		t.Errorf("expected no error, got: %v", err)
 	}
 }
+
+func TestExternalIdentityUsesOnlyLocalRoleAuthority(t *testing.T) {
+	p, err := Build(true, "admin", map[string][]string{"external-reader": {"status:read"}}, nil, "recovery-token-32-characters-long", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := p.ExternalIdentity("alice", "external-reader", "public-subject-fingerprint")
+	if err != nil || !id.Has(StatusRead) || id.Has(AdminManage) || id.Legacy || id.TokenDigest != "" {
+		t.Fatalf("external grant: %+v %v", id, err)
+	}
+	if _, err := p.ExternalIdentity("alice", "provider-controlled-role", "fingerprint"); err != ErrForbidden {
+		t.Fatal("unknown role admitted")
+	}
+	disabled, _ := Build(false, "admin", nil, nil, "", time.Now())
+	if _, err := disabled.ExternalIdentity("alice", "admin", "x"); err != ErrUnauthenticated {
+		t.Fatal("disabled policy admitted")
+	}
+	var absent *Policy
+	if _, err := absent.ExternalIdentity("alice", "admin", "x"); err != ErrUnauthenticated {
+		t.Fatal("nil policy admitted")
+	}
+	changed, _ := Build(true, "admin", map[string][]string{"external-reader": {"admin:manage"}}, nil, "recovery-token-32-characters-long", time.Now())
+	if p.Fingerprint() == changed.Fingerprint() {
+		t.Fatal("external-only role change did not change generation fingerprint")
+	}
+}

@@ -194,6 +194,7 @@ func TestOptInRouteMetricContractMatchesCollectors(t *testing.T) {
 //
 // Each entry must also appear in docs/compatibility.md.
 var amendedReleasedMetrics = map[string]string{
+	"jul_auth_decisions_total":            "#441 adds the bounded oidc method value; help lists it, while name, type, labels and existing series are unchanged. See docs/compatibility.md.",
 	"jul_upstream_probes_total":           "gained a bounded source label (http/stream): the stream proxy owns its own registry, so an upstream used by both surfaces is probed twice and the two were indistinguishable (#144)",
 	"jul_upstream_probe_duration_seconds": "gained the same bounded source label, for the same reason (#144)",
 }

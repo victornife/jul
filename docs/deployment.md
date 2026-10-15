@@ -546,3 +546,8 @@ Measured in the #422 host-fault runs ([soak-evidence.md](soak-evidence.md)):
   `storage_unavailable` without changing the configuration. A separate history
   finalization failure can follow a committed apply and is reported as advisory
   degradation; it does not roll back that successful live change.
+
+
+## Shared administration with OIDC
+
+The optional [OIDC Console flow](admin-oidc.md) retains RBAC and local recovery credentials. Register an exact HTTPS callback, use trusted admin TLS or a TLS proxy connecting over loopback, preserve the configured Host/origin and retain firewall/private-network restrictions. Remote plaintext requests remain refused. Sessions are process-local, lost on restart and independent of provider global logout. Use scoped local tokens for unattended API clients.

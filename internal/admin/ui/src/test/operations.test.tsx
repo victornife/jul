@@ -123,6 +123,13 @@ describe("operational schemas", () => {
   it("rejects an audit event missing required fields", () => {
     expect(() => AuditEventSchema.parse({ id: 1 })).toThrow();
   });
+
+  it("retains captured OIDC authority and accepts historical audit records", () => {
+    const event = { id: 1, time: "2026-10-15T00:00:00Z", actor: "alice", operation: "cache.purge", result: "success" };
+    const authority = { provider_name: "Company identity", role: "deployment", permissions: ["cache:purge"] };
+    expect(AuditEventSchema.parse({ ...event, ...authority })).toMatchObject(authority);
+    expect(AuditEventSchema.parse(event).role).toBeUndefined();
+  });
 });
 
 // ── auditExportUrl ───────────────────────────────────────────────────────────
@@ -223,6 +230,7 @@ vi.mock("@/api/client.ts", async (importOriginal) => {
     ]),
     fetchAudit: vi.fn().mockResolvedValue([
       { id: 1, time: "2024-01-01T00:00:00Z", actor: "operator", operation: "config.apply", result: "success" },
+      { id: 2, time: "2026-10-15T00:00:00Z", actor: "alice", operation: "cache.purge", result: "success", provider_name: "Company identity", role: "deployment", permissions: ["cache:purge"] },
     ]),
   };
 });
@@ -272,5 +280,8 @@ describe("AuditPanel", () => {
     // Export controls are present and labelled.
     expect(screen.getByRole("button", { name: "Export JSON" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export CSV" })).toBeInTheDocument();
+    expect(screen.getByText("Company identity")).toBeInTheDocument();
+    expect(screen.getByText("deployment")).toBeInTheDocument();
+    expect(screen.getByText("cache:purge")).toBeInTheDocument();
   });
 });

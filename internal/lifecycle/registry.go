@@ -321,6 +321,24 @@ func adminEntries() []Entry {
 		hot("admin.history_keep", SubAdmin, "the existing history backend keeps an atomic retention policy published with the admin runtime; tightening prunes only after Publish and prune failure is advisory (#106/#159)"),
 	)
 	out = append(out,
+		hot("admin.oidc.enabled", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.provider_name", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.issuer", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.client_id", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.callback_url", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.scopes", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.subjects.*.subject", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.subjects.*.principal", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.subjects.*.role", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.group_claim", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.groups.*.group", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.groups.*.role", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.session_idle", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.session_absolute", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.max_sessions", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.max_transactions", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		hot("admin.oidc.clock_skew", SubAdmin, "the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions"),
+		secretDigest(hot("admin.oidc.client_secret", SubAdmin, "the resolved client secret belongs to the immutable prepared OIDC authentication generation")),
 		// admin.token feeds the same immutable authSnapshot the RBAC fields
 		// below already install atomically at Publish (PrepareAuth/
 		// CommitPreparedAuth): every authentication read loads the current

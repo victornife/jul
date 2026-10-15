@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -492,6 +493,9 @@ func (a *auditLog) record(ev AuditEvent) {
 	}
 	ev.Actor = redactActor(ev.Actor)
 	ev.Detail = redactAuditText(ev.Detail)
+	ev.ProviderName = auditLabel(ev.ProviderName, 80)
+	ev.Role = auditLabel(ev.Role, 63)
+	ev.Permissions = slices.Clone(ev.Permissions)
 	a.buf[a.next] = ev
 	a.next = (a.next + 1) % len(a.buf)
 	if a.next == 0 {

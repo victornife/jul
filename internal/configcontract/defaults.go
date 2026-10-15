@@ -131,7 +131,14 @@ var DefaultOverrides = map[string]string{
 // admin.enabled is also true) — they surface only as machine metadata and
 // reference text.
 var ConditionalDefaultOverrides = map[string]string{
-	"admin.console": "true (when admin.enabled)",
+	"admin.oidc.provider_name":    "OpenID Connect (when admin.oidc.enabled)",
+	"admin.oidc.scopes":           "[openid] (when admin.oidc.enabled)",
+	"admin.oidc.session_idle":     "15m (when admin.oidc.enabled)",
+	"admin.oidc.session_absolute": "8h (when admin.oidc.enabled)",
+	"admin.oidc.max_sessions":     "1024 (when admin.oidc.enabled)",
+	"admin.oidc.max_transactions": "128 (when admin.oidc.enabled)",
+	"admin.oidc.clock_skew":       "60s (when admin.oidc.enabled)",
+	"admin.console":               "true (when admin.enabled)",
 }
 
 // DefaultFor returns the documented unconditional default for path, as

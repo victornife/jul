@@ -70,6 +70,11 @@ func TestCatalogOwnsMuxRegistrations(t *testing.T) {
 
 func TestRouteTransportPolicyInventory(t *testing.T) {
 	policies := map[string]string{
+		"/auth/oidc/status":   "tls_or_loopback",
+		"/auth/oidc/login":    "tls_or_loopback",
+		"/auth/oidc/callback": "tls_or_loopback",
+		"/auth/oidc/logout":   "tls_or_loopback",
+
 		"/healthz":                                "probe_exempt",
 		"/readyz":                                 "probe_exempt",
 		"/":                                       "tls_or_loopback",

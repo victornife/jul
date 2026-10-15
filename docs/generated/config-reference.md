@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 325 configurable leaves.
+Coverage: 343 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -144,6 +144,227 @@ MaxEventConns bounds concurrent /api/events SSE streams per client to prevent re
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 4 |
 | Active when | always |
+
+## `admin.oidc.callback_url` {#admin-oidc-callback_url}
+
+CallbackURL is the exact registered absolute /auth/oidc/callback URL.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+
+## `admin.oidc.client_id` {#admin-oidc-client_id}
+
+ClientID is the registered OIDC relying-party client identifier.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+
+## `admin.oidc.client_secret` {#admin-oidc-client_secret}
+
+ClientSecret is optional; use an env/file/secret reference for confidential clients.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the resolved client secret belongs to the immutable prepared OIDC authentication generation |
+| Flags | secret |
+
+## `admin.oidc.clock_skew` {#admin-oidc-clock_skew}
+
+ClockSkew is time-claim leeway (default 60s, maximum 120s).
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| Default (conditional) | 60s (when admin.oidc.enabled) |
+| Constraint | 0..120s |
+| Zero/empty semantics | omitted/zero defaults to 60s |
+| Active when | admin OIDC enabled |
+
+## `admin.oidc.enabled` {#admin-oidc-enabled}
+
+Enabled activates Code + PKCE login; RBAC and local recovery remain required.
+
+| | |
+| --- | --- |
+| Type | `bool` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+
+## `admin.oidc.group_claim` {#admin-oidc-group_claim}
+
+GroupClaim names one flat string-array ID-token claim, including namespaced names.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+
+## `admin.oidc.groups.*.group` {#admin-oidc-groups-x-group}
+
+Group is the exact, case-sensitive group value.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+
+## `admin.oidc.groups.*.role` {#admin-oidc-groups-x-role}
+
+Role names an existing predefined or custom Jul RBAC role.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+
+## `admin.oidc.issuer` {#admin-oidc-issuer}
+
+Issuer is the exact discovery and ID-token issuer, without query or fragment.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+
+## `admin.oidc.max_sessions` {#admin-oidc-max_sessions}
+
+MaxSessions bounds live in-memory sessions; exhaustion denies new login.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| Default (conditional) | 1024 (when admin.oidc.enabled) |
+| Constraint | 1..65536 |
+| Zero/empty semantics | omitted/zero defaults to 1024 |
+| Active when | admin OIDC enabled |
+
+## `admin.oidc.max_transactions` {#admin-oidc-max_transactions}
+
+MaxTransactions bounds simultaneous five-minute login transactions.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| Default (conditional) | 128 (when admin.oidc.enabled) |
+| Constraint | 1..1024 |
+| Zero/empty semantics | omitted/zero defaults to 128 |
+| Active when | admin OIDC enabled |
+
+## `admin.oidc.provider_name` {#admin-oidc-provider_name}
+
+ProviderName is the bounded human-readable login label.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| Default (conditional) | OpenID Connect (when admin.oidc.enabled) |
+
+## `admin.oidc.scopes` {#admin-oidc-scopes}
+
+Scopes is a bounded set containing openid; offline_access is forbidden.
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| Default (conditional) | [openid] (when admin.oidc.enabled) |
+
+## `admin.oidc.session_absolute` {#admin-oidc-session_absolute}
+
+SessionAbsolute is the absolute session lifetime (default 8h, maximum 24h).
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| Default (conditional) | 8h (when admin.oidc.enabled) |
+| Constraint | idle <= absolute <= 24h |
+| Zero/empty semantics | omitted/zero defaults to 8h |
+| Active when | admin OIDC enabled |
+
+## `admin.oidc.session_idle` {#admin-oidc-session_idle}
+
+SessionIdle is the maximum session inactivity interval (default 15m).
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| Default (conditional) | 15m (when admin.oidc.enabled) |
+| Constraint | 1m <= idle <= absolute |
+| Zero/empty semantics | omitted/zero defaults to 15m |
+| Active when | admin OIDC enabled |
+
+## `admin.oidc.subjects.*.principal` {#admin-oidc-subjects-x-principal}
+
+Principal is a stable configured audit name, never taken from email/display claims.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+
+## `admin.oidc.subjects.*.role` {#admin-oidc-subjects-x-role}
+
+Role names an existing predefined or custom Jul RBAC role.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+
+## `admin.oidc.subjects.*.subject` {#admin-oidc-subjects-x-subject}
+
+Subject is the exact, case-sensitive, non-empty OIDC sub claim.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `admin` |
+| Why | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
 
 ## `admin.plugin_upload_dir` {#admin-plugin_upload_dir}
 

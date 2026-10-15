@@ -2,13 +2,39 @@
 """Score the complete changed Go-production diff with the HR-07C block algorithm.
 
 Consumes a zero-context diff after strip_moved_lines.py. No package allowlist:
-every changed non-test Go file must have measured statements. Standalone Go
+every changed non-test Go statement must be measured; the Go instrumenter
+distinguishes declarations from missing coverage. Standalone Go
 tools report absolute filenames, normalized to the repository root here.
 """
 import argparse
 import json
 import re
+import subprocess
+import tempfile
 from pathlib import Path
+
+
+def instrumented_spans(path):
+    """Ask Go's coverage instrumenter which source spans contain statements.
+
+    Struct fields and static configuration tables are code but are not Go
+    statements. Checking the instrumenter's complete inventory distinguishes
+    those edits from missing test profiles without a filename exclusion.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        output = Path(directory) / "instrumented.go"
+        subprocess.run(["go", "tool", "cover", "-mode=set", "-var=GateCoverage",
+                        "-o", str(output), str(path)], check=True, capture_output=True, text=True)
+        source = output.read_text()
+    positions = re.search(r"Pos:\s*\[[^\]]+\]uint32\{(.*?)\}", source, re.S)
+    statements = re.search(r"NumStmt:\s*\[[^\]]+\]uint16\{(.*?)\}", source, re.S)
+    if positions is None or statements is None:
+        raise ValueError(f"cannot read Go coverage statement inventory: {path}")
+    spans = re.findall(r"(\d+),\s*(\d+),\s*0x[0-9a-f]+,", positions[1])
+    counts = re.findall(r"(\d+),", re.sub(r"//[^\n]*", "", statements[1]))
+    if len(spans) != len(counts):
+        raise ValueError(f"inconsistent Go coverage statement inventory: {path}")
+    return [(int(lo), int(hi)) for (lo, hi), count in zip(spans, counts) if int(count)]
 
 
 def score(diff, profiles, root):
@@ -45,7 +71,8 @@ def score(diff, profiles, root):
         lines = (root / path).read_text().splitlines()
         code = any(lines[n - 1].strip() and not lines[n - 1].lstrip().startswith(("//", "/*", "*", "*/")) for n in numbers)
         if code and path not in measured:
-            raise ValueError(f"changed production file has no measured statements: {path}")
+            if any(lo <= n <= hi for lo, hi in instrumented_spans(root / path) for n in numbers):
+                raise ValueError(f"changed production file has no measured statements: {path}")
     total = sum(key[2] for key in executions)
     covered = sum(key[2] for key, count in executions.items() if count > 0)
     return {"covered": covered, "total": total, "percent": covered * 100 / total if total else None,

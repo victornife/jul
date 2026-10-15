@@ -134,7 +134,7 @@ features:
     8: null
     9: true
   notes: 'Single-operator GA. Named-principal RBAC (roles, scoped revocable tokens, per-principal audit attribution, Console
-    permission gating) delivered as opt-in [admin.rbac] (Phase 3 / #73); external identity (OIDC/SSO) remains Y3-02 horizon. Relationship (#512): the admin audit log, configuration history and rollback are part of this row''s Console/admin surface; managed configuration authority and drift adoption are the separate AUTO-AUTH row.'
+    permission gating) delivered as opt-in [admin.rbac] (Phase 3 / #73); external Console OIDC is separately tracked by ADMIN-OIDC and inherits none of this GA evidence. Relationship (#512): the admin audit log, configuration history and rollback are part of this row''s Console/admin surface; managed configuration authority and drift adoption are the separate AUTO-AUTH row.'
   delivery: soaked
 - id: Y1-08
   name: Zero-config + jul lint
@@ -925,3 +925,23 @@ features:
     performance surface), 8 n/a (no parser), 9 n/a (host packaging, not a Console surface). 4 is open: unit, image
     and service layouts are not yet under a semver contract; 5 is open: no packaging-specific soak. No container
     image is published (#446).'
+
+- id: ADMIN-OIDC
+  name: External admin Console OIDC
+  tags:
+  - core
+  - console
+  maturity: Beta
+  delivery: merged
+  doc: admin-oidc.md
+  criteria:
+    1: true
+    2: false
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: true
+    9: true
+  notes: 'Unreleased #441: one provider, Code + PKCE, bounded process-local sessions and existing RBAC. Separate from Y1-07 GA, published v2.2.0 and sharing/audiences. Provider evidence is source-specific; no universal provider, upstream logout or immediate IdP revocation claim. Benchmark publication and long-running GA soak remain open.'

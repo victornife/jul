@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 387 |
-| Schema leaves (configurable values) | 325 |
-| Registry entries | 325 |
+| Schema paths (containers included) | 408 |
+| Schema leaves (configurable values) | 343 |
+| Registry entries | 343 |
 | Startup-consumed entries | 29 |
-| Class `hot_reload` | 282 |
+| Class `hot_reload` | 300 |
 | Class `restart_required` | 29 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -127,6 +127,24 @@ value is compared as a digest so no secret material leaves the process.
 | `admin.history_keep` | `hot_reload` | `admin` | — | the existing history backend keeps an atomic retention policy published with the admin runtime; tightening prunes only after Publish and prune failure is advisory (#106/#159) |
 | `admin.listen` | `restart_required` | `admin` | startup | the admin listener and its resources are created once at startup |
 | `admin.max_event_conns` | `hot_reload` | `admin` | — | new SSE admissions use the captured per-client connection cap while existing leases and connection counts survive policy reload |
+| `admin.oidc.callback_url` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.client_id` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.client_secret` | `hot_reload` | `admin` | digest | the resolved client secret belongs to the immutable prepared OIDC authentication generation |
+| `admin.oidc.clock_skew` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.enabled` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.group_claim` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.groups.*.group` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.groups.*.role` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.issuer` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.max_sessions` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.max_transactions` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.provider_name` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.scopes` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.session_absolute` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.session_idle` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.subjects.*.principal` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.subjects.*.role` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
+| `admin.oidc.subjects.*.subject` | `hot_reload` | `admin` | — | the bounded OIDC runtime is prepared with RBAC and installed in the same immutable authentication snapshot at Publish; authentication policy changes invalidate prior browser sessions |
 | `admin.plugin_upload_dir` | `hot_reload` | `admin` | — | candidate storage is preflighted before Publish and each upload is confined to the directory captured at request start |
 | `admin.plugin_upload_enabled` | `hot_reload` | `admin` | — | new upload requests read admission state from the immutable admin runtime snapshot captured at request start |
 | `admin.plugin_upload_max_size` | `hot_reload` | `admin` | — | each upload captures its size limit from the immutable admin runtime snapshot before body processing |

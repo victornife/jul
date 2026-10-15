@@ -212,6 +212,7 @@ func Validate(c *Config) error {
 			errs = append(errs, errors.New("[admin] 'plugin_upload_max_size' must be positive when upload is enabled"))
 		}
 		errs = append(errs, validateRBAC(c.Admin.RBAC, c.Admin.Token)...)
+		errs = append(errs, validateAdminOIDC(c.Admin)...)
 		errs = append(errs, validateAdminTLS(c.Admin.TLS)...)
 	}
 

@@ -13,6 +13,7 @@ import { ConsoleHealthBadge } from "@/features/observability/ConsoleHealthBadge.
 import { CommandPalette, type CommandItem } from "@/app/CommandPalette.tsx";
 import { openCommandPalette } from "@/app/commandPaletteBus.ts";
 import { fetchOverview, type CertRisk, type ConfigAuthority } from "@/api/client.ts";
+import { OidcSession } from "@/auth/OidcSession.tsx";
 import { usePermission } from "@/auth/usePermission.ts";
 
 type NavLayout = "top" | "side";
@@ -543,7 +544,7 @@ export function Layout() {
 
   const controlsTop = (
     <div className="flex items-center gap-2">
-      <IdentityBadge />
+      <IdentityBadge /><OidcSession />
       <ConsoleHealthBadge />
       <CommandPaletteButton />
       <PreferenceMenu
@@ -557,7 +558,7 @@ export function Layout() {
 
   const controlsSide = (
     <div className="flex flex-col items-stretch gap-y-2">
-      <IdentityBadge compact={collapsed} />
+      <IdentityBadge compact={collapsed} /><OidcSession />
       <ConsoleHealthBadge compact={collapsed} />
       <CommandPaletteButton compact={collapsed} />
       <PreferenceMenu

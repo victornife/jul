@@ -46,6 +46,10 @@ The following are not required for standalone product completeness:
 - AI provider gateway;
 - universal hot reload of every structural field.
 
+The separately activated [admin Console OIDC](admin-oidc.md) Beta addition
+authenticates administrators into existing RBAC; it is not a hosted identity
+service and does not redefine the standalone completeness bar.
+
 These may become future products or experiments, but they cannot redefine the
 core completion bar implicitly.
 

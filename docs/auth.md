@@ -283,7 +283,7 @@ constrained to an operator-approved set of hosts/CIDRs and refused at dial time
 otherwise (subsystem `auth`), bounding the blast radius of a mistyped or
 compromised config. It is disabled by default.
 
-## Limits
+## Application-route limits
 
 - **At most one credential method per location** (no Basic **AND** JWT).
 - **No OAuth2 / OIDC flows**, no opaque-token introspection, no cookie sessions,
@@ -295,6 +295,9 @@ compromised config. It is disabled by default.
   claim assertions.
 - Forward-auth is a **probe** (GET, no body), suited to services like Traefik
   ForwardAuth / NGINX `auth_request` — not a full OAuth2 exchange.
+
+The separate [admin Console OIDC](admin-oidc.md) Beta capability authenticates
+administrators into Jul RBAC. It does not change these application-route limits.
 
 ## GA status
 
