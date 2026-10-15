@@ -263,6 +263,16 @@ func validateCacheValues(c CacheConfig) []error {
 	if c.LockTimeout > 0 && !c.Lock {
 		errs = append(errs, fmt.Errorf("[cache].lock_timeout: %s requires [cache].lock = true", c.LockTimeout.Std()))
 	}
+	if err := validateNonNegativeInt("[cache].max_ranges", c.MaxRanges); err != nil {
+		errs = append(errs, err)
+	} else {
+		if c.MaxRanges > 0 && !c.RangeEnabled {
+			errs = append(errs, fmt.Errorf("[cache].max_ranges: %d requires [cache].range_enabled = true", c.MaxRanges))
+		}
+		if c.MaxRanges > 16 {
+			errs = append(errs, fmt.Errorf("[cache].max_ranges: %d must be at most 16", c.MaxRanges))
+		}
+	}
 	return errs
 }
 

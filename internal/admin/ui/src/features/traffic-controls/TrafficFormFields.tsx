@@ -57,7 +57,9 @@ export function NumberField({
         min={0}
         value={value}
         onChange={(e) => {
-          onChange(Math.max(0, Number(e.target.value) || 0));
+          const raw = e.target.value.trim();
+          const parsed = raw === "" ? 0 : Number(raw);
+          onChange(Number.isNaN(parsed) ? 0 : parsed);
         }}
         className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
       />

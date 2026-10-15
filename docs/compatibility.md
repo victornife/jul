@@ -102,10 +102,13 @@ parseable but deprecated and ignored for the rest of the v1 line.
 
 ### Response-cache behavior changes (#132)
 
-No configuration key changed. The following **observable HTTP behavior** changed
-because the previous behavior contradicted the shared-cache contract Jul.IA
-claims. Each is a correctness fix, not a feature toggle, and none is
-configurable:
+In #132, no configuration key changed. The following **observable HTTP behavior**
+changed because the previous behavior contradicted the shared-cache contract
+Jul.IA claims. In `v2.0.0`–`v2.2.0` each was a non-configurable correctness
+fix; post-`v2.2.0` #442 ([ADR 0024](adr/0024-range-aware-cache-option-a.md))
+adds opt-in `[cache].range_enabled = true` (`max_ranges`) for Option A
+complete-object range caching while keeping `range_enabled = false` as the
+default bypass:
 
 - `Cache-Control: no-cache` on a request or a response now forces successful
   validation before reuse. It previously did nothing.
@@ -115,8 +118,11 @@ configurable:
   response unless that response explicitly permits shared reuse.
 - A successful `POST`/`PUT`/`PATCH`/`DELETE` now invalidates the cached
   representations of its target. Nothing was invalidated before.
-- A request carrying `Range` or `If-Range` now bypasses the cache. It could
-  previously be answered with a cached complete representation.
+- A request carrying `Range` or `If-Range` bypasses the cache by default
+  (`range_enabled = false`), whereas prior to #132 it could be answered with a
+  cached complete representation. When `[cache].range_enabled = true` (#442
+  Option A), Jul satisfies single byte-range `GET` requests (`206`/`416`) from
+  complete cached representations without ever storing `206` fragments.
 - Freshness is measured from the origin's `Date`/`Age`, so a response that
   already aged upstream is served for less time than before.
 - A new `X-Cache: REVALIDATED` value can appear where `HIT` previously did.

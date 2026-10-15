@@ -11,6 +11,21 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Opt-in Option A range-aware response caching (`[cache].range_enabled` and
+  `[cache].max_ranges`, #442, ADR 0024): when enabled (`range_enabled = false`
+  by default to preserve D05 bypass), satisfies single byte-range `GET`
+  requests (`206 Partial Content` and `416 Range Not Satisfiable` with
+  `Content-Range: bytes */length`) from complete cached representations in
+  memory or on disk using 32 KiB pooled `io.SectionReader` streaming without
+  body-sized heap allocation, enforces RFC 9110 §13.1.5 strong `If-Range`
+  entity-tag and HTTP-date (`IMF-fixdate`, `RFC 850`, and `asctime`) comparison,
+  coordinates (and when `lock = true`, coalesces) complete-object origin fills on
+  eligible cold range misses while preserving original `Range`/`If-Range`
+  headers on fallback, bounds range parsing via `max_ranges` (default `1`, max
+  `16`), exports bounded `jul_cache_range_requests_total{outcome}` metrics, and
+  classifies NGINX `slice` and `proxy_cache_max_range_offset` as blocking across
+  `http`, `server`, and `location` scopes.
+
 - Disk-streamed large-object cache capture and serving (`[cache].max_entry_size`,
   #525 Part 2, ADR 0023): decouples the maximum cacheable response body size
   from `memory_max_size` when `disk_path` is enabled (up to `disk_max_size`,

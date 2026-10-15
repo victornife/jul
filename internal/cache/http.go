@@ -424,7 +424,15 @@ type recorder struct {
 	acct           captureAccount
 	// noStore marks a response that can never be stored whatever its headers
 	// say: an interim/protocol-switch status, or a live event stream.
-	noStore bool
+	noStore     bool
+	headerCheck func(code int, h http.Header) bool
+	onAbandon   func()
+}
+
+func (r *recorder) notifyAbandon() {
+	if r.onAbandon != nil {
+		r.onAbandon()
+	}
 }
 
 func (r *recorder) effMemLimit() int64 {
@@ -460,6 +468,7 @@ func (r *recorder) dropCapture() {
 	r.noStore = true
 	r.body = bytes.Buffer{}
 	r.releaseCapture()
+	r.notifyAbandon()
 }
 
 func (r *recorder) WriteHeader(code int) {
@@ -481,6 +490,8 @@ func (r *recorder) WriteHeader(code int) {
 		r.dropCapture()
 	} else if cl > r.limit {
 		r.abandon(captureSkipOversize)
+	} else if r.headerCheck != nil && !r.headerCheck(code, r.Header()) {
+		r.dropCapture()
 	} else {
 		captureInitDiskStream(cl, r.effMemLimit(), r.disk, r.acct.onSkip, &r.diskStream, r.abandon, r.dropCapture)
 	}
@@ -495,6 +506,7 @@ func (r *recorder) abandon(reason string) {
 		r.diskStream = nil
 	}
 	r.acct.skip(reason)
+	r.notifyAbandon()
 }
 
 func (r *recorder) Write(p []byte) (int, error) {

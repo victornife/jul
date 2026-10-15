@@ -1221,7 +1221,8 @@ Enable `[cache].enabled` globally, then opt individual locations in with
 `cache = true`. Cache entries survive config reloads but are lost on restart
 unless `disk_path` is configured. `memory_max_size`, `max_entry_size`,
 `disk_max_size`, `default_ttl`, `stale_while_revalidate`, `stale_if_error`,
-`lock`, and `lock_timeout` are all hot-reloadable (#92, #525): a change applies
+`lock`, `lock_timeout`, `range_enabled`, and `max_ranges` are all
+hot-reloadable (#92, #525, #442): a change applies
 atomically at the next successful reload, resizing the memory/disk stores in
 place (evicting strict LRU entries/files immediately if a cap is lowered)
 without resetting counters or rebuilding the cache. `enabled` and `disk_path`
@@ -1239,6 +1240,8 @@ stale_while_revalidate = "60s"
 stale_if_error = "30s"
 lock = true
 lock_timeout = "5s"
+range_enabled = true
+max_ranges = 1
 ```
 
 | Key | Type | Description |
@@ -1253,6 +1256,8 @@ lock_timeout = "5s"
 | `stale_if_error` | duration | Extend stale serving when a background revalidation encounters an upstream error (5xx or timeout) |
 | `lock` | bool | Coalesce concurrent cold misses per cache key so one leader fetches and captures from the origin while compatible waiters block up to `lock_timeout` (default `false`); see [cache.md](cache.md#cold-miss-fill-locking) |
 | `lock_timeout` | duration | Maximum wait for an active cold-miss fill before falling through to an uncached origin request (defaults to `5s` when `lock = true`; setting a positive value with `lock = false` is rejected) |
+| `range_enabled` | bool | Opt-in Option A range-aware caching (#442, [ADR 0024](adr/0024-range-aware-cache-option-a.md)): satisfy single byte-range `GET` requests (`206`/`416`) from complete stored representations and coordinate complete-object fills on eligible range misses (default `false`, preserving D05 bypass) |
+| `max_ranges` | int | Maximum comma-separated range specs accepted when `range_enabled = true` (defaults to `1` when `range_enabled = true`, maximum `16`; setting a positive value with `range_enabled = false` is rejected) |
 
 Per-location caching also requires `cache = true` on the location. See
 [docs/cache.md](cache.md) for the two-tier model, on-disk format, and

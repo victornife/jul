@@ -40,14 +40,17 @@ benchmarks below were refreshed against the corrected implementation.
 | Memory | in-process map, LRU by bytes | `memory_max_size` | process lifetime; survives reloads |
 | Disk (optional) | files under `disk_path`, LRU by bytes | `disk_max_size` (per-entry ceiling `max_entry_size`) | survives restarts |
 
-A request is served from the memory tier first. On a memory miss the disk tier is
-consulted: a disk hit whose body fits within `memory_max_size` is **promoted**
-back into the memory tier so subsequent reads stay hot, whereas a large
-disk-backed object (`> memory_max_size`, up to `max_entry_size`) is streamed
-directly from its on-disk file in 32 KiB chunks without entering or evicting the
-memory tier ([ADR 0023](adr/0023-large-object-disk-streamed-cache.md)). When the
-memory tier overflows, evicted entries spill **down** to the disk tier (when
-configured) rather than being dropped, so disk acts as a larger, slower backstop.
+A request is served from the memory tier first. Memory-eligible entries
+(`body <= min(memory_max_size, max_entry_size)`) are stored in the memory tier
+and written through to the disk tier (when `disk_path` is configured) under a
+monotonic per-key generation so they survive process restarts and remain backed
+by the larger disk LRU if evicted from memory. On a memory miss the disk tier is
+consulted: a disk hit whose body fits within `min(memory_max_size, max_entry_size)`
+is **promoted** back into the memory tier (provided its per-key generation is
+still current) so subsequent reads stay hot, whereas a large disk-backed object
+(`> memory_max_size`, up to `max_entry_size`) is streamed directly from its
+on-disk file in 32 KiB chunks without entering or evicting the memory tier
+([ADR 0023](adr/0023-large-object-disk-streamed-cache.md)).
 
 The cache instance is shared across configuration reloads, so a reload does not
 cold-start the cache.
@@ -69,6 +72,8 @@ stale_while_revalidate = "30s"
 stale_if_error         = "300s"   # keep serving stale on upstream 5xx
 lock                   = true     # coalesce concurrent cold misses per key
 lock_timeout           = "5s"     # fall through uncached after 5s wait
+range_enabled          = true     # opt-in Option A range-aware caching (#442)
+max_ranges             = 1        # bound accepted range specs (default 1 when range_enabled = true)
 ```
 
 Per-location opt-in is still required:
@@ -127,7 +132,7 @@ request-derived may ever appear here.
 | `HIT` | Served from a fresh stored entry without contacting the origin |
 | `STALE` | Served from a stored entry past its freshness lifetime, under `stale-while-revalidate` or `stale-if-error` |
 | `REVALIDATED` | The origin confirmed the stored entry with a `304` during this request, and the confirmed copy was served |
-| `BYPASS` | The cache was not consulted at all (protocol upgrade, `Range`/`If-Range`, or request `no-store`) |
+| `BYPASS` | The cache was not consulted or fell back to the origin (protocol upgrade, `Range`/`If-Range` when `range_enabled = false` or on range fallback, or request `no-store`) |
 
 > The `jul_cache_events_total` **help string** still reads
 > `(HIT/MISS/STALE/BYPASS)`. That text is frozen by the v1.32.0 released metric
@@ -416,10 +421,11 @@ invalidation target is only ever used to build a cache key, and a disk file is
 named by the SHA-256 of that key, so it can neither traverse a directory nor name
 a file the cache did not write. Foreign files in `disk_path` are never touched.
 
-### `Range` and `If-Range` (decision D05)
+### `Range` and `If-Range` (decision D05 and #442 Option A)
 
-A request carrying `Range` **or** `If-Range` bypasses the cache entirely, before
-lookup and before any storage decision:
+By default (`[cache].range_enabled = false`), a request carrying `Range` **or**
+`If-Range` bypasses the cache entirely, before lookup and before any storage
+decision (decision D05):
 
 - no cached complete representation is substituted for the origin's answer;
 - the request is forwarded unchanged, and the origin's `206`, `200` or `416`,
@@ -430,13 +436,58 @@ lookup and before any storage decision:
   key, and not a `200` the origin happened to return;
 - an existing complete representation is neither replaced nor evicted.
 
-Only the cache is bypassed. Authentication, authorization, client-certificate
-handling, rate limiting, plugins, the WAF, tracing, metrics and the access log
-all wrap outside this handler and still run.
+When `[cache].range_enabled = true` (#442 Option A, [ADR 0024](adr/0024-range-aware-cache-option-a.md)),
+Jul.IA enables complete-object range-aware caching on cached routes:
 
-Serving RFC-compliant byte ranges from complete cached representations is a
-documented future enhancement, not a gap that will be filled implicitly. See
-[Known limitations](#known-limitations).
+- **Complete representations only.** Only complete cacheable `200 OK`
+  representations are ever stored. Origin `206 Partial Content` responses are
+  never stored or merged as fragments.
+- **Single byte-range serving (`206` and `416`).** Valid single byte-range `GET`
+  requests (`bytes=first-last`, `bytes=first-`, `bytes=-suffix`, ignoring empty
+  `#range-spec` list elements per RFC 9110 §5.6.1.2) against a complete cached
+  representation are answered directly from the memory or disk tier (`206
+  Partial Content` with exact `Content-Range: bytes start-end/total`,
+  `Content-Length`, and `Accept-Ranges: bytes`, or `416 Range Not Satisfiable`
+  with `Content-Range: bytes */total` when unsatisfiable; for a 0-byte cached
+  representation, `Range` is ignored per RFC 9110 §14.1.2 & §14.2 and the
+  complete 0-byte `200 OK` is served; content-scoped digests `Content-Digest`
+  and `Content-MD5` and HTTP message signatures `Signature` and `Signature-Input`
+  are stripped on synthetic `206`/`416` responses while `Repr-Digest` is
+  preserved). Disk-backed range hits slice `[start, end]` via
+  `io.NewSectionReader` and stream in 32 KiB pooled chunks without loading the
+  full object into memory.
+- **Strong `If-Range` validation (RFC 9110 §13.1.5, §5.6.7, and §8.8.2.2).**
+  Entity-tag `If-Range` values require syntactically valid strong comparison via
+  `opaqueETag` (weak `W/"..."` tags and invalid `etagc` characters never match);
+  HTTP-date `If-Range` values accept all three RFC 9110 §5.6.7 formats
+  (`IMF-fixdate`, `RFC 850`, and ANSI C `asctime`), require exact timestamp
+  equality with `Last-Modified`, and require a valid cached response `Date`
+  header at least one second later than `Last-Modified` so implicitly weak
+  timestamps are rejected (when an origin response omits `Date`, Jul synthesizes
+  the received-time `Date` on capture per RFC 9110 §6.6.1).
+  When `If-Range` does not match, the cache serves the complete `200 OK`
+  representation (`jul_cache_range_requests_total{outcome="if_range_full"}`).
+  `If-Range` without `Range` is ignored per RFC 9110 §13.1.5; `If-None-Match`
+  and `If-Modified-Since` are evaluated ahead of `If-Range` and `Range`.
+- **Cold-miss complete-object fill and fallback.** On a cache miss for a valid
+  single byte-range `GET`, the cache initiates (and when `[cache].lock = true`,
+  coalesces) a complete-object origin fetch (`outcome="fill"`), stores the
+  complete representation in memory or on disk up to `max_entry_size`, and
+  serves the requested byte slice. If the origin response is uncacheable,
+  exceeds `max_entry_size` or capture budgets, or a fill-lock waiter times out,
+  the request falls back to the origin (`outcome="fallback"`, `X-Cache: BYPASS`)
+  with the client's original `Range` and `If-Range` headers preserved untouched.
+- **Bounded `max_ranges` and multi-range disposition.** `[cache].max_ranges`
+  (default `1` when `range_enabled = true`, maximum `16`) bounds the number of
+  range specs accepted by the parser. Malformed `Range` headers or requests
+  exceeding `max_ranges` record `outcome="invalid"` and bypass to the origin;
+  syntactically valid multi-range requests within `max_ranges` record
+  `outcome="fallback"` and bypass to the origin without synthesizing
+  `multipart/byteranges` in cache.
+
+Only the cache is bypassed on fallback. Authentication, authorization,
+client-certificate handling, rate limiting, plugins, the WAF, tracing, metrics
+and the access log all wrap outside this handler and still run.
 
 ## Executable behaviour matrix
 
@@ -461,7 +512,7 @@ the complete audit record is [the 2026-08-07 cache recertification](audit/old/20
 | `Set-Cookie` | Never stored, even when an earlier field line is empty | `TestResponseDirectiveStorage`, `TestRepeatedSetCookieResponseIsNotShared`, `TestSharedReusePermissionMatrix` |
 | `Vary` and membership | Distinct variants coexist across repeated request/response field lines; 64-entry membership cap; old first-value entries miss after upgrade; invalidation removes every owned memory/disk variant | `TestHandlerVaryVariantsCoexist`, `TestVaryDistinguishesRepeatedRequestHeaderValues`, `TestVaryHonorsEveryResponseFieldLine`, `TestFirstValueVaryEntriesFailClosedAfterUpgrade`, `TestUnsafeMethodRemovesEveryVaryVariant`, `TestDeletedVariantCannotBeResurrectedByANewStub`, `TestChangedVaryReplacesTheVariantSet` |
 | ETag / Last-Modified / 304 | ETag precedence; immutable metadata merge; changed/unsafe metadata discards; every `Connection` line's nominated fields excluded | `TestValidatorPrecedence`, `TestMerge304UpdatesMetadata`, `TestMerge304Discards`, `TestRemoveHopByHopFromEveryConnectionLine`, `TestMerge304NeverMutatesThePublishedEntry`, `TestMerge304AcrossBothTiers` |
-| Range / If-Range | Bypass before lookup/store; 206 is never stored | `TestRangeRequestBypassesLookup`, `TestIfRangeBypassesLookup`, `TestRangeResponsesAreNeverStored`, `TestRealRangePassThrough` |
+| Range / If-Range | Default bypass (`range_enabled = false`) before lookup/store; opt-in Option A (`range_enabled = true`, `max_ranges`) serves single byte ranges (`206`/`416`) from complete stored representations, enforces strong `If-Range`, coalesces complete-object fills on cold misses, and preserves original `Range`/`If-Range` on fallback; `206` is never stored | `TestRangeRequestBypassesLookup`, `TestIfRangeBypassesLookup`, `TestRangeResponsesAreNeverStored`, `TestRealRangePassThrough`, `TestRangeOptionAByteRangeMatrix`, `TestRangeOptionAIfRangeAndConditionalSemantics`, `TestRangeOptionAMalformedMultiRangeAndUnits`, `TestRangeOptionAVaryAuthCompressionStaleAndInvalidation`, `TestRangeOptionAConcurrentCoalescingTimeoutAndBoundedHeap`, `TestRangeOptionAReviewRegressions`, `TestLargeObjectAndRangeAuditRegressions`, `TestRangeGateEvaluationSyntheticWorkload`, `FuzzRangeHeaderAndStateTransitions` (`internal/cache`) |
 | WebSocket / 101 | Upgrade requests bypass with the original writer; 101 is never stored | `TestWebSocketThroughCachedProxy`, `TestWebSocketThroughFullMiddlewareChain`, `TestUpgradeRequestBypassesCache`, `TestProtocolSwitchResponseNeverStored`, `TestRepeatedUpgradesThroughCachedProxy` |
 | SSE / flushed / oversized | SSE is not buffered or stored; ordinary flushed chunked responses remain cacheable; oversized capture is not stored | `TestSSEThroughCachedProxyStreamsAndIsNotStored`, `TestEventStreamIsNeverStoredOrBuffered`, `TestFlushedChunkedResponseIsStillCached`, `TestOversizedStreamIsNotStored` |
 | Memory/disk tiers | Byte-bounded LRU, disk overflow/promotion, restart rehydration, owner-only files and foreign-file isolation | `TestDiskStorePersistence`, `TestDiskStoreConcurrentOverflowEviction`, `TestDiskStoreFileMode`, `TestDiskStoreAtomicNoTempLeftovers`, `TestDiskStoreIgnoresForeignFiles` |
@@ -529,9 +580,9 @@ When a popular uncached URL receives a burst of concurrent requests, default
 cache behavior forwards every miss to the origin in parallel. Enabling
 `[cache].lock = true` coalesces concurrent cold misses per cache key so only one
 request fetches and captures from the origin while compatible followers wait up
-to `[cache].lock_timeout` (#525 Part 1; disk-streamed capture of objects larger
-than `memory_max_size` remains tracked separately under #525 Part 2, and
-range-aware caching remains gated under #442):
+to `[cache].lock_timeout` (#525 Part 1; combines with `[cache].max_entry_size`
+disk-streamed capture from #525 Part 2 and `[cache].range_enabled` Option A
+range fills from #442):
 
 - **Leader selection and parallel keys.** The first cold miss for a cache key
   becomes the fill leader and performs the origin fetch and capture. Unrelated
@@ -668,7 +719,10 @@ purge both tiers, then resume traffic.
 label set: `stored`, `not_modified`, `uncacheable`, `origin_error`, `canceled`,
 `panic`, `no_lease`, `deduplicated`. `jul_cache_fill_locks_total{outcome}`
 counts cold-miss fill-lock events with a fixed label set: `wait`, `reused`,
-`not_reusable`, `uncacheable`, `timeout`, `canceled`. No cache key, URL, host,
+`not_reusable`, `uncacheable`, `timeout`, `canceled`.
+`jul_cache_range_requests_total{outcome}` counts range-aware cache decisions
+(#442 Option A) with a fixed label set: `hit`, `fill`, `fallback`,
+`if_range_full`, `unsatisfiable`, `invalid`. No cache key, URL, host,
 user identity, generation id or error string is ever used as a label. Structured
 logs carry only the bounded operation name, the generation id and a bounded
 reason.
@@ -900,20 +954,29 @@ memory or disk pressure.
 Both tiers track their size in bytes and evict least-recently-used entries when
 over budget:
 
-- The **memory tier** evicts to stay within `memory_max_size`. Evicted entries are
-  handed to the disk tier (when configured). The disk write runs **outside** the
-  memory-tier lock — victims are collected under the lock and persisted after it
-  is released — so a slow disk never blocks in-memory reads and writes.
+- The **memory tier** evicts to stay within `memory_max_size`. Memory-eligible
+  entries are already written through to the disk tier on publication (when
+  `disk_path` is configured); if an entry was evicted from disk while staying
+  hot in memory, the memory-eviction callback re-persists it outside the
+  memory-tier lock so a slow disk never blocks in-memory reads and writes.
 - The **disk tier** evicts whole files to stay within `disk_max_size`, retiring
   and removing the backing file as it goes. The disk store tracks both physical
-  on-disk bytes (`physBytes = sum(fileSize)`, reported by `Stats()` and
-  `jul_cache_bytes{tier="disk"}`) and logical LRU capacity charge (`curBytes`).
-  When an entry's representation body fits within `disk_max_size` (`bodyLen <= disk_max_size`)
-  and its `JULDCH02` metadata+trailer fits within the bounded metadata envelope
+  on-disk bytes (`physBytes + retiredBytes + tombstoneBytes`, reported by
+  `Stats()` and `jul_cache_bytes{tier="disk"}`) and logical LRU capacity charge
+  (`curBytes + retiredBytes + tombstoneBytes`). Retired `.jul-cache-retired-*`
+  files still held open by active readers remain counted in physical occupancy
+  and capacity admission until their final reader closes; failed file unlinks
+  during deletion, purge, or eviction are retained/recorded in
+  `.jul-cache-tombstones` and swept on startup so invalidated entries never
+  resurrect across restarts. When an entry's representation body fits within
+  `disk_max_size` (`bodyLen <= disk_max_size`) and its `JULDCH02`
+  metadata+trailer fits within the bounded metadata envelope
   (`maxDiskMetaEnvelope = 1 MiB + 24 B`), its logical LRU capacity charge is
-  capped at `disk_max_size` so an exact-boundary object (`body == max_entry_size == disk_max_size`)
-  is cached without self-evicting while `Stats()` still reports the exact
-  physical file size on disk.
+  capped at `disk_max_size` (and `Vary` membership stubs carry `0` logical
+  charge while their variants are live) so an exact-boundary object
+  (`body == max_entry_size == disk_max_size`, including `Vary` responses) is
+  cached without self-evicting while `Stats()` still reports the exact physical
+  file size on disk.
 
 `[cache].max_entry_size` (defaulting to `memory_max_size` when unset or `0`)
 sets the maximum cacheable response body size (#525 Part 2):
@@ -963,14 +1026,15 @@ Product limitations — deliberate scope, not defects:
    invalidate all `/api/v1/users/*`). Operators needing selective invalidation
    must do so at the application layer or use short TTLs.
 
-2. **No cached byte-range serving.** Every request carrying `Range` or
-   `If-Range` bypasses the cache and reaches the origin (decision D05). Range
-   workloads therefore get no cache benefit. Serving RFC-compliant single byte
-   ranges from complete cached representations — with `If-Range`,
-   `Content-Range` and `416`, and without multipart ranges or partial-object
-   storage — is a recorded future enhancement candidate (#442), promoted only
-   when representative media/download workloads show material origin or latency
-   cost.
+2. **Range-aware caching is opt-in, complete-object only, and single-range.**
+   By default (`[cache].range_enabled = false`), every request carrying `Range`
+   or `If-Range` bypasses the cache (`X-Cache: BYPASS`, decision D05). When
+   `[cache].range_enabled = true` (#442 Option A, [ADR 0024](adr/0024-range-aware-cache-option-a.md)),
+   a cold range miss fetches the **complete** representation from the origin
+   (amplifying origin bandwidth if a client requests only a one-shot tiny slice
+   of a large file), never stores `206` fragments, and bypasses multi-range
+   requests (`multipart/byteranges`) to the origin under the `[cache].max_ranges`
+   bound.
 
 3. **No cross-process / distributed cache.** Each Jul.IA process has one
    process-scoped cache instance shared by its cache-enabled locations. There is
@@ -1081,6 +1145,29 @@ branch (PR #617). Values below are the five-sample medians (`ns/op`, `allocs/op`
 | --- | --- | ---: | ---: | ---: |
 | `BenchmarkCacheLargeDiskCapture` | 4 MiB cold-miss disk-streamed capture (`memory_max_size = 64 KiB`, `max_entry_size = 8 MiB`) | 22,536,279 | 380 | 27,530 |
 | `BenchmarkCacheLargeDiskHit` | 4 MiB warm disk-streamed hit (32 KiB pooled chunk copy) | 20,810,422 | 281 | 14,281 |
+
+### Range-aware caching benchmarks (#442 Option A)
+
+Command (five fixed-iteration samples):
+
+```bash
+go test -run '^$' -bench='BenchmarkCacheRange(HitMemory|HitDisk|OneShotTinyCold)$' -benchmem -benchtime=100x -count=5 ./internal/cache
+```
+
+Environment: Linux 6.18.54.1-microsoft-standard-WSL2, Go 1.27.2, `linux/arm64`,
+Qualcomm Oryon (12 cores), `GOMAXPROCS=12`, on the `#442 Option A`
+implementation branch. Values below are the five-sample medians, including
+`origin_bytes/op` to surface both warm origin offload and cold one-shot
+full-object amplification:
+
+| Benchmark | Scenario | Median ns/op | origin_bytes/op | allocs/op | bytes/op |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `BenchmarkCacheRangeHitMemory/bypass` | Warm 64 KiB range on 256 KiB memory object (`range_enabled = false`) | 250,482 | 65,536 | 8 | 501 |
+| `BenchmarkCacheRangeHitMemory/option_a` | Warm 64 KiB range on 256 KiB memory object (`range_enabled = true`) | 251,914 | 0 | 20 | 1,120 |
+| `BenchmarkCacheRangeHitDisk/bypass` | Warm 64 KiB range on 4 MiB disk object (`range_enabled = false`) | 302,348 | 65,536 | 8 | 501 |
+| `BenchmarkCacheRangeHitDisk/option_a` | Warm 64 KiB range on 4 MiB disk object (`range_enabled = true`, 32 KiB chunks) | 393,525 | 0 | 293 | 14,528 |
+| `BenchmarkCacheRangeOneShotTinyCold/bypass` | One-shot cold 1 KiB range on 4 MiB object (`range_enabled = false`) | 11,334 | 1,024 | 29 | 6,774 |
+| `BenchmarkCacheRangeOneShotTinyCold/option_a` | One-shot cold 1 KiB range on 4 MiB object (`range_enabled = true`, full-object fill) | 3,899,675 | 4,194,304 | 397 | 29,632 |
 
 ## Threat note
 

@@ -364,8 +364,8 @@ features:
     directives, mandatory validation, authenticated reuse, invalidation, Vary membership, 304 merge and Range bypass. #134
     published the executable matrix, refreshed six benchmarks, added a zero-error focused correctness soak and found no unresolved
     P0/P1 cache defect. Criterion 8 is satisfied by adversarial Cache-Control parser coverage. Additive post-v2.2.0 cold-miss fill
-    locking (#525 Part 1) and disk-streamed large-object capture (#525 Part 2) are unreleased and do not inherit this GA/soaked
-    certification; range-aware caching (#442) remains separate. See docs/cache.md and the 2026-08-07
+    locking (#525 Part 1), disk-streamed large-object capture (#525 Part 2), and Option A range-aware caching (#442) are unreleased
+    and do not inherit this GA/soaked certification. See docs/cache.md and the 2026-08-07
     audit record.
 
     '
@@ -947,3 +947,22 @@ features:
     8: true
     9: true
   notes: 'Unreleased #441: one provider, Code + PKCE, bounded process-local sessions and existing RBAC. Separate from Y1-07 GA, published v2.2.0 and sharing/audiences. Provider evidence is source-specific; no universal provider, upstream logout or immediate IdP revocation claim. Benchmark publication and long-running GA soak remain open.'
+
+- id: CACHE-LARGE-RANGE
+  name: Large-object fill lock, disk streaming, and Option A range caching
+  tags:
+  - core
+  maturity: Beta
+  delivery: merged
+  doc: cache.md
+  criteria:
+    1: true
+    2: true
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: true
+    9: true
+  notes: 'Unreleased #525 (Part 1 cold-miss fill lock, Part 2 disk-streamed large-object capture under ADR 0023) and #442 (opt-in Option A complete-object range caching under ADR 0024). Separate from the historical core-cache GA/soaked record and published v2.2.0 packages. Complete-object storage only; no 206 fragment caching. Long-running GA soak remains open.'

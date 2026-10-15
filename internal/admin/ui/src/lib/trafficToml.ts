@@ -59,12 +59,23 @@ export function upsertTopLevelTable(raw: string, table: string, fragment: string
   return [before, fragment, after].filter((part) => part.length > 0).join("\n\n").trim() + "\n";
 }
 
+export function isValidCacheMaxRanges(draft: CacheDraft): boolean {
+  const maxRanges = draft.maxRanges ?? 0;
+  if (!Number.isInteger(maxRanges) || maxRanges < 0 || maxRanges > 16) {
+    return false;
+  }
+  return Boolean(draft.rangeEnabled) || maxRanges === 0;
+}
+
 /**
  * Generates the complete current [cache] table. Values are emitted independently
  * of enabled so dormant disk/TTL/stale settings survive disable/enable cycles.
  * Empty values represent schema fields that were absent and remain absent.
  */
 export function generateCacheToml(draft: CacheDraft): string {
+  if (!isValidCacheMaxRanges(draft)) {
+    throw new Error("cache.max_ranges must be an integer between 0 and 16.");
+  }
   const lines = ["[cache]", `enabled = ${String(draft.enabled)}`];
   if (draft.memoryMaxSize.trim() !== "") {
     lines.push(`memory_max_size = ${tomlString(draft.memoryMaxSize.trim())}`);
@@ -72,6 +83,10 @@ export function generateCacheToml(draft: CacheDraft): string {
   if (draft.diskPath.trim() !== "") lines.push(`disk_path = ${tomlString(draft.diskPath.trim())}`);
   if (draft.diskMaxSize.trim() !== "") {
     lines.push(`disk_max_size = ${tomlString(draft.diskMaxSize.trim())}`);
+  }
+  const maxEntrySize = (draft.maxEntrySize ?? "").trim();
+  if (maxEntrySize !== "" && maxEntrySize !== "0b") {
+    lines.push(`max_entry_size = ${tomlString(maxEntrySize)}`);
   }
   if (draft.defaultTTL.trim() !== "") {
     lines.push(`default_ttl = ${tomlString(draft.defaultTTL.trim())}`);
@@ -81,6 +96,20 @@ export function generateCacheToml(draft: CacheDraft): string {
   }
   if (draft.staleIfError.trim() !== "") {
     lines.push(`stale_if_error = ${tomlString(draft.staleIfError.trim())}`);
+  }
+  if (draft.lock === true) {
+    lines.push("lock = true");
+    const lockTimeout = (draft.lockTimeout ?? "").trim();
+    if (lockTimeout !== "" && lockTimeout !== "0s") {
+      lines.push(`lock_timeout = ${tomlString(lockTimeout)}`);
+    }
+  }
+  if (draft.rangeEnabled === true) {
+    lines.push("range_enabled = true");
+    const maxRanges = draft.maxRanges ?? 0;
+    if (maxRanges > 0) {
+      lines.push(`max_ranges = ${String(maxRanges)}`);
+    }
   }
   return lines.join("\n");
 }

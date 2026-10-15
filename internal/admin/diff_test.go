@@ -303,7 +303,7 @@ func TestDiffGlobalCacheCompressionRateLimit(t *testing.T) {
 		RateLimit:   config.RateLimitConfig{Enabled: true, Rate: 100, Burst: 100},
 	}
 	after := &config.Config{
-		Cache:       config.CacheConfig{Enabled: true, DiskPath: "/var/cache", MaxEntrySize: config.Size(128 << 20), Lock: true, LockTimeout: config.Duration(3 * time.Second)},
+		Cache:       config.CacheConfig{Enabled: true, DiskPath: "/var/cache", MaxEntrySize: config.Size(128 << 20), Lock: true, LockTimeout: config.Duration(3 * time.Second), RangeEnabled: true, MaxRanges: 4},
 		Compression: config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip", "br"}},
 		RateLimit:   config.RateLimitConfig{Enabled: false},
 	}
@@ -313,6 +313,12 @@ func TestDiffGlobalCacheCompressionRateLimit(t *testing.T) {
 	}
 	if !diffHas(d, "Change cache maximum entry size") {
 		t.Errorf("expected cache max_entry_size change, got %+v", d)
+	}
+	if !diffHas(d, "Enable cache range serving") {
+		t.Errorf("expected cache range_enabled change, got %+v", d)
+	}
+	if !diffHas(d, "Change cache maximum ranges") {
+		t.Errorf("expected cache max_ranges change, got %+v", d)
 	}
 	if !diffHas(d, "Enable cache fill lock") {
 		t.Errorf("expected cache fill-lock enable, got %+v", d)
@@ -324,11 +330,18 @@ func TestDiffGlobalCacheCompressionRateLimit(t *testing.T) {
 		t.Errorf("expected cache fill-lock disable, got %+v", dDisable)
 	}
 	cacheOff := &config.Config{Cache: config.CacheConfig{Enabled: false}}
-	if dEnableCache := diffConfigs(cacheOff, after); !diffHas(dEnableCache, "Enable the response cache") {
-		t.Errorf("expected cache enable entry, got %+v", dEnableCache)
+	cacheOnOnly := &config.Config{Cache: after.Cache}
+	dEnableCache := diffConfigs(cacheOff, cacheOnOnly)
+	if !diffHas(dEnableCache, "Enable the response cache") || len(dEnableCache.Modifications) != 1 {
+		t.Errorf("expected single cache enable entry covering range_enabled/max_ranges, got %+v", dEnableCache.Modifications)
 	}
-	if dDisableCache := diffConfigs(after, cacheOff); !diffHas(dDisableCache, "Disable the response cache") {
-		t.Errorf("expected cache disable entry, got %+v", dDisableCache)
+	dDisableCache := diffConfigs(cacheOnOnly, cacheOff)
+	if !diffHas(dDisableCache, "Disable the response cache") || len(dDisableCache.Modifications) != 1 {
+		t.Errorf("expected single cache disable entry covering range_enabled/max_ranges, got %+v", dDisableCache.Modifications)
+	}
+	cacheDormantEdit := &config.Config{Cache: config.CacheConfig{Enabled: false, RangeEnabled: true, MaxRanges: 4}}
+	if dDormant := diffConfigs(cacheOff, cacheDormantEdit); len(dDormant.Modifications) != 0 {
+		t.Errorf("expected disabled cache field edits to be covered without fallback rows, got %+v", dDormant.Modifications)
 	}
 	if !diffHas(d, "Change compression encoders") {
 		t.Errorf("expected compression encoders change, got %+v", d)

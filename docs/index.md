@@ -112,6 +112,7 @@ inside the immutable release archives. They do not close the partial-audit ledge
 | Client-certificate policy and CRL hot reload | [mtls.md](mtls.md) | `Beta` / `released` |
 | Secrets references + log redaction | [secrets.md](secrets.md) | `GA` / `soaked` |
 | Response cache (memory + disk) | [cache.md](cache.md) | `GA` / `soaked` |
+| Large-object fill lock, disk streaming, and Option A range caching | [cache.md](cache.md) | `Beta` / `merged` |
 | Core HTTP (static / proxy / FastCGI / vhosts / routing) | [core-http.md](core-http.md) | `GA` / `soaked` |
 | Downstream write-inactivity timeout | [core-http.md](core-http.md#downstream-write-inactivity) | `Beta` / `released` |
 | Per-route HTTP metrics and bounded hosts | [observability.md](observability.md#per-route-http-metrics) | `Beta` / `released` |

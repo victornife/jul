@@ -181,6 +181,22 @@
       },
       {
         "source": "nginx.conf",
+        "code": "NGX_LOCATION_CACHE_MAX_RANGE_OFFSET",
+        "class": "blocking",
+        "risk": "performance",
+        "context": "location",
+        "directive": "proxy_cache_max_range_offset"
+      },
+      {
+        "source": "nginx.conf",
+        "code": "NGX_LOCATION_SLICE",
+        "class": "blocking",
+        "risk": "performance",
+        "context": "location",
+        "directive": "slice"
+      },
+      {
+        "source": "nginx.conf",
         "code": "NGX_LOCATION_ADD_HEADER",
         "class": "supported",
         "risk": "security",

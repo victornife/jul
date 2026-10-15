@@ -171,6 +171,7 @@ the Jul request path.
 | `proxy_buffering off` | ✅ | Sets `proxy_buffering = false`, forcing immediate flush per proxy write. `on` is blocking. |
 | `proxy_next_upstream` | ❌ | Deferred application-outcome retry (#406) capability. |
 | `proxy_cache_lock`, `proxy_cache_lock_timeout` | ⚠️ (`on` / positive duration) / ignored (`off`) / ❌ (conflict or `proxy_cache_lock_age`) | Valid in `http`, `server`, and `location`. Effective values are resolved via `http → server → location` inheritance (including NGINX defaults `off` and `5s`) across all cache-enabled locations: when compatible, `on` and `<time>` map to process-wide `[cache].lock` and `[cache].lock_timeout` (`NGX_{HTTP,SERVER,LOCATION}_CACHE_LOCK`, `NGX_{HTTP,SERVER,LOCATION}_CACHE_LOCK_TIMEOUT`); `off` is ignored (`NGX_*_CACHE_LOCK_OFF`); mixed effective values across cache-enabled locations emit a blocking `NGX_CACHE_LOCK_CONFLICT`; `proxy_cache_lock_age` is blocking (`NGX_*_CACHE_LOCK_AGE`). |
+| `slice`, `proxy_cache_max_range_offset` | ❌ | Blocking across `http`, `server`, and `location` (`NGX_{HTTP,SERVER,LOCATION}_SLICE`, `NGX_{HTTP,SERVER,LOCATION}_CACHE_MAX_RANGE_OFFSET`). Jul implements opt-in Option A complete-object range caching (`[cache].range_enabled`), not NGINX fixed-size `slice` fragment caching or offset-threshold range fill gating. |
 | `alias` | ⚠️ | Maps to `root`; NGINX prefix-stripping semantics differ. |
 | `return` | ✅ | Status and redirect preserved; response body text is not. |
 | `rewrite` | ✅ | Pattern, replacement, and recognized flags are preserved. |
@@ -434,6 +435,7 @@ whole file names that same zone:
 | `proxy_cache_bypass`, `proxy_no_cache`, `proxy_cache_key`, `proxy_ignore_headers` | ❌ — expression-driven or would silently change Jul's always-honored `Cache-Control`/`Expires` behavior |
 | `proxy_cache_lock on;`, `proxy_cache_lock_timeout <time>;` (`http`, `server`, `location`) | ⚠️ / ❌ on conflict — effective values are resolved through `http → server → location` (with NGINX defaults `off` and `5s`) across all cache-enabled locations; when all cache-enabled locations share compatible effective values, maps to `[cache].lock = true` and `[cache].lock_timeout` (`NGX_{HTTP,SERVER,LOCATION}_CACHE_LOCK`, `NGX_{HTTP,SERVER,LOCATION}_CACHE_LOCK_TIMEOUT`); `proxy_cache_lock off;` is ignored (`NGX_*_CACHE_LOCK_OFF`); mixed effective values across cache-enabled locations leave the global settings unset and emit a blocking `NGX_CACHE_LOCK_CONFLICT` finding |
 | `proxy_cache_lock_age <time>;` (`http`, `server`, `location`) | ❌ — blocking (`NGX_{HTTP,SERVER,LOCATION}_CACHE_LOCK_AGE`); Jul keeps the leader's fill lock until the leader completes or cancels rather than starting a second competing cache fill after a lock-age timer |
+| `slice <size>;`, `proxy_cache_max_range_offset <offset>;` (`http`, `server`, `location`) | ❌ — blocking (`NGX_{HTTP,SERVER,LOCATION}_SLICE`, `NGX_{HTTP,SERVER,LOCATION}_CACHE_MAX_RANGE_OFFSET`); Jul implements opt-in Option A complete-object range caching (`[cache].range_enabled` and `[cache].max_ranges`, [ADR 0024](adr/0024-range-aware-cache-option-a.md)), not NGINX `slice` 206 fragment caching or byte-offset fill gating |
 | `proxy_cache_min_uses`, `proxy_cache_background_update` | ignored — no Jul equivalent knob |
 | `proxy_cache_revalidate`, `proxy_cache_use_stale` | ⚠️ — Jul's background revalidation/stale-serving is unconditional and cannot be selectively disabled |
 
@@ -465,7 +467,10 @@ still passive. Port `X-Accel-Expires` to intentional standard origin policy,
 not to an importer-invented alias. `Surrogate-Control` remains forwarding-only.
 NGINX's `expires` directive generates downstream `Expires`/`Cache-Control`;
 it is not an origin targeted-policy selector. Plain signed-duration migration
-uses the separate response-time policy described below (#523). Range/fragment/slice work remains #442's decision.
+uses the separate response-time policy described below (#523). Opt-in Option A
+complete-object range caching (`[cache].range_enabled`, #442) is configured
+explicitly in Jul; NGINX `slice` and `proxy_cache_max_range_offset` remain
+blocking.
 
 `TestNGINXCorpusTargetedCacheDifference` uses the existing `cache-runtime`
 candidate, real Jul, and pinned NGINX 1.28.3 with a synthetic local origin.

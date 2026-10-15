@@ -1082,9 +1082,14 @@ export const CacheProjectionSchema = z.object({
   memory_max: z.string().optional(),
   disk_path: z.string().default(""),
   disk_max_size: z.string().default(""),
+  max_entry_size: z.string().default(""),
   default_ttl: z.string().default(""),
   stale_while_revalidate: z.string().default(""),
   stale_if_error: z.string().default(""),
+  lock: z.boolean().default(false),
+  lock_timeout: z.string().default(""),
+  range_enabled: z.boolean().default(false),
+  max_ranges: z.number().int().nonnegative().default(0),
 });
 export type CacheProjection = z.infer<typeof CacheProjectionSchema>;
 

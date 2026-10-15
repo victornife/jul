@@ -273,6 +273,14 @@
       "active_when": "always"
     },
     {
+      "go_field": "CacheConfig.MaxRanges",
+      "path": "cache.max_ranges",
+      "kind": "integer",
+      "constraint": "0..16; requires cache.range_enabled = true when positive",
+      "zero_semantics": "omitted/zero defaults to 1 when range_enabled is enabled",
+      "active_when": "cache.enabled = true and cache.range_enabled = true"
+    },
+    {
       "go_field": "CacheConfig.MemoryMaxSize",
       "path": "cache.memory_max_size",
       "kind": "size",

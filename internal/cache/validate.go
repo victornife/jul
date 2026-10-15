@@ -71,8 +71,20 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	pol := c.Policy()
 	rec := c.newRecorder(pol)
 	defer rec.releaseCapture()
-	next.ServeHTTP(rec, conditionalRequest(r.Clone(vctx), stored))
+	vreq := conditionalRequest(r.Clone(vctx), stored)
+	next.ServeHTTP(rec, vreq)
 	now := c.clock()
+
+	_, isRange := rangeSpecFromRequest(r)
+	fallbackAfterValidation := func() {
+		if isRange {
+			c.observeRange(rangeOutcomeFallback)
+			w.Header().Set("X-Cache", stateBypass)
+			next.ServeHTTP(w, r)
+			return
+		}
+		c.fetchAndStore(w, r, next, c.clock())
+	}
 
 	switch {
 	case rec.status == http.StatusNotModified:
@@ -80,13 +92,13 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		if action == mergeDiscard {
 			c.Delete(k.key)
 			c.finishValidation(call, nil, outcomeUncacheable)
-			c.fetchAndStore(w, r, next, c.clock())
+			fallbackAfterValidation()
 			return
 		}
 		c.set(k.key, refreshed)
 		c.finishValidation(call, refreshed, outcomeNotModified)
 		if !c.serve(w, r, refreshed, stateRevalidated, now) {
-			c.fetchAndStore(w, r, next, c.clock())
+			fallbackAfterValidation()
 		}
 
 	case rec.status >= 500:
@@ -103,8 +115,8 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 			}
 		}
 		c.finishValidation(call, nil, outcomeOriginError)
-		if !writeRecorded(w, r, rec, nil, stateMiss) {
-			c.fetchAndStore(w, r, next, c.clock())
+		if isRange || !writeRecorded(w, r, rec, nil, stateMiss) {
+			fallbackAfterValidation()
 		}
 
 	case !rec.storable():
@@ -115,21 +127,26 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		// truncating a response.
 		c.Delete(k.key)
 		c.finishValidation(call, nil, outcomeUncacheable)
-		c.fetchAndStore(w, r, next, c.clock())
+		fallbackAfterValidation()
 
 	default:
-		e := c.buildEntryFromCapture(r, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		if e == nil || !c.storeCaptured(key(r), r, e, rec.diskStream) {
+		e := c.buildEntryFromCapture(vreq, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
+		if e == nil || !e.matchesVary(r) || !c.storeCaptured(key(vreq), vreq, e, rec.diskStream) {
 			// The origin replaced the representation with one that must not be
-			// stored. The old copy described something that no longer exists.
+			// stored or that varies on a header modified for conditional/range
+			// validation. The old copy described something that no longer exists.
 			c.Delete(k.key)
 			c.finishValidation(call, nil, outcomeUncacheable)
-			if !writeRecorded(w, r, rec, nil, stateMiss) {
-				c.fetchAndStore(w, r, next, c.clock())
+			if isRange || (e != nil && !e.matchesVary(r)) || !writeRecorded(w, r, rec, nil, stateMiss) {
+				fallbackAfterValidation()
 			}
 		} else {
 			c.finishValidation(call, e, outcomeStored)
-			if !writeRecorded(w, r, rec, e, stateMiss) {
+			if isRange {
+				if !c.serve(w, r, e, stateMiss, now) {
+					fallbackAfterValidation()
+				}
+			} else if !writeRecorded(w, r, rec, e, stateMiss) {
 				c.fetchAndStore(w, r, next, c.clock())
 			}
 		}
@@ -162,6 +179,12 @@ func (c *Cache) awaitValidation(w http.ResponseWriter, r *http.Request, next htt
 	}
 	// Origin error without a servable entry, uncacheable, canceled, panic, or a
 	// result this request may not reuse: fetch a response of its own.
+	if _, isRange := rangeSpecFromRequest(r); isRange {
+		c.observeRange(rangeOutcomeFallback)
+		w.Header().Set("X-Cache", stateBypass)
+		next.ServeHTTP(w, r)
+		return
+	}
 	c.fetchAndStore(w, r, next, c.clock())
 }
 

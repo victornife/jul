@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"jul/internal/atomicfile"
 	"jul/internal/logthrottle"
 )
 
@@ -163,28 +164,53 @@ func readDiskEntryMetaFile(f *os.File) (entry *Entry, bodyLen, fileSize int64, e
 // in a single trailer-framed file named by the SHA-256 of its key so a lookup
 // can read metadata at the end of the file without loading the body into
 // memory, and stream or slice the body at offset 0.
+// diskTombstoneFile records SHA-256 cache file hashes whose deletion, purge,
+// or eviction removal failed so startup rehydration can retry removing them
+// and never resurrect invalidated or evicted entries across restarts.
+const (
+	diskTombstoneFile  = ".jul-cache-tombstones"
+	diskTombstoneMagic = "JULTOMB1"
+)
+
 type diskStore struct {
-	mu        sync.Mutex
-	dir       string
-	maxBytes  int64
-	curBytes  int64 // logical LRU capacity charge (sum of it.size)
-	physBytes int64 // physical on-disk bytes occupied (sum of it.fileSize)
+	mu             sync.Mutex
+	dir            string
+	maxBytes       int64
+	curBytes       int64 // logical LRU capacity charge (sum of it.size)
+	physBytes      int64 // physical on-disk bytes of indexed entries (sum of it.fileSize)
+	retiredBytes   int64 // physical on-disk bytes of retired entries still held by active readers
+	tombstoneBytes int64 // physical on-disk bytes of unremoved tombstoned files awaiting retry
 	// evictions counts LRU-capacity evictions from evictLocked and Resize (not
 	// explicit del/purge calls), for jul_cache_evictions_total{tier="disk"}.
-	evictions int64
-	ll        *list.List // front = most recently used; values are *diskItem
-	items     map[string]*list.Element
-	pinned    map[string]*diskBlob
-	log       *slog.Logger
+	evictions      int64
+	ll             *list.List // front = most recently used; values are *diskItem
+	items          map[string]*list.Element
+	pinned         map[string]*diskBlob
+	tombstones     map[string]int64
+	tombstoneKeys  map[string]string
+	tombstoneDirty bool
+	failedRetired  map[*diskBlob]struct{}
+	log            *slog.Logger
 
 	// tempBudget bounds all concurrent temporary capture files in dir so
-	// concurrent large misses and 304 rewrites cannot bypass disk_max_size.
-	tempBudget captureBudget
-	onSkip     func(reason string)
+	// concurrent large misses, memory write-throughs, Vary stubs, and 304
+	// rewrites cannot bypass disk_max_size.
+	tempBudget                captureBudget
+	onSkip                    func(reason string)
+	checkGen                  func(key string, gen uint64) bool
+	onKeyDiskState            func(key string, inDisk bool)
+	unrecoverableInvalidation atomic.Bool
 
 	// Test hooks for deterministic fault and concurrency-window injection.
-	testPublishFault     string
-	onLookupLeaseAcquire func()
+	testPublishFault         string
+	testRemoveFile           func(path string) error
+	testRenameFile           func(oldpath, newpath string) error
+	testTruncateFile         func(path string, size int64) error
+	testReadTombstoneFile    func(path string) ([]byte, error)
+	testPersistTombstoneErr  error
+	onLookupLeaseAcquire     func()
+	onBeforePublishLock      func(key string, gen uint64)
+	onBeforeLastReaderRemove func()
 
 	// writeFailLog bounds the write-failure warning: a full filesystem fails
 	// every store, and one line per failure turned ENOSPC into a log flood
@@ -200,15 +226,22 @@ type diskStore struct {
 const diskWriteFailureLogInterval = 10 * time.Second
 
 type diskItem struct {
-	hash     string
-	size     int64
-	fileSize int64
-	bodyLen  int64
-	metaLen  int64
-	blob     *diskBlob
+	hash       string
+	key        string
+	gen        uint64
+	size       int64
+	fileSize   int64
+	bodyLen    int64
+	metaLen    int64
+	isVaryStub bool
+	variants   []string
+	blob       *diskBlob
 }
 
 func (it *diskItem) effectiveSize(maxBytes int64) int64 {
+	if it.isVaryStub && it.bodyLen == 0 && it.metaLen <= maxDiskMetaEnvelope {
+		return 0
+	}
 	if it.bodyLen <= maxBytes && it.metaLen <= maxDiskMetaEnvelope && it.fileSize > maxBytes {
 		return maxBytes
 	}
@@ -228,11 +261,13 @@ func newDiskStore(dir string, maxBytes int64, logger *slog.Logger) (*diskStore, 
 		logger = slog.Default()
 	}
 	d := &diskStore{
-		dir:      dir,
-		maxBytes: maxBytes,
-		ll:       list.New(),
-		items:    make(map[string]*list.Element),
-		log:      logger,
+		dir:           dir,
+		maxBytes:      maxBytes,
+		ll:            list.New(),
+		items:         make(map[string]*list.Element),
+		tombstones:    make(map[string]int64),
+		tombstoneKeys: make(map[string]string),
+		log:           logger,
 	}
 	d.rehydrate()
 	return d, nil
@@ -242,6 +277,305 @@ func (d *diskStore) maxBytesCap() int64 {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.maxBytes
+}
+
+func (d *diskStore) availableBudgetCap() int64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	avail := d.maxBytes - d.retiredBytes - d.tombstoneBytes
+	if avail < 0 {
+		return 0
+	}
+	return avail
+}
+
+func (d *diskStore) effectiveUsedLocked() int64 {
+	return d.curBytes + d.retiredBytes + d.tombstoneBytes
+}
+
+func (d *diskStore) removePath(path string) error {
+	if d.testRemoveFile != nil {
+		return d.testRemoveFile(path)
+	}
+	return os.Remove(path)
+}
+
+func (d *diskStore) renamePath(oldpath, newpath string) error {
+	if d.testRenameFile != nil {
+		return d.testRenameFile(oldpath, newpath)
+	}
+	return os.Rename(oldpath, newpath)
+}
+
+func (d *diskStore) truncatePath(path string, size int64) error {
+	if d.testTruncateFile != nil {
+		return d.testTruncateFile(path, size)
+	}
+	return os.Truncate(path, size)
+}
+
+func (d *diskStore) readTombstoneManifest(path string) ([]byte, error) {
+	if d.testReadTombstoneFile != nil {
+		return d.testReadTombstoneFile(path)
+	}
+	return os.ReadFile(path)
+}
+
+func (d *diskStore) hasHashStateLocked(hash string) bool {
+	if _, ok := d.items[hash]; ok {
+		return true
+	}
+	if p := d.pinned[hash]; p != nil && !p.removed {
+		return true
+	}
+	if _, ok := d.tombstones[hash]; ok {
+		return true
+	}
+	return false
+}
+
+func (d *diskStore) notifyKeyDiskStateLocked(key, hash string) {
+	if key != "" && d.onKeyDiskState != nil {
+		d.onKeyDiskState(key, d.hasHashStateLocked(hash))
+	}
+}
+
+func (d *diskStore) newBlob(hash, path string, bodyLen, fileSize int64) *diskBlob {
+	return &diskBlob{
+		store:    d,
+		hash:     hash,
+		dir:      d.dir,
+		path:     path,
+		bodyLen:  bodyLen,
+		fileSize: fileSize,
+	}
+}
+
+func (d *diskStore) persistTombstonesLocked() error {
+	if d.testPersistTombstoneErr != nil {
+		d.tombstoneDirty = true
+		return d.testPersistTombstoneErr
+	}
+	tombPath := filepath.Join(d.dir, diskTombstoneFile)
+	if len(d.tombstones) == 0 {
+		if err := d.removePath(tombPath); err != nil && !os.IsNotExist(err) {
+			d.tombstoneDirty = true
+			return err
+		}
+		d.tombstoneDirty = false
+		return nil
+	}
+	var sb strings.Builder
+	count := 0
+	for h, sz := range d.tombstones {
+		sb.WriteString(h)
+		sb.WriteByte(' ')
+		sb.WriteString(strconv.FormatInt(sz, 10))
+		sb.WriteByte('\n')
+		count++
+	}
+	sb.WriteString(diskTombstoneMagic)
+	sb.WriteByte(' ')
+	sb.WriteString(strconv.Itoa(count))
+	sb.WriteByte('\n')
+
+	if err := atomicfile.Write(tombPath, []byte(sb.String()), 0o600); err != nil {
+		d.tombstoneDirty = true
+		return err
+	}
+	d.tombstoneDirty = false
+	return nil
+}
+
+func (d *diskStore) recordTombstoneLocked(hash string, fileSize int64) {
+	if d.tombstones == nil {
+		d.tombstones = make(map[string]int64)
+	}
+	if prev, exists := d.tombstones[hash]; exists {
+		d.tombstoneBytes -= prev
+	}
+	d.tombstones[hash] = fileSize
+	d.tombstoneBytes += fileSize
+	if err := d.persistTombstonesLocked(); err != nil {
+		// Fail-closed fallback: truncate the invalidated cache file in place so
+		// its 24-byte JULDCH02 trailer is destroyed even when creating a new
+		// temporary tombstone manifest file fails.
+		if tErr := d.truncatePath(d.path(hash), 0); tErr != nil && !os.IsNotExist(tErr) {
+			d.unrecoverableInvalidation.Store(true)
+			d.recordWriteFailure(tErr)
+			d.log.Error("cache: durable invalidation failed (unlink, tombstone manifest, and truncate all failed)",
+				"dir", d.dir, "error", tErr)
+		}
+		d.recordWriteFailure(err)
+	}
+}
+
+func (d *diskStore) clearTombstoneLocked(hash string) {
+	if prev, exists := d.tombstones[hash]; exists {
+		delete(d.tombstones, hash)
+		key := d.tombstoneKeys[hash]
+		delete(d.tombstoneKeys, hash)
+		d.tombstoneBytes -= prev
+		if err := d.persistTombstonesLocked(); err != nil {
+			d.recordWriteFailure(err)
+		} else if len(d.tombstones) == 0 && !d.tombstoneDirty {
+			d.unrecoverableInvalidation.Store(false)
+		}
+		d.notifyKeyDiskStateLocked(key, hash)
+	}
+}
+
+func (d *diskStore) sweepTombstonesLocked() {
+	for b := range d.failedRetired {
+		if b.retryDeferredRemove() {
+			d.onRetiredBlobClosedLocked(b.hash, b)
+		}
+	}
+	if len(d.tombstones) == 0 && !d.tombstoneDirty {
+		d.unrecoverableInvalidation.Store(false)
+		return
+	}
+	changed := d.tombstoneDirty
+	for h, sz := range d.tombstones {
+		if p := d.pinned[h]; p != nil && !p.removed {
+			continue
+		}
+		err := d.removePath(d.path(h))
+		if err == nil || os.IsNotExist(err) {
+			delete(d.tombstones, h)
+			key := d.tombstoneKeys[h]
+			delete(d.tombstoneKeys, h)
+			d.tombstoneBytes -= sz
+			changed = true
+			d.notifyKeyDiskStateLocked(key, h)
+		} else {
+			_ = d.truncatePath(d.path(h), 0)
+		}
+	}
+	if changed {
+		if err := d.persistTombstonesLocked(); err != nil {
+			d.recordWriteFailure(err)
+		} else if len(d.tombstones) == 0 && !d.tombstoneDirty {
+			d.unrecoverableInvalidation.Store(false)
+		}
+	}
+}
+
+func (d *diskStore) purgeAllCacheFilesOnCorruptTombstoneLocked() {
+	entries, err := os.ReadDir(d.dir)
+	if err != nil {
+		d.unrecoverableInvalidation.Store(true)
+		d.recordWriteFailure(err)
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if isCacheFile(name) {
+			if err := d.removePath(d.path(name)); err != nil && !os.IsNotExist(err) {
+				var sz int64
+				if info, stErr := e.Info(); stErr == nil {
+					sz = info.Size()
+				}
+				d.tombstones[name] = sz
+				d.tombstoneBytes += sz
+				if tErr := d.truncatePath(d.path(name), 0); tErr != nil && !os.IsNotExist(tErr) {
+					d.unrecoverableInvalidation.Store(true)
+				}
+			}
+		} else if isCacheTempFile(name) {
+			_ = d.removePath(filepath.Join(d.dir, name))
+		}
+	}
+	_ = d.persistTombstonesLocked()
+}
+
+func (d *diskStore) loadAndSweepTombstonesLocked() {
+	tombPath := filepath.Join(d.dir, diskTombstoneFile)
+	raw, err := d.readTombstoneManifest(tombPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		// Non-ENOENT read error (e.g. permission or I/O error on an existing
+		// tombstone manifest): fail closed by purging all cache files in d.dir
+		// so invalidated entries listed in the unreadable manifest cannot be
+		// rehydrated.
+		d.recordWriteFailure(err)
+		d.purgeAllCacheFilesOnCorruptTombstoneLocked()
+		return
+	}
+	lines := strings.Split(string(raw), "\n")
+	var parsed []struct {
+		hash string
+		size int64
+	}
+	validFooter := false
+	expectedCount := -1
+	corrupt := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if validFooter {
+			corrupt = true
+			break
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == diskTombstoneMagic {
+			n, pErr := strconv.Atoi(fields[1])
+			if pErr != nil || n != len(parsed) {
+				corrupt = true
+				break
+			}
+			expectedCount = n
+			validFooter = true
+			continue
+		}
+		if len(fields) < 1 || !isCacheFile(fields[0]) {
+			corrupt = true
+			break
+		}
+		var sz int64
+		if len(fields) > 1 {
+			var pErr error
+			sz, pErr = strconv.ParseInt(fields[1], 10, 64)
+			if pErr != nil || sz < 0 {
+				corrupt = true
+				break
+			}
+		}
+		parsed = append(parsed, struct {
+			hash string
+			size int64
+		}{hash: fields[0], size: sz})
+	}
+	if !validFooter || expectedCount != len(parsed) {
+		corrupt = true
+	}
+	for _, item := range parsed {
+		sz := item.size
+		if sz <= 0 {
+			if st, stErr := os.Stat(d.path(item.hash)); stErr == nil {
+				sz = st.Size()
+			}
+		}
+		if _, exists := d.tombstones[item.hash]; !exists {
+			d.tombstones[item.hash] = sz
+			d.tombstoneBytes += sz
+		}
+	}
+	if corrupt {
+		// Fail closed: if the tombstone manifest was truncated or corrupted,
+		// purge all cache files in the directory rather than risking rehydration
+		// of an invalidated entry whose tombstone line was lost.
+		d.purgeAllCacheFilesOnCorruptTombstoneLocked()
+		return
+	}
+	d.sweepTombstonesLocked()
 }
 
 // isCacheFile reports whether name matches the cache's own file-naming scheme:
@@ -267,7 +601,10 @@ func isCacheFile(name string) bool {
 // retired reader artifact created by Jul's cache in disk_path. Startup
 // rehydration removes these leftovers without counting or deleting foreign files.
 func isCacheTempFile(name string) bool {
-	if strings.HasPrefix(name, ".jul-cache-tmp-") || strings.HasPrefix(name, ".jul-cache-retired-") {
+	if strings.HasPrefix(name, ".jul-cache-tmp-") ||
+		strings.HasPrefix(name, ".jul-cache-retired-") ||
+		strings.HasPrefix(name, diskTombstoneFile+".tmp-") ||
+		strings.HasPrefix(name, "."+diskTombstoneFile+".tmp-") {
 		return true
 	}
 	if strings.HasPrefix(name, ".") {
@@ -283,15 +620,18 @@ func isCacheTempFile(name string) bool {
 // temporary files and corrupt/incompatible cache files are removed; foreign
 // files are left untouched.
 func (d *diskStore) rehydrate() {
+	d.loadAndSweepTombstonesLocked()
 	entries, err := os.ReadDir(d.dir)
 	if err != nil {
 		return
 	}
 	type fi struct {
-		hash    string
-		size    int64
-		bodyLen int64
-		mod     int64
+		hash       string
+		size       int64
+		bodyLen    int64
+		mod        int64
+		isVaryStub bool
+		variants   []string
 	}
 	var files []fi
 	var foreign int
@@ -300,12 +640,21 @@ func (d *diskStore) rehydrate() {
 			continue
 		}
 		name := e.Name()
+		if name == diskTombstoneFile {
+			continue
+		}
 		if isCacheTempFile(name) {
-			_ = os.Remove(filepath.Join(d.dir, name))
+			_ = d.removePath(filepath.Join(d.dir, name))
 			continue
 		}
 		if !isCacheFile(name) {
 			foreign++
+			continue
+		}
+		if _, isTomb := d.tombstones[name]; isTomb {
+			if err := d.removePath(d.path(name)); err == nil || os.IsNotExist(err) {
+				d.clearTombstoneLocked(name)
+			}
 			continue
 		}
 		info, err := e.Info()
@@ -313,12 +662,19 @@ func (d *diskStore) rehydrate() {
 			continue
 		}
 		fullPath := d.path(name)
-		_, bodyLen, fileSize, err := readDiskEntryMeta(fullPath)
+		entryMeta, bodyLen, fileSize, err := readDiskEntryMeta(fullPath)
 		if err != nil {
-			_ = os.Remove(fullPath)
+			_ = d.removePath(fullPath)
 			continue
 		}
-		files = append(files, fi{hash: name, size: fileSize, bodyLen: bodyLen, mod: info.ModTime().UnixNano()})
+		files = append(files, fi{
+			hash:       name,
+			size:       fileSize,
+			bodyLen:    bodyLen,
+			mod:        info.ModTime().UnixNano(),
+			isVaryStub: entryMeta.IsVaryStub,
+			variants:   entryMeta.Variants,
+		})
 	}
 	if foreign > 0 {
 		d.log.Warn("cache: ignoring foreign files in disk cache directory",
@@ -327,18 +683,15 @@ func (d *diskStore) rehydrate() {
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].mod < files[j].mod })
 	for _, f := range files {
-		blob := &diskBlob{
-			dir:      d.dir,
-			path:     d.path(f.hash),
-			bodyLen:  f.bodyLen,
-			fileSize: f.size,
-		}
+		blob := d.newBlob(f.hash, d.path(f.hash), f.bodyLen, f.size)
 		it := &diskItem{
-			hash:     f.hash,
-			fileSize: f.size,
-			bodyLen:  f.bodyLen,
-			metaLen:  f.size - f.bodyLen,
-			blob:     blob,
+			hash:       f.hash,
+			fileSize:   f.size,
+			bodyLen:    f.bodyLen,
+			metaLen:    f.size - f.bodyLen,
+			isVaryStub: f.isVaryStub,
+			variants:   f.variants,
+			blob:       blob,
 		}
 		it.size = it.effectiveSize(d.maxBytes)
 		el := d.ll.PushFront(it)
@@ -346,6 +699,7 @@ func (d *diskStore) rehydrate() {
 		d.curBytes += it.size
 		d.physBytes += it.fileSize
 	}
+	d.pruneOrphanedVaryStubsLocked()
 	d.evictLocked()
 }
 
@@ -365,27 +719,44 @@ func (d *diskStore) recordWriteFailure(err error) {
 	}
 }
 
-func (d *diskStore) get(key string) (*Entry, bool) {
-	return d.getWithMemCap(key, math.MaxInt64)
-}
-
-func (d *diskStore) getWithMemCap(key string, memCap int64) (*Entry, bool) {
+func (d *diskStore) hasKey(key string) bool {
 	hash := hashKey(key)
 	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, ok := d.items[hash]
+	return ok
+}
+
+func (d *diskStore) get(key string) (*Entry, bool) {
+	e, _, ok := d.getWithMemCapGen(key, math.MaxInt64)
+	return e, ok
+}
+
+func (d *diskStore) getWithMemCapGen(key string, memCap int64) (*Entry, uint64, bool) {
+	hash := hashKey(key)
+	d.mu.Lock()
+	d.sweepTombstonesLocked()
+	if d.unrecoverableInvalidation.Load() {
+		d.mu.Unlock()
+		return nil, 0, false
+	}
 	el, ok := d.items[hash]
 	var blob *diskBlob
+	var gen uint64
 	if ok {
-		blob = el.Value.(*diskItem).blob
+		it := el.Value.(*diskItem)
+		blob = it.blob
+		gen = it.gen
 		if blob == nil || !blob.acquireLease() {
 			d.mu.Unlock()
-			return nil, false
+			return nil, 0, false
 		}
 		d.ll.MoveToFront(el)
 	}
 	hook := d.onLookupLeaseAcquire
 	d.mu.Unlock()
 	if !ok {
-		return nil, false
+		return nil, 0, false
 	}
 	if hook != nil {
 		hook()
@@ -394,43 +765,48 @@ func (d *diskStore) getWithMemCap(key string, memCap int64) (*Entry, bool) {
 	rc, err := blob.openAcquiredReader()
 	if err != nil {
 		d.delIfBlob(key, blob)
-		return nil, false
+		return nil, 0, false
 	}
 	defer func() { _ = rc.Close() }()
 
 	e, bodyLen, _, err := readDiskEntryMetaFile(rc.file)
 	if err != nil {
 		d.delIfBlob(key, blob)
-		return nil, false
+		return nil, 0, false
 	}
 	if bodyLen <= memCap {
 		if bodyLen > 0 {
 			body := make([]byte, bodyLen)
 			if _, err := io.ReadFull(rc, body); err != nil {
 				d.delIfBlob(key, blob)
-				return nil, false
+				return nil, 0, false
 			}
 			e.Body = body
 		}
-		return e, true
+		return e, gen, true
 	}
 	e.diskBody = blob
-	return e, true
+	return e, gen, true
 }
 
 func (d *diskStore) set(key string, e *Entry) {
-	var acct captureAccount
-	if e.diskBody != nil {
-		acct = captureAccount{budget: &d.tempBudget, onSkip: d.onSkip}
-		if e.BodyLen() > 0 && !acct.grow(int(e.BodyLen()), d.maxBytesCap()) {
-			acct.skip(captureSkipBudget)
-			return
-		}
+	d.setWithGen(key, e, 0)
+}
+
+func (d *diskStore) setWithGen(key string, e *Entry, gen uint64) bool {
+	if e == nil {
+		return false
+	}
+	acct := captureAccount{budget: &d.tempBudget, onSkip: d.onSkip}
+	bodyLen := e.BodyLen()
+	if bodyLen > 0 && !acct.grow(int(bodyLen), d.availableBudgetCap()) {
+		acct.skip(captureSkipBudget)
+		return false
 	}
 	s := d.beginStreamCapture(d.onSkip)
 	if s == nil {
 		acct.release()
-		return
+		return false
 	}
 	s.acct = acct
 	defer d.abortStream(s)
@@ -438,25 +814,27 @@ func (d *diskStore) set(key string, e *Entry) {
 		rc, err := e.diskBody.openReader()
 		if err != nil {
 			d.recordWriteFailure(err)
-			return
+			return false
 		}
 		n, copyErr := copyWithPooledBuffer(s.file, rc)
 		_ = rc.Close()
 		if copyErr != nil {
 			d.recordWriteFailure(copyErr)
-			return
+			return false
 		}
 		s.bodyLen = n
 	} else if len(e.Body) > 0 {
 		if _, err := s.file.Write(e.Body); err != nil {
 			d.recordWriteFailure(err)
-			return
+			return false
 		}
 		s.bodyLen = int64(len(e.Body))
 	}
-	if blob, ok := d.publishStream(key, e, s); ok && e.diskBody != nil {
+	blob, ok := d.publishStreamWithGen(key, e, s, gen)
+	if ok && e.diskBody != nil {
 		e.diskBody = blob
 	}
+	return ok
 }
 
 var tempFileSeq atomic.Uint64
@@ -465,18 +843,68 @@ func (d *diskStore) tempPath(seq uint64) string {
 	return filepath.Join(d.dir, ".jul-cache-tmp-"+strconv.FormatUint(seq, 10))
 }
 
+func (d *diskStore) onRetiredBlobClosedLocked(hash string, b *diskBlob) {
+	if b.countedRetired {
+		b.countedRetired = false
+		d.retiredBytes -= b.fileSize
+		if d.retiredBytes < 0 {
+			d.retiredBytes = 0
+		}
+	}
+	if d.pinned != nil && d.pinned[hash] == b {
+		delete(d.pinned, hash)
+	}
+	if d.failedRetired != nil {
+		delete(d.failedRetired, b)
+	}
+	if sz, ok := d.tombstones[hash]; ok && sz == 0 {
+		d.clearTombstoneLocked(hash)
+	}
+}
+
+func (d *diskStore) onRetiredBlobClosed(hash string, b *diskBlob) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.onRetiredBlobClosedLocked(hash, b)
+}
+
+func (d *diskStore) onDeferredRemoveFailed(b *diskBlob, path string, err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.recordWriteFailure(err)
+	if d.failedRetired == nil {
+		d.failedRetired = make(map[*diskBlob]struct{})
+	}
+	d.failedRetired[b] = struct{}{}
+	if isCacheFile(filepath.Base(path)) {
+		// Record a 0-byte tombstone (physical bytes are already counted in
+		// d.retiredBytes via b.countedRetired) so a restart cannot rehydrate the
+		// unremoved canonical file.
+		d.recordTombstoneLocked(filepath.Base(path), 0)
+	}
+}
+
 func (d *diskStore) retireBlobLocked(hash string, b *diskBlob) error {
 	if b == nil {
 		return nil
 	}
-	err := b.retire()
-	if b.isPinning(d.path(hash)) {
-		if d.pinned == nil {
-			d.pinned = make(map[string]*diskBlob)
-		}
-		d.pinned[hash] = b
+	unlinkedImm, err := b.retire()
+	if err != nil {
+		return err
 	}
-	return err
+	if !unlinkedImm {
+		if !b.countedRetired {
+			b.countedRetired = true
+			d.retiredBytes += b.fileSize
+		}
+		if b.isPinning(d.path(hash)) {
+			if d.pinned == nil {
+				d.pinned = make(map[string]*diskBlob)
+			}
+			d.pinned[hash] = b
+		}
+	}
+	return nil
 }
 
 // diskStreamCapture manages a temporary file receiving a streamed response body
@@ -508,7 +936,7 @@ func (d *diskStore) writeStream(s *diskStreamCapture, chunks ...[]byte) (ok bool
 	if d == nil || s == nil || s.closed {
 		return false, ""
 	}
-	maxB := d.maxBytesCap()
+	maxB := d.availableBudgetCap()
 	for _, p := range chunks {
 		if len(p) == 0 {
 			continue
@@ -549,11 +977,25 @@ func (d *diskStore) abortStream(s *diskStreamCapture) {
 }
 
 func (d *diskStore) publishStream(key string, e *Entry, s *diskStreamCapture) (*diskBlob, bool) {
+	return d.publishStreamWithGen(key, e, s, 0)
+}
+
+func (d *diskStore) publishStreamWithGen(key string, e *Entry, s *diskStreamCapture, gen uint64) (*diskBlob, bool) {
 	if s == nil || s.closed {
 		return nil, false
 	}
 	tail, err := encodeDiskTrailerAndMeta(e, s.bodyLen)
 	if err != nil {
+		return nil, false
+	}
+	budgetCap := d.availableBudgetCap()
+	allowCap := budgetCap
+	if (s.bodyLen <= budgetCap && int64(len(tail)) <= maxDiskMetaEnvelope && s.bodyLen+int64(len(tail)) > budgetCap && d.tempBudget.inflight.Load() == s.bodyLen) ||
+		(e.IsVaryStub && s.bodyLen == 0 && int64(len(tail)) <= maxDiskMetaEnvelope && d.tempBudget.inflight.Load() == 0) {
+		allowCap = budgetCap + int64(len(tail))
+	}
+	if !s.acct.grow(len(tail), allowCap) {
+		s.acct.skip(captureSkipBudget)
 		return nil, false
 	}
 	totalSize := s.bodyLen + int64(len(tail))
@@ -584,17 +1026,32 @@ func (d *diskStore) publishStream(key string, e *Entry, s *diskStreamCapture) (*
 	}
 	s.closed = true
 
+	if d.onBeforePublishLock != nil {
+		d.onBeforePublishLock(key, gen)
+	}
+
 	hash := hashKey(key)
 	targetPath := d.path(hash)
 	tmpPath := d.tempPath(s.seq)
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.sweepTombstonesLocked()
 	if s.bodyLen > d.maxBytes || int64(len(tail)) > maxDiskMetaEnvelope {
 		if s.acct.onSkip != nil {
 			s.acct.onSkip(captureSkipOversize)
 		}
 		return nil, false
+	}
+	if gen != 0 {
+		if d.checkGen != nil && !d.checkGen(key, gen) {
+			return nil, false
+		}
+		if el, ok := d.items[hash]; ok {
+			if it := el.Value.(*diskItem); it.gen > gen {
+				return nil, false
+			}
+		}
 	}
 	if fault == "rename" {
 		d.recordWriteFailure(errors.New("injected rename failure"))
@@ -602,41 +1059,41 @@ func (d *diskStore) publishStream(key string, e *Entry, s *diskStreamCapture) (*
 	}
 	if el, ok := d.items[hash]; ok {
 		it := el.Value.(*diskItem)
-		_ = d.retireBlobLocked(hash, it.blob)
-	}
-	finalPath := targetPath
-	var pinned *diskBlob
-	// lgtm[go/path-injection] – tmpPath is derived from an internal uint64 sequence and targetPath from a SHA-256 hex digest under d.dir.
-	if err := os.Rename(tmpPath, targetPath); err != nil {
-		if p := d.pinned[hash]; p != nil && p.isPinning(targetPath) {
-			pinned = p
-			finalPath = tmpPath
-		} else {
-			if el, ok := d.items[hash]; ok {
-				it := el.Value.(*diskItem)
-				d.ll.Remove(el)
-				delete(d.items, hash)
-				d.curBytes -= it.size
-				d.physBytes -= it.fileSize
-			}
+		if err := d.retireBlobLocked(hash, it.blob); err != nil {
 			d.recordWriteFailure(err)
 			return nil, false
 		}
+	}
+	finalPath := targetPath
+	var pinned *diskBlob
+	if p := d.pinned[hash]; p != nil && p.isPinning(targetPath) {
+		// The retired blob still owns targetPath and its last reader will call
+		// os.Remove(targetPath) on Close. Keep the new file at tmpPath until
+		// that removal completes, then promote tmpPath -> targetPath via setOnClose.
+		pinned = p
+		finalPath = tmpPath
+	} else if err := d.renamePath(tmpPath, targetPath); err != nil {
+		if el, ok := d.items[hash]; ok {
+			it := el.Value.(*diskItem)
+			d.ll.Remove(el)
+			delete(d.items, hash)
+			d.curBytes -= it.size
+			d.physBytes -= it.fileSize
+			d.notifyKeyDiskStateLocked(it.key, hash)
+		}
+		d.recordWriteFailure(err)
+		return nil, false
 	} else {
 		delete(d.pinned, hash)
 	}
+	d.clearTombstoneLocked(hash)
 	s.published = true
 	s.acct.release()
 	if d.failing.Load() {
 		d.failing.Store(false)
 	}
 
-	blob := &diskBlob{
-		dir:      d.dir,
-		path:     finalPath,
-		bodyLen:  s.bodyLen,
-		fileSize: totalSize,
-	}
+	blob := d.newBlob(hash, finalPath, s.bodyLen, totalSize)
 	if pinned != nil {
 		pinned.setOnClose(func() {
 			blob.promote(targetPath)
@@ -646,9 +1103,15 @@ func (d *diskStore) publishStream(key string, e *Entry, s *diskStreamCapture) (*
 		it := el.Value.(*diskItem)
 		d.curBytes -= it.size
 		d.physBytes -= it.fileSize
+		it.key = key
+		if gen != 0 {
+			it.gen = gen
+		}
 		it.fileSize = totalSize
 		it.bodyLen = s.bodyLen
 		it.metaLen = int64(len(tail))
+		it.isVaryStub = e.IsVaryStub
+		it.variants = append([]string(nil), e.Variants...)
 		it.size = it.effectiveSize(d.maxBytes)
 		it.blob = blob
 		d.curBytes += it.size
@@ -656,11 +1119,15 @@ func (d *diskStore) publishStream(key string, e *Entry, s *diskStreamCapture) (*
 		d.ll.MoveToFront(el)
 	} else {
 		it := &diskItem{
-			hash:     hash,
-			fileSize: totalSize,
-			bodyLen:  s.bodyLen,
-			metaLen:  int64(len(tail)),
-			blob:     blob,
+			hash:       hash,
+			key:        key,
+			gen:        gen,
+			fileSize:   totalSize,
+			bodyLen:    s.bodyLen,
+			metaLen:    int64(len(tail)),
+			isVaryStub: e.IsVaryStub,
+			variants:   append([]string(nil), e.Variants...),
+			blob:       blob,
 		}
 		it.size = it.effectiveSize(d.maxBytes)
 		el := d.ll.PushFront(it)
@@ -668,8 +1135,12 @@ func (d *diskStore) publishStream(key string, e *Entry, s *diskStreamCapture) (*
 		d.curBytes += it.size
 		d.physBytes += it.fileSize
 	}
+	d.notifyKeyDiskStateLocked(key, hash)
 	d.evictLocked()
 	if el, ok := d.items[hash]; !ok || el.Value.(*diskItem).blob != blob {
+		if s.acct.onSkip != nil {
+			s.acct.onSkip(captureSkipBudget)
+		}
 		return nil, false
 	}
 	return blob, true
@@ -687,30 +1158,75 @@ func (d *diskStore) recomputeSizesLocked() {
 	d.physBytes = totalPhys
 }
 
-func (d *diskStore) evictLocked() {
-	for d.curBytes > d.maxBytes && d.ll.Len() > 0 {
-		el := d.ll.Back()
+func (d *diskStore) pruneOrphanedVaryStubsLocked() {
+	for el := d.ll.Back(); el != nil; {
+		prev := el.Prev()
 		it := el.Value.(*diskItem)
+		if it.isVaryStub && len(it.variants) > 0 {
+			hasLive := false
+			for _, vk := range it.variants {
+				if _, ok := d.items[hashKey(vk)]; ok {
+					hasLive = true
+					break
+				}
+			}
+			if !hasLive {
+				if err := d.retireBlobLocked(it.hash, it.blob); err == nil {
+					d.ll.Remove(el)
+					delete(d.items, it.hash)
+					d.curBytes -= it.size
+					d.physBytes -= it.fileSize
+					d.notifyKeyDiskStateLocked(it.key, it.hash)
+				}
+			}
+		}
+		el = prev
+	}
+}
+
+func (d *diskStore) evictLocked() {
+	evictedAny := false
+	for el := d.ll.Back(); el != nil && d.effectiveUsedLocked() > d.maxBytes; {
+		prev := el.Prev()
+		it := el.Value.(*diskItem)
+		if it.size == 0 {
+			el = prev
+			continue
+		}
+		if err := d.retireBlobLocked(it.hash, it.blob); err != nil {
+			d.recordWriteFailure(err)
+			el = prev
+			continue
+		}
 		d.ll.Remove(el)
 		delete(d.items, it.hash)
 		d.curBytes -= it.size
 		d.physBytes -= it.fileSize
-		_ = d.retireBlobLocked(it.hash, it.blob)
 		d.evictions++
+		evictedAny = true
+		d.notifyKeyDiskStateLocked(it.key, it.hash)
+		el = prev
+	}
+	if evictedAny {
+		d.pruneOrphanedVaryStubsLocked()
 	}
 }
 
-// stats returns a snapshot of the tier's live physical occupancy; see memStore.stats.
+// stats returns a snapshot of the tier's live physical occupancy (including
+// retired files still held by active readers and unremoved tombstones); see
+// memStore.stats.
 func (d *diskStore) stats() (curBytes, maxBytes int64, entries int, evictions int64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.physBytes, d.maxBytes, d.ll.Len(), d.evictions
+	d.sweepTombstonesLocked()
+	return d.physBytes + d.retiredBytes + d.tombstoneBytes, d.maxBytes, d.ll.Len(), d.evictions
 }
 
 func (d *diskStore) delIfBlob(key string, target *diskBlob) {
 	hash := hashKey(key)
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.sweepTombstonesLocked()
 	if el, ok := d.items[hash]; ok {
 		it := el.Value.(*diskItem)
 		if it.blob == target {
@@ -718,33 +1234,85 @@ func (d *diskStore) delIfBlob(key string, target *diskBlob) {
 			delete(d.items, it.hash)
 			d.curBytes -= it.size
 			d.physBytes -= it.fileSize
-			_ = d.retireBlobLocked(hash, it.blob)
+			if err := d.retireBlobLocked(hash, it.blob); err != nil {
+				d.tombstoneKeys[hash] = key
+				d.recordTombstoneLocked(hash, it.fileSize)
+				d.recordWriteFailure(err)
+			}
+			d.notifyKeyDiskStateLocked(key, hash)
 		}
 	}
+}
+
+func (d *diskStore) delIfOlderGen(key string, maxGen uint64) {
+	hash := hashKey(key)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.sweepTombstonesLocked()
+	if el, ok := d.items[hash]; ok {
+		it := el.Value.(*diskItem)
+		if it.gen >= maxGen {
+			return
+		}
+		d.ll.Remove(el)
+		delete(d.items, it.hash)
+		d.curBytes -= it.size
+		d.physBytes -= it.fileSize
+		if err := d.retireBlobLocked(hash, it.blob); err != nil {
+			d.tombstoneKeys[hash] = key
+			d.recordTombstoneLocked(hash, it.fileSize)
+			d.recordWriteFailure(err)
+		}
+		d.notifyKeyDiskStateLocked(key, hash)
+		return
+	}
+	if err := d.removePath(d.path(hash)); err != nil && !os.IsNotExist(err) {
+		if st, stErr := os.Stat(d.path(hash)); stErr == nil {
+			d.tombstoneKeys[hash] = key
+			d.recordTombstoneLocked(hash, st.Size())
+		}
+	}
+	d.notifyKeyDiskStateLocked(key, hash)
 }
 
 func (d *diskStore) del(key string) {
 	hash := hashKey(key)
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.sweepTombstonesLocked()
 	if el, ok := d.items[hash]; ok {
 		it := el.Value.(*diskItem)
 		d.ll.Remove(el)
 		delete(d.items, it.hash)
 		d.curBytes -= it.size
 		d.physBytes -= it.fileSize
-		_ = d.retireBlobLocked(hash, it.blob)
+		if err := d.retireBlobLocked(hash, it.blob); err != nil {
+			d.tombstoneKeys[hash] = key
+			d.recordTombstoneLocked(hash, it.fileSize)
+			d.recordWriteFailure(err)
+		}
+		d.notifyKeyDiskStateLocked(key, hash)
 		return
 	}
-	_ = os.Remove(d.path(hash))
+	if err := d.removePath(d.path(hash)); err != nil && !os.IsNotExist(err) {
+		if st, stErr := os.Stat(d.path(hash)); stErr == nil {
+			d.tombstoneKeys[hash] = key
+			d.recordTombstoneLocked(hash, st.Size())
+		}
+	}
+	d.notifyKeyDiskStateLocked(key, hash)
 }
 
 func (d *diskStore) purge() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.sweepTombstonesLocked()
 	for _, el := range d.items {
 		it := el.Value.(*diskItem)
-		_ = d.retireBlobLocked(it.hash, it.blob)
+		if err := d.retireBlobLocked(it.hash, it.blob); err != nil {
+			d.recordTombstoneLocked(it.hash, it.fileSize)
+			d.recordWriteFailure(err)
+		}
 	}
 	d.ll.Init()
 	d.items = make(map[string]*list.Element)
@@ -769,11 +1337,16 @@ func (d *diskStore) Resize(maxBytes int64) (evictedCount int, evictedBytes int64
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.sweepTombstonesLocked()
 	d.maxBytes = maxBytes
 	d.recomputeSizesLocked()
-	for d.curBytes > d.maxBytes && d.ll.Len() > 0 {
-		el := d.ll.Back()
+	for el := d.ll.Back(); el != nil && d.effectiveUsedLocked() > d.maxBytes; {
+		prev := el.Prev()
 		it := el.Value.(*diskItem)
+		if it.size == 0 {
+			el = prev
+			continue
+		}
 		if err := d.retireBlobLocked(it.hash, it.blob); err != nil {
 			d.log.Warn("cache: disk eviction failed to remove file", "dir", d.dir, "error", err)
 			failedRemovals++
@@ -785,6 +1358,11 @@ func (d *diskStore) Resize(maxBytes int64) (evictedCount int, evictedBytes int64
 		d.physBytes -= it.fileSize
 		evictedCount++
 		evictedBytes += it.fileSize
+		d.notifyKeyDiskStateLocked(it.key, it.hash)
+		el = prev
+	}
+	if evictedCount > 0 {
+		d.pruneOrphanedVaryStubsLocked()
 	}
 	d.evictions += int64(evictedCount)
 	return evictedCount, evictedBytes, failedRemovals

@@ -392,7 +392,9 @@ func cacheEntries() []Entry {
 		"cache.lock",
 		"cache.lock_timeout",
 		"cache.max_entry_size",
+		"cache.max_ranges",
 		"cache.memory_max_size",
+		"cache.range_enabled",
 		"cache.stale_if_error",
 		"cache.stale_while_revalidate",
 	)...)

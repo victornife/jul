@@ -177,6 +177,7 @@ export function TrafficControlsPanel() {
             <KV k="default TTL" v={data.cache?.default_ttl} />
             <KV k="memory max" v={data.cache?.memory_max_size ?? data.cache?.memory_max} />
             <KV k="disk max" v={data.cache?.disk_max_size} />
+            <KV k="max entry" v={data.cache?.max_entry_size} />
             <KV k="stale if error" v={data.cache?.stale_if_error} />
           </div>
         </SectionCard>

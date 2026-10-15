@@ -393,6 +393,9 @@ func corpusBackendHandler(id string) http.Handler {
 			w.Header().Set("Expires", time.Now().Add(time.Hour).UTC().Format(http.TimeFormat))
 		case "/targeted-x-accel-zero":
 			w.Header().Set("X-Accel-Expires", "0")
+		case "/range-warm-slice":
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("Content-Length", "2300")
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, strings.Repeat("corpus-backend-payload ", 100))

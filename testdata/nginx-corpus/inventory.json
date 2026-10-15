@@ -89,7 +89,7 @@
     },
     {
       "name": "blocking",
-      "count": 32
+      "count": 34
     },
     {
       "name": "ignored",
@@ -119,7 +119,7 @@
     },
     {
       "name": "performance",
-      "count": 12
+      "count": 14
     },
     {
       "name": "routing",
@@ -224,6 +224,10 @@
       "count": 1
     },
     {
+      "name": "NGX_LOCATION_CACHE_MAX_RANGE_OFFSET",
+      "count": 1
+    },
+    {
       "name": "NGX_LOCATION_CACHE_VALID",
       "count": 1
     },
@@ -285,6 +289,10 @@
     },
     {
       "name": "NGX_LOCATION_SEND_TIMEOUT",
+      "count": 1
+    },
+    {
+      "name": "NGX_LOCATION_SLICE",
       "count": 1
     },
     {

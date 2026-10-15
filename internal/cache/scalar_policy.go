@@ -31,6 +31,11 @@ type CachePolicy struct {
 	// LockTimeout bounds how long a cold-miss waiter blocks for an active fill
 	// leader before falling through to an uncached origin fetch.
 	LockTimeout time.Duration
+	// RangeEnabled opts the cache into Option A range-aware caching (#442, ADR 0024).
+	RangeEnabled bool
+	// MaxRanges bounds the number of byte-range specs accepted when RangeEnabled
+	// is true (defaults to 1 when RangeEnabled is true).
+	MaxRanges int
 }
 
 // MemoryCapBytes returns the largest response body that may be captured in
@@ -57,6 +62,10 @@ func policyFromConfig(cfg config.CacheConfig) CachePolicy {
 	if maxEntry <= 0 {
 		maxEntry = memMax
 	}
+	maxRanges := cfg.MaxRanges
+	if cfg.RangeEnabled && maxRanges <= 0 {
+		maxRanges = 1
+	}
 	return CachePolicy{
 		DefaultTTL:           cfg.DefaultTTL.Std(),
 		StaleWhileRevalidate: cfg.StaleWhileRevalidate.Std(),
@@ -65,6 +74,8 @@ func policyFromConfig(cfg config.CacheConfig) CachePolicy {
 		MaxEntryBytes:        maxEntry,
 		Lock:                 cfg.Lock,
 		LockTimeout:          lockTimeout,
+		RangeEnabled:         cfg.RangeEnabled,
+		MaxRanges:            maxRanges,
 	}
 }
 

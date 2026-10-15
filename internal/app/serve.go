@@ -141,6 +141,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	responseCache.SetRevalidationObserver(metrics.ObserveCacheRevalidation)
 	responseCache.SetCaptureSkipObserver(metrics.ObserveCacheCaptureSkipped)
 	responseCache.SetFillLockObserver(metrics.ObserveCacheFillLock)
+	responseCache.SetRangeObserver(metrics.ObserveCacheRangeRequest)
 	// The live cache-occupancy gauges are read at scrape time rather than
 	// pushed from the request path, for the same reason the upstream
 	// resilience gauges are (JUL-AUD-005).

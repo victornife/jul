@@ -10,6 +10,31 @@
 | Report location | Original working copy: `/home/victornf/jul-audit-20260930/jul-audit-report-2026-09-30.md`; publication target: `docs/audit/jul-audit-report-2026-09-30.md` |
 | Post-audit baseline note | After the report was written, `main` moved to `f036b063` (PR #501: access-log writer sharing, a dependency security floor, docs). A read-only diff (8 files: `internal/observability/sinks.go` + test, CHANGELOG, three docs, Console lockfiles) shows no change to any file behind F-01–F-19, except `docs/known-limitations.md` line shifts: the cited L242 is now L238 and L510 is now L506. All findings still apply at `f036b063`. The Y1-10 access-log sink change itself was not re-reviewed. |
 
+## Delivery scope addendum — 2026-10-15 (#442 Option A)
+
+This addendum supersedes the `#442` pending note in the `#525 Part 2` addendum
+below:
+
+- **#442 (Option A range-aware caching):** evaluated under the predeclared
+  `SYNTH-442-MEDIA-V1` synthetic workload gate in #442/#113 and implemented on
+  `main` as opt-in, unreleased functionality governed by [ADR 0024](../adr/0024-range-aware-cache-option-a.md).
+  Adds `[cache].range_enabled` (default `false`, preserving decision D05 bypass)
+  and `[cache].max_ranges` (default `1` when `range_enabled = true`, maximum
+  `16`), both classified `hot_reload`. When enabled, single byte-range `GET`
+  requests (`206 Partial Content` and `416 Range Not Satisfiable`) are served
+  from complete cached representations in memory or on disk via `BodyReader`
+  random access (`io.NewSectionReader` in 32 KiB chunks without loading large
+  objects into memory), strong `If-Range` entity-tag and HTTP-date validation is
+  enforced, cold range misses initiate (and when `lock = true`, coalesce) a
+  complete-object origin fill, and fallbacks preserve the client's original
+  `Range` and `If-Range` headers. Exports bounded
+  `jul_cache_range_requests_total{outcome}` metrics (`hit`, `fill`, `fallback`,
+  `if_range_full`, `unsatisfiable`, `invalid`). Option B fragment/slice caching
+  remains rejected; NGINX `slice` and `proxy_cache_max_range_offset` are
+  explicitly classified as blocking across `http`, `server`, and `location`
+  scopes. This addendum records implementation scope, not release publication,
+  soak completion, or a GA maturity promotion.
+
 ## Delivery scope addendum — 2026-10-15 (#525 Part 2)
 
 This addendum supersedes the `#525 Part 2` pending note in the `#525 Part 1`

@@ -1353,6 +1353,15 @@ type CacheConfig struct {
 	// fill leader before falling through to an uncached origin fetch. Zero or
 	// omitted defaults to 5s when lock is enabled.
 	LockTimeout Duration `toml:"lock_timeout,omitempty"`
+	// RangeEnabled opts the cache into Option A range-aware caching (#442, ADR 0024):
+	// single byte-range GET requests are satisfied from complete stored
+	// representations, and eligible cold range misses coordinate a complete-object
+	// origin fill. Disabled by default (preserving decision D05 bypass).
+	RangeEnabled bool `toml:"range_enabled,omitempty"`
+	// MaxRanges bounds the number of comma-separated byte-range specs accepted
+	// when range_enabled is true. Omitted or zero defaults to 1 (single byte
+	// range); maximum 16.
+	MaxRanges int `toml:"max_ranges,omitempty"`
 }
 
 // AdminConfig configures the separate admin/observability listener. It binds

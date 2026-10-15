@@ -59,9 +59,14 @@ const traffic: TrafficControls = {
     memory_max: "73m",
     disk_path: "/var/cache/jul",
     disk_max_size: "5g",
+    max_entry_size: "256m",
     default_ttl: "71s",
     stale_while_revalidate: "13s",
     stale_if_error: "29s",
+    lock: true,
+    lock_timeout: "7s",
+    range_enabled: true,
+    max_ranges: 4,
   },
   servers: [server],
 };
@@ -155,25 +160,35 @@ describe("issue #81 sparse patch builders", () => {
 });
 
 describe("issue #81 complete cache table", () => {
-  it("seeds all seven fields and preserves them while disabled", () => {
+  it("seeds all cache fields (including large-object tranche fields) and preserves them while disabled", () => {
     const draft = seedCache(traffic);
     expect(draft).toEqual({
       enabled: false,
       memoryMaxSize: "73m",
       diskPath: "/var/cache/jul",
       diskMaxSize: "5g",
+      maxEntrySize: "256m",
       defaultTTL: "71s",
       staleWhileRevalidate: "13s",
       staleIfError: "29s",
+      lock: true,
+      lockTimeout: "7s",
+      rangeEnabled: true,
+      maxRanges: 4,
     });
     const toml = generateCacheToml(draft);
     expect(toml).toContain("enabled = false");
     expect(toml).toContain('memory_max_size = "73m"');
     expect(toml).toContain('disk_path = "/var/cache/jul"');
     expect(toml).toContain('disk_max_size = "5g"');
+    expect(toml).toContain('max_entry_size = "256m"');
     expect(toml).toContain('default_ttl = "71s"');
     expect(toml).toContain('stale_while_revalidate = "13s"');
     expect(toml).toContain('stale_if_error = "29s"');
+    expect(toml).toContain("lock = true");
+    expect(toml).toContain('lock_timeout = "7s"');
+    expect(toml).toContain("range_enabled = true");
+    expect(toml).toContain("max_ranges = 4");
   });
 
   it("preserves every untouched cache field during a one-field edit", () => {
@@ -182,8 +197,30 @@ describe("issue #81 complete cache table", () => {
     expect(toml).toContain('memory_max_size = "73m"');
     expect(toml).toContain('disk_path = "/var/cache/jul"');
     expect(toml).toContain('disk_max_size = "5g"');
+    expect(toml).toContain('max_entry_size = "256m"');
     expect(toml).toContain('default_ttl = "2m"');
     expect(toml).toContain('stale_while_revalidate = "13s"');
     expect(toml).toContain('stale_if_error = "29s"');
+    expect(toml).toContain("lock = true");
+    expect(toml).toContain('lock_timeout = "7s"');
+    expect(toml).toContain("range_enabled = true");
+    expect(toml).toContain("max_ranges = 4");
+  });
+
+  it("omits lock_timeout and max_ranges when lock or range_enabled is disabled", () => {
+    const initial = seedCache(traffic);
+    const toml = generateCacheToml({ ...initial, lock: false, rangeEnabled: false, maxRanges: 0 });
+    expect(toml).not.toContain("lock =");
+    expect(toml).not.toContain("lock_timeout");
+    expect(toml).not.toContain("range_enabled");
+    expect(toml).not.toContain("max_ranges");
+  });
+
+  it("rejects fractional, negative, over-limit, or disabled-but-non-zero max_ranges instead of truncating", () => {
+    const initial = seedCache(traffic);
+    expect(() => generateCacheToml({ ...initial, maxRanges: 1.9 })).toThrow(/max_ranges/);
+    expect(() => generateCacheToml({ ...initial, maxRanges: -1 })).toThrow(/max_ranges/);
+    expect(() => generateCacheToml({ ...initial, maxRanges: 17 })).toThrow(/max_ranges/);
+    expect(() => generateCacheToml({ ...initial, rangeEnabled: false, maxRanges: 2 })).toThrow(/max_ranges/);
   });
 });

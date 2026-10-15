@@ -379,6 +379,9 @@ func (c *Config) applyDefaultsWithPresence(tracingSampleRatioPresent bool) {
 	if c.Cache.Lock && c.Cache.LockTimeout == 0 {
 		c.Cache.LockTimeout = Duration(5 * time.Second)
 	}
+	if c.Cache.RangeEnabled && c.Cache.MaxRanges == 0 {
+		c.Cache.MaxRanges = 1
+	}
 
 	// Resolve compression enabled state:
 	//   - Explicit enabled=true  → always active.

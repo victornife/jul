@@ -727,6 +727,59 @@ func TestNGINXCorpusCacheRealE2E(t *testing.T) {
 	if coalesceMisses != 1 || coalesceHits != concurrentMisses-1 {
 		t.Fatalf("coalesced cold misses produced %d MISS and %d HIT, want 1 MISS and %d HIT", coalesceMisses, coalesceHits, concurrentMisses-1)
 	}
+
+	// Default imported candidate leaves [cache].range_enabled = false, so a
+	// Range request to the warm /cache-e2e-check entry bypasses lookup/storage.
+	rangeBypassReq, err := http.NewRequest(http.MethodGet, baseURL+path, nil)
+	if err != nil {
+		t.Fatalf("build range bypass request: %v", err)
+	}
+	rangeBypassReq.Header.Set("Range", "bytes=0-21")
+	rangeBypassResp, err := client.Do(rangeBypassReq)
+	if err != nil {
+		t.Fatalf("range bypass request: %v", err)
+	}
+	_ = readAndClose(rangeBypassResp)
+	client.CloseIdleConnections()
+	if got := rangeBypassResp.Header.Get("X-Cache"); got != "BYPASS" {
+		t.Fatalf("default range_enabled=false X-Cache = %q, want BYPASS", got)
+	}
+
+	// When the operator enables Option A ([cache].range_enabled = true,
+	// max_ranges = 1) on the imported candidate (#442), a cold Range request
+	// performs one complete-object fill and serves 206 Partial Content (MISS),
+	// and a subsequent Range request is served directly from the complete
+	// cached representation (206 Partial Content, HIT).
+	cfgRange := loadCorpusRuntimeCandidate(t, "cache-runtime")
+	cfgRange.Cache.DiskPath = t.TempDir()
+	cfgRange.Cache.RangeEnabled = true
+	cfgRange.Cache.MaxRanges = 1
+	rangeBaseURL, cleanupRange := startRealJulForCorpus(t, "cache-runtime-range", cfgRange)
+	defer cleanupRange()
+
+	doRange := func(rng string) (*http.Response, string) {
+		t.Helper()
+		rReq, reqErr := http.NewRequest(http.MethodGet, rangeBaseURL+"/cache-range-option-a", nil)
+		if reqErr != nil {
+			t.Fatalf("build range request: %v", reqErr)
+		}
+		rReq.Header.Set("Range", rng)
+		rResp, doErr := client.Do(rReq)
+		if doErr != nil {
+			t.Fatalf("range request %s: %v", rng, doErr)
+		}
+		return rResp, readAndClose(rResp)
+	}
+
+	rMiss, rMissBody := doRange("bytes=0-21")
+	if rMiss.StatusCode != http.StatusPartialContent || rMiss.Header.Get("X-Cache") != "MISS" || rMissBody != want[:22] {
+		t.Fatalf("Option A cold range miss: status=%d X-Cache=%q body=%q, want 206 MISS %q", rMiss.StatusCode, rMiss.Header.Get("X-Cache"), rMissBody, want[:22])
+	}
+	rHit, rHitBody := doRange("bytes=23-44")
+	client.CloseIdleConnections()
+	if rHit.StatusCode != http.StatusPartialContent || rHit.Header.Get("X-Cache") != "HIT" || rHitBody != want[23:45] {
+		t.Fatalf("Option A warm range hit: status=%d X-Cache=%q body=%q, want 206 HIT %q", rHit.StatusCode, rHit.Header.Get("X-Cache"), rHitBody, want[23:45])
+	}
 }
 
 func TestNGINXCorpusTargetedCacheDifference(t *testing.T) {
@@ -843,6 +896,65 @@ http {
 			}
 		})
 	}
+
+	// Range comparison (#442): after warming /range-warm-slice (which carries
+	// Content-Length and Accept-Ranges: bytes), real NGINX serves a single byte
+	// range (bytes=0-21) from the cached complete representation as 206 HIT;
+	// real Jul with default range_enabled=false bypasses (BYPASS), while real
+	// Jul with Option A range_enabled=true serves the identical 206 HIT slice
+	// from the complete cached representation.
+	t.Run("/range-warm-slice", func(t *testing.T) {
+		if warmOut, warmErr := nginxGet("/range-warm-slice"); warmErr != nil {
+			t.Fatalf("NGINX warm /range-warm-slice: %v %s", warmErr, warmOut)
+		}
+		nginxCmd := exec.CommandContext(ctx, "docker", "exec", "-i", container, "nc", "-w", "3", "127.0.0.1", "8080")
+		nginxCmd.Stdin = strings.NewReader("GET /range-warm-slice HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: bytes=0-21\r\nConnection: close\r\n\r\n")
+		nginxRangeOut, rErr := nginxCmd.CombinedOutput()
+		if rErr != nil || !bytes.Contains(nginxRangeOut, []byte("206 Partial Content")) || !bytes.Contains(nginxRangeOut, []byte("X-Cache: HIT")) || !bytes.Contains(nginxRangeOut, []byte("Content-Range: bytes 0-21/2300")) {
+			t.Fatalf("NGINX warm range hit: %v %s", rErr, nginxRangeOut)
+		}
+		if warmJulResp, wjErr := client.Get(baseURL + "/range-warm-slice"); wjErr != nil {
+			t.Fatal(wjErr)
+		} else {
+			_, _ = io.ReadAll(warmJulResp.Body)
+			_ = warmJulResp.Body.Close()
+		}
+		bypassReq, _ := http.NewRequest(http.MethodGet, baseURL+"/range-warm-slice", nil)
+		bypassReq.Header.Set("Range", "bytes=0-21")
+		bypassResp, bErr := client.Do(bypassReq)
+		if bErr != nil {
+			t.Fatal(bErr)
+		}
+		_, _ = io.ReadAll(bypassResp.Body)
+		_ = bypassResp.Body.Close()
+		if bypassResp.Header.Get("X-Cache") != "BYPASS" {
+			t.Fatalf("Jul default range_enabled=false state=%s want=BYPASS", bypassResp.Header.Get("X-Cache"))
+		}
+
+		cfgOptA := loadCorpusRuntimeCandidate(t, "cache-runtime")
+		cfgOptA.Cache.DiskPath = t.TempDir()
+		cfgOptA.Cache.RangeEnabled = true
+		cfgOptA.Cache.MaxRanges = 1
+		optAURL, cleanupOptA := startRealJulForCorpus(t, "cache-runtime-opt-a", cfgOptA)
+		defer cleanupOptA()
+		warmResp, wErr := client.Get(optAURL + "/range-warm-slice")
+		if wErr != nil {
+			t.Fatal(wErr)
+		}
+		_, _ = io.ReadAll(warmResp.Body)
+		_ = warmResp.Body.Close()
+		optAReq, _ := http.NewRequest(http.MethodGet, optAURL+"/range-warm-slice", nil)
+		optAReq.Header.Set("Range", "bytes=0-21")
+		optAResp, oErr := client.Do(optAReq)
+		if oErr != nil {
+			t.Fatal(oErr)
+		}
+		optABody, _ := io.ReadAll(optAResp.Body)
+		_ = optAResp.Body.Close()
+		if optAResp.StatusCode != http.StatusPartialContent || optAResp.Header.Get("X-Cache") != "HIT" || string(optABody) != "corpus-backend-payload" {
+			t.Fatalf("Jul Option A warm range hit: status=%d state=%s body=%q", optAResp.StatusCode, optAResp.Header.Get("X-Cache"), optABody)
+		}
+	})
 }
 
 // TestNGINXCorpusProxyProtocolRealE2E proves the imported HTTP

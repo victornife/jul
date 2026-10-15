@@ -16,9 +16,12 @@
         "NGX_LOCATION_CACHE",
         "NGX_LOCATION_CACHE_LOCK",
         "NGX_LOCATION_CACHE_LOCK_TIMEOUT",
+        "NGX_LOCATION_CACHE_MAX_RANGE_OFFSET",
         "NGX_LOCATION_CACHE_VALID",
+        "NGX_LOCATION_SLICE",
         "issue #365 real-Jul gzip engagement + decoded-content E2E",
         "issue #365 real-Jul stateful cache MISS/HIT/BYPASS E2E",
+        "issue #442 real-Jul and pinned-NGINX range caching and blocking slice/proxy_cache_max_range_offset E2E",
         "issue #525 Part 1 proxy_cache_lock / proxy_cache_lock_timeout approximation + E2E",
         "issue #540 pinned real-NGINX-vs-Jul targeted origin policy and X-Accel-Expires difference E2E"
       ],

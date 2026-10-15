@@ -17,16 +17,20 @@ type memStore struct {
 	curBytes int64
 	// evictions counts LRU-capacity evictions (not explicit del/purge calls),
 	// for the jul_cache_evictions_total{tier="memory"} gauge-read counter.
-	evictions int64
-	ll        *list.List // front = most recently used
-	items     map[string]*list.Element
-	onEvict   func(key string, e *Entry)
+	evictions   int64
+	ll          *list.List // front = most recently used
+	items       map[string]*list.Element
+	onEvict     func(key string, e *Entry)
+	onEvictItem func(it *memItem)
+	pinVictims  func(victims []*memItem)
 }
 
 type memItem struct {
-	key   string
-	entry *Entry
-	size  int64
+	key         string
+	entry       *Entry
+	size        int64
+	gen         uint64
+	pinnedState *keyGenState
 }
 
 func newMemStore(maxBytes int64, onEvict func(key string, e *Entry)) *memStore {
@@ -41,6 +45,13 @@ func newMemStore(maxBytes int64, onEvict func(key string, e *Entry)) *memStore {
 	}
 }
 
+func (m *memStore) hasKey(key string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.items[key]
+	return ok
+}
+
 func (m *memStore) get(key string) (*Entry, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -52,7 +63,7 @@ func (m *memStore) get(key string) (*Entry, bool) {
 	return el.Value.(*memItem).entry, true
 }
 
-func (m *memStore) set(key string, e *Entry) {
+func (m *memStore) putWithGen(key string, e *Entry, gen uint64) []*memItem {
 	// A variant key includes request Vary values and can be much larger than
 	// the response body. The key is retained by the map/list too.
 	size := e.Size() + int64(len(key))
@@ -63,23 +74,40 @@ func (m *memStore) set(key string, e *Entry) {
 		m.curBytes += size - it.size
 		it.entry = e
 		it.size = size
+		if gen != 0 {
+			it.gen = gen
+		}
 		m.ll.MoveToFront(el)
 	} else {
-		el := m.ll.PushFront(&memItem{key: key, entry: e, size: size})
+		el := m.ll.PushFront(&memItem{key: key, entry: e, size: size, gen: gen})
 		m.items[key] = el
 		m.curBytes += size
 	}
 	victims := m.evictLocked()
 	m.mu.Unlock()
+	return victims
+}
 
-	// Forward evicted entries to the disk overflow tier outside the lock: the
-	// hook performs disk I/O (encode + atomic write), which must not block other
-	// cache operations nor invert the mem/disk lock order.
+func (m *memStore) put(key string, e *Entry) []*memItem {
+	return m.putWithGen(key, e, 0)
+}
+
+func (m *memStore) flushVictims(victims []*memItem) {
+	if m.onEvictItem != nil {
+		for _, it := range victims {
+			m.onEvictItem(it)
+		}
+		return
+	}
 	if m.onEvict != nil {
 		for _, it := range victims {
 			m.onEvict(it.key, it.entry)
 		}
 	}
+}
+
+func (m *memStore) set(key string, e *Entry) {
+	m.flushVictims(m.put(key, e))
 }
 
 // evictLocked drops LRU entries until within the byte cap and returns them (in
@@ -143,11 +171,10 @@ func (m *memStore) Resize(maxBytes int64) (evictedCount int, evictedBytes int64)
 	victims := m.evictLocked()
 	m.mu.Unlock()
 
-	if m.onEvict != nil {
-		for _, it := range victims {
-			m.onEvict(it.key, it.entry)
-		}
+	if m.pinVictims != nil && len(victims) > 0 {
+		m.pinVictims(victims)
 	}
+	m.flushVictims(victims)
 	for _, it := range victims {
 		evictedCount++
 		evictedBytes += it.size
