@@ -18,6 +18,10 @@ package admin
 // A reason is a sentence a reviewer can disagree with, not a label. "Console
 // dashboard shape" is a reason; "internal" is not.
 var internalRouteReasons = map[string]string{
+	"/auth/oidc/status":   "Secret-free Console sign-in configuration; no external automation contract.",
+	"/auth/oidc/login":    "Interactive browser-only OIDC initiation with exact-origin protection.",
+	"/auth/oidc/callback": "Single-use OIDC protocol callback, bound to initiating browser.",
+	"/auth/oidc/logout":   "Browser session revocation, exact-origin and custom-header protected.",
 	// ── Console shell and plumbing ────────────────────────────────────────
 	"/": "The Console SPA shell. An HTML document served to a browser, not a machine contract.",
 	"/api/admin/me": "Console plumbing: the caller's own server-derived identity, shaped for the " +

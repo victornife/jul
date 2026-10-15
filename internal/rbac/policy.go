@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -32,6 +33,7 @@ type Policy struct {
 	all []*principalEntry
 	// enabled reflects whether RBAC was enabled when this policy was built.
 	enabled bool
+	roles   map[string][]Permission
 	// catalogVersion is a summary fingerprint of the permission catalog version
 	// embedded in this policy, for diagnostics and debug.
 	catalogVersion int
@@ -80,6 +82,8 @@ func Build(
 	if err != nil {
 		return nil, err
 	}
+
+	p.roles = rolePerms
 
 	// Add a synthetic legacy principal when a legacy token is configured
 	// alongside RBAC so migration can be gradual.
@@ -195,6 +199,19 @@ func (p *Policy) PrincipalCount() int { return len(p.all) }
 // Fingerprint returns a stable safe digest of the effective policy contents.
 func (p *Policy) Fingerprint() string {
 	h := sha256.New()
+	names := make([]string, 0, len(p.roles))
+	for name := range p.roles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		_, _ = h.Write([]byte(name))
+		for _, permission := range p.roles[name] {
+			_, _ = h.Write([]byte{0})
+			_, _ = h.Write([]byte(permission))
+		}
+		_, _ = h.Write([]byte{0})
+	}
 	for _, entry := range p.all {
 		_, _ = h.Write([]byte(entry.name))
 		_, _ = h.Write([]byte{0})
@@ -266,4 +283,18 @@ func hasActivePrincipalWith(entries []*principalEntry, now time.Time, perm Permi
 		}
 	}
 	return false
+}
+
+// ExternalIdentity resolves a configured external mapping through the same
+// immutable role authority as local credentials. Callers must authenticate and
+// map the external subject before invoking this; provider claims never supply grants.
+func (p *Policy) ExternalIdentity(principal, role, fingerprint string) (Identity, error) {
+	if p == nil || !p.enabled {
+		return Identity{}, ErrUnauthenticated
+	}
+	perms, ok := p.roles[role]
+	if !ok {
+		return Identity{}, ErrForbidden
+	}
+	return Identity{Principal: principal, Role: role, TokenID: "oidc:" + fingerprint, Permissions: perms}, nil
 }

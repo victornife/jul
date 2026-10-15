@@ -5,6 +5,8 @@ package admin
 
 import (
 	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
 	"jul/internal/config"
@@ -52,6 +54,9 @@ func (s *Server) reachabilityChanges(cur, next *config.Config, id rbac.Identity)
 	}
 	changes := adminLockoutChanges(cur.Admin, next.Admin)
 	changes = append(changes, rbacCredentialLockoutChanges(cur.Admin, next.Admin, id)...)
+	if strings.HasPrefix(id.TokenID, "oidc:") && (!reflect.DeepEqual(cur.Admin.OIDC, next.Admin.OIDC) || !adminRBACEqual(cur.Admin.RBAC, next.Admin.RBAC) || cur.Admin.Token != next.Admin.Token) {
+		changes = append(changes, "OIDC authentication policy would change; all browser sessions would need to sign in again")
+	}
 	return changes
 }
 

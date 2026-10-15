@@ -218,3 +218,8 @@ Changes to this area should exercise at least:
 - >=90% meaningful #158-owned Go statement coverage and >=90% statements/lines/functions/branches for #158-owned frontend logic.
 
 See `docs/console.md`, `docs/plugins.md`, `docs/reload-semantics.md`, `docs/security-posture.md`, `docs/known-limitations.md` and the generated configuration/lifecycle reference for corresponding user-facing surfaces.
+
+
+## OIDC authentication generations
+
+[Admin OIDC](admin-oidc.md) is prepared and published with the same immutable admin/RBAC snapshot. Preparation creates bounded local state without discovery. OIDC configuration, local credential or effective role-policy changes install a fresh empty session/transaction owner; unrelated settings reuse the owner. Rejected candidates keep the preceding generation. Requests and streams already admitted under an old snapshot retain its existing in-flight semantics. The auth egress manager owns outbound pools; retired OIDC owners add no goroutine, transport or disk resource.

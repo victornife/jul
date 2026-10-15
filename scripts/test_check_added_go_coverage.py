@@ -33,6 +33,16 @@ class AddedCoverageTests(unittest.TestCase):
         profile = self.profile.replace("jul/tool.go", str(self.root / "tool.go")).replace("2 0", "2 1")
         self.assertEqual(scorer.score(self.diff, [profile], self.root)["percent"], 100)
 
+    def test_declaration_only_changes_have_no_statements(self):
+        (self.root / "tool.go").write_text('package main\ntype Config struct {\nEnabled bool\n}\nvar labels = map[string]string{"login": "Console"}\n')
+        diff = "+++ b/tool.go\n@@ -0,0 +3,1 @@\n+Enabled bool\n@@ -0,0 +5,1 @@\n+var labels = map[string]string{}\n"
+        self.assertIsNone(scorer.score(diff, ["mode: atomic\n"], self.root)["percent"])
+
+    def test_missing_initializer_function_coverage_is_rejected(self):
+        (self.root / "tool.go").write_text('package main\nvar initialized = func() int {\nreturn 1\n}()\n')
+        with self.assertRaisesRegex(ValueError, "no measured statements"):
+            scorer.score(self.diff, ["mode: atomic\n"], self.root)
+
     def test_comment_and_test_only_changes_are_not_production(self):
         (self.root / "tool.go").write_text("package main\n// comment\n")
         diff = "+++ b/tool.go\n@@ -0,0 +2,1 @@\n+// comment\n+++ b/tool_test.go\n@@ -0,0 +1,1 @@\n+panic()\n"

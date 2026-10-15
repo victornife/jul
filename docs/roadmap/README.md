@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.22 · Updated 2026-10-14
+> Version 2.23 · Updated 2026-10-15
 >
 > This roadmap owns the **durable portfolio sequence**. It deliberately does
 > not duplicate volatile READY/NEXT/blocked issue state. The current issue-level
@@ -70,6 +70,16 @@ programme does not make AI Gateway, fleet operation or another category an
 automatic next phase. Completed #502's same-path log-rotation correction is
 included in v2.2.0. Completed #515/#516/#517/#590 each retain their own bounded
 evidence; none certifies every application, host or provider path.
+
+## External administrator identity
+
+The maintainer explicitly activated #441 as a bounded operational enhancement:
+one-provider Console OIDC with existing RBAC, local-token coexistence, bounded
+sessions and truthful provider evidence. [ADR 0022](../adr/0022-admin-console-oidc.md)
+and the [guide](../admin-oidc.md) define this Beta/unreleased tranche. It is
+separate from application audiences/invitations (#579/#588), SAML/SCIM and
+identity governance; those horizons are not implicitly activated. It does not
+inherit the Console's GA/soak record or change published v2.2.0 packages.
 
 ## Active operating roadmap
 

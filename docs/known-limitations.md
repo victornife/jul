@@ -315,9 +315,9 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
 - **One credential method per location.** Basic, JWT, forward-auth, or CIDR —
   not combined. Use multiple layers (mTLS + JWT) at different paths if you need
   defence-in-depth.
-- **No OAuth2 / OIDC flows.** No opaque-token introspection, no cookie sessions,
+- **No application-route OAuth2 / OIDC flows.** No opaque-token introspection, no application cookie sessions,
   no refresh tokens. JWT bearer with JWKS validation is the supported pattern.
-- **Application authorization remains upstream-owned.** Route authentication forwards validated identity/claims but does not implement arbitrary application scopes. The admin control plane separately ships opt-in local named-principal RBAC; external OIDC/SAML/SCIM identity is not available.
+- **Application authorization remains upstream-owned.** Route authentication forwards validated identity/claims but does not implement arbitrary application scopes. The admin control plane separately ships opt-in local named-principal RBAC; separate [admin Console OIDC](admin-oidc.md) is an unreleased Beta addition. It does not implement application audiences. SAML/SCIM are unavailable.
 - **One issuer/audience per location.** Multi-issuer validation is not supported.
 - **Forward-auth is a GET probe.** It mirrors the Traefik / NGINX `auth_request`
   pattern — not a full OAuth2 exchange.
@@ -680,8 +680,7 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   attribution. Named-principal RBAC — roles, scoped revocable tokens,
   least-privilege enforcement, and per-principal audit attribution — is now
   available as an **opt-in `[admin.rbac]` layer** (HP-02 / ADR 0010); enable it
-  for multi-user workflows. External identity (OIDC/SSO) remains a Y3-02 horizon
-  item. See [docs/specs/console-rbac.md](specs/console-rbac.md) and the migration
+  for multi-user workflows. [External Console OIDC](admin-oidc.md) is separately Beta/unreleased: one provider, in-memory sessions lost on restart, local-only logout and bounded role mappings. Provider account revocation does not immediately revoke Jul sessions, and already established streams are not drained. Local recovery credentials remain required. See [docs/specs/console-rbac.md](specs/console-rbac.md) and the migration
   steps in [docs/console.md](console.md).
 - **Admin listener TLS has no ACME.** `[admin.tls]` (#336) terminates the
   listener with an operator-supplied certificate, with hot content rotation

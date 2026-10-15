@@ -1351,6 +1351,8 @@ type AdminConfig struct {
 	// RBAC, when enabled, replaces the single shared token with named principals,
 	// predefined/custom roles, and per-route permission gates (Phase 3).
 	RBAC AdminRBACConfig `toml:"rbac"`
+	// OIDC configures external interactive Console authentication, retaining RBAC.
+	OIDC AdminOIDCConfig `toml:"oidc"`
 	// Console toggles the web console dashboard at the admin root. It is a
 	// pointer so an omitted value defaults to enabled (when admin is enabled)
 	// while an explicit `console = false` serves only the basic config page.
@@ -1616,4 +1618,56 @@ type MIMEConfig struct {
 	Types *map[string]string `toml:"types,omitempty"`
 	// DefaultType is the media type for unmapped files; empty inherits.
 	DefaultType string `toml:"default_type,omitempty"`
+}
+
+// AdminOIDCConfig configures one external Console identity provider.
+type AdminOIDCConfig struct {
+	// Enabled activates Code + PKCE login; RBAC and local recovery remain required.
+	Enabled bool `toml:"enabled"`
+	// ProviderName is the bounded human-readable login label.
+	ProviderName string `toml:"provider_name"`
+	// Issuer is the exact discovery and ID-token issuer, without query or fragment.
+	Issuer string `toml:"issuer"`
+	// ClientID is the registered OIDC relying-party client identifier.
+	ClientID string `toml:"client_id"`
+	// ClientSecret is optional; use an env/file/secret reference for confidential clients.
+	ClientSecret string `toml:"client_secret"`
+	// CallbackURL is the exact registered absolute /auth/oidc/callback URL.
+	CallbackURL string `toml:"callback_url"`
+	// Scopes is a bounded set containing openid; offline_access is forbidden.
+	Scopes []string `toml:"scopes"`
+	// Subjects maps exact provider subjects to server-owned principal names and roles.
+	Subjects []AdminOIDCSubject `toml:"subjects"`
+	// GroupClaim names one flat string-array ID-token claim, including namespaced names.
+	GroupClaim string `toml:"group_claim"`
+	// Groups maps exact group values to existing Jul roles; conflicting matches deny.
+	Groups []AdminOIDCGroup `toml:"groups"`
+	// SessionIdle is the maximum session inactivity interval (default 15m).
+	SessionIdle Duration `toml:"session_idle"`
+	// SessionAbsolute is the absolute session lifetime (default 8h, maximum 24h).
+	SessionAbsolute Duration `toml:"session_absolute"`
+	// MaxSessions bounds live in-memory sessions; exhaustion denies new login.
+	MaxSessions int `toml:"max_sessions"`
+	// MaxTransactions bounds simultaneous five-minute login transactions.
+	MaxTransactions int `toml:"max_transactions"`
+	// ClockSkew is time-claim leeway (default 60s, maximum 120s).
+	ClockSkew Duration `toml:"clock_skew"`
+}
+
+// AdminOIDCSubject grants one exact (configured issuer, subject) a Jul role.
+type AdminOIDCSubject struct {
+	// Subject is the exact, case-sensitive, non-empty OIDC sub claim.
+	Subject string `toml:"subject"`
+	// Principal is a stable configured audit name, never taken from email/display claims.
+	Principal string `toml:"principal"`
+	// Role names an existing predefined or custom Jul RBAC role.
+	Role string `toml:"role"`
+}
+
+// AdminOIDCGroup grants a Jul role through an exact flat group claim value.
+type AdminOIDCGroup struct {
+	// Group is the exact, case-sensitive group value.
+	Group string `toml:"group"`
+	// Role names an existing predefined or custom Jul RBAC role.
+	Role string `toml:"role"`
 }

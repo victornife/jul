@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"jul/internal/adminapi"
+	"jul/internal/adminoidc"
 	"jul/internal/config"
 	"jul/internal/rbac"
 )
@@ -35,6 +36,7 @@ type authSnapshot struct {
 	mode            authMode
 	cfg             config.AdminConfig
 	policy          *rbac.Policy
+	oidc            *adminoidc.Runtime
 	gen             string
 	consoleCompiled bool
 	pluginsCompiled bool
@@ -82,6 +84,8 @@ func authGeneration(cfg config.AdminConfig, p *rbac.Policy) string {
 	_, _ = h.Write([]byte(strconv.FormatBool(cfg.RBAC.Enabled)))
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write([]byte(rbac.TokenDigest(cfg.Token)))
+	oidcBytes, _ := json.Marshal(cfg.OIDC)
+	_, _ = h.Write(oidcBytes)
 	if p != nil {
 		_, _ = h.Write([]byte{0})
 		_, _ = h.Write([]byte(p.Fingerprint()))
@@ -106,7 +110,11 @@ func deriveAuthSnapshot(cfg config.AdminConfig, p *rbac.Policy, gen string) *aut
 
 func (s *Server) installAuth(cfg config.AdminConfig, p *rbac.Policy) {
 	gen := strconv.FormatUint(s.authGen.Add(1), 10)
-	s.authState.Store(s.completeAdminRuntimeSnapshot(deriveAuthSnapshot(cfg, p, gen)))
+	out := deriveAuthSnapshot(cfg, p, gen)
+	if err := s.prepareOIDC(out); err != nil {
+		out.mode = authModeBlocked
+	}
+	s.authState.Store(s.completeAdminRuntimeSnapshot(out))
 }
 
 func (s *Server) currentAuth() *authSnapshot {
@@ -229,7 +237,7 @@ func (s *Server) requirePermission(perm rbac.Permission, next http.Handler) http
 			return
 		case authModeRBAC:
 			bearer := adminAuthorization(r)
-			authID, err := snap.policy.Authenticate(bearer, now)
+			authID, err := authenticateAdminRBAC(r, snap, bearer, now)
 			if err == rbac.ErrDisabled {
 				s.writeUnauthenticated(w, r, "The principal is disabled or expired.")
 				return
@@ -263,7 +271,7 @@ func (s *Server) requireAnyPermission(perms []rbac.Permission, next http.Handler
 			return
 		case authModeRBAC:
 			bearer := adminAuthorization(r)
-			authID, err := snap.policy.Authenticate(bearer, now)
+			authID, err := authenticateAdminRBAC(r, snap, bearer, now)
 			if err == rbac.ErrDisabled {
 				s.writeUnauthenticated(w, r, "The principal is disabled or expired.")
 				return
@@ -299,7 +307,7 @@ func (s *Server) authWithRBAC(next http.Handler) http.Handler {
 			return
 		case authModeRBAC:
 			bearer := adminAuthorization(r)
-			id, err := snap.policy.Authenticate(bearer, now)
+			id, err := authenticateAdminRBAC(r, snap, bearer, now)
 			if err == rbac.ErrDisabled {
 				s.writeUnauthenticated(w, r, "The principal is disabled or expired.")
 				return
@@ -355,4 +363,17 @@ func writeForbiddenAny(w http.ResponseWriter, r *http.Request, accepted []rbac.P
 		"role":         id.Role,
 	}
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+func authenticateAdminRBAC(r *http.Request, snap *authSnapshot, bearer string, now time.Time) (rbac.Identity, error) {
+	if adminoidc.CookiePresented(r) {
+		if snap.oidc == nil {
+			return rbac.Identity{}, rbac.ErrUnauthenticated
+		}
+		id, expiry, err := snap.oidc.Authenticate(r)
+		id.Authentication = "oidc"
+		id.SessionExpiresAt = expiry
+		return id, err
+	}
+	return snap.policy.Authenticate(bearer, now)
 }

@@ -260,3 +260,8 @@ Egress is **core** — no build tag. The subsystem guards that live behind build
 tags are only reachable in builds that compile them: Consul/Kubernetes discovery
 (`-tags consul` / `-tags kubernetes`), ACME/OCSP (`-tags acme`), and WASM plugin
 `fetch` (`-tags wasmplugins`).
+
+
+## Console OIDC egress
+
+[Admin OIDC](admin-oidc.md) uses the existing `auth` subsystem for discovery, token exchange and JWKS. Allow the exact discovered issuer/token/JWKS hosts, including cross-host HTTPS provider endpoints. The application-owned client selects current egress generations for each exchange; HTTP redirects are refused and TLS verification cannot be disabled. Tightening policy affects new outbound exchanges; existing validated local sessions remain bounded by their session lifetime.

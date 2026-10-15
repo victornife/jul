@@ -94,6 +94,7 @@ inside the immutable release archives. They do not close the partial-audit ledge
 | Rate + connection limiting | [ratelimit.md](ratelimit.md) | `GA` / `soaked` |
 | Authentication (CIDR / Basic / JWT / forward-auth) | [auth.md](auth.md) | `GA` / `soaked` |
 | Active health checks (HTTP / TCP probes) | [health.md](health.md) | `GA` / `soaked` |
+| External admin Console OIDC | [admin-oidc.md](admin-oidc.md) | `Beta` / `merged` |
 | Console (operations cockpit) | [console.md](console.md) | `GA` / `soaked` |
 | Zero-config + jul lint | [zeroconf.md](zeroconf.md) | `GA` / `soaked` |
 | NGINX config importer | [nginx-importer.md](nginx-importer.md) | `GA` / `soaked` |

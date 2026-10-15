@@ -9,7 +9,7 @@
 > usage metadata remain future work, as distinguished below.
 > The later #595 open-confirmation and #602 audit-contract regressions are
 > repaired through merged PRs #597 and #603; original failing evidence is retained
-> in the D11 resolution ledger. External identity remains Y3-02 horizon.
+> in the D11 resolution ledger. [External admin OIDC](../admin-oidc.md) is a separate unreleased Beta addition governed by ADR 0022.
 > Source catalogs own exhaustive mounted routes; future targets and the
 > historical phase plan are not mounted endpoints.
 
@@ -55,7 +55,7 @@ posture.
 
 **Non-goals (deferred to Y3-02)**
 
-- External IdPs (OIDC/SAML/SSO), group→role mapping, SCIM provisioning.
+- SAML/SCIM and generic identity governance. The separately selected [OIDC tranche](../admin-oidc.md) authenticates browsers and maps exact subjects/groups into these roles; it introduces no permission authority.
 - Per-object scoping *beyond* resource verbs (e.g., "operator, but only for
   `listen = :8443`"). The model is designed to allow this later (see
   [Open questions](#open-questions)) but Phase 1–3 keep grants resource-wide.
@@ -128,7 +128,7 @@ Two kinds of principal, same model:
 
 ## Tokens (credentials)
 
-Tokens are the only credential in HP-02 (external identity is Y3-02).
+Local tokens are HP-02 credentials. The separate [admin OIDC tranche](../admin-oidc.md) adds browser sessions; automation keeps scoped local tokens.
 
 - **Current shape and lookup.** Supply a high-entropy secret; there is no
   required `juladm_` prefix. The policy hashes the complete bearer token, derives

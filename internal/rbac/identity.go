@@ -3,9 +3,15 @@
 
 package rbac
 
+import "time"
+
 // Identity describes the authenticated caller attached to a request context.
 // It is immutable after construction by Policy.Authenticate.
 type Identity struct {
+	// Authentication distinguishes a browser session from a local token.
+	Authentication string
+	// SessionExpiresAt is a secret-free current expiry indication.
+	SessionExpiresAt time.Time
 	// Principal is the named identity (e.g. "alice"). Legacy single-token
 	// auth produces the synthetic principal "shared".
 	Principal string

@@ -21,7 +21,7 @@ Jul.IA supports two local admin authentication modes:
 | Opt-in `[admin.rbac]` | Named principals, predefined/custom roles, scoped revocable token hashes and deny-by-default route permissions | Principal, role and public token ID in audit/status projections |
 
 The shared token remains a bootstrap/compatibility mode, not the only shipped
-model. External OIDC/SAML/SCIM identity and browser login flows are not shipped.
+model. [External Console OIDC](admin-oidc.md) adds one-provider Code + PKCE login as an unreleased Beta capability; RBAC remains the authorization authority. SAML/SCIM are not shipped.
 Admin token rotation hot-reloads through the prepared atomic authentication
 snapshot (#95): a rotated token is live for the very next request after a
 successful reload, and the prior token is rejected immediately, with no
@@ -37,8 +37,7 @@ enforcement at the API boundary, per-principal audit attribution, proactive
 Console permission gating, and a backward-compatible migration path — **ships as
 an opt-in `[admin.rbac]` layer** (Phase 3). When it is disabled the single
 shared-token model above applies; enabling it replaces all-or-nothing access
-with least-privilege roles and attributable audit. External identity (OIDC/SSO)
-remains a [Y3-02](roadmap/) horizon item. See:
+with least-privilege roles and attributable audit. The separately tracked [admin OIDC](admin-oidc.md) Beta addition maps identities into this same policy; broader identity governance remains deferred. See:
 
 One permission is deliberately outside every predefined role except `admin`:
 **`config:trust`**, required to change a listener's

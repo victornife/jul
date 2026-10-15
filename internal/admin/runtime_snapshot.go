@@ -58,6 +58,9 @@ func (s *Server) PrepareAdminRuntime(cfg config.AdminConfig, prepared *PreparedA
 	}
 	out := *prepared.snapshot
 	out.cfg = cfg
+	if err := s.prepareOIDC(&out); err != nil {
+		return nil, err
+	}
 	result := &PreparedAuth{snapshot: s.completeAdminRuntimeSnapshot(&out)}
 	if s.hist != nil {
 		// Stage only the scalar policy. No prune, directory creation or other

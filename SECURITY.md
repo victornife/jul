@@ -106,8 +106,7 @@ disabled by default.
   deny-by-default admin routes ([ADR 0010](docs/adr/0010-console-rbac.md),
   [docs/specs/console-rbac.md](docs/specs/console-rbac.md)). **Interactive token
   management** — minting and revoking scoped tokens from the Console/API — is the
-  remaining future milestone; external identity (OIDC/SSO) stays a separate
-  Y3-02 milestone.
+  remaining future milestone. [Console OIDC](docs/admin-oidc.md) is a separate unreleased Beta addition: exact issuer/subject mapping, PKCE, bounded HttpOnly sessions, origin/header CSRF protection, local logout and token recovery. Provider tokens are never Jul automation credentials.
   Edits that change admin reachability (disabling admin, moving its listen
   address, rotating its token, or disabling the web console) are held for
   explicit confirmation so a single apply cannot silently lock you out. See the

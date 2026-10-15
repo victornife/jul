@@ -22,6 +22,14 @@
     },
     "src/features/config/configMutationMachine.ts": {
       "statements": 80
+    },
+    "src/app/AuthGate.tsx": {
+      "statements": 90,
+      "branches": 70
+    },
+    "src/auth/OidcSession.tsx": {
+      "statements": 90,
+      "branches": 70
     }
   }
 }

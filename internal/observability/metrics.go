@@ -323,7 +323,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		}, []string{"source", "result"}),
 		authDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_auth_decisions_total",
-			Help: "Access-control decisions, labeled by method (cidr/basic/jwt/forward) and result (allow/deny).",
+			Help: "Access-control decisions, labeled by method (cidr/basic/jwt/forward/oidc) and result (allow/deny).",
 		}, []string{"method", "result"}),
 		wafEvents: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_waf_events_total",
@@ -805,7 +805,7 @@ func (m *Metrics) ObserveClientAddrDerivation(source, result string) {
 }
 
 // ObserveAuthDecision records an access-control decision. method is the gate
-// that produced it (cidr/basic/jwt/forward) and result is allow or deny, both
+// that produced it (cidr/basic/jwt/forward/oidc) and result is allow or deny, both
 // fixed-cardinality labels. It is wired into the auth middleware as its
 // OnDecision hook (the auth package cannot import observability directly).
 func (m *Metrics) ObserveAuthDecision(method, result string) {

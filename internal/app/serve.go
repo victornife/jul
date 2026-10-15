@@ -926,6 +926,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// Build admin server before srv.Run so it is running when the first
 	// generation is ready. adminSrv is hoisted out of the if-block so the
 	// reload hook can call UpdatePolicy after each successful hot reload.
+	deps.OIDCClient = egressManager.Client(egress.SubsystemAuth, 10*time.Second)
+	deps.ObserveOIDCLogin = func(result string) { metrics.ObserveAuthDecision("oidc", result) }
 	adminSrv := admin.New(cfg.Admin, log, deps)
 	// Jul-owned storage headroom (#437) is read on demand by /api/stats and
 	// scrapes; nothing polls in the background. A nil adminSrv (admin

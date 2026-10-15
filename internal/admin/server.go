@@ -331,6 +331,10 @@ type ManagedApplyCompletion struct {
 // root. All fields are optional; endpoints degrade gracefully when a
 // dependency is nil.
 type Deps struct {
+	// OIDCClient is the application-owned generation-aware auth egress client.
+	OIDCClient *http.Client
+	// ObserveOIDCLogin receives only fixed allow/deny outcomes, never identity labels.
+	ObserveOIDCLogin func(string)
 	// Product is the commercial product name shown in the GUI (e.g. "Jul.IA").
 	Product string
 	// Version is the running build version shown in the GUI.

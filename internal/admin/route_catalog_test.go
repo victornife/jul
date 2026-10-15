@@ -222,6 +222,11 @@ func TestCatalogHandlerMethodsMatchCatalog(t *testing.T) {
 // If a new public route is added the developer must explicitly add it here.
 func TestCatalogPublicOnlyApproved(t *testing.T) {
 	approved := map[string]bool{
+		"/auth/oidc/status":   true,
+		"/auth/oidc/login":    true,
+		"/auth/oidc/callback": true,
+		"/auth/oidc/logout":   true,
+
 		"/healthz": true,
 		"/readyz":  true,
 		"/":        true, // console shell / root — loaded before token prompt

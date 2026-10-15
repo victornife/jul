@@ -73,6 +73,7 @@ func fullConfig() *config.Config {
 					CRLFile:   "/etc/admin-crl.pem",
 				},
 			},
+			OIDC: config.AdminOIDCConfig{Enabled: true, ProviderName: "Test IdP", Issuer: "https://issuer.example", ClientID: "jul", ClientSecret: "resolved-secret", CallbackURL: "https://admin.example/auth/oidc/callback", Scopes: []string{"openid"}, GroupClaim: "groups", Subjects: []config.AdminOIDCSubject{{Subject: "subject", Principal: "alice", Role: "viewer"}}, Groups: []config.AdminOIDCGroup{{Group: "ops", Role: "operator"}}, SessionIdle: config.Duration(time.Minute), SessionAbsolute: config.Duration(time.Hour), ClockSkew: config.Duration(time.Minute), MaxSessions: 32, MaxTransactions: 8},
 			RBAC: config.AdminRBACConfig{
 				Enabled:     true,
 				DefaultRole: "admin",

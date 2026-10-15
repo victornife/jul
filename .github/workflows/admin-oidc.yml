@@ -1,0 +1,78 @@
+name: Admin OIDC
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: admin-oidc-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  provider-and-browser:
+    name: OIDC pinned Keycloak and browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+      - name: Install the repository-pinned pnpm
+        run: npm install -g pnpm@11.8.0
+      - name: Install Console dependencies
+        run: pnpm --dir internal/admin/ui install --frozen-lockfile
+      - name: Real pinned Keycloak Code + PKCE, mapping and local logout
+        run: scripts/admin-oidc-keycloak.sh
+      - name: Focused race and bounded session stress
+        run: go test -race -count=1 ./internal/adminoidc ./internal/auth ./internal/admin ./internal/rbac ./internal/config ./internal/lifecycle
+      - name: OIDC package statement coverage
+        run: |
+          go test -coverprofile=oidc-cover.out ./internal/adminoidc/...
+          go tool cover -func=oidc-cover.out
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          packages={}
+          for line in Path('oidc-cover.out').read_text().splitlines()[1:]:
+              span, statements, count=line.rsplit(' ',2)
+              package=span.rsplit('/',1)[0]
+              covered,total=packages.get(package,(0,0))
+              packages[package]=(covered+(int(statements) if int(count)>0 else 0),total+int(statements))
+          for package,(covered,total) in packages.items():
+              print(json.dumps({'package':package,'covered':covered,'total':total,'percent':100*covered/total}))
+              if covered/total<.90:raise SystemExit('OIDC statement coverage below 90%')
+          PY
+      - name: Build and verify Console
+        run: |
+          pnpm --dir internal/admin/ui run typecheck
+          pnpm --dir internal/admin/ui run lint
+          pnpm --dir internal/admin/ui run test:coverage
+          pnpm --dir internal/admin/ui run build
+      - name: Upload Console coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5
+        with:
+          files: internal/admin/ui/coverage/lcov.info
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Install Chromium
+        run: pnpm --dir internal/admin/ui exec playwright install --with-deps chromium
+      - name: Real-admin fake-provider browser flow
+        run: pnpm --dir internal/admin/ui exec playwright test --config=playwright.oidc.config.ts
+      - name: Retain coverage and browser evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: admin-oidc-evidence
+          path: |
+            oidc-cover.out
+            internal/admin/ui/coverage/
+            internal/admin/ui/test-results/

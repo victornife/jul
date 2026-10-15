@@ -1,6 +1,6 @@
 # ADR 0010 — Console RBAC: local principals, roles, and scoped tokens
 
-- **Status:** Accepted — **delivered** (local-token RBAC) in Phase 3 (#73); external identity remains Y3-02 horizon
+- **Status:** Accepted — **delivered** (local-token RBAC) in Phase 3 (#73); external Console OIDC is separately selected in [ADR 0022](0022-admin-console-oidc.md)
 - **Date:** 2026-07-08
 - **Deciders:** Jul.IA maintainers
 - **Applies to:** the admin API and Console v2 authorization model
@@ -25,7 +25,7 @@ exist, how tokens are issued/revoked, and how to stay backward-compatible.
 Adopt a **local, config-managed RBAC model** enforced at the admin API boundary.
 Named principals, custom/predefined roles and one config token per principal are
 delivered. Interactive API token management remains the future target in the
-spec, not part of that delivery. External identity remains out of scope (Y3-02).
+spec, not part of that delivery. External identity remains outside this original local-token decision; [ADR 0022](0022-admin-console-oidc.md) adds a separately bounded browser authentication path without changing this permission authority.
 
 1. **Principals → one role → a permission set.** A principal is a named identity
    (human or automation). A role is a set of `"<resource>:<action>"` permissions.

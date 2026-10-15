@@ -23,7 +23,7 @@ export default mergeConfig(
       execArgv: ["--no-experimental-webstorage"],
       coverage: {
         provider: "v8",
-        reporter: ["text", "html", "json", "json-summary"],
+        reporter: ["text", "html", "json", "json-summary", "lcov"],
         include: ["src/**/*.{ts,tsx}"],
         exclude: ["src/test/**", "src/**/*.d.ts"],
         thresholds: {

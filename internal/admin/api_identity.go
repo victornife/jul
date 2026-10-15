@@ -5,6 +5,7 @@ package admin
 
 import (
 	"net/http"
+	"time"
 
 	"jul/internal/rbac"
 )
@@ -16,11 +17,13 @@ import (
 // shared token. It never contains the raw token, its digest, or any other
 // secret material.
 type identityResponse struct {
-	Principal   string   `json:"principal"`
-	Role        string   `json:"role"`
-	TokenID     string   `json:"token_id,omitempty"`
-	Permissions []string `json:"permissions"`
-	Legacy      bool     `json:"legacy"`
+	Principal        string     `json:"principal"`
+	Role             string     `json:"role"`
+	TokenID          string     `json:"token_id,omitempty"`
+	Permissions      []string   `json:"permissions"`
+	Legacy           bool       `json:"legacy"`
+	Authentication   string     `json:"authentication,omitempty"`
+	SessionExpiresAt *time.Time `json:"session_expires_at,omitempty"`
 }
 
 // handleIdentity serves GET /api/admin/me. The route is authenticated-only: any
@@ -46,12 +49,18 @@ func (s *Server) handleIdentity(w http.ResponseWriter, r *http.Request) {
 			Legacy:      true,
 		}
 	}
+	var expiry *time.Time
+	if !id.SessionExpiresAt.IsZero() {
+		expiry = &id.SessionExpiresAt
+	}
 	writeJSON(w, http.StatusOK, identityResponse{
-		Principal:   id.Principal,
-		Role:        id.Role,
-		TokenID:     id.TokenID,
-		Permissions: expandIdentityPermissions(id),
-		Legacy:      id.Legacy,
+		Authentication:   id.Authentication,
+		SessionExpiresAt: expiry,
+		Principal:        id.Principal,
+		Role:             id.Role,
+		TokenID:          id.TokenID,
+		Permissions:      expandIdentityPermissions(id),
+		Legacy:           id.Legacy,
 	})
 }
 

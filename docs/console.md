@@ -1272,3 +1272,8 @@ or live-log stream; clients already at or above the new per-client cap must fall
 it before opening another stream. Lifecycle badges and preview remain server-derived,
 and mixed changes that include `admin.enabled` or `admin.listen` remain whole-candidate
 restart/staging operations.
+
+
+## External Console sign-in
+
+[OIDC authentication](admin-oidc.md) adds one-provider Code + PKCE login as a separate unreleased Beta capability. The Console shows mapped principal/role and expiry, provides local logout and offers explicit reauthentication after expiry. Local scoped tokens remain available for automation and recovery. Browser sessions use HttpOnly cookies, exact-origin/header CSRF protection and the same server-enforced RBAC catalogue. See the guide for provider evidence, setup, reload revocation and outage limits.
