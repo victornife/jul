@@ -311,6 +311,14 @@ func TestCookieAttributesAndLoginOrigin(t *testing.T) {
 			t.Fatal(rr.Code)
 		}
 	}
+	opaque := httptest.NewRequest("POST", srv.URL+"/auth/oidc/login", nil)
+	opaque.Header.Set("Origin", "null")
+	opaque.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr = httptest.NewRecorder()
+	r.Login(rr, opaque)
+	if rr.Code != 403 {
+		t.Fatal("opaque Origin bypassed browser binding")
+	}
 }
 func TestCancelledDiscoveryAndInvalidConstruction(t *testing.T) {
 	r, _, _, _ := fixture(t)

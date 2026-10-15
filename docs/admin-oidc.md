@@ -147,6 +147,10 @@ provider exchanges have ten-second timeouts and bounded responses. Discovery and
 token responses are limited to 64 KiB, ID tokens to 16 KiB, JWKS to 1 MiB and 128
 keys. Redirects are rejected; there is no TLS-verification-disable option.
 
+The OIDC-enabled Console HTML uses a same-origin referrer policy so browsers
+preserve Origin on the sign-in form POST. Cross-origin referrers are suppressed;
+login redirects and callbacks use no-referrer, and null Origins remain denied.
+
 The [auth egress subsystem](egress.md) covers discovery, token exchange and JWKS,
 including cross-host HTTPS endpoints discovered for Google. Allow the issuer,
 token host and JWKS host actually advertised by your provider. Tightened egress

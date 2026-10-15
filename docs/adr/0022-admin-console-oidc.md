@@ -54,6 +54,12 @@ correct `azp`, expiration, issued-at, not-before when present, a bounded subject
 and matching nonce. Callback responses always navigate to a clean Console URL.
 Provider errors are replaced with bounded generic categories.
 
+The OIDC-enabled Console HTML uses `Referrer-Policy: same-origin` so a native
+sign-in form POST retains its real Origin; `no-referrer` makes that Origin
+`null` under the Fetch standard. Cross-origin referrers remain suppressed.
+Protocol redirects/callbacks retain `no-referrer`, and opaque/null Origins are
+still denied. Console HTML with OIDC disabled retains its existing policy.
+
 ## Verification owner and dependency choice
 
 The OIDC verifier is a strict wrapper around `internal/auth`'s existing JWT

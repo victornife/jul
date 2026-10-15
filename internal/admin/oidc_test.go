@@ -284,3 +284,21 @@ func TestOIDCDisabledStillClearsStaleBrowserCredential(t *testing.T) {
 		}
 	}
 }
+
+func TestOIDCConsoleFormPreservesOriginWithoutCrossOriginReferrers(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		cfg := config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: strings.Repeat("r", 32), RBAC: config.AdminRBACConfig{Enabled: true}, OIDC: config.AdminOIDCConfig{Enabled: enabled, Issuer: "https://issuer.example", ClientID: "jul", CallbackURL: "https://localhost/auth/oidc/callback"}}
+		s := New(cfg, testLogger(t), Deps{OIDCClient: http.DefaultClient})
+		s.UpdateAuth(cfg, oidcPolicy(t, "viewer"))
+		req := httptest.NewRequest("GET", "https://localhost/", nil)
+		rr := httptest.NewRecorder()
+		s.serveConsoleV2Index(rr, req, []byte("<head></head>"))
+		want := "no-referrer"
+		if enabled {
+			want = "same-origin"
+		}
+		if got := rr.Header().Get("Referrer-Policy"); got != want {
+			t.Fatalf("OIDC enabled=%v: referrer policy %q, want %q", enabled, got, want)
+		}
+	}
+}
