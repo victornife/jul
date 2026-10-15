@@ -131,20 +131,38 @@ func TestStaleIfErrorUsesActivePolicyAtFailureTime(t *testing.T) {
 	}
 }
 
-// TestMaxEntryBytesCoupledToMemoryMaxSize characterizes maxEntry (#92 scope
-// item 5): the schema has no separate per-entry capture limit, so the
-// per-entry cap is intentionally coupled to memory_max_size and updates with
-// it at Commit.
-func TestMaxEntryBytesCoupledToMemoryMaxSize(t *testing.T) {
+// TestMaxEntryBytesDefaultsToMemoryAndDecouplesWhenConfigured replaces the old
+// #92 coupling characterization (#525 Part 2, ADR 0023): when max_entry_size
+// is omitted or zero, MaxEntryBytes defaults to memory_max_size; when set,
+// MaxEntryBytes hot-reloads independently while MemoryCapBytes respects both.
+func TestMaxEntryBytesDefaultsToMemoryAndDecouplesWhenConfigured(t *testing.T) {
 	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20)})
 	if got := c.Policy().MaxEntryBytes; got != 1<<20 {
-		t.Fatalf("MaxEntryBytes = %d, want %d (== memory_max_size)", got, int64(1<<20))
+		t.Fatalf("MaxEntryBytes = %d, want %d (defaulted to memory_max_size)", got, int64(1<<20))
 	}
 
 	c.PrepareCacheUpdate(config.CacheConfig{MemoryMaxSize: config.Size(4 << 20)}).Commit()
-
 	if got := c.Policy().MaxEntryBytes; got != 4<<20 {
-		t.Fatalf("MaxEntryBytes after commit = %d, want %d (updated with memory_max_size)", got, int64(4<<20))
+		t.Fatalf("MaxEntryBytes after memory_max_size commit = %d, want %d", got, int64(4<<20))
+	}
+
+	c.PrepareCacheUpdate(config.CacheConfig{
+		MemoryMaxSize: config.Size(2 << 20),
+		MaxEntrySize:  config.Size(16 << 20),
+		DiskMaxSize:   config.Size(64 << 20),
+	}).Commit()
+	pol := c.Policy()
+	if pol.MemoryMaxBytes != 2<<20 || pol.MaxEntryBytes != 16<<20 || pol.MemoryCapBytes() != 2<<20 {
+		t.Fatalf("policy after decoupled commit = %+v (MemoryCapBytes=%d), want MemoryMaxBytes=2MiB MaxEntryBytes=16MiB MemoryCapBytes=2MiB", pol, pol.MemoryCapBytes())
+	}
+
+	c.PrepareCacheUpdate(config.CacheConfig{
+		MemoryMaxSize: config.Size(8 << 20),
+		MaxEntrySize:  config.Size(1 << 20),
+	}).Commit()
+	pol = c.Policy()
+	if pol.MemoryMaxBytes != 8<<20 || pol.MaxEntryBytes != 1<<20 || pol.MemoryCapBytes() != 1<<20 {
+		t.Fatalf("policy with MaxEntryBytes < MemoryMaxBytes = %+v (MemoryCapBytes=%d), want MemoryCapBytes=1MiB", pol, pol.MemoryCapBytes())
 	}
 }
 

@@ -265,6 +265,14 @@
       "active_when": "cache.enabled = true and cache.lock = true"
     },
     {
+      "go_field": "CacheConfig.MaxEntrySize",
+      "path": "cache.max_entry_size",
+      "kind": "size",
+      "constraint": "non-negative; at most memory_max_size when disk_path is unset, or at most disk_max_size when disk_path is set",
+      "zero_semantics": "omitted/zero defaults to memory_max_size when enabled",
+      "active_when": "always"
+    },
+    {
       "go_field": "CacheConfig.MemoryMaxSize",
       "path": "cache.memory_max_size",
       "kind": "size",

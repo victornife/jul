@@ -222,9 +222,29 @@ func validateCacheValues(c CacheConfig) []error {
 	}{
 		{"[cache].memory_max_size", c.MemoryMaxSize},
 		{"[cache].disk_max_size", c.DiskMaxSize},
+		{"[cache].max_entry_size", c.MaxEntrySize},
 	} {
 		if err := validateNonNegativeSize(check.path, check.value); err != nil {
 			errs = append(errs, err)
+		}
+	}
+	if c.MaxEntrySize > 0 {
+		memMax := c.MemoryMaxSize
+		if memMax <= 0 {
+			memMax = Size(64 << 20)
+		}
+		if strings.TrimSpace(c.DiskPath) == "" {
+			if c.MaxEntrySize > memMax {
+				errs = append(errs, fmt.Errorf("[cache].max_entry_size: %d bytes exceeds [cache].memory_max_size (%d bytes) when [cache].disk_path is not set", c.MaxEntrySize.Bytes(), memMax.Bytes()))
+			}
+		} else {
+			diskMax := c.DiskMaxSize
+			if diskMax <= 0 {
+				diskMax = Size(512 << 20)
+			}
+			if c.MaxEntrySize > diskMax {
+				errs = append(errs, fmt.Errorf("[cache].max_entry_size: %d bytes must not exceed [cache].disk_max_size (%d bytes)", c.MaxEntrySize.Bytes(), diskMax.Bytes()))
+			}
 		}
 	}
 	for _, check := range []struct {

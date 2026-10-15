@@ -64,6 +64,7 @@ type CompleteCacheProjection struct {
 	MemoryMax            string `json:"memory_max,omitempty"`
 	DiskPath             string `json:"disk_path"`
 	DiskMaxSize          string `json:"disk_max_size"`
+	MaxEntrySize         string `json:"max_entry_size"`
 	DefaultTTL           string `json:"default_ttl"`
 	StaleWhileRevalidate string `json:"stale_while_revalidate"`
 	StaleIfError         string `json:"stale_if_error"`
@@ -165,6 +166,7 @@ func projectCacheSettings(c *config.Config) *CompleteCacheProjection {
 		MemoryMax:            memory,
 		DiskPath:             c.Cache.DiskPath,
 		DiskMaxSize:          string(mustMarshal(c.Cache.DiskMaxSize.MarshalText())),
+		MaxEntrySize:         string(mustMarshal(c.Cache.MaxEntrySize.MarshalText())),
 		DefaultTTL:           string(mustMarshal(c.Cache.DefaultTTL.MarshalText())),
 		StaleWhileRevalidate: string(mustMarshal(c.Cache.StaleWhileRevalidate.MarshalText())),
 		StaleIfError:         string(mustMarshal(c.Cache.StaleIfError.MarshalText())),

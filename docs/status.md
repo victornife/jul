@@ -92,9 +92,9 @@ not inherit an older GA row merely because it lives in the same package or guide
 
 - **Response cache:** #134 completed integrated recertification; the released
   cache record retains GA. Additive post-v2.2.0 cold-miss fill locking (#525
-  Part 1) is unreleased and does not inherit that GA/soaked certification;
-  disk-streamed capture (#525 Part 2) and range-aware caching (#442) remain
-  separate.
+  Part 1) and disk-streamed large-object capture (#525 Part 2) are unreleased
+  and do not inherit that GA/soaked certification; range-aware caching (#442)
+  remains separate.
 - **Routing, resilience and auxiliary egress:** the bounded CGC-ROUTE,
   CGC-RES and SEC-EGRESS contracts are independently GA/soaked under
   #527/#590, with eight-hour evidence on unchanged full v2.2.0 source.

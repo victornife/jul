@@ -1329,6 +1329,12 @@ type CacheConfig struct {
 	DiskPath string `toml:"disk_path"`
 	// DiskMaxSize is the disk tier cap.
 	DiskMaxSize Size `toml:"disk_max_size"`
+	// MaxEntrySize is the maximum cacheable response body size across both
+	// tiers. Responses up to MemoryMaxSize are captured in memory; responses
+	// larger than MemoryMaxSize up to MaxEntrySize stream to a temporary file
+	// in DiskPath and remain disk-backed (#525 Part 2, ADR 0023). Omitted or
+	// zero defaults to MemoryMaxSize.
+	MaxEntrySize Size `toml:"max_entry_size,omitempty"`
 	// DefaultTTL is applied when upstream gives no explicit freshness.
 	DefaultTTL Duration `toml:"default_ttl"`
 	// StaleWhileRevalidate serves stale entries for this grace period after

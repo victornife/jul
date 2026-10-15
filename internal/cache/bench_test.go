@@ -186,3 +186,75 @@ func BenchmarkCacheColdMissFillLockCoalesced(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkCacheLargeDiskCapture measures streaming capture of a 4 MiB object
+// larger than the 64 KiB memory tier into the disk tier, proving heap
+// allocations stay O(1) rather than proportional to the 4 MiB body (#525 Part 2).
+func BenchmarkCacheLargeDiskCapture(b *testing.B) {
+	const bodySize = 4 << 20 // 4 MiB
+	chunk := make([]byte, 32<<10)
+	c, _ := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(64 << 10),
+		DiskPath:      b.TempDir(),
+		DiskMaxSize:   config.Size(64 << 20),
+		MaxEntrySize:  config.Size(8 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+	}, nil)
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("Content-Length", strconv.Itoa(bodySize))
+		w.WriteHeader(http.StatusOK)
+		for written := 0; written < bodySize; written += len(chunk) {
+			_, _ = w.Write(chunk)
+		}
+	}))
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		w := newDiscardResponseWriter()
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/large-capture?id="+strconv.Itoa(i%4), nil)
+		c.Delete(key(req))
+		h.ServeHTTP(w, req)
+		if w.written != bodySize || w.Header().Get("X-Cache") != stateMiss {
+			b.Fatalf("written=%d state=%q", w.written, w.Header().Get("X-Cache"))
+		}
+	}
+}
+
+// BenchmarkCacheLargeDiskHit measures serving a warm 4 MiB disk-backed cache
+// hit, proving heap allocations stay O(1) without loading the 4 MiB body into
+// memory (#525 Part 2).
+func BenchmarkCacheLargeDiskHit(b *testing.B) {
+	const bodySize = 4 << 20 // 4 MiB
+	chunk := make([]byte, 32<<10)
+	c, _ := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(64 << 10),
+		DiskPath:      b.TempDir(),
+		DiskMaxSize:   config.Size(64 << 20),
+		MaxEntrySize:  config.Size(8 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+	}, nil)
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("Content-Length", strconv.Itoa(bodySize))
+		w.WriteHeader(http.StatusOK)
+		for written := 0; written < bodySize; written += len(chunk) {
+			_, _ = w.Write(chunk)
+		}
+	}))
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/large-warm", nil)
+	h.ServeHTTP(newDiscardResponseWriter(), req)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		w := newDiscardResponseWriter()
+		h.ServeHTTP(w, req)
+		if w.written != bodySize || w.Header().Get("X-Cache") != stateHit {
+			b.Fatalf("written=%d state=%q", w.written, w.Header().Get("X-Cache"))
+		}
+	}
+}

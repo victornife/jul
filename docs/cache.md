@@ -38,13 +38,16 @@ benchmarks below were refreshed against the corrected implementation.
 | Tier | Backing store | Bound | Lifetime |
 | --- | --- | --- | --- |
 | Memory | in-process map, LRU by bytes | `memory_max_size` | process lifetime; survives reloads |
-| Disk (optional) | files under `disk_path`, LRU by bytes | `disk_max_size` | survives restarts |
+| Disk (optional) | files under `disk_path`, LRU by bytes | `disk_max_size` (per-entry ceiling `max_entry_size`) | survives restarts |
 
 A request is served from the memory tier first. On a memory miss the disk tier is
-consulted; a disk hit is **promoted** back into the memory tier so subsequent
-reads stay hot. When the memory tier overflows, evicted entries spill **down** to
-the disk tier (when configured) rather than being dropped, so disk acts as a
-larger, slower backstop.
+consulted: a disk hit whose body fits within `memory_max_size` is **promoted**
+back into the memory tier so subsequent reads stay hot, whereas a large
+disk-backed object (`> memory_max_size`, up to `max_entry_size`) is streamed
+directly from its on-disk file in 32 KiB chunks without entering or evicting the
+memory tier ([ADR 0023](adr/0023-large-object-disk-streamed-cache.md)). When the
+memory tier overflows, evicted entries spill **down** to the disk tier (when
+configured) rather than being dropped, so disk acts as a larger, slower backstop.
 
 The cache instance is shared across configuration reloads, so a reload does not
 cold-start the cache.
@@ -52,12 +55,13 @@ cold-start the cache.
 ## Configuration
 
 See the [`[cache]`](../README.md#cache) reference for the full key list. A typical
-block with the disk overflow tier enabled:
+block with the disk overflow tier and large-object streaming enabled:
 
 ```toml
 [cache]
 enabled                = true
 memory_max_size        = "256MB"
+max_entry_size         = "512MB"                  # defaults to memory_max_size; up to disk_max_size when disk_path is set
 disk_path              = "/var/cache/jul/http"   # enables the disk tier
 disk_max_size          = "4GB"
 default_ttl            = "5m"
@@ -461,6 +465,7 @@ the complete audit record is [the 2026-08-07 cache recertification](audit/old/20
 | WebSocket / 101 | Upgrade requests bypass with the original writer; 101 is never stored | `TestWebSocketThroughCachedProxy`, `TestWebSocketThroughFullMiddlewareChain`, `TestUpgradeRequestBypassesCache`, `TestProtocolSwitchResponseNeverStored`, `TestRepeatedUpgradesThroughCachedProxy` |
 | SSE / flushed / oversized | SSE is not buffered or stored; ordinary flushed chunked responses remain cacheable; oversized capture is not stored | `TestSSEThroughCachedProxyStreamsAndIsNotStored`, `TestEventStreamIsNeverStoredOrBuffered`, `TestFlushedChunkedResponseIsStillCached`, `TestOversizedStreamIsNotStored` |
 | Memory/disk tiers | Byte-bounded LRU, disk overflow/promotion, restart rehydration, owner-only files and foreign-file isolation | `TestDiskStorePersistence`, `TestDiskStoreConcurrentOverflowEviction`, `TestDiskStoreFileMode`, `TestDiskStoreAtomicNoTempLeftovers`, `TestDiskStoreIgnoresForeignFiles` |
+| Large-object disk streaming (#525 Part 2) | `max_entry_size` decouples single-object ceiling from `memory_max_size`; `JULDCH02` trailer-framed disk capture and streaming hits without body-sized heap allocation; active-reader lease retirement across eviction/invalidation/purge/replacement; single-lease metadata+body lookup with generation-checked cleanup; exact-boundary metadata envelope; temp-disk capture budget bounded by `disk_max_size` across misses and `304` rewrites | `TestLargeObjectTierPlacementAndKnownUnknownLengths`, `TestLargeObjectBoundaryOneByteOverAndBoundedHeap`, `TestLargeObjectFailurePathsLeaveNoPartialEntry`, `TestLargeObjectRestartRecoveryAndForeignFileSafety`, `TestLargeObjectActiveReaderDuringEvictionInvalidationAndReplacement`, `TestLargeObjectRevalidation304And200`, `TestLargeObjectConcurrentTempDiskBudgetExhaustion`, `TestLargeObjectDiskWriteAndRenameFailures`, `TestLargeObjectValidation200PublishFailuresStreamBodyToClient`, `TestLargeObjectLookupVsReplacementAndEvictionRaces`, `TestLargeObjectExactMaxEntrySizeWithMinimumDiskMaxSize`, `TestLargeObjectConcurrent304RewriteRespectsTempDiskBudget` (`internal/cache`) |
 | Entry immutability | Published entries are cloned and replaced, never mutated under readers | `TestStaleIfErrorReplacesRatherThanMutates`, `TestNotModifiedReplacesRatherThanMutates`, `TestConcurrentReadsDuringStaleIfErrorReplacement`, `TestPublishedEntryDoesNotAliasHandlerState` |
 | Reload and generation lifetime | Refresh/validation is generation-owned, survives client disconnect, blocks premature retirement and is bounded on forced retirement/shutdown | `TestReloadWaitsForCacheRevalidationHoldingGeneration`, `TestReloadDuringMandatorySynchronousValidation`, `TestRevalidationSurvivesClientDisconnect`, `TestForcedRetirementCancelsLeasedWork`, `TestDrainCancelsAndBoundsLiveBackgroundWork` |
 | Real HTTP/admin paths | H1/H2 validation, concurrent singleflight, invalidation, auth isolation and purge/delete use production handlers | `TestRealProxyOriginValidation`, `TestRealHTTP2CacheBehavior`, `TestRealConcurrentValidatorsShareOneOriginRequest`, `TestRealUnsafeMethodInvalidation`, `TestPurgeMethodAndKey` |
@@ -673,7 +678,13 @@ labeled by `tier` (`memory`/`disk`; the disk series is absent when no
 `disk_path` is configured), read at scrape time rather than pushed from the
 request path — the same pattern as the upstream resilience gauges:
 
-- `jul_cache_bytes` — current bytes occupied.
+- `jul_cache_bytes` — current bytes occupied. For the disk tier this is the
+  exact physical size on disk (`body + metadata + 24-byte trailer`) of all
+  indexed entries (`physBytes`). When a single exact-boundary entry has
+  `body <= disk_max_size` (`max_entry_size == disk_max_size`), its bounded
+  `JULDCH02` metadata and trailer envelope (`<= 1 MiB + 24 B`) is permitted
+  above `disk_max_size` so the entry does not self-evict, and
+  `jul_cache_bytes{tier="disk"}` reports that true physical file size.
 - `jul_cache_max_bytes` — the configured byte cap.
 - `jul_cache_entries` — current entry count.
 - `jul_cache_evictions_total` — cumulative LRU-capacity evictions since
@@ -736,8 +747,8 @@ at all.
 | Any other `1xx` (e.g. `103 Early Hints`) | n/a | Not evaluated for storage at all: it passes through untouched, without latching the writer, so the real final status that follows it is judged entirely on its own merits (#331). |
 | Anything written after a successful hijack | no | The connection has left HTTP; the wrapper also refuses further writes with `http.ErrHijacked`. |
 | `Content-Type: text/event-stream` | no | An event stream never ends. Capture stops at the first byte, so an open SSE connection accumulates nothing. |
-| A body larger than `memory_max_size` | no | The per-entry capture limit. A declared `Content-Length` above it abandons capture before the first byte; a body that crosses it frees its capture buffer at that point. Counted as `jul_cache_capture_skipped_total{reason="oversize"}`. |
-| A miss that arrives while in-flight captures already hold `memory_max_size` bytes | no | The capture budget below. Streamed to the client uncaptured and counted as `reason="budget"`. |
+| A body larger than `max_entry_size` (defaults to `memory_max_size`) | no | The per-entry capture limit. A declared `Content-Length` above it abandons capture before the first byte; a body that crosses it frees its capture buffer or temporary file at that point. Counted as `jul_cache_capture_skipped_total{reason="oversize"}`. |
+| A miss that arrives while in-flight memory captures hold `memory_max_size` bytes or in-flight temporary disk captures hold `disk_max_size` bytes | no | The capture budgets below. Streamed to the client uncaptured and counted as `reason="budget"`. |
 
 ### Which response headers are stored
 
@@ -824,45 +835,61 @@ erode it.
 
 ## On-disk format
 
-Each cached response is a single self-contained file under `disk_path`:
+Each cached response is a single self-contained file under `disk_path` using the
+`JULDCH02` trailer-framed layout ([ADR 0023](adr/0023-large-object-disk-streamed-cache.md)):
 
 - **Filename** — the lowercase hex SHA-256 of the cache key (exactly 64 hex
   characters). Filenames are content-addressed, opaque, and reveal nothing about
   the original URL.
-- **Contents** — the gob-encoded entry (status, headers, body, timestamps,
-  freshness metadata, and any `Vary` values).
+- **Contents** — `[raw body bytes: 0 .. bodyLen][gob(diskEntryMeta): bodyLen .. bodyLen+metaLen][24-byte trailer: uint64(metaLen) + uint64(bodyLen) + "JULDCH02"]`.
+  Placing raw body bytes at offset `0` and the metadata + fixed 24-byte trailer
+  at the tail of the file allows unknown-length (`chunked`) responses to stream
+  sequentially to a temporary file without rewriting the body on completion,
+  allows startup rehydration and cache lookups to read only the metadata tail
+  without loading the body into memory, and exposes an `O(1)` `io.SectionReader`
+  over `[0, bodyLen)` for streaming hits.
 
-There is no index file or sidecar; on startup the directory is scanned and each
-cache file is re-hydrated into the index, ordered by modification time and bounded
-by `disk_max_size`.
+There is no external index file or sidecar; on startup the directory is scanned
+and each valid `JULDCH02` file is re-hydrated into the index by reading only its
+metadata trailer, ordered by modification time and bounded by `disk_max_size`.
+Unpublished `.jul-cache-tmp-*` and `.jul-cache-retired-*` files left by an
+unclean shutdown, as well as truncated, corrupt, or pre-`JULDCH02` hex-named
+cache files, are removed during startup rehydration so the cache heals cleanly as
+misses.
 
-The encoding is gob, which decodes a field absent from an older file as its zero
-value. Every field #132 added was chosen so that **its zero value is the
-conservative answer**: an entry written by an older Jul permits no authenticated
-reuse, and a `Vary` pointer entry with no membership record claims no variants.
-An older Jul reading a newer file ignores the fields it does not know, which
-returns it to its own (looser) behaviour but never corrupts the file. No
-migration is required in either direction.
+The metadata block is gob-encoded, which decodes a field absent from an older
+`JULDCH02` file as its zero value. Every field #132 added was chosen so that
+**its zero value is the conservative answer**: an entry written by an older Jul
+permits no authenticated reuse, and a `Vary` pointer entry with no membership
+record claims no variants.
 
 ## Disk-tier safety
 
 The disk tier is written defensively so that an operator can point `disk_path` at
 a directory without risking other data or torn cache entries:
 
-- **Atomic writes.** Entries are written to a same-directory temporary file,
-  fsync'd, then renamed over the final name. A crash mid-write leaves either the
-  previous complete entry or no entry — never a partially written file. This uses
-  the same atomic-write primitive as the config writer
-  (see [SECURITY.md](../SECURITY.md#hardening-defaults--recommendations)).
+- **Atomic writes.** Entries are streamed to a same-directory temporary file
+  (`.jul-cache-tmp-*`), trailer-appended, fsync'd, closed, and then atomically
+  renamed over the final content-addressed name. A crash mid-write leaves either
+  the previous complete entry or a `.jul-cache-tmp-*` file that is cleaned up on
+  the next startup — never a partially written published entry.
+- **Active-reader lease safety.** Serving a disk-backed entry acquires a
+  reference-counted lease (`diskBlob`) and opens an independent file descriptor
+  before response headers are committed. If an entry is evicted, invalidated,
+  purged, or replaced while one or more readers are streaming it, the published
+  file is renamed to `.jul-cache-retired-*` in `disk_path` and unlinked only
+  when the last active reader closes its descriptor, guaranteeing cross-platform
+  reader isolation without body buffering.
 - **Restrictive permissions.** Cache files are created mode `0o600` (owner
   read/write only) and the cache directory is created mode `0o700`. A cached
   response body is never world-readable.
 - **Foreign-file safety.** Only files whose names match the content-addressed
-  scheme (64 lowercase hex characters) are indexed, served, or eligible for LRU
-  eviction. Any other file — an operator's note, a stray archive, a nested
-  directory — is **ignored and never deleted**. Their presence is logged once at
-  startup with a `WARN` so a misconfigured `disk_path` (for example, a shared
-  directory) is visible without endangering the foreign data.
+  scheme (64 lowercase hex characters) or Jul's own `.jul-cache-tmp-*` /
+  `.jul-cache-retired-*` prefixes are managed by the cache. Any other file — an
+  operator's note, a stray archive, a nested directory — is **ignored and never
+  deleted**. Their presence is logged once at startup with a `WARN` so a
+  misconfigured `disk_path` (for example, a shared directory) is visible without
+  endangering the foreign data.
 
 Even so, prefer a **dedicated** directory for `disk_path`. The cache assumes it
 owns the directory's hex-named files and may delete any of them at any time under
@@ -877,34 +904,55 @@ over budget:
   handed to the disk tier (when configured). The disk write runs **outside** the
   memory-tier lock — victims are collected under the lock and persisted after it
   is released — so a slow disk never blocks in-memory reads and writes.
-- The **disk tier** evicts whole files to stay within `disk_max_size`, removing the
-  backing file as it goes.
+- The **disk tier** evicts whole files to stay within `disk_max_size`, retiring
+  and removing the backing file as it goes. The disk store tracks both physical
+  on-disk bytes (`physBytes = sum(fileSize)`, reported by `Stats()` and
+  `jul_cache_bytes{tier="disk"}`) and logical LRU capacity charge (`curBytes`).
+  When an entry's representation body fits within `disk_max_size` (`bodyLen <= disk_max_size`)
+  and its `JULDCH02` metadata+trailer fits within the bounded metadata envelope
+  (`maxDiskMetaEnvelope = 1 MiB + 24 B`), its logical LRU capacity charge is
+  capped at `disk_max_size` so an exact-boundary object (`body == max_entry_size == disk_max_size`)
+  is cached without self-evicting while `Stats()` still reports the exact
+  physical file size on disk.
 
-An entry larger than a tier's cap is not stored in that tier. Every entry is
-first captured in memory, so **`memory_max_size` is also the largest object
-either tier can hold**: a larger `disk_max_size` does not admit bigger objects
-(decoupling them is tracked in #525).
+`[cache].max_entry_size` (defaulting to `memory_max_size` when unset or `0`)
+sets the maximum cacheable response body size (#525 Part 2):
 
-### Capture memory
+- Entries with `body <= memory_max_size` are captured in memory and stored in
+  the memory tier (and persisted to disk when `disk_path` is enabled).
+- Entries with `memory_max_size < body <= max_entry_size` (requires `disk_path`
+  and `max_entry_size <= disk_max_size`) are streamed to a temporary file under
+  `disk_path` during origin transfer — either immediately on `WriteHeader` when
+  `Content-Length > memory_max_size` or by spilling the in-memory buffer to disk
+  the instant an unknown-length response crosses `memory_max_size` — and are
+  published directly into the disk tier without entering or evicting the memory
+  tier.
+- Entries with `body > max_entry_size` are never stored and increment
+  `jul_cache_capture_skipped_total{reason="oversize"}`.
+
+### Capture memory and temporary disk budgets
 
 A cacheable miss is streamed to the client while a copy is captured for
-storage. Two bounds keep that copy from multiplying memory use (#505):
+storage. Two independent byte budgets bound concurrent captures (#505, #525 Part 2):
 
-- **Per response: `memory_max_size`.** A response that declares a larger
-  `Content-Length` is never captured. One without a length that grows past the
-  limit has its capture buffer released at that point, not when the transfer
-  ends.
-- **Across all in-flight captures: `memory_max_size` again.** Miss captures and
-  validation buffers share one byte budget equal to `memory_max_size`. A
-  response that would exceed it is streamed uncaptured and not stored. The
-  budget is returned when each response completes or is canceled.
+- **In-memory capture budget (`memory_max_size`).** Captures buffered in memory
+  (up to `memory_max_size` per response) share one byte budget equal to
+  `memory_max_size`. When a chunked response spills to disk upon crossing
+  `memory_max_size`, its in-memory buffer and memory-budget reservation are
+  released immediately.
+- **Temporary disk capture budget (`disk_max_size`).** Concurrent disk-streamed
+  captures (`> memory_max_size` up to `max_entry_size`) reserve bytes from a
+  separate temporary-disk budget bounded by `disk_max_size`. If concurrent
+  temporary files would exceed `disk_max_size`, the capture is aborted, its
+  temporary file is removed immediately, the response continues streaming to the
+  client uncaptured, and `jul_cache_capture_skipped_total{reason="budget"}` is
+  incremented.
 
-Stored entries plus in-flight captures therefore stay within twice
-`memory_max_size`. Both outcomes are counted in
+Stored memory entries plus in-flight memory captures stay within twice
+`memory_max_size`, and in-flight temporary disk captures never exceed
+`disk_max_size`. Both skip reasons (`oversize` and `budget`) are counted in
 `jul_cache_capture_skipped_total{reason="oversize"|"budget"}` and logged at
-debug level, throttled to one line per ten seconds. A steady `budget` count
-means many large cacheable misses overlap: raise `memory_max_size` or lower
-what those routes cache.
+debug level, throttled to one line per ten seconds.
 
 ## Known limitations
 
@@ -920,18 +968,19 @@ Product limitations — deliberate scope, not defects:
    workloads therefore get no cache benefit. Serving RFC-compliant single byte
    ranges from complete cached representations — with `If-Range`,
    `Content-Range` and `416`, and without multipart ranges or partial-object
-   storage — is a recorded future enhancement candidate, promoted only when
-   representative media/download workloads show material origin or latency cost.
+   storage — is a recorded future enhancement candidate (#442), promoted only
+   when representative media/download workloads show material origin or latency
+   cost.
 
 3. **No cross-process / distributed cache.** Each Jul.IA process has one
    process-scoped cache instance shared by its cache-enabled locations. There is
    no shared cache (e.g. Redis) across multiple instances; each node warms
    independently.
 
-4. **Oversized objects are never cached.** A response body larger than
-   `memory_max_size` is streamed to the client but not cached, whatever
-   `disk_max_size` is: every entry is captured in memory first (#525 tracks
-   disk-streamed capture). Each such response increments
+4. **Objects larger than `max_entry_size` are never cached.** A response body
+   larger than `max_entry_size` (which defaults to `memory_max_size` when unset,
+   and can be configured up to `disk_max_size` when `disk_path` is enabled) is
+   streamed to the client but not cached. Each such response increments
    `jul_cache_capture_skipped_total{reason="oversize"}`.
 
 Intentionally conservative behavior — correct, but stricter than the letter of
@@ -957,10 +1006,11 @@ the standard:
    oldest variant is deleted. A resource with more than 64 live variants will
    churn.
 
-10. **Mandatory validation buffers the origin's answer** rather than streaming
-    it, because the cache must see the status before deciding whether to serve
-    the stored body. An answer that exceeds `memory_max_size` or turns out to be
-    a stream costs one extra origin request, and is then streamed normally.
+10. **Mandatory validation buffers or streams the origin's answer to temporary
+    storage** before deciding whether to serve the stored body (`304`) or the
+    replacement representation (`200`). An answer that exceeds `max_entry_size`
+    or turns out to be an event stream costs one extra origin request, and is
+    then streamed normally.
 
 Lifecycle behavior:
 
@@ -1013,6 +1063,24 @@ The fixed `100x` benchtime deliberately excludes automatic calibration that
 would repeatedly rebuild the 32-variant setup. Disk overflow remains orders of
 magnitude slower than a memory hit because it performs crash-safe file I/O; the
 memory lock is released before that I/O.
+
+### Large-object disk-streaming benchmarks (#525 Part 2)
+
+Command (five fixed-iteration samples):
+
+```bash
+go test -run '^$' -bench='BenchmarkCacheLargeDisk(Capture|Hit)$' -benchmem -benchtime=100x -count=5 ./internal/cache
+```
+
+Environment: Linux 6.18.54.1-microsoft-standard-WSL2, Go 1.27.2, `linux/arm64`,
+Qualcomm Oryon (12 cores), `GOMAXPROCS=12`, on the `#525 Part 2` implementation
+branch (PR #617). Values below are the five-sample medians (`ns/op`, `allocs/op`,
+`bytes/op`):
+
+| Benchmark | Scenario | Median ns/op | allocs/op | bytes/op |
+| --- | --- | ---: | ---: | ---: |
+| `BenchmarkCacheLargeDiskCapture` | 4 MiB cold-miss disk-streamed capture (`memory_max_size = 64 KiB`, `max_entry_size = 8 MiB`) | 22,536,279 | 380 | 27,530 |
+| `BenchmarkCacheLargeDiskHit` | 4 MiB warm disk-streamed hit (32 KiB pooled chunk copy) | 20,810,422 | 281 | 14,281 |
 
 ## Threat note
 

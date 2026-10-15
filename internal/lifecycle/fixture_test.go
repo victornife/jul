@@ -347,6 +347,7 @@ func fullConfig() *config.Config {
 			MemoryMaxSize:        config.Size(64 << 20),
 			DiskPath:             "./jul-data/cache",
 			DiskMaxSize:          config.Size(1 << 30),
+			MaxEntrySize:         config.Size(256 << 20),
 			DefaultTTL:           config.Duration(300 * time.Second),
 			StaleWhileRevalidate: config.Duration(60 * time.Second),
 			StaleIfError:         config.Duration(300 * time.Second),

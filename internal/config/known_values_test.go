@@ -129,6 +129,23 @@ func TestValidateRejectsInvalidCacheCompressionAndAdminScalars(t *testing.T) {
 		{"cache sie", func(c *Config) { c.Cache.StaleIfError = -1 }, `[cache].stale_if_error`},
 		{"cache lock timeout negative", func(c *Config) { c.Cache.Lock = true; c.Cache.LockTimeout = -1 }, `[cache].lock_timeout`},
 		{"cache lock timeout without lock", func(c *Config) { c.Cache.Lock = false; c.Cache.LockTimeout = Duration(time.Second) }, `[cache].lock_timeout`},
+		{"cache max entry negative", func(c *Config) { c.Cache.MaxEntrySize = -1 }, `[cache].max_entry_size`},
+		{"cache max entry exceeds memory without disk", func(c *Config) {
+			c.Cache.MemoryMaxSize = Size(1 << 20)
+			c.Cache.MaxEntrySize = Size(2 << 20)
+		}, `[cache].max_entry_size`},
+		{"cache max entry exceeds default memory without disk", func(c *Config) {
+			c.Cache.MaxEntrySize = Size(128 << 20)
+		}, `[cache].max_entry_size`},
+		{"cache max entry exceeds disk", func(c *Config) {
+			c.Cache.DiskPath = "/var/cache/jul"
+			c.Cache.DiskMaxSize = Size(10 << 20)
+			c.Cache.MaxEntrySize = Size(20 << 20)
+		}, `[cache].max_entry_size`},
+		{"cache max entry exceeds default disk", func(c *Config) {
+			c.Cache.DiskPath = "/var/cache/jul"
+			c.Cache.MaxEntrySize = Size(1 << 30)
+		}, `[cache].max_entry_size`},
 		{"compression min size", func(c *Config) { c.Compression = CompressionConfig{Enabled: Bool(false), MinSize: -1} }, `[compression].min_size`},
 		{"history keep disabled admin", func(c *Config) { c.Admin.HistoryKeep = -1 }, `[admin].history_keep`},
 		{"event connections", func(c *Config) { c.Admin.MaxEventConns = -1 }, `[admin].max_event_conns`},

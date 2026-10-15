@@ -19,17 +19,30 @@ type CachePolicy struct {
 	DefaultTTL           time.Duration
 	StaleWhileRevalidate time.Duration
 	StaleIfError         time.Duration
-	// MaxEntryBytes caps how much of one response body fetchAndStore/the
-	// revalidation recorder buffers for storage. It is deliberately coupled to
-	// MemoryMaxSize: the schema has no separate per-entry limit field, and
-	// decoupling it would be a new capability, not a hot-reload of an existing
-	// one (#92 scope item 5 — characterized, not changed).
+	// MemoryMaxBytes is the in-memory tier cap and in-flight memory capture
+	// budget ceiling (#505).
+	MemoryMaxBytes int64
+	// MaxEntryBytes caps the maximum cacheable response body size across both
+	// tiers (#525 Part 2, ADR 0023). When [cache].max_entry_size is omitted or
+	// zero, it defaults to MemoryMaxBytes.
 	MaxEntryBytes int64
 	// Lock enables per-key cold-miss fill coalescing (#525 Part 1).
 	Lock bool
 	// LockTimeout bounds how long a cold-miss waiter blocks for an active fill
 	// leader before falling through to an uncached origin fetch.
 	LockTimeout time.Duration
+}
+
+// MemoryCapBytes returns the largest response body that may be captured in
+// memory and stored in the memory tier under this policy.
+func (p CachePolicy) MemoryCapBytes() int64 {
+	if p.MemoryMaxBytes <= 0 {
+		return p.MaxEntryBytes
+	}
+	if p.MaxEntryBytes > 0 && p.MaxEntryBytes < p.MemoryMaxBytes {
+		return p.MaxEntryBytes
+	}
+	return p.MemoryMaxBytes
 }
 
 const defaultLockTimeout = 5 * time.Second
@@ -39,11 +52,17 @@ func policyFromConfig(cfg config.CacheConfig) CachePolicy {
 	if cfg.Lock && lockTimeout <= 0 {
 		lockTimeout = defaultLockTimeout
 	}
+	memMax := cfg.MemoryMaxSize.Bytes()
+	maxEntry := cfg.MaxEntrySize.Bytes()
+	if maxEntry <= 0 {
+		maxEntry = memMax
+	}
 	return CachePolicy{
 		DefaultTTL:           cfg.DefaultTTL.Std(),
 		StaleWhileRevalidate: cfg.StaleWhileRevalidate.Std(),
 		StaleIfError:         cfg.StaleIfError.Std(),
-		MaxEntryBytes:        cfg.MemoryMaxSize.Bytes(),
+		MemoryMaxBytes:       memMax,
+		MaxEntryBytes:        maxEntry,
 		Lock:                 cfg.Lock,
 		LockTimeout:          lockTimeout,
 	}

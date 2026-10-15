@@ -5,6 +5,7 @@ package cache
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"time"
 
@@ -67,8 +68,9 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		call.finish(nil, outcomeCanceled, context.Canceled)
 	}()
 
-	rec := &recorder{header: http.Header{}, limit: c.Policy().MaxEntryBytes, acct: c.newCaptureAccount()}
-	defer rec.acct.release()
+	pol := c.Policy()
+	rec := c.newRecorder(pol)
+	defer rec.releaseCapture()
 	next.ServeHTTP(rec, conditionalRequest(r.Clone(vctx), stored))
 	now := c.clock()
 
@@ -83,7 +85,9 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		}
 		c.set(k.key, refreshed)
 		c.finishValidation(call, refreshed, outcomeNotModified)
-		c.serve(w, r, refreshed, stateRevalidated, now)
+		if !c.serve(w, r, refreshed, stateRevalidated, now) {
+			c.fetchAndStore(w, r, next, c.clock())
+		}
 
 	case rec.status >= 500:
 		// Validation failed. Serving the stored copy anyway is only permitted by
@@ -94,15 +98,18 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 			refreshed.StaleUntil = now.Add(sie)
 			c.set(k.key, refreshed)
 			c.finishValidation(call, refreshed, outcomeOriginError)
-			c.serve(w, r, refreshed, stateStale, now)
-			return
+			if c.serve(w, r, refreshed, stateStale, now) {
+				return
+			}
 		}
 		c.finishValidation(call, nil, outcomeOriginError)
-		writeRecorded(w, r, rec, stateMiss)
+		if !writeRecorded(w, r, rec, nil, stateMiss) {
+			c.fetchAndStore(w, r, next, c.clock())
+		}
 
 	case !rec.storable():
 		// The origin's answer could not be buffered whole — it exceeded
-		// memory_max_size, or it is a stream. The captured bytes are incomplete,
+		// max_entry_size, or it is a stream. The captured bytes are incomplete,
 		// so they must not be sent. Re-fetch and stream instead: one extra
 		// origin request, bounded to this path, in exchange for never
 		// truncating a response.
@@ -111,17 +118,21 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		c.fetchAndStore(w, r, next, c.clock())
 
 	default:
-		e := c.buildEntry(r, rec.status, rec.header, rec.body.Bytes(), now)
-		if e == nil {
+		e := c.buildEntryFromCapture(r, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
+		if e == nil || !c.storeCaptured(key(r), r, e, rec.diskStream) {
 			// The origin replaced the representation with one that must not be
 			// stored. The old copy described something that no longer exists.
 			c.Delete(k.key)
 			c.finishValidation(call, nil, outcomeUncacheable)
+			if !writeRecorded(w, r, rec, nil, stateMiss) {
+				c.fetchAndStore(w, r, next, c.clock())
+			}
 		} else {
-			c.store(key(r), r, e)
 			c.finishValidation(call, e, outcomeStored)
+			if !writeRecorded(w, r, rec, e, stateMiss) {
+				c.fetchAndStore(w, r, next, c.clock())
+			}
 		}
-		writeRecorded(w, r, rec, stateMiss)
 	}
 }
 
@@ -138,13 +149,15 @@ func (c *Cache) awaitValidation(w http.ResponseWriter, r *http.Request, next htt
 	if entry != nil && validatedReusable(entry, r) {
 		switch outcome {
 		case outcomeNotModified, outcomeStored:
-			c.serve(w, r, entry, stateRevalidated, c.clock())
-			return
+			if c.serve(w, r, entry, stateRevalidated, c.clock()) {
+				return
+			}
 		case outcomeOriginError:
 			// The leader's stale-if-error decision already applied the policy
 			// this entry carries; a waiter inherits it rather than re-deciding.
-			c.serve(w, r, entry, stateStale, c.clock())
-			return
+			if c.serve(w, r, entry, stateStale, c.clock()) {
+				return
+			}
 		}
 	}
 	// Origin error without a servable entry, uncacheable, canceled, panic, or a
@@ -167,8 +180,33 @@ func (c *Cache) finishValidation(call *revalidateCall, e *Entry, outcome revalid
 	c.observeRevalidation(outcome)
 }
 
-// writeRecorded forwards a buffered origin response to the client.
-func writeRecorded(w http.ResponseWriter, r *http.Request, rec *recorder, state string) {
+func openRecordedDiskBody(rec *recorder, published *Entry) (io.ReadCloser, bool) {
+	if published != nil && published.diskBody != nil {
+		if br, err := published.OpenBody(); err == nil {
+			return br, true
+		}
+	}
+	if rec.diskStream != nil {
+		return openStreamBody(rec.diskStream, rec.bodyLen)
+	}
+	return nil, false
+}
+
+// writeRecorded forwards a buffered or disk-captured origin response to the
+// client. When the response was captured to disk and no readable body handle
+// can be opened, it returns false before committing response headers so the
+// caller can fall back to streaming from the origin.
+func writeRecorded(w http.ResponseWriter, r *http.Request, rec *recorder, published *Entry, state string) bool {
+	var diskBody io.ReadCloser
+	if r.Method != http.MethodHead && (rec.diskStream != nil || (published != nil && published.diskBody != nil)) {
+		var ok bool
+		diskBody, ok = openRecordedDiskBody(rec, published)
+		if !ok {
+			return false
+		}
+		defer func() { _ = diskBody.Close() }()
+	}
+
 	h := w.Header()
 	// Set on the first value, Add on the rest — see the identical rule in
 	// Cache.serve: a multi-value field still reproduces in full, but a
@@ -190,6 +228,10 @@ func writeRecorded(w http.ResponseWriter, r *http.Request, rec *recorder, state 
 	}
 	w.WriteHeader(status)
 	if r.Method != http.MethodHead {
+		if diskBody != nil {
+			_, _ = copyWithPooledBuffer(w, diskBody)
+			return true
+		}
 		// lgtm[go/reflected-xss] – This forwards the upstream response body
 		// unchanged, together with its own Content-Type. User input flows to the
 		// upstream application, which is responsible for sanitizing any output it
@@ -197,4 +239,5 @@ func writeRecorded(w http.ResponseWriter, r *http.Request, rec *recorder, state 
 		// does not make the cache the origin of the bytes.
 		_, _ = w.Write(rec.body.Bytes())
 	}
+	return true
 }

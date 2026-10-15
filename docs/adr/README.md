@@ -41,6 +41,7 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
 | [0021](0021-consistent-hash-affinity.md) | Deterministic consistent-hash affinity (`rendezvous_v1`) | Accepted | 2026-09-26 |
 
 | [0022](0022-admin-console-oidc.md) | External Console OIDC through existing Jul RBAC | Accepted — Beta/unreleased | 2026-10-15 |
+| [0023](0023-large-object-disk-streamed-cache.md) | Large-object disk-streamed cache and random-access body contract | Accepted — Beta/unreleased | 2026-10-15 |
 
 ## Reading order
 

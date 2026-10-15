@@ -7,6 +7,7 @@
 package cache
 
 import (
+	"bytes"
 	"maps"
 	"net/http"
 	"time"
@@ -26,6 +27,9 @@ type Entry struct {
 	Status int
 	Header http.Header
 	Body   []byte
+	// diskBody is non-nil when the entry's payload lives in a reference-counted
+	// on-disk cache file rather than in Body (#525 Part 2, ADR 0023).
+	diskBody *diskBlob
 
 	CreatedAt  time.Time
 	ExpiresAt  time.Time // end of freshness
@@ -110,6 +114,33 @@ func (e *Entry) Clone() *Entry {
 		cp.Variants = append([]string(nil), e.Variants...)
 	}
 	return &cp
+}
+
+// BodyLen returns the stored representation's body length in bytes, whether
+// the payload is held in memory or on disk.
+func (e *Entry) BodyLen() int64 {
+	if e == nil {
+		return 0
+	}
+	if e.diskBody != nil {
+		return e.diskBody.bodyLen
+	}
+	return int64(len(e.Body))
+}
+
+// IsDiskBacked reports whether the entry streams its payload from the disk tier
+// rather than holding it in Body.
+func (e *Entry) IsDiskBacked() bool {
+	return e != nil && e.diskBody != nil
+}
+
+// OpenBody acquires a leased BodyReader over the entry's representation bytes.
+// Callers must always Close the returned reader.
+func (e *Entry) OpenBody() (BodyReader, error) {
+	if e.diskBody != nil {
+		return e.diskBody.openReader()
+	}
+	return memBodyReader{Reader: bytes.NewReader(e.Body)}, nil
 }
 
 // Size estimates the entry's memory footprint in bytes.

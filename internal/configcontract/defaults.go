@@ -140,6 +140,7 @@ var ConditionalDefaultOverrides = map[string]string{
 	"admin.oidc.clock_skew":       "60s (when admin.oidc.enabled)",
 	"admin.console":               "true (when admin.enabled)",
 	"cache.lock_timeout":          "5s (when cache.lock)",
+	"cache.max_entry_size":        "memory_max_size (when cache.enabled)",
 }
 
 // DefaultFor returns the documented unconditional default for path, as

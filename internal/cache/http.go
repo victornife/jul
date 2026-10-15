@@ -105,12 +105,17 @@ func declaredLength(h http.Header) int64 {
 // take Hijack away from a WebSocket upgrade, nor invent it on HTTP/2.
 type cacheWriter struct {
 	http.ResponseWriter
-	status      int
-	wroteHeader bool
-	buf         bytes.Buffer
-	limit       int64
-	tooBig      bool
-	acct        captureAccount
+	status         int
+	wroteHeader    bool
+	buf            bytes.Buffer
+	limit          int64
+	memLimit       int64
+	memBudgetLimit int64
+	bodyLen        int64
+	disk           *diskStore
+	diskStream     *diskStreamCapture
+	tooBig         bool
+	acct           captureAccount
 	// noStore marks a response that can never be stored whatever its headers
 	// say: the connection was hijacked, the status is a protocol switch, or the
 	// body is a live event stream.
@@ -137,9 +142,31 @@ type cacheWriter struct {
 	entrySnapshot http.Header
 }
 
+func (w *cacheWriter) effMemLimit() int64 {
+	if w.memLimit > 0 && w.memLimit < w.limit {
+		return w.memLimit
+	}
+	return w.limit
+}
+
+func (w *cacheWriter) effMemBudgetLimit() int64 {
+	if w.memBudgetLimit > 0 {
+		return w.memBudgetLimit
+	}
+	return w.effMemLimit()
+}
+
 func (w *cacheWriter) notifyAbandon() {
 	if w.onAbandon != nil {
 		w.onAbandon()
+	}
+}
+
+func (w *cacheWriter) releaseCapture() {
+	w.acct.release()
+	if w.diskStream != nil {
+		w.disk.abortStream(w.diskStream)
+		w.diskStream = nil
 	}
 }
 
@@ -149,21 +176,98 @@ func (w *cacheWriter) notifyAbandon() {
 func (w *cacheWriter) dropCapture() {
 	w.noStore = true
 	w.buf = bytes.Buffer{}
-	w.acct.release()
+	w.releaseCapture()
 	w.notifyAbandon()
 }
 
 // abandonCapture stops buffering a response that will not be stored and frees
-// its buffer now, not when the (possibly long) response finally ends.
+// its buffer or temporary file now, not when the (possibly long) response
+// finally ends.
 func (w *cacheWriter) abandonCapture(reason string) {
 	w.tooBig = true
 	w.buf = bytes.Buffer{}
+	if w.diskStream != nil {
+		w.disk.abortStream(w.diskStream)
+		w.diskStream = nil
+	}
 	w.acct.skip(reason)
 	w.notifyAbandon()
 }
 
 // storable reports whether the captured response may be considered for storage.
 func (w *cacheWriter) storable() bool { return !w.noStore && !w.tooBig }
+
+func captureInitDiskStream(cl, memLimit int64, disk *diskStore, onSkip func(string), diskStream **diskStreamCapture, abandon func(string), drop func()) {
+	if cl <= memLimit {
+		return
+	}
+	if disk == nil {
+		abandon(captureSkipOversize)
+		return
+	}
+	stream := disk.beginStreamCapture(onSkip)
+	if stream == nil {
+		drop()
+		return
+	}
+	*diskStream = stream
+}
+
+func captureWriteChunk(
+	p []byte,
+	buf *bytes.Buffer,
+	bodyLen *int64,
+	limit, memLimit, memBudgetLimit int64,
+	disk *diskStore,
+	acct *captureAccount,
+	diskStream **diskStreamCapture,
+	abandon func(string),
+	drop func(),
+) {
+	switch {
+	case *bodyLen+int64(len(p)) > limit:
+		abandon(captureSkipOversize)
+	case *diskStream != nil:
+		if ok, reason := disk.writeStream(*diskStream, p); !ok {
+			if reason != "" {
+				abandon(reason)
+			} else {
+				drop()
+			}
+		} else {
+			*bodyLen += int64(len(p))
+		}
+	case *bodyLen+int64(len(p)) > memLimit:
+		if disk == nil {
+			abandon(captureSkipOversize)
+			return
+		}
+		prior := buf.Bytes()
+		*buf = bytes.Buffer{}
+		acct.release()
+		stream := disk.beginStreamCapture(acct.onSkip)
+		if stream == nil {
+			drop()
+			return
+		}
+		if ok, wReason := disk.writeStream(stream, prior, p); !ok {
+			disk.abortStream(stream)
+			if wReason != "" {
+				abandon(wReason)
+			} else {
+				drop()
+			}
+			return
+		}
+		*diskStream = stream
+		*bodyLen += int64(len(p))
+	case !acct.grow(len(p), memBudgetLimit):
+		abandon(captureSkipBudget)
+	default:
+		buf.Write(p)
+		*bodyLen += int64(len(p))
+	}
+}
 
 func (w *cacheWriter) WriteHeader(code int) {
 	if w.wroteHeader || w.hijacked {
@@ -190,16 +294,19 @@ func (w *cacheWriter) WriteHeader(code int) {
 	// the handler ran, so a pre-set field is never mistaken for one the handler
 	// contributed.
 	w.snapshot = headerDifference(w.Header(), w.entrySnapshot)
+	cl := declaredLength(w.Header())
 	// A 1xx status is an interim or protocol-switch response, not a
 	// representation; 101 in particular means the connection is leaving HTTP.
 	// An event stream never ends, so capturing it would only grow a buffer that
 	// is discarded at the size limit.
 	if code < http.StatusOK || isEventStream(w.Header()) {
 		w.dropCapture()
-	} else if !w.noStore && declaredLength(w.Header()) > w.limit {
+	} else if !w.noStore && cl > w.limit {
 		w.abandonCapture(captureSkipOversize)
 	} else if w.headerCheck != nil && !w.headerCheck(code, w.snapshot) {
-		w.notifyAbandon()
+		w.dropCapture()
+	} else if !w.noStore {
+		captureInitDiskStream(cl, w.effMemLimit(), w.disk, w.acct.onSkip, &w.diskStream, w.abandonCapture, w.dropCapture)
 	}
 	w.ResponseWriter.WriteHeader(code)
 }
@@ -211,15 +318,8 @@ func (w *cacheWriter) Write(p []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
-	if !w.tooBig && !w.noStore {
-		switch {
-		case int64(w.buf.Len()+len(p)) > w.limit:
-			w.abandonCapture(captureSkipOversize)
-		case !w.acct.grow(len(p), w.limit):
-			w.abandonCapture(captureSkipBudget)
-		default:
-			w.buf.Write(p)
-		}
+	if !w.tooBig && !w.noStore && len(p) > 0 {
+		captureWriteChunk(p, &w.buf, &w.bodyLen, w.limit, w.effMemLimit(), w.effMemBudgetLimit(), w.disk, &w.acct, &w.diskStream, w.abandonCapture, w.dropCapture)
 	}
 	n, err := w.ResponseWriter.Write(p)
 	if err != nil && !errors.Is(err, http.ErrBodyNotAllowed) {
@@ -311,15 +411,42 @@ func isUpgradeRequest(r *http.Request) bool {
 // streaming capture writer, so a revalidation cannot store — or buffer — a
 // response the foreground path would have refused.
 type recorder struct {
-	header http.Header
-	status int
-	body   bytes.Buffer
-	limit  int64
-	tooBig bool
-	acct   captureAccount
+	header         http.Header
+	status         int
+	body           bytes.Buffer
+	limit          int64
+	memLimit       int64
+	memBudgetLimit int64
+	bodyLen        int64
+	disk           *diskStore
+	diskStream     *diskStreamCapture
+	tooBig         bool
+	acct           captureAccount
 	// noStore marks a response that can never be stored whatever its headers
 	// say: an interim/protocol-switch status, or a live event stream.
 	noStore bool
+}
+
+func (r *recorder) effMemLimit() int64 {
+	if r.memLimit > 0 && r.memLimit < r.limit {
+		return r.memLimit
+	}
+	return r.limit
+}
+
+func (r *recorder) effMemBudgetLimit() int64 {
+	if r.memBudgetLimit > 0 {
+		return r.memBudgetLimit
+	}
+	return r.effMemLimit()
+}
+
+func (r *recorder) releaseCapture() {
+	r.acct.release()
+	if r.diskStream != nil {
+		r.disk.abortStream(r.diskStream)
+		r.diskStream = nil
+	}
 }
 
 func (r *recorder) Header() http.Header {
@@ -327,6 +454,12 @@ func (r *recorder) Header() http.Header {
 		r.header = http.Header{}
 	}
 	return r.header
+}
+
+func (r *recorder) dropCapture() {
+	r.noStore = true
+	r.body = bytes.Buffer{}
+	r.releaseCapture()
 }
 
 func (r *recorder) WriteHeader(code int) {
@@ -340,15 +473,16 @@ func (r *recorder) WriteHeader(code int) {
 		return
 	}
 	r.status = code
+	cl := declaredLength(r.Header())
 	// A 1xx is an interim or protocol-switch response, not a representation, and
 	// an event stream never ends — buffering one would grow to the size limit
 	// before being discarded.
 	if code < http.StatusOK || isEventStream(r.Header()) {
-		r.noStore = true
-		r.body = bytes.Buffer{}
-		r.acct.release()
-	} else if declaredLength(r.Header()) > r.limit {
+		r.dropCapture()
+	} else if cl > r.limit {
 		r.abandon(captureSkipOversize)
+	} else {
+		captureInitDiskStream(cl, r.effMemLimit(), r.disk, r.acct.onSkip, &r.diskStream, r.abandon, r.dropCapture)
 	}
 }
 
@@ -356,6 +490,10 @@ func (r *recorder) WriteHeader(code int) {
 func (r *recorder) abandon(reason string) {
 	r.tooBig = true
 	r.body = bytes.Buffer{}
+	if r.diskStream != nil {
+		r.disk.abortStream(r.diskStream)
+		r.diskStream = nil
+	}
 	r.acct.skip(reason)
 }
 
@@ -363,15 +501,8 @@ func (r *recorder) Write(p []byte) (int, error) {
 	if r.status == 0 {
 		r.WriteHeader(http.StatusOK)
 	}
-	if !r.tooBig && !r.noStore {
-		switch {
-		case int64(r.body.Len()+len(p)) > r.limit:
-			r.abandon(captureSkipOversize)
-		case !r.acct.grow(len(p), r.limit):
-			r.abandon(captureSkipBudget)
-		default:
-			r.body.Write(p)
-		}
+	if !r.tooBig && !r.noStore && len(p) > 0 {
+		captureWriteChunk(p, &r.body, &r.bodyLen, r.limit, r.effMemLimit(), r.effMemBudgetLimit(), r.disk, &r.acct, &r.diskStream, r.abandon, r.dropCapture)
 	}
 	return len(p), nil
 }
