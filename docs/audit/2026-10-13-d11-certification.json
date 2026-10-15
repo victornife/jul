@@ -4418,11 +4418,11 @@
         "internal/admin/apiv1_status_test.go",
         "internal/admin/apply_concurrency_legacy_test.go",
         "internal/admin/apply_concurrency_test.go",
-        "internal/admin/assets/dist/assets/CodeEditor-B-y7hQIU.js",
-        "internal/admin/assets/dist/assets/CodeEditor-B-y7hQIU.js.map",
+        "internal/admin/assets/dist/assets/CodeEditor-DoKS9Y0y.js",
+        "internal/admin/assets/dist/assets/CodeEditor-DoKS9Y0y.js.map",
         "internal/admin/assets/dist/assets/index-BBFvT2bh.css",
-        "internal/admin/assets/dist/assets/index-B126UQtA.js",
-        "internal/admin/assets/dist/assets/index-B126UQtA.js.map",
+        "internal/admin/assets/dist/assets/index-KNB4enS7.js",
+        "internal/admin/assets/dist/assets/index-KNB4enS7.js.map",
         "internal/admin/assets/dist/assets/query-BdSLN-Ub.js",
         "internal/admin/assets/dist/assets/query-BdSLN-Ub.js.map",
         "internal/admin/assets/dist/assets/rolldown-runtime-Bh1tDfsg.js",
@@ -4887,12 +4887,12 @@
       ],
       "open_defects": [],
       "establishing_pr": "https://github.com/victornife/jul/pull/604",
-      "path_reconciliation": "Four original content-hashed embedded asset paths were renamed by the established Console build in selected repair PR597. Full original expansion remains in frozen JSON; all other original paths are retained. Explicit old-to-new mapping below; no wildcard or denominator narrowing.",
+      "path_reconciliation": "Four original content-hashed embedded asset paths were renamed by the established Console build in selected repair PR597. Full original expansion remains in frozen JSON; all other original paths are retained. Explicit old-to-new mapping below; no wildcard or denominator narrowing. PR615 subsequently rebuilds these four artifacts for the OIDC Console change; the current mapping follows the original paths through PR597 to the PR615 artifact names. This reconciles paths only and does not certify the new OIDC implementation under the historical D11 review.",
       "path_changes": {
-        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js": "internal/admin/assets/dist/assets/CodeEditor-B-y7hQIU.js",
-        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js.map": "internal/admin/assets/dist/assets/CodeEditor-B-y7hQIU.js.map",
-        "internal/admin/assets/dist/assets/index-CTCwXmN5.js": "internal/admin/assets/dist/assets/index-B126UQtA.js",
-        "internal/admin/assets/dist/assets/index-CTCwXmN5.js.map": "internal/admin/assets/dist/assets/index-B126UQtA.js.map"
+        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js": "internal/admin/assets/dist/assets/CodeEditor-DoKS9Y0y.js",
+        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js.map": "internal/admin/assets/dist/assets/CodeEditor-DoKS9Y0y.js.map",
+        "internal/admin/assets/dist/assets/index-CTCwXmN5.js": "internal/admin/assets/dist/assets/index-KNB4enS7.js",
+        "internal/admin/assets/dist/assets/index-CTCwXmN5.js.map": "internal/admin/assets/dist/assets/index-KNB4enS7.js.map"
       },
       "resolved_defects": [
         {
@@ -4910,7 +4910,18 @@
           "status": "merged; issue closed/completed"
         }
       ],
-      "review_verdict_boundary": "Original area-source review verdict retained; linked defects repaired by subsequent approved corrective sources. Resolved records do not relabel the original failing execution as a pass."
+      "review_verdict_boundary": "Original area-source review verdict retained; linked defects repaired by subsequent approved corrective sources. Resolved records do not relabel the original failing execution as a pass.",
+      "subsequent_asset_rebuilds": [
+        {
+          "pr": "https://github.com/victornife/jul/pull/615",
+          "path_changes": {
+            "internal/admin/assets/dist/assets/CodeEditor-B-y7hQIU.js": "internal/admin/assets/dist/assets/CodeEditor-DoKS9Y0y.js",
+            "internal/admin/assets/dist/assets/CodeEditor-B-y7hQIU.js.map": "internal/admin/assets/dist/assets/CodeEditor-DoKS9Y0y.js.map",
+            "internal/admin/assets/dist/assets/index-B126UQtA.js": "internal/admin/assets/dist/assets/index-KNB4enS7.js",
+            "internal/admin/assets/dist/assets/index-B126UQtA.js.map": "internal/admin/assets/dist/assets/index-KNB4enS7.js.map"
+          }
+        }
+      ]
     },
     {
       "id": "D11-105",

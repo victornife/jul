@@ -11,8 +11,20 @@ concurrency:
   group: admin-oidc-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  keycloak:
+    name: OIDC pinned Keycloak integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Real pinned Keycloak Code + PKCE, mapping, logout and outage
+        run: scripts/admin-oidc-keycloak.sh
   provider-and-browser:
-    name: OIDC pinned Keycloak and browser
+    name: OIDC coverage and browser
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -30,8 +42,6 @@ jobs:
         run: npm install -g pnpm@11.8.0
       - name: Install Console dependencies
         run: pnpm --dir internal/admin/ui install --frozen-lockfile
-      - name: Real pinned Keycloak Code + PKCE, mapping and local logout
-        run: scripts/admin-oidc-keycloak.sh
       - name: Focused race and bounded session stress
         run: go test -race -count=1 ./internal/adminoidc ./internal/auth ./internal/admin ./internal/rbac ./internal/config ./internal/lifecycle
       - name: OIDC package statement coverage
@@ -57,16 +67,16 @@ jobs:
           pnpm --dir internal/admin/ui run lint
           pnpm --dir internal/admin/ui run test:coverage
           pnpm --dir internal/admin/ui run build
+      - name: Install Chromium
+        run: pnpm --dir internal/admin/ui exec playwright install chromium
+      - name: Real-admin fake-provider browser flow
+        run: pnpm --dir internal/admin/ui exec playwright test --config=playwright.oidc.config.ts
       - name: Upload Console coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5
         with:
           files: internal/admin/ui/coverage/lcov.info
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
-      - name: Install Chromium
-        run: pnpm --dir internal/admin/ui exec playwright install --with-deps chromium
-      - name: Real-admin fake-provider browser flow
-        run: pnpm --dir internal/admin/ui exec playwright test --config=playwright.oidc.config.ts
       - name: Retain coverage and browser evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

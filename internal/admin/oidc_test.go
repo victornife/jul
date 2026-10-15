@@ -9,6 +9,8 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -34,7 +36,8 @@ func TestOIDCAdminFlowRBACReloadAndAudit(t *testing.T) {
 	}
 	defer provider.Close()
 	cfg := config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090", Token: strings.Repeat("r", 32), RBAC: config.AdminRBACConfig{Enabled: true}}
-	s := New(cfg, testLogger(t), Deps{OIDCClient: provider.Server.Client(), Cache: &fakePurger{}})
+	loginOutcomes := make(chan string, 8)
+	s := New(cfg, testLogger(t), Deps{OIDCClient: provider.Server.Client(), Cache: &fakePurger{}, ObserveOIDCLogin: func(result string) { loginOutcomes <- result }})
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 	cfg.OIDC = config.AdminOIDCConfig{Enabled: true, Issuer: provider.URL(), ClientID: "jul", CallbackURL: srv.URL + "/auth/oidc/callback", Subjects: []config.AdminOIDCSubject{{Subject: "operator-1", Principal: "alice", Role: "viewer"}}}
@@ -69,6 +72,17 @@ func TestOIDCAdminFlowRBACReloadAndAudit(t *testing.T) {
 	if json.NewDecoder(me.Body).Decode(&id) != nil || id.Principal != "alice" || id.Role != "viewer" || id.Authentication != "oidc" || id.SessionExpiresAt == nil {
 		t.Fatalf("identity: %+v", id)
 	}
+	status := call("GET", "/auth/oidc/status", nil)
+	var advertised struct {
+		Enabled bool   `json:"enabled"`
+		Name    string `json:"provider_name"`
+	}
+	if json.NewDecoder(status.Body).Decode(&advertised) != nil || !advertised.Enabled || advertised.Name != "OpenID Connect" {
+		t.Fatal("enabled sign-in configuration missing")
+	}
+	if <-loginOutcomes != "allow" {
+		t.Fatal("unbounded login metric result")
+	}
 	csrf := map[string]string{"Origin": srv.URL, "X-Jul-Console": "1"}
 	if got := call("POST", "/api/config/apply", csrf).StatusCode; got != 403 {
 		t.Fatalf("viewer bypass: %d", got)
@@ -83,7 +97,11 @@ func TestOIDCAdminFlowRBACReloadAndAudit(t *testing.T) {
 	bad := cfg
 	bad.PluginUploadEnabled = boolPtr(true)
 	bad.PluginUploadMaxSize = 1
-	bad.PluginUploadDir = "/dev/null/unusable"
+	blockedParent := filepath.Join(t.TempDir(), "regular-file")
+	if err := os.WriteFile(blockedParent, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bad.PluginUploadDir = filepath.Join(blockedParent, "unusable")
 	if _, err := s.PrepareAdminRuntime(bad, PrepareAuth(bad, pol)); err == nil {
 		t.Fatal("invalid candidate accepted")
 	}
@@ -173,6 +191,32 @@ func TestOIDCAdminFlowRBACReloadAndAudit(t *testing.T) {
 		s.CommitPreparedAdminRuntime(prepared)
 	}
 	requests.Wait()
+	start = call("POST", "/auth/oidc/login", map[string]string{"Origin": srv.URL})
+	authorize = call("GET", start.Header.Get("Location"), nil)
+	if call("GET", authorize.Header.Get("Location"), nil).Header.Get("Location") != "/" {
+		t.Fatal("post-reload sign-in")
+	}
+	if got := call("POST", "/auth/oidc/logout", csrf).StatusCode; got != 204 {
+		t.Fatalf("session logout failed: %d", got)
+	}
+	if call("GET", "/api/admin/me", nil).StatusCode != 401 {
+		t.Fatal("logged-out session remained authoritative")
+	}
+	if call("GET", "/auth/oidc/callback?state=invalid&code=invalid", nil).Header.Get("Location") != "/?oidc_error=login_failed" {
+		t.Fatal("malformed callback admitted")
+	}
+	if <-loginOutcomes != "allow" || <-loginOutcomes != "allow" || <-loginOutcomes != "deny" {
+		t.Fatal("login metrics do not use bounded allow/deny results")
+	}
+	foundLogout := false
+	for _, ev := range s.audit.snapshot("", "", 100) {
+		if ev.Operation == "admin.oidc.logout" {
+			foundLogout = ev.Actor == "alice" && ev.TokenID == id.TokenID && ev.Result == "success"
+		}
+	}
+	if !foundLogout {
+		t.Fatal("local logout lost stable audit attribution")
+	}
 	local := &http.Client{}
 	req, _ := http.NewRequest("GET", srv.URL+"/api/admin/me", nil)
 	req.Header.Set("Authorization", "Bearer "+cfg.Token)

@@ -44,7 +44,7 @@ func DefaultAdminOIDC(o *AdminOIDCConfig) {
 // exactly localhost; remote providers and callbacks always require HTTPS.
 func OIDCURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
-	if err != nil || len(raw) > 2048 || u == nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+	if err != nil || len(raw) > 2048 || u == nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "#") || u.Opaque != "" {
 		return nil, fmt.Errorf("OIDC URL must be absolute without credentials, query or fragment")
 	}
 	ip := net.ParseIP(u.Hostname())
@@ -100,7 +100,7 @@ func validateAdminOIDC(a AdminConfig) []error {
 	}
 	seen := map[string]bool{}
 	for _, scope := range o.Scopes {
-		if scope == "" || len(scope) > 128 || strings.ContainsAny(scope, " \t\r\n\x00") || scope == "offline_access" || seen[scope] {
+		if !validOIDCScope(scope) || scope == "offline_access" || seen[scope] {
 			bad("scopes must be unique bounded values without offline_access")
 		}
 		seen[scope] = true
@@ -127,4 +127,17 @@ func validateAdminOIDC(a AdminConfig) []error {
 		seen[m.Group] = true
 	}
 	return errs
+}
+
+// RFC 6749 scope-token permits printable ASCII except quote and backslash.
+func validOIDCScope(scope string) bool {
+	if scope == "" || len(scope) > 128 {
+		return false
+	}
+	for _, c := range scope {
+		if c < 0x21 || c > 0x7e || c == '"' || c == '\\' {
+			return false
+		}
+	}
+	return true
 }

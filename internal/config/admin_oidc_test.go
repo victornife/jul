@@ -37,6 +37,12 @@ func TestAdminOIDCValidation(t *testing.T) {
 		{"scopes", func(a *AdminConfig) { a.OIDC.Scopes = []string{"profile"} }},
 		{"refresh", func(a *AdminConfig) { a.OIDC.Scopes = []string{"openid", "offline_access"} }},
 		{"duplicate-scope", func(a *AdminConfig) { a.OIDC.Scopes = []string{"openid", "openid"} }},
+		{"quoted-scope", func(a *AdminConfig) { a.OIDC.Scopes = []string{"openid", `bad"scope`} }},
+		{"backslash-scope", func(a *AdminConfig) { a.OIDC.Scopes = []string{"openid", `bad\scope`} }},
+		{"unicode-scope", func(a *AdminConfig) { a.OIDC.Scopes = []string{"openid", "scopé"} }},
+		{"control-scope", func(a *AdminConfig) { a.OIDC.Scopes = []string{"openid", "bad\x01scope"} }},
+		{"empty-scope", func(a *AdminConfig) { a.OIDC.Scopes = []string{"openid", ""} }},
+		{"oversized-scope", func(a *AdminConfig) { a.OIDC.Scopes = []string{"openid", strings.Repeat("x", 129)} }},
 		{"mapping", func(a *AdminConfig) { a.OIDC.Subjects = nil }},
 		{"duplicate-subject", func(a *AdminConfig) { a.OIDC.Subjects = append(a.OIDC.Subjects, a.OIDC.Subjects[0]) }},
 		{"unknown-role", func(a *AdminConfig) { a.OIDC.Subjects[0].Role = "root" }},
@@ -63,12 +69,12 @@ func TestAdminOIDCValidation(t *testing.T) {
 	}
 }
 func TestOIDCURLs(t *testing.T) {
-	for _, raw := range []string{"https://issuer.example/realm", "http://localhost:8080/realm", "http://[::1]:8080/realm"} {
+	for _, raw := range []string{"https://issuer.example/realm", "https://tenant.auth0.com/", "http://localhost:8080/realm", "http://[::1]:8080/realm"} {
 		if _, err := OIDCURL(raw); err != nil {
 			t.Fatal(raw, err)
 		}
 	}
-	for _, raw := range []string{"", "/relative", "ftp://issuer.example", "http://remote.example", "https://user:pass@example.com", "https://example.com/?secret=x", "https://example.com/#token", "https://example.com/%xx"} {
+	for _, raw := range []string{"", "/relative", "ftp://issuer.example", "http://remote.example", "https://user:pass@example.com", "https://example.com/?secret=x", "https://example.com/?", "https://example.com/#", "https://example.com/#token", "https://example.com/%xx"} {
 		if _, err := OIDCURL(raw); err == nil {
 			t.Fatal(raw)
 		}
