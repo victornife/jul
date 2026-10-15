@@ -205,8 +205,10 @@ func TestOIDCAdminFlowRBACReloadAndAudit(t *testing.T) {
 	if call("GET", "/auth/oidc/callback?state=invalid&code=invalid", nil).Header.Get("Location") != "/?oidc_error=login_failed" {
 		t.Fatal("malformed callback admitted")
 	}
-	if <-loginOutcomes != "allow" || <-loginOutcomes != "allow" || <-loginOutcomes != "deny" {
-		t.Fatal("login metrics do not use bounded allow/deny results")
+	for _, want := range []string{"allow", "allow", "deny"} {
+		if got := <-loginOutcomes; got != want {
+			t.Fatalf("login metric result %q, want %q", got, want)
+		}
 	}
 	foundLogout := false
 	for _, ev := range s.audit.snapshot("", "", 100) {
