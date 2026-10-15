@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -18,6 +19,7 @@ import (
 	"net/http"
 
 	"jul/internal/upstream"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -72,7 +74,7 @@ func (j *jwtAuth) validate(r *http.Request) (map[string]any, error) {
 		return nil, errors.New("missing bearer token")
 	}
 	claims := jwt.MapClaims{}
-	_, err := j.parser.ParseWithClaims(raw, claims, j.keyFunc)
+	_, err := j.parser.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) { return j.keyFuncContext(r.Context(), t) })
 	if err != nil {
 		return nil, err
 	}
@@ -81,9 +83,9 @@ func (j *jwtAuth) validate(r *http.Request) (map[string]any, error) {
 
 // keyFunc selects the verification key for a token by its "kid" header,
 // confirming the token's algorithm family matches the key type.
-func (j *jwtAuth) keyFunc(t *jwt.Token) (any, error) {
+func (j *jwtAuth) keyFuncContext(ctx context.Context, t *jwt.Token) (any, error) {
 	kid, _ := t.Header["kid"].(string)
-	key, err := j.jwks.keyByID(kid)
+	key, err := j.jwks.keyByIDContext(ctx, kid)
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +171,9 @@ func jwksHTTPClient(dial DialFunc, timeout time.Duration) *http.Client {
 // into a storm of JWKS fetches; within the throttle window a stale key is served
 // while it remains inside the grace window.
 func (c *jwksCache) keyByID(kid string) (crypto.PublicKey, error) {
+	return c.keyByIDContext(context.Background(), kid)
+}
+func (c *jwksCache) keyByIDContext(ctx context.Context, kid string) (crypto.PublicKey, error) {
 	c.mu.RLock()
 	key, known := c.keys[kid]
 	fresh := time.Since(c.fetchedAt) < c.refreshAfter
@@ -178,7 +183,7 @@ func (c *jwksCache) keyByID(kid string) (crypto.PublicKey, error) {
 	}
 
 	// A miss or an aged cache warrants a refresh, subject to throttling.
-	if c.tryRefresh() {
+	if c.tryRefreshContext(ctx) {
 		c.mu.RLock()
 		key, known = c.keys[kid]
 		c.mu.RUnlock()
@@ -201,18 +206,19 @@ func (c *jwksCache) keyByID(kid string) (crypto.PublicKey, error) {
 
 // tryRefresh fetches the JWKS at most once per minRefresh interval. It reports
 // whether a fetch succeeded and updated the cache.
-func (c *jwksCache) tryRefresh() bool {
+func (c *jwksCache) tryRefreshContext(ctx context.Context) bool {
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
 	if !c.lastAttempt.IsZero() && time.Since(c.lastAttempt) < c.minRefresh {
 		return false
 	}
 	c.lastAttempt = time.Now()
-	return c.refresh() == nil
+	return c.refreshContext(ctx) == nil
 }
 
-func (c *jwksCache) refresh() error {
-	req, err := http.NewRequest(http.MethodGet, c.url, nil)
+func (c *jwksCache) refresh() error { return c.refreshContext(context.Background()) }
+func (c *jwksCache) refreshContext(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
 	if err != nil {
 		return err
 	}
@@ -249,13 +255,16 @@ type jwkSet struct {
 }
 
 type jwk struct {
-	Kty string `json:"kty"`
-	Kid string `json:"kid"`
-	Crv string `json:"crv"`
-	N   string `json:"n"`
-	E   string `json:"e"`
-	X   string `json:"x"`
-	Y   string `json:"y"`
+	Kty    string   `json:"kty"`
+	Use    string   `json:"use"`
+	Alg    string   `json:"alg"`
+	KeyOps []string `json:"key_ops"`
+	Kid    string   `json:"kid"`
+	Crv    string   `json:"crv"`
+	N      string   `json:"n"`
+	E      string   `json:"e"`
+	X      string   `json:"x"`
+	Y      string   `json:"y"`
 }
 
 func parseJWKS(body []byte) (map[string]crypto.PublicKey, error) {
@@ -263,8 +272,20 @@ func parseJWKS(body []byte) (map[string]crypto.PublicKey, error) {
 	if err := json.Unmarshal(body, &set); err != nil {
 		return nil, fmt.Errorf("decode JWKS: %w", err)
 	}
+	if len(set.Keys) > 128 {
+		return nil, errors.New("JWKS exceeds 128 keys")
+	}
 	keys := make(map[string]crypto.PublicKey, len(set.Keys))
 	for _, k := range set.Keys {
+		if k.Use != "" && k.Use != "sig" {
+			continue
+		}
+		if len(k.KeyOps) > 0 && !slices.Contains(k.KeyOps, "verify") {
+			continue
+		}
+		if _, duplicate := keys[k.Kid]; duplicate {
+			return nil, errors.New("duplicate JWKS key identifier")
+		}
 		pub, err := k.publicKey()
 		if err != nil {
 			// Skip keys we cannot model rather than rejecting the whole set.
@@ -298,6 +319,9 @@ func (k jwk) rsaKey() (*rsa.PublicKey, error) {
 	eBytes, err := base64.RawURLEncoding.DecodeString(k.E)
 	if err != nil {
 		return nil, fmt.Errorf("RSA e: %w", err)
+	}
+	if len(eBytes) == 0 || len(eBytes) > 4 || len(nBytes) < 128 || len(nBytes) > 1024 {
+		return nil, errors.New("invalid RSA key size or exponent")
 	}
 	e := 0
 	for _, b := range eBytes {
