@@ -113,7 +113,10 @@ separate five-minute cookie. JavaScript never reads either secret. Every unsafe
 session-authenticated API request requires the exact configured Origin and
 `X-Jul-Console: 1`; incompatible fetch metadata is refused. Bearer plus session
 credentials are ambiguous and rejected. Switching to a local token first logs
-out the browser session. Clear stale cookies when changing protocol/origin.
+out the browser session. Successful sign-in and local logout expire both secure
+and development cookie forms, including retired login bindings. Cookies are
+host-scoped rather than port-isolated: use a dedicated admin hostname and trust
+other services sharing a development loopback host.
 
 Local sign-out revokes the Jul session immediately. It does **not** terminate
 upstream provider sessions or every other browser's Jul session. This tranche

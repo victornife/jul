@@ -237,7 +237,7 @@ func (r *Runtime) Callback(w http.ResponseWriter, req *http.Request) (identity r
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	r.setCookie(w, true, "", -1)
 	fail := func() { http.Redirect(w, req, "/?oidc_error=login_failed", http.StatusSeeOther) }
-	if req.Method != "GET" || len(req.URL.RawQuery) > 8192 || canonicalHost(strings.SplitN(r.origin, ":", 2)[0], req.Host) != mustHost(r.origin) {
+	if req.Method != "GET" || len(req.Header.Values("Authorization")) > 0 || len(req.URL.RawQuery) > 8192 || canonicalHost(strings.SplitN(r.origin, ":", 2)[0], req.Host) != mustHost(r.origin) {
 		fail()
 		return
 	}
@@ -298,6 +298,7 @@ func (r *Runtime) Callback(w http.ResponseWriter, req *http.Request) (identity r
 	r.sessionCount.Add(1)
 	shard.mu.Unlock()
 	r.mu.Unlock()
+	ClearSessionCookies(w)
 	r.setCookie(w, false, raw, int(r.cfg.SessionAbsolute.Std()/time.Second))
 	http.Redirect(w, req, "/", http.StatusSeeOther)
 	return id, true
@@ -310,12 +311,15 @@ func (r *Runtime) Logout(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Logout request refused", http.StatusForbidden)
 		return
 	}
-	raw, _ := r.cookie(req, false)
 	r.mu.Lock()
-	r.deleteSession(digest(raw))
+	for _, cookie := range req.Cookies() {
+		if cookie.Name == r.cookieName(false) && len(cookie.Value) <= 128 {
+			r.deleteSession(digest(cookie.Value))
+		}
+	}
 	r.cleanup(r.now())
 	r.mu.Unlock()
-	r.setCookie(w, false, "", -1)
+	ClearSessionCookies(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 

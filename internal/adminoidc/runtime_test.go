@@ -133,6 +133,109 @@ func TestExplicitPublicClientWithKeycloakMetadata(t *testing.T) {
 		t.Fatal("confidential client downgraded to public")
 	}
 }
+
+func TestLogoutClearsRetiredCookieForms(t *testing.T) {
+	r, _, client, server := fixture(t)
+	if login(t, client, server).StatusCode != 200 {
+		t.Fatal("login")
+	}
+	u, _ := url.Parse(server.URL)
+	req := httptest.NewRequest("POST", server.URL+"/auth/oidc/logout", nil)
+	for _, cookie := range client.Jar.Cookies(u) {
+		req.AddCookie(cookie)
+	}
+	req.AddCookie(&http.Cookie{Name: "__Host-jul_oidc", Value: randomSecret()})
+	req.Header.Set("Origin", server.URL)
+	req.Header.Set("X-Jul-Console", "1")
+	if _, _, err := r.Authenticate(req); err == nil {
+		t.Fatal("mixed session forms were authenticated")
+	}
+	rr := httptest.NewRecorder()
+	r.Logout(rr, req)
+	if rr.Code != 204 || r.sessionCount.Load() != 0 || len(rr.Result().Cookies()) != 4 {
+		t.Fatal("retired cookie prevented local session recovery")
+	}
+	for _, cookie := range rr.Result().Cookies() {
+		if cookie.MaxAge != -1 {
+			t.Fatal("logout retained a browser credential")
+		}
+	}
+}
+
+func TestLogoutRevokesDuplicatePresentedSessions(t *testing.T) {
+	r, _, first, server := fixture(t)
+	jar, _ := cookiejar.New(nil)
+	second := &http.Client{Jar: jar, CheckRedirect: first.CheckRedirect}
+	if login(t, first, server).StatusCode != 200 || login(t, second, server).StatusCode != 200 {
+		t.Fatal("login")
+	}
+	u, _ := url.Parse(server.URL)
+	req := httptest.NewRequest("POST", server.URL+"/auth/oidc/logout", nil)
+	for _, client := range []*http.Client{first, second} {
+		for _, cookie := range client.Jar.Cookies(u) {
+			req.AddCookie(cookie)
+		}
+	}
+	req.Header.Set("Origin", server.URL)
+	req.Header.Set("X-Jul-Console", "1")
+	if _, _, err := r.Authenticate(req); err == nil {
+		t.Fatal("duplicate sessions were authenticated")
+	}
+	rr := httptest.NewRecorder()
+	r.Logout(rr, req)
+	if rr.Code != 204 || r.sessionCount.Load() != 0 {
+		t.Fatal("logout left a presented session replayable")
+	}
+	if request(t, first, "GET", server.URL, "", false).StatusCode != 401 || request(t, second, "GET", server.URL, "", false).StatusCode != 401 {
+		t.Fatal("revoked session remained authoritative")
+	}
+}
+
+func TestCallbackRejectsBearerCredential(t *testing.T) {
+	r, _, client, server := fixture(t)
+	start := request(t, client, "POST", server.URL+"/auth/oidc/login", server.URL, false)
+	callback := request(t, client, "GET", start.Header.Get("Location"), "", false).Header.Get("Location")
+	req, err := http.NewRequest("GET", callback, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer unrelated-local-credential")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.Header.Get("Location") != "/?oidc_error=login_failed" || r.sessionCount.Load() != 0 {
+		t.Fatal("callback silently ignored an extra credential")
+	}
+}
+
+func TestSuccessfulCallbackExpiresEveryRetiredCookieForm(t *testing.T) {
+	r, _, client, server := fixture(t)
+	start := request(t, client, "POST", server.URL+"/auth/oidc/login", server.URL, false)
+	callback := request(t, client, "GET", start.Header.Get("Location"), "", false).Header.Get("Location")
+	req := httptest.NewRequest("GET", callback, nil)
+	u, _ := url.Parse(server.URL)
+	for _, cookie := range client.Jar.Cookies(u) {
+		req.AddCookie(cookie)
+	}
+	req.AddCookie(&http.Cookie{Name: "__Host-jul_oidc", Value: randomSecret()})
+	rr := httptest.NewRecorder()
+	if _, accepted := r.Callback(rr, req); !accepted {
+		t.Fatal("fresh sign-in could not replace a retired cookie")
+	}
+	expired := map[string]bool{}
+	for _, cookie := range rr.Result().Cookies() {
+		if cookie.MaxAge == -1 {
+			expired[cookie.Name] = true
+		}
+	}
+	for _, name := range []string{"__Host-jul_oidc", "__Host-jul_oidc_login", "jul_oidc_dev", "jul_oidc_login_dev"} {
+		if !expired[name] {
+			t.Fatal("fresh sign-in retained a retired browser credential")
+		}
+	}
+}
 func TestProtocolRejections(t *testing.T) {
 	for _, tt := range []struct {
 		name, mode string
