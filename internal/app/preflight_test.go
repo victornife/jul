@@ -255,7 +255,15 @@ func TestPreflightApplyUsesLiveSnapshotForRebind(t *testing.T) {
 // the listener probe, restart-required, and ACME checks still run against the
 // live runtime snapshot when prev is nil.
 func TestPreflightApplyUsesLiveSnapshotWithoutPrev(t *testing.T) {
-	boundAddr := freePort(t)
+	// Keep the occupied port reserved before selecting the free candidate.
+	// Two closed freePort probes may return the same address, which makes the
+	// valid-candidate case accidentally exercise a bound listener instead.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("hold listener: %v", err)
+	}
+	defer ln.Close()
+	boundAddr := ln.Addr().String()
 	freeAddr := freePort(t)
 	base := &config.Config{
 		Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
@@ -264,14 +272,6 @@ func TestPreflightApplyUsesLiveSnapshotWithoutPrev(t *testing.T) {
 			Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
 		}},
 	}
-
-	// Hold a listener so the candidate address is genuinely in use. The live
-	// snapshot says it is unbound, so PreflightListeners must probe it and fail.
-	ln, err := net.Listen("tcp", boundAddr)
-	if err != nil {
-		t.Fatalf("hold listener: %v", err)
-	}
-	defer ln.Close()
 
 	p := Preflight{
 		BuildHandlers: func(_ context.Context, _ *config.Config, _ bool) (map[string]http.Handler, func(), error) {
