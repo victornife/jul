@@ -276,6 +276,7 @@ func (r *Runtime) Callback(w http.ResponseWriter, req *http.Request) (identity r
 		fail()
 		return
 	}
+	id.ProviderName = r.cfg.ProviderName
 	raw := randomSecret()
 	now = r.now()
 	r.mu.Lock()
@@ -305,11 +306,11 @@ func (r *Runtime) Callback(w http.ResponseWriter, req *http.Request) (identity r
 }
 
 // Logout revokes the Jul session immediately; upstream IdP sessions are separate.
-func (r *Runtime) Logout(w http.ResponseWriter, req *http.Request) {
+func (r *Runtime) Logout(w http.ResponseWriter, req *http.Request) bool {
 	w.Header().Set("Cache-Control", "no-store")
 	if req.Method != "POST" || !r.SameOrigin(req, true) || len(req.Header.Values("Authorization")) > 0 {
 		http.Error(w, "Logout request refused", http.StatusForbidden)
-		return
+		return false
 	}
 	r.mu.Lock()
 	for _, cookie := range req.Cookies() {
@@ -321,6 +322,7 @@ func (r *Runtime) Logout(w http.ResponseWriter, req *http.Request) {
 	r.mu.Unlock()
 	ClearSessionCookies(w)
 	w.WriteHeader(http.StatusNoContent)
+	return true
 }
 
 // ProviderName is a configured display label, not an untrusted provider claim.

@@ -382,10 +382,13 @@ access-control posture without exposing any credential, principal name, or hash.
 - Authentication-rejection recording is repaired separately in #602: anonymous
   actor, source IP and fixed failure category, without copying credentials,
   failed-token identifiers, request data or client-provided actor metadata.
-- The CSV/JSONL export schema gains a `token_id` column
-  (`id,time,actor,operation,resource,result,detail,source_ip,token_id` after
-  the separately selected #602 correction); readers
-  must tolerate the added column (append-only schema evolution).
+- The CSV export retains `token_id` in position nine (the #602 correction),
+  followed by the #441 additions `provider_name,role,permissions`:
+  `id,time,actor,operation,resource,result,detail,source_ip,token_id,provider_name,role,permissions`.
+  JSON/JSONL retain the same additive metadata. Permissions are concrete local
+  catalogue grants captured with the request identity, including custom roles
+  and group-derived OIDC users; CSV joins them with spaces. Readers must tolerate
+  appended columns and historical JSON records without these optional fields.
 
 ## Configuration schema
 

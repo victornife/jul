@@ -30,6 +30,9 @@ func TestOIDCBrowserHarness(t *testing.T) {
 	}
 	defer provider.Close()
 	cfg := config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9296", Token: "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr", RBAC: config.AdminRBACConfig{Enabled: true}, OIDC: config.AdminOIDCConfig{Enabled: true, Issuer: provider.URL(), ClientID: "jul", CallbackURL: "http://127.0.0.1:9296/auth/oidc/callback", SessionIdle: config.Duration(10 * time.Second), SessionAbsolute: config.Duration(15 * time.Second), MaxTransactions: 128, Subjects: []config.AdminOIDCSubject{{Subject: "operator-1", Principal: "alice", Role: "viewer"}}}}
+	if err := provider.RegisterClient(cfg.OIDC.ClientID, cfg.OIDC.CallbackURL); err != nil {
+		t.Fatal(err)
+	}
 	s := New(cfg, testLogger(t), Deps{OIDCClient: provider.Server.Client()})
 	s.UpdateAuth(cfg, oidcPolicy(t, "viewer"))
 	listener, err := net.Listen("tcp", cfg.Listen)

@@ -55,6 +55,9 @@ func fixture(t *testing.T) (*Runtime, *oidctest.Provider, *http.Client, *httptes
 		}
 	}))
 	t.Cleanup(srv.Close)
+	if err := p.RegisterClient("jul-console", srv.URL+"/auth/oidc/callback"); err != nil {
+		t.Fatal(err)
+	}
 	runtime, err = New(config.AdminOIDCConfig{Enabled: true, Issuer: p.URL(), ClientID: "jul-console", CallbackURL: srv.URL + "/auth/oidc/callback", Subjects: []config.AdminOIDCSubject{{Subject: "operator-1", Principal: "alice", Role: "viewer"}}}, policy(t), p.Server.Client())
 	if err != nil {
 		t.Fatal(err)

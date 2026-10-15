@@ -41,6 +41,9 @@ func TestOIDCAdminFlowRBACReloadAndAudit(t *testing.T) {
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 	cfg.OIDC = config.AdminOIDCConfig{Enabled: true, Issuer: provider.URL(), ClientID: "jul", CallbackURL: srv.URL + "/auth/oidc/callback", Subjects: []config.AdminOIDCSubject{{Subject: "operator-1", Principal: "alice", Role: "viewer"}}}
+	if err := provider.RegisterClient(cfg.OIDC.ClientID, cfg.OIDC.CallbackURL); err != nil {
+		t.Fatal(err)
+	}
 	pol := oidcPolicy(t, "viewer")
 	s.UpdateAuth(cfg, pol)
 	jar, _ := cookiejar.New(nil)
@@ -211,13 +214,20 @@ func TestOIDCAdminFlowRBACReloadAndAudit(t *testing.T) {
 		}
 	}
 	foundLogout := false
+	foundDeniedLogin := false
 	for _, ev := range s.audit.snapshot("", "", 100) {
 		if ev.Operation == "admin.oidc.logout" {
 			foundLogout = ev.Actor == "alice" && ev.TokenID == id.TokenID && ev.Result == "success"
 		}
+		if ev.Operation == "admin.oidc.login" && ev.Result == "failure" {
+			foundDeniedLogin = ev.Actor == "anonymous" && ev.ProviderName == "OpenID Connect" && ev.TokenID == "" && ev.Role == "" && len(ev.Permissions) == 0
+		}
 	}
 	if !foundLogout {
 		t.Fatal("local logout lost stable audit attribution")
+	}
+	if !foundDeniedLogin {
+		t.Fatal("rejected login lost provider or invented identity metadata")
 	}
 	local := &http.Client{}
 	req, _ := http.NewRequest("GET", srv.URL+"/api/admin/me", nil)

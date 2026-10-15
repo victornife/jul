@@ -27,6 +27,9 @@ function AuditRow({ ev }: { readonly ev: AuditEvent }) {
       <td className="px-3 py-1.5 text-jul-muted">{ev.resource ?? "—"}</td>
       <td className={`px-3 py-1.5 font-semibold ${resultTone(ev.result)}`}>{ev.result}</td>
       <td className="px-3 py-1.5 text-jul-muted">{ev.actor}</td>
+      <td className="px-3 py-1.5 text-jul-muted">{ev.provider_name ?? "—"}</td>
+      <td className="px-3 py-1.5 text-jul-muted">{ev.role ?? "—"}</td>
+      <td className="px-3 py-1.5 text-jul-muted">{ev.permissions?.join(", ") ?? "—"}</td>
       <td className="px-3 py-1.5 font-mono text-jul-muted">{ev.token_id === "" ? "—" : ev.token_id}</td>
       <td className="px-3 py-1.5 text-jul-muted">{ev.source_ip ?? "—"}</td>
       <td className="max-w-xs truncate px-3 py-1.5 text-jul-muted">{ev.detail ?? ""}</td>
@@ -149,6 +152,9 @@ export function AuditPanel() {
                   <th scope="col" className="px-3 py-2 font-medium">Resource</th>
                   <th scope="col" className="px-3 py-2 font-medium">Result</th>
                   <th scope="col" className="px-3 py-2 font-medium">Actor</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Provider</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Role</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Permissions</th>
                   <th scope="col" className="px-3 py-2 font-medium">Token ID</th>
                   <th scope="col" className="px-3 py-2 font-medium">Source IP</th>
                   <th scope="col" className="px-3 py-2 font-medium">Detail</th>

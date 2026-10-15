@@ -11,7 +11,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -23,13 +25,15 @@ import (
 
 // Provider owns synthetic keys/codes and bounded test-controlled failures.
 type Provider struct {
-	Server *httptest.Server
-	mu     sync.Mutex
-	key    *rsa.PrivateKey
-	kid    string
-	codes  map[string]url.Values
-	claims map[string]any
-	mode   string
+	Server      *httptest.Server
+	mu          sync.Mutex
+	key         *rsa.PrivateKey
+	kid         string
+	codes       map[string]url.Values
+	claims      map[string]any
+	mode        string
+	clientID    string
+	callbackURL string
 }
 
 // New starts a deterministic-protocol provider with synthetic credentials only.
@@ -44,6 +48,23 @@ func New() (*Provider, error) {
 }
 func (p *Provider) Close()      { p.Server.Close() }
 func (p *Provider) URL() string { return p.Server.URL }
+
+// RegisterClient installs one trusted client/callback pair before authorization.
+// Tests must register their actual loopback listener, never request parameters.
+func (p *Provider) RegisterClient(clientID, callbackURL string) error {
+	u, err := url.Parse(callbackURL)
+	if err != nil || u.Scheme != "http" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" || clientID == "" {
+		return errors.New("invalid test client registration")
+	}
+	ip := net.ParseIP(u.Hostname())
+	if u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return errors.New("test callback must be loopback")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.clientID, p.callbackURL = clientID, callbackURL
+	return nil
+}
 
 // Configure replaces bounded test claims and a failure mode between exchanges.
 func (p *Provider) Configure(mode string, claims map[string]any) {
@@ -96,13 +117,19 @@ func (p *Provider) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(m)
 	case "/authorize":
 		q := r.URL.Query()
+		if p.clientID == "" || len(q["client_id"]) != 1 || len(q["redirect_uri"]) != 1 || q.Get("client_id") != p.clientID || q.Get("redirect_uri") != p.callbackURL {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		if q.Get("response_type") != "code" || q.Get("code_challenge_method") != "S256" || q.Get("nonce") == "" {
 			w.WriteHeader(400)
 			return
 		}
 		code := rand.Text()
 		p.codes[code] = q
-		callback, _ := url.Parse(q.Get("redirect_uri"))
+		// Redirect only to the registered value. Token-exchange consistency
+		// checks cannot prevent an open redirect at this earlier endpoint.
+		callback, _ := url.Parse(p.callbackURL)
 		v := callback.Query()
 		v.Set("code", code)
 		v.Set("state", q.Get("state"))

@@ -133,9 +133,18 @@ it does not claim upstream global logout. Provider logout and refresh-token
 sessions are deliberately omitted. Local named/legacy tokens remain available for
 recovery under their own existing secure-transport and RBAC checks.
 
-Mutation and login/logout audit uses Jul principals, roles through identity and a
-stable non-secret subject fingerprint, never codes, nonce/state, cookies, tokens,
-secrets or raw claims. Login metrics reuse bounded auth method/outcome labels;
+Mutation and successful login/logout audit persists the captured configured
+provider name, Jul principal, stable non-secret subject fingerprint, effective
+role and resolved concrete catalogue permissions. This includes group-derived
+identities and admitted work completed after a policy publication. Role grants
+are historical snapshots rather than later configuration lookups. Provider/role
+labels are bounded to 80/63 bytes; permissions are bounded by the local catalogue.
+The ring, Console, JSON export and durable JSONL sink retain these additive fields;
+CSV appends `provider_name,role,permissions` after its existing nine columns,
+with space-separated permissions. Anonymous/open-mode events invent no authority.
+Rejected logout does not record successful revocation. Audit never contains
+codes, nonce/state, cookies, tokens, secrets or raw claims.
+Login metrics reuse bounded auth method/outcome labels;
 no issuer, email, subject, group or principal is a metric label.
 
 ADR 0012 permits additive commercial external identity but does not require it.

@@ -77,8 +77,12 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	result := "deny"
 	if accepted {
 		result = "allow"
-		r = r.WithContext(rbac.WithIdentity(r.Context(), id))
+	} else {
+		// The selected provider is known even when no subject was admitted.
+		// Never attach failed claims or invent a role/credential identifier.
+		id = rbac.Identity{ProviderName: runtime.ProviderName()}
 	}
+	r = r.WithContext(rbac.WithIdentity(r.Context(), id))
 	if s.deps.ObserveOIDCLogin != nil {
 		s.deps.ObserveOIDCLogin(result)
 	}
@@ -103,8 +107,8 @@ func (s *Server) handleOIDCLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	// The runtime checks session-origin and ambiguity again; audit uses only
 	// server-owned identity before revocation. No cookie/token/claims are recorded.
-	if id, _, err := runtime.Authenticate(r); err == nil {
+	id, _, err := runtime.Authenticate(r)
+	if revoked := runtime.Logout(w, r); revoked && err == nil {
 		s.recordAudit(r.WithContext(rbac.WithIdentity(r.Context(), id)), "admin.oidc.logout", "session", "success", "Local Console session revoked")
 	}
-	runtime.Logout(w, r)
 }

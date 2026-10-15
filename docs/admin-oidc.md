@@ -161,9 +161,22 @@ uses the new generation for the next exchange; it does not revoke already
 validated local sessions. No provider is a mandatory dependency while OIDC is off.
 
 Login outcome metrics reuse `jul_auth_decisions_total{method="oidc",result="allow|deny"}`.
-Audit attribution uses configured principals or a stable issuer/subject
-fingerprint. These signals never label metrics with issuer, principal, group,
-email or subject and never record protocol credentials or complete claim sets.
+Audit records persist the configured `provider_name` (at most 80 bytes), mapped
+principal or stable issuer/subject fingerprint, effective Jul `role` (at most 63
+bytes), and concrete `permissions` from the finite local catalogue. Login,
+successful local logout and mutations use the captured request/session identity,
+including group-derived users. Later provider, mapping or custom-role changes
+cannot rewrite the authority used for a historical action, including work admitted
+before a publication and completed afterward. Rejected logout requests do not
+produce a successful logout event.
+
+The same fields are retained in the bounded ring, Console Audit panel, JSON
+exports and durable JSONL sink. CSV preserves its original nine columns and appends
+`provider_name,role,permissions`; permissions are separated by spaces. Older JSON
+records may omit these additive fields. Local token events have no OIDC provider;
+anonymous/open-mode events have no role or grants. These signals never label
+metrics with issuer, principal, group, email or subject and never record protocol
+credentials or complete claim sets.
 
 ## Provider compatibility and evidence
 

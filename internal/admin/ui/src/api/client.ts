@@ -3085,6 +3085,10 @@ export const AuditEventSchema = z.object({
   // from the presented token. It is safe to display and never contains secret
   // bytes. Optional for compatibility with events recorded before attribution.
   token_id: z.string().optional().default(""),
+  // Captured at admission; optional for records predating administrator OIDC.
+  provider_name: z.string().optional(),
+  role: z.string().optional(),
+  permissions: z.array(z.string()).optional(),
   operation: z.string(),
   resource: z.string().optional(),
   result: z.string(),

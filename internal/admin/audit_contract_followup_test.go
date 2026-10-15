@@ -32,7 +32,7 @@ func TestAuditCSVRetainsCredentialIdentityAdditively(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"id", "time", "actor", "operation", "resource", "result", "detail", "source_ip", "token_id"}
+	want := []string{"id", "time", "actor", "operation", "resource", "result", "detail", "source_ip", "token_id", "provider_name", "role", "permissions"}
 	if len(rows) != 3 || !reflect.DeepEqual(rows[0], want) {
 		t.Fatalf("CSV schema/rows = %v", rows)
 	}

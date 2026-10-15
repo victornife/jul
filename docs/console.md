@@ -995,9 +995,14 @@ Audit panel), so a change can be traced to the principal that made it without
 exposing any secret. By default they live in a bounded in-memory ring buffer
 (10,000 events) queryable at `GET /api/audit` and exportable as JSON/CSV.
 
-CSV appends `token_id` after the existing eight columns, preserving their order:
-`id,time,actor,operation,resource,result,detail,source_ip,token_id`.
-An event without an authenticated credential has an empty ID.
+CSV preserves the existing nine columns and appends captured authentication metadata:
+`id,time,actor,operation,resource,result,detail,source_ip,token_id,provider_name,role,permissions`.
+The Audit panel also shows provider, role and effective permissions. JSON exports
+and durable JSONL carry the same optional fields. OIDC provider names come from
+configuration, never raw claims; effective role and concrete catalogue permissions
+come from the admitted identity, so later policy changes do not rewrite history.
+CSV separates permissions with spaces. An event without an authenticated credential
+has an empty ID and no role/permissions; local token events have no OIDC provider.
 Open-mode compatibility identities are projected as anonymous audit/history
 metadata, consistently with the current-identity endpoint.
 Credential rejections produce an `auth.fail` event with anonymous actor, socket-peer source
