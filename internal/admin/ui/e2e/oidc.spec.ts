@@ -8,6 +8,9 @@ test("sign-in, RBAC, CSRF, secret-free storage, expiry and logout", async ({ pag
   await page.goto("/");
   await page.getByRole("button", { name: "Sign in with OpenID Connect" }).click();
   await expect(page.getByText("alice", { exact: true })).toBeVisible();
+  await expect(page.getByTitle("Signed in as alice (role: viewer)")).toBeVisible();
+  await page.goto("/audit");
+  await expect(page.getByRole("button", { name: "Export CSV", exact: true })).toBeDisabled();
   expect(page.url()).not.toMatch(/code=|state=|id_token|access_token/);
   const cookies = await context.cookies();
   const session = cookies.find((cookie) => cookie.name === "jul_oidc_dev");
