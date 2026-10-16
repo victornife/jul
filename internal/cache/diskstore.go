@@ -191,6 +191,7 @@ type diskStore struct {
 	tombstoneDirty                 bool
 	corruptTombstoneCleanupPending bool
 	failedRetired                  map[*diskBlob]struct{}
+	activeTempFiles                sync.Map
 	log                            *slog.Logger
 
 	// tempBudget bounds all concurrent temporary capture files in dir so
@@ -386,7 +387,7 @@ func (d *diskStore) persistTombstonesLocked() error {
 	}
 	tombPath := filepath.Join(d.dir, diskTombstoneFile)
 	if len(d.tombstones) == 0 {
-		if err := d.removePath(tombPath); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(tombPath); err != nil && !os.IsNotExist(err) {
 			d.tombstoneDirty = true
 			return err
 		}
@@ -425,6 +426,14 @@ func (d *diskStore) recordTombstoneLocked(hash string, fileSize int64) {
 	d.tombstones[hash] = fileSize
 	d.tombstoneBytes += fileSize
 	if err := d.persistTombstonesLocked(); err != nil {
+		if p := d.pinned[hash]; p != nil && p.hasActiveReaders() {
+			// Active readers still hold the canonical file open: preserve their
+			// contents (do not truncate) and mark invalidation unrecoverable
+			// until the manifest can be persisted or the last reader unlinks it.
+			d.unrecoverableInvalidation.Store(true)
+			d.recordWriteFailure(err)
+			return
+		}
 		// Fail-closed fallback: truncate the invalidated cache file in place so
 		// its 24-byte JULDCH02 trailer is destroyed even when creating a new
 		// temporary tombstone manifest file fails.
@@ -474,7 +483,7 @@ func (d *diskStore) sweepTombstonesLocked() {
 	}
 	changed := d.tombstoneDirty
 	for h, sz := range d.tombstones {
-		if p := d.pinned[h]; p != nil && !p.isRemoved() {
+		if d.pinned[h] != nil {
 			continue
 		}
 		err := d.removePath(d.path(h))
@@ -504,6 +513,34 @@ func (d *diskStore) dropIndexedHashLocked(hash string) {
 	}
 }
 
+func (d *diskStore) purgeCorruptTombstoneCacheFileLocked(name string, e os.DirEntry) {
+	if el, ok := d.items[name]; ok {
+		it := el.Value.(*diskItem)
+		d.dropIndexedHashLocked(name)
+		if err := d.retireBlobLocked(name, it.blob); err != nil {
+			d.recordTombstoneLocked(name, it.fileSize)
+			_ = d.truncatePath(d.path(name), 0)
+			d.recordWriteFailure(err)
+		}
+		d.notifyKeyDiskStateLocked(it.key, name)
+		return
+	}
+	if d.pinned[name] != nil {
+		d.recordTombstoneLocked(name, 0)
+		d.notifyKeyDiskStateLocked("", name)
+		return
+	}
+	if err := d.removePath(d.path(name)); err != nil && !os.IsNotExist(err) {
+		var sz int64
+		if info, stErr := e.Info(); stErr == nil {
+			sz = info.Size()
+		}
+		d.recordTombstoneLocked(name, sz)
+		_ = d.truncatePath(d.path(name), 0)
+	}
+	d.notifyKeyDiskStateLocked("", name)
+}
+
 func (d *diskStore) purgeAllCacheFilesOnCorruptTombstoneLocked() {
 	entries, err := d.readDir(d.dir)
 	if err != nil {
@@ -518,17 +555,11 @@ func (d *diskStore) purgeAllCacheFilesOnCorruptTombstoneLocked() {
 		}
 		name := e.Name()
 		if isCacheFile(name) {
-			d.dropIndexedHashLocked(name)
-			if err := d.removePath(d.path(name)); err != nil && !os.IsNotExist(err) {
-				var sz int64
-				if info, stErr := e.Info(); stErr == nil {
-					sz = info.Size()
-				}
-				d.recordTombstoneLocked(name, sz)
-			}
-			d.notifyKeyDiskStateLocked("", name)
+			d.purgeCorruptTombstoneCacheFileLocked(name, e)
 		} else if isCacheTempFile(name) {
-			_ = d.removePath(filepath.Join(d.dir, name))
+			if _, active := d.activeTempFiles.Load(name); !active {
+				_ = d.removePath(filepath.Join(d.dir, name))
+			}
 		}
 	}
 	d.corruptTombstoneCleanupPending = false
@@ -907,14 +938,17 @@ func (d *diskStore) onRetiredBlobClosedLocked(hash string, b *diskBlob) {
 			d.retiredBytes = 0
 		}
 	}
-	if d.pinned != nil && d.pinned[hash] == b {
+	wasPinned := d.pinned != nil && d.pinned[hash] == b
+	if wasPinned {
 		delete(d.pinned, hash)
 	}
 	if d.failedRetired != nil {
 		delete(d.failedRetired, b)
 	}
-	if sz, ok := d.tombstones[hash]; ok && sz == 0 {
-		d.clearTombstoneLocked(hash)
+	if wasPinned {
+		if _, ok := d.tombstones[hash]; ok {
+			d.clearTombstoneLocked(hash)
+		}
 	}
 	d.notifyKeyDiskStateLocked("", hash)
 }
@@ -939,6 +973,7 @@ func (d *diskStore) onDeferredRemoveFailed(b *diskBlob, path string, err error) 
 		// unremoved canonical file.
 		d.recordTombstoneLocked(filepath.Base(path), 0)
 	}
+	_ = d.truncatePath(path, 0)
 }
 
 func (d *diskStore) retireBlobLocked(hash string, b *diskBlob) error {
@@ -959,6 +994,7 @@ func (d *diskStore) retireBlobLocked(hash string, b *diskBlob) error {
 				d.pinned = make(map[string]*diskBlob)
 			}
 			d.pinned[hash] = b
+			d.recordTombstoneLocked(hash, 0)
 		}
 	}
 	return nil
@@ -977,8 +1013,12 @@ type diskStreamCapture struct {
 
 func (d *diskStore) beginStreamCapture(onSkip func(reason string)) *diskStreamCapture {
 	seq := tempFileSeq.Add(1)
-	tmp, err := os.OpenFile(d.tempPath(seq), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	tmpPath := d.tempPath(seq)
+	tmpName := filepath.Base(tmpPath)
+	d.activeTempFiles.Store(tmpName, struct{}{})
+	tmp, err := os.OpenFile(tmpPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
+		d.activeTempFiles.Delete(tmpName)
 		d.recordWriteFailure(err)
 		return nil
 	}
@@ -1026,8 +1066,10 @@ func (d *diskStore) abortStream(s *diskStreamCapture) {
 		_ = s.file.Close()
 	}
 	if !s.published && s.seq != 0 && d != nil {
+		tmpPath := d.tempPath(s.seq)
 		// lgtm[go/path-injection] – d.dir is the operator-configured cache directory and s.seq is an internal atomic uint64 counter.
-		_ = os.Remove(d.tempPath(s.seq))
+		_ = os.Remove(tmpPath)
+		d.activeTempFiles.Delete(filepath.Base(tmpPath))
 		s.seq = 0
 	}
 	s.acct.release()
@@ -1141,12 +1183,13 @@ func (d *diskStore) publishStreamWithGen(key string, e *Entry, s *diskStreamCapt
 		d.recordWriteFailure(err)
 		return nil, false
 	} else {
+		d.activeTempFiles.Delete(filepath.Base(tmpPath))
 		delete(d.pinned, hash)
+		d.clearTombstoneLocked(hash)
 	}
-	d.clearTombstoneLocked(hash)
 	s.published = true
 	s.acct.release()
-	if d.failing.Load() {
+	if d.failing.Load() && !d.tombstoneDirty && !d.unrecoverableInvalidation.Load() {
 		d.failing.Store(false)
 	}
 
@@ -1317,6 +1360,12 @@ func (d *diskStore) delIfOlderGen(key string, maxGen uint64) {
 			d.recordTombstoneLocked(hash, it.fileSize)
 			d.recordWriteFailure(err)
 		}
+		d.notifyKeyDiskStateLocked(key, hash)
+		return
+	}
+	if d.pinned[hash] != nil {
+		d.rememberHashKeyLocked(hash, key)
+		d.recordTombstoneLocked(hash, 0)
 		d.notifyKeyDiskStateLocked(key, hash)
 		return
 	}

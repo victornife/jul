@@ -2504,6 +2504,40 @@ func TestLargeObjectAndRangeAuditRegressions(t *testing.T) {
 	})
 }
 
+type pausingRangeWriter struct {
+	header            http.Header
+	code              int
+	buf               bytes.Buffer
+	firstChunkWritten chan struct{}
+	resumeWriter      <-chan struct{}
+	pausedOnce        sync.Once
+}
+
+func (w *pausingRangeWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *pausingRangeWriter) WriteHeader(statusCode int) {
+	if w.code == 0 {
+		w.code = statusCode
+	}
+}
+
+func (w *pausingRangeWriter) Write(p []byte) (int, error) {
+	if w.code == 0 {
+		w.code = http.StatusOK
+	}
+	n, err := w.buf.Write(p)
+	w.pausedOnce.Do(func() {
+		close(w.firstChunkWritten)
+		<-w.resumeWriter
+	})
+	return n, err
+}
+
 func TestLargeObjectResidencyAndStartupRecoveryRegressions(t *testing.T) {
 	// 15. Failed startup cleanup listing followed by successful rehydration listing stays fail-closed.
 	t.Run("startup-cleanup-readdir-failure-stays-fail-closed", func(t *testing.T) {
@@ -2837,6 +2871,241 @@ func TestLargeObjectResidencyAndStartupRecoveryRegressions(t *testing.T) {
 		if remKeys != 0 {
 			t.Fatalf("expected 0 remaining keyGen entries after concurrent pinned close/delete/sweep, got %d", remKeys)
 		}
+	})
+
+	// 20. Crash/restart while reader holds pinned canonical V1 after Delete, Purge, and replacement never resurrects V1;
+	// and failed tombstone persistence preserves active-reader contents without truncating the backing file.
+	t.Run("pinned-reader-crash-restart-after-delete-purge-and-replacement", func(t *testing.T) {
+		mkEntry := func(body []byte) *Entry {
+			return &Entry{
+				Status:    http.StatusOK,
+				Header:    http.Header{"Cache-Control": {"public, max-age=3600"}},
+				Body:      body,
+				CreatedAt: time.Now(),
+				ExpiresAt: time.Now().Add(time.Hour),
+			}
+		}
+
+		// (a) Delete while reader holds canonical V1 -> restart before reader closes: V1 must not resurrect.
+		dirDel := t.TempDir()
+		cfgDel := rangeEnabledCfg(dirDel, 64, 512, 8<<10)
+		cDel := newTestCache(t, cfgDel)
+		kDel := "GET\nexample.com\n/pinned-crash-del"
+		v1Del := bytes.Repeat([]byte("D"), 180)
+		cDel.set(kDel, mkEntry(v1Del))
+		eDel, ok := cDel.get(kDel)
+		if !ok {
+			t.Fatal("expected kDel hit")
+		}
+		rcDel, err := eDel.OpenBody()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cDel.disk.testRenameFile = func(_, _ string) error { return os.ErrPermission }
+		cDel.Delete(kDel)
+		cDel.disk.testRenameFile = nil
+
+		// Simulate process crash + restart while rcDel is still open.
+		cDelRestart := newTestCache(t, cfgDel)
+		if _, ok := cDelRestart.get(kDel); ok {
+			t.Fatal("invalidated V1 resurrected after crash/restart while pinned Delete reader remained open")
+		}
+		_ = rcDel.Close()
+
+		// (b) Purge while reader holds canonical V1 -> restart before reader closes: V1 must not resurrect.
+		dirPurge := t.TempDir()
+		cfgPurge := rangeEnabledCfg(dirPurge, 64, 512, 8<<10)
+		cPurge := newTestCache(t, cfgPurge)
+		kPurge := "GET\nexample.com\n/pinned-crash-purge"
+		v1Purge := bytes.Repeat([]byte("P"), 180)
+		cPurge.set(kPurge, mkEntry(v1Purge))
+		ePurge, ok := cPurge.get(kPurge)
+		if !ok {
+			t.Fatal("expected kPurge hit")
+		}
+		rcPurge, err := ePurge.OpenBody()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cPurge.disk.testRenameFile = func(_, _ string) error { return os.ErrPermission }
+		cPurge.Purge()
+		cPurge.disk.testRenameFile = nil
+
+		cPurgeRestart := newTestCache(t, cfgPurge)
+		if _, ok := cPurgeRestart.get(kPurge); ok {
+			t.Fatal("purged V1 resurrected after crash/restart while pinned Purge reader remained open")
+		}
+		_ = rcPurge.Close()
+
+		// (c) Replacement while reader holds canonical V1 -> restart before reader closes: V1 must not resurrect.
+		dirRep := t.TempDir()
+		cfgRep := rangeEnabledCfg(dirRep, 64, 512, 8<<10)
+		cRep := newTestCache(t, cfgRep)
+		kRep := "GET\nexample.com\n/pinned-crash-rep"
+		v1Rep := bytes.Repeat([]byte("1"), 180)
+		v2Rep := bytes.Repeat([]byte("2"), 180)
+		cRep.set(kRep, mkEntry(v1Rep))
+		eRep1, ok := cRep.get(kRep)
+		if !ok {
+			t.Fatal("expected kRep V1 hit")
+		}
+		rcRep1, err := eRep1.OpenBody()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cRep.disk.testRenameFile = func(_, _ string) error { return os.ErrPermission }
+		cRep.set(kRep, mkEntry(v2Rep))
+		cRep.disk.testRenameFile = nil
+
+		// Simulate crash + restart BEFORE rcRep1 closes (while V1 is at canonical path and V2 is at tmpPath).
+		cRepRestart := newTestCache(t, cfgRep)
+		if eGot, ok := cRepRestart.get(kRep); ok {
+			rcGot, _ := eGot.OpenBody()
+			gotBytes, _ := io.ReadAll(rcGot)
+			_ = rcGot.Close()
+			t.Fatalf("superseded V1 resurrected after crash/restart during pinned replacement: got %q", string(gotBytes[:8]))
+		}
+		_ = rcRep1.Close()
+
+		// (d) Failed tombstone persistence while pinned reader is active preserves active-reader bytes (does not truncate).
+		dirPF := t.TempDir()
+		cfgPF := rangeEnabledCfg(dirPF, 64, 512, 8<<10)
+		cPF := newTestCache(t, cfgPF)
+		kPF := "GET\nexample.com\n/pinned-persist-fail"
+		v1PF := bytes.Repeat([]byte("K"), 180)
+		cPF.set(kPF, mkEntry(v1PF))
+		ePF, ok := cPF.get(kPF)
+		if !ok {
+			t.Fatal("expected kPF hit")
+		}
+		rcPF, err := ePF.OpenBody()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cPF.disk.testRenameFile = func(_, _ string) error { return os.ErrPermission }
+		cPF.disk.testPersistTombstoneErr = os.ErrPermission
+		cPF.Delete(kPF)
+
+		gotPF, err := io.ReadAll(rcPF)
+		if err != nil || !bytes.Equal(gotPF, v1PF) {
+			t.Fatalf("active reader contents corrupted when tombstone persistence failed: len=%d err=%v", len(gotPF), err)
+		}
+		_ = rcPF.Close()
+		cPF.disk.testRenameFile = nil
+		cPF.disk.testPersistTombstoneErr = nil
+	})
+
+	// 21. Recovery cleanup triggered while a large range fill reader is paused preserves active reader and live captures.
+	t.Run("pending-recovery-cleanup-preserves-active-range-fill-reader", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := rangeEnabledCfg(dir, 1<<10, 128<<10, 512<<10)
+		c := newTestCache(t, cfg)
+
+		// Pre-populate an old file from before restart, write a corrupt tombstone manifest, and fail startup readDir.
+		kOld := "GET\nexample.com\n/old-before-recovery"
+		c.set(kOld, &Entry{
+			Status:    http.StatusOK,
+			Header:    http.Header{"Cache-Control": {"public, max-age=3600"}},
+			Body:      bytes.Repeat([]byte("O"), 4<<10),
+			CreatedAt: time.Now(),
+			ExpiresAt: time.Now().Add(time.Hour),
+		})
+		c.mem.del(kOld)
+		if err := os.WriteFile(filepath.Join(dir, diskTombstoneFile), []byte("corrupt\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		c.disk.mu.Lock()
+		c.disk.ll.Init()
+		clear(c.disk.items)
+		c.disk.curBytes = 0
+		c.disk.physBytes = 0
+		c.disk.testReadDir = func(_ string) ([]os.DirEntry, error) {
+			return nil, os.ErrPermission
+		}
+		c.disk.rehydrate()
+		c.disk.mu.Unlock()
+		if !c.disk.corruptTombstoneCleanupPending {
+			t.Fatal("expected corruptTombstoneCleanupPending to be true")
+		}
+
+		// Start a 96 KiB origin response and request a 64 KiB range (bytes=0-65535), pausing after the first 32 KiB chunk.
+		fullBody := make([]byte, 96<<10)
+		for i := range fullBody {
+			fullBody[i] = byte('A' + (i % 26))
+		}
+		h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+			w.Header().Set("Content-Length", strconv.Itoa(len(fullBody)))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(fullBody)
+		}))
+
+		firstChunkWritten := make(chan struct{})
+		resumeWriter := make(chan struct{})
+		pw := &pausingRangeWriter{
+			firstChunkWritten: firstChunkWritten,
+			resumeWriter:      resumeWriter,
+		}
+		var rangeWG sync.WaitGroup
+		rangeWG.Add(1)
+		go func() {
+			defer rangeWG.Done()
+			req := httptest.NewRequest(http.MethodGet, "http://example.com/range-during-recovery", nil)
+			req.Header.Set("Range", "bytes=0-65535")
+			h.ServeHTTP(pw, req)
+		}()
+		<-firstChunkWritten
+
+		// Also create an active in-flight stream capture to ensure recovery cleanup does not unlink active .jul-cache-tmp-* files.
+		sActive := c.disk.beginStreamCapture(nil)
+		if sActive == nil {
+			t.Fatal("expected beginStreamCapture to succeed")
+		}
+		defer c.disk.abortStream(sActive)
+
+		// Restore directory access, inject unlink + rename failure with truncation succeeding, and trigger cleanup!
+		c.disk.mu.Lock()
+		c.disk.testReadDir = nil
+		c.disk.testRenameFile = func(_, _ string) error { return os.ErrPermission }
+		c.disk.testRemoveFile = func(p string) error {
+			if isCacheFile(filepath.Base(p)) {
+				return os.ErrPermission
+			}
+			return os.Remove(p)
+		}
+		c.disk.mu.Unlock()
+
+		_, _ = c.Stats()
+
+		// Old unindexed file must be truncated to 0 bytes immediately, while active capture temp file survives.
+		if stOld, err := os.Stat(c.disk.path(hashKey(kOld))); err != nil || stOld.Size() != 0 {
+			t.Fatalf("expected old unindexed file to be truncated to 0 bytes, stat=%v err=%v", stOld, err)
+		}
+		if _, err := os.Stat(c.disk.tempPath(sActive.seq)); err != nil {
+			t.Fatalf("expected active in-flight temp capture file to survive cleanup, stat err=%v", err)
+		}
+
+		// Resume the paused range response reader: the client must receive every promised byte!
+		close(resumeWriter)
+		rangeWG.Wait()
+
+		if pw.code != http.StatusPartialContent {
+			t.Fatalf("status = %d, want 206", pw.code)
+		}
+		if !bytes.Equal(pw.buf.Bytes(), fullBody[:65536]) {
+			t.Fatalf("range response body length = %d (want 65536), content mismatch", pw.buf.Len())
+		}
+
+		// After the range reader closed with unlink failing, deferred remove failure truncated its file to 0 bytes.
+		kRange := "GET\nexample.com\n/range-during-recovery"
+		if stRange, err := os.Stat(c.disk.path(hashKey(kRange))); err != nil || stRange.Size() != 0 {
+			t.Fatalf("expected range file to be truncated after reader close with unlink failing, stat=%v err=%v", stRange, err)
+		}
+
+		c.disk.mu.Lock()
+		c.disk.testRenameFile = nil
+		c.disk.testRemoveFile = nil
+		c.disk.mu.Unlock()
 	})
 }
 

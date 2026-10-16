@@ -59,17 +59,34 @@ type diskBlob struct {
 }
 
 func (b *diskBlob) remove(path string) error {
+	var err error
 	if b.store != nil {
-		return b.store.removePath(path)
+		err = b.store.removePath(path)
+	} else {
+		err = os.Remove(path)
 	}
-	return os.Remove(path)
+	if (err == nil || os.IsNotExist(err)) && b.store != nil {
+		b.store.activeTempFiles.Delete(filepath.Base(path))
+	}
+	return err
 }
 
 func (b *diskBlob) rename(oldpath, newpath string) error {
-	if b.store != nil {
-		return b.store.renamePath(oldpath, newpath)
+	if b.store != nil && isCacheTempFile(filepath.Base(newpath)) {
+		b.store.activeTempFiles.Store(filepath.Base(newpath), struct{}{})
 	}
-	return os.Rename(oldpath, newpath)
+	var err error
+	if b.store != nil {
+		err = b.store.renamePath(oldpath, newpath)
+	} else {
+		err = os.Rename(oldpath, newpath)
+	}
+	if err == nil && b.store != nil {
+		b.store.activeTempFiles.Delete(filepath.Base(oldpath))
+	} else if err != nil && b.store != nil && isCacheTempFile(filepath.Base(newpath)) {
+		b.store.activeTempFiles.Delete(filepath.Base(newpath))
+	}
+	return err
 }
 
 func (b *diskBlob) acquireLease() bool {
@@ -146,13 +163,13 @@ func (b *diskBlob) isPinning(targetPath string) bool {
 	return b.unlinked && !b.removed && b.path == targetPath
 }
 
-func (b *diskBlob) isRemoved() bool {
+func (b *diskBlob) hasActiveReaders() bool {
 	if b == nil {
-		return true
+		return false
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.removed
+	return b.readers > 0
 }
 
 func (b *diskBlob) setOnClose(fn func()) {

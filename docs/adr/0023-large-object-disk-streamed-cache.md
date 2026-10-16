@@ -220,6 +220,14 @@ type BodyReader interface {
     on the same in-flight `*Entry` opens the retired path rather than the new
     replacement file, and the canonical `<sha256(key)>` path is immediately free
     on all platforms (including Windows, where `os.Open` sets `FILE_SHARE_DELETE`).
+    If renaming `blob.path` fails while readers are active, `diskStore` pins the
+    retired blob (`d.pinned[hash]`) and immediately persists a durable tombstone
+    in `.jul-cache-tombstones` (preserving active-reader contents without
+    truncating the backing file if manifest persistence fails) until the last
+    reader closes, removes the old canonical file, and promotes any deferred
+    replacement. Recovery cleanup (`purgeAllCacheFilesOnCorruptTombstoneLocked`)
+    similarly retires indexed entries through their reader leases and preserves
+    active in-flight temporary captures (`d.activeTempFiles`).
     When the last active reader calls `Close()`, it closes its `*os.File` handle
     first and then removes `blob.path`.
 - **Random-access contract for #442:**
