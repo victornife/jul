@@ -17,12 +17,13 @@ type memStore struct {
 	curBytes int64
 	// evictions counts LRU-capacity evictions (not explicit del/purge calls),
 	// for the jul_cache_evictions_total{tier="memory"} gauge-read counter.
-	evictions   int64
-	ll          *list.List // front = most recently used
-	items       map[string]*list.Element
-	onEvict     func(key string, e *Entry)
-	onEvictItem func(it *memItem)
-	pinVictims  func(victims []*memItem)
+	evictions          int64
+	ll                 *list.List // front = most recently used
+	items              map[string]*list.Element
+	onEvict            func(key string, e *Entry)
+	onEvictItem        func(it *memItem)
+	pinVictims         func(victims []*memItem)
+	onBeforePinVictims func()
 }
 
 type memItem struct {
@@ -171,6 +172,9 @@ func (m *memStore) Resize(maxBytes int64) (evictedCount int, evictedBytes int64)
 	victims := m.evictLocked()
 	m.mu.Unlock()
 
+	if m.onBeforePinVictims != nil && len(victims) > 0 {
+		m.onBeforePinVictims()
+	}
 	if m.pinVictims != nil && len(victims) > 0 {
 		m.pinVictims(victims)
 	}

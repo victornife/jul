@@ -257,9 +257,7 @@ func (c *Cache) maybeReclaimLocked(st *keyGenState) {
 		return
 	}
 	if cur, ok := c.keyGen[st.key]; ok && cur == st && st.inflight == 0 {
-		if st.inMem && (c.mem == nil || !c.mem.hasKey(st.key)) {
-			st.inMem = false
-		}
+		st.inMem = c.mem != nil && c.mem.hasKey(st.key)
 		if !st.inMem && !st.inDisk {
 			delete(c.keyGen, st.key)
 		}
@@ -302,7 +300,9 @@ func (c *Cache) setKeyDiskState(key string, inDisk bool) {
 func (c *Cache) pinVictimsLocked(victims []*memItem) {
 	for _, it := range victims {
 		if st, ok := c.keyGen[it.key]; ok {
-			st.inMem = false
+			if st.gen == it.gen && (c.mem == nil || !c.mem.hasKey(it.key)) {
+				st.inMem = false
+			}
 			st.inflight++
 			it.pinnedState = st
 		}
@@ -361,7 +361,6 @@ func (c *Cache) get(key string) (*Entry, bool) {
 			c.finishKeyOp(st)
 			return c.mem.get(key)
 		}
-		st.inDisk = true
 		var victims []*memItem
 		if e.diskBody == nil {
 			victims = c.mem.putWithGen(key, e, diskGen) // promote memory-eligible entry under genMu

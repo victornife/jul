@@ -146,6 +146,15 @@ func (b *diskBlob) isPinning(targetPath string) bool {
 	return b.unlinked && !b.removed && b.path == targetPath
 }
 
+func (b *diskBlob) isRemoved() bool {
+	if b == nil {
+		return true
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.removed
+}
+
 func (b *diskBlob) setOnClose(fn func()) {
 	b.mu.Lock()
 	if b.removed {

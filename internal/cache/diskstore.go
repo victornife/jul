@@ -182,15 +182,16 @@ type diskStore struct {
 	tombstoneBytes int64 // physical on-disk bytes of unremoved tombstoned files awaiting retry
 	// evictions counts LRU-capacity evictions from evictLocked and Resize (not
 	// explicit del/purge calls), for jul_cache_evictions_total{tier="disk"}.
-	evictions      int64
-	ll             *list.List // front = most recently used; values are *diskItem
-	items          map[string]*list.Element
-	pinned         map[string]*diskBlob
-	tombstones     map[string]int64
-	tombstoneKeys  map[string]string
-	tombstoneDirty bool
-	failedRetired  map[*diskBlob]struct{}
-	log            *slog.Logger
+	evictions                      int64
+	ll                             *list.List // front = most recently used; values are *diskItem
+	items                          map[string]*list.Element
+	pinned                         map[string]*diskBlob
+	tombstones                     map[string]int64
+	hashKeys                       map[string]string
+	tombstoneDirty                 bool
+	corruptTombstoneCleanupPending bool
+	failedRetired                  map[*diskBlob]struct{}
+	log                            *slog.Logger
 
 	// tempBudget bounds all concurrent temporary capture files in dir so
 	// concurrent large misses, memory write-throughs, Vary stubs, and 304
@@ -207,6 +208,7 @@ type diskStore struct {
 	testRenameFile           func(oldpath, newpath string) error
 	testTruncateFile         func(path string, size int64) error
 	testReadTombstoneFile    func(path string) ([]byte, error)
+	testReadDir              func(path string) ([]os.DirEntry, error)
 	testPersistTombstoneErr  error
 	onLookupLeaseAcquire     func()
 	onBeforePublishLock      func(key string, gen uint64)
@@ -261,13 +263,13 @@ func newDiskStore(dir string, maxBytes int64, logger *slog.Logger) (*diskStore, 
 		logger = slog.Default()
 	}
 	d := &diskStore{
-		dir:           dir,
-		maxBytes:      maxBytes,
-		ll:            list.New(),
-		items:         make(map[string]*list.Element),
-		tombstones:    make(map[string]int64),
-		tombstoneKeys: make(map[string]string),
-		log:           logger,
+		dir:        dir,
+		maxBytes:   maxBytes,
+		ll:         list.New(),
+		items:      make(map[string]*list.Element),
+		tombstones: make(map[string]int64),
+		hashKeys:   make(map[string]string),
+		log:        logger,
 	}
 	d.rehydrate()
 	return d, nil
@@ -321,11 +323,28 @@ func (d *diskStore) readTombstoneManifest(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
+func (d *diskStore) readDir(path string) ([]os.DirEntry, error) {
+	if d.testReadDir != nil {
+		return d.testReadDir(path)
+	}
+	return os.ReadDir(path)
+}
+
+func (d *diskStore) rememberHashKeyLocked(hash, key string) {
+	if hash == "" || key == "" {
+		return
+	}
+	if d.hashKeys == nil {
+		d.hashKeys = make(map[string]string)
+	}
+	d.hashKeys[hash] = key
+}
+
 func (d *diskStore) hasHashStateLocked(hash string) bool {
 	if _, ok := d.items[hash]; ok {
 		return true
 	}
-	if p := d.pinned[hash]; p != nil && !p.removed {
+	if d.pinned[hash] != nil {
 		return true
 	}
 	if _, ok := d.tombstones[hash]; ok {
@@ -335,8 +354,17 @@ func (d *diskStore) hasHashStateLocked(hash string) bool {
 }
 
 func (d *diskStore) notifyKeyDiskStateLocked(key, hash string) {
+	if key == "" && d.hashKeys != nil {
+		key = d.hashKeys[hash]
+	}
+	inDisk := d.hasHashStateLocked(hash)
+	if inDisk {
+		d.rememberHashKeyLocked(hash, key)
+	} else if d.hashKeys != nil {
+		delete(d.hashKeys, hash)
+	}
 	if key != "" && d.onKeyDiskState != nil {
-		d.onKeyDiskState(key, d.hasHashStateLocked(hash))
+		d.onKeyDiskState(key, inDisk)
 	}
 }
 
@@ -413,12 +441,11 @@ func (d *diskStore) recordTombstoneLocked(hash string, fileSize int64) {
 func (d *diskStore) clearTombstoneLocked(hash string) {
 	if prev, exists := d.tombstones[hash]; exists {
 		delete(d.tombstones, hash)
-		key := d.tombstoneKeys[hash]
-		delete(d.tombstoneKeys, hash)
+		key := d.hashKeys[hash]
 		d.tombstoneBytes -= prev
 		if err := d.persistTombstonesLocked(); err != nil {
 			d.recordWriteFailure(err)
-		} else if len(d.tombstones) == 0 && !d.tombstoneDirty {
+		} else if !d.corruptTombstoneCleanupPending && len(d.tombstones) == 0 && !d.tombstoneDirty {
 			d.unrecoverableInvalidation.Store(false)
 		}
 		d.notifyKeyDiskStateLocked(key, hash)
@@ -426,25 +453,32 @@ func (d *diskStore) clearTombstoneLocked(hash string) {
 }
 
 func (d *diskStore) sweepTombstonesLocked() {
+	if d.corruptTombstoneCleanupPending {
+		d.purgeAllCacheFilesOnCorruptTombstoneLocked()
+		if d.corruptTombstoneCleanupPending {
+			return
+		}
+	}
 	for b := range d.failedRetired {
 		if b.retryDeferredRemove() {
 			d.onRetiredBlobClosedLocked(b.hash, b)
 		}
 	}
 	if len(d.tombstones) == 0 && !d.tombstoneDirty {
-		d.unrecoverableInvalidation.Store(false)
+		if !d.corruptTombstoneCleanupPending {
+			d.unrecoverableInvalidation.Store(false)
+		}
 		return
 	}
 	changed := d.tombstoneDirty
 	for h, sz := range d.tombstones {
-		if p := d.pinned[h]; p != nil && !p.removed {
+		if p := d.pinned[h]; p != nil && !p.isRemoved() {
 			continue
 		}
 		err := d.removePath(d.path(h))
 		if err == nil || os.IsNotExist(err) {
 			delete(d.tombstones, h)
-			key := d.tombstoneKeys[h]
-			delete(d.tombstoneKeys, h)
+			key := d.hashKeys[h]
 			d.tombstoneBytes -= sz
 			changed = true
 			d.notifyKeyDiskStateLocked(key, h)
@@ -455,15 +489,16 @@ func (d *diskStore) sweepTombstonesLocked() {
 	if changed {
 		if err := d.persistTombstonesLocked(); err != nil {
 			d.recordWriteFailure(err)
-		} else if len(d.tombstones) == 0 && !d.tombstoneDirty {
+		} else if !d.corruptTombstoneCleanupPending && len(d.tombstones) == 0 && !d.tombstoneDirty {
 			d.unrecoverableInvalidation.Store(false)
 		}
 	}
 }
 
 func (d *diskStore) purgeAllCacheFilesOnCorruptTombstoneLocked() {
-	entries, err := os.ReadDir(d.dir)
+	entries, err := d.readDir(d.dir)
 	if err != nil {
+		d.corruptTombstoneCleanupPending = true
 		d.unrecoverableInvalidation.Store(true)
 		d.recordWriteFailure(err)
 		return
@@ -474,22 +509,32 @@ func (d *diskStore) purgeAllCacheFilesOnCorruptTombstoneLocked() {
 		}
 		name := e.Name()
 		if isCacheFile(name) {
+			if el, ok := d.items[name]; ok {
+				it := el.Value.(*diskItem)
+				d.ll.Remove(el)
+				delete(d.items, name)
+				d.curBytes -= it.size
+				d.physBytes -= it.fileSize
+				d.rememberHashKeyLocked(name, it.key)
+			}
 			if err := d.removePath(d.path(name)); err != nil && !os.IsNotExist(err) {
 				var sz int64
 				if info, stErr := e.Info(); stErr == nil {
 					sz = info.Size()
 				}
-				d.tombstones[name] = sz
-				d.tombstoneBytes += sz
-				if tErr := d.truncatePath(d.path(name), 0); tErr != nil && !os.IsNotExist(tErr) {
-					d.unrecoverableInvalidation.Store(true)
-				}
+				d.recordTombstoneLocked(name, sz)
 			}
+			d.notifyKeyDiskStateLocked("", name)
 		} else if isCacheTempFile(name) {
 			_ = d.removePath(filepath.Join(d.dir, name))
 		}
 	}
-	_ = d.persistTombstonesLocked()
+	d.corruptTombstoneCleanupPending = false
+	if err := d.persistTombstonesLocked(); err != nil {
+		d.recordWriteFailure(err)
+	} else if len(d.tombstones) == 0 && !d.tombstoneDirty {
+		d.unrecoverableInvalidation.Store(false)
+	}
 }
 
 func (d *diskStore) loadAndSweepTombstonesLocked() {
@@ -621,8 +666,8 @@ func isCacheTempFile(name string) bool {
 // files are left untouched.
 func (d *diskStore) rehydrate() {
 	d.loadAndSweepTombstonesLocked()
-	entries, err := os.ReadDir(d.dir)
-	if err != nil {
+	entries, err := d.readDir(d.dir)
+	if err != nil || d.corruptTombstoneCleanupPending {
 		return
 	}
 	type fi struct {
@@ -723,7 +768,14 @@ func (d *diskStore) hasKey(key string) bool {
 	hash := hashKey(key)
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	_, ok := d.items[hash]
+	el, ok := d.items[hash]
+	if ok {
+		it := el.Value.(*diskItem)
+		if it.key == "" {
+			it.key = key
+		}
+		d.rememberHashKeyLocked(hash, key)
+	}
 	return ok
 }
 
@@ -745,6 +797,9 @@ func (d *diskStore) getWithMemCapGen(key string, memCap int64) (*Entry, uint64, 
 	var gen uint64
 	if ok {
 		it := el.Value.(*diskItem)
+		if it.key == "" {
+			it.key = key
+		}
 		blob = it.blob
 		gen = it.gen
 		if blob == nil || !blob.acquireLease() {
@@ -752,6 +807,7 @@ func (d *diskStore) getWithMemCapGen(key string, memCap int64) (*Entry, uint64, 
 			return nil, 0, false
 		}
 		d.ll.MoveToFront(el)
+		d.notifyKeyDiskStateLocked(key, hash)
 	}
 	hook := d.onLookupLeaseAcquire
 	d.mu.Unlock()
@@ -771,6 +827,7 @@ func (d *diskStore) getWithMemCapGen(key string, memCap int64) (*Entry, uint64, 
 
 	e, bodyLen, _, err := readDiskEntryMetaFile(rc.file)
 	if err != nil {
+		_ = rc.Close()
 		d.delIfBlob(key, blob)
 		return nil, 0, false
 	}
@@ -778,6 +835,7 @@ func (d *diskStore) getWithMemCapGen(key string, memCap int64) (*Entry, uint64, 
 		if bodyLen > 0 {
 			body := make([]byte, bodyLen)
 			if _, err := io.ReadFull(rc, body); err != nil {
+				_ = rc.Close()
 				d.delIfBlob(key, blob)
 				return nil, 0, false
 			}
@@ -860,6 +918,7 @@ func (d *diskStore) onRetiredBlobClosedLocked(hash string, b *diskBlob) {
 	if sz, ok := d.tombstones[hash]; ok && sz == 0 {
 		d.clearTombstoneLocked(hash)
 	}
+	d.notifyKeyDiskStateLocked("", hash)
 }
 
 func (d *diskStore) onRetiredBlobClosed(hash string, b *diskBlob) {
@@ -1234,8 +1293,8 @@ func (d *diskStore) delIfBlob(key string, target *diskBlob) {
 			delete(d.items, it.hash)
 			d.curBytes -= it.size
 			d.physBytes -= it.fileSize
+			d.rememberHashKeyLocked(hash, key)
 			if err := d.retireBlobLocked(hash, it.blob); err != nil {
-				d.tombstoneKeys[hash] = key
 				d.recordTombstoneLocked(hash, it.fileSize)
 				d.recordWriteFailure(err)
 			}
@@ -1258,8 +1317,8 @@ func (d *diskStore) delIfOlderGen(key string, maxGen uint64) {
 		delete(d.items, it.hash)
 		d.curBytes -= it.size
 		d.physBytes -= it.fileSize
+		d.rememberHashKeyLocked(hash, key)
 		if err := d.retireBlobLocked(hash, it.blob); err != nil {
-			d.tombstoneKeys[hash] = key
 			d.recordTombstoneLocked(hash, it.fileSize)
 			d.recordWriteFailure(err)
 		}
@@ -1268,7 +1327,7 @@ func (d *diskStore) delIfOlderGen(key string, maxGen uint64) {
 	}
 	if err := d.removePath(d.path(hash)); err != nil && !os.IsNotExist(err) {
 		if st, stErr := os.Stat(d.path(hash)); stErr == nil {
-			d.tombstoneKeys[hash] = key
+			d.rememberHashKeyLocked(hash, key)
 			d.recordTombstoneLocked(hash, st.Size())
 		}
 	}
@@ -1286,8 +1345,8 @@ func (d *diskStore) del(key string) {
 		delete(d.items, it.hash)
 		d.curBytes -= it.size
 		d.physBytes -= it.fileSize
+		d.rememberHashKeyLocked(hash, key)
 		if err := d.retireBlobLocked(hash, it.blob); err != nil {
-			d.tombstoneKeys[hash] = key
 			d.recordTombstoneLocked(hash, it.fileSize)
 			d.recordWriteFailure(err)
 		}
@@ -1296,7 +1355,7 @@ func (d *diskStore) del(key string) {
 	}
 	if err := d.removePath(d.path(hash)); err != nil && !os.IsNotExist(err) {
 		if st, stErr := os.Stat(d.path(hash)); stErr == nil {
-			d.tombstoneKeys[hash] = key
+			d.rememberHashKeyLocked(hash, key)
 			d.recordTombstoneLocked(hash, st.Size())
 		}
 	}
@@ -1307,17 +1366,22 @@ func (d *diskStore) purge() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.sweepTombstonesLocked()
+	items := make([]*diskItem, 0, len(d.items))
 	for _, el := range d.items {
-		it := el.Value.(*diskItem)
-		if err := d.retireBlobLocked(it.hash, it.blob); err != nil {
-			d.recordTombstoneLocked(it.hash, it.fileSize)
-			d.recordWriteFailure(err)
-		}
+		items = append(items, el.Value.(*diskItem))
 	}
 	d.ll.Init()
 	d.items = make(map[string]*list.Element)
 	d.curBytes = 0
 	d.physBytes = 0
+	for _, it := range items {
+		d.rememberHashKeyLocked(it.hash, it.key)
+		if err := d.retireBlobLocked(it.hash, it.blob); err != nil {
+			d.recordTombstoneLocked(it.hash, it.fileSize)
+			d.recordWriteFailure(err)
+		}
+		d.notifyKeyDiskStateLocked(it.key, it.hash)
+	}
 }
 
 // Resize atomically changes the disk byte cap (#92). Increasing it never

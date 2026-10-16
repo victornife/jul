@@ -2502,6 +2502,340 @@ func TestLargeObjectAndRangeAuditRegressions(t *testing.T) {
 			t.Fatalf("superseded V1 resurrected after failed background streamed replacement: len=%d", e.BodyLen())
 		}
 	})
+
+	// 15. Failed startup cleanup listing followed by successful rehydration listing stays fail-closed.
+	t.Run("startup-cleanup-readdir-failure-stays-fail-closed", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := rangeEnabledCfg(dir, 1<<10, 32<<10, 128<<10)
+		c := newTestCache(t, cfg)
+		k := "GET\nexample.com\n/startup-cleanup-readdir"
+		c.set(k, &Entry{
+			Status:    http.StatusOK,
+			Header:    http.Header{"Cache-Control": {"public, max-age=3600"}},
+			Body:      []byte("INVALIDATED-BEFORE-RESTART"),
+			CreatedAt: time.Now(),
+			ExpiresAt: time.Now().Add(time.Hour),
+		})
+		c.mem.del(k)
+		// Write a corrupt tombstone manifest so startup enters purgeAllCacheFilesOnCorruptTombstoneLocked.
+		if err := os.WriteFile(filepath.Join(dir, diskTombstoneFile), []byte("corrupt-manifest\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		// Reset in-memory index to simulate startup rehydration, failing the 1st readDir (cleanup)
+		// and allowing the 2nd readDir (rehydrate) to succeed, then failing the 3rd readDir (lookup retry).
+		c.disk.mu.Lock()
+		c.disk.ll.Init()
+		clear(c.disk.items)
+		c.disk.curBytes = 0
+		c.disk.physBytes = 0
+		var readDirCalls atomic.Int32
+		c.disk.testReadDir = func(p string) ([]os.DirEntry, error) {
+			n := readDirCalls.Add(1)
+			if n == 1 || n == 3 {
+				return nil, os.ErrPermission
+			}
+			return os.ReadDir(p)
+		}
+		c.disk.rehydrate()
+		pendingAfterRehydrate := c.disk.corruptTombstoneCleanupPending
+		indexedCount := len(c.disk.items)
+		c.disk.mu.Unlock()
+
+		if !pendingAfterRehydrate || !c.disk.unrecoverableInvalidation.Load() {
+			t.Fatalf("expected unresolved startup cleanup condition (pending=%v, unrecoverable=%v)", pendingAfterRehydrate, c.disk.unrecoverableInvalidation.Load())
+		}
+		if indexedCount != 0 {
+			t.Fatalf("expected 0 rehydrated items while startup cleanup is pending, got %d", indexedCount)
+		}
+
+		// Next lookup attempts retry (call #3 fails) and must remain fail-closed.
+		if _, ok := c.get(k); ok {
+			t.Fatal("expected lookup to fail closed while startup cleanup remains unresolved")
+		}
+		if !c.disk.unrecoverableInvalidation.Load() {
+			t.Fatal("expected unrecoverableInvalidation to remain true when retry readDir fails")
+		}
+
+		// Once readDir succeeds (call #4), sweepTombstonesLocked completes the cleanup and deletes the file.
+		c.disk.testReadDir = nil
+		if _, ok := c.get(k); ok {
+			t.Fatal("expected invalidated file to be purged and unavailable after cleanup recovery")
+		}
+		if c.disk.unrecoverableInvalidation.Load() {
+			t.Fatal("expected unrecoverableInvalidation to clear after cleanup succeeds")
+		}
+	})
+
+	// 16. Disk lookup paused across eviction does not overwrite inDisk=false or leak keyGen state.
+	t.Run("lookup-evicted-before-completion-reclaims-keygen", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := rangeEnabledCfg(dir, 64, 256, 512)
+		c := newTestCache(t, cfg)
+		k1 := "GET\nexample.com\n/lookup-evict-1"
+		k2 := "GET\nexample.com\n/lookup-evict-2"
+		k3 := "GET\nexample.com\n/lookup-evict-3"
+		mkEntry := func(tag byte) *Entry {
+			return &Entry{
+				Status:    http.StatusOK,
+				Header:    http.Header{"Cache-Control": {"public, max-age=3600"}},
+				Body:      bytes.Repeat([]byte{tag}, 180),
+				CreatedAt: time.Now(),
+				ExpiresAt: time.Now().Add(time.Hour),
+			}
+		}
+		c.set(k1, mkEntry('A'))
+
+		leasePaused := make(chan struct{})
+		leaseResume := make(chan struct{})
+		var hitLease atomic.Bool
+		c.disk.onLookupLeaseAcquire = func() {
+			if hitLease.CompareAndSwap(false, true) {
+				close(leasePaused)
+				<-leaseResume
+			}
+		}
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e, ok := c.get(k1)
+			if ok && e != nil {
+				if rc, err := e.OpenBody(); err == nil {
+					_ = rc.Close()
+				}
+			}
+		}()
+		<-leasePaused
+
+		// Evict k1 from disk while c.get(k1) is paused at the lookup lease barrier.
+		c.set(k2, mkEntry('B'))
+		c.set(k3, mkEntry('C'))
+		if c.disk.hasKey(k1) {
+			t.Fatal("expected k1 to be evicted from disk")
+		}
+
+		close(leaseResume)
+		wg.Wait()
+		c.disk.onLookupLeaseAcquire = nil
+
+		c.genMu.Lock()
+		_, leaked := c.keyGen[k1]
+		c.genMu.Unlock()
+		if leaked {
+			t.Fatal("expected k1 generation state to be reclaimed after lookup completed following eviction")
+		}
+	})
+
+	// 17. Residency transitions clear keyGen on pinned-reader close, restart->lookup->eviction, and purge overlap.
+	t.Run("residency-transitions-pinned-close-rehydrated-evict-and-purge", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := rangeEnabledCfg(dir, 64, 256, 512)
+		c := newTestCache(t, cfg)
+		mkDiskEntry := func(tag byte) *Entry {
+			return &Entry{
+				Status:    http.StatusOK,
+				Header:    http.Header{"Cache-Control": {"public, max-age=3600"}},
+				Body:      bytes.Repeat([]byte{tag}, 180),
+				CreatedAt: time.Now(),
+				ExpiresAt: time.Now().Add(time.Hour),
+			}
+		}
+
+		// (a) Successful pinned-reader cleanup without a tombstone clears residency and reclaims keyGen.
+		kPin := "GET\nexample.com\n/residency-pinned"
+		c.set(kPin, mkDiskEntry('P'))
+		ePin, ok := c.get(kPin)
+		if !ok {
+			t.Fatal("expected kPin hit")
+		}
+		rcPin, err := ePin.OpenBody()
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.disk.testRenameFile = func(_, _ string) error { return os.ErrPermission }
+		c.Delete(kPin)
+		c.disk.testRenameFile = nil
+
+		c.genMu.Lock()
+		_, presentWhilePinned := c.keyGen[kPin]
+		c.genMu.Unlock()
+		if !presentWhilePinned {
+			t.Fatal("expected kPin to remain in keyGen while pinned reader holds canonical path")
+		}
+		_ = rcPin.Close()
+		c.genMu.Lock()
+		_, leakedAfterPinClose := c.keyGen[kPin]
+		c.genMu.Unlock()
+		if leakedAfterPinClose {
+			t.Fatal("expected kPin to be reclaimed from keyGen after pinned reader closed cleanly")
+		}
+
+		// (b) Restart -> lookup -> eviction of rehydrated disk item clears residency and reclaims keyGen.
+		kRehyd := "GET\nexample.com\n/residency-rehydrated"
+		c.set(kRehyd, mkDiskEntry('R'))
+		cRestart := newTestCache(t, cfg)
+		if _, ok := cRestart.get(kRehyd); !ok {
+			t.Fatal("expected rehydrated kRehyd hit")
+		}
+		cRestart.set("GET\nexample.com\n/evictor-1", mkDiskEntry('1'))
+		cRestart.set("GET\nexample.com\n/evictor-2", mkDiskEntry('2'))
+		if cRestart.disk.hasKey(kRehyd) {
+			t.Fatal("expected kRehyd to be evicted after evictor writes")
+		}
+		cRestart.genMu.Lock()
+		_, leakedRehyd := cRestart.keyGen[kRehyd]
+		cRestart.genMu.Unlock()
+		if leakedRehyd {
+			t.Fatal("expected rehydrated & evicted key to be reclaimed from keyGen")
+		}
+
+		// (c) Publication racing into the post-purge epoch before d.purge() runs clears residency and reclaims keyGen.
+		kPurge := "GET\nexample.com\n/residency-purge-overlap"
+		cRestart.genMu.Lock()
+		cRestart.purgeGen = cRestart.genSeq.Add(1)
+		cRestart.keyGen = make(map[string]*keyGenState)
+		cRestart.mem.purge()
+		cRestart.genMu.Unlock()
+
+		// Simulate a post-purge disk-only publication completing right before cRestart.disk.purge() runs.
+		cRestart.set(kPurge, mkDiskEntry('Z'))
+		cRestart.disk.purge()
+
+		cRestart.genMu.Lock()
+		_, leakedAfterPurge := cRestart.keyGen[kPurge]
+		cRestart.genMu.Unlock()
+		if leakedAfterPurge {
+			t.Fatal("expected post-purge publication wiped by disk.purge() to be reclaimed from keyGen")
+		}
+	})
+
+	// 18. Resize paused before victim pinning does not mark a newer memory entry absent.
+	t.Run("resize-race-with-newer-memory-entry-preserves-generation", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := rangeEnabledCfg(dir, 1024, 1024, 4<<10)
+		c := newTestCache(t, cfg)
+		k := "GET\nexample.com\n/resize-race"
+		v1 := &Entry{
+			Status:    http.StatusOK,
+			Header:    http.Header{"Cache-Control": {"public, max-age=3600"}},
+			Body:      bytes.Repeat([]byte("1"), 200),
+			CreatedAt: time.Now(),
+			ExpiresAt: time.Now().Add(time.Hour),
+		}
+		v2 := &Entry{
+			Status:    http.StatusOK,
+			Header:    http.Header{"Cache-Control": {"public, max-age=3600"}},
+			Body:      []byte("v2-small"),
+			CreatedAt: time.Now(),
+			ExpiresAt: time.Now().Add(time.Hour),
+		}
+		c.set(k, v1)
+
+		var hookRan atomic.Bool
+		c.mem.onBeforePinVictims = func() {
+			if hookRan.CompareAndSwap(false, true) {
+				// Install newer entry v2 in memory before the old victim v1 is pinned,
+				// and remove the disk copy so v2 relies on memory eviction to overflow to disk.
+				c.set(k, v2)
+				c.disk.del(k)
+			}
+		}
+		c.mem.Resize(400)
+		c.mem.onBeforePinVictims = nil
+
+		c.genMu.Lock()
+		stAfterResize := c.keyGen[k]
+		c.genMu.Unlock()
+		if stAfterResize == nil || !stAfterResize.inMem {
+			t.Fatalf("expected newer memory entry for %q to remain tracked in keyGen with inMem=true, got %+v", k, stAfterResize)
+		}
+
+		// Evicting v2 from memory must still pass generation validation and overflow v2 to disk.
+		c.mem.Resize(1)
+		if eDisk, ok := c.disk.get(k); !ok || string(eDisk.Body) != "v2-small" {
+			t.Fatalf("expected v2-small to overflow to disk on eviction after resize race, ok=%v", ok)
+		}
+	})
+
+	// 19. Concurrent pinned-reader close, deletion/publication, and tombstone sweeping under -race.
+	t.Run("concurrent-pinned-reader-close-and-sweep-race", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := rangeEnabledCfg(dir, 64, 512, 8<<10)
+		c := newTestCache(t, cfg)
+		for iter := 0; iter < 16; iter++ {
+			k := fmt.Sprintf("GET\nexample.com\n/pin-race-%d", iter)
+			c.set(k, &Entry{
+				Status:    http.StatusOK,
+				Header:    http.Header{"Cache-Control": {"public, max-age=3600"}},
+				Body:      bytes.Repeat([]byte("X"), 128),
+				CreatedAt: time.Now(),
+				ExpiresAt: time.Now().Add(time.Hour),
+			})
+			e, ok := c.get(k)
+			if !ok {
+				t.Fatal("expected hit")
+			}
+			rc, err := e.OpenBody()
+			if err != nil {
+				t.Fatal(err)
+			}
+			// 1st Delete with rename failure pins the active blob in d.pinned[hash].
+			c.disk.mu.Lock()
+			c.disk.testRenameFile = func(_, _ string) error { return os.ErrPermission }
+			c.disk.mu.Unlock()
+			c.Delete(k)
+
+			// 2nd Delete with remove failure records a tombstone for the same hash while d.pinned[hash] is set.
+			c.disk.mu.Lock()
+			c.disk.testRenameFile = nil
+			c.disk.testRemoveFile = func(p string) error {
+				if isCacheFile(filepath.Base(p)) {
+					return os.ErrPermission
+				}
+				return os.Remove(p)
+			}
+			c.disk.mu.Unlock()
+			c.Delete(k)
+			c.disk.mu.Lock()
+			c.disk.testRemoveFile = nil
+			c.disk.mu.Unlock()
+
+			var wg sync.WaitGroup
+			wg.Add(4)
+			go func() {
+				defer wg.Done()
+				_ = rc.Close()
+			}()
+			go func() {
+				defer wg.Done()
+				_, _ = c.Stats()
+			}()
+			go func() {
+				defer wg.Done()
+				c.set(k, &Entry{
+					Status:    http.StatusOK,
+					Header:    http.Header{"Cache-Control": {"public, max-age=3600"}},
+					Body:      bytes.Repeat([]byte("Y"), 128),
+					CreatedAt: time.Now(),
+					ExpiresAt: time.Now().Add(time.Hour),
+				})
+			}()
+			go func() {
+				defer wg.Done()
+				c.Delete(k)
+			}()
+			wg.Wait()
+			c.Delete(k)
+			_, _ = c.Stats()
+		}
+		c.genMu.Lock()
+		remKeys := len(c.keyGen)
+		c.genMu.Unlock()
+		if remKeys != 0 {
+			t.Fatalf("expected 0 remaining keyGen entries after concurrent pinned close/delete/sweep, got %d", remKeys)
+		}
+	})
 }
 
 // FuzzRangeHeaderAndStateTransitions fuzzes parseRangeHeader and
