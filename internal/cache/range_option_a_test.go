@@ -2502,7 +2502,9 @@ func TestLargeObjectAndRangeAuditRegressions(t *testing.T) {
 			t.Fatalf("superseded V1 resurrected after failed background streamed replacement: len=%d", e.BodyLen())
 		}
 	})
+}
 
+func TestLargeObjectResidencyAndStartupRecoveryRegressions(t *testing.T) {
 	// 15. Failed startup cleanup listing followed by successful rehydration listing stays fail-closed.
 	t.Run("startup-cleanup-readdir-failure-stays-fail-closed", func(t *testing.T) {
 		dir := t.TempDir()

@@ -438,16 +438,20 @@ func (d *diskStore) recordTombstoneLocked(hash string, fileSize int64) {
 	}
 }
 
+func (d *diskStore) syncTombstoneStateLocked() {
+	if err := d.persistTombstonesLocked(); err != nil {
+		d.recordWriteFailure(err)
+	} else if !d.corruptTombstoneCleanupPending && len(d.tombstones) == 0 && !d.tombstoneDirty {
+		d.unrecoverableInvalidation.Store(false)
+	}
+}
+
 func (d *diskStore) clearTombstoneLocked(hash string) {
 	if prev, exists := d.tombstones[hash]; exists {
 		delete(d.tombstones, hash)
 		key := d.hashKeys[hash]
 		d.tombstoneBytes -= prev
-		if err := d.persistTombstonesLocked(); err != nil {
-			d.recordWriteFailure(err)
-		} else if !d.corruptTombstoneCleanupPending && len(d.tombstones) == 0 && !d.tombstoneDirty {
-			d.unrecoverableInvalidation.Store(false)
-		}
+		d.syncTombstoneStateLocked()
 		d.notifyKeyDiskStateLocked(key, hash)
 	}
 }
@@ -465,9 +469,7 @@ func (d *diskStore) sweepTombstonesLocked() {
 		}
 	}
 	if len(d.tombstones) == 0 && !d.tombstoneDirty {
-		if !d.corruptTombstoneCleanupPending {
-			d.unrecoverableInvalidation.Store(false)
-		}
+		d.unrecoverableInvalidation.Store(false)
 		return
 	}
 	changed := d.tombstoneDirty
@@ -487,11 +489,18 @@ func (d *diskStore) sweepTombstonesLocked() {
 		}
 	}
 	if changed {
-		if err := d.persistTombstonesLocked(); err != nil {
-			d.recordWriteFailure(err)
-		} else if !d.corruptTombstoneCleanupPending && len(d.tombstones) == 0 && !d.tombstoneDirty {
-			d.unrecoverableInvalidation.Store(false)
-		}
+		d.syncTombstoneStateLocked()
+	}
+}
+
+func (d *diskStore) dropIndexedHashLocked(hash string) {
+	if el, ok := d.items[hash]; ok {
+		it := el.Value.(*diskItem)
+		d.ll.Remove(el)
+		delete(d.items, hash)
+		d.curBytes -= it.size
+		d.physBytes -= it.fileSize
+		d.rememberHashKeyLocked(hash, it.key)
 	}
 }
 
@@ -509,14 +518,7 @@ func (d *diskStore) purgeAllCacheFilesOnCorruptTombstoneLocked() {
 		}
 		name := e.Name()
 		if isCacheFile(name) {
-			if el, ok := d.items[name]; ok {
-				it := el.Value.(*diskItem)
-				d.ll.Remove(el)
-				delete(d.items, name)
-				d.curBytes -= it.size
-				d.physBytes -= it.fileSize
-				d.rememberHashKeyLocked(name, it.key)
-			}
+			d.dropIndexedHashLocked(name)
 			if err := d.removePath(d.path(name)); err != nil && !os.IsNotExist(err) {
 				var sz int64
 				if info, stErr := e.Info(); stErr == nil {
@@ -530,11 +532,7 @@ func (d *diskStore) purgeAllCacheFilesOnCorruptTombstoneLocked() {
 		}
 	}
 	d.corruptTombstoneCleanupPending = false
-	if err := d.persistTombstonesLocked(); err != nil {
-		d.recordWriteFailure(err)
-	} else if len(d.tombstones) == 0 && !d.tombstoneDirty {
-		d.unrecoverableInvalidation.Store(false)
-	}
+	d.syncTombstoneStateLocked()
 }
 
 func (d *diskStore) loadAndSweepTombstonesLocked() {
@@ -1310,13 +1308,10 @@ func (d *diskStore) delIfOlderGen(key string, maxGen uint64) {
 	d.sweepTombstonesLocked()
 	if el, ok := d.items[hash]; ok {
 		it := el.Value.(*diskItem)
-		if it.gen >= maxGen {
+		if maxGen != math.MaxUint64 && it.gen >= maxGen {
 			return
 		}
-		d.ll.Remove(el)
-		delete(d.items, it.hash)
-		d.curBytes -= it.size
-		d.physBytes -= it.fileSize
+		d.dropIndexedHashLocked(hash)
 		d.rememberHashKeyLocked(hash, key)
 		if err := d.retireBlobLocked(hash, it.blob); err != nil {
 			d.recordTombstoneLocked(hash, it.fileSize)
@@ -1335,31 +1330,7 @@ func (d *diskStore) delIfOlderGen(key string, maxGen uint64) {
 }
 
 func (d *diskStore) del(key string) {
-	hash := hashKey(key)
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.sweepTombstonesLocked()
-	if el, ok := d.items[hash]; ok {
-		it := el.Value.(*diskItem)
-		d.ll.Remove(el)
-		delete(d.items, it.hash)
-		d.curBytes -= it.size
-		d.physBytes -= it.fileSize
-		d.rememberHashKeyLocked(hash, key)
-		if err := d.retireBlobLocked(hash, it.blob); err != nil {
-			d.recordTombstoneLocked(hash, it.fileSize)
-			d.recordWriteFailure(err)
-		}
-		d.notifyKeyDiskStateLocked(key, hash)
-		return
-	}
-	if err := d.removePath(d.path(hash)); err != nil && !os.IsNotExist(err) {
-		if st, stErr := os.Stat(d.path(hash)); stErr == nil {
-			d.rememberHashKeyLocked(hash, key)
-			d.recordTombstoneLocked(hash, st.Size())
-		}
-	}
-	d.notifyKeyDiskStateLocked(key, hash)
+	d.delIfOlderGen(key, math.MaxUint64)
 }
 
 func (d *diskStore) purge() {
