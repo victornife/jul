@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 411 |
-| Schema leaves (configurable values) | 346 |
-| Registry entries | 346 |
+| Schema paths (containers included) | 413 |
+| Schema leaves (configurable values) | 348 |
+| Registry entries | 348 |
 | Startup-consumed entries | 29 |
-| Class `hot_reload` | 303 |
+| Class `hot_reload` | 305 |
 | Class `restart_required` | 29 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -178,7 +178,9 @@ value is compared as a digest so no secret material leaves the process.
 | `cache.lock` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.lock_timeout` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.max_entry_size` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| `cache.max_ranges` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.memory_max_size` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| `cache.range_enabled` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.stale_if_error` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.stale_while_revalidate` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `compression.enabled` | `hot_reload` | `compression` | — | the compression middleware is rebuilt with the handler tree on each successful reload |

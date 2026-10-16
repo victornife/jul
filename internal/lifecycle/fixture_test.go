@@ -353,6 +353,8 @@ func fullConfig() *config.Config {
 			StaleIfError:         config.Duration(300 * time.Second),
 			Lock:                 true,
 			LockTimeout:          config.Duration(5 * time.Second),
+			RangeEnabled:         true,
+			MaxRanges:            1,
 		},
 		Compression: config.CompressionConfig{
 			Enabled:       config.Bool(true),

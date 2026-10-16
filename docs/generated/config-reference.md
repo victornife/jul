@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 346 configurable leaves.
+Coverage: 348 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -788,6 +788,22 @@ MaxEntrySize is the maximum cacheable response body size across both tiers.
 | Zero/empty semantics | omitted/zero defaults to memory_max_size when enabled |
 | Active when | always |
 
+## `cache.max_ranges` {#cache-max_ranges}
+
+MaxRanges bounds the number of comma-separated byte-range specs accepted when range_enabled is true.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| Default (conditional) | 1 (when cache.range_enabled) |
+| Constraint | 0..16; requires cache.range_enabled = true when positive |
+| Zero/empty semantics | omitted/zero defaults to 1 when range_enabled is enabled |
+| Active when | cache.enabled = true and cache.range_enabled = true |
+
 ## `cache.memory_max_size` {#cache-memory_max_size}
 
 MemoryMaxSize is the in-memory tier cap.
@@ -801,6 +817,18 @@ MemoryMaxSize is the in-memory tier cap.
 | Constraint | non-negative |
 | Zero/empty semantics | omitted/zero defaults to 64 MiB when enabled |
 | Active when | always |
+
+## `cache.range_enabled` {#cache-range_enabled}
+
+RangeEnabled opts the cache into Option A range-aware caching (#442, ADR 0024): single byte-range GET requests are satisfied from complete stored representations, and eligible cold range misses coordinate a complete-object origin fill.
+
+| | |
+| --- | --- |
+| Type | `bool` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 
 ## `cache.stale_if_error` {#cache-stale_if_error}
 

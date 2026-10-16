@@ -49,12 +49,25 @@ type Cache struct {
 	fillMu     sync.Mutex
 	fills      map[string]*fillCall // in-flight cold-miss fills (#525)
 	onFillLock func(outcome string)
+	onRange    func(outcome string)
 
 	// varyMu serializes the read-modify-write of a base resource's variant
 	// membership stub. Publishing a variant and recording it in the stub must be
 	// one step, or two concurrent variant writes lose one another's membership
 	// and leave an entry that invalidation can no longer reach.
 	varyMu sync.Mutex
+
+	// genMu, genSeq, keyGen, and purgeGen assign monotonic per-key generations
+	// across the memory and disk tiers so a slow disk lookup cannot resurrect a
+	// deleted/replaced entry into memory and a slow write-through cannot
+	// overwrite a newer disk entry. Entries in keyGen are reference-counted by
+	// in-flight operations and tier residency (inMem/inDisk), and are reclaimed
+	// in O(1) time once a key is idle and absent from both tiers.
+	genMu           sync.Mutex
+	genSeq          atomic.Uint64
+	keyGen          map[string]*keyGenState
+	purgeGen        uint64
+	onBeforeReclaim func(key string)
 
 	// observe, when set, receives one bounded outcome per revalidation
 	// decision. It is installed by the composition root so the cache does not
@@ -124,9 +137,10 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		logger = slog.Default()
 	}
 	c := &Cache{
-		log:   logger,
-		calls: make(map[revalidateKey]*revalidateCall),
-		fills: make(map[string]*fillCall),
+		log:    logger,
+		calls:  make(map[revalidateKey]*revalidateCall),
+		fills:  make(map[string]*fillCall),
+		keyGen: make(map[string]*keyGenState),
 	}
 	pol := policyFromConfig(cfg)
 	c.policy.Store(&pol)
@@ -136,13 +150,24 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 			return nil, err
 		}
 		d.onSkip = c.captureSkipped
+		d.checkGen = c.isGenCurrent
+		d.onKeyDiskState = c.setKeyDiskState
 		c.disk = d
 	}
-	c.mem = newMemStore(cfg.MemoryMaxSize.Bytes(), func(key string, e *Entry) {
-		if c.disk != nil {
-			c.disk.set(key, e)
+	c.mem = newMemStore(cfg.MemoryMaxSize.Bytes(), nil)
+	c.mem.pinVictims = func(victims []*memItem) {
+		c.genMu.Lock()
+		c.pinVictimsLocked(victims)
+		c.genMu.Unlock()
+	}
+	c.mem.onEvictItem = func(it *memItem) {
+		if c.disk != nil && !c.disk.hasKey(it.key) && c.isGenCurrent(it.key, it.gen) {
+			c.disk.setWithGen(it.key, it.entry, it.gen)
 		}
-	})
+		if it.pinnedState != nil {
+			c.finishKeyOp(it.pinnedState)
+		}
+	}
 	return c, nil
 }
 
@@ -190,31 +215,207 @@ func (c *Cache) captureSkipped(reason string) {
 	}
 }
 
+type keyGenState struct {
+	key      string
+	gen      uint64
+	inflight int32
+	inMem    bool
+	inDisk   bool
+}
+
+func (c *Cache) beginNextGenLocked(key string) (st *keyGenState, gen, prevGen uint64, hadPrev bool) {
+	if c.keyGen == nil {
+		c.keyGen = make(map[string]*keyGenState)
+	}
+	g := c.genSeq.Add(1)
+	if existing, ok := c.keyGen[key]; ok {
+		prevGen = existing.gen
+		existing.gen = g
+		existing.inflight++
+		return existing, g, prevGen, true
+	}
+	st = &keyGenState{key: key, gen: g, inflight: 1}
+	c.keyGen[key] = st
+	return st, g, 0, false
+}
+
+func (c *Cache) beginReadGenLocked(key string) (st *keyGenState, preGen, prePurge uint64) {
+	if c.keyGen == nil {
+		c.keyGen = make(map[string]*keyGenState)
+	}
+	existing, ok := c.keyGen[key]
+	if !ok {
+		existing = &keyGenState{key: key}
+		c.keyGen[key] = existing
+	}
+	existing.inflight++
+	return existing, existing.gen, c.purgeGen
+}
+
+func (c *Cache) maybeReclaimLocked(st *keyGenState) {
+	if st == nil {
+		return
+	}
+	if cur, ok := c.keyGen[st.key]; ok && cur == st && st.inflight == 0 {
+		st.inMem = c.mem != nil && c.mem.hasKey(st.key)
+		if !st.inMem && !st.inDisk {
+			delete(c.keyGen, st.key)
+		}
+	}
+}
+
+func (c *Cache) finishKeyOp(st *keyGenState) {
+	if st == nil {
+		return
+	}
+	hook := c.onBeforeReclaim
+	c.genMu.Lock()
+	st.inflight--
+	if st.inflight < 0 {
+		st.inflight = 0
+	}
+	if hook == nil {
+		c.maybeReclaimLocked(st)
+		c.genMu.Unlock()
+		return
+	}
+	c.genMu.Unlock()
+	hook(st.key)
+	c.genMu.Lock()
+	c.maybeReclaimLocked(st)
+	c.genMu.Unlock()
+}
+
+func (c *Cache) setKeyDiskState(key string, inDisk bool) {
+	c.genMu.Lock()
+	if st, ok := c.keyGen[key]; ok {
+		st.inDisk = inDisk
+		if !inDisk {
+			c.maybeReclaimLocked(st)
+		}
+	}
+	c.genMu.Unlock()
+}
+
+func (c *Cache) pinVictimsLocked(victims []*memItem) {
+	for _, it := range victims {
+		if st, ok := c.keyGen[it.key]; ok {
+			if st.gen == it.gen && (c.mem == nil || !c.mem.hasKey(it.key)) {
+				st.inMem = false
+			}
+			st.inflight++
+			it.pinnedState = st
+		}
+	}
+}
+
+func (c *Cache) isGenCurrentLocked(key string, gen uint64) bool {
+	if gen < c.purgeGen {
+		return false
+	}
+	if st, ok := c.keyGen[key]; ok && st.gen != 0 {
+		return st.gen == gen
+	}
+	return gen == 0 && c.purgeGen == 0
+}
+
+func (c *Cache) isGenCurrent(key string, gen uint64) bool {
+	c.genMu.Lock()
+	defer c.genMu.Unlock()
+	return c.isGenCurrentLocked(key, gen)
+}
+
+func (c *Cache) hasStoredKey(key string) bool {
+	if _, ok := c.mem.get(key); ok {
+		return true
+	}
+	if c.disk != nil {
+		return c.disk.hasKey(key)
+	}
+	return false
+}
+
 func (c *Cache) get(key string) (*Entry, bool) {
 	if e, ok := c.mem.get(key); ok {
 		return e, true
 	}
 	if c.disk != nil {
+		c.genMu.Lock()
+		st, preGen, prePurge := c.beginReadGenLocked(key)
+		c.genMu.Unlock()
 		memCap := c.Policy().MemoryCapBytes()
-		if e, ok := c.disk.getWithMemCap(key, memCap); ok {
-			if e.diskBody == nil {
-				c.mem.set(key, e) // promote memory-eligible entry
-			}
-			return e, true
+		e, diskGen, ok := c.disk.getWithMemCapGen(key, memCap)
+		if !ok {
+			c.finishKeyOp(st)
+			return nil, false
 		}
+		c.genMu.Lock()
+		curSt := c.keyGen[key]
+		curGen := uint64(0)
+		if curSt != nil {
+			curGen = curSt.gen
+		}
+		stillValid := c.purgeGen == prePurge && curSt == st && curGen == preGen && c.isGenCurrentLocked(key, diskGen)
+		if !stillValid {
+			c.genMu.Unlock()
+			c.finishKeyOp(st)
+			return c.mem.get(key)
+		}
+		var victims []*memItem
+		if e.diskBody == nil {
+			victims = c.mem.putWithGen(key, e, diskGen) // promote memory-eligible entry under genMu
+			st.inMem = c.mem.hasKey(key)
+			c.pinVictimsLocked(victims)
+		}
+		c.genMu.Unlock()
+		c.mem.flushVictims(victims)
+		c.finishKeyOp(st)
+		return e, true
 	}
 	return nil, false
 }
 
 func (c *Cache) set(key string, e *Entry) {
+	c.setWithResult(key, e)
+}
+
+func (c *Cache) setWithResult(key string, e *Entry) bool {
+	c.genMu.Lock()
+	st, gen, prevGen, hadPrev := c.beginNextGenLocked(key)
+	var victims []*memItem
 	if e != nil && e.diskBody != nil {
 		c.mem.del(key)
+		st.inMem = false
 	} else {
-		c.mem.set(key, e)
+		victims = c.mem.putWithGen(key, e, gen)
+		st.inMem = c.mem.hasKey(key)
+		c.pinVictimsLocked(victims)
 	}
+	c.genMu.Unlock()
+	c.mem.flushVictims(victims)
 	if c.disk != nil {
-		c.disk.set(key, e)
+		if !c.disk.setWithGen(key, e, gen) {
+			if e != nil && e.diskBody != nil {
+				c.genMu.Lock()
+				if c.keyGen[key] == st && st.gen == gen {
+					if hadPrev {
+						st.gen = prevGen
+					} else {
+						st.gen = 0
+					}
+				}
+				c.genMu.Unlock()
+				c.finishKeyOp(st)
+				return false
+			}
+			// Memory write-through failed, while memory now holds the new generation `gen`.
+			// Remove or tombstone any older disk generation (< gen) for `key` so a
+			// subsequent restart cannot rehydrate and serve the superseded disk value.
+			c.disk.delIfOlderGen(key, gen)
+		}
 	}
+	c.finishKeyOp(st)
+	return c.hasStoredKey(key)
 }
 
 // Delete removes a single key from both tiers. When the key holds a Vary stub,
@@ -237,15 +438,24 @@ func (c *Cache) deleteLocked(key string) {
 }
 
 func (c *Cache) delOne(key string) {
+	c.genMu.Lock()
+	st, _, _, _ := c.beginNextGenLocked(key)
 	c.mem.del(key)
+	st.inMem = false
+	c.genMu.Unlock()
 	if c.disk != nil {
 		c.disk.del(key)
 	}
+	c.finishKeyOp(st)
 }
 
 // Purge clears both tiers.
 func (c *Cache) Purge() {
+	c.genMu.Lock()
+	c.purgeGen = c.genSeq.Add(1)
+	c.keyGen = make(map[string]*keyGenState)
 	c.mem.purge()
+	c.genMu.Unlock()
 	if c.disk != nil {
 		c.disk.purge()
 	}
@@ -309,18 +519,24 @@ func (c *Cache) store(base string, r *http.Request, e *Entry) {
 
 func (c *Cache) setCaptured(k string, e *Entry, stream *diskStreamCapture) bool {
 	if stream == nil {
-		c.set(k, e)
-		return true
+		return c.setWithResult(k, e)
 	}
 	if c.disk == nil {
 		return false
 	}
-	blob, ok := c.disk.publishStream(k, e, stream)
+	c.genMu.Lock()
+	st, gen, _, _ := c.beginNextGenLocked(k)
+	c.mem.del(k)
+	st.inMem = false
+	c.genMu.Unlock()
+	blob, ok := c.disk.publishStreamWithGen(k, e, stream, gen)
 	if !ok {
+		c.disk.delIfOlderGen(k, gen)
+		c.finishKeyOp(st)
 		return false
 	}
 	e.diskBody = blob
-	c.mem.del(k)
+	c.finishKeyOp(st)
 	return true
 }
 
@@ -342,7 +558,16 @@ func (c *Cache) storeCaptured(base string, r *http.Request, e *Entry, stream *di
 	if evicted := stub.addVariant(vk); evicted != "" {
 		c.delOne(evicted)
 	}
-	c.set(base, stub)
+	if !c.setWithResult(base, stub) {
+		c.delOne(vk)
+		return false
+	}
+	if (e.diskBody != nil && c.disk != nil && (!c.disk.hasKey(base) || !c.disk.hasKey(vk))) ||
+		!c.hasStoredKey(base) || !c.hasStoredKey(vk) {
+		c.delOne(vk)
+		c.delOne(base)
+		return false
+	}
 	return true
 }
 
@@ -464,13 +689,19 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		// Decision D05 (#107/#132): a request for a byte range bypasses the
-		// cache entirely rather than being answered from a complete stored
-		// representation. It runs BEFORE lookup so no cached full response can
-		// substitute for the 206/416 the origin would produce, and before any
-		// storage decision so a 206 never reaches the store.
+		pol := c.Policy()
+
+		// Decision D05 (#107/#132) & #442 Option A (ADR 0024): when range_enabled
+		// is false (default), a request carrying Range or If-Range bypasses the
+		// cache before lookup and storage. When range_enabled is true, Option A
+		// evaluates Range/If-Range against complete cached representations and
+		// coordinates complete-object fills on eligible cold range misses.
 		if isRangeRequest(r) {
-			c.bypass(w, r, next, span)
+			if !pol.RangeEnabled {
+				c.bypass(w, r, next, span)
+				return
+			}
+			c.handleRangeRequest(w, r, next, pol, span)
 			return
 		}
 
@@ -482,21 +713,24 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		k := key(r)
-		now := c.clock()
-		effKey, served := c.serveCachedIfReusable(w, r, next, k, reqPolicy, now, span)
-		if served {
-			return
-		}
-		pol := c.Policy()
-		if pol.Lock {
-			c.fillOrWait(w, r, next, k, effKey, reqPolicy, pol, span, effKey == k)
-			return
-		}
-		span.SetString("cache.status", "MISS")
-		span.End()
-		c.fetchAndStoreWithPolicy(w, r, next, now, pol, nil)
+		c.serveOrFillFull(w, r, next, reqPolicy, pol, span)
 	})
+}
+
+func (c *Cache) serveOrFillFull(w http.ResponseWriter, r *http.Request, next http.Handler, reqPolicy requestPolicy, pol CachePolicy, span tracing.Span) {
+	k := key(r)
+	now := c.clock()
+	effKey, served := c.serveCachedIfReusable(w, r, next, k, reqPolicy, now, span)
+	if served {
+		return
+	}
+	if pol.Lock {
+		c.fillOrWait(w, r, next, k, effKey, reqPolicy, pol, span, effKey == k)
+		return
+	}
+	span.SetString("cache.status", "MISS")
+	span.End()
+	c.fetchAndStoreWithPolicy(w, r, next, now, pol, nil)
 }
 
 func (c *Cache) serveCachedIfReusable(w http.ResponseWriter, r *http.Request, next http.Handler, base string, reqPolicy requestPolicy, now time.Time, span tracing.Span) (effKey string, served bool) {
@@ -693,11 +927,12 @@ func (c *Cache) startRevalidate(effKey string, r *http.Request, next http.Handle
 		return
 	}
 
+	origReq := r.Clone(ctx)
 	req := conditionalRequest(r.Clone(ctx), stale)
 
 	go func() {
 		defer release()
-		c.revalidate(ctx, k, req, next, stale, call)
+		c.revalidate(ctx, k, req, origReq, next, stale, call)
 	}()
 }
 
@@ -709,6 +944,8 @@ func conditionalRequest(req *http.Request, stale *Entry) *http.Request {
 	req.Body = http.NoBody
 	req.Header.Del("If-None-Match")
 	req.Header.Del("If-Modified-Since")
+	req.Header.Del("Range")
+	req.Header.Del("If-Range")
 	// RFC 9110 §13.1.2 precedence: an entity tag is the strong validator and is
 	// preferred whenever the origin supplied one; Last-Modified is the fallback.
 	if stale.ETag != "" {
@@ -728,7 +965,7 @@ func conditionalRequest(req *http.Request, stale *Entry) *http.Request {
 // replaces the stored pointer under the tier's own lock. The deferred cleanup
 // removes the call state and releases every waiter on all paths, including a
 // panic in the downstream handler.
-func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req *http.Request, next http.Handler, stale *Entry, call *revalidateCall) {
+func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *http.Request, next http.Handler, stale *Entry, call *revalidateCall) {
 	defer func() {
 		// Ordering matters: drop the call state first so a later stale hit can
 		// start a fresh refresh the instant a waiter is released.
@@ -802,7 +1039,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req *http.Reque
 
 	default:
 		e := c.buildEntryFromCapture(req, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		if e == nil || !c.storeCaptured(key(req), req, e, rec.diskStream) {
+		if e == nil || !e.matchesVary(origReq) || !c.storeCaptured(key(req), req, e, rec.diskStream) {
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return
@@ -875,6 +1112,11 @@ func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header
 	// that spent time in an upstream cache would be served for its full TTL
 	// again here, and the Age header Jul reports would understate its real age.
 	created := now.Add(-initialAge(h, now))
+	if !hasHeaderField(stored, "Date") {
+		// RFC 9110 §6.6.1: a caching recipient with a clock MUST append a Date
+		// header field with the time the message was received when one is absent.
+		stored.Set("Date", now.UTC().Format(http.TimeFormat))
+	}
 
 	var copiedBody []byte
 	if !streamBacked {
@@ -947,6 +1189,29 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, e *Entry, state st
 		defer func() { _ = bodyReader.Close() }()
 	}
 
+	age := int(now.Sub(e.CreatedAt).Seconds())
+	if age < 0 {
+		age = 0
+	}
+
+	if modified && r.Method == http.MethodGet && e.Status == http.StatusOK {
+		if spec, isRange := rangeSpecFromRequest(r); isRange {
+			if e.BodyLen() == 0 {
+				// RFC 9110 §14.1.2 & §14.2: a zero-length representation has no
+				// addressable byte offsets (and a non-zero suffix-length such as
+				// bytes=-1 is satisfiable with 0 bytes, which cannot be formatted
+				// as a valid byte-range-resp first-last/0). Ignore Range for an
+				// empty representation and serve the complete 0-byte 200 OK.
+				c.observeRange(rangeOutcomeHit)
+			} else if hasHeaderField(r.Header, "If-Range") && !ifRangeMatches(r, e) {
+				c.observeRange(rangeOutcomeIfRangeFull)
+			} else {
+				c.serveRangeResponse(w, e, spec, bodyReader, state, age)
+				return true
+			}
+		}
+	}
+
 	h := w.Header()
 	// Set on the first value, Add on the rest: a stored multi-value field is
 	// still reproduced in full, but a stored field cannot stack beside a value
@@ -962,10 +1227,6 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, e *Entry, state st
 				h.Add(k, v)
 			}
 		}
-	}
-	age := int(now.Sub(e.CreatedAt).Seconds())
-	if age < 0 {
-		age = 0
 	}
 	h.Set("Age", strconv.Itoa(age))
 	h.Set("X-Cache", state)

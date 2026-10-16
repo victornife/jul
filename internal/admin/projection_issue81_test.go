@@ -57,6 +57,8 @@ stale_while_revalidate = "13s"
 stale_if_error = "29s"
 lock = true
 lock_timeout = "7s"
+range_enabled = true
+max_ranges = 4
 
 [[servers]]
 listen = "127.0.0.1:8080"
@@ -89,7 +91,8 @@ path = "/"
 		got.Cache.MemoryMax != "73m" || got.Cache.DiskPath != "/var/lib/jul/cache" ||
 		got.Cache.DiskMaxSize != "5g" || got.Cache.MaxEntrySize != "256m" || got.Cache.DefaultTTL != "1m11s" ||
 		got.Cache.StaleWhileRevalidate != "13s" || got.Cache.StaleIfError != "29s" ||
-		!got.Cache.Lock || got.Cache.LockTimeout != "7s" {
+		!got.Cache.Lock || got.Cache.LockTimeout != "7s" ||
+		!got.Cache.RangeEnabled || got.Cache.MaxRanges != 4 {
 		t.Fatalf("cache projection is incomplete: %#v", got.Cache)
 	}
 

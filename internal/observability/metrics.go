@@ -60,7 +60,10 @@ type Metrics struct {
 	cacheCaptureSkipped *prometheus.CounterVec
 	// cacheFillLocks counts cold-miss fill-lock events (#525 Part 1), labeled by
 	// a closed outcome set.
-	cacheFillLocks     *prometheus.CounterVec
+	cacheFillLocks *prometheus.CounterVec
+	// cacheRangeRequests counts range-aware cache decisions (#442 Option A),
+	// labeled by a closed outcome set.
+	cacheRangeRequests *prometheus.CounterVec
 	compressed         *prometheus.CounterVec
 	ratelimited        *prometheus.CounterVec
 	clientAddrDerived  *prometheus.CounterVec
@@ -315,6 +318,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		cacheFillLocks: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_cache_fill_locks_total",
 			Help: "Cold-miss cache fill-lock events, labeled by bounded outcome (wait/reused/not_reusable/uncacheable/timeout/canceled).",
+		}, []string{"outcome"}),
+		cacheRangeRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_cache_range_requests_total",
+			Help: "Range-aware cache decisions, labeled by bounded outcome (hit/fill/fallback/if_range_full/unsatisfiable/invalid).",
 		}, []string{"outcome"}),
 		compressed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_http_response_compressed_total",
@@ -588,6 +595,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.cacheRevalidations,
 		m.cacheCaptureSkipped,
 		m.cacheFillLocks,
+		m.cacheRangeRequests,
 		m.compressed,
 		m.ratelimited,
 		m.clientAddrDerived,
@@ -799,6 +807,14 @@ func (m *Metrics) ObserveCacheCaptureSkipped(reason string) {
 // identity, or error string.
 func (m *Metrics) ObserveCacheFillLock(outcome string) {
 	m.cacheFillLocks.WithLabelValues(outcome).Inc()
+}
+
+// ObserveCacheRangeRequest records one range-aware cache decision. outcome is
+// one of the cache package's bounded constants ("hit", "fill", "fallback",
+// "if_range_full", "unsatisfiable", "invalid") — never a cache key, range
+// value, path, host, user identity, or error string.
+func (m *Metrics) ObserveCacheRangeRequest(outcome string) {
+	m.cacheRangeRequests.WithLabelValues(outcome).Inc()
 }
 
 // ObserveRateLimited records that a request was rejected by rate limiting. kind

@@ -66,10 +66,23 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 		d.cover("cache.stale_if_error")
 		d.cover("cache.lock")
 		d.cover("cache.lock_timeout")
+		d.cover("cache.range_enabled")
+		d.cover("cache.max_ranges")
 		return
 	}
 	if !a.Enabled {
 		d.cover("cache.enabled")
+		d.cover("cache.memory_max_size")
+		d.cover("cache.disk_path")
+		d.cover("cache.disk_max_size")
+		d.cover("cache.max_entry_size")
+		d.cover("cache.default_ttl")
+		d.cover("cache.stale_while_revalidate")
+		d.cover("cache.stale_if_error")
+		d.cover("cache.lock")
+		d.cover("cache.lock_timeout")
+		d.cover("cache.range_enabled")
+		d.cover("cache.max_ranges")
 		return
 	}
 	if b.MemoryMaxSize != a.MemoryMaxSize {
@@ -103,6 +116,16 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	if b.LockTimeout != a.LockTimeout {
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: durStr(b.LockTimeout), After: durStr(a.LockTimeout), Detail: "Change cache fill-lock timeout"}, "cache lock_timeout")
 	}
+	if b.RangeEnabled != a.RangeEnabled {
+		action := "Enable"
+		if !a.RangeEnabled {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "cache", Name: "global", Detail: action + " cache range serving"}, "cache range_enabled")
+	}
+	if b.MaxRanges != a.MaxRanges {
+		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: fmt.Sprintf("%d", b.MaxRanges), After: fmt.Sprintf("%d", a.MaxRanges), Detail: "Change cache maximum ranges"}, "cache max_ranges")
+	}
 	d.cover("cache.enabled")
 	d.cover("cache.memory_max_size")
 	d.cover("cache.disk_path")
@@ -113,6 +136,8 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	d.cover("cache.stale_if_error")
 	d.cover("cache.lock")
 	d.cover("cache.lock_timeout")
+	d.cover("cache.range_enabled")
+	d.cover("cache.max_ranges")
 }
 
 // diffGlobalCompression compares the [compression] block.

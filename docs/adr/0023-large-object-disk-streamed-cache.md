@@ -57,8 +57,12 @@ Add `[cache].max_entry_size` (`Size`, classified `hot_reload`):
     entry sizes.
 - **Tier placement rule:**
   - Let `memCap = min(memory_max_size, max_entry_size)`.
-  - Responses with body length `<= memCap` are captured in memory and stored in
-    the memory tier (overflowing to the disk tier on LRU eviction as before).
+  - Responses with body length `<= memCap` are captured in memory, stored in the
+    memory tier, and written through to the disk tier (when `disk_path` is
+    configured) under a monotonic per-key generation so they survive process
+    restarts and remain backed by the larger disk LRU if evicted from memory.
+    On a memory miss, a disk hit within `memCap` is promoted back into the
+    memory tier only if its per-key generation is still current.
   - Responses with body length `> memory_max_size` and `<= max_entry_size`
     (which requires an enabled disk tier) are captured via a temporary file in
     `disk_path` and published directly to the disk tier.
@@ -73,10 +77,21 @@ during concurrent misses and revalidations:
 
 1. **In-memory capture budget (`memory_max_size`):** unchanged from #505.
    In-memory captures reserve bytes from `Cache.capture` up to `memory_max_size`.
-2. **Temporary-disk capture budget (`disk_max_size`):** in-flight disk captures
-   reserve bytes from `diskStore.tempBudget` up to `disk_max_size` (the current
-   configured disk cap). Concurrent temporary files therefore cannot bypass
-   `disk_max_size`.
+2. **Temporary-disk capture budget (`disk_max_size`):** in-flight disk writes
+   (large-object streamed captures, memory write-throughs, `Vary` stubs, and
+   `304` disk rewrites, including body, gob metadata, and 24-byte trailer bytes)
+   reserve bytes from `diskStore.tempBudget` up to the available disk capacity
+   (`availableBudgetCap = disk_max_size - retiredBytes - tombstoneBytes`). When
+   a **single** exact-boundary capture (`bodyLen <= availableBudgetCap` with no
+   other concurrent temporary capture in flight: `tempBudget.inflight == bodyLen`)
+   or a standalone `Vary` stub (`bodyLen == 0` with `tempBudget.inflight == 0`)
+   appends its bounded `JULDCH02` metadata and 24-byte trailer
+   (`len(tail) <= maxDiskMetaEnvelope = 1 MiB + 24 B`), `publishStreamWithGen`
+   permits `tempBudget` to reserve `len(tail)` up to
+   `availableBudgetCap + len(tail)` for the duration of the `Write`/`Sync`/`Close`/`Rename`
+   step so an exact-boundary object (`body == max_entry_size == disk_max_size`)
+   can be published without deadlocking against its own metadata trailer. No
+   second concurrent capture can exceed `availableBudgetCap`.
 3. **Spill transition for unknown-length responses:**
    - A response whose declared `Content-Length` exceeds `max_entry_size` is
      rejected at `WriteHeader` before any buffer or temporary file is allocated
@@ -205,6 +220,14 @@ type BodyReader interface {
     on the same in-flight `*Entry` opens the retired path rather than the new
     replacement file, and the canonical `<sha256(key)>` path is immediately free
     on all platforms (including Windows, where `os.Open` sets `FILE_SHARE_DELETE`).
+    If renaming `blob.path` fails while readers are active, `diskStore` pins the
+    retired blob (`d.pinned[hash]`) and immediately persists a durable tombstone
+    in `.jul-cache-tombstones` (preserving active-reader contents without
+    truncating the backing file if manifest persistence fails) until the last
+    reader closes, removes the old canonical file, and promotes any deferred
+    replacement. Recovery cleanup (`purgeAllCacheFilesOnCorruptTombstoneLocked`)
+    similarly retires indexed entries through their reader leases and preserves
+    active in-flight temporary captures (`d.activeTempFiles`).
     When the last active reader calls `Close()`, it closes its `*os.File` handle
     first and then removes `blob.path`.
 - **Random-access contract for #442:**

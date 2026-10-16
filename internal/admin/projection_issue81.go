@@ -70,6 +70,8 @@ type CompleteCacheProjection struct {
 	StaleIfError         string `json:"stale_if_error"`
 	Lock                 bool   `json:"lock"`
 	LockTimeout          string `json:"lock_timeout"`
+	RangeEnabled         bool   `json:"range_enabled"`
+	MaxRanges            int    `json:"max_ranges"`
 }
 
 // ServerLimitsProjection is the smallest adjacent safe projection needed to
@@ -172,6 +174,8 @@ func projectCacheSettings(c *config.Config) *CompleteCacheProjection {
 		StaleIfError:         string(mustMarshal(c.Cache.StaleIfError.MarshalText())),
 		Lock:                 c.Cache.Lock,
 		LockTimeout:          string(mustMarshal(c.Cache.LockTimeout.MarshalText())),
+		RangeEnabled:         c.Cache.RangeEnabled,
+		MaxRanges:            c.Cache.MaxRanges,
 	}
 }
 

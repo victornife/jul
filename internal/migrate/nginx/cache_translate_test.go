@@ -439,6 +439,36 @@ http {
 				code: "NGX_LOCATION_CACHE_LOCK_AGE",
 			},
 			{
+				name: "http proxy_cache_max_range_offset",
+				src:  "http { proxy_cache_max_range_offset 1m; server { listen 8080; location / { return 200; } } }",
+				code: "NGX_HTTP_CACHE_MAX_RANGE_OFFSET",
+			},
+			{
+				name: "server proxy_cache_max_range_offset",
+				src:  "http { server { listen 8080; proxy_cache_max_range_offset 1m; location / { return 200; } } }",
+				code: "NGX_SERVER_CACHE_MAX_RANGE_OFFSET",
+			},
+			{
+				name: "location proxy_cache_max_range_offset",
+				src:  "http { server { listen 8080; location / { proxy_cache_max_range_offset 1m; return 200; } } }",
+				code: "NGX_LOCATION_CACHE_MAX_RANGE_OFFSET",
+			},
+			{
+				name: "http slice",
+				src:  "http { slice 1m; server { listen 8080; location / { return 200; } } }",
+				code: "NGX_HTTP_SLICE",
+			},
+			{
+				name: "server slice",
+				src:  "http { server { listen 8080; slice 1m; location / { return 200; } } }",
+				code: "NGX_SERVER_SLICE",
+			},
+			{
+				name: "location slice",
+				src:  "http { server { listen 8080; location / { slice 1m; return 200; } } }",
+				code: "NGX_LOCATION_SLICE",
+			},
+			{
 				name: "invalid lock and timeout",
 				src: `http {
   proxy_cache_path /var/cache/jul keys_zone=z:10m;

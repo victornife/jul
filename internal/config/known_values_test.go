@@ -146,6 +146,16 @@ func TestValidateRejectsInvalidCacheCompressionAndAdminScalars(t *testing.T) {
 			c.Cache.DiskPath = "/var/cache/jul"
 			c.Cache.MaxEntrySize = Size(1 << 30)
 		}, `[cache].max_entry_size`},
+		{"cache max ranges negative", func(c *Config) {
+			c.Cache.MaxRanges = -1
+		}, `[cache].max_ranges`},
+		{"cache max ranges without range_enabled", func(c *Config) {
+			c.Cache.MaxRanges = 2
+		}, `[cache].max_ranges`},
+		{"cache max ranges above 16", func(c *Config) {
+			c.Cache.RangeEnabled = true
+			c.Cache.MaxRanges = 17
+		}, `[cache].max_ranges`},
 		{"compression min size", func(c *Config) { c.Compression = CompressionConfig{Enabled: Bool(false), MinSize: -1} }, `[compression].min_size`},
 		{"history keep disabled admin", func(c *Config) { c.Admin.HistoryKeep = -1 }, `[admin].history_keep`},
 		{"event connections", func(c *Config) { c.Admin.MaxEventConns = -1 }, `[admin].max_event_conns`},
@@ -184,6 +194,7 @@ func TestValidatePreservesDocumentedZeroAndDisableSemantics(t *testing.T) {
 [cache]
 enabled = true
 lock = true
+range_enabled = true
 
 [[servers]]
 listen = "127.0.0.1:8080"
@@ -194,8 +205,8 @@ listen = "127.0.0.1:8080"
 	if err != nil {
 		t.Fatalf("Parse cache.lock default: %v", err)
 	}
-	if !parsed.Cache.Lock || parsed.Cache.LockTimeout.Std() != 5*time.Second {
-		t.Fatalf("parsed cache = %+v, want Lock=true and LockTimeout=5s", parsed.Cache)
+	if !parsed.Cache.Lock || parsed.Cache.LockTimeout.Std() != 5*time.Second || !parsed.Cache.RangeEnabled || parsed.Cache.MaxRanges != 1 {
+		t.Fatalf("parsed cache = %+v, want Lock=true LockTimeout=5s RangeEnabled=true MaxRanges=1", parsed.Cache)
 	}
 }
 

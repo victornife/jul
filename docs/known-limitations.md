@@ -330,12 +330,16 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
   entire cache. There is no prefix, host, or tag-based purge (e.g. all
   `/api/v1/*`). Use short TTLs or application-layer cache busting for
   selective invalidation.
-- **No cached byte-range serving.** Every request carrying `Range` or `If-Range`
-  bypasses the cache and reaches the origin (`X-Cache: BYPASS`), and no `206` is
-  ever stored. Range workloads get no cache benefit. Serving single byte ranges
-  from complete cached representations is a recorded future enhancement, not an
-  accidental gap; #442 owns its evidence-gated decision, with #521/#525 remaining
-  independent evidence/prerequisite work.
+- **Range-aware caching is opt-in, complete-object only, and single-range.**
+  By default (`[cache].range_enabled = false`), every request carrying `Range`
+  or `If-Range` bypasses the cache and reaches the origin (`X-Cache: BYPASS`,
+  decision D05), and no `206` is ever stored. When `[cache].range_enabled = true`
+  (#442 Option A, [ADR 0024](adr/0024-range-aware-cache-option-a.md)), single
+  byte-range `GET` requests (`206`/`416`) are served from complete cached
+  representations (with strong `If-Range` comparison and `[cache].max_ranges`
+  bounds) and cold range misses coordinate a complete-object fill; `206`
+  fragments are never stored, and multi-range requests (`multipart/byteranges`)
+  bypass to the origin.
 - **`Surrogate-Control` is not cache policy.** Jul neither aliases it to
   `CDN-Cache-Control` nor translates it to generic `Cache-Control`; normal
   forwarding and sanitation still apply. RFC 9213 support is limited to

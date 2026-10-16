@@ -258,3 +258,221 @@ func BenchmarkCacheLargeDiskHit(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkCacheRangeHitMemory compares warm 64 KiB range requests on a 256 KiB
+// memory-backed object under Option A (range_enabled = true) vs Bypass
+// (range_enabled = false), reporting origin_bytes/op (#442).
+func BenchmarkCacheRangeHitMemory(b *testing.B) {
+	const (
+		bodySize  = 256 << 10
+		sliceSize = 64 << 10
+	)
+	payload := make([]byte, bodySize)
+	for _, rangeEnabled := range []bool{false, true} {
+		name := "bypass"
+		if rangeEnabled {
+			name = "option_a"
+		}
+		b.Run(name, func(b *testing.B) {
+			var originBytes int64
+			c, _ := New(config.CacheConfig{
+				Enabled:       true,
+				MemoryMaxSize: config.Size(2 << 20),
+				MaxEntrySize:  config.Size(2 << 20),
+				DefaultTTL:    config.Duration(5 * time.Minute),
+				RangeEnabled:  rangeEnabled,
+				MaxRanges:     1,
+			}, nil)
+			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Cache-Control", "public, max-age=300")
+				if r.Header.Get("Range") != "" {
+					w.Header().Set("Content-Range", "bytes 0-65535/262144")
+					w.Header().Set("Content-Length", strconv.Itoa(sliceSize))
+					w.WriteHeader(http.StatusPartialContent)
+					n, _ := w.Write(payload[:sliceSize])
+					originBytes += int64(n)
+					return
+				}
+				w.Header().Set("Content-Length", strconv.Itoa(bodySize))
+				w.WriteHeader(http.StatusOK)
+				n, _ := w.Write(payload)
+				originBytes += int64(n)
+			}))
+			req := httptest.NewRequest(http.MethodGet, "http://example.com/mem-range", nil)
+			req.Header.Set("Range", "bytes=0-65535")
+			h.ServeHTTP(newDiscardResponseWriter(), req)
+
+			originBytes = 0
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				w := newDiscardResponseWriter()
+				h.ServeHTTP(w, req)
+				if w.written != sliceSize || w.status != http.StatusPartialContent {
+					b.Fatalf("written=%d status=%d", w.written, w.status)
+				}
+			}
+			b.ReportMetric(float64(originBytes)/float64(b.N), "origin_bytes/op")
+		})
+	}
+}
+
+// BenchmarkCacheRangeHitDisk compares warm 64 KiB range requests on a 4 MiB
+// disk-backed object under Option A vs Bypass, reporting origin_bytes/op and
+// proving O(1) heap allocation on disk range hits (#442).
+func BenchmarkCacheRangeHitDisk(b *testing.B) {
+	const (
+		bodySize  = 4 << 20
+		sliceSize = 64 << 10
+	)
+	payload := make([]byte, bodySize)
+	for _, rangeEnabled := range []bool{false, true} {
+		name := "bypass"
+		if rangeEnabled {
+			name = "option_a"
+		}
+		b.Run(name, func(b *testing.B) {
+			var originBytes int64
+			c, _ := New(config.CacheConfig{
+				Enabled:       true,
+				MemoryMaxSize: config.Size(64 << 10),
+				DiskPath:      b.TempDir(),
+				DiskMaxSize:   config.Size(64 << 20),
+				MaxEntrySize:  config.Size(8 << 20),
+				DefaultTTL:    config.Duration(5 * time.Minute),
+				RangeEnabled:  rangeEnabled,
+				MaxRanges:     1,
+			}, nil)
+			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Cache-Control", "public, max-age=300")
+				if r.Header.Get("Range") != "" {
+					w.Header().Set("Content-Range", "bytes 1048576-1114111/4194304")
+					w.Header().Set("Content-Length", strconv.Itoa(sliceSize))
+					w.WriteHeader(http.StatusPartialContent)
+					n, _ := w.Write(payload[1<<20 : (1<<20)+sliceSize])
+					originBytes += int64(n)
+					return
+				}
+				w.Header().Set("Content-Length", strconv.Itoa(bodySize))
+				w.WriteHeader(http.StatusOK)
+				n, _ := w.Write(payload)
+				originBytes += int64(n)
+			}))
+			req := httptest.NewRequest(http.MethodGet, "http://example.com/disk-range", nil)
+			req.Header.Set("Range", "bytes=1048576-1114111")
+			h.ServeHTTP(newDiscardResponseWriter(), req)
+
+			originBytes = 0
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				w := newDiscardResponseWriter()
+				h.ServeHTTP(w, req)
+				if w.written != sliceSize || w.status != http.StatusPartialContent {
+					b.Fatalf("written=%d status=%d", w.written, w.status)
+				}
+			}
+			b.ReportMetric(float64(originBytes)/float64(b.N), "origin_bytes/op")
+		})
+	}
+}
+
+// BenchmarkCacheRangeOneShotTinyCold measures a one-shot 1 KiB range request on
+// a cold 4 MiB object, explicitly surfacing the full-object origin byte
+// amplification of Option A vs Bypass on unrepeated cold probes (#442).
+func BenchmarkCacheRangeOneShotTinyCold(b *testing.B) {
+	const (
+		bodySize  = 4 << 20
+		sliceSize = 1 << 10
+	)
+	payload := make([]byte, bodySize)
+	for _, rangeEnabled := range []bool{false, true} {
+		name := "bypass"
+		if rangeEnabled {
+			name = "option_a"
+		}
+		b.Run(name, func(b *testing.B) {
+			var originBytes int64
+			c, _ := New(config.CacheConfig{
+				Enabled:       true,
+				MemoryMaxSize: config.Size(64 << 10),
+				DiskPath:      b.TempDir(),
+				DiskMaxSize:   config.Size(64 << 20),
+				MaxEntrySize:  config.Size(8 << 20),
+				DefaultTTL:    config.Duration(5 * time.Minute),
+				RangeEnabled:  rangeEnabled,
+				MaxRanges:     1,
+			}, nil)
+			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Cache-Control", "public, max-age=300")
+				if r.Header.Get("Range") != "" {
+					w.Header().Set("Content-Range", "bytes 0-1023/4194304")
+					w.Header().Set("Content-Length", strconv.Itoa(sliceSize))
+					w.WriteHeader(http.StatusPartialContent)
+					n, _ := w.Write(payload[:sliceSize])
+					originBytes += int64(n)
+					return
+				}
+				w.Header().Set("Content-Length", strconv.Itoa(bodySize))
+				w.WriteHeader(http.StatusOK)
+				n, _ := w.Write(payload)
+				originBytes += int64(n)
+			}))
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				w := newDiscardResponseWriter()
+				req := httptest.NewRequest(http.MethodGet, "http://example.com/oneshot?id="+strconv.Itoa(i%4), nil)
+				req.Header.Set("Range", "bytes=0-1023")
+				c.Delete(key(req))
+				h.ServeHTTP(w, req)
+				if w.written != sliceSize || w.status != http.StatusPartialContent {
+					b.Fatalf("written=%d status=%d", w.written, w.status)
+				}
+			}
+			b.ReportMetric(float64(originBytes)/float64(b.N), "origin_bytes/op")
+		})
+	}
+}
+
+// BenchmarkCacheWriteChurnScaling benchmarks sustained write churn across
+// increasing live-key populations (64, 1024, 4096) to verify O(1) per-write
+// generation bookkeeping without O(N) map scans.
+func BenchmarkCacheWriteChurnScaling(b *testing.B) {
+	payload := make([]byte, 256)
+	for _, liveKeys := range []int{64, 1024, 4096} {
+		b.Run("live_"+strconv.Itoa(liveKeys), func(b *testing.B) {
+			memBytes := int64(liveKeys) * 600
+			c, err := New(config.CacheConfig{
+				Enabled:       true,
+				MemoryMaxSize: config.Size(memBytes),
+				MaxEntrySize:  config.Size(memBytes),
+				DefaultTTL:    config.Duration(5 * time.Minute),
+			}, nil)
+			if err != nil {
+				b.Fatal(err)
+			}
+			now := time.Now()
+			e := &Entry{
+				Status:    http.StatusOK,
+				Header:    http.Header{"Cache-Control": {"public, max-age=300"}},
+				Body:      payload,
+				CreatedAt: now,
+				ExpiresAt: now.Add(5 * time.Minute),
+			}
+			keys := make([]string, liveKeys*2)
+			for i := range keys {
+				keys[i] = "GET\nexample.com\n/bench-churn/" + strconv.Itoa(i)
+			}
+			for i := 0; i < liveKeys; i++ {
+				c.set(keys[i], e)
+			}
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				c.set(keys[i%len(keys)], e)
+			}
+		})
+	}
+}

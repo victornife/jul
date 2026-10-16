@@ -81,6 +81,16 @@ separate from application audiences/invitations (#579/#588), SAML/SCIM and
 identity governance; those horizons are not implicitly activated. It does not
 inherit the Console's GA/soak record or change published v2.2.0 packages.
 
+## Large-object and range-aware caching
+
+The large-object caching tranche (#525 Part 1 cold-miss fill locking, #525
+Part 2 disk-streamed large-object capture under [ADR 0023](../adr/0023-large-object-disk-streamed-cache.md),
+and #442 opt-in Option A range-aware caching under [ADR 0024](../adr/0024-range-aware-cache-option-a.md))
+is delivered as a bounded Beta/unreleased capability (`CACHE-LARGE-RANGE` in
+[feature status](../status.md)). It stores only complete cacheable
+representations, never caches `206` fragments, and does not inherit the
+historical `core-cache` GA/soak record or alter published v2.2.0 packages.
+
 ## Active operating roadmap
 
 | Stage | Durable focus | Current snapshot |

@@ -142,8 +142,8 @@ func TestMetricContractMatchesCollectors(t *testing.T) {
 		}
 		want[metric.Name] = normalizeMetric(metric)
 	}
-	if releasedCount != 25 || releasedV2Count != 38 || pendingCount != 11 {
-		t.Fatalf("metric contract states = %d v1.32.0 + %d v2.0.0 + %d pending, want 25 + 38 + 11", releasedCount, releasedV2Count, pendingCount)
+	if releasedCount != 25 || releasedV2Count != 38 || pendingCount != 12 {
+		t.Fatalf("metric contract states = %d v1.32.0 + %d v2.0.0 + %d pending, want 25 + 38 + 12", releasedCount, releasedV2Count, pendingCount)
 	}
 
 	for name, actual := range got {

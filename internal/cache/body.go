@@ -43,15 +43,50 @@ var retiredBlobSeq atomic.Uint64
 // active, retire renames the file to a unique same-directory retired path and
 // defers os.Remove until the last active reader closes its handle.
 type diskBlob struct {
-	mu            sync.Mutex
-	dir           string
-	path          string
-	pendingTarget string
-	bodyLen       int64
-	fileSize      int64
-	readers       int32
-	unlinked      bool
-	onClose       func()
+	mu             sync.Mutex
+	store          *diskStore
+	hash           string
+	dir            string
+	path           string
+	pendingTarget  string
+	bodyLen        int64
+	fileSize       int64
+	readers        int32
+	unlinked       bool
+	removed        bool
+	countedRetired bool
+	onPromote      func()
+}
+
+func (b *diskBlob) remove(path string) error {
+	var err error
+	if b.store != nil {
+		err = b.store.removePath(path)
+	} else {
+		err = os.Remove(path)
+	}
+	if (err == nil || os.IsNotExist(err)) && b.store != nil {
+		b.store.activeTempFiles.Delete(filepath.Base(path))
+	}
+	return err
+}
+
+func (b *diskBlob) rename(oldpath, newpath string) error {
+	if b.store != nil && isCacheTempFile(filepath.Base(newpath)) {
+		b.store.activeTempFiles.Store(filepath.Base(newpath), struct{}{})
+	}
+	var err error
+	if b.store != nil {
+		err = b.store.renamePath(oldpath, newpath)
+	} else {
+		err = os.Rename(oldpath, newpath)
+	}
+	if err == nil && b.store != nil {
+		b.store.activeTempFiles.Delete(filepath.Base(oldpath))
+	} else if err != nil && b.store != nil && isCacheTempFile(filepath.Base(newpath)) {
+		b.store.activeTempFiles.Delete(filepath.Base(newpath))
+	}
+	return err
 }
 
 func (b *diskBlob) acquireLease() bool {
@@ -60,7 +95,7 @@ func (b *diskBlob) acquireLease() bool {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.unlinked {
+	if b.unlinked || b.removed {
 		return false
 	}
 	b.readers++
@@ -90,43 +125,62 @@ func (b *diskBlob) openReader() (BodyReader, error) {
 	return b.openAcquiredReader()
 }
 
-func (b *diskBlob) retire() error {
+// retire marks b as unlinked from the cache index. It returns
+// unlinkedImmediately=true when no readers are active and the backing file was
+// removed from disk immediately; unlinkedImmediately=false with err=nil when
+// active readers hold open leases so physical removal is deferred to the last
+// reader's Close; or err!=nil when immediate removal failed and the file
+// remains on disk.
+func (b *diskBlob) retire() (unlinkedImmediately bool, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.removed {
+		return true, nil
+	}
 	if b.unlinked {
-		return nil
+		return false, nil
 	}
 	if b.readers == 0 {
-		err := os.Remove(b.path)
+		err := b.remove(b.path)
 		if err != nil && !os.IsNotExist(err) {
-			return err
+			return false, err
 		}
 		b.unlinked = true
-		return nil
+		b.removed = true
+		return true, nil
 	}
 	b.unlinked = true
 	retiredPath := filepath.Join(b.dir, fmt.Sprintf(".jul-cache-retired-%d", retiredBlobSeq.Add(1)))
-	if err := os.Rename(b.path, retiredPath); err == nil {
+	if err := b.rename(b.path, retiredPath); err == nil {
 		b.path = retiredPath
 	}
-	return nil
+	return false, nil
 }
 
 func (b *diskBlob) isPinning(targetPath string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.unlinked && b.readers > 0 && b.path == targetPath
+	return b.unlinked && !b.removed && b.path == targetPath
+}
+
+func (b *diskBlob) hasActiveReaders() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.readers > 0
 }
 
 func (b *diskBlob) setOnClose(fn func()) {
 	b.mu.Lock()
-	if b.readers == 0 {
+	if b.removed {
 		b.mu.Unlock()
 		fn()
 		return
 	}
-	prev := b.onClose
-	b.onClose = func() {
+	prev := b.onPromote
+	b.onPromote = func() {
 		if prev != nil {
 			prev()
 		}
@@ -135,42 +189,86 @@ func (b *diskBlob) setOnClose(fn func()) {
 	b.mu.Unlock()
 }
 
-func (b *diskBlob) promote(targetPath string) {
+func (b *diskBlob) promote(targetPath string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.unlinked || b.path == targetPath {
-		return
+	if b.unlinked || b.removed {
+		return false
 	}
-	if err := os.Rename(b.path, targetPath); err == nil {
+	if b.path == targetPath {
+		b.pendingTarget = ""
+		return true
+	}
+	if err := b.rename(b.path, targetPath); err == nil {
 		b.path = targetPath
 		b.pendingTarget = ""
-	} else {
-		b.pendingTarget = targetPath
+		return true
 	}
+	b.pendingTarget = targetPath
+	return false
 }
 
 func (b *diskBlob) releaseReader() {
 	b.mu.Lock()
 	b.readers--
-	shouldRemove := b.readers == 0 && b.unlinked
 	if b.readers == 0 && !b.unlinked && b.pendingTarget != "" {
-		if err := os.Rename(b.path, b.pendingTarget); err == nil {
+		if err := b.rename(b.path, b.pendingTarget); err == nil {
 			b.path = b.pendingTarget
 			b.pendingTarget = ""
 		}
 	}
+	shouldRemove := b.readers == 0 && b.unlinked && !b.removed
 	path := b.path
-	onClose := b.onClose
-	if shouldRemove {
-		b.onClose = nil
+	store := b.store
+	var hook func()
+	if store != nil {
+		hook = store.onBeforeLastReaderRemove
 	}
 	b.mu.Unlock()
 	if shouldRemove {
-		_ = os.Remove(path)
-		if onClose != nil {
-			onClose()
+		if hook != nil {
+			hook()
+		}
+		if err := b.remove(path); err != nil && !os.IsNotExist(err) {
+			if store != nil {
+				store.onDeferredRemoveFailed(b, path, err)
+			}
+			return
+		}
+		b.mu.Lock()
+		b.removed = true
+		onPromote := b.onPromote
+		b.onPromote = nil
+		b.mu.Unlock()
+		if onPromote != nil {
+			onPromote()
+		}
+		if store != nil {
+			store.onRetiredBlobClosed(b.hash, b)
 		}
 	}
+}
+
+func (b *diskBlob) retryDeferredRemove() bool {
+	b.mu.Lock()
+	if b.removed || !b.unlinked || b.readers > 0 {
+		b.mu.Unlock()
+		return b.removed
+	}
+	path := b.path
+	b.mu.Unlock()
+	if err := b.remove(path); err != nil && !os.IsNotExist(err) {
+		return false
+	}
+	b.mu.Lock()
+	b.removed = true
+	onPromote := b.onPromote
+	b.onPromote = nil
+	b.mu.Unlock()
+	if onPromote != nil {
+		onPromote()
+	}
+	return true
 }
 
 type diskBodyReader struct {

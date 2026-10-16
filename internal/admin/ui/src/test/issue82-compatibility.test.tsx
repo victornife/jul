@@ -16,6 +16,8 @@ vi.mock("@/api/client.ts", async () => {
 });
 
 import { TrafficControlsPanel } from "@/features/traffic-controls/TrafficControlsPanel.tsx";
+import { TrafficControlEditor } from "@/features/traffic-controls/TrafficControlEditor.tsx";
+import { fireEvent } from "@testing-library/react";
 
 function renderPanel() {
   const client = new QueryClient({
@@ -56,5 +58,67 @@ describe("issue #82 optional traffic-control projections", () => {
     expect(screen.getAllByText(/Unavailable on this server/)).toHaveLength(7);
     expect(screen.queryByText(/^enabled$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/^disabled$/i)).not.toBeInTheDocument();
+  });
+
+  it("renders cache tranche summary and edits tranche fields in TrafficControlEditor", async () => {
+    const current = {
+      cache: {
+        enabled: true,
+        memory_max_size: "64MiB",
+        disk_path: "/var/cache/jul",
+        disk_max_size: "1GiB",
+        max_entry_size: "32MiB",
+        default_ttl: "1m0s",
+        stale_while_revalidate: "30s",
+        stale_if_error: "5m0s",
+        lock: false,
+        lock_timeout: "5s",
+        range_enabled: false,
+        max_ranges: 1,
+      },
+    };
+    mocks.fetchTrafficControls.mockResolvedValue(current);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <TrafficControlsPanel />
+          <TrafficControlEditor kind="cache" current={current} onClose={() => undefined} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("32MiB")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Maximum entry size"), { target: { value: "64MiB" } });
+    fireEvent.click(screen.getByLabelText("Enable cold-miss fill lock"));
+    fireEvent.change(screen.getByLabelText("Fill-lock timeout"), { target: { value: "8s" } });
+    fireEvent.click(screen.getByLabelText("Enable range-aware caching"));
+    fireEvent.change(screen.getByLabelText("Maximum ranges"), { target: { value: "4" } });
+
+    expect(screen.getByLabelText("Maximum entry size")).toHaveValue("64MiB");
+    expect(screen.getByLabelText("Enable cold-miss fill lock")).toBeChecked();
+    expect(screen.getByLabelText("Fill-lock timeout")).toHaveValue("8s");
+    expect(screen.getByLabelText("Enable range-aware caching")).toBeChecked();
+    expect(screen.getByLabelText("Maximum ranges")).toHaveValue(4);
+
+    // Disabling fill lock and range caching clears their dependent fields.
+    fireEvent.click(screen.getByLabelText("Enable cold-miss fill lock"));
+    fireEvent.click(screen.getByLabelText("Enable range-aware caching"));
+    expect(screen.getByLabelText("Enable cold-miss fill lock")).not.toBeChecked();
+    expect(screen.getByLabelText("Fill-lock timeout")).toHaveValue("");
+    expect(screen.getByLabelText("Enable range-aware caching")).not.toBeChecked();
+    expect(screen.getByLabelText("Maximum ranges")).toHaveValue(0);
+
+    // Fractional, negative, and over-limit max_ranges values show validation error and are not truncated.
+    fireEvent.click(screen.getByLabelText("Enable range-aware caching"));
+    for (const invalidVal of ["1.9", "-1", "17"]) {
+      fireEvent.change(screen.getByLabelText("Maximum ranges"), { target: { value: invalidVal } });
+      expect(screen.getByText(/Maximum ranges must be an integer between 0 and 16/)).toBeInTheDocument();
+    }
+    fireEvent.change(screen.getByLabelText("Maximum ranges"), { target: { value: "2" } });
+    expect(screen.queryByText(/Maximum ranges must be an integer between 0 and 16/)).not.toBeInTheDocument();
   });
 });

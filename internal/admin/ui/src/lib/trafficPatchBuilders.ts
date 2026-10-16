@@ -33,9 +33,14 @@ export interface CacheDraft {
   memoryMaxSize: string;
   diskPath: string;
   diskMaxSize: string;
+  maxEntrySize?: string;
   defaultTTL: string;
   staleWhileRevalidate: string;
   staleIfError: string;
+  lock?: boolean;
+  lockTimeout?: string;
+  rangeEnabled?: boolean;
+  maxRanges?: number;
 }
 
 export interface RateLimitDraft {
@@ -148,14 +153,21 @@ export function buildGlobalRateLimitPatch(
 
 export function seedCache(current: TrafficControls): CacheDraft {
   const cache = current.cache;
+  const rawMaxEntry = cache?.max_entry_size ?? "";
+  const rawLockTimeout = cache?.lock_timeout ?? "";
   return {
     enabled: cache?.enabled ?? false,
     memoryMaxSize: cache?.memory_max_size ?? cache?.memory_max ?? "",
     diskPath: cache?.disk_path ?? "",
     diskMaxSize: cache?.disk_max_size ?? "",
+    maxEntrySize: rawMaxEntry === "0b" ? "" : rawMaxEntry,
     defaultTTL: cache?.default_ttl ?? "",
     staleWhileRevalidate: cache?.stale_while_revalidate ?? "",
     staleIfError: cache?.stale_if_error ?? "",
+    lock: cache?.lock ?? false,
+    lockTimeout: rawLockTimeout === "0s" ? "" : rawLockTimeout,
+    rangeEnabled: cache?.range_enabled ?? false,
+    maxRanges: cache?.max_ranges ?? 0,
   };
 }
 

@@ -92,9 +92,9 @@ not inherit an older GA row merely because it lives in the same package or guide
 
 - **Response cache:** #134 completed integrated recertification; the released
   cache record retains GA. Additive post-v2.2.0 cold-miss fill locking (#525
-  Part 1) and disk-streamed large-object capture (#525 Part 2) are unreleased
-  and do not inherit that GA/soaked certification; range-aware caching (#442)
-  remains separate.
+  Part 1), disk-streamed large-object capture (#525 Part 2), and Option A
+  range-aware caching (#442) are unreleased and do not inherit that GA/soaked
+  certification.
 - **Routing, resilience and auxiliary egress:** the bounded CGC-ROUTE,
   CGC-RES and SEC-EGRESS contracts are independently GA/soaked under
   #527/#590, with eight-hour evidence on unchanged full v2.2.0 source.
@@ -222,6 +222,7 @@ v2.0.0 or v2.1.0. Publication does not complete the unchecked GA criteria.
 | NGINX migration assessment, provenance, and includes | MIG-ASSESS | `importer` | `released` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ✅ | [nginx-assessment.md](nginx-assessment.md) |
 | Local diagnostics and support bundles | OPS-DIAG | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [diagnostics.md](diagnostics.md) |
 | External admin Console OIDC | ADMIN-OIDC | core · `console` | `merged` | ✅ | ☐ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [admin-oidc.md](admin-oidc.md) |
+| Large-object fill lock, disk streaming, and Option A range caching | CACHE-LARGE-RANGE | core | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [cache.md](cache.md) |
 | Admin listener TLS and client authentication | ADMIN-TLS | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [deployment.md](deployment.md) |
 | Versioned external admin API | AUTO-API | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [admin-api.md](admin-api.md) |
 | Remote automation CLI | AUTO-CLI | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [remote-cli.md](remote-cli.md) |

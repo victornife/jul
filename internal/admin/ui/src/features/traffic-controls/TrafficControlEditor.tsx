@@ -45,6 +45,7 @@ import {
   compressionWarnings,
   generateCacheToml,
   generateLimitsToml,
+  isValidCacheMaxRanges,
   limitsWarnings,
   rateLimitWarnings,
   upsertTopLevelTable,
@@ -115,9 +116,14 @@ function equalCache(left: CacheDraft, right: CacheDraft): boolean {
     left.memoryMaxSize === right.memoryMaxSize &&
     left.diskPath === right.diskPath &&
     left.diskMaxSize === right.diskMaxSize &&
+    (left.maxEntrySize ?? "") === (right.maxEntrySize ?? "") &&
     left.defaultTTL === right.defaultTTL &&
     left.staleWhileRevalidate === right.staleWhileRevalidate &&
-    left.staleIfError === right.staleIfError
+    left.staleIfError === right.staleIfError &&
+    Boolean(left.lock) === Boolean(right.lock) &&
+    (left.lockTimeout ?? "") === (right.lockTimeout ?? "") &&
+    Boolean(left.rangeEnabled) === Boolean(right.rangeEnabled) &&
+    (left.maxRanges ?? 0) === (right.maxRanges ?? 0)
   );
 }
 
@@ -202,6 +208,7 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
       ? buildServerLimitsPatch(selectedRoute, limitBaseline, serverLimits)
       : null;
   const cacheDirty = !equalCache(cacheInitial.current, cache);
+  const cacheMaxRangesValid = isValidCacheMaxRanges(cache);
 
   const warnings = useMemo(() => {
     switch (kind) {
@@ -318,7 +325,7 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
     busy ||
     !canWrite ||
     (kind === "cache"
-      ? !cacheDirty || !canRaw || cacheBase.isLoading || cacheBase.isFetching || cacheBase.isError
+      ? !cacheDirty || !cacheMaxRangesValid || !canRaw || cacheBase.isLoading || cacheBase.isFetching || cacheBase.isError
       : typedOperation === null);
 
   const toggleListValue = (
@@ -499,6 +506,14 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
               }}
             />
             <TextField
+              label="Maximum entry size"
+              value={cache.maxEntrySize ?? ""}
+              onChange={(maxEntrySize) => {
+                setCache((previous) => ({ ...previous, maxEntrySize }));
+                clearErrors();
+              }}
+            />
+            <TextField
               label="Default TTL"
               value={cache.defaultTTL}
               onChange={(defaultTTL) => {
@@ -522,6 +537,51 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
                 clearErrors();
               }}
             />
+            <Toggle
+              label="Enable cold-miss fill lock"
+              checked={Boolean(cache.lock)}
+              onChange={(lock) => {
+                setCache((previous) => ({
+                  ...previous,
+                  lock,
+                  lockTimeout: lock ? (previous.lockTimeout ?? "") : "",
+                }));
+                clearErrors();
+              }}
+            />
+            <TextField
+              label="Fill-lock timeout"
+              value={cache.lockTimeout ?? ""}
+              onChange={(lockTimeout) => {
+                setCache((previous) => ({ ...previous, lockTimeout }));
+                clearErrors();
+              }}
+            />
+            <Toggle
+              label="Enable range-aware caching"
+              checked={Boolean(cache.rangeEnabled)}
+              onChange={(rangeEnabled) => {
+                setCache((previous) => ({
+                  ...previous,
+                  rangeEnabled,
+                  maxRanges: rangeEnabled ? (previous.maxRanges ?? 0) : 0,
+                }));
+                clearErrors();
+              }}
+            />
+            <NumberField
+              label="Maximum ranges"
+              value={cache.maxRanges ?? 0}
+              onChange={(maxRanges) => {
+                setCache((previous) => ({ ...previous, maxRanges }));
+                clearErrors();
+              }}
+            />
+            {!cacheMaxRangesValid && (
+              <p className="text-xs text-jul-danger">
+                Maximum ranges must be an integer between 0 and 16 (and 0 when range-aware caching is disabled).
+              </p>
+            )}
             <AffectedRoutes title="Cached routes" paths={affected} emptyHint="No locations currently opt into caching." />
             {stats.data && (
               <p className="text-xs text-jul-muted">
