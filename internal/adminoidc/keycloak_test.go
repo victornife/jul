@@ -47,7 +47,8 @@ func TestKeycloakCodePKCE(t *testing.T) {
 			if tt.subject {
 				cfg.Subjects = []config.AdminOIDCSubject{{Subject: "11111111-1111-4111-8111-111111111111", Principal: "alice", Role: "viewer"}}
 			}
-			runtime, err := New(cfg, policy(t), &http.Client{})
+			tr := http.DefaultTransport.(*http.Transport).Clone()
+			runtime, err := New(cfg, policy(t), &http.Client{Transport: tr})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,8 +71,9 @@ func TestKeycloakCodePKCE(t *testing.T) {
 			})}
 			go srv.Serve(listener)
 			defer srv.Close()
+			defer tr.CloseIdleConnections()
 			jar, _ := cookiejar.New(nil)
-			client := &http.Client{Jar: jar, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+			client := &http.Client{Transport: tr, Jar: jar, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 			base := "http://127.0.0.1:9298"
 			start := request(t, client, "POST", base+"/auth/oidc/login", base, false)
 			page := request(t, client, "GET", start.Header.Get("Location"), "", false)
