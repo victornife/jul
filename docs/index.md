@@ -105,7 +105,7 @@ inside the immutable release archives. They do not close the partial-audit ledge
 | WASM plugin response phase (jul-abi/v2) | [abi.md](abi.md) | `Beta` / `released` |
 | Deterministic consistent-hash affinity | [upstreams.md](upstreams.md#consistent-hash-affinity) | `Beta` / `released` |
 | L4 stream proxy | [stream.md](stream.md) | `GA` / `soaked` |
-| Offered-ALPN TCP passthrough routing | [stream-alpn.md](stream-alpn.md) | `Alpha` / `implemented` |
+| Offered-ALPN TCP passthrough routing | [stream-alpn.md](stream-alpn.md) | `Alpha` / `merged` |
 | Native gRPC passthrough + h2c | [grpc-proxy.md](grpc-proxy.md) | `GA` / `soaked` |
 | Service discovery / dynamic upstreams | [service-discovery.md](service-discovery.md) | `GA` / `soaked` |
 | Web application firewall (WAF) | [waf.md](waf.md) | `GA` / `soaked` |

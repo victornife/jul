@@ -1,8 +1,8 @@
 # Offered-ALPN TCP passthrough routing
 
-**Alpha, implemented on the #434 working branch, unreleased.** This extension
-has separate evidence from the released GA L4 proxy. Required final coverage,
-CI and migration-reference results are recorded in the
+**Alpha, merged via [PR #635](https://github.com/victornife/jul/pull/635), unreleased.**
+This extension has separate evidence from the released GA L4 proxy. Passing
+changed-code coverage, CI and migration-reference results are recorded in the
 [delivery evidence](audit/434-alpn/README.md). Build with `-tags stream`.
 
 Route two TLS services sharing a hostname and TCP port while leaving TLS keys,

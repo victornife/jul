@@ -972,7 +972,7 @@ features:
   tags:
   - stream
   maturity: Alpha
-  delivery: implemented
+  delivery: merged
   doc: stream-alpn.md
   criteria:
     1: true
@@ -984,4 +984,4 @@ features:
     7: true
     8: true
     9: false
-  notes: 'Proposed in PR #635 for #434; working branch only. Strict global/package/diff coverage and final-head CI remain explicit gates. No inherited GA/soak status. No automatic NGINX ALPN map equivalence; precise blocking guidance and reference counterexample are retained.'
+  notes: 'Merged via PR #635 for completed #434 at 1b462ce46659275db38964a25436a6eac9c022cf; Alpha and unreleased. Reviewed-head CI passes, with changed Go 165/166 and frontend 27/29 statements covered, each strictly greater than 90%; whole-module/package coverage is informational under the maintainer clarification. No inherited GA/soak status. Automatic ambiguous NGINX ALPN map conversion remains blocking, with manual guidance and a passing pinned reference counterexample. See audit/434-alpn/README.md for exact source identities and evidence.'

@@ -2013,6 +2013,6 @@ The optional `[admin.oidc]` block configures one external Console provider; it r
 ## Offered-ALPN TCP stream rules
 
 `[[stream.alpn_routes]]` adds ordered `server_name`, `protocols`, and `proxy_pass`
-rules for client-offered identifiers. This Alpha working-branch extension
+rules for client-offered identifiers. This Alpha, merged and unreleased extension
 requires `stream`; UDP/QUIC are excluded. See [the complete contract and example](stream-alpn.md)
 for precedence, identifier representation, bounds, fallback and management semantics.

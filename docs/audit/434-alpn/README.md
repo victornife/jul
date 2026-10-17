@@ -1,5 +1,37 @@
 # #434 TCP ALPN feasibility and delivery evidence
 
+## Merged delivery — 2026-10-18 Europe/Madrid
+
+[PR #635](https://github.com/victornife/jul/pull/635) merged with explicit
+maintainer authorization at 2026-10-17T23:13:59Z as
+[`1b462ce46659275db38964a25436a6eac9c022cf`](https://github.com/victornife/jul/commit/1b462ce46659275db38964a25436a6eac9c022cf).
+Reviewed head: `fbaa69a8594edc3dd99d82472989aeb23e4c6b37`; base:
+`d0f30218c46743f274a9f7280f1ebf2c82a78c5f`. The merge and reviewed head share
+tree `0949db9d332dbb5338a2d69c7b2fd94ac04b674d`.
+
+Reviewed-head checks completed with 65 successes and two expected website
+deployment skips; Codecov and Qlty passed. Native profiles, race, browser,
+static/generated/docs and the existing short smoke passed. Hosted fuzz smoke
+passed all 35 targets; ALPN completed 71,818 executions in 21.013s without
+failure. All nine pinned NGINX ALPN cases and the real-Jul corpus passed.
+Changed production statement coverage is Go 165/166 (99.39759036144578%) and
+frontend 27/29 (93.10344827586206%), each strictly greater than 90%.
+
+Sources: [reviewed-head certification](https://github.com/victornife/jul/pull/635#issuecomment-6242787219),
+[CI](https://github.com/victornife/jul/actions/runs/39076149316),
+[changed-code coverage](https://github.com/victornife/jul/actions/runs/39076149292),
+[pinned NGINX](https://github.com/victornife/jul/actions/runs/39076149283).
+Separate [post-merge CI](https://github.com/victornife/jul/actions/runs/39078217836)
+and its final disposition are tracked in the [issue closure](https://github.com/victornife/jul/issues/434).
+Reviewed-head results do not assert a separate completed execution of main CI.
+#434 is closed/completed. Maturity remains Alpha; this feature is unreleased.
+
+Codecov's separate line-patch metric is 98.24561% against its 90% target.
+Its red bot-comment marker flags three uncovered lines; the actual reviewed-head
+check and merge-commit status are successful. The merge-commit upload completed
+successfully. This line metric is distinct from the Go/frontend statement
+denominators above.
+
 ## Phase 0 — GO (2026-10-17)
 
 Base: `d0f30218c46743f274a9f7280f1ebf2c82a78c5f`.
@@ -102,10 +134,10 @@ is unaffected.
 | Snapshot/reload/admission | Real TLS reload/admission test; invalid-pool atomicity test | Established sessions retain pool and admission ownership; invalid candidates roll back |
 | Config/API/lifecycle/Console | `validate_alpn*`, generated schema/value/lifecycle/OpenAPI, projection/patch/diff tests and UI tests | Guided edits preserve rules; omission preserves for older clients, explicit empty clears |
 | NGINX migration decision | `NGX_STREAM_ALPN_MAP_AMBIGUOUS`, manual guidance, provenance/corpus fixture | Automatic maps remain blocking; no source form falsely claimed equivalent |
-| Real NGINX comparison | Required pinned `nginx-alpn-e2e.sh` lane and `TestALPNNGINXReference` | Docker unavailable locally; final PR-head CI owns runtime evidence |
-| Documentation and status | Root/index/config/stream/reload/migration guides, generated contracts, roadmap/status, example and unreleased changelog | Alpha/implemented working branch, separate from released L4 GA |
+| Real NGINX comparison | Required pinned `nginx-alpn-e2e.sh` lane and `TestALPNNGINXReference` | All nine reviewed-head cases and the real-Jul corpus pass in hosted CI; Docker unavailable locally |
+| Documentation and status | Root/index/config/stream/reload/migration guides, generated contracts, roadmap/status, example and unreleased changelog | Alpha/merged/unreleased, separate from released L4 GA |
 | Coverage | Complete Go diff and separate lean/full main-module instrumentation; changed frontend statement spans | Strict >90% complete changed-code gates for Go and frontend; global/package measurements informational |
-| Final CI | PR #635, current-head checks and source-bound artifacts | Pending final-head certification; no merge/release authorization |
+| Final reviewed-head CI | PR #635, exact-head checks and source-bound artifacts | 65 success, two expected skips; Codecov and Qlty pass; merged with maintainer authorization |
 
 ### Additional observed CI finding
 
@@ -124,6 +156,20 @@ The hosted docs lane also identified four stale D11 current asset paths after
 the Console rebuild. D11-104 now records the exact old-to-new path mapping and
 PR635 rebuild provenance while preserving its historical review and verdict.
 
+### Closeout CI finding
+
+The documentation closeout in [PR #636](https://github.com/victornife/jul/pull/636)
+exposed an overstrict check introduced by #635: the ALPN delivery workflow treated
+a documentation-only diff with no changed executable statements as missing
+coverage ([failed frontend job](https://github.com/victornife/jul/actions/runs/39078586502/job/117530743913)).
+Both language gates now record a zero denominator as not applicable, with no
+invented percentage. Missing/empty coverage artifacts and missing changed-file
+instrumentation still fail; any nonempty changed-statement scope must remain
+strictly above 90%. Ten regression tests execute the actual workflow gate scripts,
+covering empty scopes, exact/below/above-floor boundaries and missing evidence;
+the existing seven Go scorer regressions also pass. This CI defect does not
+change the implementation's measured denominators or runtime behavior.
+
 ### Reviewed surfaces without broader changes
 
 - `SECURITY.md`: the feature-specific threat model is in `stream-alpn.md`; no
@@ -138,12 +184,12 @@ PR635 rebuild provenance while preserving its historical review and verdict.
 
 ## Integrated implementation and evidence
 
-The complete native integration is proposed in PR #635.
-The maintainer explicitly authorized publication on 2026-10-18, resolving the
-previous generated-contract publication pause. Final CI and the pinned NGINX
-reference lane must certify the integrated public head; the current PR
-checkpoint records their result. Earlier parser-spike CI does not certify the
-integration. The generated metadata was checked against the
+The complete native integration merged in PR #635.
+The maintainer explicitly authorized publication and merge on 2026-10-18,
+resolving the previous generated-contract publication pause. Final reviewed-head
+CI and the pinned NGINX reference lane passed, as recorded in the merged-delivery
+checkpoint above. Earlier parser-spike CI remains historical evidence.
+The generated metadata was checked against the
 already-public base: all 348 existing fields, including security/credential
 descriptions, are unchanged. Only three ALPN fields and schema counts differ;
 see the [exact proposed diff](config-metadata-proposed.diff) and
@@ -206,7 +252,7 @@ importer/corpus ALPN cases, and race tests for stream/config/lifecycle/admin/
 importer. Console typecheck/lint/tests/coverage/build pass (79 files, 919 tests; final
 coverage suite 38.75s), and the embedded
 production bundle is regenerated. Native-platform and pinned-NGINX evidence
-still require CI on the integrated published head; Docker is unavailable here.
+passed in hosted CI on the integrated published head; Docker is unavailable here.
 
 The [changed frontend statement report](changed-frontend-coverage.json) measures
 **27/29 = 93.10344827586206%** over complete diff statement spans. The overall
@@ -240,9 +286,9 @@ python3 scripts/docs-check.py
 
 ### GitHub reconciliation
 
-- [#434](https://github.com/victornife/jul/issues/434): activated for bounded TCP;
-  Phase-0 checked; implementation and clarified changed-code coverage scope
-  recorded; open while unmerged.
+- [#434](https://github.com/victornife/jul/issues/434): closed/completed after
+  the authorized merge; all implementation and migration acceptance criteria
+  checked, with clarified changed-code coverage and source-bound evidence.
 - [#62 checkpoint](https://github.com/victornife/jul/issues/62#issuecomment-6242114735):
   records the later selection and current verification status without rewriting unrelated programme
   details or historical release decisions.
@@ -250,9 +296,9 @@ python3 scripts/docs-check.py
   [#426](https://github.com/victornife/jul/issues/426#issuecomment-6242117434), and
   [#367](https://github.com/victornife/jul/issues/367#issuecomment-6242118727): factual
   migration/reference cross-references only; all remain closed.
-- [PR #635](https://github.com/victornife/jul/pull/635): tracks the integrated source and final-head
-  CI while preserving the historical spike source and coverage measurements.
+- [PR #635](https://github.com/victornife/jul/pull/635): merged, with exact source
+  and reviewed-head CI while preserving historical spike and coverage measurements.
 
-No merge, release, deployment or maturity promotion occurred. HTTP/3/QUIC
+No release or maturity promotion occurred. HTTP/3/QUIC
 passthrough inspection remains excluded. Mandatory acceptance work was not
 moved into a follow-up issue to declare completion.

@@ -8,6 +8,8 @@ on:
       - 'internal/stream/sni.go'
       - 'internal/config/validate_alpn*'
       - 'docs/stream-alpn.md'
+      - 'scripts/check-added-go-coverage.py'
+      - 'scripts/test_issue434_coverage.py'
 
 permissions:
   contents: read
@@ -34,6 +36,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify changed-code gate boundary regressions
+        run: python3 scripts/test_issue434_coverage.py
       - name: Measure final-head main-module profiles
         shell: bash
         run: |
@@ -80,8 +84,10 @@ jobs:
                   changed.add('jul/'+str(Path(line[6:]).parent)+'/')
           for package in sorted(changed): report['informational_metrics']['package:'+package]=counts(profiles['head-full'],package)
           patch=json.loads((root/'patch.json').read_text())
-          if not patch['total']: raise ValueError('missing changed-code coverage')
-          patch['pass']=patch['covered']*10>patch['total']*9
+          # The scorer rejects missing instrumentation before returning zero.
+          # An empty executable diff has no coverage denominator.
+          patch['applicable']=bool(patch['total'])
+          patch['pass']=not patch['applicable'] or patch['covered']*10>patch['total']*9
           report['patch']=patch
           report['pass']=patch['pass']
           (root/'delivery-coverage.json').write_text(json.dumps(report,indent=2)+'\n')
@@ -126,6 +132,7 @@ jobs:
           from pathlib import Path
           root=Path.cwd()
           data=json.loads(Path('internal/admin/ui/coverage/coverage-final.json').read_text())
+          if not isinstance(data,dict) or not data: raise ValueError('empty frontend coverage instrumentation')
           diff=subprocess.check_output(['git','diff','--unified=0',os.environ['BASE_SHA'],os.environ['HEAD_SHA'],'--','internal/admin/ui/src'],text=True)
           changed={}; current=None
           for line in diff.splitlines():
@@ -147,9 +154,10 @@ jobs:
               hit=sum(item['s'][k]>0 for k in selected)
               report['files'][path]={'covered':hit,'total':len(selected)}
               covered+=hit; total+=len(selected)
-          if not total: raise ValueError('missing changed frontend coverage')
-          report.update(covered=covered,total=total,percent=covered*100/total)
-          report['pass']=covered*10>total*9
+          # Every changed production file above must have instrumentation.
+          # No selected executable spans means the gate is not applicable.
+          report.update(covered=covered,total=total,percent=covered*100/total if total else None,applicable=bool(total))
+          report['pass']=not report['applicable'] or covered*10>total*9
           Path('internal/admin/ui/coverage/alpn-diff.json').write_text(json.dumps(report,indent=2)+'\n')
           print(json.dumps(report,indent=2))
           raise SystemExit(0 if report['pass'] else 1)
