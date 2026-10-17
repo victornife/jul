@@ -196,8 +196,9 @@ a `full` release artifact to enable all optional capabilities.
 | **L4 stream proxy** | TCP and UDP reverse proxying (`[[stream]]`) with load balancing and health checks across an upstream pool, TLS **SNI routing** by host without terminating, and HAProxy **PROXY protocol** v1/v2 (in and out) to preserve the client address — survives hot reload, opt-in `stream` build tag |
 | **Portability** | Single static binary, no runtime dependencies; Windows, Linux, and macOS on amd64/arm64 |
 
-The [offered-ALPN TCP routing extension](docs/stream-alpn.md) (#434) is Alpha
-on its working branch, unreleased, with separate coverage and verification gates.
+The [offered-ALPN TCP routing extension](docs/stream-alpn.md) (#434) is Alpha,
+merged via [PR #635](https://github.com/victornife/jul/pull/635) and unreleased,
+with separate [coverage and verification evidence](docs/audit/434-alpn/README.md).
 It routes client offers while backends retain TLS negotiation.
 
 > Note: The `[[stream]]` (L4 proxy) table is active in binaries built with

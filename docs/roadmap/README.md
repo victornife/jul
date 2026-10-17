@@ -65,9 +65,10 @@ research keep their own design and activation gates. Exact issue selection,
 impact, effort, rationale, dependencies and blockers remain in
 [#62](https://github.com/victornife/jul/issues/62) and its linked children.
 
-#434 was separately selected for the bounded TCP ALPN extension in
-[PR #635](https://github.com/victornife/jul/pull/635); its [separate Alpha
-contract](../stream-alpn.md) does not include HTTP/3/QUIC or automatic NGINX map
+#434 is completed and merged via
+[PR #635](https://github.com/victornife/jul/pull/635) for the bounded TCP ALPN
+extension. Its unreleased [separate Alpha contract](../stream-alpn.md) does not
+include HTTP/3/QUIC or automatic NGINX map
 equivalence. #456 and other unactivated gateway candidates remain deferred. The
 programme does not make AI Gateway, fleet operation or another category an
 automatic next phase. Completed #502's same-path log-rotation correction is

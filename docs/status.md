@@ -90,10 +90,11 @@ not inherit an older GA row merely because it lives in the same package or guide
 
 ### Current notices
 
-- **Offered-ALPN TCP passthrough routing (#434):** Alpha on the working branch
-  in [PR #635](https://github.com/victornife/jul/pull/635), unreleased. The
-  [separate evidence](audit/434-alpn/README.md) records the feasibility GO and
-  outstanding final coverage/CI gates; the released L4 GA row is unchanged.
+- **Offered-ALPN TCP passthrough routing (#434):** Alpha, merged via
+  [PR #635](https://github.com/victornife/jul/pull/635), unreleased. The
+  [separate evidence](audit/434-alpn/README.md) records the feasibility GO,
+  passing changed-code coverage and final reviewed-head CI, including the
+  pinned NGINX comparison; the released L4 GA row is unchanged.
 
 - **Response cache:** #134 completed integrated recertification; the released
   cache record retains GA. Additive post-v2.2.0 cold-miss fill locking (#525
@@ -246,7 +247,7 @@ v2.0.0 or v2.1.0. Publication does not complete the unchecked GA criteria.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| Offered-ALPN TCP passthrough routing | L4-ALPN | `stream` | `implemented` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ☐ | [stream-alpn.md](stream-alpn.md) |
+| Offered-ALPN TCP passthrough routing | L4-ALPN | `stream` | `merged` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | ✅ | ☐ | [stream-alpn.md](stream-alpn.md) |
 
 ## Deprecated
 
