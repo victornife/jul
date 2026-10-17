@@ -9,13 +9,14 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"jul/internal/config"
 )
 
-// The required pinned-reference script supplies all four loopback endpoints.
+// The required pinned-reference script supplies four isolated Docker endpoints.
 // Ordinary package tests explicitly skip this external-runtime lane.
 func TestALPNNGINXReference(t *testing.T) {
 	reference := os.Getenv("JUL_ALPN_NGINX_ADDR")
@@ -26,6 +27,10 @@ func TestALPNNGINXReference(t *testing.T) {
 	if a == "" || b == "" || fallback == "" {
 		t.Fatal("incomplete required NGINX endpoints")
 	}
+	// Docker internal networks do not publish ports. Keep test requests on
+	// loopback using transparent TCP bridges, as in the existing corpus lane.
+	reference = alpnReferenceBridge(t, reference)
+	a, b, fallback = alpnReferenceBridge(t, a), alpnReferenceBridge(t, b), alpnReferenceBridge(t, fallback)
 	s := newTestServer(t, Hooks{})
 	addr := freeTCPAddr(t)
 	if err := s.Reload([]config.StreamServer{{Listen: addr, ProxyPass: fallback, ALPNRoutes: []config.StreamALPNRoute{
@@ -80,4 +85,43 @@ func TestALPNNGINXReference(t *testing.T) {
 			}
 		})
 	}
+}
+
+func alpnReferenceBridge(t *testing.T, target string) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessions sync.WaitGroup
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			client, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			sessions.Add(1)
+			go func() {
+				defer sessions.Done()
+				defer client.Close()
+				_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+				backend, err := net.DialTimeout("tcp", target, time.Second)
+				if err != nil {
+					return
+				}
+				defer backend.Close()
+				_ = backend.SetDeadline(time.Now().Add(3 * time.Second))
+				copied := make(chan struct{})
+				go func() { _, _ = io.Copy(backend, client); close(copied) }()
+				_, _ = io.Copy(client, backend)
+				_ = client.Close()
+				_ = backend.Close()
+				<-copied
+			}()
+		}
+	}()
+	t.Cleanup(func() { _ = ln.Close(); <-done; sessions.Wait() })
+	return ln.Addr().String()
 }

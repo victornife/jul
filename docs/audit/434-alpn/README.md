@@ -120,6 +120,10 @@ is reduced; no hour-long run is added. Initial changed-code coverage also
 failed; the complete-envelope adversarial tests cover its reachable critical
 rejection cases rather than excluding their statements.
 
+The hosted docs lane also identified four stale D11 current asset paths after
+the Console rebuild. D11-104 now records the exact old-to-new path mapping and
+PR635 rebuild provenance while preserving its historical review and verdict.
+
 ### Reviewed surfaces without broader changes
 
 - `SECURITY.md`: the feature-specific threat model is in `stream-alpn.md`; no
@@ -149,7 +153,10 @@ The first integrated pinned-NGINX run exposed a harness startup assumption:
 the official image has no `/usr/lib/nginx/modules/ngx_stream_module.so` file.
 The reference fixture no longer attempts that dynamic load. The harness records
 `nginx -V` and a required `nginx -t` before running, propagates endpoint-discovery
-failures, and prints retained container diagnostics on failure. The current PR
+failures, and prints retained container diagnostics on failure. The image build
+flags confirm static stream/preread support. The isolated internal network uses
+bounded transparent Go TCP bridges on loopback, matching the existing corpus
+network model instead of relying on unavailable Docker port publication. The current PR
 checkpoint records the resulting pinned-runtime evidence.
 
 The [complete changed Go statement report](changed-go-coverage.json) measures

@@ -31,10 +31,19 @@ docker run --rm --network none --entrypoint nginx \
 docker network create --internal "${network}" >/dev/null
 network_created=1
 docker run --detach --name "${name}" --network "${network}" \
-  -p 127.0.0.1::18443 -p 127.0.0.1::18001 -p 127.0.0.1::18002 -p 127.0.0.1::18003 \
-  -v "${fixture}:/etc/nginx/nginx.conf:ro" "${image}" >"${artifacts}/container-id.txt"
+  --read-only --user 101:101 --cap-drop ALL --security-opt no-new-privileges \
+  --pids-limit 128 --memory 128m --cpus 1 \
+  --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0700 \
+  --tmpfs /tmp:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0700 \
+  -v "${fixture}:/etc/nginx/nginx.conf:ro" --entrypoint /usr/sbin/nginx \
+  "${image}" -g 'daemon off;' >"${artifacts}/container-id.txt"
 container_started=1
-endpoint() { docker port "${name}" "$1/tcp"; }
+container_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${name}")"
+if [[ ! "${container_ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "unexpected internal container address" >&2
+  exit 1
+fi
+endpoint() { printf '%s:%s\n' "${container_ip}" "$1"; }
 JUL_ALPN_NGINX_ADDR="$(endpoint 18443)"
 JUL_ALPN_BACKEND_A="$(endpoint 18001)"
 JUL_ALPN_BACKEND_B="$(endpoint 18002)"
