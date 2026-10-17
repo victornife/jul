@@ -7,6 +7,8 @@ package stream
 
 import (
 	"bufio"
+
+	"jul/internal/config"
 )
 
 // SNI routing inspects the TLS ClientHello to read the requested server name
@@ -21,8 +23,8 @@ const (
 	tlsRecordMax             = 16384
 	tlsClientHelloMax        = 16384 // handshake header plus declared body
 	tlsClientHelloMaxRecords = 64
-	tlsALPNMaxProtocols      = 64
-	tlsALPNMaxProtocolLen    = 255
+	tlsALPNMaxProtocols      = config.StreamALPNMaxProtocols
+	tlsALPNMaxProtocolLen    = config.StreamALPNMaxProtocolLen
 	tlsInspectMax            = tlsClientHelloMax + 5*tlsClientHelloMaxRecords
 )
 

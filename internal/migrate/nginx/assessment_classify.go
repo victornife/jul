@@ -128,6 +128,8 @@ func classifyDirective(context AssessmentContext, d ngx.IDirective, facts walkFa
 			return classifyStreamDuration("proxy_connect_timeout", "NGX_STREAM_PROXY_CONNECT_TIMEOUT", params)
 		case context == ContextStream && name == "ssl_preread":
 			return classifyStreamSSLPreread(params)
+		case context == ContextStream && name == "map" && len(params) > 0 && params[0] == "$ssl_preread_alpn_protocols":
+			return blocking("NGX_STREAM_ALPN_MAP_AMBIGUOUS", RiskRouting, streamALPNMapReason)
 		case context == ContextServer && name == "ssl_protocols":
 			return classifyTLSProtocols(params)
 		case context == ContextServer && name == "ssl_verify_client":

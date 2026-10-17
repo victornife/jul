@@ -25,6 +25,10 @@ import (
 	ngx "github.com/tufanbarisyildirim/gonginx/config"
 )
 
+// NGINX loses opaque identifier boundaries when it joins offers with commas.
+// Even a conventional token-boundary regex is not equivalent on all clients.
+const streamALPNMapReason = "ALPN maps require manual redesign: NGINX joins opaque offered identifiers with commas, while Jul matches complete identifiers; an offer x,h2 can match a source h2 map without offering h2"
+
 // streamServerSpec is one nginx stream `server {}` block, translated as far as
 // this tranche can go. Fields are zero-valued when the corresponding
 // directive was absent or unsupported (and reported via t.report.skip).
@@ -55,7 +59,11 @@ func (t *translator) translateStream(d ngx.IDirective, out *config.Config) {
 		case "server":
 			specs = append(specs, t.translateStreamServer(c))
 		case "map":
-			t.report.skip(c, "variable maps (including ssl_preread-driven routing) are not representable in the bounded Jul stream model")
+			if params := paramValues(c); len(params) > 0 && params[0] == "$ssl_preread_alpn_protocols" {
+				t.report.skip(c, streamALPNMapReason)
+			} else {
+				t.report.skip(c, "variable maps (including ssl_preread-driven routing) are not representable in the bounded Jul stream model")
+			}
 		case "include":
 			t.report.skip(c, "include not followed; import each included file separately")
 		default:

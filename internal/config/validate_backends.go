@@ -54,8 +54,8 @@ func validateStreams(streams []StreamServer, upstreamNames map[string]int) []err
 		}
 		// A stream must have at least one target: a default proxy_pass and/or
 		// SNI routes.
-		if strings.TrimSpace(st.ProxyPass) == "" && len(st.SNIRoutes) == 0 {
-			errs = append(errs, fmt.Errorf("%s: 'proxy_pass' or 'sni_routes' is required", where))
+		if strings.TrimSpace(st.ProxyPass) == "" && len(st.SNIRoutes) == 0 && len(st.ALPNRoutes) == 0 {
+			errs = append(errs, fmt.Errorf("%s: 'proxy_pass', 'sni_routes' or 'alpn_routes' is required", where))
 		}
 		if strings.TrimSpace(st.ProxyPass) != "" {
 			errs = append(errs, validateStreamTarget(st.ProxyPass, upstreamNames, where+".proxy_pass")...)
@@ -66,8 +66,17 @@ func validateStreams(streams []StreamServer, upstreamNames map[string]int) []err
 			}
 			errs = append(errs, validateStreamTarget(target, upstreamNames, fmt.Sprintf("%s.sni_routes[%q]", where, host))...)
 		}
+		if err := ValidateStreamALPNRoutes(st.ALPNRoutes); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", where, err))
+		}
+		for j, rule := range st.ALPNRoutes {
+			errs = append(errs, validateStreamTarget(rule.ProxyPass, upstreamNames, fmt.Sprintf("%s.alpn_routes[%d].proxy_pass", where, j))...)
+		}
 		// SNI routing, TLS passthrough, and the PROXY protocol are TCP-only in v1.
 		if proto == "udp" {
+			if len(st.ALPNRoutes) > 0 {
+				errs = append(errs, fmt.Errorf("%s: 'alpn_routes' is only supported for tcp streams", where))
+			}
 			if len(st.SNIRoutes) > 0 {
 				errs = append(errs, fmt.Errorf("%s: 'sni_routes' is only supported for tcp streams", where))
 			}

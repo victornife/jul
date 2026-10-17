@@ -129,6 +129,7 @@ type route struct {
 	proto          string
 	defaultPool    *upstream.Pool            // proxy_pass target; may be nil
 	sniPools       map[string]*upstream.Pool // SNI host -> pool, incl "*" catch-all
+	alpnRoutes     []alpnRoute
 	proxyIn        bool
 	proxyOut       bool
 	trustedProxies *clientaddr.Policy // peers permitted to assert an inbound PROXY source
@@ -378,6 +379,12 @@ func (s *Server) Close() error {
 
 // buildRoute resolves a stream block into a route, building its backend pools.
 func (s *Server) buildRoute(st config.StreamServer, upstreams map[string]config.UpstreamConfig) (*route, error) {
+	if err := config.ValidateStreamALPNRoutes(st.ALPNRoutes); err != nil {
+		return nil, err
+	}
+	if len(st.ALPNRoutes) > 0 && normProto(st.Protocol) != "tcp" {
+		return nil, fmt.Errorf("stream: alpn_routes requires tcp")
+	}
 	r := &route{
 		proto:          normProto(st.Protocol),
 		connectTimeout: st.ConnectTimeout.Std(),
@@ -427,6 +434,23 @@ func (s *Server) buildRoute(st config.StreamServer, upstreams map[string]config.
 			}
 			r.sniPools[strings.ToLower(host)] = p
 		}
+	}
+	for i, rule := range st.ALPNRoutes {
+		target := strings.TrimSpace(rule.ProxyPass)
+		if _, named := upstreams[target]; !named {
+			if _, _, err := net.SplitHostPort(target); err != nil {
+				return nil, fmt.Errorf("stream: alpn_routes[%d].proxy_pass: unknown upstream or invalid host:port: %w", i, err)
+			}
+		}
+		p, err := s.pool(target, r.proto, upstreams)
+		if err != nil {
+			return nil, err
+		}
+		protocols := make(map[string]struct{}, len(rule.Protocols))
+		for _, protocol := range rule.Protocols {
+			protocols[protocol] = struct{}{}
+		}
+		r.alpnRoutes = append(r.alpnRoutes, alpnRoute{serverName: strings.ToLower(rule.ServerName), protocols: protocols, pool: p})
 	}
 	return r, nil
 }

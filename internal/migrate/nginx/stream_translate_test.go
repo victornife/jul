@@ -484,3 +484,43 @@ func validateGenerated(t *testing.T, cfg *config.Config) {
 		t.Fatalf("validate candidate:\n%s\nerror: %v", toml, err)
 	}
 }
+
+func TestStreamALPNMapRemainsExplicitlyBlocking(t *testing.T) {
+	const source = `events {} stream {
+  map $ssl_preread_alpn_protocols $selected {
+   ~(^|,)h2(,|$) 127.0.0.1:18001;
+   ~(^|,)http/1[.]1(,|$) 127.0.0.1:18002;
+   default 127.0.0.1:18003;
+  }
+  server { listen 18443; ssl_preread on; proxy_pass $selected; }
+ }`
+	src, err := parseString(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, rep := Translate(src, "alpn.conf")
+	if !hasSkip(rep, "NGINX joins opaque offered identifiers") {
+		t.Fatal("missing truthful ALPN skip reason")
+	}
+	for _, st := range cfg.Streams {
+		if len(st.ALPNRoutes) != 0 {
+			t.Fatal("invented automatic ALPN equivalence")
+		}
+	}
+	a := BuildAssessment(src, "alpn.conf", rep)
+	found := false
+	for _, result := range a.Results {
+		if result.Code == "NGX_STREAM_ALPN_MAP_AMBIGUOUS" {
+			found = true
+			if result.Class != AssessmentBlocking || len(result.TargetPaths) != 0 || result.Provenance == nil {
+				t.Fatalf("bad blocking/provenance: %+v", result)
+			}
+			if len(result.GuidanceCodes) != 1 || result.GuidanceCodes[0] != "GUIDE_STREAM_ALPN_MANUAL" {
+				t.Fatalf("missing ALPN guidance: %+v", result)
+			}
+		}
+	}
+	if !found || a.Summary.Ready {
+		t.Fatalf("ALPN map claimed ready: %+v", a.Summary)
+	}
+}

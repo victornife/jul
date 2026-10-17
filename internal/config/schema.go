@@ -58,7 +58,7 @@ type Config struct {
 
 // StreamServer is one L4 (TCP or UDP) reverse-proxy listener ([[stream]]). It
 // forwards raw connections/datagrams to a backend without parsing the
-// application protocol. For TLS it can route by SNI host without terminating
+// application protocol. For TLS it can route by SNI and offered ALPN without terminating
 // (TLS passthrough) and preserve the client address via the PROXY protocol.
 type StreamServer struct {
 	// Listen is the bind address (host:port), e.g. "0.0.0.0:5432".
@@ -66,15 +66,19 @@ type StreamServer struct {
 	// Protocol is "tcp" (default) or "udp".
 	Protocol string `toml:"protocol"`
 	// ProxyPass is the default backend: a named upstream or a literal host:port.
-	// It is used when no SNI route matches (or for non-TLS / UDP streams).
+	// It is used when no TLS route matches (or for non-TLS / UDP streams).
 	ProxyPass string `toml:"proxy_pass"`
 	// SNIRoutes maps a TLS server name (SNI host) to a backend (named upstream
 	// or host:port). Setting it enables ClientHello SNI inspection on a TCP
 	// listener and routes by host without terminating TLS. A "*" key is a
 	// catch-all that takes precedence over ProxyPass.
 	SNIRoutes map[string]string `toml:"sni_routes"`
+	// ALPNRoutes matches client-offered ALPN identifiers on TCP TLS passthrough.
+	// Exact server names precede "*"; within each tier declaration order wins.
+	// Empty means the existing SNI-only inspection and routing contract applies.
+	ALPNRoutes []StreamALPNRoute `toml:"alpn_routes,omitempty"`
 	// TLSPassthrough documents that the listener forwards TLS unmodified. It is
-	// implied whenever SNIRoutes is set and is informational otherwise. JUL
+	// implied whenever SNI or ALPN routes are set and is informational otherwise. JUL
 	// never terminates TLS on a stream listener in v1.
 	TLSPassthrough bool `toml:"tls_passthrough"`
 	// ProxyProtocol controls HAProxy PROXY-protocol handling (TCP only):
@@ -101,6 +105,17 @@ type StreamServer struct {
 	// is reclaimable the new client's datagram is dropped. Zero applies a 10000
 	// default. Ignored for tcp listeners.
 	MaxUDPSessions int `toml:"max_udp_sessions"`
+}
+
+// StreamALPNRoute selects a backend using client offers, not TLS negotiation.
+type StreamALPNRoute struct {
+	// ServerName is an exact, case-insensitive SNI name, or "*" for any/absent SNI.
+	ServerName string `toml:"server_name" json:"server_name"`
+	// Protocols are complete, case-sensitive UTF-8 identifiers encoded verbatim,
+	// each 1–255 bytes. Any offered identifier can match; client order is ignored.
+	Protocols []string `toml:"protocols" json:"protocols"`
+	// ProxyPass is a named upstream or literal host:port selected by this rule.
+	ProxyPass string `toml:"proxy_pass" json:"proxy_pass"`
 }
 
 // PluginConfig declares a single WASM plugin. Exactly one of Path or Inline

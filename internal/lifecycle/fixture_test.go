@@ -431,6 +431,7 @@ func fullConfig() *config.Config {
 			Protocol:       "tcp",
 			ProxyPass:      "tcp://db",
 			SNIRoutes:      map[string]string{"db.example.com": "tcp://db"},
+			ALPNRoutes:     []config.StreamALPNRoute{{ServerName: "db.example.com", Protocols: []string{"db/1"}, ProxyPass: "tcp://db"}},
 			TLSPassthrough: true,
 			ProxyProtocol:  "both",
 			TrustedProxies: []string{"10.0.0.0/8"},

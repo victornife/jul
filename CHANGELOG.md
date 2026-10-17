@@ -11,6 +11,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Alpha offered-ALPN TCP passthrough routing (#434): ordered exact-SNI/wildcard
+  rules reuse bounded ClientHello inspection and existing stream pools/reloads;
+  backend TLS negotiation remains end-to-end. Config, lifecycle, API and Console
+  preservation are aligned. HTTP/3/QUIC are excluded. NGINX ALPN maps remain
+  explicitly blocking because comma-joined offers are not exact opaque tokens.
+
 - Opt-in Option A range-aware response caching (`[cache].range_enabled` and
   `[cache].max_ranges`, #442, ADR 0024): when enabled (`range_enabled = false`
   by default to preserve D05 bypass), satisfies single byte-range `GET`
@@ -64,6 +70,10 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 
 ### Fixed
+
+- Drain the complete retained-metrics summary in the short soak reproduction
+  smoke gate, preventing a successful early grep match from causing SIGPIPE
+  (exit 141) under pipefail; producer failures still fail the gate.
 
 - Reconcile completed documentation/Console hardening and the three bounded
   post-GA contracts in roadmap and limitation notices. Link the planned verified

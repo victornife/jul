@@ -2009,3 +2009,10 @@ Run the repository example from the repository root:
 ## Admin OIDC
 
 The optional `[admin.oidc]` block configures one external Console provider; it requires enabled `[admin.rbac]` and a local admin recovery credential. Exact issuer/client/callback, subject/group mapping and bounded session settings are covered by the [OIDC guide](admin-oidc.md) and generated reference. Changes publish with the existing immutable authentication snapshot and invalidate prior browser sessions when authentication policy changes. This does not change application-route authentication or NGINX migration.
+
+## Offered-ALPN TCP stream rules
+
+`[[stream.alpn_routes]]` adds ordered `server_name`, `protocols`, and `proxy_pass`
+rules for client-offered identifiers. This Alpha working-branch extension
+requires `stream`; UDP/QUIC are excluded. See [the complete contract and example](stream-alpn.md)
+for precedence, identifier representation, bounds, fallback and management semantics.

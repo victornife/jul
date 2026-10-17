@@ -154,11 +154,23 @@ func v1Streams(c *config.Config) []adminapi.Stream {
 			Protocol:         streamProtoOrDefault(st.Protocol),
 			Target:           st.ProxyPass,
 			SNIRoutes:        v1SNIRoutes(st.SNIRoutes),
+			ALPNRoutes:       v1ALPNRoutes(st.ALPNRoutes),
 			TLSPassthrough:   st.TLSPassthrough,
 			ProxyProtocol:    strings.ToLower(strings.TrimSpace(st.ProxyProtocol)),
 			ConnectTimeoutMS: st.ConnectTimeout.Std().Milliseconds(),
 			IdleTimeoutMS:    st.IdleTimeout.Std().Milliseconds(),
 		})
+	}
+	return out
+}
+
+func v1ALPNRoutes(rules []config.StreamALPNRoute) []adminapi.ALPNRoute {
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make([]adminapi.ALPNRoute, 0, len(rules))
+	for _, rule := range rules {
+		out = append(out, adminapi.ALPNRoute{ServerName: rule.ServerName, Protocols: append([]string(nil), rule.Protocols...), ProxyPass: rule.ProxyPass})
 	}
 	return out
 }

@@ -1206,11 +1206,19 @@ export type PluginsProjection = z.infer<typeof PluginsProjectionSchema>;
 // StreamProjectionSchema is one declared [[stream]] L4 (TCP/UDP) listener for
 // the Streams panel and its guided editor. The protocol is normalized to its
 // effective value (tcp default) so the editor seeds a faithful round-trip.
+const StreamALPNRouteSchema = z.object({
+  server_name: z.string(),
+  protocols: z.array(z.string()),
+  proxy_pass: z.string(),
+});
+export type StreamALPNRoute = z.infer<typeof StreamALPNRouteSchema>;
+
 export const StreamProjectionSchema = z.object({
   listen: z.string(),
   protocol: z.string(), // "tcp" | "udp"
   proxy_pass: z.string().optional(),
   sni_routes: z.record(z.string(), z.string()).optional(),
+  alpn_routes: z.array(StreamALPNRouteSchema).optional(),
   tls_passthrough: z.boolean(),
   proxy_protocol: z.string().optional(), // "" | "in" | "out" | "both"
   connect_timeout: z.string().optional(),
@@ -1277,12 +1285,17 @@ export const PoolResilienceSchema = z.object({
     circuit_fail_timeout: z.string().optional(),
     circuit_half_open_probes: z.number().nonnegative(),
   }),
-  retry_budget: z.object({ percent: z.number().nonnegative(), remaining: z.number().nonnegative() }),
+  retry_budget: z.object({
+    percent: z.number().nonnegative(),
+    remaining: z.number().nonnegative(),
+  }),
   by_state: z.record(z.string(), z.number()),
 });
 
 export function fetchPoolResilience(name: string) {
-  return api<unknown>(`/upstreams/${encodeURIComponent(name)}/resilience`).then((data) => z.array(PoolResilienceSchema).parse(data));
+  return api<unknown>(`/upstreams/${encodeURIComponent(name)}/resilience`).then((data) =>
+    z.array(PoolResilienceSchema).parse(data),
+  );
 }
 
 export function fetchOverview(): Promise<Overview> {
@@ -1367,14 +1380,23 @@ export function fetchSecurity(): Promise<SecurityProjection> {
 
 // OIDC browser plumbing deliberately sends no local bearer token: cookies and
 // bearer credentials must never be presented together.
-export async function fetchOIDCConfiguration(): Promise<{ enabled: boolean; provider_name?: string | undefined } | null> {
- const response = await fetch("/auth/oidc/status", { credentials: "same-origin" });
- if (!response.ok) return null;
- return z.object({ enabled: z.boolean(), provider_name: z.string().optional() }).parse(await response.json());
+export async function fetchOIDCConfiguration(): Promise<{
+  enabled: boolean;
+  provider_name?: string | undefined;
+} | null> {
+  const response = await fetch("/auth/oidc/status", { credentials: "same-origin" });
+  if (!response.ok) return null;
+  return z
+    .object({ enabled: z.boolean(), provider_name: z.string().optional() })
+    .parse(await response.json());
 }
 export async function logoutOIDC(): Promise<boolean> {
- const response = await fetch("/auth/oidc/logout", { method: "POST", credentials: "same-origin", headers: { "X-Jul-Console": "1" } });
- return response.ok;
+  const response = await fetch("/auth/oidc/logout", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "X-Jul-Console": "1" },
+  });
+  return response.ok;
 }
 
 // ── Current identity (GET /api/admin/me) ─────────────────────────────────────
@@ -1825,6 +1847,7 @@ export type StreamDefPatch = {
   protocol?: "tcp" | "udp";
   proxy_pass?: string;
   sni_routes?: Record<string, string>;
+  alpn_routes?: StreamALPNRoute[];
   tls_passthrough?: boolean;
   proxy_protocol?: "in" | "out" | "both";
   connect_timeout?: string;
@@ -3224,7 +3247,7 @@ async function streamEvents(
   while (!signalAborted(signal)) {
     try {
       const headers = new Headers();
-  headers.set("X-Jul-Console", "1");
+      headers.set("X-Jul-Console", "1");
       headers.set("Accept", "text/event-stream");
       const token = authToken.get();
       if (token) headers.set("Authorization", `Bearer ${token}`);

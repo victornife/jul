@@ -266,3 +266,55 @@ func TestHandleStreamsEndpoint(t *testing.T) {
 		t.Errorf("unexpected body: %s", body)
 	}
 }
+
+func TestStreamALPNProjectionPatchAndDiff(t *testing.T) {
+	c := streamPatchConfig()
+	rules := []config.StreamALPNRoute{{ServerName: "*", Protocols: []string{"h2", "x,h2"}, ProxyPass: "db"}}
+	st, label, err := buildStream(streamDef{Listen: ":9443", ALPNRoutes: rules})
+	if err != nil || len(st.ALPNRoutes) != 1 || !strings.Contains(label, "1 ALPN route") {
+		t.Fatalf("build ALPN: %+v %q %v", st, label, err)
+	}
+	for _, input := range []streamDef{
+		{Listen: ":9443", Protocol: "udp", ALPNRoutes: rules},
+		{Listen: ":9443", ALPNRoutes: []config.StreamALPNRoute{{ServerName: "*", Protocols: []string{""}, ProxyPass: "db"}}},
+	} {
+		if _, _, err := buildStream(input); err == nil {
+			t.Fatal("invalid ALPN stream accepted")
+		}
+	}
+	c.Streams[0].ALPNRoutes = rules
+	projected := projectStreams(c, true)
+	if len(projected.Streams[0].ALPNRoutes) != 1 {
+		t.Fatal("internal projection lost ALPN")
+	}
+	v1 := v1Streams(c)
+	if len(v1[0].ALPNRoutes) != 1 || len(v1ALPNRoutes(nil)) != 0 {
+		t.Fatal("external projection lost ALPN")
+	}
+	v1[0].ALPNRoutes[0].Protocols[0] = "mutated"
+	if rules[0].Protocols[0] != "h2" {
+		t.Fatal("projection aliases config")
+	}
+	// Older clients omit the field. Preserve the existing routing rules.
+	if _, err := applyPatch(c, patchRequest{Op: "stream_set", Listen: ":5432", Stream: &streamDef{Listen: ":5432", ProxyPass: "db"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Streams[0].ALPNRoutes) != 1 {
+		t.Fatal("legacy stream_set erased ALPN rules")
+	}
+	before := *c
+	before.Streams = append([]config.StreamServer(nil), c.Streams...)
+	// An explicit empty array clears rules.
+	if _, err := applyPatch(c, patchRequest{Op: "stream_set", Listen: ":5432", Stream: &streamDef{Listen: ":5432", ProxyPass: "db", ALPNRoutes: []config.StreamALPNRoute{}}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Streams[0].ALPNRoutes) != 0 {
+		t.Fatal("explicit clear ignored")
+	}
+	if !diffHas(diffConfigs(&before, c), "offered-ALPN rules") {
+		t.Fatal("ALPN diff missing")
+	}
+	if diffHas(diffConfigs(c, c), "offered-ALPN rules") {
+		t.Fatal("spurious ALPN diff")
+	}
+}

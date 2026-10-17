@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import type { StreamProjection, StreamDefPatch } from "@/api/client.ts";
+import type { StreamProjection, StreamDefPatch, StreamALPNRoute } from "@/api/client.ts";
 
 // StreamDraft is the editable form state for one [[stream]] L4 listener. It
 // mirrors StreamDefPatch but keeps the SNI route table as the raw multi-line
@@ -13,6 +13,7 @@ export interface StreamDraft {
   protocol: "tcp" | "udp";
   proxyPass: string;
   sniRoutes: string; // "host = target" lines
+  alpnRoutes: StreamALPNRoute[]; // preserved verbatim; edited in Configuration
   tlsPassthrough: boolean;
   proxyProtocol: "" | "in" | "out" | "both";
   connectTimeout: string;
@@ -26,6 +27,7 @@ export function emptyStreamDraft(): StreamDraft {
     protocol: "tcp",
     proxyPass: "",
     sniRoutes: "",
+    alpnRoutes: [],
     tlsPassthrough: false,
     proxyProtocol: "",
     connectTimeout: "",
@@ -40,6 +42,7 @@ export function seedStreamDraft(s: StreamProjection): StreamDraft {
     protocol: s.protocol === "udp" ? "udp" : "tcp",
     proxyPass: s.proxy_pass ?? "",
     sniRoutes: formatSNIRoutes(s.sni_routes ?? {}),
+    alpnRoutes: s.alpn_routes ?? [],
     tlsPassthrough: s.tls_passthrough,
     proxyProtocol: normProxyProtocol(s.proxy_protocol),
     connectTimeout: s.connect_timeout ?? "",
@@ -85,6 +88,7 @@ export function streamDraftToPatch(draft: StreamDraft): StreamDefPatch {
   if (draft.proxyPass.trim() !== "") patch.proxy_pass = draft.proxyPass.trim();
   const sni = parseSNIRoutes(draft.sniRoutes);
   if (Object.keys(sni).length > 0) patch.sni_routes = sni;
+  if (draft.alpnRoutes.length > 0) patch.alpn_routes = draft.alpnRoutes;
   if (draft.tlsPassthrough) patch.tls_passthrough = true;
   if (draft.proxyProtocol !== "") patch.proxy_protocol = draft.proxyProtocol;
   if (draft.connectTimeout.trim() !== "") patch.connect_timeout = draft.connectTimeout.trim();
@@ -101,10 +105,11 @@ export function streamDraftWarnings(draft: StreamDraft): string[] {
     out.push("A listen address is required (e.g. 0.0.0.0:5432).");
   }
   const hasSNI = Object.keys(parseSNIRoutes(draft.sniRoutes)).length > 0;
-  if (draft.proxyPass.trim() === "" && !hasSNI) {
-    out.push("A default backend (proxy_pass) or at least one SNI route is required.");
+  if (draft.proxyPass.trim() === "" && !hasSNI && draft.alpnRoutes.length === 0) {
+    out.push("A default backend (proxy_pass) or at least one SNI or ALPN route is required.");
   }
   if (draft.protocol === "udp") {
+    if (draft.alpnRoutes.length > 0) out.push("ALPN routes are only supported for TCP streams.");
     if (hasSNI) out.push("SNI routes are only supported for TCP streams.");
     if (draft.tlsPassthrough) out.push("TLS passthrough is only supported for TCP streams.");
     if (draft.proxyProtocol !== "") {
@@ -122,5 +127,7 @@ export function streamSummary(s: StreamProjection): string {
   const parts: string[] = [];
   if (target) parts.push(`→ ${target}`);
   if (sniCount > 0) parts.push(`${String(sniCount)} SNI route${sniCount === 1 ? "" : "s"}`);
+  const alpnCount = s.alpn_routes?.length ?? 0;
+  if (alpnCount > 0) parts.push(`${String(alpnCount)} ALPN route${alpnCount === 1 ? "" : "s"}`);
   return parts.length > 0 ? parts.join(" · ") : "(no target)";
 }

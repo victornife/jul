@@ -332,7 +332,11 @@ done
 NGINX_CACHE_REFERENCE_IMAGE="${NGINX_IMAGE}" REQUIRE_NGINX_E2E=1 \
 	go test -tags importer ./cmd/jul -run '^TestNGINXCorpus(TargetedCacheDifference|ExpirationMIMEPair)$' -count=1 -v
 
+scripts/nginx-alpn-e2e.sh "${NGINX_IMAGE}" "${ARTIFACT_DIR}/alpn"
+
 cat >"${ARTIFACT_DIR}/result.txt" <<'EOF_RESULT'
+reference_passed: stream-alpn-boundary/conventional-offers-order-absence-case
+expected_difference: stream-alpn-boundary/comma-containing-identifier NGX_STREAM_ALPN_MAP_AMBIGUOUS
 reference_passed: idioms-runtime
 reference_passed: expiration-mime-pair
 reference_passed: core-multifile-return

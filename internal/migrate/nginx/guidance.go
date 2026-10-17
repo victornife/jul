@@ -10,6 +10,14 @@ import "sort"
 // guidanceCatalog is closed and reviewable. Results reference these stable
 // codes instead of duplicating long remediation prose in classifiers.
 var guidanceCatalog = map[string]AssessmentGuidance{
+	"GUIDE_STREAM_ALPN_MANUAL": {
+		Code:        "GUIDE_STREAM_ALPN_MANUAL",
+		Title:       "Review offered-ALPN matching before cutover",
+		Action:      "Write explicit stream.alpn_routes only after reviewing source map priority, exact opaque identifiers, fallback and malformed-input behavior. Test multiple offers and a comma-containing identifier. Broader map expressions and QUIC/UDP remain blocking.",
+		Consequence: "Matching NGINX's comma-joined variable can select a backend that an exact ALPN offer rule does not select; native ALPN support does not prove migration equivalence.",
+		Docs:        "nginx-assessment#alpn-passthrough-routing",
+		Blocking:    true,
+	},
 	"GUIDE_INCLUDE_ENABLE": {
 		Code:     "GUIDE_INCLUDE_ENABLE",
 		Title:    "Assess included files explicitly",

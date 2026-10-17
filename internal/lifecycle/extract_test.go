@@ -376,3 +376,20 @@ func contains(xs []string, want string) bool {
 	}
 	return false
 }
+
+func TestALPNRuleOrderChangesLifecycleDiff(t *testing.T) {
+	a := &config.Config{Streams: []config.StreamServer{{Listen: ":443", ALPNRoutes: []config.StreamALPNRoute{
+		{ServerName: "*", Protocols: []string{"h2"}, ProxyPass: "one:443"},
+		{ServerName: "*", Protocols: []string{"http/1.1"}, ProxyPass: "two:443"},
+	}}}}
+	b := &config.Config{Streams: []config.StreamServer{{Listen: ":443", ALPNRoutes: []config.StreamALPNRoute{a.Streams[0].ALPNRoutes[1], a.Streams[0].ALPNRoutes[0]}}}}
+	changes := DiffConfig(a, b)
+	if len(changes) == 0 {
+		t.Fatal("ALPN priority reorder was ignored")
+	}
+	for _, change := range changes {
+		if change.Class != HotReloadClass {
+			t.Fatalf("ALPN classification: %+v", change)
+		}
+	}
+}

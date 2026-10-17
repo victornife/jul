@@ -1,0 +1,15 @@
+fuzz: elapsed: 0s, gathering baseline coverage: 0/6 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 6/6 completed, now fuzzing with 2 workers
+fuzz: elapsed: 3s, execs: 42627 (14206/sec), new interesting: 9 (total: 15)
+fuzz: elapsed: 6s, execs: 54958 (4110/sec), new interesting: 12 (total: 18)
+fuzz: elapsed: 9s, execs: 54958 (0/sec), new interesting: 12 (total: 18)
+fuzz: elapsed: 12s, execs: 54958 (0/sec), new interesting: 12 (total: 18)
+fuzz: elapsed: 15s, execs: 54958 (0/sec), new interesting: 12 (total: 18)
+fuzz: elapsed: 18s, execs: 54958 (0/sec), new interesting: 12 (total: 18)
+fuzz: elapsed: 21s, execs: 54958 (0/sec), new interesting: 12 (total: 18)
+fuzz: elapsed: 24s, execs: 54958 (0/sec), new interesting: 12 (total: 18)
+fuzz: elapsed: 27s, execs: 54958 (0/sec), new interesting: 12 (total: 18)
+fuzz: elapsed: 30s, execs: 54958 (0/sec), new interesting: 12 (total: 18)
+fuzz: elapsed: 31s, execs: 54958 (0/sec), new interesting: 12 (total: 18)
+PASS
+ok  	jul/internal/stream	31.032s

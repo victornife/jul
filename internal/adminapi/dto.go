@@ -75,6 +75,7 @@ var schemaTypes = map[string]reflect.Type{
 	"StreamsResponse":       reflect.TypeFor[StreamsResponse](),
 	"Stream":                reflect.TypeFor[Stream](),
 	"SNIRoute":              reflect.TypeFor[SNIRoute](),
+	"ALPNRoute":             reflect.TypeFor[ALPNRoute](),
 
 	"ConfigExportResponse": reflect.TypeFor[ConfigExportResponse](),
 	"ExportGlobal":         reflect.TypeFor[ExportGlobal](),

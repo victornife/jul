@@ -369,6 +369,9 @@ func inferredTargetPaths(result AssessmentResult) []string {
 }
 
 func guidanceCodesForResult(result AssessmentResult) []string {
+	if result.Code == "NGX_STREAM_ALPN_MAP_AMBIGUOUS" {
+		return []string{"GUIDE_STREAM_ALPN_MANUAL"}
+	}
 	if result.Code == "JUL_CANDIDATE_VALIDATION" {
 		return []string{"GUIDE_CANDIDATE_VALIDATION"}
 	}

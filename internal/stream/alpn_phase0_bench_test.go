@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"jul/internal/config"
 )
 
 // Typical-size padded ClientHello, SNI shared.example, offers h2 and http/1.1.
@@ -101,4 +103,52 @@ func BenchmarkALPNPhase0Connection(b *testing.B) {
 		}
 	}
 	b.StopTimer()
+}
+
+// Compare complete existing stream runtime paths on one environment, including
+// fresh accepts, preread, routing, admission, pool dial, relay and teardown.
+func BenchmarkALPNRoutingEstablishment(b *testing.B) {
+	for _, enabled := range []bool{false, true} {
+		name := "legacy-SNI"
+		if enabled {
+			name = "offered-ALPN"
+		}
+		b.Run(name, func(b *testing.B) {
+			backend, stopBackend := benchBackend()
+			defer stopBackend()
+			addr := benchAddr("tcp")
+			s := NewServer(Options{Logger: discardLogger()})
+			st := config.StreamServer{Listen: addr}
+			if enabled {
+				st.ALPNRoutes = []config.StreamALPNRoute{{ServerName: "shared.example", Protocols: []string{"h2"}, ProxyPass: backend}}
+			} else {
+				st.SNIRoutes = map[string]string{"shared.example": backend}
+			}
+			if err := s.Reload([]config.StreamServer{st}, nil); err != nil {
+				b.Fatal(err)
+			}
+			defer s.Close()
+			wire := phase0Hello()
+			reply := make([]byte, len(wire))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				c, err := net.DialTimeout("tcp", addr, 5*time.Second)
+				if err != nil {
+					b.Fatal(err)
+				}
+				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+				if _, err := c.Write(wire); err != nil {
+					_ = c.Close()
+					b.Fatal(err)
+				}
+				_, err = io.ReadFull(c, reply)
+				_ = c.Close()
+				if err != nil || !bytes.Equal(wire, reply) {
+					b.Fatalf("replay: %v", err)
+				}
+			}
+			b.StopTimer()
+		})
+	}
 }

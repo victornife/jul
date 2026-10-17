@@ -8,10 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Drawer } from "@/components/Drawer.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading, MaturityBadge } from "@/components/ui.tsx";
-import {
-  fetchStreams,
-  type StreamProjection,
-} from "@/api/client.ts";
+import { fetchStreams, type StreamProjection } from "@/api/client.ts";
 import { useRunPatch } from "@/lib/useRunPatch.ts";
 import {
   emptyStreamDraft,
@@ -182,8 +179,16 @@ function StreamEditorDrawer({
         <p className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
           A stream is an L4 (TCP/UDP) reverse-proxy listener. It forwards raw connections or
           datagrams to a backend without parsing the application protocol. For TLS it can route by
-          SNI host without terminating it (passthrough).
+          SNI and client-offered ALPN without terminating it (passthrough).
         </p>
+
+        {draft.alpnRoutes.length > 0 && (
+          <p className="rounded-md border border-jul-border p-3 text-xs text-jul-muted">
+            This listener uses ALPN routing. This form preserves rule order and values. Edit them in
+            the Configuration editor. ALPN describes client offers; the backend still negotiates
+            TLS.
+          </p>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <TextField
@@ -248,10 +253,7 @@ function StreamEditorDrawer({
                   value={draft.proxyProtocol}
                   onChange={(e) => {
                     const v = e.target.value;
-                    set(
-                      "proxyProtocol",
-                      v === "in" || v === "out" || v === "both" ? v : "",
-                    );
+                    set("proxyProtocol", v === "in" || v === "out" || v === "both" ? v : "");
                   }}
                   className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
                 >
@@ -370,8 +372,8 @@ export function StreamsPanel() {
             <MaturityBadge level="ga" />
           </div>
           <p className="max-w-3xl text-sm text-jul-muted">
-            Raw TCP and UDP reverse-proxy listeners operating below the HTTP layer.
-            Offload non-HTTP traffic or forward TLS-encrypted streams without termination.
+            Raw TCP and UDP reverse-proxy listeners operating below the HTTP layer. Offload non-HTTP
+            traffic or forward TLS-encrypted streams without termination.
           </p>
         </div>
         <button

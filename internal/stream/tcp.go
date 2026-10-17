@@ -9,7 +9,6 @@ import (
 	"bufio"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -96,16 +95,11 @@ func (l *listener) handleTCP(client net.Conn) {
 	}
 
 	pool := r.defaultPool
-	if len(r.sniPools) > 0 {
+	if len(r.sniPools) > 0 || len(r.alpnRoutes) > 0 {
 		_ = client.SetReadDeadline(time.Now().Add(r.connectTimeout))
-		host := peekSNI(br)
+		hello := peekClientHello(br, len(r.alpnRoutes) > 0)
 		_ = client.SetReadDeadline(time.Time{})
-		switch {
-		case host != "" && r.sniPools[strings.ToLower(host)] != nil:
-			pool = r.sniPools[strings.ToLower(host)]
-		case r.sniPools["*"] != nil:
-			pool = r.sniPools["*"]
-		}
+		pool = r.selectPool(hello)
 	}
 	if pool == nil {
 		if l.routeLog.Allow(diagLogInterval) {
