@@ -5,7 +5,8 @@ parsing the application protocol. It supports TLS SNI-based routing (without
 terminating TLS), the HAProxy PROXY protocol, and upstream pool load balancing.
 
 The separate [offered-ALPN TCP routing extension](stream-alpn.md) (#434) is
-Alpha on its working branch and does not inherit this feature's GA evidence.
+Alpha, merged via [PR #635](https://github.com/victornife/jul/pull/635) and
+unreleased. It has separate [delivery evidence](audit/434-alpn/README.md).
 
 The feature is compiled only into builds with the `"stream"` build tag. A lean
 build (without the tag) rejects any configuration that declares `[[stream]]`

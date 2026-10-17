@@ -26,6 +26,12 @@ and its final disposition are tracked in the [issue closure](https://github.com/
 Reviewed-head results do not assert a separate completed execution of main CI.
 #434 is closed/completed. Maturity remains Alpha; this feature is unreleased.
 
+Codecov's separate line-patch metric is 98.24561% against its 90% target.
+Its red bot-comment marker flags three uncovered lines; the actual reviewed-head
+check and merge-commit status are successful. The merge-commit upload completed
+successfully. This line metric is distinct from the Go/frontend statement
+denominators above.
+
 ## Phase 0 — GO (2026-10-17)
 
 Base: `d0f30218c46743f274a9f7280f1ebf2c82a78c5f`.
@@ -149,6 +155,20 @@ rejection cases rather than excluding their statements.
 The hosted docs lane also identified four stale D11 current asset paths after
 the Console rebuild. D11-104 now records the exact old-to-new path mapping and
 PR635 rebuild provenance while preserving its historical review and verdict.
+
+### Closeout CI finding
+
+The documentation closeout in [PR #636](https://github.com/victornife/jul/pull/636)
+exposed an overstrict check introduced by #635: the ALPN delivery workflow treated
+a documentation-only diff with no changed executable statements as missing
+coverage ([failed frontend job](https://github.com/victornife/jul/actions/runs/39078586502/job/117530743913)).
+Both language gates now record a zero denominator as not applicable, with no
+invented percentage. Missing/empty coverage artifacts and missing changed-file
+instrumentation still fail; any nonempty changed-statement scope must remain
+strictly above 90%. Ten regression tests execute the actual workflow gate scripts,
+covering empty scopes, exact/below/above-floor boundaries and missing evidence;
+the existing seven Go scorer regressions also pass. This CI defect does not
+change the implementation's measured denominators or runtime behavior.
 
 ### Reviewed surfaces without broader changes
 

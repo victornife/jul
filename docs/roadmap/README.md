@@ -156,7 +156,7 @@ outcome changes.
 - **#434 decision (2026-09-29): no-go.** No concrete SNI+ALPN routing workload
   and no Phase-0 parser/fuzz/benchmark evidence were produced. The candidate
   stayed CANDIDATE/LATER for that release. The later maintainer-selected #434
-  TCP tranche has a recorded Phase-0 GO and separate working-branch evidence;
+  TCP tranche passed Phase-0 and merged via #635 with separate delivery evidence;
   it does not change this historical release decision. Live sequencing
   remains in #62, not in this table.
 
