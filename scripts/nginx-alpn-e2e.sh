@@ -18,12 +18,16 @@ cleanup() {
   if [[ "${container_started}" == 1 ]]; then
     docker logs "${name}" >"${artifacts}/nginx.log" 2>&1 || true
     docker inspect "${name}" >"${artifacts}/container-inspect.json" 2>/dev/null || true
+    if [[ "${status}" != 0 ]]; then tail -n 60 "${artifacts}/nginx.log" >&2 || true; fi
     docker rm -f "${name}" >/dev/null 2>&1 || true
   fi
   if [[ "${network_created}" == 1 ]]; then docker network rm "${network}" >/dev/null 2>&1 || true; fi
   exit "${status}"
 }
 trap cleanup EXIT INT TERM
+docker run --rm --network none --entrypoint nginx "${image}" -V 2>&1 | tee "${artifacts}/nginx-build.txt"
+docker run --rm --network none --entrypoint nginx \
+  -v "${fixture}:/etc/nginx/nginx.conf:ro" "${image}" -t 2>&1 | tee "${artifacts}/config-check.txt"
 docker network create --internal "${network}" >/dev/null
 network_created=1
 docker run --detach --name "${name}" --network "${network}" \
@@ -31,10 +35,11 @@ docker run --detach --name "${name}" --network "${network}" \
   -v "${fixture}:/etc/nginx/nginx.conf:ro" "${image}" >"${artifacts}/container-id.txt"
 container_started=1
 endpoint() { docker port "${name}" "$1/tcp"; }
-export JUL_ALPN_NGINX_ADDR="$(endpoint 18443)"
-export JUL_ALPN_BACKEND_A="$(endpoint 18001)"
-export JUL_ALPN_BACKEND_B="$(endpoint 18002)"
-export JUL_ALPN_BACKEND_F="$(endpoint 18003)"
+JUL_ALPN_NGINX_ADDR="$(endpoint 18443)"
+JUL_ALPN_BACKEND_A="$(endpoint 18001)"
+JUL_ALPN_BACKEND_B="$(endpoint 18002)"
+JUL_ALPN_BACKEND_F="$(endpoint 18003)"
+export JUL_ALPN_NGINX_ADDR JUL_ALPN_BACKEND_A JUL_ALPN_BACKEND_B JUL_ALPN_BACKEND_F
 python3 - <<'PY'
 import os, socket, time
 host, port = os.environ['JUL_ALPN_BACKEND_A'].rsplit(':', 1)

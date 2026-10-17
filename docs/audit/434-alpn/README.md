@@ -132,17 +132,25 @@ rejection cases rather than excluding their statements.
   this tranche adds route projection, count/guidance and safe guided-edit
   preservation rather than a second expression/config editor.
 
-## Integrated implementation — final-head CI pending
+## Integrated implementation and evidence
 
-The complete native integration is prepared for publication in PR #635.
+The complete native integration is proposed in PR #635.
 The maintainer explicitly authorized publication on 2026-10-18, resolving the
 previous generated-contract publication pause. Final CI and the pinned NGINX
-reference lane must certify the integrated public head; earlier parser-spike
-CI does not certify it. The generated metadata was checked against the
+reference lane must certify the integrated public head; the current PR
+checkpoint records their result. Earlier parser-spike CI does not certify the
+integration. The generated metadata was checked against the
 already-public base: all 348 existing fields, including security/credential
 descriptions, are unchanged. Only three ALPN fields and schema counts differ;
 see the [exact proposed diff](config-metadata-proposed.diff) and
 [machine-readable field review](config-metadata-review.json).
+
+The first integrated pinned-NGINX run exposed a harness startup assumption:
+the official image has no `/usr/lib/nginx/modules/ngx_stream_module.so` file.
+The reference fixture no longer attempts that dynamic load. The harness records
+`nginx -V` and a required `nginx -t` before running, propagates endpoint-discovery
+failures, and prints retained container diagnostics on failure. The current PR
+checkpoint records the resulting pinned-runtime evidence.
 
 The [complete changed Go statement report](changed-go-coverage.json) measures
 **165/166 = 99.39759036144578%**, using the complete PR diff without a moved-line
