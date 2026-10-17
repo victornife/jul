@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 348 configurable leaves.
+Coverage: 351 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -3501,6 +3501,51 @@ WriteTimeout bounds writing the response for this server block.
 | Constraint | non-negative |
 | Zero/empty semantics | zero disables the timeout |
 | Active when | always |
+
+## `stream.*.alpn_routes.*.protocols` {#stream-x-alpn_routes-x-protocols}
+
+Protocols are complete, case-sensitive UTF-8 identifiers encoded verbatim, each 1–255 bytes.
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `stream` |
+| Why | the stream listener swaps its route pointer atomically on each successful reload |
+| Requires | `stream_proxy` |
+| Constraint | 1–64 distinct UTF-8 identifiers of 1–255 encoded bytes; complete case-sensitive match of any client offer |
+| Zero/empty semantics | empty is rejected |
+| Active when | TCP ALPN rules configured |
+
+## `stream.*.alpn_routes.*.proxy_pass` {#stream-x-alpn_routes-x-proxy_pass}
+
+ProxyPass is a named upstream or literal host:port selected by this rule.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `stream` |
+| Why | the stream listener swaps its route pointer atomically on each successful reload |
+| Requires | `stream_proxy` |
+| Constraint | known upstream name or literal host:port |
+| Zero/empty semantics | empty is rejected |
+| Active when | TCP ALPN rules configured |
+
+## `stream.*.alpn_routes.*.server_name` {#stream-x-alpn_routes-x-server_name}
+
+ServerName is an exact, case-insensitive SNI name, or "*" for any/absent SNI.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `stream` |
+| Why | the stream listener swaps its route pointer atomically on each successful reload |
+| Requires | `stream_proxy` |
+| Constraint | exact ASCII SNI name or *, 1–255 bytes; no surrounding whitespace or partial wildcard |
+| Zero/empty semantics | empty is rejected |
+| Active when | TCP ALPN rules configured |
 
 ## `stream.*.connect_timeout` {#stream-x-connect_timeout}
 

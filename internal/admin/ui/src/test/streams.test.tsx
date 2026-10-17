@@ -129,7 +129,7 @@ describe("streams lib", () => {
   it("streamDraftWarnings flags a missing listen and missing target", () => {
     const w = streamDraftWarnings(emptyStreamDraft());
     expect(w.some((m) => /listen address is required/i.test(m))).toBe(true);
-    expect(w.some((m) => /default backend.*or.*SNI route/i.test(m))).toBe(true);
+    expect(w.some((m) => /default backend.*or.*SNI or ALPN route/i.test(m))).toBe(true);
   });
 
   it("streamDraftWarnings rejects TCP-only fields on a UDP stream", () => {
@@ -222,6 +222,32 @@ describe("StreamsPanel", () => {
     });
   });
 
+  it("shows preserved ALPN rules when editing an existing listener", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            compiled: true,
+            streams: [
+              {
+                listen: ":9443",
+                protocol: "tcp",
+                tls_passthrough: true,
+                alpn_routes: [{ server_name: "*", protocols: ["h2"], proxy_pass: "web" }],
+              },
+            ],
+          }),
+      }),
+    );
+    render(<StreamsPanel />, { wrapper: Wrapper });
+    await screen.findByText(":9443");
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    expect(await screen.findByText(/This listener uses ALPN routing/)).toBeInTheDocument();
+    expect(screen.getByText(/Edit them in the Configuration editor/)).toBeInTheDocument();
+  });
+
   it("warns when the build lacks the stream proxy", async () => {
     vi.stubGlobal(
       "fetch",
@@ -231,8 +257,36 @@ describe("StreamsPanel", () => {
       }),
     );
     render(<StreamsPanel />, { wrapper: Wrapper });
-    expect(
-      await screen.findByText(/does not include the L4 stream proxy/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/does not include the L4 stream proxy/i)).toBeInTheDocument();
+  });
+});
+
+describe("offered ALPN rules", () => {
+  const rules = [
+    { server_name: "shared.example", protocols: ["h2", "x,h2"], proxy_pass: "one" },
+    { server_name: "*", protocols: ["http/1.1"], proxy_pass: "two" },
+  ];
+  it("parses and preserves opaque tokens and rule order through guided edits", () => {
+    const parsed = StreamsProjectionSchema.parse({
+      compiled: true,
+      streams: [
+        {
+          listen: ":443",
+          protocol: "tcp",
+          tls_passthrough: true,
+          alpn_routes: rules,
+        },
+      ],
+    });
+    const stream = parsed.streams[0];
+    if (!stream) throw new Error("missing fixture");
+    const draft = seedStreamDraft(stream);
+    expect(streamDraftWarnings(draft)).toEqual([]);
+    expect(streamDraftToPatch(draft).alpn_routes).toEqual(rules);
+    expect(streamSummary(stream)).toBe("2 ALPN routes");
+    expect(streamSummary({ ...stream, alpn_routes: rules.slice(0, 1) })).toBe("1 ALPN route");
+    expect(streamDraftWarnings({ ...draft, protocol: "udp" })).toContain(
+      "ALPN routes are only supported for TCP streams.",
+    );
   });
 });

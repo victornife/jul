@@ -16,7 +16,11 @@ import (
 // empty string (never uninitialised memory).
 func FuzzPeekSNI(f *testing.F) {
 	// Real ClientHello captured for "example.com" (minimal, deterministic).
-	f.Add(clientHelloBytesForFuzz())
+	seed := clientHelloBytesForFuzz()
+	if peekSNI(bufio.NewReaderSize(bytes.NewReader(seed), tlsInspectMax)) != "a.b" {
+		f.Fatal("invalid positive SNI fuzz seed")
+	}
+	f.Add(seed)
 	// Not TLS
 	f.Add([]byte("GET / HTTP/1.1\r\n"))
 	// TLS record header but truncated
@@ -86,8 +90,8 @@ func clientHelloBytesForFuzz() []byte {
 	v := uint16(len(name))
 	sni[7] = byte(v >> 8)
 	sni[8] = byte(v)
-	sni = append(sni[:10], name...)
-	w := uint16(len(sni) - 5)
+	sni = append(sni[:9], name...)
+	w := uint16(len(sni) - 4)
 	sni[2] = byte(w >> 8)
 	sni[3] = byte(w)
 	body = append(body, sni...)

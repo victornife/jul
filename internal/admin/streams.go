@@ -19,19 +19,20 @@ import (
 // constraints) is re-checked by the validated SaveConfig re-parse, so a
 // structured edit never bypasses validation.
 type streamDef struct {
-	Listen         string            `json:"listen"`
-	Protocol       string            `json:"protocol,omitempty"` // "tcp" (default) | "udp"
-	ProxyPass      string            `json:"proxy_pass,omitempty"`
-	SNIRoutes      map[string]string `json:"sni_routes,omitempty"`
-	TLSPassthrough bool              `json:"tls_passthrough,omitempty"`
-	ProxyProtocol  string            `json:"proxy_protocol,omitempty"`  // "" | "in" | "out" | "both"
-	ConnectTimeout string            `json:"connect_timeout,omitempty"` // duration string, e.g. "10s"
-	IdleTimeout    string            `json:"idle_timeout,omitempty"`    // duration string, e.g. "5m"
+	Listen         string                   `json:"listen"`
+	Protocol       string                   `json:"protocol,omitempty"` // "tcp" (default) | "udp"
+	ProxyPass      string                   `json:"proxy_pass,omitempty"`
+	SNIRoutes      map[string]string        `json:"sni_routes,omitempty"`
+	ALPNRoutes     []config.StreamALPNRoute `json:"alpn_routes,omitempty"`
+	TLSPassthrough bool                     `json:"tls_passthrough,omitempty"`
+	ProxyProtocol  string                   `json:"proxy_protocol,omitempty"`  // "" | "in" | "out" | "both"
+	ConnectTimeout string                   `json:"connect_timeout,omitempty"` // duration string, e.g. "10s"
+	IdleTimeout    string                   `json:"idle_timeout,omitempty"`    // duration string, e.g. "5m"
 }
 
 // buildStream constructs a config.StreamServer from the guided editor payload.
 // The near-side checks (listen present, protocol/proxy_protocol keywords, a
-// default target or at least one SNI route, the TCP-only constraints) mirror
+// default target or at least one SNI/ALPN route, the TCP-only constraints) mirror
 // the validator so the operator gets a clear message before the diff is
 // generated; the validated re-parse still enforces target references and
 // duplicate listeners. It returns a short label for the audit summary.
@@ -48,8 +49,11 @@ func buildStream(in streamDef) (config.StreamServer, string, error) {
 	}
 	proxyPass := strings.TrimSpace(in.ProxyPass)
 	sni := trimSNIRoutes(in.SNIRoutes)
-	if proxyPass == "" && len(sni) == 0 {
-		return config.StreamServer{}, "", fmt.Errorf("a default proxy_pass or at least one SNI route is required")
+	if proxyPass == "" && len(sni) == 0 && len(in.ALPNRoutes) == 0 {
+		return config.StreamServer{}, "", fmt.Errorf("a default proxy_pass or at least one SNI or ALPN route is required")
+	}
+	if err := config.ValidateStreamALPNRoutes(in.ALPNRoutes); err != nil {
+		return config.StreamServer{}, "", err
 	}
 	pp := strings.ToLower(strings.TrimSpace(in.ProxyProtocol))
 	switch pp {
@@ -60,6 +64,9 @@ func buildStream(in streamDef) (config.StreamServer, string, error) {
 	// SNI routing, TLS passthrough, and the PROXY protocol are TCP-only in v1
 	// (the validator enforces the same; surface it before the diff).
 	if proto == "udp" {
+		if len(in.ALPNRoutes) > 0 {
+			return config.StreamServer{}, "", fmt.Errorf("alpn_routes is only supported for tcp streams")
+		}
 		if len(sni) > 0 {
 			return config.StreamServer{}, "", fmt.Errorf("sni_routes is only supported for tcp streams")
 		}
@@ -75,6 +82,7 @@ func buildStream(in streamDef) (config.StreamServer, string, error) {
 		Protocol:       proto,
 		ProxyPass:      proxyPass,
 		SNIRoutes:      sni,
+		ALPNRoutes:     in.ALPNRoutes,
 		TLSPassthrough: in.TLSPassthrough,
 		ProxyProtocol:  pp,
 	}
@@ -134,6 +142,9 @@ func streamSummary(st config.StreamServer) string {
 	}
 	if n := len(st.SNIRoutes); n > 0 {
 		out += fmt.Sprintf(" + %d SNI route%s", n, plural(n))
+	}
+	if n := len(st.ALPNRoutes); n > 0 {
+		out += fmt.Sprintf(" + %d ALPN route%s", n, plural(n))
 	}
 	return out
 }
@@ -208,14 +219,15 @@ type StreamsProjection struct {
 // normalized to its effective value (tcp default) so the editor seeds a faithful
 // round-trip.
 type StreamProjection struct {
-	Listen         string            `json:"listen"`
-	Protocol       string            `json:"protocol"`
-	ProxyPass      string            `json:"proxy_pass,omitempty"`
-	SNIRoutes      map[string]string `json:"sni_routes,omitempty"`
-	TLSPassthrough bool              `json:"tls_passthrough"`
-	ProxyProtocol  string            `json:"proxy_protocol,omitempty"`
-	ConnectTimeout string            `json:"connect_timeout,omitempty"`
-	IdleTimeout    string            `json:"idle_timeout,omitempty"`
+	Listen         string                   `json:"listen"`
+	Protocol       string                   `json:"protocol"`
+	ProxyPass      string                   `json:"proxy_pass,omitempty"`
+	SNIRoutes      map[string]string        `json:"sni_routes,omitempty"`
+	ALPNRoutes     []config.StreamALPNRoute `json:"alpn_routes,omitempty"`
+	TLSPassthrough bool                     `json:"tls_passthrough"`
+	ProxyProtocol  string                   `json:"proxy_protocol,omitempty"`
+	ConnectTimeout string                   `json:"connect_timeout,omitempty"`
+	IdleTimeout    string                   `json:"idle_timeout,omitempty"`
 }
 
 // projectStreams builds the Streams panel projection from the parsed config.
@@ -229,6 +241,7 @@ func projectStreams(c *config.Config, compiled bool) StreamsProjection {
 			Protocol:       streamProtoOrDefault(st.Protocol),
 			ProxyPass:      st.ProxyPass,
 			SNIRoutes:      st.SNIRoutes,
+			ALPNRoutes:     st.ALPNRoutes,
 			TLSPassthrough: st.TLSPassthrough,
 			ProxyProtocol:  strings.ToLower(strings.TrimSpace(st.ProxyProtocol)),
 		}

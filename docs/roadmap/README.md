@@ -65,7 +65,10 @@ research keep their own design and activation gates. Exact issue selection,
 impact, effort, rationale, dependencies and blockers remain in
 [#62](https://github.com/victornife/jul/issues/62) and its linked children.
 
-#434, #456 and the other unactivated gateway candidates remain deferred. The
+#434 was separately selected for the bounded TCP ALPN extension in
+[PR #635](https://github.com/victornife/jul/pull/635); its [separate Alpha
+contract](../stream-alpn.md) does not include HTTP/3/QUIC or automatic NGINX map
+equivalence. #456 and other unactivated gateway candidates remain deferred. The
 programme does not make AI Gateway, fleet operation or another category an
 automatic next phase. Completed #502's same-path log-rotation correction is
 included in v2.2.0. Completed #515/#516/#517/#590 each retain their own bounded
@@ -151,7 +154,9 @@ outcome changes.
   become GA by shipping.
 - **#434 decision (2026-09-29): no-go.** No concrete SNI+ALPN routing workload
   and no Phase-0 parser/fuzz/benchmark evidence were produced. The candidate
-  stays CANDIDATE/LATER and is not activated by this release. Live sequencing
+  stayed CANDIDATE/LATER for that release. The later maintainer-selected #434
+  TCP tranche has a recorded Phase-0 GO and separate working-branch evidence;
+  it does not change this historical release decision. Live sequencing
   remains in #62, not in this table.
 
 ## Published stable checkpoint

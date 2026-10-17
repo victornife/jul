@@ -1,0 +1,18 @@
+goos: linux
+goarch: amd64
+pkg: jul/internal/stream
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkALPNPhase0Parser-2       	 1000000	       331.3 ns/op	      64 B/op	       4 allocs/op
+BenchmarkALPNPhase0Parser-2       	 1000000	       356.1 ns/op	      64 B/op	       4 allocs/op
+BenchmarkALPNPhase0Parser-2       	 1000000	       321.0 ns/op	      64 B/op	       4 allocs/op
+BenchmarkALPNPhase0Parser-2       	 1000000	       410.6 ns/op	      64 B/op	       4 allocs/op
+BenchmarkALPNPhase0Parser-2       	 1017406	       318.9 ns/op	      64 B/op	       4 allocs/op
+BenchmarkALPNPhase0Parser-2       	 1130300	       315.6 ns/op	      64 B/op	       4 allocs/op
+BenchmarkALPNPhase0Connection-2   	    2295	    166778 ns/op	   22760 B/op	      79 allocs/op
+BenchmarkALPNPhase0Connection-2   	    2172	    161930 ns/op	   22748 B/op	      79 allocs/op
+BenchmarkALPNPhase0Connection-2   	    2197	    163943 ns/op	   22748 B/op	      79 allocs/op
+BenchmarkALPNPhase0Connection-2   	    1946	    172628 ns/op	   22748 B/op	      79 allocs/op
+BenchmarkALPNPhase0Connection-2   	    2114	    168560 ns/op	   22748 B/op	      79 allocs/op
+BenchmarkALPNPhase0Connection-2   	    2092	    160828 ns/op	   22748 B/op	      79 allocs/op
+PASS
+ok  	jul/internal/stream	5.231s

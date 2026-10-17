@@ -1067,7 +1067,7 @@
       "go_field": "ResponseHeaderOp.Name",
       "path": "servers[].locations[].response_headers[].name",
       "kind": "grammar",
-      "constraint": "RFC 9110 field-name token; hop-by-hop/framing names, Content-Encoding, and Vary/Access-Control-* under their \u00a78a/\u00a78b conditions are rejected",
+      "constraint": "RFC 9110 field-name token; hop-by-hop/framing names, Content-Encoding, and Vary/Access-Control-* under their §8a/§8b conditions are rejected",
       "zero_semantics": "required; there is no default",
       "active_when": "a response_headers entry is present"
     },
@@ -1088,7 +1088,7 @@
       "go_field": "ResponseHeaderOp.Value",
       "path": "servers[].locations[].response_headers[].value",
       "kind": "grammar",
-      "constraint": "at most 4 KiB; every byte must be RFC 9110 \u00a75.5 VCHAR / SP / HTAB / obs-text",
+      "constraint": "at most 4 KiB; every byte must be RFC 9110 §5.5 VCHAR / SP / HTAB / obs-text",
       "zero_semantics": "omitted and explicitly empty are different: omitted is only legal for op = remove, and an empty value emits an empty field value on add/set",
       "active_when": "op is add or set"
     },
@@ -1174,6 +1174,30 @@
       "constraint": "non-negative",
       "zero_semantics": "zero disables the timeout",
       "active_when": "always"
+    },
+    {
+      "go_field": "StreamALPNRoute.Protocols",
+      "path": "stream[].alpn_routes[].protocols",
+      "kind": "grammar",
+      "constraint": "1–64 distinct UTF-8 identifiers of 1–255 encoded bytes; complete case-sensitive match of any client offer",
+      "zero_semantics": "empty is rejected",
+      "active_when": "TCP ALPN rules configured"
+    },
+    {
+      "go_field": "StreamALPNRoute.ProxyPass",
+      "path": "stream[].alpn_routes[].proxy_pass",
+      "kind": "grammar",
+      "constraint": "known upstream name or literal host:port",
+      "zero_semantics": "empty is rejected",
+      "active_when": "TCP ALPN rules configured"
+    },
+    {
+      "go_field": "StreamALPNRoute.ServerName",
+      "path": "stream[].alpn_routes[].server_name",
+      "kind": "grammar",
+      "constraint": "exact ASCII SNI name or *, 1–255 bytes; no surrounding whitespace or partial wildcard",
+      "zero_semantics": "empty is rejected",
+      "active_when": "TCP ALPN rules configured"
     },
     {
       "go_field": "StreamServer.ConnectTimeout",

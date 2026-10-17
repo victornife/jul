@@ -1069,9 +1069,11 @@ by an access-log change.
 
 ### L4 stream listeners {:#l4-stream-listeners-are-not-affected}
 
-`[[stream]]` routes (`proxy_pass`, `sni_routes`, `proxy_protocol`,
+`[[stream]]` routes (`proxy_pass`, `sni_routes`, `alpn_routes`, `proxy_protocol`,
 `connect_timeout`, `idle_timeout`, `max_udp_sessions`, `tls_passthrough`) are
 swapped atomically per listener and take effect on the next connection.
+ALPN rule order is significant; existing connections retain their original
+route snapshot and admission ownership. See [offered-ALPN routing](stream-alpn.md).
 
 `protocol` is also hot-reloadable. An L4 listener is keyed by protocol **and**
 address, and TCP and UDP occupy independent port spaces, so switching the

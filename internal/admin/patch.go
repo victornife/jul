@@ -553,7 +553,13 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("stream_set: %w", err)
 		}
-		st, summary, err := buildStream(*req.Stream)
+		input := *req.Stream
+		// An older guided client cannot know ALPN rules. Omission preserves them;
+		// an explicit empty array clears them. Never erase routing on an edit.
+		if input.ALPNRoutes == nil {
+			input.ALPNRoutes = c.Streams[idx].ALPNRoutes
+		}
+		st, summary, err := buildStream(input)
 		if err != nil {
 			return "", fmt.Errorf("stream_set: %w", err)
 		}

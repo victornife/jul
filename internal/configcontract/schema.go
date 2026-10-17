@@ -32,12 +32,13 @@ var SchemaID = fmt.Sprintf("https://github.com/victornife/jul/schema/config-cont
 // unconditional check in internal/config/validate*.go, not inferred from the
 // Go type. Every other object renders with an empty "required" list.
 var requiredChildren = map[string][]string{
-	"":                            {"servers"},      // "at least one [[servers]] block is required"
-	"upstreams.*":                 {"name"},         // "upstream 'name' is required"
-	"upstreams.*.servers.*":       {"address"},      // "address is required" (object form only)
-	"servers.*":                   {"listen"},       // "'listen' is required"
-	"stream.*":                    {"listen"},       // "'listen' is required"
-	"servers.*.locations.*.match": {"type", "path"}, // "match.type/match.path is required"
+	"":                            {"servers"},                                // "at least one [[servers]] block is required"
+	"upstreams.*":                 {"name"},                                   // "upstream 'name' is required"
+	"upstreams.*.servers.*":       {"address"},                                // "address is required" (object form only)
+	"servers.*":                   {"listen"},                                 // "'listen' is required"
+	"stream.*":                    {"listen"},                                 // "'listen' is required"
+	"stream.*.alpn_routes.*":      {"server_name", "protocols", "proxy_pass"}, // all rule fields are required
+	"servers.*.locations.*.match": {"type", "path"},                           // "match.type/match.path is required"
 }
 
 // RenderSchema builds the complete JSON Schema 2020-12 document for Jul's

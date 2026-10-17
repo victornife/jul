@@ -1,0 +1,24 @@
+{
+  "method": "Istanbul statement spans intersecting complete PR diff, excluding tests; no moved-line exclusion",
+  "files": {
+    "internal/admin/ui/src/api/client.ts": {
+      "covered": 13,
+      "total": 14,
+      "percent": 92.85714285714286
+    },
+    "internal/admin/ui/src/features/streams/StreamsPanel.tsx": {
+      "covered": 2,
+      "total": 3,
+      "percent": 66.66666666666667
+    },
+    "internal/admin/ui/src/lib/streams.ts": {
+      "covered": 12,
+      "total": 12,
+      "percent": 100.0
+    }
+  },
+  "covered": 27,
+  "total": 29,
+  "percent": 93.10344827586206,
+  "strict_gt_90": true
+}

@@ -124,5 +124,10 @@ func streamTargets(st StreamServer) []string {
 			targets = append(targets, t)
 		}
 	}
+	for _, rule := range st.ALPNRoutes {
+		if target := strings.TrimSpace(rule.ProxyPass); target != "" {
+			targets = append(targets, target)
+		}
+	}
 	return targets
 }

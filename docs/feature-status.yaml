@@ -966,3 +966,22 @@ features:
     8: true
     9: true
   notes: 'Unreleased #525 (Part 1 cold-miss fill lock, Part 2 disk-streamed large-object capture under ADR 0023) and #442 (opt-in Option A complete-object range caching under ADR 0024). Separate from the historical core-cache GA/soaked record and published v2.2.0 packages. Complete-object storage only; no 206 fragment caching. Long-running GA soak remains open.'
+
+- id: L4-ALPN
+  name: Offered-ALPN TCP passthrough routing
+  tags:
+  - stream
+  maturity: Alpha
+  delivery: implemented
+  doc: stream-alpn.md
+  criteria:
+    1: true
+    2: true
+    3: true
+    4: false
+    5: false
+    6: true
+    7: true
+    8: true
+    9: false
+  notes: 'Proposed in PR #635 for #434; working branch only. Strict global/package/diff coverage and final-head CI remain explicit gates. No inherited GA/soak status. No automatic NGINX ALPN map equivalence; precise blocking guidance and reference counterexample are retained.'

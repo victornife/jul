@@ -9,6 +9,7 @@ package admin
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -565,6 +566,10 @@ func diffStreamFields(key string, b, a config.StreamServer, d *ConfigDiff) {
 		d.mod(DiffEntry{Kind: "stream", Name: key, Before: fmt.Sprintf("%d route%s", len(b.SNIRoutes), plural(len(b.SNIRoutes))), After: fmt.Sprintf("%d route%s", len(a.SNIRoutes), plural(len(a.SNIRoutes))), Detail: "Change SNI routes for stream " + key}, "stream "+key+" sni_routes")
 	}
 	d.cover("stream.*.sni_routes")
+	if (len(b.ALPNRoutes) > 0 || len(a.ALPNRoutes) > 0) && !reflect.DeepEqual(b.ALPNRoutes, a.ALPNRoutes) {
+		d.mod(DiffEntry{Kind: "stream", Name: key, Before: fmt.Sprintf("%d ALPN routes", len(b.ALPNRoutes)), After: fmt.Sprintf("%d ALPN routes", len(a.ALPNRoutes)), Detail: "Change offered-ALPN rules or priority for stream " + key}, "stream "+key+" alpn_routes")
+	}
+	d.cover("stream.*.alpn_routes")
 	if b.TLSPassthrough != a.TLSPassthrough {
 		d.mod(DiffEntry{Kind: "stream", Name: key, Detail: "Change TLS passthrough flag for stream " + key}, "stream "+key+" tls_passthrough")
 	}

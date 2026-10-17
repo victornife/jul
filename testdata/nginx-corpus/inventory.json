@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "fixture_schema_version": 1,
-  "fixture_count": 37,
-  "core_fixtures": 35,
+  "fixture_count": 38,
+  "core_fixtures": 36,
   "full_fixtures": 2,
   "categories": [
     {
@@ -39,7 +39,7 @@
     },
     {
       "name": "protocol-gateways",
-      "count": 13
+      "count": 14
     },
     {
       "name": "request-policy",
@@ -89,7 +89,7 @@
     },
     {
       "name": "blocking",
-      "count": 34
+      "count": 39
     },
     {
       "name": "ignored",
@@ -97,17 +97,17 @@
     },
     {
       "name": "informational",
-      "count": 39
+      "count": 40
     },
     {
       "name": "supported",
-      "count": 379
+      "count": 388
     }
   ],
   "risks": [
     {
       "name": "availability",
-      "count": 90
+      "count": 92
     },
     {
       "name": "observability",
@@ -115,7 +115,7 @@
     },
     {
       "name": "operational",
-      "count": 89
+      "count": 92
     },
     {
       "name": "performance",
@@ -123,11 +123,11 @@
     },
     {
       "name": "routing",
-      "count": 231
+      "count": 240
     },
     {
       "name": "security",
-      "count": 44
+      "count": 45
     }
   ],
   "codes": [
@@ -181,7 +181,7 @@
     },
     {
       "name": "NGX_HTTP_SERVER",
-      "count": 37
+      "count": 38
     },
     {
       "name": "NGX_HTTP_TYPES",
@@ -281,7 +281,7 @@
     },
     {
       "name": "NGX_LOCATION_RETURN",
-      "count": 28
+      "count": 29
     },
     {
       "name": "NGX_LOCATION_RETURN_ABSOLUTE_REDIRECT",
@@ -317,11 +317,11 @@
     },
     {
       "name": "NGX_MAIN_EVENTS",
-      "count": 35
+      "count": 36
     },
     {
       "name": "NGX_MAIN_HTTP",
-      "count": 37
+      "count": 38
     },
     {
       "name": "NGX_MAIN_MAIL",
@@ -329,7 +329,7 @@
     },
     {
       "name": "NGX_MAIN_STREAM",
-      "count": 9
+      "count": 10
     },
     {
       "name": "NGX_MAIN_WORKERS",
@@ -381,7 +381,7 @@
     },
     {
       "name": "NGX_SERVER_LISTEN",
-      "count": 36
+      "count": 37
     },
     {
       "name": "NGX_SERVER_LISTEN_HTTP2_CLEARTEXT",
@@ -389,7 +389,7 @@
     },
     {
       "name": "NGX_SERVER_LOCATION",
-      "count": 50
+      "count": 51
     },
     {
       "name": "NGX_SERVER_NAME",
@@ -412,8 +412,12 @@
       "count": 2
     },
     {
+      "name": "NGX_STREAM_ALPN_MAP_AMBIGUOUS",
+      "count": 1
+    },
+    {
       "name": "NGX_STREAM_LISTEN",
-      "count": 11
+      "count": 12
     },
     {
       "name": "NGX_STREAM_LISTEN_OPTION",
@@ -436,6 +440,10 @@
       "count": 15
     },
     {
+      "name": "NGX_STREAM_PROXY_PASS_DYNAMIC",
+      "count": 1
+    },
+    {
       "name": "NGX_STREAM_PROXY_PROTOCOL_OUT",
       "count": 1
     },
@@ -449,7 +457,7 @@
     },
     {
       "name": "NGX_STREAM_SERVER",
-      "count": 15
+      "count": 16
     },
     {
       "name": "NGX_STREAM_SERVER_NAME",
@@ -457,7 +465,7 @@
     },
     {
       "name": "NGX_STREAM_SSL_PREREAD",
-      "count": 3
+      "count": 4
     },
     {
       "name": "NGX_STREAM_TLS_TERMINATION",
@@ -501,7 +509,7 @@
     },
     {
       "name": "NGX_VARIABLE_BLOCK_UNSUPPORTED",
-      "count": 4
+      "count": 7
     }
   ],
   "verdicts": [
@@ -570,6 +578,7 @@
         "grpc-gateway-runtime",
         "idioms-runtime",
         "protocol-boundaries",
+        "stream-alpn-boundary",
         "stream-extensibility-boundaries",
         "stream-named-upstream",
         "stream-security-boundaries",

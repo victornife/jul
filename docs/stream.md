@@ -4,6 +4,9 @@ Jul.IA can forward raw TCP/UDP connections and datagrams to backends without
 parsing the application protocol. It supports TLS SNI-based routing (without
 terminating TLS), the HAProxy PROXY protocol, and upstream pool load balancing.
 
+The separate [offered-ALPN TCP routing extension](stream-alpn.md) (#434) is
+Alpha on its working branch and does not inherit this feature's GA evidence.
+
 The feature is compiled only into builds with the `"stream"` build tag. A lean
 build (without the tag) rejects any configuration that declares `[[stream]]`
 blocks, so misconfiguration fails loudly.

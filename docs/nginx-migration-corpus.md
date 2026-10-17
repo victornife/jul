@@ -658,3 +658,12 @@ send_timeout remains approximate. Boundary tests retain modified/@time/variable
 expiration, unlimited body size, non-exact WebSocket forms and content-mismatched
 MIME include filenames as blocking. These are asserted dimensions, not full
 NGINX parity or a release certification.
+
+## Offered-ALPN boundary (#434)
+
+`stream-alpn-boundary` adds provenance/guidance-backed blocking assessment for
+comma-joined NGINX ALPN maps. The existing pinned reference script invokes
+`scripts/nginx-alpn-e2e.sh` with its image digest and an internal Docker network.
+The required lane checks conventional matches/order/absence/case and explicitly
+expects NGINX to match `x,h2` as h2 while Jul selects fallback. Native rules are
+manual test setup, not translated output. No automatic ALPN form is certified.

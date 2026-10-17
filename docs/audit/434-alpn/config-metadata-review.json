@@ -1,0 +1,13 @@
+{
+  "base_sha": "d0f30218c46743f274a9f7280f1ebf2c82a78c5f",
+  "existing_field_count": 348,
+  "unchanged_existing_fields": true,
+  "new_fields": [
+    "stream.*.alpn_routes.*.protocols",
+    "stream.*.alpn_routes.*.proxy_pass",
+    "stream.*.alpn_routes.*.server_name"
+  ],
+  "other_changes": "schema counts only",
+  "proposed_blob_sha": "72f735757357ec47f3d7133557965f016f72b020",
+  "proposed_sha256": "a7ae1f97cd640ff4e814342f1a92a87833baa59a76455280b2ef1418f8b21fb7"
+}

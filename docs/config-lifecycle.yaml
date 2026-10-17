@@ -76,12 +76,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 413
-  schema_leaves: 348
-  registry_entries: 348
+  schema_paths: 417
+  schema_leaves: 351
+  registry_entries: 351
   startup_consumed: 29
   by_class:
-    hot_reload: 305
+    hot_reload: 308
     restart_required: 29
     new_listener_only: 7
     ignored_deprecated: 4
@@ -1226,6 +1226,18 @@ fields:
     subsystem: listener_timeouts
     reason: "the value is read once when the socket binds; an address kept across the reload keeps the value it bound with"
     conditional: true
+  - path: "stream.*.alpn_routes.*.protocols"
+    class: hot_reload
+    subsystem: stream
+    reason: "the stream listener swaps its route pointer atomically on each successful reload"
+  - path: "stream.*.alpn_routes.*.proxy_pass"
+    class: hot_reload
+    subsystem: stream
+    reason: "the stream listener swaps its route pointer atomically on each successful reload"
+  - path: "stream.*.alpn_routes.*.server_name"
+    class: hot_reload
+    subsystem: stream
+    reason: "the stream listener swaps its route pointer atomically on each successful reload"
   - path: "stream.*.connect_timeout"
     class: hot_reload
     subsystem: stream

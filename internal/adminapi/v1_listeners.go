@@ -67,6 +67,13 @@ type SNIRoute struct {
 	Target     string `json:"target"`
 }
 
+// ALPNRoute is one ordered offered-protocol rule, never negotiated-protocol evidence.
+type ALPNRoute struct {
+	ServerName string   `json:"server_name"`
+	Protocols  []string `json:"protocols"`
+	ProxyPass  string   `json:"proxy_pass"`
+}
+
 // Stream is one declared L4 listener.
 //
 // A stream's identity is the composite natural key (protocol, listen), and it
@@ -77,11 +84,12 @@ type Stream struct {
 	Protocol string `json:"protocol"`
 	// Target is the proxy destination for a non-passthrough stream.
 	Target string `json:"target,omitempty"`
-	// SNIRoutes is sorted by server name. A stream carries at most one of
-	// Target and SNIRoutes.
-	SNIRoutes      []SNIRoute `json:"sni_routes,omitempty"`
-	TLSPassthrough bool       `json:"tls_passthrough"`
-	ProxyProtocol  string     `json:"proxy_protocol,omitempty"`
+	// SNIRoutes is sorted by server name; Target is the final fallback.
+	SNIRoutes []SNIRoute `json:"sni_routes,omitempty"`
+	// ALPNRoutes preserves configuration priority within exact/wildcard SNI tiers.
+	ALPNRoutes     []ALPNRoute `json:"alpn_routes,omitempty"`
+	TLSPassthrough bool        `json:"tls_passthrough"`
+	ProxyProtocol  string      `json:"proxy_protocol,omitempty"`
 	// ConnectTimeoutMS and IdleTimeoutMS are integer milliseconds, never a Go
 	// duration string (ADR 0019 §26.4), and they are the **effective** values
 	// after defaulting — a client reads what the stream will actually do without

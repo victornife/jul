@@ -3699,6 +3699,29 @@
   },
   "components": {
     "schemas": {
+      "ALPNRoute": {
+        "type": "object",
+        "properties": {
+          "protocols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "proxy_pass": {
+            "type": "string"
+          },
+          "server_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocols",
+          "proxy_pass",
+          "server_name"
+        ],
+        "additionalProperties": false
+      },
       "AdoptExternalRequest": {
         "type": "object",
         "properties": {
@@ -6025,6 +6048,32 @@
                 "stream": {
                   "type": "object",
                   "properties": {
+                    "alpn_routes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "protocols": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "proxy_pass": {
+                            "type": "string"
+                          },
+                          "server_name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "protocols",
+                          "proxy_pass",
+                          "server_name"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
                     "connect_timeout": {
                       "type": "string"
                     },
@@ -6926,6 +6975,12 @@
       "Stream": {
         "type": "object",
         "properties": {
+          "alpn_routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ALPNRoute"
+            }
+          },
           "connect_timeout_ms": {
             "type": "integer",
             "format": "int64"

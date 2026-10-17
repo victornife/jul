@@ -33,3 +33,7 @@ stateful residual dimensions remain explicit in `coverage.json`, with rationale 
 See `docs/nginx-migration-corpus.md` for the image digest, isolation controls,
 category inventory, protocol decisions, report commands, contribution policy,
 and closure boundary.
+
+#434 adds `stream-alpn-boundary`: a blocking assessment/provenance fixture plus
+a pinned-reference lane for conventional offers and the explicit comma-identifier
+difference. It introduces no automatic ALPN map translation.

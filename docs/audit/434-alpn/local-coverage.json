@@ -1,0 +1,208 @@
+{
+  "base-lean": {
+    "covered": 28067,
+    "total": 31859,
+    "percent": "88.09755485106249411469286544",
+    "packages": {
+      "config": {
+        "covered": 2536,
+        "total": 2671,
+        "percent": "94.94571321602396106327218270",
+        "above_90_percent": true
+      },
+      "stream": {
+        "covered": 11,
+        "total": 15,
+        "percent": "73.33333333333333333333333333",
+        "above_90_percent": false
+      },
+      "lifecycle": {
+        "covered": 751,
+        "total": 832,
+        "percent": "90.26442307692307692307692308",
+        "above_90_percent": true
+      },
+      "admin": {
+        "covered": 8083,
+        "total": 9392,
+        "percent": "86.06260647359454855195911414",
+        "above_90_percent": false
+      },
+      "adminapi": {
+        "covered": 57,
+        "total": 57,
+        "percent": "100",
+        "above_90_percent": true
+      },
+      "configcontract": {
+        "covered": 455,
+        "total": 492,
+        "percent": "92.47967479674796747967479675",
+        "above_90_percent": true
+      },
+      "migrate/nginx": {
+        "covered": 0,
+        "total": 0,
+        "percent": null,
+        "above_90_percent": false
+      }
+    },
+    "above_90_percent": false
+  },
+  "base-full": {
+    "covered": 34889,
+    "total": 39269,
+    "percent": "88.84616364053069851536835672",
+    "packages": {
+      "config": {
+        "covered": 2538,
+        "total": 2671,
+        "percent": "95.02059153874953201048296518",
+        "above_90_percent": true
+      },
+      "stream": {
+        "covered": 562,
+        "total": 630,
+        "percent": "89.20634920634920634920634921",
+        "above_90_percent": false
+      },
+      "lifecycle": {
+        "covered": 751,
+        "total": 832,
+        "percent": "90.26442307692307692307692308",
+        "above_90_percent": true
+      },
+      "admin": {
+        "covered": 8106,
+        "total": 9391,
+        "percent": "86.31668618890427004578852092",
+        "above_90_percent": false
+      },
+      "adminapi": {
+        "covered": 57,
+        "total": 57,
+        "percent": "100",
+        "above_90_percent": true
+      },
+      "configcontract": {
+        "covered": 455,
+        "total": 492,
+        "percent": "92.47967479674796747967479675",
+        "above_90_percent": true
+      },
+      "migrate/nginx": {
+        "covered": 2700,
+        "total": 2886,
+        "percent": "93.55509355509355509355509356",
+        "above_90_percent": true
+      }
+    },
+    "above_90_percent": false
+  },
+  "head-lean": {
+    "covered": 28120,
+    "total": 31912,
+    "percent": "88.11732263725244422160942592",
+    "packages": {
+      "config": {
+        "covered": 2571,
+        "total": 2706,
+        "percent": "95.01108647450110864745011086",
+        "above_90_percent": true
+      },
+      "stream": {
+        "covered": 11,
+        "total": 15,
+        "percent": "73.33333333333333333333333333",
+        "above_90_percent": false
+      },
+      "lifecycle": {
+        "covered": 751,
+        "total": 832,
+        "percent": "90.26442307692307692307692308",
+        "above_90_percent": true
+      },
+      "admin": {
+        "covered": 8101,
+        "total": 9410,
+        "percent": "86.08926673751328374070138151",
+        "above_90_percent": false
+      },
+      "adminapi": {
+        "covered": 57,
+        "total": 57,
+        "percent": "100",
+        "above_90_percent": true
+      },
+      "configcontract": {
+        "covered": 455,
+        "total": 492,
+        "percent": "92.47967479674796747967479675",
+        "above_90_percent": true
+      },
+      "migrate/nginx": {
+        "covered": 0,
+        "total": 0,
+        "percent": null,
+        "above_90_percent": false
+      }
+    },
+    "above_90_percent": false
+  },
+  "head-full": {
+    "covered": 35002,
+    "total": 39382,
+    "percent": "88.87816769082321872936874714",
+    "packages": {
+      "config": {
+        "covered": 2573,
+        "total": 2706,
+        "percent": "95.08499630450849963045084996",
+        "above_90_percent": true
+      },
+      "stream": {
+        "covered": 630,
+        "total": 685,
+        "percent": "91.97080291970802919708029197",
+        "above_90_percent": true
+      },
+      "lifecycle": {
+        "covered": 751,
+        "total": 832,
+        "percent": "90.26442307692307692307692308",
+        "above_90_percent": true
+      },
+      "admin": {
+        "covered": 8123,
+        "total": 9409,
+        "percent": "86.33223509405887979594005739",
+        "above_90_percent": false
+      },
+      "adminapi": {
+        "covered": 57,
+        "total": 57,
+        "percent": "100",
+        "above_90_percent": true
+      },
+      "configcontract": {
+        "covered": 455,
+        "total": 492,
+        "percent": "92.47967479674796747967479675",
+        "above_90_percent": true
+      },
+      "migrate/nginx": {
+        "covered": 2705,
+        "total": 2891,
+        "percent": "93.56624005534417156693185749",
+        "above_90_percent": true
+      }
+    },
+    "above_90_percent": false
+  },
+  "_coverage_contract": {
+    "clarified_on": "2026-10-18",
+    "threshold_scope": "complete changed executable production code, separately Go and frontend",
+    "global_and_whole_package": "informational; above_90_percent is not a delivery gate",
+    "existing_repository_gates": "unchanged"
+  }
+}

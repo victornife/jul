@@ -677,6 +677,9 @@ func streamEntries() []Entry {
 		"stream.*.proxy_pass",
 		"stream.*.proxy_protocol",
 		"stream.*.sni_routes.*",
+		"stream.*.alpn_routes.*.server_name",
+		"stream.*.alpn_routes.*.protocols",
+		"stream.*.alpn_routes.*.proxy_pass",
 		"stream.*.tls_passthrough",
 		"stream.*.trusted_proxies",
 	)

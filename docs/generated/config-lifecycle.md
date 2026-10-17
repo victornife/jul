@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 413 |
-| Schema leaves (configurable values) | 348 |
-| Registry entries | 348 |
+| Schema paths (containers included) | 417 |
+| Schema leaves (configurable values) | 351 |
+| Registry entries | 351 |
 | Startup-consumed entries | 29 |
-| Class `hot_reload` | 305 |
+| Class `hot_reload` | 308 |
 | Class `restart_required` | 29 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -380,6 +380,9 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.tls.key` | `hot_reload` | `tls` | digest | a candidate certificate provider is built and validated during Prepare and swapped atomically into the listener's existing dynamic provider at Publish, without rebinding (#100) |
 | `servers.*.tls.min_version` | `restart_required` | `tls` | startup, per-address, cond. | the minimum protocol version is written into the listener's tls.Config at bind time |
 | `servers.*.write_timeout` | `new_listener_only` | `listener_timeouts` | cond. | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
+| `stream.*.alpn_routes.*.protocols` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
+| `stream.*.alpn_routes.*.proxy_pass` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
+| `stream.*.alpn_routes.*.server_name` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
 | `stream.*.connect_timeout` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
 | `stream.*.idle_timeout` | `hot_reload` | `stream` | — | the stream listener swaps its route pointer atomically on each successful reload |
 | `stream.*.listen` | `new_listener_only` | `stream` | cond. | an L4 listener is keyed by protocol and address; moving to a different address binds a new socket and retires the old one |

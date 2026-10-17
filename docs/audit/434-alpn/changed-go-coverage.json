@@ -1,0 +1,29 @@
+{
+  "covered": 165,
+  "total": 166,
+  "percent": 99.39759036144578,
+  "files": [
+    "internal/admin/apiv1_listeners.go",
+    "internal/admin/diff_global.go",
+    "internal/admin/patch.go",
+    "internal/admin/streams.go",
+    "internal/config/validate_alpn.go",
+    "internal/config/validate_backends.go",
+    "internal/config/validate_resilience.go",
+    "internal/lifecycle/registry.go",
+    "internal/migrate/nginx/assessment_classify.go",
+    "internal/migrate/nginx/assessment_enrich.go",
+    "internal/migrate/nginx/stream_translate.go",
+    "internal/stream/alpn.go",
+    "internal/stream/server.go",
+    "internal/stream/sni.go",
+    "internal/stream/tcp.go"
+  ],
+  "uncovered": [
+    [
+      "internal/stream/sni.go",
+      "180.3,181.1",
+      1
+    ]
+  ]
+}

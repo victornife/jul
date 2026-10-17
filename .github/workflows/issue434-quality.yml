@@ -1,0 +1,164 @@
+name: ALPN delivery coverage
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue434-quality.yml'
+      - 'internal/stream/alpn*'
+      - 'internal/stream/sni.go'
+      - 'internal/config/validate_alpn*'
+      - 'docs/stream-alpn.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alpn-quality-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  coverage-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FULL_TAGS: 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf'
+      GOMAXPROCS: '4'
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Measure final-head main-module profiles
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tmp/alpn-delivery
+          artifacts="${PWD}/tmp/alpn-delivery"
+          go version > "${artifacts}/toolchain.txt"
+          go test -p 2 -coverpkg=./... -coverprofile="${artifacts}/head-lean.cover" ./...
+          go test -p 2 -tags "${FULL_TAGS}" -coverpkg=./... -coverprofile="${artifacts}/head-full.cover" ./...
+          git diff --unified=0 "${BASE_SHA}" "${HEAD_SHA}" -- '*.go' > tmp/alpn-delivery/complete.diff
+          # Complete diff: no moved-line filter can hide moved-and-edited code.
+          python3 scripts/check-added-go-coverage.py --diff tmp/alpn-delivery/complete.diff --profile tmp/alpn-delivery/head-lean.cover --profile tmp/alpn-delivery/head-full.cover > tmp/alpn-delivery/patch.json
+      - name: Enforce changed Go statements strictly above 90 percent
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root=Path('tmp/alpn-delivery')
+          def read_profile(name):
+              spans={}
+              lines=(root/name).read_text().splitlines()
+              if not lines or not lines[0].startswith('mode:'): raise ValueError('missing profile header')
+              for line in lines[1:]:
+                  key,n,hits=line.split(); n,hits=int(n),int(hits)
+                  if n<0 or hits<0: raise ValueError('invalid coverage record')
+                  old=spans.get(key,(n,0))
+                  if old[0]!=n: raise ValueError('incompatible statement span')
+                  spans[key]=(n,max(hits,old[1]))
+              if not spans: raise ValueError('empty coverage profile')
+              return spans
+          def counts(spans,prefix=''):
+              records=[v for k,v in spans.items() if not prefix or k.rsplit('/',1)[0]+'/'==prefix]
+              hit=sum(n for n,c in records if c); total=sum(n for n,c in records)
+              if total<=0: raise ValueError('missing instrumented scope: '+prefix)
+              return {'covered':hit,'total':total,'percent':hit*100/total}
+          profiles={name:read_profile(name+'.cover') for name in ('head-lean','head-full')}
+          report={'base_sha':os.environ['BASE_SHA'],'head_sha':os.environ['HEAD_SHA'],'coverage_scope':'complete changed production statements','informational_metrics':{}}
+          for profile,spans in profiles.items(): report['informational_metrics'][profile]=counts(spans)
+          changed=set()
+          for line in (root/'complete.diff').read_text().splitlines():
+              if line.startswith('+++ b/') and line.endswith('.go') and not line.endswith('_test.go'):
+                  changed.add('jul/'+str(Path(line[6:]).parent)+'/')
+          for package in sorted(changed): report['informational_metrics']['package:'+package]=counts(profiles['head-full'],package)
+          patch=json.loads((root/'patch.json').read_text())
+          if not patch['total']: raise ValueError('missing changed-code coverage')
+          patch['pass']=patch['covered']*10>patch['total']*9
+          report['patch']=patch
+          report['pass']=patch['pass']
+          (root/'delivery-coverage.json').write_text(json.dumps(report,indent=2)+'\n')
+          print(json.dumps(report,indent=2))
+          raise SystemExit(0 if report['pass'] else 1)
+          PY
+      - name: Retain source-bound coverage evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: alpn-delivery-${{ github.event.pull_request.head.sha }}
+          path: tmp/alpn-delivery
+          if-no-files-found: error
+          retention-days: 7
+
+  frontend-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: internal/admin/ui/package.json
+          cache: pnpm
+          cache-dependency-path: internal/admin/ui/pnpm-lock.yaml
+      - run: pnpm --dir internal/admin/ui install --frozen-lockfile
+      - run: pnpm --dir internal/admin/ui run test:coverage
+      - name: Require changed frontend statements strictly above 90 percent
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          from pathlib import Path
+          root=Path.cwd()
+          data=json.loads(Path('internal/admin/ui/coverage/coverage-final.json').read_text())
+          diff=subprocess.check_output(['git','diff','--unified=0',os.environ['BASE_SHA'],os.environ['HEAD_SHA'],'--','internal/admin/ui/src'],text=True)
+          changed={}; current=None
+          for line in diff.splitlines():
+              if line.startswith('+++ b/'):
+                  current=line[6:]
+                  if '/test/' in current or not current.endswith(('.ts','.tsx')): current=None
+                  else: changed[current]=set()
+              elif current and line.startswith('@@'):
+                  m=re.search(r'\+(\d+)(?:,(\d+))?',line)
+                  start,count=int(m[1]),int(m[2] or '1')
+                  changed[current].update(range(start,start+count))
+          report={'base_sha':os.environ['BASE_SHA'],'head_sha':os.environ['HEAD_SHA'],'files':{}}
+          covered=total=0
+          for path,lines in changed.items():
+              if not lines: continue
+              item=data.get(str(root/path))
+              if item is None: raise ValueError('missing changed-file instrumentation: '+path)
+              selected=[k for k,s in item['statementMap'].items() if lines.intersection(range(s['start']['line'],s['end']['line']+1))]
+              hit=sum(item['s'][k]>0 for k in selected)
+              report['files'][path]={'covered':hit,'total':len(selected)}
+              covered+=hit; total+=len(selected)
+          if not total: raise ValueError('missing changed frontend coverage')
+          report.update(covered=covered,total=total,percent=covered*100/total)
+          report['pass']=covered*10>total*9
+          Path('internal/admin/ui/coverage/alpn-diff.json').write_text(json.dumps(report,indent=2)+'\n')
+          print(json.dumps(report,indent=2))
+          raise SystemExit(0 if report['pass'] else 1)
+          PY
+      - name: Retain frontend coverage evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: alpn-frontend-${{ github.event.pull_request.head.sha }}
+          path: internal/admin/ui/coverage
+          if-no-files-found: error
+          retention-days: 7

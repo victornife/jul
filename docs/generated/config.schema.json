@@ -2068,6 +2068,47 @@
       "items": {
         "additionalProperties": false,
         "properties": {
+          "alpn_routes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "protocols": {
+                  "description": "Protocols are complete, case-sensitive UTF-8 identifiers encoded verbatim, each 1–255 bytes",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "x-jul-capability": [
+                    "stream_proxy"
+                  ],
+                  "x-jul-constraint": "1–64 distinct UTF-8 identifiers of 1–255 encoded bytes; complete case-sensitive match of any client offer"
+                },
+                "proxy_pass": {
+                  "description": "ProxyPass is a named upstream or literal host:port selected by this rule",
+                  "type": "string",
+                  "x-jul-capability": [
+                    "stream_proxy"
+                  ],
+                  "x-jul-constraint": "known upstream name or literal host:port"
+                },
+                "server_name": {
+                  "description": "ServerName is an exact, case-insensitive SNI name, or \"*\" for any/absent SNI",
+                  "type": "string",
+                  "x-jul-capability": [
+                    "stream_proxy"
+                  ],
+                  "x-jul-constraint": "exact ASCII SNI name or *, 1–255 bytes; no surrounding whitespace or partial wildcard"
+                }
+              },
+              "required": [
+                "server_name",
+                "protocols",
+                "proxy_pass"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "connect_timeout": {
             "default": "10s",
             "description": "ConnectTimeout bounds dialing the backend",

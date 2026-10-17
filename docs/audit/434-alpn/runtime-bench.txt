@@ -1,0 +1,18 @@
+goos: linux
+goarch: amd64
+pkg: jul/internal/stream
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkALPNRoutingEstablishment/legacy-SNI-2         	    1850	    182862 ns/op	   88280 B/op	      81 allocs/op
+BenchmarkALPNRoutingEstablishment/legacy-SNI-2         	    1954	    172531 ns/op	   88276 B/op	      81 allocs/op
+BenchmarkALPNRoutingEstablishment/legacy-SNI-2         	    1780	    192594 ns/op	   88274 B/op	      81 allocs/op
+BenchmarkALPNRoutingEstablishment/legacy-SNI-2         	    1878	    181856 ns/op	   88274 B/op	      81 allocs/op
+BenchmarkALPNRoutingEstablishment/legacy-SNI-2         	    1780	    195137 ns/op	   88274 B/op	      81 allocs/op
+BenchmarkALPNRoutingEstablishment/legacy-SNI-2         	    1815	    192821 ns/op	   88274 B/op	      81 allocs/op
+BenchmarkALPNRoutingEstablishment/offered-ALPN-2       	    1598	    198899 ns/op	   88321 B/op	      84 allocs/op
+BenchmarkALPNRoutingEstablishment/offered-ALPN-2       	    1687	    203414 ns/op	   88321 B/op	      84 allocs/op
+BenchmarkALPNRoutingEstablishment/offered-ALPN-2       	    1879	    185599 ns/op	   88321 B/op	      84 allocs/op
+BenchmarkALPNRoutingEstablishment/offered-ALPN-2       	    1963	    184213 ns/op	   88321 B/op	      84 allocs/op
+BenchmarkALPNRoutingEstablishment/offered-ALPN-2       	    1886	    183090 ns/op	   88321 B/op	      84 allocs/op
+BenchmarkALPNRoutingEstablishment/offered-ALPN-2       	    1590	    205576 ns/op	   88322 B/op	      84 allocs/op
+PASS
+ok  	jul/internal/stream	5.497s

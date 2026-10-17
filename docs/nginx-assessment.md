@@ -401,3 +401,24 @@ settings untranslated. `proxy_cache_lock_age` is blocking in every context
 
 See [exact behavior and candidate pruning](nginx-importer.md#common-idioms-expiration-and-mime-523).
 No readiness, score or equivalence claim is inferred from directive spelling alone.
+
+## ALPN passthrough routing
+
+Native [offered-ALPN routing](stream-alpn.md) does not imply NGINX map equivalence.
+`NGX_STREAM_ALPN_MAP_AMBIGUOUS` is a **blocking** result for maps over
+`$ssl_preread_alpn_protocols`, with source provenance and
+`GUIDE_STREAM_ALPN_MANUAL`. No target mapping or ready candidate is claimed.
+NGINX joins offers with commas; a single opaque `x,h2` identifier can match a
+source token-boundary h2 regex. Jul preserves identifiers and must not match it.
+
+This tranche automatically translates **no ALPN map forms**. Source literals
+(case-insensitive matching), arbitrary/word-boundary regexes, variable chains,
+ambiguous priorities and QUIC/UDP assumptions remain blocking. Any manual
+redesign must explicitly review offers versus negotiation, priority, fallback,
+malformed-input handling and the comma-containing counterexample.
+The `stream-alpn-boundary` corpus fixture and required pinned-reference lane
+cover conventional selections plus the declared NGINX A / Jul fallback difference.
+
+Primary references: [NGINX preread](https://nginx.org/en/docs/stream/ngx_stream_ssl_preread_module.html),
+[map priority and case behavior](https://nginx.org/en/docs/stream/ngx_stream_map_module.html),
+and [NGINX ticket 1616](https://trac.nginx.org/nginx/ticket/1616).

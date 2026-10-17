@@ -249,7 +249,7 @@ residual boundary.
 | `proxy_pass` | ✅ | A named upstream or literal `host:port`. Variable-derived (`$...`) targets are blocking. |
 | `proxy_timeout`, `proxy_connect_timeout` | ✅ | Map to `idle_timeout`/`connect_timeout`. Bare digits mean seconds; `ms`/`s`/`m`/`h` suffixes are supported. nginx's `d`/`w`/`M`/`y` units are not. |
 | `server_name` + `ssl_preread on` | ✅ | See SNI below. |
-| `map` (including `$ssl_preread_server_name` routing) | ❌ | Arbitrary variable maps are not representable in the bounded Jul stream model; this is a deliberate non-goal, not an oversight. |
+| `map` (including SNI/ALPN variable routing) | ❌ | Arbitrary variable maps are not representable in the bounded Jul stream model; this is a deliberate non-goal, not an oversight. |
 | Lua (`ngx_stream_lua_module`), njs (`ngx_stream_js_module`), any other third-party stream module, unrecognized `listen`/directive options | ❌ | Falls through to an explicit blocking finding by default; never silently accepted. See `stream-extensibility-boundaries` in the [migration corpus](nginx-migration-corpus.md). |
 
 **Bounded SNI routing.** nginx can route a stream listener by inspecting the
@@ -707,3 +707,9 @@ with its own versioned framing, canonical path rules, expiry and key rotation;
 it is not wire-compatible with nginx's secure-link formats. Manually attach the
 plugin and migrate the trusted issuer together; existing links require reissue.
 No assessment/corpus classification is promoted by adding this example.
+
+ALPN maps over `$ssl_preread_alpn_protocols` retain the specific blocking code
+`NGX_STREAM_ALPN_MAP_AMBIGUOUS`, even with native ALPN routing available.
+See [ALPN migration boundaries](nginx-assessment.md#alpn-passthrough-routing)
+and the `stream-alpn-boundary` corpus fixture; no automatic ALPN map translation
+or general `map` equivalence is claimed.

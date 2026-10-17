@@ -87,6 +87,8 @@ m = json.load(open(sys.argv[1]))
 assert m["ok"] >= 2 and m["series"] > 10 and len(m["sha256"]) == 64, m
 print(f"soak-scrape: {m['ok']} samples, {m['series']} series, sha256 {m['sha256'][:12]}")
 PY
-"$WORKDIR/soak-scrape" -summarize "$WORKDIR/metrics" | grep -q 'process_open_fds'
+# Drain the complete summary: grep -q can close the pipe after its first
+# match and turn an otherwise successful producer into SIGPIPE (exit 141).
+"$WORKDIR/soak-scrape" -summarize "$WORKDIR/metrics" | grep 'process_open_fds' >/dev/null
 
 echo "soak-repro-smoke: the documented #287 resilience-soak reproduction runs end to end"
