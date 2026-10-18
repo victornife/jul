@@ -291,7 +291,7 @@ recorded as evidence, not as proof of correctness.
 | Host trust includes all same-host processes | stated assumption (§6 of the spec) | Jul-side checks where untrusted processes run |
 | Provider seams (membership, invitations, revocation) remain handoffs | by design | SD-06 outcome gate; #588 |
 | Reviewer independence | AI agents; instruction-based blindness | maintainer acceptance is the decision |
-| #581, #579, #62 still describe the old baseline and order | not yet updated | on authorised publication |
+| Issue records for the new baseline and order | posted 2026-10-18: comments on #580, #579, #62, #562, #563; #581 body amended; #641 and #642 registered (all pending #580 acceptance) | maintainer acceptance switches #640 to `Closes #580` |
 
 ## 7. Traceability
 
