@@ -13,8 +13,9 @@
 > (third principal re-review, §6.16), **r16** `e513edf2` (round 17, §6.17),
 > **r17** `8385c59c` (round 18, §6.18), **r18** `874df4e4` (round 19, §6.19),
 > **r19** `c0af10a3` (whole-contract review, §6.20), **r20** `1332982a` (round
-> 21, §6.21) and **r21** (this revision; round 22 in §6.22). This packet holds
-> evidence, decisions, review findings and traceability for the
+> 21, §6.21), **r21** `a27acb0d` (round 22, §6.22) and **r22** (this revision:
+> round-22 record). This packet holds evidence, decisions, review findings and
+> traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -712,9 +713,10 @@ hidden interlock. Two new medium findings were accepted:
 | W2-1 | medium | an ADR consequence still said restricted entries *cannot* use the cache | "must not use; warned about but currently accepted" |
 | W2-2 | medium | `entry.route_id`, `entry.selector` and `blocks.names` did not declare their new union or `BoundedText` shapes | explicit unions for `route_id` and `selector`; `blocks` fields typed `BoundedText`; URL items typed `BoundedText`; selectors never act on display values |
 
-### 6.22 Round 22 (verification of r21)
+### 6.22 Round 22 (verification of r21 `a27acb0d`)
 
-(Recorded below.)
+The whole-contract reviewer verified W2-1 and W2-2 resolved and found no new
+contradiction. No blocker or high finding is open.
 
 ## 7. Traceability
 
