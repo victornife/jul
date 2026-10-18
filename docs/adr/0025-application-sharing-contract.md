@@ -61,7 +61,7 @@ constrains any design:
    and answers two questions separately: is the exact planned configuration
    serving, and do the expected access facts match (SD-13)? Only both together
    may be described as the change serving. References without a `route_id` are
-   resolved only in the revision they name. Remote authorities (a JWT key set,
+   positions resolved only in the exact configuration revision they name. Remote authorities (a JWT key set,
    forward-auth decisions, and the provider policy of any entry whose declared
    intent relies on one) are named as not compared. Delivered as a bounded
    tranche (#641) before #581's evidence run.

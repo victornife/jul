@@ -7,9 +7,9 @@
 > review, §6.5), **r5** `c53b14b5` (round 5, §6.6), **r6** `ecde75fa` (round 6,
 > §6.7), **r7** `7e3382c4` (round 7, §6.8), **r8** `292a294c` (round 8, §6.8;
 > independent principal re-review, §6.9), **r9** `72871705` (round 10, §6.10),
-> **r10** `74fb5631` (round 11, §6.11) and **r11** (this revision: round-11
-> record and one precision note). This packet holds evidence, decisions,
-> review findings and traceability for the
+> **r10** `74fb5631` (round 11, §6.11), **r11** `1290e14a` (second principal
+> re-review, §6.12) and **r12** (this revision; round 13 in §6.13). This packet
+> holds evidence, decisions, review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -92,6 +92,8 @@ the row.
 | E51 | Coraza's `ctl:ruleEngine` action changes the engine for one transaction, so a rule can switch blocking on in detect mode; in DetectionOnly mode `allow` is not enforced. The embedded CRS v4.25.0 contains no `ctl:ruleEngine` | coraza v3.8.1 internal/actions/ctl.go:261-271, internal/corazawaf/transaction.go:353-363; coraza-coreruleset v4.25.0 (no match) | F (round 9) | operators' rule files may use it | high |
 | E52 | Host dispatch: each block scores the request host (3 exact, 2 leading wildcard matching any deeper name, 0 none) after trimming surrounding whitespace, lower-casing and removing one trailing dot (configuration validation does not reject padded or upper-case names; the existing selector normalisation trims and de-duplicates but does not lower-case); the highest score wins, ties go to the earlier-declared block, and no match falls to the listener's first-declared block | internal/router/host.go:20-39; internal/router/router.go:73-85; internal/config/validate_values.go:152-183; internal/admin/normalize.go:14-29 | F (round 9, RR04; the reviewer's real-router probe: 410 → 200 after renaming only an exact host) | — | high |
 | E53 | `serving_version` and `desired_version` are both `CanonicalVersion`: the first 8 bytes of SHA-256 over the canonical marshalled **effective** configuration. Equal versions are a 64-bit fingerprint match of the canonical effective configuration, so the postcondition compares full SHA-256 digests of the same form (round 10, R10-3); the contents of referenced files are not included | internal/server/reload_result.go:101-111; internal/app/config_apply.go:624-625; internal/app/config_apply_restore.go:34 | F (rounds 9 and 10) | — | high |
+| E54 | The existing route selector resolver compares `listen`, `match_type` and `path` as raw strings and `server_names` as a raw multiset (whitespace and duplicates significant), and counts `match_ordinal` across every block matching those coordinates; the existing route projection and `/api/v1` publish a **per-block** ordinal. With two valid blocks sharing `listen` and identical raw names, the second block's published selector resolves to the first block's location (probe P4) | internal/admin/patch_helpers.go:248-299; internal/admin/routetest.go:221-231; internal/admin/projections.go:52; internal/admin/apiv1_resources.go:85; ADR 0018 §14 | F (round 12; P4) | pre-existing runtime defect outside #580's scope; not fixed here | high |
+| E55 | Configuration files are capped at 16 MiB; validation sets no byte limit on server `name` or `server_names`, so a valid configuration can carry 32 KiB labels or host strings (the principal re-review checked both with `jul check`) | internal/config/parser.go:62-83; internal/config/validate_values.go:152-183 | F (round 12) | — | high |
 
 ### External primary sources
 
@@ -217,7 +219,9 @@ any row above.
 - **Cleanup.** The file was deleted; `git status` showed only the pre-existing
   unrelated editor-settings change.
 - **Limits.** HTTP/1.1; one body size; per-request engine control (E51) was not
-  exercised and is source-only.
+  exercised and is source-only. (The second principal re-review later exercised
+  it: a rule switching the engine on made `detect` block, and an `allow` before
+  it gave `block` 200 and `detect` 403.)
 
 ### P3 — soundness of the host-dispatch rule (round 9)
 
@@ -239,7 +243,26 @@ any row above.
 - **Cleanup.** The file was deleted; `git status` showed no residue.
 - **Limits.** One listener; a bounded vocabulary; relocation was modelled as
   removal from one listener and insertion into another, not run across two
-  listeners. It tests soundness, not how tight the expansion is.
+  listeners. It tests soundness, not how tight the expansion is. (The second
+  principal re-review ran an independent two-listener version: 1,200,000
+  comparisons, 280,979 moves, none missed.)
+
+### P4 — published route ordinal versus the resolver (round 12)
+
+- **Question.** Does the existing route projection's `match_ordinal` resolve
+  to the same location through the existing selector resolver when two blocks
+  share `listen` and identical raw `server_names`?
+- **Method.** A disposable test in `internal/admin`: a valid configuration with
+  two such blocks, each with a `prefix /` location (`return 200` and
+  `return 201`); for each projected route, `findLocation` with the projected
+  coordinates and ordinal.
+- **Result.** Validation accepted the configuration. Block 0's selector
+  resolved to its own location; block 1's projected ordinal `0` resolved to
+  block 0's location (`return 200`).
+- **Cleanup.** The file was deleted; `git status` showed no residue.
+- **Limits.** Resolver level only; no typed patch was applied through the API
+  or Console. The second block is unreachable by routing (equal score, first
+  declared wins), so the defect needs a duplicated block to occur.
 
 ## 5. Validation actually run
 
@@ -254,6 +277,7 @@ any row above.
 | V-7 | The exact F1, F2 and F3 TOML blocks extracted from the final specification, plus the F1 withdrawal variant and the combined instance, checked with `jul check` and `jul lint` (full-tag build, placeholder files); the specification's `cloudflared` YAML parsed. Re-run at r5 and r7 (the four TOML blocks are byte-identical between them): F1, F1 withdrawal, F1 mTLS, F1+F2 and F1+F2+F3, each in `managed` and `file_owned` authority (10 files), with `JUL_ADMIN_TOKEN` set to a throwaway placeholder; negative control: `proxy_pass` with `deny = true` | 10/10 `check` and `lint` exit 0 with one intentional warning (compression disabled); negative control exit 1 (`conflicting actions [proxy_pass deny]`). The proposed `sharing` block is not implemented and was not checked by `jul`. At r9 the five fixture blocks (TOML and YAML) were compared byte for byte with r8 and are identical, so `jul` was not re-run; the principal re-review independently ran all 20 `check`/`lint` commands at r8 (exit 0) |
 | V-8 | probe P2 (§4): disposable `go test -count=1 -tags waf ./internal/waf -run TestPR640ProbeDetectBodyLimit -v` | `block` 413 (action not reached); `detect` 200 (32 bytes delivered); file deleted |
 | V-9 | probe P3 (§4): disposable property test `go test -count=1 ./internal/router -run TestPR640HostDispatchOverlapRuleIsSound -v`, at r9 and again after round 10 | passed both times: no move outside the affected set with the router's normalisation; the no-trim negative control missed 3,667 moves as expected; file deleted |
+| V-10 | probe P4 (§4): disposable `go test -count=1 ./internal/admin -run TestPR640ProjectedOrdinalAcrossDuplicateBlocks -v` | block 1's published selector resolves to block 0's location; file deleted |
 
 Not run: live provider paths, independent clients, race detector, full CI. None
 is claimed. The full-tag build needed one direct module download after repeated
@@ -521,6 +545,33 @@ access-policy equivalence for requests that arrive intact and within size
 limits, not identical outcomes for every request. No blocker or high finding
 is open.
 
+### 6.12 Second principal re-review (head `1290e14a`)
+
+The external principal engineer re-reviewed head `1290e14a` (four fresh passes,
+independent probes, exact-head CI) and found no blocker or high finding: RR01
+to RR04 addressed, RR05 substantially addressed, AD-07 and AD-08 agreed within
+their stated scope (still Proposed with the whole contract). Two medium and
+three low findings were raised. The author verified each against source and
+agreed with all of them.
+
+| ID | Sev. | Finding | Author verification | Resolution (r12) |
+| --- | --- | --- | --- | --- |
+| RR06 | medium | the normalised `server_names_digest` reference merges entries that the existing resolver keeps distinct (`["a.test"]` and `[" a.test "]` in one revision), and the projection ordinal is per block while the resolver counts across blocks | verified in source (E54); additionally found that the existing projection's published selector already resolves to the wrong block when two blocks share identical raw names (probe P4) | postcondition references for entries without a `route_id` are positions in the exact digest-named revision (constant size, no names or ordinals); the view's selector states the resolver's exact semantics and cross-block ordinal; round-trip invariant; router matching and reference identity kept separate |
+| RR05-B | medium | list caps did not bound scalar or page bytes; labels and URLs could repeat large strings per entry | verified: no byte limit on names (E55) | block-level strings, including labels, moved into a shared `blocks` table; byte bounds for every string with display-only truncation (`truncated` URLs never copyable); pages bounded by count and bytes; cumulative traversal cost stated; #586 gate extended to bytes and long-scalar fixtures |
+| Low | — | per-block reading of host-pattern changes; loaded bytes versus disk edits; full certificate policy for #642 | agreed | §9.5 *C* defined per block (moves between blocks count for both); §9.4 compares loaded bytes; §8.4 re-checks mode, CA, CRL and SAN allow-list |
+
+**Pre-existing defect (outside #580).** Probe P4 shows that the existing route
+projection and `/api/v1` publish a per-block `match_ordinal` that the typed-patch
+resolver interprets across blocks. With a duplicated block (same listener and
+identical raw names), a typed patch built from the published selector of the
+second block edits the first, live block. The managed plan shows the change, but
+nothing prevents it. Fixing it belongs to the route-projection owner, not this
+design PR; the sharing view does not reuse the per-block ordinal.
+
+### 6.13 Round 13 (verification of r12)
+
+(Recorded below.)
+
 ## 7. Traceability
 
 | # | Criterion (abridged) | Design section | Review / validation evidence | Runtime verification owner |
@@ -560,6 +611,7 @@ resource and value evidence contract maps to §13–§15 and §17.
 | WAF effects classified only for mode and enablement; every rule change is `uncertain` | conservative by design; retirement on rule tuning may surprise operators | #641/#642 tests; keep-open exception |
 | WAF detect-mode rules depend on pinned Coraza behaviour (E49, E51) and on AD-08's treatment of transport failures | a dependency upgrade could change them; the maintainer may prefer the stricter `narrowed` class | #641 regression tests; rules re-derived on any engine upgrade |
 | Host-dispatch rule under-expands if implemented wrongly | property test against the real router over generated host sets; listener-wide fallback | #641 |
-| Projection caps (names, URLs, members, page size) are proposals | measured and fixed before exposure | #586 gate for #586/#587 |
+| Projection caps (strings, names, URLs, members, page entries and bytes) are proposals | measured and fixed before exposure | #586 gate for #586/#587 |
+| Existing route projection publishes a per-block `match_ordinal` that the resolver reads across blocks (E54, P4) | pre-existing defect; with a duplicated block a typed patch can edit the wrong route | route-projection owner; separate issue on maintainer authorisation |
 | Reviewer independence | AI agents; instruction-based blindness | maintainer acceptance is the decision |
 | Issue records for the new baseline and order | posted 2026-10-18: comments on #580, #579, #62, #562, #563; #581 body amended; #641 and #642 registered (all pending #580 acceptance) | maintainer acceptance switches #640 to `Closes #580` |

@@ -149,7 +149,7 @@ configuration differs from what is serving, with its own `desired_version`).
 | Referent | Reference | Stability | Consequence |
 | --- | --- | --- | --- |
 | Entry with `route_id` | `route_id` | Durable (ADR 0019 §4) | Deep links, diff, audit and evidence correlate. A deleted ID can later be reused for a different route (ADR 0019 §4.9). |
-| Entry without `route_id` | `(listen, server_names, match_type, path, match_ordinal)` + `base_version` | Revision-bound | Shown as "revision-bound reference"; never persisted or presented as a name. |
+| Entry without `route_id` | `(listen, server_names, match_type, path, match_ordinal)` + `base_version`, with the existing resolver's semantics (§4.3); postconditions use a position in a digest-named revision (§9.4) | Revision-bound | Shown as "revision-bound reference"; never persisted or presented as a name. |
 | Upstream pool | upstream `name` | Durable natural key | Rename is delete + create. |
 | Listener | canonical `listen` | Composite natural key | Relocation is delete + create. |
 | Shared service | none — label only | Not an identity | Two blocks may share a label. |
@@ -219,15 +219,14 @@ existing rules, so an unreadable or invalid file yields
 | `layer` | `serving` \| `saved` | per entry layer | server | — |
 | `revision` | `serving_version` or `desired_version` | always for its layer | existing status | — |
 | `entry.route_id` | string | absent ⇒ `entry.identity = revision_bound` | `route_id` | ADR 0019 grammar |
-| `entry.selector` | `{listen, host_set, match_type, path, match_ordinal}` + `base_version` | always | layer's configuration | the ADR 0018 §14 selector, with the block's `server_names` given by reference to `host_sets` rather than repeated per entry; paths are admin-visible only |
+| `entry.selector` | `{block, match_type, path, match_ordinal}` + `base_version` | always | layer's configuration | the ADR 0018 §14 selector with exactly the existing resolver's semantics: `listen` (from `block`), `match_type` and `path` compared as raw strings, the block's raw `server_names` compared as a multiset (whitespace and duplicates significant), and `match_ordinal` counted across **every** block matching those coordinates, in declaration order — not the per-block ordinal the existing route projection publishes (E54); paths are admin-visible only |
+| `entry.position` | `{block_index, location_index}` | always | layer's configuration | 0-based positions in the layer's revision; revision-bound, never an identity; what postcondition references use (§9.4) |
 | `entry.identity` | `durable` \| `revision_bound` | always | derived | — |
-| `service.display_label` | string | always (fallback chain §4.1) | layer's configuration | not an identity, not a key |
-| `service.host_set` | response-local key into `host_sets` | always (a set may be empty) | `server_names` | shared by every entry of the block; never repeated per entry |
-| `service.receives_unmatched_hosts` | bool | true for the first-declared block on its listener | router rule | — |
-| `listener.address` | string | always | canonical `listen` | — |
+| `service.block` | response-local key into `blocks` | always | layer's configuration | the block's label, host names, listener and unmatched-host role live in `blocks`, once per response, never repeated per entry |
+| `listener.address` | string | always | canonical `listen` | bounded string (below) |
 | `listener.bind_scope` | `loopback` \| `private_address` \| `shared_address_space` \| `all_interfaces` \| `public_address` \| `unknown` | `unknown` when not a literal address | derived (§4.4) | configured bind, **not** reachability |
 | `listener.transport` | `{tls, client_auth: none\|request\|require, http3, h2c}` | always | layer's configuration | listener-scoped (ADR 0016 §11) |
-| `urls` | `{items[], count, truncated}`; each item `{url \| template, kind: concrete\|template\|none}` | `concrete` only for literal host names and `exact`/`prefix` paths; wildcard hosts and regex paths yield a `template` that is not a usable address; no host names yields `none`; `count` covers every host name of the block | derived from the entry's host set and path | `items` capped (below); what Jul answers locally, never proof of outside reach |
+| `urls` | `{items[], count, truncated}`; each item `{url \| template, kind: concrete\|template\|none\|truncated}` | `concrete` only for literal host names and `exact`/`prefix` paths whose complete URL fits its bound; wildcard hosts and regex paths yield a `template` that is not a usable address; no host names yields `none`; a URL whose host, path or whole text exceeds its bound is `truncated`, shown for recognition only and never offered as a usable or copyable address; `count` covers every host name of the block | derived from the block's host names and the entry's path | `items` capped (below); what Jul answers locally, never proof of outside reach |
 | `jul_checks.network` | `none` \| `allow_list` \| `deny_list` \| `allow_and_deny` | always | `auth.allow/deny` | CIDR values not shown in the summary |
 | `jul_checks.credential` | `none` \| `basic` \| `jwt` \| `forward_auth` | always | `auth.*` | no file paths, URLs or secrets |
 | `jul_checks.client_certificate` | `not_required` \| `required_by_route` \| `required_by_listener` | always | `require_client_cert`, `client_auth.mode` | identity is fixed per TLS connection (§8.1) |
@@ -243,33 +242,49 @@ existing rules, so an unreadable or invalid file yields
 | `next_actions[]` | closed set (§9.7) | always | server rule table | — |
 
 **Response size (bounded).** Data that belongs to a server block or a backend
-appears once per response, never once per entry, and every list has a cap with
-a truthful count:
+appears once per page that needs it, never once per entry; every list has a
+cap with a truthful count, and every string has a byte bound:
 
-- `host_sets`: `{key, names[], name_count, names_digest, has_wildcard,
-  truncated}`, one per server block and layer; `names[]` capped (proposed
-  100), with the rest available through a paged read of that host set.
-  `names_digest` is the digest used by revision-bound references (§9.4).
+- `blocks`: `{key, layer, block_index, listen, display_label (fallback chain
+  §4.1), names[], name_count, has_wildcard, receives_unmatched_hosts,
+  truncated}`, one per server block and layer. `names[]` holds the configured
+  names exactly (raw), capped (proposed 100), with the rest available through
+  a paged read of that block. Display may trim whitespace; identity never does.
 - `backend_groups`: `{key, kind: upstream|address|static_root, member_count,
   members[], truncated}`; `members[]` capped (proposed 50). Entries reference
   their group by `key`; groups are advisory and not exhaustive.
 - `urls.items` per entry: capped (proposed 3); `count` is the total.
-- Entries are paged (proposed 200 per page). A page carries only the host sets
-  and backend groups its entries reference, and its cursor is bound to the
-  response's `serving_version` and `desired_version`: a cursor from another
-  revision is refused with "the configuration changed; reload the view", so
-  pages never join revisions (SH-13).
+- **Strings.** Every string the view returns is bounded in bytes and cut at a
+  UTF-8 boundary (proposed: labels, host names, listener addresses, warning
+  details and evidence text 256 bytes; paths 1,024; URLs 2,048). The
+  configuration accepts longer values (only the 16 MiB file cap bounds them,
+  E55). A cut value is returned as `{text, truncated: true, full_bytes}`; it is
+  for display only, never offered as a usable or copyable address, and never
+  used to resolve or act. The full value is available through a paged read of
+  its block or entry, each chunk bounded.
+- **Pages.** Entries are paged by count and by bytes (proposed 200 entries and
+  1 MiB, whichever comes first; a page always holds at least one entry, which
+  the string caps bound). A page carries only the block and backend-group rows
+  its entries reference, and its cursor is bound to the response's
+  `serving_version` and `desired_version`: a cursor from another revision is
+  refused with "the configuration changed; reload the view", so pages never
+  join revisions (SH-13).
 
-Each page is therefore bounded by constants, and reading the whole view costs
-time and output linear in the configuration's size (entries, host names,
-backend members), never entries × host names. A truncated list is labelled
-"and N more" and never presented as complete. Caps never narrow what an
-operation acts on: operations select entries, an entry always covers every host
-name of its block, and a plan states the count and offers the full list. The
-caps are proposals: #641 implements this shape, and #586 measures response size
-and render time on a synthetic all-aliases × all-routes configuration and fixes
-the values before the view is exposed in the Console or API (a gate for #586
-and #587).
+Every entry, block row and group row is bounded by these caps, so each page is
+bounded by constants. Reading every page costs output linear in the number of
+entries (each page adds at most one bounded row per referenced block or group)
+and time linear in the configuration's size: the projection is derived once per
+serving revision (an in-memory derivation discarded when the revision changes,
+never persisted) or by equivalent means, so paging never recomputes the whole
+view per page. A truncated list is labelled "and N more" and never presented as
+complete. Caps never narrow what an operation acts on: operations select
+entries by reference, an entry always covers every host name of its block, and
+a plan states the count and offers the full list. The caps are proposals: #641
+implements this shape, and #586 measures bytes per page, total traversal bytes
+and time, and render time — on an all-aliases × all-routes configuration, a
+32 KiB display name, a 32 KiB host string, long paths and long evidence text —
+and fixes the values before the view is exposed in the Console or API (a gate
+for #586 and #587).
 
 ### 4.4 Derived posture rules
 
@@ -583,7 +598,7 @@ design must satisfy; the design owns mechanisms, bounds and tests.
 | Uncertain changes (SD-09) | Treated as narrowing by default. The plan offers an explicit "keep open connections" exception per entry; choosing it is recorded in the result and forfeits any complete-withdrawal claim for that entry. |
 | Never triggers | `metadata_only` changes (declared intent and labels); changes to inputs that are not access inputs (§9.5: rate limits, request size limits, cache, compression, timeouts, response headers, transport failures); `widened` changes; and external events (provider policy, issuer key removal), which have no Jul event. |
 | Scope (SD-08) | **Exactly the narrowed entries.** Exchanges of every other entry continue uninterrupted, including exchanges multiplexed on the same HTTP/2 or HTTP/3 connection (browsers coalesce connections when one certificate covers several hosts). |
-| Mechanisms | Stream-level: end the narrowed entry's in-flight requests, SSE and gRPC streams and owned H1 WebSockets (#562), without closing connections shared with other entries. Certificate revocation is enforced by re-checking the current CA/CRL policy on every request to entries that require a client certificate, instead of closing the connection. Closing a whole connection is a fallback only when no stream-level mechanism exists for that protocol. |
+| Mechanisms | Stream-level: end the narrowed entry's in-flight requests, SSE and gRPC streams and owned H1 WebSockets (#562), without closing connections shared with other entries. Certificate revocation and policy changes are enforced by re-checking the current client-certificate policy (mode, CA bundle, CRL and SAN allow-list) on every request to entries that require a client certificate, instead of closing the connection. Closing a whole connection is a fallback only when no stream-level mechanism exists for that protocol. |
 | Collateral | If a fallback closes a connection that also carried another entry's exchange, the result discloses the count, the entry's claim is downgraded to "new access stopped; open connections ended with collateral interruption", and §13 W3 counts it as a failure. |
 | Bound | Starts at publish; completes within a maximum delay chosen and *tested* by #642. Surfaces show only the tested value. |
 | Closure | Graceful where the protocol and library allow (WebSocket close frame, stream reset); otherwise abrupt, reported as forced. |
@@ -728,15 +743,20 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
     `absent` when the plan removes it. A plan that affects no entry (for
     example a global log-level or timeout change) lists none.
   - `ref` is the entry's `route_id` when it has one. Otherwise it is a
-    revision-bound selector `{listen, server_names_digest, match_type, path,
-    match_ordinal, revision}`: the ADR 0018 §14 coordinates with
-    `server_names` (normalised as the existing selector normalises them:
-    trimmed, empty names dropped, duplicates removed, order kept) replaced by
-    their digest. `revision` is `candidate` for `present` entries and `base`
-    for `absent` ones, naming the configuration digest the coordinates were
-    taken from. The selector is resolved only while that digest is serving;
-    Jul never resolves it in another revision, never mints an identifier and
-    keeps no mapping.
+    revision-bound **position** `{revision, block_index, location_index}`: the
+    0-based index of the server block in the configuration named by
+    `revision` (`candidate` for `present` entries, `base` for `absent` ones,
+    meaning the corresponding digest above) and of the location within that
+    block. It is resolved only while that configuration's digest is serving,
+    where positions are exact. It uses no names, ordinals or normalisation, so
+    it cannot merge two distinct entries (review packet E54) and its size is
+    constant. A non-resolving `display` (listener and path, bounded as in
+    §4.3) is carried for people. Jul never resolves a position in another
+    revision, never mints an identifier and keeps no mapping; router host
+    matching (§9.5) and reference identity are separate relations.
+    **Round trip:** every emitted reference resolves, in its named revision, to
+    exactly the entry it was produced from; anything else is `unverifiable`,
+    never a guess.
   - `expected`, for `present` entries, holds the entry facts the change should
     produce in the `serving` layer (§4.3) — the Jul checks it actually applies,
     client-certificate requirement, bind scope, withdrawal state, declared
@@ -760,8 +780,8 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
     or an `absent` entry's `route_id` resolves to nothing); `differs` (with the
     differing field names, or `still_present` for an entry expected absent);
     `not_found` (a `present` reference resolves to nothing); `unverifiable` (a
-    revision-bound selector whose revision is not serving, or an access file
-    whose loaded digest is unavailable); or `unknown`. A revision-bound
+    position whose revision is not serving, or an access file whose loaded
+    digest is unavailable); or `unknown`. A revision-bound
     `absent` entry matches only while the candidate is serving, because that
     exact configuration does not contain it.
   - `access`, aggregated: `matches` (at least one entry, and all match),
@@ -801,10 +821,15 @@ answer are always shown, separately.
   because it reads only the current state. A failed, staged or restart-bound
   apply yields `not_serving_yet`; a later writer yields `access_matches`,
   `other_revision`, `diverged` or `unverifiable`; a restart that loads the
-  candidate yields `candidate_serving`. A local access file edited after the
-  plan yields `diverged`, naming the file, even while the exact candidate is
-  serving. Clients never re-implement the comparison; they display the
-  server's result.
+  candidate yields `candidate_serving`. Access files are compared by the bytes
+  Jul has **loaded**: a file edited on disk but not reloaded changes nothing
+  that serves and is not a divergence by itself. When the loaded bytes differ
+  from what the plan read — the file was changed and reloaded, or the plan
+  expected a new file but an asset-only reload failed while the configuration
+  digest stayed equal — the result is `diverged`, naming the file, even while
+  the exact candidate configuration is serving. Each postcondition entry is
+  bounded by the §4.3 string caps. Clients never re-implement the comparison;
+  they display the server's result.
 
 ### 9.5 Audience delta (accepted semantics, SD-09)
 
@@ -845,8 +870,10 @@ class or retirement.
   of a listener. The router sends a request to the block with the
   best-scoring name (exact over leading wildcard), breaks ties by declaration
   order, and sends unmatched hosts to the first-declared block (review packet
-  E52). Let *C* be the host patterns added or removed on the listener plus
-  every pattern of a block that was added, removed, relocated or reordered.
+  E52). Let *C* be the host patterns added to or removed from each block —
+  per block, so a name that moves between blocks counts for both even when the
+  listener's overall set of names is unchanged — plus every pattern of a block
+  that was added, removed, relocated or reordered.
   Patterns are compared exactly as the router compares them: surrounding
   whitespace trimmed, lower-cased, one trailing dot removed (E52). An
   implementation reuses the router's normalisation rather than restating it,
@@ -1414,8 +1441,9 @@ or provider capacity. One host's numbers are a support envelope for that fixture
 and configuration, never a universal sizing, lightweight or cost claim.
 
 **This design's own budgets.** The view adds no background work or metric labels
-and is computed on request in time and output linear in the configuration's
-size, with every response page bounded by the §4.3 caps. Evidence is ≤ 8
+and is computed on request: each page is bounded in entries and bytes by the
+§4.3 caps, and a full traversal costs output linear in the number of entries
+and time linear in the configuration's size. Evidence is ≤ 8
 records per entry. The intent block is three bounded fields per location. No new module
 dependency; provider CLIs are operator tools.
 
