@@ -3,8 +3,8 @@
 > **Reviewed:** design branch `design/580-application-sharing-contract`; source
 > baseline `main` at `64e4a8b29230134c5dee37dfd8bfa130a9580a2a` (2026-10-18).
 > Design revisions: **r1** `e5b77b42` (round 1), **r2** `75264d61` (round 2),
-> **r3** `fe44f6a0` (round-3 verification, §6.4); the final revision adds only
-> review-record updates to this packet. This packet holds evidence, decisions,
+> **r3** `fe44f6a0` (round 3, §6.4), **r4** `a76f197e` (independent principal
+> review, §6.5) and **r5** (this revision; round 5 in §6.6). This packet holds evidence, decisions,
 > review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
@@ -74,6 +74,11 @@ the row.
 | E37 | Router canonicalises the decoded path (dot segments, repeated slashes) before location selection and re-escapes the forwarded target, so `/public/../admin` and percent-encoded variants select `/admin` | internal/router/canonical.go:10-60; canonical_test.go | F | — | high |
 | E38 | WASM plugins wrap outermost (before auth) and the CORS preflight terminator sits outside auth (approved preflights skip it); a plugin that generates a response is not stopped by a location deny | internal/app/factory.go:648-720 | F | plugin behaviour is plugin-specific | high |
 | E39 | `require_client_cert` checks only that `r.TLS.PeerCertificates` is non-empty (connection state); no per-request revocation check | internal/middleware/clientcert.go:60-80 | F | — | high |
+| E40 | `MarkFailedApply` sets `managed_failed_apply` **before** the restoration decision; restoration may then fail (`managed_inconsistent`). The terminal apply result carries `restored` and `restore_error` | internal/app/managed_baseline.go:725-741; internal/app/config_apply.go:878-906; internal/adminapi/v1_mutation.go:40-41; `TestManagedFailedApplyObservableDuringRestorationWindow` | F (found by principal review R01; verified) | — | high |
+| E41 | `file_owned_clean` is returned for no configured path, an unreadable or missing file, or a valid file; it never compares the file with the serving generation | internal/app/config_apply_baseline.go:171-198 | F (R01; verified) | — | high |
+| E42 | `redirect`/`permanent` rewrites answer in the router after location selection and before the location handler (so before auth); a server-level `redirect_https` answers plaintext requests before location selection | internal/router/router.go:290-325; internal/router/matcher.go:19-45 | F (R04; verified) | — | high |
+| E43 | Console v2 and `/api/v1` projections load the saved file (`deps.LoadConfig = src.Load`); the server holds an atomically published serving snapshot (`LiveSnapshot`: `EffectiveConfig`, pre-expansion `RawConfig`, `Generation`) | internal/admin/api.go:74-91; internal/app/serve.go:409-420; internal/admin/apiv1_resources.go:200-213; internal/server/server.go:550-584 | F (R05; verified) | — | high |
+| E44 | Compatibility guarantees apply to GA features within a MAJOR line; internal `/api/*` routes may change in any release | docs/compatibility.md:50-80 | D | — | high |
 
 ### External primary sources
 
@@ -97,6 +102,7 @@ must be re-checked against the knowledge base by #582.
 | X12 | cloudflared originRequest.access {required, teamName, audTag} validates signature/iss/exp/aud before proxying; 403 missing/aud mismatch, 502 other failures; needs outbound 443 to team domain | cloudflared proxy.go, jwtvalidator.go@8e090e5b; tunnel docs | high |
 | X13 | Create the Access app before the tunnel route or the hostname is public; validate token in cloudflared or origin | developers.cloudflare.com self-hosted-public-app | high |
 | X14 | Tunnel: WebSockets supported; SSE flushed; public-hostname gRPC unsupported and Access ignores gRPC; http2Origin needs HTTPS origin; HTTP/3 to origin unsupported; upload cap 100 MB Free/Pro | developers.cloudflare.com websockets, grpc, origin-parameters, http3; cloudflared connection.go | high |
+| X15 | `cloudflared` pins go-oidc v3.17.0; `RemoteKeySet.verify` tries cached keys first and fetches the key set only on a miss; cached keys are not evicted when a fetch fails | cloudflared go.mod@8e090e5b; go-oidc oidc/jwks.go@35b8e031 (tag v3.17.0) | high (source; no live outage test) |
 
 ### Contradictions and observations
 
@@ -118,6 +124,12 @@ must be re-checked against the knowledge base by #582.
 | SD-04 | 2026-10-18 | Withdrawal mechanism (S-1, S-2, O-1) | A: `auth.deny` in place now with plan guards; dedicated outermost address-independent gate with sparse typed op before #587 guided withdrawal — maintainer | Accepted | spec §9.3; ADR D4 |
 | SD-05 | 2026-10-18 | Held-intent timing (dissent A-3, U-1) | B+: accept minimal block now (`mode`, `audience_label`, `route_id` required) and build it early with intent-guarded changes before #581's evidence run; bundle the SD-04 gate with SD-02 retirement as "complete withdrawal" — maintainer | Accepted | spec §4.5, §8.4, §17; ADR D2, D4 |
 | SD-06 | 2026-10-18 | Product-outcome gate (U-7) | A: predeclared targets; zero dangerous failures T1–T6; evidence-forced #588 GO/REDUCE/DEFER — maintainer | Accepted | spec §14; ADR D8 |
+| SD-07 | 2026-10-18 | R03(a): does #587 guided withdrawal need the whole #642? | whole bundle — maintainer | Accepted | spec §8.4 delivery table; ADR D4 |
+| SD-08 | 2026-10-18 | R03(b): scope on shared H2/H3 connections | exact-entry; collateral is a disclosed downgrade and a W3 failure — maintainer | Accepted | spec §8.4, §13 |
+| SD-09 | 2026-10-18 | R02/R03(c): changes Jul cannot classify | treated as narrowing with a previewed keep-open exception; metadata-only never retires — maintainer | Accepted | spec §9.5, §8.4 |
+| SD-10 | 2026-10-18 | R05: saved or serving source for current access | serving snapshot; saved layer separate — maintainer | Accepted | spec SH-13, §4.3, §7.2 |
+| SD-11 | 2026-10-18 | R06: file-owned confirmation | keep, fully specified (producer and server-owned evaluator in #641; observation only) — maintainer chose "keep"; the author applied the audit's conditions for keeping it | Accepted | spec §9.4; #641 |
+| SD-12 | 2026-10-18 | R08: source of "who enforces" on provider paths | B: optional declared `external_enforcer` in #641 — maintainer | Accepted | spec §4.5; #641 |
 | AD-01 | 2026-10-18 | Withdrawal mechanism (author) | superseded by SD-04 | Superseded | — |
 | AD-02 | 2026-10-18 | F1 layout | separate host names on one listener **plus a first-declared default-deny block** (after S-3) | Proposed | F1 |
 | AD-03 | 2026-10-18 | Vocabulary | design/API terms fixed; Console wording validated by #585 before #587 freezes it (after U-4) | Proposed | spec §2 |
@@ -127,6 +139,27 @@ must be re-checked against the knowledge base by #582.
 
 "Shown without objection" is not acceptance; AD items become accepted only with
 the maintainer's acceptance of #580.
+
+### Verbatim answer record (R10)
+
+The maintainer answered through the authoring session's structured question
+tool on 2026-10-18 (Europe/Madrid), in this order. Answers are transcribed
+verbatim, spelling included; option texts are abridged.
+
+| # | Question (abridged) and options offered | Verbatim answer | Recorded as |
+| --- | --- | --- | --- |
+| 1 | SD-01 intent location (A derived now / B block now / C `[[applications]]`); SD-02 promise (A defer / B GO #563 / C GO #562); SD-03 coarse private network (A / B / C) | `sd01=A, sd02=whats the impact here? be explicit with pros an cons, sd03=A, notes=no disagreement so far` | SD-01 A, SD-03 A; SD-02 open |
+| 2 | SD-02 with explicit impacts (D defer + re-decision / A / B / C) | `notes=not sure... I tend to agree with you but need more evidence, sd02=not sure again... what are the pros and cons?` | SD-02 open; evidence gathered (V-1, P1, X01–X07) |
+| 3 | SD-02 with evidence (D / A / B / C) | `notes=OK i tend to agree but is this the highest value long term? are we being bold and ambitious? should we not push further?, sd02=I tend to agree with option 1 to defer both but are we being bold and brave? should we not push further?` | leaning to option 1 (D); bolder option requested |
+| 4 | SD-02 with option E (DE parallel / E first / D / B) | `notes=OK this makes sense, sd02=what are the real differences between options 1 and 2? I tend to agree with you but 2 seems bolder` | open; comparison requested |
+| 5 | DE (option 1) versus E-first (option 2) | `notes=ok agree with option 1, sd02=DE` | SD-02 = D+E |
+| 6 | SD-04 withdrawal mechanism (A/B/C); SD-05 held intent (A/B/C); SD-06 outcome gate (A/B) | `notes=what are the bolder, more useful long term alternatives? even if it means more effort today (reasonable)I tend to agree with your reommendation for first decision, not sure i understand the second one. third one also i tend to agree with you, sd04=A, sd05=This one I am not sure about option 1 vs 2, sd06=A` | SD-04 A, SD-06 A; SD-05 open |
+| 7 | SD-05 (B+ / B / A) and bundling the gate with #563/#562 | `bundle=true, notes=this is the best for the user and bolder move? are we really pushing further for a complete and seamless experience, sd05=Bplus` | SD-05 B+; bundle accepted |
+| 8 | Acceptance of the contract; publication authority | `accept=Is this final? 10/10? I will review after you confirm you consider this to be a 10/10 ready for ready for review delivery, issues=true, notes=No additional notes other than keeping github issues and documentation updated, push_pr=True but once we merge - it closes 580, register=true` | contract **not** accepted; publication authorised; PR kept non-closing until acceptance |
+| 9 | After the principal review: confirm SD-01–SD-06 (R10); R03 delivery, scope and uncertain edits; R05 source; R06 confirmation; R08 enforcer | `notes=If you think the principal engineer is more sound than my answers, it makes sense to follow his guidance. We are here to get THE BEST product. The only authority is quality., q1=Follow the feedback from the audit unless you disagree with it or think it materally changes direction, q2a=whole, q2b=exact, q2c=narrowing, q3a=serving, q3b=keep, q4=B` | SD-07–SD-12; SD-01–SD-06 stand (the audit recommends preserving genuine prior decisions with provenance; nothing in it changes their direction) |
+
+Final whole-contract acceptance is a separate, later act and is not implied by
+any row above.
 
 ### Deferred safely
 
@@ -286,28 +319,69 @@ recorded as evidence, not as proof of correctness.
 | Tailscale behaviour taken from source because the knowledge base was unreachable | unverified against current docs | #582 re-checks before closure |
 | Cloudflare behaviour of open WebSockets on Access revocation | undocumented | #583 measures |
 | Route-level `require_client_cert` on an open connection after revocation | source inspection only (E39); probe P1 was handler-level | candidate regression for #634 or the mTLS owner |
-| Effort for the intent tranche (#641) and complete withdrawal (#642) | author estimates, not owner estimates | re-estimated at selection |
+| Effort for the intent tranche (#641, now including the postcondition and delta classes) and complete withdrawal (#642) | author estimates (nominal 16–32 days), not owner estimates | re-estimated at selection |
+| Stream-level retirement and per-request revocation re-checks on Go HTTP/2 and quic-go HTTP/3 (SD-08) | feasible in principle (handler-owned contexts, hijacked-connection ownership, middleware lookup) but unproven | #642 design; where infeasible for a protocol, the disclosed collateral downgrade applies and W3 fails |
+| `uncertain` classes will be common (any auth-setting edit), so retirement on edit may surprise operators | accepted trade-off (SD-09); keep-open exception exists | #641/#642 tests; #585/#587 usability evidence |
 | Intent field names frozen before first-use evidence | accepted trade-off (SD-05) | additive evolution only |
 | Host trust includes all same-host processes | stated assumption (§6 of the spec) | Jul-side checks where untrusted processes run |
 | Provider seams (membership, invitations, revocation) remain handoffs | by design | SD-06 outcome gate; #588 |
 | Reviewer independence | AI agents; instruction-based blindness | maintainer acceptance is the decision |
 | Issue records for the new baseline and order | posted 2026-10-18: comments on #580, #579, #62, #562, #563; #581 body amended; #641 and #642 registered (all pending #580 acceptance) | maintainer acceptance switches #640 to `Closes #580` |
 
+### 6.5 Round 4 — independent principal-engineer review (head `a76f197e`)
+
+An external principal-engineer review (four internal adversarial passes plus a
+remedy challenge, independent source probes and its own CI attribution)
+recommended **request changes**. The author re-verified every load-bearing claim
+against source or primary documentation before accepting it (E40–E44, X15). All
+findings were accepted; none was rejected. Where the review offered a choice,
+the maintainer decided (SD-07–SD-12).
+
+| ID | Sev. | Finding | Author verification | Resolution (r5) |
+| --- | --- | --- | --- | --- |
+| R01 | high | `managed_failed_apply` and `file_owned_clean` renderings claimed restoration or convergence their inputs do not prove | confirmed (E40, E41) | spec §9.2: transient state; restoration only from terminal `restored: true`; file-owned equality only from `desired_version == serving_version` |
+| R02 | high | audience delta lacked conservative semantics for incomparable or opaque policies | agreed (design gap) | spec §9.5: defined access inputs, expansion to referencers, five classes, monotone table, `uncertain` never "unchanged"; SD-09 |
+| R03 | high | withdrawal scope and delivery gates inconsistent; wireframe contradicted retirement | confirmed | SD-07/SD-08; spec §8.4 rewritten with delivery table and collateral rule; §9.8 wireframe; ADR D4 |
+| R04 | medium | redirect rewrites answer before auth; gate placement unspecified | confirmed (E42) | spec §9.3 guard, `redirect_https` handling, exact gate placement, exact recovery; §4.3/§4.4/§4.5 codes |
+| R05 | medium | saved versus serving semantics not chosen | confirmed (E43) | SD-10; SH-13; spec §4.1, §4.3 layers, §4.6 saved example, §7.2 |
+| R06 | medium | file-owned confirmation producer and evaluator undefined | agreed | SD-11: spec §9.4 producer, server-owned evaluator, outcomes and limits; owner #641 |
+| R07 | medium | key-endpoint outage equated with universal denial | confirmed (X15) | spec F3 failure cases separated; §4.6 example |
+| R08 | medium | no defined input for external enforcer/provider | agreed | SD-12: declared `external_enforcer` (§4.5), never verified; findings refined |
+| R09 | medium | `also_reaches_backend` quadratic versus linear budget | confirmed (arithmetic) | spec §4.2/§4.3 bounded response-local `backend_groups` with truncation counts |
+| R10 | evidence | decision provenance not auditable | agreed (record gap; decisions were made in-session) | §3 verbatim answer record; maintainer instruction recorded |
+| O01 | — | "additive only" / "one-way once shipped" overstated | confirmed (E44) | spec §4.3/§4.5 and ADR doors scoped to the compatibility policy |
+| O02 | — | T1/T5 scope wording imprecise | agreed | spec §14 T1/T5 require stating selected addresses and known alternate paths |
+| O03 | — | W1/W3 can trip the portal's per-address rate limit | agreed | spec §13 rate-limit interaction |
+| O04 | — | 641→581 mislabelled as a hard technical edge | agreed | spec §17.2: accepted product prerequisite with stated cost |
+| O05 | — | combined effort not stated | agreed | spec §17.1: nominal 16–32 days, owner re-estimates |
+| O06 | — | derived URLs not concrete for wildcard or regex | agreed | spec §4.3 `urls[].kind` |
+| O07 | — | ADR conflated a same-authority resource with a second store | agreed | ADR alternatives split, with real costs |
+| O08 | — | "≥ 90 %" versus strictly more than 90 % | agreed | spec §17.1 strict wording, Go and frontend separately |
+
+**Process lesson.** Three internal rounds missed R01, R04 and R05, which are
+source facts. The internal reviewers were directed at the draft's claims; the
+principal review probed the implementation underneath each rendered statement.
+Round 5 below targets exactly that.
+
+### 6.6 Round 5 (re-review of r5)
+
+(Recorded below.)
+
 ## 7. Traceability
 
 | # | Criterion (abridged) | Design section | Review / validation evidence | Runtime verification owner |
 | --- | --- | --- | --- | --- |
-| 1 | Successor can identify service, audience, trust boundary, owning config/API | spec §2, §4, §5, §6, §9.7, §10 | §6 (A, S); V-3 | #581–#583; #586/#587; intent tranche |
+| 1 | Successor can identify service, audience, trust boundary, owning config/API | spec §2, §4 (serving/saved layers, `external_enforcer`), §5, §6, §9.5, §9.7, §10 | §6 (A, S), §6.5 R02/R05/R06/R08; V-3, V-7 | #581–#583; #586/#587; intent tranche |
 | 2 | Each vision commitment has a primary owner and observable exit evidence | spec §17.4 | §6 (U) | #579 matrix update on publication |
 | 3 | Four access modes, provider-independent operation, advanced escape hatches | spec §5, SH-8, SH-9, F1, §9.8 | V-3 (F1 without any provider) | #581, #587 |
-| 4 | Revocation/session limits; #562/#563 GO/DEFER with trade-offs | spec §8; ADR D4; SD-02, SD-05 bundle | V-1, V-2, X01–X07; §6 (S) | #581 (continuation); complete withdrawal |
-| 5 | Honest outcomes for partial configuration, external drift, provider outage, unknown verification | spec §4.6, §7.3, §9.2, §9.6, F3 | §6 (O) | #581, #583, #586 |
+| 4 | Revocation/session limits; #562/#563 GO/DEFER with trade-offs | spec §8 (delivery table, exact-entry, uncertain = narrowing); ADR D4; SD-02, SD-05 bundle, SD-07–SD-09 | V-1, V-2, X01–X07; §6 (S); §6.5 R03 | #581 (continuation); complete withdrawal |
+| 5 | Honest outcomes for partial configuration, external drift, provider outage, unknown verification | spec §4.6, §7.3, §9.2 (R01), §9.4, §9.6, F3 (R07) | §6 (O); §6.5 R01/R06/R07 | #581, #583, #586 |
 | 6 | Protocol matrix; three fixtures with same-instance isolation and security defaults | spec §10–§12 | V-3, V-4; §6 (S) | #581–#583, #634 |
 | 7 | Resource method; evidence owners for #585, #584, #613 | spec §13–§15, §17 | §6 (O) | #581, #584, #585, #613 |
-| 8 | Existing authorities authoritative; new metadata minimal, budgeted, versioned, approved | spec SH-1, §4.1, §4.5, §13 budgets; ADR D1–D2; SD-01, SD-05 | §6 (A) | intent tranche |
+| 8 | Existing authorities authoritative; new metadata minimal, budgeted, versioned, approved | spec SH-1, SH-13, §4.1, §4.5, §13 budgets; ADR D1–D2; SD-01, SD-05, SD-12 | §6 (A); §3 verbatim record (R10); §6.5 O01 | intent tranche |
 | 9 | Docs/links/examples/contract checks pass; decisions recorded in #580 and #579 | §5 | V-3–V-6 | issue records need publication authorisation |
-| 10 | Summary and withdrawal implementable from a field/state/action contract without confusing admin OIDC, reachability or a URL with authorization | spec §4.3, §4.6, §9, SH-3, SH-4 | §6 (S, U) | #586, #587 |
-| 11 | Example states: deliberate public, restricted success/denial, provider outage/unknown, stale evidence, removal not ending an open stream | spec §4.6 | — | #581, #583 |
+| 10 | Summary and withdrawal implementable from a field/state/action contract without confusing admin OIDC, reachability or a URL with authorization | spec §4.3, §4.6, §9 (R04 guards, R06 postcondition), SH-3, SH-4, SH-13 | §6 (S, U); §6.5 | #586, #587 |
+| 11 | Example states: deliberate public, restricted success/denial, provider outage/unknown, stale evidence, removal not ending an open stream | spec §4.6 (plus saved-not-serving and complete-withdrawal examples) | §6.5 R03/R05/R07 | #581, #583 |
 | 12 | Intent mapped to #633 findings and #634 assertions; unsupported/unanalysed explicit; no second store | spec §4.5 tables | §6 (A) | #633, #634, intent tranche |
 | 13 | Executable usability rubric for #585/#587; #588 keeps its later GO gate | spec §14, §16; ADR D8 | §6 (U) | #585, #587, #588 |
 

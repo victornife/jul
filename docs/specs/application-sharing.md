@@ -113,6 +113,11 @@ Normative. A successor that cannot satisfy one stops and escalates.
     `Cf-Access-Authenticated-User-Email` and similar) until every Jul path to it
     is controlled and a separate decision covers sanitisation. Provider identity
     is accepted only as a cryptographically validated token (§10, F3).
+13. **SH-13 — Current access comes from what is serving.** Any statement about
+    who can use an entry *now* is derived from the serving generation (the
+    server's live snapshot). Saved-but-not-serving configuration is shown
+    separately, labelled with its own version, and never presented as current
+    access. Without a serving snapshot the current-access answer is `unknown`.
 
 ## 4. The service view
 
@@ -125,7 +130,13 @@ identifier.
 *Accepted (SD-05 "B+", 2026-10-18, superseding SD-01's deferral of held
 intent):* declared intent is held in the configuration through one optional,
 location-scoped block, delivered as an early runtime tranche **before #581's
-evidence run**, together with intent-guarded plans and lint (§4.5).
+evidence run**, together with intent-guarded plans and lint (§4.5). *Accepted
+(SD-12):* the block also carries an optional declared `external_enforcer`.
+
+*Accepted (SD-10):* current-access facts come from the serving generation
+(SH-13). The view carries two clearly separated layers: `serving` (always
+present when a snapshot exists) and `saved` (present only when the saved
+configuration differs from what is serving, with its own `desired_version`).
 
 - **Unit:** the entry (one HTTP location in one server block on one listener).
 - **Grouping:** by server block for display, labelled by server `name`, else
@@ -150,25 +161,21 @@ Edge cases:
   Jul never adds one during an edit (ADR 0019 §6).
 - **Same target in preview and apply.** In `managed` mode the `base_version`
   fence guarantees that an apply targets the previewed revision or is refused.
-  In `file_owned` mode Jul has no write fence: the owner's pipeline writes the
-  file, and Jul keeps **no** record of previews. A file-owned preview therefore
-  returns a stateless **postcondition object** — `base_version`, the candidate's
-  `desired_version`, the explicit entry references and the expected audience
-  delta — which the owner keeps with the change. After the reload, the owner
-  (or a client on its behalf) submits it for evaluation against the current
-  `serving_version`, or evaluates it locally. Without it, Jul reports every
-  observed delta since the previous serving revision and the change stays
-  **unconfirmed**; Jul never claims to have verified the operator's intent.
+  In `file_owned` mode Jul has no write fence and keeps no record of previews;
+  confirmation uses the stateless postcondition of §9.4, which observes the
+  current serving state and never attributes a change to a writer.
 - **Rename, delete, recreate.** Changing `route_id` is delete + create. Evidence
   is bound to `route_id` + `serving_version` (§7.1) and becomes stale when either
   changes; reuse of an ID is never treated as continuity.
 - **One application, several entries.** An application reached through several
   routes, host names, listeners or backends is several entries. Sharing
   operations act only on an **explicit, previewed set of entries**. As advisory
-  context the view lists other entries that route to the same upstream `name`,
-  the same literal backend address or the same static root ("also reaches this
-  backend"); this list is never an application identity and never widens an
-  operation's scope by itself.
+  context the view reports **backend groups**: entries that route to the same
+  upstream `name`, the same normalised literal backend address or the same
+  static root. A group is local to one response, is never an application
+  identity, never widens an operation's scope, and is not exhaustive (an
+  application can be reachable through paths Jul cannot relate, for example
+  different upstream names pointing at one host).
 - **Several applications on one gateway.** Each entry carries its own posture.
   Listener-scoped properties (bind, TLS, `client_auth` mode, trust policy) are
   shown on every entry they affect.
@@ -177,40 +184,64 @@ Edge cases:
 
 ### 4.3 Field contract (proposed projection)
 
-Server-computed (SH-9), introduced with internal API stability (ADR 0019 §24),
-promoted to an external `/api/v1` contract only by a separate decision. The
-envelope carries `sharing_view_version` (initially `1`). Fields are only ever
-added; a semantic replacement ships side by side under a new version while the
-old one is still rendered. Closed-set codes (warnings, intent findings, next
-actions) are never repurposed: removing or relaxing one is a deprecation, and
-severity is a separate field that may evolve.
+Server-computed (SH-9) and introduced with internal API stability (ADR 0019
+§24): under the [compatibility policy](../compatibility.md) internal routes may
+change in any release, so stability promises begin only if a separate decision
+promotes the view to the external `/api/v1` contract. Even internally, the
+envelope carries `sharing_view_version` (initially `1`) so consumers can detect
+a change: fields are added rather than repurposed, a semantic replacement is
+introduced under a new version alongside the old one for a stated deprecation
+period, consumers ignore unknown fields and treat unknown enum values as
+`unknown`, and closed-set codes (warnings, intent findings, next actions) are
+never given a new meaning. Severity is a separate, evolvable field.
+
+**Layers (SD-10, SH-13).** Every entry has a `serving` layer computed from the
+serving generation's configuration (the live snapshot's pre-expansion
+configuration, so secrets are never resolved into the view). When the saved
+configuration differs from what is serving, a `saved` layer with the same
+fields and its own `desired_version` is added and labelled "saved, not
+serving". An entry that exists only in the saved configuration has only a
+`saved` layer; one removed from the saved configuration but still serving has
+only a `serving` layer marked "pending removal". Jul never joins facts from
+different revisions into one layer. The saved layer reads the file under its
+existing rules, so an unreadable or invalid file yields
+`saved: unavailable` rather than an error for the whole view.
 
 | Field | Type | Presence / absence meaning | Source | Sensitivity and bounds |
 | --- | --- | --- | --- | --- |
 | `sharing_view_version` | integer | always | server | — |
+| `layer` | `serving` \| `saved` | per entry layer | server | — |
+| `revision` | `serving_version` or `desired_version` | always for its layer | existing status | — |
 | `entry.route_id` | string | absent ⇒ `entry.identity = revision_bound` | `route_id` | ADR 0019 grammar |
-| `entry.selector` | object + `base_version` | always | config | paths are admin-visible only |
+| `entry.selector` | object + `base_version` | always | layer's configuration | paths are admin-visible only |
 | `entry.identity` | `durable` \| `revision_bound` | always | derived | — |
-| `service.display_label` | string | always (fallback chain §4.1) | config | not an identity, not a key |
+| `service.display_label` | string | always (fallback chain §4.1) | layer's configuration | not an identity, not a key |
 | `service.hosts` | string[] | may be empty | `server_names` | — |
 | `service.receives_unmatched_hosts` | bool | true for the first-declared block on its listener | router rule | — |
 | `listener.address` | string | always | canonical `listen` | — |
 | `listener.bind_scope` | `loopback` \| `private_address` \| `shared_address_space` \| `all_interfaces` \| `public_address` \| `unknown` | `unknown` when not a literal address | derived (§4.4) | configured bind, **not** reachability |
-| `listener.transport` | `{tls, client_auth: none\|request\|require, http3, h2c}` | always | config | listener-scoped (ADR 0016 §11) |
-| `urls[]` | `{url, source: derived}` | scheme from listener TLS, host from `server_names`, port, path | config | what Jul answers locally; not proof of outside reach |
+| `listener.transport` | `{tls, client_auth: none\|request\|require, http3, h2c}` | always | layer's configuration | listener-scoped (ADR 0016 §11) |
+| `urls[]` | `{url \| template, kind: concrete\|template\|none}` | `concrete` only for literal host names and `exact`/`prefix` paths; wildcard hosts and regex paths yield a `template` that is not a usable address; no host names yields `none` | derived | what Jul answers locally; never proof of outside reach |
 | `jul_checks.network` | `none` \| `allow_list` \| `deny_list` \| `allow_and_deny` | always | `auth.allow/deny` | CIDR values not shown in the summary |
 | `jul_checks.credential` | `none` \| `basic` \| `jwt` \| `forward_auth` | always | `auth.*` | no file paths, URLs or secrets |
 | `jul_checks.client_certificate` | `not_required` \| `required_by_route` \| `required_by_listener` | always | `require_client_cert`, `client_auth.mode` | identity is fixed per TLS connection (§8.1) |
-| `jul_checks.outside_auth` | `{request_plugins: bool, cors_preflight: bool}` | always | config | these run before Jul's location checks (§9.3) |
-| `action`, `upstream_ref` | existing vocabulary; upstream `name` | `upstream_ref` absent for static, literal or non-proxy actions | config | — |
-| `controls` | `{cache, waf, rate_limit, cors}` | always | config | — |
-| `also_reaches_backend[]` | entry references | advisory (§4.2) | derived | never an identity or scope |
+| `jul_checks.outside_auth` | `{redirect_rewrites, request_plugins, cors_preflight: bool}` | always | layer's configuration | these answer before Jul's location checks (§9.3) |
+| `action`, `upstream_ref` | existing vocabulary; upstream `name` | `upstream_ref` absent for static, literal or non-proxy actions | layer's configuration | — |
+| `controls` | `{cache, waf, rate_limit, cors}` | always | layer's configuration | — |
+| `backend_group` | response-local group key | present when the entry shares a backend with others | derived (§4.2) | never an identity or scope |
 | `warnings[]` | closed set (§4.4) | empty when none | derived | bounded |
-| `declared_intent` | `{mode, audience_label}` \| `not_declared` | from §4.5; `not_declared` when the block is absent | config | label only; never a user list |
+| `declared_intent` | `{mode, audience_label?, external_enforcer?}` \| `not_declared` | from §4.5 | layer's configuration | labels only; never a user list or credential |
 | `intent_findings[]` | closed set (§4.5) | empty when consistent or not declared | derived | bounded |
 | `evidence[]` | §7.1 records | empty ⇒ `unverified` | Jul-local in the first release | ≤ 8 per entry |
-| `authority` | `{config_authority, config_state, desired_version, serving_version}` | always | existing status | ADR 0019 §16 |
+| `authority` | `{config_authority, config_state, desired_version, serving_version}` | once per response | existing status | ADR 0019 §16 |
 | `next_actions[]` | closed set (§9.7) | always | server rule table | — |
+
+**Backend groups (bounded).** The response carries a `backend_groups` table
+once: `{key, kind: upstream|address|static_root, member_count, members[]}`,
+with `members[]` capped (proposed: 50) and `truncated: true` plus the omitted
+count when capped. Entries reference their group by `key`. Output is linear in
+the number of entries; the UI states that groups are advisory and not
+exhaustive, and never presents a truncated list as complete.
 
 ### 4.4 Derived posture rules
 
@@ -226,8 +257,10 @@ severity is a separate field that may evolve.
 - **Warnings** (closed set, proposed): `receives_unmatched_hosts` (this block
   answers every unknown `Host` on the listener), `shared_listener_mixed_checks`,
   `client_auth_request_mode_shared` (a `request`-mode listener also serves open
-  entries; browsers may prompt), `checks_bypassed_by_outer_layers` (request
-  plugins or CORS preflight answer before Jul's location checks),
+  entries; browsers may prompt), `checks_bypassed_by_outer_layers` (a
+  redirect rewrite, request plugin or CORS preflight answers before Jul's
+  location checks), `server_https_redirect` (plaintext requests to this block
+  are redirected before any entry is selected),
   `cache_on_restricted_entry`, `cidr_with_trusted_proxies`, `all_interfaces_bind`,
   `admin_listener_not_loopback` (existing lint), `jwt_header_only` (a provider
   token in another header or cookie is not validated by Jul).
@@ -245,17 +278,19 @@ proxy_pass = "http://dashboard"
   [servers.locations.sharing]
   mode = "restricted"           # preview | private_network | restricted | public
   audience_label = "family"     # optional label, ≤ 64 bytes; never a user list
+  external_enforcer = "cloudflare-access:dash-team"   # optional, declared, never verified by Jul
 ```
 
 | Property | Contract |
 | --- | --- |
 | Presence | Optional forever. Absent ⇒ `not_declared`. Existing configurations remain valid. |
-| Validation | `mode` required inside the block, closed enum; `audience_label` printable UTF-8, 1–64 bytes, no control characters; a `route_id` must be present on the same location (validation error otherwise, naming the location). |
+| Validation | `mode` required inside the block, closed enum; `audience_label` and `external_enforcer` optional, printable UTF-8, 1–64 bytes, no control characters; a `route_id` must be present on the same location (validation error otherwise, naming the location). |
+| `external_enforcer` (SD-12) | An operator declaration of who enforces the audience outside Jul (for example a provider and policy name). Rendered only as "declared by the operator, not verified by Jul"; it never suppresses a Jul-side finding about a missing origin check and never counts as evidence. Structured, verifiable provider references belong to #588. |
 | Runtime effect | None on routing, matching, enforcement, caching or metrics. Lifecycle `hot_reload`; generated contracts, description and lifecycle entries as for any field. |
 | Authority | `file_owned`: written only by the owner. `managed`: raw apply, or a sparse typed operation that **refuses** a route without `route_id` and directs the operator to add one through raw TOML (editing never mints, ADR 0019 §6). |
-| Evolution | Additive only. A future second audience, provider reference or grouping key is a **new** field; `audience_label` is never retyped. Structured provider references belong to #588. |
-| Budget | Two fields per location; no background work; no metric labels; computed findings are on request. |
-| Door | **One-way once shipped** (field and enum names). |
+| Evolution | New needs get new optional fields; existing fields are not retyped or repurposed. Under the [compatibility policy](../compatibility.md) a change is allowed with notice while the feature is Alpha or Beta, and needs a MAJOR release with a deprecation period once it is GA. |
+| Budget | Three optional fields per location; no background work; no metric labels; computed findings are on request. |
+| Door | **Costly once adopted**: operators' files and pipelines carry the names; a rename needs dual-read and a deprecation window. |
 
 **Intent findings** (lint and plan, warning severity; never a validation
 rejection, so file-owned pipelines never break; tightening later needs its own
@@ -263,19 +298,22 @@ decision):
 
 | Finding | Condition |
 | --- | --- |
-| `intent_restricted_unenforced` | `restricted`, no Jul check, listener bind not loopback |
-| `intent_restricted_external_only` (info) | `restricted`, no Jul check, loopback bind — enforcement must come from a connector; verify origin protection |
+| `intent_restricted_unenforced` | `restricted`, no Jul check, and either a non-loopback bind or no declared `external_enforcer` |
+| `intent_restricted_external_only` (info) | `restricted`, no Jul check, loopback bind, `external_enforcer` declared — enforcement is declared outside Jul; verify origin protection |
 | `intent_private_bind_too_wide` | `private_network` on `all_interfaces` or `public_address` |
 | `intent_preview_not_loopback` | `preview` on a non-loopback bind |
 | `intent_public_has_checks` (info) | `public` with a Jul credential or certificate requirement |
-| `intent_checks_bypassed` | `restricted` or `private_network` with request plugins or CORS preflight outside the checks |
+| `intent_checks_bypassed` | `restricted` or `private_network` with a redirect rewrite, request plugin or CORS preflight outside the checks |
 | `intent_restricted_cached` | `restricted` or `private_network` with Jul's response cache enabled (§11) |
 
-**Intent-guarded plans.** A plan reports, per entry, any change that widens the
-entry's audience or creates an intent finding ("this change removes the only
-check on an entry declared restricted"). The Console requires an explicit
-acknowledgement naming those entries before apply; API and CLI return them with
-the existing plan output. Changing `mode` to a wider value is itself a widening.
+**Intent-guarded plans.** A plan reports, per entry, the audience-delta class
+of §9.5 and any intent finding the change creates ("this change removes the
+only check on an entry declared restricted"). The Console requires an explicit
+acknowledgement naming every entry classed `widened` or `uncertain`, or whose
+declared `mode` becomes wider, before apply; API and CLI return the same data
+with the existing plan output (the acknowledgement is a Console interaction,
+not a server-side interlock on raw API use). A change to intent fields alone is
+`metadata_only`: it may need acknowledgement but never triggers retirement.
 
 **How intent maps to consumers** (no second enforcement store):
 
@@ -293,39 +331,56 @@ it is retired when the tranche ships.
 
 ### 4.6 Example summaries (rendering after the intent tranche)
 
+Every statement below is from the `serving` layer unless marked "saved".
+
 ```text
-Application access — portal (portal.lab.test on :443)
+Application access — portal (portal.lab.test on :443)            serving 9f1c…
   /  — Public (declared)
     Who can use this?   Anyone who can reach portal.lab.test:443. Declared public.
     Who enforces that?  No one restricts it. Jul applies rate limits.
     How do we know?     Anonymous request from lab-client-2 (LAN): 200 at 2026-11-02 14:10 UTC.
 
-Application access — dashboard (dash.lab.test on :443)
+Application access — dashboard (dash.lab.test on :443)           serving 9f1c…
   /  — Restricted, audience "family" (declared)
     Who can use this?   People with a dashboard password (Jul checks it on every request).
     Who enforces that?  Jul. The dashboard's own permissions apply after login.
     How do we know?     Intended user 200; excluded user 401; forged X-Forwarded-For 401 —
                         lab-client-2, 14:12 UTC, serving version 9f1c…
-    Also reaches this backend: dash.example.net / (Cloudflare), jul-host…ts.net / (tailnet)
+    Same backend (advisory, may be incomplete): dash.example.net /, jul-host…ts.net /
 
-Application access — dashboard via Cloudflare (dash.example.net)
+Application access — dashboard via Cloudflare (dash.example.net)  serving 9f1c…
   /  — Restricted, audience "family" (declared)
-    Who can use this?   Members of the Cloudflare Access policy (Jul cannot read it).
-    Who enforces that?  Cloudflare Access at the edge; cloudflared checks the Access token
-                        before forwarding. Jul adds no check on this entry.
+    Who can use this?   Whoever the declared enforcer admits. Jul adds no check here.
+    Who enforces that?  Declared by the operator: Cloudflare Access "dash-team"
+                        (not verified by Jul).
     How do we know?     UNAVAILABLE — Access unreachable at 15:02 UTC; last check 13:40 UTC (stale).
+                        A warm connector may keep accepting valid tokens meanwhile.
     Next action         Re-check from an excluded identity when Cloudflare responds.
 
-Application access — dashboard (dash.lab.test on :443)
+Application access — dashboard (dash.lab.test on :443)           serving 9f1c…
   /  — Restricted, audience "family" (declared)
     How do we know?     STALE — configuration changed at 16:20 UTC after the last check at 14:12.
     Next action         Re-run the intended and excluded checks.
 
-Application access — dashboard (dash.lab.test on :443)
-  /  — New access stopped
-    New requests        Denied by Jul since 16:31:07 UTC (applied_live, serving version 2b7e…).
+Application access — wiki (wiki.lab.test on :443)                serving 9f1c…
+  /  — Public (declared)                     Saved, not serving (a7d0…): Restricted, Jul password
+    Who can use this now?  Anyone who can reach wiki.lab.test:443.
+    Pending                The saved configuration restricts it, but Jul is still serving 9f1c…
+                           (restart required). Current access is unchanged until then.
+
+Application access — dashboard (dash.lab.test on :443)           serving 2b7e…
+  /  — New access stopped (before complete withdrawal is delivered)
+    New requests        Denied by Jul since 16:31:07 UTC (applied_live).
     Still open          Connections and streams opened earlier may continue until they end.
                         The address, the dashboard and any connector are unchanged.
+    Undo                Restore access (a widening change; you will review it again).
+
+Application access — dashboard (dash.lab.test on :443)           serving 2b7e…
+  /  — Withdrawn (complete withdrawal, #642)
+    New requests        Denied by Jul since 16:31:07 UTC.
+    Open connections    3 streams to this entry ended by 16:31:09 UTC (bound: tested value);
+                        other entries' exchanges were not interrupted.
+    Unchanged           The address, the dashboard, connectors and provider sessions.
     Undo                Restore access (a widening change; you will review it again).
 ```
 
@@ -417,11 +472,12 @@ Fixtures record evidence in this shape; #586 reuses it for runtime evidence.
 
 ### 7.2 What Jul can observe in the first release
 
-Configured posture and declared intent (§4.4–§4.5); `config_state`,
-`desired_version`, `serving_version`; terminal apply outcomes; the ADR 0018
-route-test explanation of which entry a host and path select; lint and doctor
-findings. These are configured facts; they never prove client-vantage access,
-provider policy or application behaviour.
+Configured posture and declared intent (§4.4–§4.5) of the **serving**
+generation, and separately of the saved configuration when it differs;
+`config_state`, `desired_version`, `serving_version`; terminal apply outcomes;
+the ADR 0018 route-test explanation of which entry a host and path select; lint
+and doctor findings. These are configured facts; they never prove client-vantage
+access, provider policy or application behaviour.
 
 ### 7.3 Freshness and invalidation
 
@@ -470,7 +526,7 @@ new generation.
 There is no 0-RTT on any listener. A route deny does not terminate a transport.
 A provider accepting a request is not universal revocation.
 
-### 8.2 Current promise (normative until §8.4 is delivered)
+### 8.2 Current promise (normative until #642 is delivered)
 
 *"New access to the selected entries is denied from the published generation
 onward. Already-open connections and streams may continue until they end.
@@ -486,28 +542,32 @@ There is no targeted termination API. The escapes are a Jul restart (all
 entries), stopping a connector (all provider-path traffic) or stopping the
 application. Each is shown with its blast radius.
 
-### 8.4 Complete withdrawal: retirement on narrowing (#563 with #562)
+### 8.4 Complete withdrawal: the gate plus retirement on narrowing (#642 with #563/#562)
 
-Consumer contract the #563 design must satisfy (the design owns mechanisms,
-bounds and tests; this section owns what consumers may rely on):
+*Accepted (SD-07, SD-08, SD-09, 2026-10-18).* Consumer contract the #642
+design must satisfy; the design owns mechanisms, bounds and tests.
 
 | Aspect | Requirement |
 | --- | --- |
-| Trigger | A published generation that **narrows** an entry's effective access inputs: withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file content change (htpasswd digest); CA/CRL change invalidating certificates; the entry's host names or match narrowed; **any change of its target** while long-lived exchanges admitted under the old target remain. A target change may be exempted only by an explicit, previewed exception that states the continuation; an exempted change never supports a complete-withdrawal claim. CORS changes are not authorization and are excluded. External events (provider policy, issuer key removal) have no Jul event and are not covered. |
-| Scope | Connections and streams admitted to the narrowed entry under an earlier generation; for certificate changes, TLS and QUIC connections whose verified certificate is no longer acceptable. |
-| Collateral | HTTP/2 and HTTP/3 connections can carry several entries. Retirement is stream-level where possible; any wider closure is disclosed in the plan and the result. |
-| Protocols | H1 keep-alive and in-flight responses, H1 WebSocket (with #562 ownership), SSE and long responses, native and transcoded gRPC, H2 and H3 streams. |
-| Bound | Starts at publish; completes within a maximum delay chosen and *tested* by #563. Surfaces show a bound only from that tested value. |
-| Closure | Graceful where the protocol and library allow; otherwise abrupt, reported as forced. |
-| Observability | Apply result and status report a bounded count of retired connections per entry and whether completion was confirmed; no client identities; no new metric labels. |
-| Preview | The plan states that open connections to narrowed entries will be ended and shows the current count. |
-| Not covered | Provider sessions (Jul-routed requests are still denied by the gate), application sessions, traffic reaching the application without Jul, other entries. |
+| Trigger | A published generation in which an entry's effective access inputs are classed `narrowed` or `uncertain` by §9.5, including: the withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file content change (htpasswd); a CA/CRL change that invalidates certificates; host names or match narrowed; **any target change** while exchanges admitted under the old target remain. |
+| Uncertain changes (SD-09) | Treated as narrowing by default. The plan offers an explicit "keep open connections" exception per entry; choosing it is recorded in the result and forfeits any complete-withdrawal claim for that entry. |
+| Never triggers | `metadata_only` changes (declared intent and labels); changes to inputs that are not access inputs (§9.5: CORS, WAF, rate limits, cache, compression, timeouts, response headers); and external events (provider policy, issuer key removal), which have no Jul event. |
+| Scope (SD-08) | **Exactly the narrowed entries.** Exchanges of every other entry continue uninterrupted, including exchanges multiplexed on the same HTTP/2 or HTTP/3 connection (browsers coalesce connections when one certificate covers several hosts). |
+| Mechanisms | Stream-level: end the narrowed entry's in-flight requests, SSE and gRPC streams and owned H1 WebSockets (#562), without closing connections shared with other entries. Certificate revocation is enforced by re-checking the current CA/CRL policy on every request to entries that require a client certificate, instead of closing the connection. Closing a whole connection is a fallback only when no stream-level mechanism exists for that protocol. |
+| Collateral | If a fallback closes a connection that also carried another entry's exchange, the result discloses the count, the entry's claim is downgraded to "new access stopped; open connections ended with collateral interruption", and §13 W3 counts it as a failure. |
+| Bound | Starts at publish; completes within a maximum delay chosen and *tested* by #642. Surfaces show only the tested value. |
+| Closure | Graceful where the protocol and library allow (WebSocket close frame, stream reset); otherwise abrupt, reported as forced. |
+| Observability | The terminal apply result and status report, per entry, a bounded count of ended exchanges, whether completion was confirmed, any collateral, and any keep-open exception. No client identities; no new metric labels. |
+| Preview | The plan states, per entry, that open exchanges will be ended and shows a **snapshot** count; connection membership can change before apply, so the result reports the actual scope. |
+| Not covered | Provider sessions (Jul-routed requests are still denied by the gate), application sessions, traffic reaching the application without Jul, L4 streams. |
 
-**Gates.** #587 may offer "also end open connections" and #613 may claim that
-withdrawal ends access for its WebSocket applications (Grafana Live, Jellyfin)
-only after this capability is delivered and verified with real clients;
-otherwise both ship §8.2. #581 includes it if delivered before its evidence run;
-if delivered later, W3 is re-run.
+**Delivery and earliest supported behaviour (SD-07).**
+
+| Consumer | Before #642 is delivered | After #642 is delivered and verified with real H1/H2/H3 clients |
+| --- | --- | --- |
+| #581 | `auth.deny` withdrawal (§9.3) with the §8.2 promise; W3 measures continuation | W3 re-run with complete withdrawal (included from the start if delivered first) |
+| #613 | recipes document the §8.2 limit; no claim that withdrawal ends access | may claim complete withdrawal for its WebSocket applications |
+| #587 | summary and evidence views may ship; **guided withdrawal does not ship** | guided withdrawal ships using the gate and retirement together |
 
 ## 9. Operations
 
@@ -531,7 +591,7 @@ The reload outcome and the authority state are reported separately.
 | `applied_live` | committed and published | "Serving since <time> (serving version <v>)." Evidence for affected entries becomes stale. |
 | `applied_degraded` | committed **and** published; a subsystem failed or timed out after publication | "Serving the new configuration; <subsystem> did not complete — see details." A withdrawal **is** effective; do not retry or roll back to "finish" it. |
 | `no_change` | terminal success; candidate accepted and persisted; no serving input changed | "Accepted; nothing that Jul serves changed." |
-| `not_applied` | Publish not reached; the previous runtime keeps serving | "Not applied; the previous configuration is still serving." Inspect `config_state`: persisted bytes may differ (managed restoration can fail; file-owned files are never rewritten). |
+| `not_applied` | Publish not reached; the previous runtime keeps serving | "Not applied; the previous configuration is still serving." For managed writes, the saved file's restoration is reported separately by the terminal result's `restored` / `restore_error`; file-owned files are never rewritten. |
 | `saved_not_live` (non-terminal) | persisted; live result not yet known | "Saved, not confirmed live." Poll the apply until terminal; never report exposure or withdrawal as effective. |
 
 The authority state is the closed `config_state` enum (ADR 0019 §16); every value
@@ -544,9 +604,9 @@ is rendered, `managed_inconsistent` always from its `reason`:
 | `managed_drift` | "The file was edited outside Jul; managed changes are refused until you adopt or revert it. Jul keeps serving." |
 | `managed_desired_ahead` | "Saved; Jul still serves the previous configuration and nothing is staged." A withdrawal in this state is **not** effective. |
 | `managed_pending_restart` | "Saved and staged; Jul serves the previous configuration until it restarts." A withdrawal needing a restart is **not** effective. |
-| `managed_failed_apply` | "The last change was saved but could not go live; the previous file was restored and is serving." Nothing to undo. |
+| `managed_failed_apply` | "The last change was saved but did not go live; Jul is restoring the previous file." This is a transient state set **before** restoration runs. Restoration is complete only when the change's terminal result reports `restored: true` (the state then returns to `managed_clean`); a `restore_error` leads to `managed_inconsistent` with its reason. |
 | `managed_inconsistent` + `reason` | rendered from the reason (for example "the managed baseline could not be read"); never as "the file disagrees" unless the reason says so |
-| `file_owned_clean` | "Owned by a file or pipeline; serving matches the file." |
+| `file_owned_clean` | "Owned by a file or pipeline; no invalid file or pending restart-bound edit was detected." This state is also reported when no file is configured or the file cannot be read, and it does **not** compare the file with what is serving. Equality is stated only when a successful read's `desired_version` equals `serving_version`; otherwise the comparison is shown as "different" or "unknown". |
 | `file_owned_desired_ahead` | "The file changed; Jul serves the previous configuration until it restarts." |
 | `file_owned_invalid` | "The current file is invalid; Jul keeps serving the last valid configuration. Fix the file in its owner's pipeline." |
 
@@ -577,19 +637,32 @@ withdrawal shows:
   request plugins or a CORS policy; the plan refuses and names the gate as the
   mechanism for them. (Detaching them would make recovery more than one
   reversal.)
+- Redirect rewrites (`rewrite` rules with `redirect` or `permanent`) answer in
+  the router **before** the location's checks, so a withdrawn entry with one
+  would still redirect matching requests. The first journeys do not withdraw
+  entries whose rewrites can produce a response; internal rewrites (no flag,
+  `last`, `break`) still reach the checks and are allowed.
+- A server-level `redirect_https` answers plaintext requests before any entry is
+  selected. It reveals no entry content and the redirected HTTPS request meets
+  the entry's checks, so it is shown, not refused.
 - A deny-only CIDR gate admits a client whose address cannot be identified (not
   expected on TCP listeners; stated for completeness).
+- Recovery removes exactly the deny entries the withdrawal added; any deny list
+  the entry already had is preserved.
 - The `deny` action is not used: it cannot coexist with `proxy_pass` and would
   remove the target needed for recovery.
 
 **Before #587 offers guided withdrawal: a dedicated withdrawal gate,** delivered
-in the complete-withdrawal stream (§8.4, §17). Requirements: per-location;
-**outermost** (dominates plugins, preflight, auth, cache and action);
+with retirement as #642 (§8.4, §17). Requirements: per-location; placed **after**
+path canonicalisation and entry selection and **before** the location's
+rewrites, request plugins, CORS preflight, client-certificate handling, checks,
+cache and action, so nothing inside the entry can answer first;
 address-independent; preserves the route's configuration so recovery is one
 reversible change; works without the intent block; a sparse typed operation with
-preview and `base_version`; emits the §8.4 narrowing trigger; reported in the
-view. Field name and shape are settled by that stream's design as an amendment
-to ADR 0025 (public schema, one-way once shipped).
+preview and `base_version`; emits the §8.4 trigger; reported in the view. The
+server-level `redirect_https` stays where it is (moving it would change routing
+scope). Field name and shape are settled by #642's design as an amendment to
+ADR 0025 (public schema, costly once adopted).
 
 **Credential files** (htpasswd, CA, CRL) take effect only on an explicit reload:
 SIGHUP or a configuration rewrite in `file_owned` mode; a managed Apply or
@@ -600,19 +673,88 @@ restart in `managed` mode.
 | | `managed` | `file_owned` |
 | --- | --- | --- |
 | Inspect, preview | yes | yes |
-| Publish, withdraw, recover through Jul | yes, under RBAC, CAS and idempotency | refused with `409 config_authority_read_only` before side effects; the view gives the exact change for the owner's pipeline and a postcondition object to evaluate after the reload (§4.2) |
+| Publish, withdraw, recover through Jul | yes, under RBAC, CAS and idempotency | refused with `409 config_authority_read_only` before side effects; the view gives the exact change for the owner's pipeline and a postcondition to evaluate after the reload |
 | Drift | writes refused until adopted | n/a |
 | History | managed history and rollback | none (the pipeline owns it) |
 
-### 9.5 Audience delta
+**Postcondition (accepted, SD-11; producer and evaluator: #641).** Confirmation
+that a change is serving, usable in both authority modes and essential for
+file-owned pipelines, which Jul cannot fence.
 
-Computed server-side from the existing diff. An entry **widens** when a Jul
-check is removed or relaxed, `require_client_cert` is cleared, its listener's
-bind scope broadens, it gains host names or becomes first on its listener, a
-match change lets it answer requests a narrower entry previously handled, its
-declared `mode` becomes wider, or a withdrawal is removed. It **narrows** in the
-§8.4 trigger cases. External widening is not computable and is shown as a
-checklist item.
+- **Producer.** Every plan (raw candidate or typed operations) returns a
+  `postcondition`: `{postcondition_version: 1, base_serving_version,
+  candidate_desired_version, entries: [{ref, expected}]}`. `ref` is a
+  `route_id`, or the revision-bound selector for entries without one. `expected`
+  holds the entry facts the change should produce in the `serving` layer
+  (§4.3): Jul checks, client-certificate requirement, bind scope, withdrawal
+  state and declared intent. Only entries the plan changes are listed. Jul
+  stores nothing; the owner keeps the object with the change.
+- **Evaluator.** A read-only, server-owned operation (permission `status:read`)
+  takes the object and compares it with the **current** serving snapshot. Per
+  entry it returns `matches`, `differs` (with the differing fields),
+  `not_found` (the reference no longer resolves; for selectors this includes
+  any revision change that moves the entry), or `unknown` (no serving snapshot).
+  Overall it returns `confirmed` (every entry matches), `not_serving_yet`
+  (`serving_version` still equals `base_serving_version`), `diverged`, or
+  `unknown`, and states whether the exact candidate is serving
+  (`serving_version == candidate_desired_version`).
+- **Limits.** Observation only: it never claims who wrote the change, keeps no
+  history, and survives restarts because it only reads the current state. It
+  does not cover the contents of external files (htpasswd, CA, CRL), which a
+  matching configuration cannot prove. A failed reload, a later writer or a
+  restart simply produce `not_serving_yet`, `diverged` or `not_found`.
+  Clients never re-implement the comparison; they display the server's result.
+
+### 9.5 Audience delta (accepted semantics, SD-09)
+
+Computed server-side per entry, between the serving configuration and the
+candidate. Jul does not attempt general policy equivalence; anything it cannot
+classify is `uncertain`, never "unchanged".
+
+**Effective access inputs** are the inputs that decide who can reach and use an
+entry: listener bind, TLS, `client_auth`, `client_address` and PROXY settings;
+host names and block order; match type, path and predicates; rewrites; request
+plugins (they can authorize or answer); location checks (CIDR, credential
+method and its settings), `require_client_cert`, the credential files they
+name; the withdrawal gate; and, for retirement only, the entry's target. CORS,
+WAF, rate limits, cache, compression, timeouts and response headers are not
+access inputs: their changes are shown as plan items and intent findings
+(for example `intent_restricted_cached`) but never produce an audience class or
+retirement.
+
+**Expansion.** A changed shared input affects every entry that references it:
+listener-level settings (bind, TLS, `client_auth`, `client_address`, PROXY
+protocol) affect every entry on that listener; an upstream change affects every
+entry that proxies to it; a credential file (htpasswd, CA, CRL) affects every
+entry that names it; global WAF or plugin changes affect every entry that
+inherits them.
+
+| Class | Meaning | Consequence |
+| --- | --- | --- |
+| `unchanged` | no effective access input of the entry changed (proven) | none |
+| `metadata_only` | only declared intent or labels changed | acknowledgement if `mode` becomes wider; **never** retirement |
+| `narrowed` | a known monotone restriction (table below) | §8.4 retirement |
+| `widened` | a known monotone relaxation | Console acknowledgement before apply |
+| `uncertain` | an effective input changed and Jul cannot order it | acknowledgement **and** §8.4 retirement by default, with the explicit keep-open exception |
+
+| Change | Class |
+| --- | --- |
+| Jul check added where none existed; withdrawal gate set; `require_client_cert` set; `client_auth` mode raised | `narrowed` |
+| All Jul checks removed; gate removed; `require_client_cert` cleared; `client_auth` mode lowered | `widened` |
+| CIDR allow list made a strict subset, or deny list a strict superset | `narrowed` |
+| CIDR allow list made a strict superset, or deny list a strict subset | `widened` |
+| htpasswd entries only removed (remaining entries byte-identical) | `narrowed` |
+| CRL serials only added | `narrowed` |
+| CRL serials only removed | `widened` |
+| Host names only removed; entry no longer first on its listener | `narrowed` |
+| Host names added; entry becomes first on its listener; bind moves along `loopback` → `private_address` → `shared_address_space` → `public_address` / `all_interfaces` | `widened` |
+| Bind moves the other way along that order | `narrowed` |
+| Target (`proxy_pass`, `root`, upstream membership) changed | `uncertain` for audience; `narrowed` for retirement of exchanges admitted under the old target |
+| Credential method replaced (for example Basic → JWT); JWT issuer, audience or key URL changed; forward-auth URL or response headers changed; htpasswd entries added or changed; CA bundle changed; match type, path or predicates changed; rewrites or request plugins changed; bind moved between two addresses of the same scope | `uncertain` |
+| Any change Jul did not classify | `uncertain` |
+
+External widening (provider policy, DNS, connectors) is not computable and is
+shown as a checklist item on every plan that touches a provider-path entry.
 
 ### 9.6 External outcomes
 
@@ -633,6 +775,7 @@ idempotency where available, and read-after-write reconciliation.
 | Declare intent | raw apply; sparse typed op (intent tranche) | `jul apply` | intent tranche: read-only display; editing in #587 |
 | Preview | `/api/v1/config/plan`, `/config/patch` (+ intent findings) | `jul plan`, `jul diff` | existing diff + intent acknowledgement |
 | Publish | `/config/apply`, `/config/patch/apply` | `jul apply`, `jul stage` | existing apply; guided flow (#587) |
+| Confirm a change is serving | postcondition from every plan; read-only evaluation against the serving snapshot (#641, §9.4) | `jul plan` output; evaluation command (#641) | shown after apply; file-owned users paste or upload the postcondition (#587) |
 | Withdraw | complete candidate via `/config/apply`; gate typed op (complete-withdrawal stream) | `jul apply` | guided withdraw (#587, after the gate) |
 | Recover | `/config/rollback` | `jul rollback` | History |
 | Cut established | — none — | — | guidance only |
@@ -647,25 +790,29 @@ unavailable and rejected before persistence (ADR 0014).
 
 ### 9.8 Presentation, accessibility and error language (for #587)
 
-Withdrawal is a two-step flow with a single mutation path:
+Guided withdrawal ships only with #642 (SD-07), so it always ends open
+connections. It is a two-step flow with a single mutation path:
 
 ```text
-┌ Stop new access ────────────────────────────────────────────────────────┐
+┌ Stop access ────────────────────────────────────────────────────────────┐
 │ Choose what to stop:                                                    │
-│   [x] dash.lab.test /                  Restricted "family" · Jul: password │
-│   [ ] dash.example.net /               Restricted "family" · Cloudflare   │
-│   [ ] jul-host.example-tailnet.ts.net / Private network · tailnet         │
-│   (All three reach backend "dashboard"; each is chosen separately.)     │
+│   [x] dash.lab.test /                   Restricted "family" · Jul: password │
+│   [ ] dash.example.net /                Restricted "family" · Cloudflare (declared) │
+│   [ ] jul-host.example-tailnet.ts.net / Private network · tailnet       │
+│   Same backend "dashboard" (advisory; there may be other paths Jul      │
+│   cannot relate). Each address is chosen separately.                    │
 │ [ Cancel ]                              [ Review plan ]                 │
 └─────────────────────────────────────────────────────────────────────────┘
-┌ Review: stop new access to dash.lab.test / ─────────────────────────────┐
+┌ Review: stop access to dash.lab.test / ─────────────────────────────────┐
 │ Applies live (no restart).                                              │
-│ After this change: new requests are denied by Jul.                      │
-│ Still open: connections opened earlier may continue until they end.     │
-│ Unchanged: the address, the dashboard app, connectors, provider sessions│
-│ Not affected: portal.lab.test, dash.example.net, the tailnet address    │
+│ New requests: denied by Jul.                                            │
+│ Open connections to this address: ended within <tested bound>           │
+│   (2 open right now; the result reports the actual count).              │
+│ Other addresses keep working, including on shared connections.          │
+│ Unchanged: the dashboard app, connectors, provider sessions.            │
+│ Still reachable: dash.example.net, the tailnet address (not selected).  │
 │ Undo: "Restore access" (you will review it again).                      │
-│ [ Back ]                              [ Stop new access ]               │
+│ [ Back ]                              [ Stop access ]                   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -970,10 +1117,24 @@ ingress:
   dash.example.net` (portal content only — separate listener); off-host direct
   origin (no inbound path); gRPC (unsupported on this path); upload above the
   plan limit.
-- **Failure and recovery.** Access or team key endpoint unreachable
-  (cloudflared fails closed; summary `unavailable`); `cloudflared` stopped;
-  tunnel deleted; Access application removed (portal unchanged; dashboard must
-  be unreachable through Cloudflare — verify, do not assume).
+- **Failure and recovery.** Distinguish, and record the connector version and
+  cache state for each:
+  - *Cloudflare edge or Access outage*: visitors may be unable to reach the
+    entry at all; this is an availability failure, not a revocation.
+  - *Key endpoint unreachable, warm cache*: `cloudflared` (go-oidc
+    `RemoteKeySet`, review packet X15) verifies with cached keys first, so
+    still-valid tokens signed by a cached key keep being accepted. An outage is
+    **not** a revocation.
+  - *Key endpoint unreachable, cold cache or unknown key ID*: the fetch fails and
+    those requests are rejected.
+  - *Token expiry*: rejected after `exp`, whatever the endpoint state.
+  - *Key rotation*: a token signed by a new key fetches the new set; cached old
+    keys are not evicted, so tokens signed by them stay valid until they expire.
+  - Summary state for all of these: provider evidence `unavailable` or `stale`,
+    never `pass`. Jul's own withdrawal still denies Jul-routed requests.
+  - Also: `cloudflared` stopped (provider path down, others unaffected); tunnel
+    deleted; Access application removed (portal unchanged; the dashboard must be
+    unreachable through Cloudflare — verify, do not assume).
 
 ## 11. Same-instance isolation
 
@@ -1073,6 +1234,14 @@ latency, throughput) are recorded numerically after the host inventory and befor
 execution. A failing run is preserved and its owner filed; bounds are not
 loosened afterwards.
 
+**Rate-limit interaction.** F1's portal limits 50 requests per second (burst
+100) per client address. #581 predeclares pacing and source addresses so the
+load stays inside each bucket, or runs load from several addresses, and sends
+the W3/W4 probes from their own address. Which response codes count as success
+and denial for each client is declared in advance; a limiter response caused by
+a mis-paced harness is a harness defect to fix before rerunning, never a reason
+to loosen a bound.
+
 **Attribution.** Jul, application and connector run in separate cgroups or
 containers where possible; otherwise CPU, I/O, network and kernel costs are
 reported as shared. Storage I/O and upload bandwidth (interface counters) are
@@ -1093,11 +1262,11 @@ under test; after the intent tranche, T1 is answered from the product.
 
 | Task | Success | Dangerous failure |
 | --- | --- | --- |
-| T1 Who can use the dashboard right now? | names the declared audience, each enforcement point and one current limit | claims privacy from a private IP or loopback; calls it "protected" without an enforcer |
+| T1 Who can use the dashboard right now? | names the exact address(es) considered, the declared audience, each enforcement point (distinguishing declared from verified) and one current limit; mentions any other known path to the same backend and that the list may be incomplete | claims privacy from a private IP or loopback; calls it "protected" without an enforcer; treats a declared enforcer as verified |
 | T2 Who enforces that, and what could bypass it? | distinguishes Jul, provider and application; names the direct-origin path and how it is closed | believes a provider URL or tunnel alone restricts the audience |
 | T3 How do we know, and since when? | reads evidence time, vantage and freshness; recognises stale or unknown | treats stale or unknown as verified |
 | T4 Make the portal public without changing the dashboard | reviews the plan; only portal entries widen; dashboard still restricted afterwards (checked) | widens the dashboard or removes its check |
-| T5 Stop new access to the dashboard, keep the portal up | stops it; states what continues (open streams, provider/app sessions, address, app, connector) | believes everything stopped; deletes the route; breaks the portal |
+| T5 Stop new access to the dashboard, keep the portal up | states which address(es) were selected and which known alternate paths remain reachable; stops them; states what continues (before #642: open streams; always: provider/app sessions, address, app, connector) | believes every path stopped when one was selected; believes everything stopped; deletes the route; breaks the portal |
 | T6 Restore dashboard access for the intended users | restores; confirms intended success and excluded denial | restores a broader state |
 
 **Protocol (predeclared by #585):** starting state, task wording, assistance
@@ -1187,8 +1356,13 @@ migration converter.
 
 | Tranche | Scope | Rough effort | Sequencing | Door |
 | --- | --- | --- | --- | --- |
-| **Intent and guarded changes** (SD-05, #641) | §4.5 block, validation, lifecycle and generated contracts, projection field, Routes read-only display, lint and plan intent findings, Console acknowledgement, sparse typed op, docs, tests (≥ 90 % changed Go and frontend statements) | 3–6 focused days (unestimated by an owner) | first shared-code stream after #580 is accepted; hard prerequisite of #581's evidence run | one-way once shipped |
-| **Complete withdrawal** (SD-04 + SD-02 bundle, #642 with #563/#562) | §9.3 gate and typed op; §8.4 retirement with #562 WebSocket ownership; real H1/H2/H3 clients; race and leak checks | design 2–4 days + implementation 10–20 days (unestimated) | next shared-code stream; #581 environment work proceeds in parallel | gate field one-way once shipped; promise additive |
+| **Intent and guarded changes** (SD-05, SD-11, SD-12; #641) | §4.5 block including `external_enforcer`; validation, lifecycle and generated contracts; serving-layer projection with saved-layer labelling (§4.3); Routes read-only display; lint and plan intent findings; §9.5 audience-delta classes; Console acknowledgement; sparse typed op; §9.4 postcondition producer and evaluator; docs; tests with **more than 90 %** of added or edited Go production statements and, separately, of added or edited frontend statements covered, existing floors preserved | 4–8 focused days (author estimate, raised from 3–6 for the postcondition and delta classes; the owner re-estimates at selection) | first shared-code stream after #580 is accepted; prerequisite of #581's evidence run by product decision (SD-05) | names costly once adopted |
+| **Complete withdrawal** (SD-04, SD-02 bundle, SD-07–SD-09; #642 with #563/#562) | §9.3 gate and typed op; §8.4 stream-level retirement with #562 WebSocket ownership and per-request revocation re-check; collateral disclosure; real H1/H2/H3 clients; race and leak checks; same coverage rule | design 2–4 days + implementation 10–20 days (author estimate) | next shared-code stream; #581 environment work proceeds in parallel | gate field costly once adopted; promise additive |
+
+Together the two tranches are a nominal 16–32 focused days before waiting and
+shared-work reconciliation. These are author estimates, not owner estimates;
+each owner re-estimates at selection, and #581's standalone evidence work does
+not wait for #642.
 
 ### 17.2 Dependency edges
 
@@ -1199,10 +1373,10 @@ order in #579).
 | From → to | Type | What flows |
 | --- | --- | --- |
 | #580 → #581 | A | contract, F1, §13, §14 dry run |
-| #641 intent tranche → #581 evidence run | H | the product answers T1; intent findings exist |
+| #641 intent tranche → #581 evidence run | A (product decision SD-05; a manifest fallback exists technically) | the product answers T1; intent findings and postconditions exist. Cost: #581's evidence run waits for #641 (4–8 days) |
 | #581 → #582 → #583 → #584 → #613 → #585 → #586 → #587 → #588 | S (+ A where each issue says so) | unchanged programme order |
 | tailnet / Cloudflare / independent participant → #582 / #583 / #585 | E | real environments, never simulated |
-| #642 complete withdrawal → #587 guided withdrawal and "end open connections"; → #613 withdrawal claims for WebSocket apps | H | delivered, real-client-verified gate and retirement |
+| #642 complete withdrawal → #587 guided withdrawal (whole bundle, SD-07); → #613 withdrawal claims for WebSocket apps | H | delivered, real-client-verified gate and retirement; §8.4 delivery table |
 | #642 complete withdrawal → #581 | O | included if delivered before the evidence run, else W3 re-run |
 | #580 → #586, #587 | A | §4 view, §7 evidence, §9 operations |
 | #580 → #633 | A (input) | intent and findings; provider intent stays `unanalysed`; static review proceeds independently |
@@ -1224,6 +1398,12 @@ order in #579).
 | SD-04 withdrawal mechanism | #581, #587, #634 | `auth.deny` now; gate before guided withdrawal |
 | SD-06 outcome gate | #585, #587, #588 | predeclared targets; zero dangerous failures; #588 outcome |
 | SH-11 / SH-12; cache rule | #582, #583, #613, #627, #634 | listener-per-domain, host trust, forged-header and cache cases |
+| SD-07 whole bundle before guided withdrawal | #587, #642 | §8.4 delivery table |
+| SD-08 exact-entry scope | #642, #581 (W3), #587 | stream-level mechanisms; collateral is a disclosed downgrade and a W3 failure |
+| SD-09 uncertain = narrowing; access inputs defined | #641 (classes), #642 (retirement), #587 (acknowledgement) | §9.5 decision table |
+| SD-10 serving snapshot (SH-13) | #586, #587, #641 | serving and saved layers; no cross-revision joins |
+| SD-11 postcondition | #641 (producer and evaluator), #581, #587, #642 | §9.4 observation-only contract |
+| SD-12 declared `external_enforcer` | #641, #582, #583, #587, #633 | declared, never verified; precise intent findings |
 
 ### 17.4 Vision commitments: owner and exit evidence
 
@@ -1270,10 +1450,14 @@ variants, the default-deny block and declared intent on every shared entry;
 evidence per §7.1; examples and runbook in the proposed `examples/sharing/` and
 `docs/sharing/`, validated by `scripts/config-check.sh`.
 
-**Expected contracts.** §4.6 renderings; §8.2 (or §8.4 if delivered); §9.2
-statements for `applied_live`, `applied_degraded` where reproducible,
-`no_change`, `not_applied` and a restart-bound change; every §11 row; the
-intent findings of §4.5 for the "remove the dashboard's check" case.
+**Expected contracts.** §4.6 renderings from the serving layer, and the saved
+layer for a restart-bound change; §8.2 (or §8.4 if delivered); §9.2 statements
+for `applied_live`, `applied_degraded` where reproducible, `no_change`,
+`not_applied` and a restart-bound change; every §11 row; the intent findings and
+§9.5 classes for the "remove the dashboard's check" case; the §9.4 postcondition
+evaluated after each change in both authority modes (`confirmed`,
+`not_serving_yet` for the restart-bound change, `diverged` after a deliberate
+second edit).
 
 **Negative, failure and recovery cases.** As listed for F1 (§10).
 

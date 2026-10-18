@@ -1,6 +1,6 @@
 # ADR 0025 — Application-sharing contract: derived view, declared intent and complete withdrawal
 
-- **Status:** Proposed — awaiting maintainer acceptance under [#580](https://github.com/victornife/jul/issues/580). Decisions SD-01 to SD-06 were answered by the maintainer on 2026-10-18; the remaining content is the author's proposal until #580 is accepted.
+- **Status:** Proposed — awaiting maintainer acceptance under [#580](https://github.com/victornife/jul/issues/580). Decisions SD-01 to SD-12 were answered by the maintainer on 2026-10-18 (verbatim record in the review packet §3); the remaining content is the author's proposal until #580 is accepted.
 - **Date:** 2026-10-18
 - **Deciders:** Jul.IA maintainer (decision owner); #580 design author
 - **Applies to:** the sharing programme [#579](https://github.com/victornife/jul/issues/579) and successors #581–#588, #613; inputs to #627, #633, #634; #562/#563
@@ -18,11 +18,14 @@ constrains any design:
 - `route_id` is optional and minted only by a managed structured create; server
   `name` is descriptive; ADR 0019 forbids an identity sidecar and forbids Jul
   writing identifiers into configuration it does not own.
-- Location checks are CIDR then one of Basic, JWT or forward-auth; WASM request
-  plugins and the CORS preflight terminator run before them; client-certificate
+- Location checks are CIDR then one of Basic, JWT or forward-auth; redirect
+  rewrites, WASM request plugins and the CORS preflight terminator answer before
+  them; client-certificate
   policy is listener-wide; JWTs are read only from `Authorization: Bearer`; an
   unmatched `Host` reaches the first-declared block; the response cache key is
   method + Host + URI.
+- Existing Console and API projections read the saved configuration file; the
+  server separately holds an atomically published serving snapshot.
 - A change reaches every new request, including new requests and streams on open
   connections. In-flight exchanges, hijacked WebSockets and certificate identity
   on an open TLS connection continue (a local probe confirmed the last). There
@@ -37,15 +40,20 @@ constrains any design:
 1. **Derived view (SD-01).** The sharing view is derived from the authoritative
    configuration. Its unit is the *entry* (one HTTP location). Entries are
    grouped by server block for display only. Operations act on explicit,
-   previewed entry sets; same-backend lists are advisory, never identity. No
-   application resource, mapping store or new identifier namespace.
+   previewed entry sets; bounded, response-local backend groups are advisory,
+   never identity. No application resource, mapping store or new identifier
+   namespace. Statements about current access come from the **serving**
+   generation; saved-but-not-serving configuration is a separately labelled
+   layer (SD-10, SH-13).
 2. **Declared intent in the configuration, built early (SD-05 "B+").** One
-   optional location block, `[servers.locations.sharing]` with `mode` and
-   `audience_label`, requires a `route_id` on the same location, has no runtime
-   effect, and drives **intent findings** in lint and plans plus an explicit
-   Console acknowledgement before any change that widens or contradicts declared
-   intent. It is delivered as a bounded tranche (#641) before #581's evidence run.
-   Evolution is additive only.
+   optional location block, `[servers.locations.sharing]` with `mode`,
+   `audience_label` and a declared, never-verified `external_enforcer` (SD-12),
+   requires a `route_id` on the same location, has no runtime effect, and drives
+   **intent findings** in lint and plans plus an explicit Console acknowledgement
+   before any change classed `widened` or `uncertain` (spec §9.5). Every plan
+   also returns a stateless **postcondition** that a read-only server operation
+   evaluates against the serving snapshot (SD-11). Delivered as a bounded
+   tranche (#641) before #581's evidence run.
 3. **Four access modes (SD-03).** `preview`, `private_network`, `restricted`,
    `public`. Private-network membership may be a declared *coarse* audience,
    enforced by the network provider and never presented as a named identity.
@@ -53,11 +61,16 @@ constrains any design:
 4. **Withdrawal promise and complete withdrawal (SD-02 "D+E", SD-04, bundle).**
    First journeys promise denial of new access from the published generation and
    display what continues. Withdrawal uses `auth.deny` in place through a
-   complete candidate, with plan guards for plugins and CORS. Before #587 offers
-   guided withdrawal, a **dedicated outermost, address-independent withdrawal
-   gate** with a sparse typed operation is delivered together with #563/#562
-   **retirement of connections on narrowing** as one capability (#642). No periodic
-   connection age and no general session-termination API.
+   complete candidate, refusing entries with redirect rewrites, request plugins
+   or CORS. #587's guided withdrawal ships only with **#642 as a whole** (SD-07):
+   a dedicated, address-independent withdrawal gate placed after entry
+   selection and before the entry's rewrites, plugins, preflight and checks,
+   together with #563/#562 **retirement on narrowing**. Retirement is
+   **exact-entry** (SD-08): stream-level, with per-request revocation re-checks
+   instead of closing shared connections; any collateral is a disclosed
+   downgrade. Changes Jul cannot classify are treated as narrowing, with an
+   explicit keep-open exception (SD-09). No periodic connection age and no
+   general session-termination API.
 5. **Withdraw in place.** Withdrawal never deletes a route.
 6. **Separation, trust and cache.** One Jul listener per external enforcement
    domain; same-host processes are inside the trusted boundary, otherwise
@@ -86,12 +99,13 @@ constrains any design:
 
 | Decision | Classification | Why | Exit or migration |
 | --- | --- | --- | --- |
-| Derived view (1) | Reversible until a surface or runbook consumes it; compatibility-relevant afterwards | operators, tests and rubrics encode its semantics | `sharing_view_version`; additive fields; side-by-side replacement; closed codes never repurposed |
-| `sharing` block names and `mode` values (2) | **One-way once shipped** | public TOML, generated contracts, GitOps files | additive fields only; a rename needs dual-read and a deprecation window |
+| Derived view (1) | Reversible until a surface or runbook consumes it; costly afterwards | operators, tests and rubrics encode its semantics; internal API routes carry no compatibility guarantee | `sharing_view_version`; new fields rather than repurposed ones; side-by-side replacement with a deprecation period; closed codes never repurposed |
+| `sharing` block names and `mode` values (2) | **Costly once adopted** | public TOML, generated contracts, GitOps files | under the [compatibility policy](../compatibility.md): changeable with notice while Alpha/Beta; a MAJOR release with deprecation once GA; renames need dual-read |
 | Intent findings as warnings (2) | Reversible to relax; costly to tighten into rejections | file-owned pipelines would break | tightening needs its own decision and notice |
 | Coarse private-network mode (3) | Costly to tighten once displayed | deployments rely on network-only audiences | migration notice; Jul checks stay optional |
 | Withdrawal promise (4) | **One-way to weaken**; additive to strengthen | security commitment | complete withdrawal strengthens it |
-| Withdrawal gate field (4) | **One-way once shipped** | public schema and typed operation | settled by an ADR amendment in its stream |
+| Withdrawal gate field (4) | **Costly once adopted** | public schema and typed operation | same compatibility rules; settled by an ADR amendment in #642 |
+| Postcondition object and evaluator (2) | Costly once adopted | automation and pipelines consume it | `postcondition_version`; observation-only semantics fixed now |
 | Retirement on narrowing (4) | Reversible until merged; costly afterwards | operators will rely on it | if infeasible, gated claims stay unshipped and §8.2 of the spec remains |
 | Withdraw in place (5) | Mechanism reversible; "never delete" one-way to weaken | safety invariant | — |
 | One listener per enforcement domain (6) | Costly to relax | topologies built around it | needs a separately decided SNI/Host binding guarantee |
@@ -122,8 +136,8 @@ runtime tranche records its own.
 
 | Alternative | Why not |
 | --- | --- |
-| First-class application resource or separate store | second desired state; conflicts with ADR 0019 I2 |
-| Top-level `[[applications]]` block referencing routes | needs IDs everywhere; dangling references; two edit sites |
+| Separate application store or sidecar | a second desired state; conflicts with ADR 0019 I2 |
+| First-class `[[applications]]` resource in the same authoritative TOML | not a second authority, and a credible later option; its real costs are identities for every member, references that dangle on delete, two edit sites per change, and a migration for existing files. Deferred until evidence shows entry-level operation plus advisory groups is insufficient |
 | Defer held intent to #587 (SD-01's original timing) | product could not answer "who is this for?" during #581–#585; reviewers A-3/U-1; maintainer chose SD-05 B+ |
 | Require `route_id` globally | contradicts ADR 0019 §4.2 |
 | Application scope inferred from upstreams or roots | hidden identity; can widen withdrawal blast radius (A-2/U-2) |
