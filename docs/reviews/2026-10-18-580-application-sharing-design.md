@@ -11,9 +11,9 @@
 > re-review, §6.12), **r12** `de5f194a` (round 13, §6.13), **r13** `5e750d63`
 > (round 14, §6.14), **r14** `3d24bd5f` (round 15, §6.15), **r15** `ce929b49`
 > (third principal re-review, §6.16), **r16** `e513edf2` (round 17, §6.17),
-> **r17** `8385c59c` (round 18, §6.18) and **r18** (this revision; round 19 in
-> §6.19). This packet holds evidence, decisions, review findings and
-> traceability for the
+> **r17** `8385c59c` (round 18, §6.18), **r18** `874df4e4` (round 19, §6.19)
+> and **r19** (this revision: round-19 record). This packet holds evidence,
+> decisions, review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -665,9 +665,16 @@ into the oracle. The finding is therefore accepted.
 | --- | --- | --- | --- |
 | S18-1 (S17-1 continued) | high | typed operations can set fields hidden from the caller (plugin configuration), so the typed-operation exception compared hidden values | a typed-operation postcondition is returned only when every field the operation sets is readable by the caller; otherwise it also requires `config:raw`; the rule no longer relies on the diff |
 
-### 6.19 Round 19 (verification of r18)
+### 6.19 Round 19 (verification of r18 `874df4e4`)
 
-(Recorded below.)
+The security reviewer verified the disclosure rule resolved: raw candidates
+always need `config:raw`, typed operations that set hidden fields do too, and
+the rule does not depend on the diff. No exported comparator over values the
+caller cannot read remains: closed-set expected facts are already visible
+through the caller's projections, access fingerprints are keyed and meaningless
+across inaccessible configurations, and evaluator results follow the same
+authorisation. No new blocker or high finding. No blocker or high finding is
+open.
 
 ## 7. Traceability
 
