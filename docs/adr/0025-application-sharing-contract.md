@@ -151,8 +151,9 @@ lose nothing; intent is optional.
 before #587. Field names become public before first-use evidence. #581's
 evidence uses a build newer than v2.2.0. Until complete withdrawal lands, open
 connections of a withdrawn entry continue unless the operator restarts Jul or
-stops a connector. Provider paths need more listeners. Restricted entries cannot
-use Jul's response cache.
+stops a connector. Provider paths need more listeners. Restricted entries must
+not use Jul's response cache; a configuration that does is warned about but
+currently accepted.
 
 **Neutral.** NGINX migration disposition for this design: not applicable. Each
 runtime tranche records its own.

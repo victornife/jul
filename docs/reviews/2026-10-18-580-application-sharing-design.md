@@ -12,9 +12,9 @@
 > (round 14, §6.14), **r14** `3d24bd5f` (round 15, §6.15), **r15** `ce929b49`
 > (third principal re-review, §6.16), **r16** `e513edf2` (round 17, §6.17),
 > **r17** `8385c59c` (round 18, §6.18), **r18** `874df4e4` (round 19, §6.19),
-> **r19** `c0af10a3` (whole-contract review, §6.20) and **r20** (this revision;
-> round 21 in §6.21). This packet holds evidence, decisions, review findings
-> and traceability for the
+> **r19** `c0af10a3` (whole-contract review, §6.20), **r20** `1332982a` (round
+> 21, §6.21) and **r21** (this revision; round 22 in §6.22). This packet holds
+> evidence, decisions, review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -700,7 +700,19 @@ two were partly disputed.
 | W-7 | medium | §15 said only references live in configuration | literal secrets are restored with the configuration; referenced values are re-provisioned |
 | W-8 | low | "configuration as written is identical" overstated canonical equality | "the same canonical pre-expansion configuration" |
 
-### 6.21 Round 21 (verification of r20)
+### 6.21 Round 21 (verification of r20 `1332982a`)
+
+The whole-contract reviewer verified W-2, W-3, W-4, W-6, W-7 and W-8 resolved
+and judged both partial disputes honest: W-1 now states the warning-only policy
+plainly with refusal deferred, and W-3 delimits enforcement without implying a
+hidden interlock. Two new medium findings were accepted:
+
+| ID | Sev. | Finding | Resolution (r21) |
+| --- | --- | --- | --- |
+| W2-1 | medium | an ADR consequence still said restricted entries *cannot* use the cache | "must not use; warned about but currently accepted" |
+| W2-2 | medium | `entry.route_id`, `entry.selector` and `blocks.names` did not declare their new union or `BoundedText` shapes | explicit unions for `route_id` and `selector`; `blocks` fields typed `BoundedText`; URL items typed `BoundedText`; selectors never act on display values |
+
+### 6.22 Round 22 (verification of r21)
 
 (Recorded below.)
 

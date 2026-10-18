@@ -244,15 +244,15 @@ environment or from files to render the view or evaluate a postcondition.
 | `sharing_view_version` | integer | always | server | — |
 | `layer` | `serving` \| `saved` | per entry layer | server | — |
 | `revision` | `serving_version` or `desired_version` | always for its layer | existing status | — |
-| `entry.route_id` | string | absent ⇒ `entry.identity = revision_bound`; a `route_id` written as a reference is shown as its reference text, marked `from_reference`, and the entry is treated as `revision_bound` (its resolved value is never shown or exported) | `route_id` | ADR 0019 grammar |
-| `entry.selector` | `{block, match_type, path, match_ordinal}` + `base_version` | always | layer's configuration | the ADR 0018 §14 selector with exactly the existing resolver's semantics: `listen` (from `block`), `match_type` and `path` compared as raw strings, the block's raw `server_names` compared as a multiset (whitespace and duplicates significant), and `match_ordinal` counted across **every** block matching those coordinates, in declaration order — not the per-block ordinal the existing route projection publishes (E54); paths are admin-visible only |
+| `entry.route_id` | string (literal, ADR 0019 grammar) \| `{from_reference: BoundedText}` | absent ⇒ `entry.identity = revision_bound`; a `route_id` written as a reference is shown as its reference text, marked `from_reference`, and the entry is treated as `revision_bound` (its resolved value is never shown or exported) | `route_id` | ADR 0019 grammar |
+| `entry.selector` | `{block, match_type, path, match_ordinal}` + `base_version` \| `{too_large: true, full_bytes}` | always; `too_large` when its coordinates exceed the selector cap or its block lists its names only in part (below) | layer's configuration | the ADR 0018 §14 selector with exactly the existing resolver's semantics: `listen` (from `block`), `match_type` and `path` compared as raw strings, the block's raw `server_names` compared as a multiset (whitespace and duplicates significant), and `match_ordinal` counted across **every** block matching those coordinates, in declaration order — not the per-block ordinal the existing route projection publishes (E54); paths are admin-visible only |
 | `entry.position` | `{block_index, location_index}` | always | layer's configuration | 0-based positions in the layer's revision; revision-bound, never an identity; what postcondition references use (§9.4) |
 | `entry.identity` | `durable` \| `revision_bound` | always | derived | — |
 | `service.block` | response-local key into `blocks` | always | layer's configuration | the block's label, host names, listener and unmatched-host role live in `blocks`, once per response, never repeated per entry |
 | `listener.address` | `BoundedText` | always | canonical `listen` | display text (below) |
 | `listener.bind_scope` | `loopback` \| `private_address` \| `shared_address_space` \| `all_interfaces` \| `public_address` \| `unknown` | `unknown` when not a literal address | derived from the effective listen address (§4.4) | configured bind, **not** reachability |
 | `listener.transport` | `{tls, client_auth: none\|request\|require\|unknown, http3, h2c}` | always | layer's configuration | listener-scoped (ADR 0016 §11) |
-| `urls` | `{items[], count, truncated}`; each item `{url \| template, kind: concrete\|template\|none\|truncated\|withheld}` | `concrete` only for literal host names and `exact`/`prefix` paths whose complete URL fits its bound; wildcard hosts and regex paths yield a `template` that is not a usable address; no host names yields `none`; a URL whose host, path or whole text exceeds its bound is `truncated`, shown for recognition only and never offered as a usable or copyable address; a host name or path written as a reference makes it `withheld` (reference text only, never resolved); `count` covers every host name of the block | derived from the block's host names and the entry's path | `items` capped (below); what Jul answers locally, never proof of outside reach |
+| `urls` | `{items[], count, truncated}`; each item `{url \| template: BoundedText, kind: concrete\|template\|none\|truncated\|withheld}` | `concrete` only for literal host names and `exact`/`prefix` paths whose complete URL fits its bound; wildcard hosts and regex paths yield a `template` that is not a usable address; no host names yields `none`; a URL whose host, path or whole text exceeds its bound is `truncated`, shown for recognition only and never offered as a usable or copyable address; a host name or path written as a reference makes it `withheld` (reference text only, never resolved); `count` covers every host name of the block | derived from the block's host names and the entry's path | `items` capped (below); what Jul answers locally, never proof of outside reach |
 | `jul_checks.network` | `none` \| `allow_list` \| `deny_list` \| `allow_and_deny` | always | `auth.allow/deny` | CIDR values not shown in the summary |
 | `jul_checks.credential` | `none` \| `basic` \| `jwt` \| `forward_auth` | always | `auth.*` | no file paths, URLs or secrets |
 | `jul_checks.client_certificate` | `not_required` \| `required_by_route` \| `required_by_listener` \| `unknown` | always | `require_client_cert`, `client_auth.mode` | identity is fixed per TLS connection (§8.1) |
@@ -271,11 +271,13 @@ environment or from files to render the view or evaluate a postcondition.
 appears once per page that needs it, never once per entry; every list has a
 cap with a truthful count, and every string has a byte bound:
 
-- `blocks`: `{key, layer, block_index, listen, display_label (fallback chain
-  §4.1), names[], name_count, has_wildcard, receives_unmatched_hosts,
-  truncated}`, one per server block and layer. `names[]` holds the configured
-  names exactly (raw), capped (proposed 100), with the rest available through
-  a paged read of that block. Display may trim whitespace; identity never does.
+- `blocks`: `{key, layer, block_index, listen: BoundedText, display_label:
+  BoundedText (fallback chain §4.1), names: BoundedText[], name_count,
+  has_wildcard, receives_unmatched_hosts, truncated}`, one per server block and
+  layer. `names` shows the configured names as written (raw, never normalised),
+  capped in count (proposed 100) and each cut as display text; complete values
+  come from the full-value read. Selectors never act on these display values
+  (below).
 - `backend_groups`: `{key, kind: upstream|address|static_root, member_count,
   members[], truncated}`; `members[]` capped (proposed 50). Entries reference
   their group by `key`; groups are advisory and not exhaustive.
