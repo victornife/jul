@@ -50,10 +50,13 @@ constrains any design:
    `audience_label` and a declared, never-verified `external_enforcer` (SD-12),
    requires a `route_id` on the same location, has no runtime effect, and drives
    **intent findings** in lint and plans plus an explicit Console acknowledgement
-   before any change classed `widened` or `uncertain` (spec §9.5). Every plan
-   also returns a stateless **postcondition** that a read-only server operation
-   evaluates against the serving snapshot (SD-11). Delivered as a bounded
-   tranche (#641) before #581's evidence run.
+   before any change classed `widened` or `uncertain` (spec §9.5). The declared
+   enforcer is context only: it never changes a finding. Every plan also returns
+   a stateless **postcondition** carrying an access fingerprint (including loaded
+   credential-file digests), which a read-only server operation, with the same
+   permissions as configuration inspection, evaluates against the serving
+   snapshot (SD-11). Delivered as a bounded tranche (#641) before #581's evidence
+   run.
 3. **Four access modes (SD-03).** `preview`, `private_network`, `restricted`,
    `public`. Private-network membership may be a declared *coarse* audience,
    enforced by the network provider and never presented as a named identity.
@@ -78,7 +81,10 @@ constrains any design:
    decision-maker — application, forward-auth service or validator — trusts
    connector identity headers; provider identity is accepted only as a
    cryptographically validated token (SH-12). Restricted and private entries
-   keep Jul's response cache off in the first release.
+   keep Jul's response cache off in the first release. Jul's cache is
+   process-wide and keyed by method, Host and URI, so public entries answering
+   the same host and path on different listeners share entries; plans warn, and
+   partitioning is the cache owner's decision.
 7. **Three layers never merge.** Declared intent, configured posture and observed
    evidence are reported separately, with freshness and vantage. Ambiguous
    outcomes, including a lost apply ledger after restart, are reported as

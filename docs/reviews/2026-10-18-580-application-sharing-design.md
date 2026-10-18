@@ -4,7 +4,8 @@
 > baseline `main` at `64e4a8b29230134c5dee37dfd8bfa130a9580a2a` (2026-10-18).
 > Design revisions: **r1** `e5b77b42` (round 1), **r2** `75264d61` (round 2),
 > **r3** `fe44f6a0` (round 3, §6.4), **r4** `a76f197e` (independent principal
-> review, §6.5) and **r5** (this revision; round 5 in §6.6). This packet holds evidence, decisions,
+> review, §6.5), **r5** `c53b14b5` (round 5, §6.6) and **r6** (this revision;
+> round 6 in §6.7). This packet holds evidence, decisions,
 > review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
@@ -79,6 +80,10 @@ the row.
 | E42 | `redirect`/`permanent` rewrites answer in the router after location selection and before the location handler (so before auth); a server-level `redirect_https` answers plaintext requests before location selection | internal/router/router.go:290-325; internal/router/matcher.go:19-45 | F (R04; verified) | — | high |
 | E43 | Console v2 and `/api/v1` projections load the saved file (`deps.LoadConfig = src.Load`); the server holds an atomically published serving snapshot (`LiveSnapshot`: `EffectiveConfig`, pre-expansion `RawConfig`, `Generation`) | internal/admin/api.go:74-91; internal/app/serve.go:409-420; internal/admin/apiv1_resources.go:200-213; internal/server/server.go:550-584 | F (R05; verified) | — | high |
 | E44 | Compatibility guarantees apply to GA features within a MAJOR line; internal `/api/*` routes may change in any release | docs/compatibility.md:50-80 | D | — | high |
+| E45 | An empty CIDR `allow` list admits every address; only a non-empty allow list restricts | internal/auth/cidr.go:18-21,44-68 | F (round 5 S5-1) | — | high |
+| E46 | `client_auth` `request` admits clients with or without a certificate (`VerifyClientCertIfGiven`); only `require` rejects them | internal/server/mtls.go:37-50 | F (round 5 P5-5) | — | high |
+| E47 | One process-wide response cache wraps every cache-enabled location; its key has no listener or entry component | internal/app/serve.go:124-128; internal/app/factory.go:398-401; internal/cache/cache.go:478-485 | F (round 5 P5-3) | — | high |
+| E48 | `BeginWrite` changes only the on-disk marker; in-memory status can read `managed_clean` while an apply is in flight | internal/app/managed_baseline.go:175-190; internal/app/config_apply.go:716-747 | F (round 5 P5-6) | — | high |
 
 ### External primary sources
 
@@ -102,7 +107,7 @@ must be re-checked against the knowledge base by #582.
 | X12 | cloudflared originRequest.access {required, teamName, audTag} validates signature/iss/exp/aud before proxying; 403 missing/aud mismatch, 502 other failures; needs outbound 443 to team domain | cloudflared proxy.go, jwtvalidator.go@8e090e5b; tunnel docs | high |
 | X13 | Create the Access app before the tunnel route or the hostname is public; validate token in cloudflared or origin | developers.cloudflare.com self-hosted-public-app | high |
 | X14 | Tunnel: WebSockets supported; SSE flushed; public-hostname gRPC unsupported and Access ignores gRPC; http2Origin needs HTTPS origin; HTTP/3 to origin unsupported; upload cap 100 MB Free/Pro | developers.cloudflare.com websockets, grpc, origin-parameters, http3; cloudflared connection.go | high |
-| X15 | `cloudflared` pins go-oidc v3.17.0; `RemoteKeySet.verify` tries cached keys first and fetches the key set only on a miss; cached keys are not evicted when a fetch fails | cloudflared go.mod@8e090e5b; go-oidc oidc/jwks.go@35b8e031 (tag v3.17.0) | high (source; no live outage test) |
+| X15 | `cloudflared` pins go-oidc v3.17.0; `RemoteKeySet.verify` tries cached keys first and fetches only on a miss; a **successful** fetch replaces the cached set, while a failed fetch leaves it intact (corrected in round 5, P5-2) | cloudflared go.mod@8e090e5b; go-oidc oidc/jwks.go@35b8e031 lines 160-219 | high (source; no live outage test) |
 
 ### Contradictions and observations
 
@@ -363,7 +368,33 @@ source facts. The internal reviewers were directed at the draft's claims; the
 principal review probed the implementation underneath each rendered statement.
 Round 5 below targets exactly that.
 
-### 6.6 Round 5 (re-review of r5)
+### 6.6 Round 5 (re-review of r5 `c53b14b5`)
+
+Two fresh independent reviewers, instructed to verify the implementation
+beneath every rendered claim. **Prior items:** R01, R05, R06, R09, O01, O04–O08
+resolved; R04 and R07 partially resolved (completed by P5-1 and P5-2). Both
+reviewers found the gate placement sound (it dominates rewrites, plugins,
+preflight, checks, cache, error pages, HEAD and selected OPTIONS) and
+stream-level H2/H3 retirement implementable in principle. All 13 new findings
+were verified against source and accepted; none was rejected.
+
+| ID | Sev. | Finding | Resolution (r6) |
+| --- | --- | --- | --- |
+| P5-3 | blocker | §11 promised the cache never crosses entries or listeners; the cache is process-wide and keyed by method, Host and URI (E47) | §11 split: restricted/private never cached; public entries sharing host and path share cache entries; new `cache_shared_across_entries` warning; partitioning to #620/#623 |
+| P5-1 | high | §8.1 omitted redirect rewrites from the withdrawal exception | §8.1 row corrected |
+| P5-4 | high | bind order treated disjoint audiences (RFC 1918 vs 100.64/10) as monotone | §9.5: only loopback→other and specific→all-interfaces are monotone; other specific changes and port changes `uncertain` |
+| S5-1 | high | empty `allow` means every address, so "subset" mis-classed removing the last entry (E45) | §9.5 computes on the permitted address set |
+| S5-2 | high | predicate narrowing on one entry lets requests fall through to another | §9.5: match/predicate/host/order/removal changes make every entry of the block `uncertain` |
+| S5-3 | high | listener-wide CA union and issuer-scoped CRLs not reflected | §9.5: listener expansion; CRL compared as `(issuer, serial)`; CA/SAN/issuer changes `uncertain` |
+| S5-4 | high | credentialed CORS and WAF relaxations do widen use | CORS and WAF are access inputs with explicit monotone rules; other rule changes `uncertain` |
+| S5-5 | high | postcondition could confirm while an old credential file serves | §9.4 access fingerprint including loaded credential-file digests; `unverifiable` outcome; `confirmed` only when all match |
+| P5-2 | medium | key rotation: a successful JWKS fetch replaces the cache | F3 rotation case corrected; X15 corrected |
+| P5-5 | medium | `client_auth` none→request is not a narrowing (E46) | §9.5: only transitions to/from `require` are monotone |
+| P5-6 | medium | `managed_clean` can coexist with an in-flight apply (E48) | §9.2: equality only from version equality; "change in progress" otherwise |
+| S5-6 | medium | evaluator with `status:read` only could act as a posture oracle | §9.4: requires `status:read` and `config:read` |
+| S5-7 | medium | declared `external_enforcer` downgraded `intent_restricted_unenforced` | finding unchanged by the declaration; enforcer shown as unverified context. **Consequence for SD-12:** the "fewer false alarms" benefit cited when the maintainer chose option B no longer holds; the in-product answer to "who enforces (declared)" remains |
+
+### 6.7 Round 6
 
 (Recorded below.)
 

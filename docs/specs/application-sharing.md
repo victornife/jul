@@ -261,7 +261,9 @@ exhaustive, and never presents a truncated list as complete.
   redirect rewrite, request plugin or CORS preflight answers before Jul's
   location checks), `server_https_redirect` (plaintext requests to this block
   are redirected before any entry is selected),
-  `cache_on_restricted_entry`, `cidr_with_trusted_proxies`, `all_interfaces_bind`,
+  `cache_on_restricted_entry`, `cache_shared_across_entries` (another cache-enabled
+  entry answers the same host name and path through a different listener or
+  target), `cidr_with_trusted_proxies`, `all_interfaces_bind`,
   `admin_listener_not_loopback` (existing lint), `jwt_header_only` (a provider
   token in another header or cookie is not validated by Jul).
 
@@ -285,7 +287,7 @@ proxy_pass = "http://dashboard"
 | --- | --- |
 | Presence | Optional forever. Absent ⇒ `not_declared`. Existing configurations remain valid. |
 | Validation | `mode` required inside the block, closed enum; `audience_label` and `external_enforcer` optional, printable UTF-8, 1–64 bytes, no control characters; a `route_id` must be present on the same location (validation error otherwise, naming the location). |
-| `external_enforcer` (SD-12) | An operator declaration of who enforces the audience outside Jul (for example a provider and policy name). Rendered only as "declared by the operator, not verified by Jul"; it never suppresses a Jul-side finding about a missing origin check and never counts as evidence. Structured, verifiable provider references belong to #588. |
+| `external_enforcer` (SD-12) | An operator declaration of who enforces the audience outside Jul (for example a provider and policy name). Rendered only as "declared by the operator, not verified by Jul" and shown alongside findings as context. It never removes, downgrades or changes any finding, and never counts as evidence. Structured, verifiable provider references belong to #588. |
 | Runtime effect | None on routing, matching, enforcement, caching or metrics. Lifecycle `hot_reload`; generated contracts, description and lifecycle entries as for any field. |
 | Authority | `file_owned`: written only by the owner. `managed`: raw apply, or a sparse typed operation that **refuses** a route without `route_id` and directs the operator to add one through raw TOML (editing never mints, ADR 0019 §6). |
 | Evolution | New needs get new optional fields; existing fields are not retyped or repurposed. Under the [compatibility policy](../compatibility.md) a change is allowed with notice while the feature is Alpha or Beta, and needs a MAJOR release with a deprecation period once it is GA. |
@@ -298,8 +300,7 @@ decision):
 
 | Finding | Condition |
 | --- | --- |
-| `intent_restricted_unenforced` | `restricted`, no Jul check, and either a non-loopback bind or no declared `external_enforcer` |
-| `intent_restricted_external_only` (info) | `restricted`, no Jul check, loopback bind, `external_enforcer` declared — enforcement is declared outside Jul; verify origin protection |
+| `intent_restricted_unenforced` | `restricted` and no Jul check. The message names the declared `external_enforcer`, if any, as unverified context, and asks for origin-protection evidence; the finding itself is unchanged by the declaration |
 | `intent_private_bind_too_wide` | `private_network` on `all_interfaces` or `public_address` |
 | `intent_preview_not_loopback` | `preview` on a non-loopback bind |
 | `intent_public_has_checks` (info) | `public` with a Jul credential or certificate requirement |
@@ -352,7 +353,8 @@ Application access — dashboard via Cloudflare (dash.example.net)  serving 9f1c
   /  — Restricted, audience "family" (declared)
     Who can use this?   Whoever the declared enforcer admits. Jul adds no check here.
     Who enforces that?  Declared by the operator: Cloudflare Access "dash-team"
-                        (not verified by Jul).
+                        (not verified by Jul). Finding: Jul does not enforce this entry;
+                        verify origin protection.
     How do we know?     UNAVAILABLE — Access unreachable at 15:02 UTC; last check 13:40 UTC (stale).
                         A warm connector may keep accepting valid tokens meanwhile.
     Next action         Re-check from an excluded identity when Cloudflare responds.
@@ -514,7 +516,7 @@ new generation.
 
 | Change | New request, new connection | New request or new H2/H3 stream on an open connection | New full / resumed TLS or QUIC handshake | Request or stream already in flight (SSE, gRPC, download) | Open H1 WebSocket | Provider session, application session, URL, connector, application |
 | --- | --- | --- | --- | --- | --- | --- |
-| Withdraw (`auth.deny` in place) or tighten a Jul location check | denied, except for requests answered by request plugins or CORS preflight (§9.3) | same | unaffected | continues until it ends | continues until it ends or Jul exits | unchanged |
+| Withdraw (`auth.deny` in place) or tighten a Jul location check | denied, except for requests answered first by a redirect rewrite, a request plugin or CORS preflight; §9.3 refuses `auth.deny` withdrawal for such entries | same | unaffected | continues until it ends | continues until it ends or Jul exits | unchanged |
 | Remove a Basic user (htpasswd + explicit reload) | denied | denied (credential checked per request) | unaffected | continues | continues | unchanged |
 | JWT: change `issuer`/`audience` in Jul | non-matching tokens denied | same | unaffected | continues | continues | unchanged |
 | JWT: issuer removes a signing key | denied once Jul refreshes its key set: on the first request after the cached set is 15 min old (at most one fetch per 30 s), or after a reload. If the key endpoint is unreachable, the old key stays usable for up to 1 h. Otherwise valid tokens last until `exp` + 60 s | same | unaffected | continues | continues | unchanged |
@@ -551,7 +553,7 @@ design must satisfy; the design owns mechanisms, bounds and tests.
 | --- | --- |
 | Trigger | A published generation in which an entry's effective access inputs are classed `narrowed` or `uncertain` by §9.5, including: the withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file content change (htpasswd); a CA/CRL change that invalidates certificates; host names or match narrowed; **any target change** while exchanges admitted under the old target remain. |
 | Uncertain changes (SD-09) | Treated as narrowing by default. The plan offers an explicit "keep open connections" exception per entry; choosing it is recorded in the result and forfeits any complete-withdrawal claim for that entry. |
-| Never triggers | `metadata_only` changes (declared intent and labels); changes to inputs that are not access inputs (§9.5: CORS, WAF, rate limits, cache, compression, timeouts, response headers); and external events (provider policy, issuer key removal), which have no Jul event. |
+| Never triggers | `metadata_only` changes (declared intent and labels); changes to inputs that are not access inputs (§9.5: rate limits, cache, compression, timeouts, response headers); `widened` changes; and external events (provider policy, issuer key removal), which have no Jul event. |
 | Scope (SD-08) | **Exactly the narrowed entries.** Exchanges of every other entry continue uninterrupted, including exchanges multiplexed on the same HTTP/2 or HTTP/3 connection (browsers coalesce connections when one certificate covers several hosts). |
 | Mechanisms | Stream-level: end the narrowed entry's in-flight requests, SSE and gRPC streams and owned H1 WebSockets (#562), without closing connections shared with other entries. Certificate revocation is enforced by re-checking the current CA/CRL policy on every request to entries that require a client certificate, instead of closing the connection. Closing a whole connection is a fallback only when no stream-level mechanism exists for that protocol. |
 | Collateral | If a fallback closes a connection that also carried another entry's exchange, the result discloses the count, the entry's claim is downgraded to "new access stopped; open connections ended with collateral interruption", and §13 W3 counts it as a failure. |
@@ -599,7 +601,7 @@ is rendered, `managed_inconsistent` always from its `reason`:
 
 | `config_state` | Summary statement and next action |
 | --- | --- |
-| `managed_clean` | "Managed; serving matches the saved configuration." |
+| `managed_clean` | "Managed; no drift, staged change or failure recorded." Serving equality is stated only when `desired_version` equals `serving_version`; during an in-flight apply the status can still read `managed_clean`, so the summary shows "change in progress" whenever the versions differ. |
 | `managed_unadopted` | "Managed, but no baseline has been adopted; changes are refused until you adopt the current file." |
 | `managed_drift` | "The file was edited outside Jul; managed changes are refused until you adopt or revert it. Jul keeps serving." |
 | `managed_desired_ahead` | "Saved; Jul still serves the previous configuration and nothing is staged." A withdrawal in this state is **not** effective. |
@@ -686,75 +688,96 @@ file-owned pipelines, which Jul cannot fence.
   candidate_desired_version, entries: [{ref, expected}]}`. `ref` is a
   `route_id`, or the revision-bound selector for entries without one. `expected`
   holds the entry facts the change should produce in the `serving` layer
-  (§4.3): Jul checks, client-certificate requirement, bind scope, withdrawal
-  state and declared intent. Only entries the plan changes are listed. Jul
-  stores nothing; the owner keeps the object with the change.
-- **Evaluator.** A read-only, server-owned operation (permission `status:read`)
-  takes the object and compares it with the **current** serving snapshot. Per
-  entry it returns `matches`, `differs` (with the differing fields),
-  `not_found` (the reference no longer resolves; for selectors this includes
-  any revision change that moves the entry), or `unknown` (no serving snapshot).
-  Overall it returns `confirmed` (every entry matches), `not_serving_yet`
-  (`serving_version` still equals `base_serving_version`), `diverged`, or
-  `unknown`, and states whether the exact candidate is serving
+  (§4.3) — Jul checks, client-certificate requirement, bind scope, withdrawal
+  state, declared intent — and an **access fingerprint**: a non-secret digest
+  over the entry's effective access inputs (§9.5), including content digests of
+  the credential files they name (htpasswd, CA, CRL) as read when the plan was
+  computed. Only entries the plan affects (including §9.5 expansion) are listed.
+  Jul stores nothing; the owner keeps the object with the change.
+- **Evaluator.** A read-only, server-owned operation requiring the same
+  permissions as inspecting the configuration (`status:read` and
+  `config:read`) compares the object with the **current** serving snapshot, whose
+  generation records the content digests it actually loaded. Per entry it
+  returns `matches` (facts and fingerprint equal), `differs` (with the differing
+  field names), `not_found` (the reference no longer resolves; for selectors
+  this includes any revision change that moves the entry), `unverifiable` (a
+  credential file's loaded digest is not available for comparison), or
+  `unknown` (no serving snapshot). Overall it returns `confirmed` only when every
+  entry `matches`; otherwise `not_serving_yet` (`serving_version` still equals
+  `base_serving_version`), `diverged`, `unverifiable` or `unknown`. It states
+  separately whether the exact candidate is serving
   (`serving_version == candidate_desired_version`).
 - **Limits.** Observation only: it never claims who wrote the change, keeps no
-  history, and survives restarts because it only reads the current state. It
-  does not cover the contents of external files (htpasswd, CA, CRL), which a
-  matching configuration cannot prove. A failed reload, a later writer or a
-  restart simply produce `not_serving_yet`, `diverged` or `not_found`.
-  Clients never re-implement the comparison; they display the server's result.
+  history, and survives restarts because it only reads the current state. A
+  failed reload, a later writer or a restart produce `not_serving_yet`,
+  `diverged` or `not_found`. A credential file edited after the plan but before
+  the reload yields `differs`, as it should. Clients never re-implement the
+  comparison; they display the server's result.
 
 ### 9.5 Audience delta (accepted semantics, SD-09)
 
 Computed server-side per entry, between the serving configuration and the
 candidate. Jul does not attempt general policy equivalence; anything it cannot
-classify is `uncertain`, never "unchanged".
+classify is `uncertain`, never "unchanged". A class is assigned only from a
+rule below; a rule that does not exactly fit falls through to `uncertain`.
 
-**Effective access inputs** are the inputs that decide who can reach and use an
-entry: listener bind, TLS, `client_auth`, `client_address` and PROXY settings;
-host names and block order; match type, path and predicates; rewrites; request
-plugins (they can authorize or answer); location checks (CIDR, credential
-method and its settings), `require_client_cert`, the credential files they
-name; the withdrawal gate; and, for retirement only, the entry's target. CORS,
-WAF, rate limits, cache, compression, timeouts and response headers are not
-access inputs: their changes are shown as plan items and intent findings
-(for example `intent_restricted_cached`) but never produce an audience class or
-retirement.
+**Effective access inputs** are everything that decides which requests reach an
+entry and whether they are admitted: listener bind and port, TLS,
+`client_auth` (mode, CA bundle, CRL, SAN list), `client_address` and PROXY
+settings; host names and block order; match type, path and predicates, and the
+match/predicate/order of every other entry in the same block (they decide
+fall-through); rewrites; request plugins (they can authorize or answer); CORS
+policy (it decides which web origins may read responses with users'
+credentials); WAF policy (it can block requests before the action); location
+checks (CIDR, credential method and its settings), `require_client_cert`, the
+credential files they name; the withdrawal gate; and, for retirement only, the
+entry's target. Rate limits, cache, compression, timeouts and response headers
+are not access inputs: their changes are shown as plan items and intent
+findings (for example `intent_restricted_cached`) but never produce an audience
+class or retirement.
 
-**Expansion.** A changed shared input affects every entry that references it:
-listener-level settings (bind, TLS, `client_auth`, `client_address`, PROXY
-protocol) affect every entry on that listener; an upstream change affects every
-entry that proxies to it; a credential file (htpasswd, CA, CRL) affects every
-entry that names it; server-level plugin changes affect every entry in that
-block. Host-name and block-order changes also affect the listener's
-first-declared block, which answers every unmatched host: when another block
-drops host names, or a different block becomes first, the first-declared block
-is classed `widened` for the names it newly answers.
+**Expansion.** A changed shared input affects every entry that depends on it:
+
+- listener-level settings (bind, port, TLS, `client_auth` — whose CA bundles,
+  CRLs and SAN lists are unioned across every block on the listener —
+  `client_address`, PROXY) affect every entry on that listener;
+- a change to any entry's match, predicates, host names or position, or the
+  removal of an entry, affects **every entry of that block** (requests can fall
+  through to another entry) and, for host names and block order, the listener's
+  first-declared block (it answers every unmatched host);
+- an upstream change affects every entry that proxies to it; a credential file
+  affects every entry that names it; a server-level plugin affects every entry
+  in that block.
 
 | Class | Meaning | Consequence |
 | --- | --- | --- |
 | `unchanged` | no effective access input of the entry changed (proven) | none |
 | `metadata_only` | only declared intent or labels changed | acknowledgement if `mode` becomes wider; **never** retirement |
-| `narrowed` | a known monotone restriction (table below) | §8.4 retirement |
-| `widened` | a known monotone relaxation | Console acknowledgement before apply |
-| `uncertain` | an effective input changed and Jul cannot order it | acknowledgement **and** §8.4 retirement by default, with the explicit keep-open exception |
+| `narrowed` | a rule below proves the admitted request space only shrank | §8.4 retirement |
+| `widened` | a rule below proves it only grew | Console acknowledgement before apply |
+| `uncertain` | an effective input changed and no rule proves a direction | acknowledgement **and** §8.4 retirement by default, with the explicit keep-open exception |
 
-| Change | Class |
+| Change (to an entry or an input it depends on) | Class |
 | --- | --- |
-| Jul check added where none existed; withdrawal gate set; `require_client_cert` set; `client_auth` mode raised | `narrowed` |
-| All Jul checks removed; gate removed; `require_client_cert` cleared; `client_auth` mode lowered | `widened` |
-| CIDR allow list made a strict subset, or deny list a strict superset | `narrowed` |
-| CIDR allow list made a strict superset, or deny list a strict subset | `widened` |
-| htpasswd entries only removed (remaining entries byte-identical) | `narrowed` |
-| CRL serials only added | `narrowed` |
-| CRL serials only removed | `widened` |
-| Host names only removed; entry no longer first on its listener | `narrowed` |
-| Host names added; entry becomes first on its listener; bind moves along `loopback` → `private_address` → `shared_address_space` → `public_address` / `all_interfaces` | `widened` |
-| Bind moves the other way along that order | `narrowed` |
+| Withdrawal gate set / removed | `narrowed` / `widened` |
+| A credential method added where the entry had none / all credential methods removed | `narrowed` / `widened` |
+| `require_client_cert` set / cleared | `narrowed` / `widened` |
+| `client_auth` mode raised to `require` / lowered from `require` | `narrowed` / `widened` |
+| `client_auth` between `none` and `request` (certificates become optional or disappear) | `uncertain` |
+| CIDR: the permitted address set (an empty `allow` list means every address; then `deny` removes addresses) strictly shrinks / strictly grows | `narrowed` / `widened` — computed on that set, so removing the last `allow` entry is `widened` |
+| htpasswd: entries only removed, remaining entries byte-identical | `narrowed` |
+| CRL: revoked `(issuer, serial)` pairs only added for the same issuers / only removed | `narrowed` / `widened` |
+| CRL replaced by one for a different issuer; CA bundle, SAN allow-list or forwarded-certificate setting changed | `uncertain` |
+| Bind: loopback → any other address, or a specific address → all interfaces (same port) | `widened` |
+| Bind: the reverse of either | `narrowed` |
+| Bind between two specific non-loopback addresses, or any port change | `uncertain` |
+| CORS: an origin added while credentials are allowed, credentials newly allowed, or `["*"]` introduced | `widened` |
+| CORS: origins only removed or credentials disallowed | `narrowed` |
+| WAF: `block` → `detect`, WAF disabled, or rules only removed | `widened` |
+| WAF: `detect` → `block` or WAF enabled with otherwise unchanged rules | `narrowed` |
 | Target (`proxy_pass`, `root`, upstream membership) changed | `uncertain` for audience; `narrowed` for retirement of exchanges admitted under the old target |
-| Credential method replaced (for example Basic → JWT); JWT issuer, audience or key URL changed; forward-auth URL or response headers changed; htpasswd entries added or changed; CA bundle changed; match type, path or predicates changed; rewrites or request plugins changed; bind moved between two addresses of the same scope | `uncertain` |
-| Any change Jul did not classify | `uncertain` |
+| Host names, match, predicates, rewrites, request plugins, block order or entry removal changed anywhere in the block; credential method replaced; JWT issuer, audience or key URL changed; forward-auth URL or response headers changed; htpasswd entries added or changed; WAF rules changed in any other way; `client_address` or PROXY settings changed | `uncertain` for every affected entry |
+| Any change not matched exactly above | `uncertain` |
 
 External widening (provider policy, DNS, connectors) is not computable and is
 shown as a checklist item on every plan that touches a provider-path entry.
@@ -1131,8 +1154,11 @@ ingress:
   - *Key endpoint unreachable, cold cache or unknown key ID*: the fetch fails and
     those requests are rejected.
   - *Token expiry*: rejected after `exp`, whatever the endpoint state.
-  - *Key rotation*: a token signed by a new key fetches the new set; cached old
-    keys are not evicted, so tokens signed by them stay valid until they expire.
+  - *Key rotation*: a token with an unknown key ID triggers a fetch; a
+    successful fetch **replaces** the cached set. Tokens signed by an old key keep
+    validating only while the published set still contains that key (Cloudflare
+    keeps the previous key for a period, X11); a failed fetch leaves the previous
+    cache intact.
   - Summary state for all of these: provider evidence `unavailable` or `stale`,
     never `pass`. Jul's own withdrawal still denies Jul-routed requests.
   - Also: `cloudflared` stopped (provider path down, others unaffected); tunnel
@@ -1156,7 +1182,8 @@ items are failures, not limitations.
 | Forged `X-Forwarded-For`, `Forwarded`, RFC 9440 client-certificate headers | ignored or stripped | ADR 0016 §12 |
 | Forged provider identity headers | decision unchanged; header reaches backend (recorded) | SH-12 |
 | Direct backend or admin access from another host | unreachable | loopback binds |
-| Cache crossing users, entries or listeners | **never**: restricted and private entries keep Jul's response cache off in the first release | cache key is method + Host + URI with no listener or identity partition; reloads do not purge |
+| Restricted or private content in a cache | **never**: restricted and private entries keep Jul's response cache off in the first release, so their responses are neither stored nor served from cache | cache key is method + Host + URI with no listener, entry or identity partition; reloads do not purge |
+| Public entries sharing cache entries | the process-wide cache is keyed by method + Host + URI, so cache-enabled entries on different listeners that answer the same host name and path share cache entries; correct only when they serve the same content. Plans and lint warn (`cache_shared_across_entries`). The fixtures enable no Jul response cache | partitioning by listener or entry is a cache-owner decision (#620/#623) |
 | Route or backend change of the portal | dashboard audience unchanged (plan shows no dashboard delta) | per-entry checks; §9.5 |
 | Intentional dashboard → public | only via a plan naming it and acknowledging the intent change | SH-5, §4.5 |
 | Provider-restricted and public entries on one Jul | different listeners | SH-11 |
