@@ -17,8 +17,8 @@ const (
 	// shorter than this fail config validation with a lint-level warning.
 	MinTokenLen = 32
 	// tokenIDLen is the number of hex chars taken from the SHA-256 hash to
-	// form the public TokenID. 12 hex chars = 6 bytes = 48 bits — enough for
-	// logging/audit without exposing secrets.
+	// form the private ownership TokenID. Public encoders must key it; even
+	// truncated unkeyed digests allow offline guesses.
 	tokenIDLen = 12
 	// bearerPrefix is the expected Authorization header prefix (with trailing space).
 	bearerPrefix = "Bearer "
@@ -31,14 +31,14 @@ func hashToken(raw string) []byte {
 	return sum[:]
 }
 
-// tokenID derives the public, non-secret token identifier from its hash.
+// tokenID derives the private, secret-derived token identifier from its hash.
 // It is the first tokenIDLen hex characters of the SHA-256 digest.
 func tokenID(hash []byte) string {
 	return hex.EncodeToString(hash)[:tokenIDLen]
 }
 
-// TokenDigest returns the full non-secret SHA-256 digest used for internal
-// credential equality. Public TokenID remains intentionally short for display.
+// TokenDigest returns a secret-derived SHA-256 digest for private credential
+// equality. Neither this digest nor the private TokenID may be exported directly.
 func TokenDigest(token string) string {
 	if token == "" {
 		return ""

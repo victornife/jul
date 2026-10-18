@@ -277,6 +277,7 @@ printf '<h1>Hello from Jul.IA</h1>\n' > public/index.html
 ```bash
 mkdir -p public
 printf '<h1>Hello from Jul.IA</h1>\n' > public/index.html
+go run ./cmd/jul version-key init
 go run ./cmd/jul run --serve ./public --listen 127.0.0.1:8080
 ```
 
@@ -304,6 +305,7 @@ Print the version:
 
 ```text
 jul [flags]                                   run the server (default)
+jul version-key init [--file PATH]            provision private effective-version key
 jul serve [-config f]                         run the server (explicit form)
 jul check [-config f] [-json] [-quiet]        full runtime preflight check
 jul doctor [-config f] [-json] [-strict] [-check-network]
@@ -410,6 +412,10 @@ changes are needed (useful for CI enforcement). Comments and original formatting
 are not preserved.
 
 ### `jul run` (zero-config)
+
+Provision a private key once with `jul version-key init` before serving. Preserve
+it across restarts; see [upgrade and recovery](docs/effective-versions.md).
+
 
 Starts a server from a synthesized profile without any config file:
 

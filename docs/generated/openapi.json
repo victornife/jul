@@ -6550,6 +6550,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "version_comparison": {
+            "type": "string"
           }
         },
         "required": [
@@ -6590,6 +6593,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "version_comparison": {
+            "type": "string"
           }
         },
         "required": [

@@ -59,10 +59,9 @@ func TestIdentityEndpointRBACPrincipal(t *testing.T) {
 	if got.Legacy {
 		t.Error("named principal must not be reported as legacy")
 	}
-	// token_id must be the public 12-hex id derived from the token, never the
-	// raw token or its full digest.
+	// Public IDs are keyed; the private token fingerprint never leaves the server.
 	sum := sha256.Sum256([]byte(opTok))
-	wantID := hex.EncodeToString(sum[:])[:12]
+	wantID := s.publicTokenID(hex.EncodeToString(sum[:])[:12])
 	if got.TokenID != wantID {
 		t.Errorf("token_id = %q, want %q", got.TokenID, wantID)
 	}

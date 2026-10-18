@@ -551,3 +551,12 @@ Measured in the #422 host-fault runs ([soak-evidence.md](soak-evidence.md)):
 ## Shared administration with OIDC
 
 The optional [OIDC Console flow](admin-oidc.md) retains RBAC and local recovery credentials. Register an exact HTTPS callback, use trusted admin TLS or a TLS proxy connecting over loopback, preserve the configured Host/origin and retain firewall/private-network restrictions. Remote plaintext requests remain refused. Sessions are process-local, lost on restart and independent of provider global logout. Use scoped local tokens for unattended API clients.
+
+## Effective version confidentiality (#644, unreleased)
+
+Effective desired/serving versions are opaque keyed identifiers scoped to a
+private durable context. Raw persisted/base/history revisions retain their
+existing meaning. Provision the key before starting or upgrading, including
+read-only and container deployments. See [effective versions, migration and
+recovery](effective-versions.md) for comparison rules, legacy pending-state
+handling, key backup/loss and the binary-downgrade boundary.

@@ -43,6 +43,8 @@ func dispatchSubcommand(args []string) (handled bool, code int) {
 		return false, 0
 	}
 	switch args[0] {
+	case "version-key":
+		return true, cmdVersionKey(args[1:])
 	case "lint":
 		return true, cmdLint(args[1:])
 	case "fmt":
@@ -74,6 +76,7 @@ func usage() {
 	fmt.Fprint(stderr, `jul - an NGINX-inspired HTTP edge server
 
 Usage:
+  jul version-key init [--file PATH]   provision the required private version key
   jul [flags]                          run the server (default)
   jul serve [-config f]                run the server (explicit form)
   jul check [-config f] [-json] [-quiet] [-skip-static-roots]

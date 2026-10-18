@@ -44,7 +44,7 @@ func TestStageRestartTerminalFinalizedThroughLedger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse live config: %v", err)
 	}
-	liveVersion := server.CanonicalVersion(liveCfg)
+	liveVersion := server.EffectiveVersion(liveCfg)
 
 	store := NewFilePlannedRestartStore(path)
 	c := &ConfigApplyCoordinator{

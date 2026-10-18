@@ -6,7 +6,6 @@ package admin
 import (
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -17,6 +16,7 @@ import (
 	"jul/internal/adminoidc"
 	"jul/internal/config"
 	"jul/internal/rbac"
+	"jul/internal/versionid"
 )
 
 type authMode int
@@ -90,7 +90,7 @@ func authGeneration(cfg config.AdminConfig, p *rbac.Policy) string {
 		_, _ = h.Write([]byte{0})
 		_, _ = h.Write([]byte(p.Fingerprint()))
 	}
-	return hex.EncodeToString(h.Sum(nil)[:16])
+	return versionid.Process().Digest("admin-auth-generation", h.Sum(nil))
 }
 
 func deriveAuthSnapshot(cfg config.AdminConfig, p *rbac.Policy, gen string) *authSnapshot {

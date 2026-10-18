@@ -127,6 +127,12 @@ function PendingRestartBanner({
               Pending: <span className="font-mono">{subs.join(", ")}</span>
             </p>
           )}
+          {status.version_comparison && status.version_comparison !== "same_context" && (
+            <p className="mt-1 text-xs text-jul-warning" role="status">
+              Effective versions are not comparable in the current key context. Restore the original
+              version key or restart to serve the staged configuration before further changes.
+            </p>
+          )}
           {status.staged_version && (
             <p className="mt-0.5 text-xs text-jul-muted">
               Staged: <span className="font-mono">{status.staged_version}</span>

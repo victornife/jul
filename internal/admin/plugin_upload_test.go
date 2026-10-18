@@ -68,7 +68,7 @@ func TestPluginUploadAuditUsesAuthenticatedPrincipal(t *testing.T) {
 		t.Fatalf("upload audit events = %d, want 1", len(events))
 	}
 	event := events[0]
-	if event.Actor != "uploader" || event.TokenID != identity.TokenID || event.SourceIP != "127.0.0.1" {
+	if event.Actor != "uploader" || event.TokenID != server.publicTokenID(identity.TokenID) || event.SourceIP != "127.0.0.1" {
 		t.Fatalf("upload audit attribution = %+v", event)
 	}
 	if event.Resource != "plugins" || event.ResourceID != "" || event.Selector != "" {

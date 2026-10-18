@@ -1282,3 +1282,12 @@ restart/staging operations.
 ## External Console sign-in
 
 [OIDC authentication](admin-oidc.md) adds one-provider Code + PKCE login as a separate unreleased Beta capability. The Console shows mapped principal/role and expiry, provides local logout and offers explicit reauthentication after expiry. Local scoped tokens remain available for automation and recovery. Browser sessions use HttpOnly cookies, exact-origin/header CSRF protection and the same server-enforced RBAC catalogue. See the guide for provider evidence, setup, reload revocation and outage limits.
+
+## Effective version confidentiality (#644, unreleased)
+
+Effective desired/serving versions are opaque keyed identifiers scoped to a
+private durable context. Raw persisted/base/history revisions retain their
+existing meaning. Provision the key before starting or upgrading, including
+read-only and container deployments. See [effective versions, migration and
+recovery](effective-versions.md) for comparison rules, legacy pending-state
+handling, key backup/loss and the binary-downgrade boundary.

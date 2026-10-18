@@ -299,3 +299,12 @@ The soak test (criterion 5) was completed via Phase 2A on 2026-07-06.
 | 7 | Security / threat note | ✅ [Security / threat note](#security--threat-note) |
 | 8 | Fuzzing where parsing is involved | n/a — references use the TOML/config parser (Y1-08), no new parser |
 | 9 | Self-explanatory Console surface | ✅ Console **Status**/**Security** report *Secret references* with a count |
+
+## Effective version confidentiality (#644, unreleased)
+
+Effective desired/serving versions are opaque keyed identifiers scoped to a
+private durable context. Raw persisted/base/history revisions retain their
+existing meaning. Provision the key before starting or upgrading, including
+read-only and container deployments. See [effective versions, migration and
+recovery](effective-versions.md) for comparison rules, legacy pending-state
+handling, key backup/loss and the binary-downgrade boundary.

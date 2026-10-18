@@ -248,6 +248,8 @@ type ConfigMutationResponse struct {
 // PendingRestartStatus exposes whether a process restart is required before
 // the on-disk configuration becomes fully live.
 type PendingRestartStatus struct {
+	// VersionComparison is same_context, different_context or unverifiable.
+	VersionComparison string `json:"version_comparison,omitempty"`
 	// State is the authoritative enum: "none", "managed_staged",
 	// "external_divergence", or "inconsistent". The boolean fields below are
 	// deprecated and retained for backward compatibility.

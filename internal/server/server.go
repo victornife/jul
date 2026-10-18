@@ -25,6 +25,7 @@ import (
 	"jul/internal/redact"
 	"jul/internal/respwriter"
 	"jul/internal/upstream"
+	"jul/internal/versionid"
 )
 
 // ReloadSource identifies which mechanism requested a configuration reload.
@@ -175,6 +176,7 @@ type HandlerFactory func(ctx context.Context, cfg *config.Config) (handlers map[
 // Server runs one http.Server per unique listen address and coordinates
 // graceful shutdown and configuration reload.
 type Server struct {
+	versions *versionid.Context
 	log      *slog.Logger
 	source   config.Source                               // reload source; nil disables reload
 	validate func(context.Context, *config.Config) error // validation applied before swapping
@@ -337,6 +339,7 @@ type Server struct {
 // coherent view: the effective config, raw config, bound listener set, and
 // handler generation all belong to the same logical moment.
 type runtimeState struct {
+	EffectiveVersion string
 	// EffectiveConfig is the expanded effective config currently being served.
 	// Treat as read-only.
 	EffectiveConfig *config.Config
@@ -552,6 +555,8 @@ type BoundListenerInfo struct {
 // rebind checks, and restart-required classification are evaluated against
 // the live runtime instead of the on-disk config (R9-04, R9-13).
 type LiveSnapshot struct {
+	// EffectiveVersion is keyed in the server's immutable version context.
+	EffectiveVersion string
 	// EffectiveConfig is the server's current effective config. Callers must
 	// treat it as read-only.
 	EffectiveConfig *config.Config
@@ -577,10 +582,11 @@ type LiveSnapshot struct {
 func (s *Server) LiveSnapshot() LiveSnapshot {
 	if rs := s.runtimeState.Load(); rs != nil {
 		return LiveSnapshot{
-			EffectiveConfig: rs.EffectiveConfig,
-			RawConfig:       rs.RawConfig,
-			Listeners:       copyListenerMap(rs.Listeners),
-			Generation:      rs.Generation,
+			EffectiveConfig:  rs.EffectiveConfig,
+			EffectiveVersion: rs.EffectiveVersion,
+			RawConfig:        rs.RawConfig,
+			Listeners:        copyListenerMap(rs.Listeners),
+			Generation:       rs.Generation,
 		}
 	}
 	return LiveSnapshot{Listeners: map[string]BoundListenerInfo{}}
@@ -590,10 +596,11 @@ func (s *Server) LiveSnapshot() LiveSnapshot {
 // server's current fields. It is used by Run before serving begins.
 func (s *Server) publishRuntimeStateDirect(gen uint64) {
 	s.runtimeState.Store(&runtimeState{
-		EffectiveConfig: s.cfg,
-		RawConfig:       s.rawCfg,
-		Listeners:       s.boundListenerSnapshot(),
-		Generation:      gen,
+		EffectiveConfig:  s.cfg,
+		EffectiveVersion: s.versions.Config(s.cfg),
+		RawConfig:        s.rawCfg,
+		Listeners:        s.boundListenerSnapshot(),
+		Generation:       gen,
 	})
 }
 
@@ -628,13 +635,18 @@ func copyListenerMapFromEntries(src map[string]*listenerEntry) map[string]BoundL
 // nil from tests that use literal configuration values. startupFP is the
 // authoritative effective startup fingerprint; when empty it is computed from
 // cfg.
-func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.Fingerprint, log *slog.Logger, factory HandlerFactory, source config.Source, validate func(context.Context, *config.Config) error) *Server {
+func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.Fingerprint, log *slog.Logger, factory HandlerFactory, source config.Source, validate func(context.Context, *config.Config) error, contexts ...*versionid.Context) *Server {
 	if len(startupFP.Values) == 0 {
 		if expanded, _, _, err := config.Resolve(cfg); err == nil {
 			startupFP = lifecycle.ComputeFingerprint(expanded)
 		}
 	}
+	versions := versionid.Process()
+	if len(contexts) > 0 && contexts[0] != nil {
+		versions = contexts[0]
+	}
 	s := &Server{
+		versions:       versions,
 		log:            log,
 		source:         source,
 		validate:       validate,
@@ -647,7 +659,7 @@ func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.F
 		redactGenBases: make(map[uint64]redact.State),
 		serveErr:       make(chan error, 8),
 	}
-	s.runtimeState.Store(&runtimeState{EffectiveConfig: cfg, RawConfig: rawStartupCfg, Listeners: map[string]BoundListenerInfo{}})
+	s.runtimeState.Store(&runtimeState{EffectiveConfig: cfg, EffectiveVersion: versions.Config(cfg), RawConfig: rawStartupCfg, Listeners: map[string]BoundListenerInfo{}})
 	return s
 }
 
@@ -1269,16 +1281,16 @@ func (s *Server) doReload(req ReloadRequest) {
 		if req.AuthGeneration != "" && req.ValidateAuthGeneration != nil && !req.ValidateAuthGeneration(req.AuthGeneration) {
 			result.Outcome = ReloadNotApplied
 			result.FailedPhase = "auth_cas"
-			result.DesiredVersion = CanonicalVersion(req.Candidate.Effective)
-			result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+			result.DesiredVersion = s.versions.Config(req.Candidate.Effective)
+			result.ServingVersion = s.LiveSnapshot().EffectiveVersion
 			result.Error = "admin authentication changed since the managed candidate was authorized"
 			return
 		}
 		if req.ExpectedGeneration != 0 && s.LiveSnapshot().Generation != req.ExpectedGeneration {
 			result.Outcome = ReloadNotApplied
 			result.FailedPhase = "runtime_cas"
-			result.DesiredVersion = CanonicalVersion(req.Candidate.Effective)
-			result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+			result.DesiredVersion = s.versions.Config(req.Candidate.Effective)
+			result.ServingVersion = s.LiveSnapshot().EffectiveVersion
 			result.Error = "live runtime changed since the managed candidate was authorized"
 			return
 		}
@@ -1292,8 +1304,8 @@ func (s *Server) doReload(req ReloadRequest) {
 		} else {
 			result.Outcome = ReloadNotApplied
 			result.FailedPhase = "persisted_cas"
-			result.DesiredVersion = CanonicalVersion(req.Candidate.Effective)
-			result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+			result.DesiredVersion = s.versions.Config(req.Candidate.Effective)
+			result.ServingVersion = s.LiveSnapshot().EffectiveVersion
 			result.Error = "persisted configuration no longer matches the managed candidate"
 			s.log.Warn("reload: managed candidate no longer matches persisted file; rejecting correlated transaction", "source", s.source.Name(), "reload_id", req.ID)
 			return
@@ -1339,7 +1351,7 @@ func (s *Server) doReload(req ReloadRequest) {
 			return
 		}
 	}
-	result.DesiredVersion = CanonicalVersion(plan.Candidate.Effective)
+	result.DesiredVersion = plan.EffectiveVersion
 	// Recheck every managed CAS before either terminal no-change adoption or
 	// expensive preparation. A no-op cannot bless a stale persisted candidate,
 	// stale runtime authorization, or stale admin-auth generation.
@@ -1349,7 +1361,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		result.DurationMS = time.Since(plan.start).Milliseconds()
 		result.Outcome = ReloadNotApplied
 		result.FailedPhase = "persisted_cas"
-		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.ServingVersion = s.LiveSnapshot().EffectiveVersion
 		result.Error = "persisted configuration changed while the managed candidate was preparing"
 		s.log.Warn("reload: managed candidate changed during preparation; aborting before publish", "source", s.source.Name(), "reload_id", req.ID)
 		return
@@ -1360,7 +1372,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		result.DurationMS = time.Since(plan.start).Milliseconds()
 		result.Outcome = ReloadNotApplied
 		result.FailedPhase = "runtime_cas"
-		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.ServingVersion = s.LiveSnapshot().EffectiveVersion
 		result.Error = "live runtime changed while the managed candidate was preparing"
 		return
 	}
@@ -1370,7 +1382,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		result.DurationMS = time.Since(plan.start).Milliseconds()
 		result.Outcome = ReloadNotApplied
 		result.FailedPhase = "auth_cas"
-		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.ServingVersion = s.LiveSnapshot().EffectiveVersion
 		result.Error = "admin authentication changed while the managed candidate was preparing"
 		return
 	}
@@ -1381,7 +1393,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		result.CompletedAt = time.Now()
 		result.DurationMS = time.Since(plan.start).Milliseconds()
 		result.Outcome = ReloadNoChange
-		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.ServingVersion = s.LiveSnapshot().EffectiveVersion
 		result.HTTP = ReloadSubsystemResult{Status: ReloadSubsystemSkipped}
 		result.Stream = ReloadSubsystemResult{Status: ReloadSubsystemSkipped}
 		result.Admin = ReloadSubsystemResult{Status: ReloadSubsystemSkipped}
@@ -1428,7 +1440,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		result.DurationMS = time.Since(plan.start).Milliseconds()
 		result.Outcome = ReloadNotApplied
 		result.FailedPhase = "persisted_cas"
-		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.ServingVersion = s.LiveSnapshot().EffectiveVersion
 		result.Error = "persisted configuration changed while the managed candidate was preparing"
 		s.log.Warn("reload: managed candidate changed during preparation; aborting before publish", "source", s.source.Name(), "reload_id", req.ID)
 		return
@@ -1439,7 +1451,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		result.DurationMS = time.Since(plan.start).Milliseconds()
 		result.Outcome = ReloadNotApplied
 		result.FailedPhase = "runtime_cas"
-		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.ServingVersion = s.LiveSnapshot().EffectiveVersion
 		result.Error = "live runtime changed while the managed candidate was preparing"
 		return
 	}
@@ -1449,7 +1461,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		result.DurationMS = time.Since(plan.start).Milliseconds()
 		result.Outcome = ReloadNotApplied
 		result.FailedPhase = "auth_cas"
-		result.ServingVersion = CanonicalVersion(s.LiveSnapshot().EffectiveConfig)
+		result.ServingVersion = s.LiveSnapshot().EffectiveVersion
 		result.Error = "admin authentication changed while the managed candidate was preparing"
 		return
 	}
@@ -1487,7 +1499,7 @@ func (s *Server) doReload(req ReloadRequest) {
 
 	result.CompletedAt = time.Now()
 	result.DurationMS = time.Since(plan.start).Milliseconds()
-	result.ServingVersion = CanonicalVersion(plan.Candidate.Effective)
+	result.ServingVersion = plan.EffectiveVersion
 
 	// Copy per-phase durations into the result so callers can observe them
 	// (M-04: jul_reload_phase_duration_seconds metric). Values are in

@@ -1176,3 +1176,12 @@ Disabling prevents new lookups from initiating a refresh through the stapler;
 already-started refresh work may finish. Cached staple state remains owned by the
 stable wrapper and may be reused when re-enabled. Broader ACME domain, challenge,
 account, issuer and cache transitions remain outside this seam.
+
+## Effective version confidentiality (#644, unreleased)
+
+Effective desired/serving versions are opaque keyed identifiers scoped to a
+private durable context. Raw persisted/base/history revisions retain their
+existing meaning. Provision the key before starting or upgrading, including
+read-only and container deployments. See [effective versions, migration and
+recovery](effective-versions.md) for comparison rules, legacy pending-state
+handling, key backup/loss and the binary-downgrade boundary.

@@ -60,7 +60,8 @@ COPY --from=build --chown=nonroot:nonroot /seed/ /
 # Container-tailored default config (admin enabled on loopback for the
 # HEALTHCHECK, managed authority for the writable config volume, static root at
 # /var/www) plus the placeholder site it serves, so
-# the image starts cleanly and its health probe passes with no host mounts.
+# provision the durable key in the state volume before starting the image.
+# See docs/effective-versions.md; no shared key is baked into the image.
 COPY --chown=nonroot:nonroot deploy/docker/server.toml /etc/jul/server.toml
 COPY --chown=nonroot:nonroot deploy/docker/index.html /var/www/index.html
 VOLUME ["/etc/jul", "/var/lib/jul", "/var/cache/jul", "/var/log/jul"]
@@ -74,6 +75,7 @@ EXPOSE 8080 8443 9090
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD ["/usr/local/bin/jul", "healthcheck", "--config", "/etc/jul/server.toml", "--quiet"]
 
+ENV JUL_EFFECTIVE_VERSION_KEY_FILE=/var/lib/jul/private/effective-version.key
 USER nonroot:nonroot
 ENTRYPOINT ["/usr/local/bin/jul"]
 CMD ["--config", "/etc/jul/server.toml"]

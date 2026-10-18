@@ -598,3 +598,12 @@ $ curl -H "Authorization: Bearer $JUL_ADMIN_TOKEN" http://127.0.0.1:9090/healthz
 - [Observability](observability.md) — metrics, probes and scrape requirements.
 - [ADR 0019](adr/0019-configuration-authority-generated-contracts-and-resource-identity.md)
   — the accepted record this document implements.
+
+## Effective version confidentiality (#644, unreleased)
+
+Effective desired/serving versions are opaque keyed identifiers scoped to a
+private durable context. Raw persisted/base/history revisions retain their
+existing meaning. Provision the key before starting or upgrading, including
+read-only and container deployments. See [effective versions, migration and
+recovery](effective-versions.md) for comparison rules, legacy pending-state
+handling, key backup/loss and the binary-downgrade boundary.

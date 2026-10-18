@@ -106,7 +106,7 @@ func (c *ConfigApplyCoordinator) DiscardPlannedRestartWithContext(reqCtx admin.A
 	if c.PlannedRestart.ConfigPath != "" {
 		var liveVersion string
 		if c.LiveSnapshot != nil {
-			liveVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
+			liveVersion = c.currentServingVersion()
 		}
 		restoredBytes, err := c.PlannedRestart.DiscardSafe(liveVersion)
 		if err != nil {
@@ -240,10 +240,10 @@ func (c *ConfigApplyCoordinator) applyStageRestart(pctx context.Context, reqCtx 
 	// resolves secrets and validates the config, so a second NewCandidate call
 	// is redundant and produces a stale resolved copy.
 	persistedVersion := server.CanonicalVersion(pfResult.Candidate.Raw)
-	desiredVersion := server.CanonicalVersion(pfResult.Candidate.Effective)
+	desiredVersion := c.Versions.Config(pfResult.Candidate.Effective)
 	liveVersion := ""
 	if c.LiveSnapshot != nil {
-		liveVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
+		liveVersion = c.currentServingVersion()
 	}
 
 	// Collect subsystem names from the lifecycle diff.
@@ -516,16 +516,17 @@ func (c *ConfigApplyCoordinator) plannedRestartStatus() *admin.PendingRestartSta
 		return nil
 	}
 	res := &admin.PendingRestartStatus{
-		State:            st.State,
-		Managed:          st.Managed,
-		Staged:           st.Staged,
-		External:         st.External,
-		DiscardAvailable: st.DiscardAvailable,
-		Inconsistent:     st.Inconsistent,
-		Subsystems:       st.Subsystems,
-		StagedVersion:    st.StagedVersion,
-		PersistedVersion: st.PersistedVersion,
-		ServingVersion:   st.ServingVersion,
+		State:             st.State,
+		VersionComparison: st.VersionComparison,
+		Managed:           st.Managed,
+		Staged:            st.Staged,
+		External:          st.External,
+		DiscardAvailable:  st.DiscardAvailable,
+		Inconsistent:      st.Inconsistent,
+		Subsystems:        st.Subsystems,
+		StagedVersion:     st.StagedVersion,
+		PersistedVersion:  st.PersistedVersion,
+		ServingVersion:    st.ServingVersion,
 	}
 	if !st.StagedAt.IsZero() {
 		res.StagedAt = st.StagedAt.UTC().Format(time.RFC3339)
