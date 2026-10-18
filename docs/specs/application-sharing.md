@@ -726,8 +726,11 @@ retirement.
 listener-level settings (bind, TLS, `client_auth`, `client_address`, PROXY
 protocol) affect every entry on that listener; an upstream change affects every
 entry that proxies to it; a credential file (htpasswd, CA, CRL) affects every
-entry that names it; global WAF or plugin changes affect every entry that
-inherits them.
+entry that names it; server-level plugin changes affect every entry in that
+block. Host-name and block-order changes also affect the listener's
+first-declared block, which answers every unmatched host: when another block
+drops host names, or a different block becomes first, the first-declared block
+is classed `widened` for the names it newly answers.
 
 | Class | Meaning | Consequence |
 | --- | --- | --- |
