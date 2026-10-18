@@ -286,7 +286,9 @@ go test -run '^$' -bench 'Handshake|MTLS' -benchmem ./internal/server/
   rebuilt during reload and swapped for new TCP TLS and QUIC handshakes; a file
   rewritten in place counts as a change. Connections already established keep
   the certificate they were accepted with. Per-location `require_client_cert` is
-  part of normal routing and applies to the next request. The admin listener's
+  part of normal routing and applies to the next request, but it checks only
+  that the connection presented a verified certificate at its handshake: a
+  certificate revoked afterwards still satisfies it on that connection. The admin listener's
   `[admin.tls.client_auth]` is still read when the admin listener starts.
 - **Established streams and revocation.** An HTTP/1 or HTTP/2 stream can keep
   exchanging data after its certificate is added to the CRL; the next full or

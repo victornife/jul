@@ -11,6 +11,19 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Proposed application-sharing contract for #580 (SHARE-01):
+  [specification](docs/specs/application-sharing.md),
+  [ADR 0025](docs/adr/0025-application-sharing-contract.md) and a
+  [design review packet](docs/reviews/2026-10-18-580-application-sharing-design.md).
+  It defines a derived sharing view, four access modes, trust and evidence
+  contracts, the withdrawal promise, three reference fixtures, a protocol
+  matrix, and measurement and usability contracts. It also selects two bounded
+  follow-up tranches: declared intent with guarded changes, and complete
+  withdrawal with #563/#562. Design only: no runtime, configuration, API,
+  Console or maturity change, and not accepted until the maintainer accepts
+  #580. Known limitations and mTLS notes now state that a revoked client
+  certificate still passes `require_client_cert` on an already-open connection.
+
 - Alpha offered-ALPN TCP passthrough routing (#434): ordered exact-SNI/wildcard
   rules reuse bounded ClientHello inspection and existing stream pools/reloads;
   backend TLS negotiation remains end-to-end. Config, lifecycle, API and Console

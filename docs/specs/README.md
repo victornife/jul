@@ -23,7 +23,7 @@ For product direction and programme entry rules, see:
 | Scope | Theme | Spec |
 |------|-------|------|
 | **Current core** | Bounded standalone gateway completeness: trust, resilience, routing policy, lifecycle, automation, diagnostics, migration, and selected runtime dynamics | [core-gateway-completeness.md](core-gateway-completeness.md) |
-| **Sharing (proposed)** | Application-sharing contract (SHARE-01, #580): derived service view, access modes, trust and evidence, withdrawal promise, reference fixtures, measurement and usability contracts | [application-sharing.md](application-sharing.md) |
+| **Sharing (proposed)** | Application-sharing contract (SHARE-01, #580): derived view, declared intent and guarded changes, access modes, trust and evidence, complete withdrawal, reference fixtures, measurement and usability contracts | [application-sharing.md](application-sharing.md) |
 | Year 1 | Credibility & effortlessness (Auto-HTTPS, Console v1, gRPC↔REST MVP, table-stakes proxy) | [year-1.md](year-1.md) |
 | Year 2 | Protocol gateway + extensibility moat (gRPC streaming, WASM plugins, L4 stream, discovery, WAF, mTLS) | [year-2.md](year-2.md) |
 | Year 3 | Scale, fleet & ecosystem — **concept horizon** (fleet, multi-node config, external identity, plugin registry) | [year-3.md](year-3.md) |

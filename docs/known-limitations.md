@@ -443,7 +443,10 @@ connection is closed. An upgraded WebSocket is neither awaited nor closed by
 HTTP server drain; process exit still drops its socket without a guaranteed
 WebSocket close handshake.
 
-Client-auth/CRL changes apply to new TLS handshakes, not established streams.
+Client-auth/CRL changes apply to new TLS handshakes, not established connections:
+new requests and new HTTP/2 streams on an already-open connection keep the
+certificate identity it was accepted with, including for `require_client_cert`
+(verified 2026-10-18 for the [sharing design](specs/application-sharing.md#81-verified-current-behaviour)).
 Revocation has no enforced time bound on those connections. Client reconnect
 requests are not enforcement, and Jul has no targeted session-termination API;
 operator-controlled backend/load-balancer termination or process shutdown may
