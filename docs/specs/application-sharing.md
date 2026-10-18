@@ -729,15 +729,20 @@ change should produce match what is serving?* It matters most for file-owned
 pipelines, which Jul cannot fence, and it never attributes a change to a writer.
 
 - **Producer.** Every plan (raw candidate or typed operations) returns a
-  `postcondition`: `{postcondition_version: 1, base_serving_version,
-  candidate_desired_version, base_config_digest, candidate_config_digest,
-  entries: [{ref, expect, expected?}]}`. The two versions are Jul's existing
-  64-bit fingerprints of the canonical *effective* configuration (review packet
-  E53), carried for correlation with status and history. The two digests are
-  full SHA-256 digests of the same canonical form, and they are what the
-  evaluator compares, so a fingerprint collision can never make another
-  configuration pass for the candidate. Neither covers the contents of files
-  the configuration names; the access fingerprint below does.
+  `postcondition`: `{postcondition_version: 1, base_config_digest,
+  candidate_config_digest, entries: [{ref, expect, expected?}]}`. The two
+  digests are full SHA-256 digests of the canonical **raw** configuration — as
+  written, with secret references unresolved — and they are what the evaluator
+  compares, so a fingerprint collision can never make another configuration
+  pass for the candidate. The object carries **no value derived from a secret**:
+  owners keep it with their change, possibly in a repository beside the
+  configuration, where a digest over resolved secrets would let anyone check
+  guesses of a weak secret offline. For that reason Jul's existing versions,
+  which hash the effective configuration with secrets resolved (review packet
+  E53, E56), are not carried. Equal digests mean the configuration as written
+  is identical; a secret value rotated under an unchanged configuration is not
+  compared. Neither digest covers the contents of files the configuration
+  names; the access fingerprint below does.
   - `expect` is `present` or `absent`. Every entry the plan affects (including
     the §9.5 expansion) is listed: `present` when it exists in the candidate,
     `absent` when the plan removes it. A plan that affects no entry (for
@@ -760,9 +765,10 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
   - `expected`, for `present` entries, holds the entry facts the change should
     produce in the `serving` layer (§4.3) — the Jul checks it actually applies,
     client-certificate requirement, bind scope, withdrawal state, declared
-    intent — and an **access fingerprint**: a non-secret SHA-256 digest over
-    the entry's effective access inputs (§9.5), including content digests of
-    the local access files they use (htpasswd, CA, CRL, WAF rule files,
+    intent — and an **access fingerprint**: a SHA-256 digest over the entry's
+    access inputs (§9.5) as configured, so no secret value enters it, including
+    content digests of the local access files they use (none holds a usable
+    password oracle: Basic accepts bcrypt entries only, E56) (htpasswd, CA, CRL, WAF rule files,
     request-plugin modules) as read when the plan was computed.
   - Jul stores nothing; the owner keeps the object with the change.
 - **Evaluator.** A read-only, server-owned operation requiring the same
@@ -770,8 +776,10 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
   `config:read`) compares the object with the **current** serving snapshot,
   whose generation records the access-file digests it actually loaded. It
   returns:
-  - `candidate`: computed from the full digest of the serving snapshot's
-    effective configuration (computed on request; nothing stored): `serving`
+  - `candidate`: computed from the full SHA-256 digest of the serving
+    snapshot's raw configuration, which the snapshot already holds (computed on
+    request; nothing stored). The response also shows the current
+    `serving_version` to its authorised caller. `serving`
     when it equals `candidate_config_digest` (checked first, so a plan that
     changes nothing is `serving` at once); otherwise `base_serving` when it
     equals `base_config_digest`; otherwise `other_revision`; `unknown` without

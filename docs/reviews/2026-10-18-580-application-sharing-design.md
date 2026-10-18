@@ -8,8 +8,9 @@
 > §6.7), **r7** `7e3382c4` (round 7, §6.8), **r8** `292a294c` (round 8, §6.8;
 > independent principal re-review, §6.9), **r9** `72871705` (round 10, §6.10),
 > **r10** `74fb5631` (round 11, §6.11), **r11** `1290e14a` (second principal
-> re-review, §6.12) and **r12** (this revision; round 13 in §6.13). This packet
-> holds evidence, decisions, review findings and traceability for the
+> re-review, §6.12), **r12** `de5f194a` (round 13, §6.13) and **r13** (this
+> revision; round 14 in §6.14). This packet holds evidence, decisions, review
+> findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -94,6 +95,7 @@ the row.
 | E53 | `serving_version` and `desired_version` are both `CanonicalVersion`: the first 8 bytes of SHA-256 over the canonical marshalled **effective** configuration. Equal versions are a 64-bit fingerprint match of the canonical effective configuration, so the postcondition compares full SHA-256 digests of the same form (round 10, R10-3); the contents of referenced files are not included | internal/server/reload_result.go:101-111; internal/app/config_apply.go:624-625; internal/app/config_apply_restore.go:34 | F (rounds 9 and 10) | — | high |
 | E54 | The existing route selector resolver compares `listen`, `match_type` and `path` as raw strings and `server_names` as a raw multiset (whitespace and duplicates significant), and counts `match_ordinal` across every block matching those coordinates; the existing route projection and `/api/v1` publish a **per-block** ordinal. With two valid blocks sharing `listen` and identical raw names, the second block's published selector resolves to the first block's location (probe P4) | internal/admin/patch_helpers.go:248-299; internal/admin/routetest.go:221-231; internal/admin/projections.go:52; internal/admin/apiv1_resources.go:85; ADR 0018 §14 | F (round 12; P4) | pre-existing runtime defect outside #580's scope; not fixed here | high |
 | E55 | Configuration files are capped at 16 MiB; validation sets no byte limit on server `name` or `server_names`, so a valid configuration can carry 32 KiB labels or host strings (the principal re-review checked both with `jul check`) | internal/config/parser.go:62-83; internal/config/validate_values.go:152-183 | F (round 12) | — | high |
+| E56 | The canonical marshal does not redact: `CanonicalVersion` hashes the effective configuration with secret references resolved, so `serving_version`/`desired_version` depend on secret values. The serving snapshot also keeps the pre-expansion `RawConfig`. Basic authentication accepts bcrypt htpasswd entries only | internal/config/parser.go:205-217; internal/config/candidate.go:56-72; internal/config/secrets.go:58-89; internal/server/server.go:343-345; internal/config/schema.go (`BasicAuthConfig`) | F (round 13) | — | high |
 
 ### External primary sources
 
@@ -568,7 +570,24 @@ second block edits the first, live block. The managed plan shows the change, but
 nothing prevents it. Fixing it belongs to the route-projection owner, not this
 design PR; the sharing view does not reuse the per-block ordinal.
 
-### 6.13 Round 13 (verification of r12)
+### 6.13 Round 13 (verification of r12 `de5f194a`)
+
+Both reviewers verified the RR06 and RR05-B resolutions and found no blocker,
+high or medium issue. The source-truth reviewer confirmed that the selector
+claims match the resolver exactly, that positions round-trip (the effective
+configuration is the raw one with secret strings resolved, so block and
+location positions are identical), and that the byte and complexity claims are
+coherent. The security reviewer found no way for a position to resolve to
+another entry or for a truncated value to act, be copied or hide a wider
+audience.
+
+While checking the position question, the author found a flaw in the design itself:
+
+| ID | Sev. | Finding | Resolution (r13) |
+| --- | --- | --- | --- |
+| A13-1 | medium | the postcondition carried Jul's versions (since r5) and, from r10, full digests of the *effective* configuration, which includes resolved secret values (E56). Owners keep the object with their change, possibly in a repository beside the configuration, where these digests let anyone confirm guesses of a weak secret offline | the object now carries only full SHA-256 digests of the canonical **raw** configuration (secret references unresolved) and access fingerprints over configured access inputs; the versions are no longer carried, and the evaluator shows the current `serving_version` only to its authorised caller. A secret rotated under an unchanged configuration is not compared, and the spec says so |
+
+### 6.14 Round 14 (verification of r13)
 
 (Recorded below.)
 
@@ -612,6 +631,7 @@ resource and value evidence contract maps to §13–§15 and §17.
 | WAF detect-mode rules depend on pinned Coraza behaviour (E49, E51) and on AD-08's treatment of transport failures | a dependency upgrade could change them; the maintainer may prefer the stricter `narrowed` class | #641 regression tests; rules re-derived on any engine upgrade |
 | Host-dispatch rule under-expands if implemented wrongly | property test against the real router over generated host sets; listener-wide fallback | #641 |
 | Projection caps (strings, names, URLs, members, page entries and bytes) are proposals | measured and fixed before exposure | #586 gate for #586/#587 |
+| `serving_version` in status hashes content that includes resolved secret values (E56), so a `status:read` caller who knows the rest of the configuration could confirm guesses of a weak secret | pre-existing, outside #580; the postcondition no longer carries it | configuration-status owner |
 | Existing route projection publishes a per-block `match_ordinal` that the resolver reads across blocks (E54, P4) | pre-existing defect; with a duplicated block a typed patch can edit the wrong route | route-projection owner; separate issue on maintainer authorisation |
 | Reviewer independence | AI agents; instruction-based blindness | maintainer acceptance is the decision |
 | Issue records for the new baseline and order | posted 2026-10-18: comments on #580, #579, #62, #562, #563; #581 body amended; #641 and #642 registered (all pending #580 acceptance) | maintainer acceptance switches #640 to `Closes #580` |
