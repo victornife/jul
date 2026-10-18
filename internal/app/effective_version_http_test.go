@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -110,5 +111,27 @@ func TestServeMissingVersionKeyDoesNotStartListeners(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("startup initialized missing key")
+	}
+}
+
+func TestServeExplicitKeyPathOverridesEnvironment(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(dir, "private", "key")
+	if _, err := versionid.Init(keyPath); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(versionid.Environment, filepath.Join(t.TempDir(), "absent"))
+	cfg := config.ProxyTarget("http://127.0.0.1:9000", freePort(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out bytes.Buffer
+	// A cancelled runtime may finish either cleanly or during preparation; key
+	// selection itself must succeed and proceed past the startup load boundary.
+	_ = Serve(ctx, nil, config.NewTOMLSource(filepath.Join(t.TempDir(), "jul.toml")), cfg, "Jul.IA", "test", WithEffectiveVersionKeyFile(keyPath), WithLogOutput(&out))
+	if strings.Contains(out.String(), "effective version key unavailable") {
+		t.Fatal("explicit file did not override environment")
 	}
 }

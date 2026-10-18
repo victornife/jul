@@ -103,3 +103,16 @@ ADR currently uses main's next number 0025; rename that proposed record to 0026
 and update spec/review/index references before landing. Append the distinction
 between durable effective IDs and AD-09's separate process-only access-input
 key; shareable postconditions remain raw. No #641/#642 runtime work is complete.
+
+## CI-driven deployment correction
+
+Initial native CI reproduced missing key provisioning in package/service/smoke
+starts, and overstrict Windows ancestor ACL validation. Current corrections add
+private disposable contexts outside uploaded reports, explicit source Windows
+installer opt-in and SCM key-path argument, offline guide packaging, and preserve
+pinned older-package harnesses through CLI command discovery. Windows ancestors
+permit only read/traverse/control/synchronize and sibling creation; strict leaves
+still reject every untrusted grant. Native rerun is required. D11 current asset
+paths/mapping are reconciled without altering frozen identities or historical
+review evidence. The fault namespace harness now requires dedicated-host root
+without user remapping; its trust boundary and invocation change are explicit.

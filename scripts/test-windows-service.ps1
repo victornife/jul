@@ -274,8 +274,13 @@ mime = {types = {"$mimeExtension" = "application/x-jul516-explicit"}, default_ty
             $beforeAcls[$path] = @{ owner = (Get-Acl -LiteralPath $path).Owner; entries = @(Get-AclEntries $path) }
         }
     }
-    & $InstallerPath `
-        -BinaryPath $binary -ConfigPath $configPath -DataDir $dataDir
+    $installerOptions = @{ BinaryPath = $binary; ConfigPath = $configPath; DataDir = $dataDir }
+    # Frozen published installers keep their original contract.
+    if ((Get-Command $InstallerPath).Parameters.ContainsKey('InitializeVersionKey')) {
+        $installerOptions.VersionKeyFile = Join-Path $root 'version-private\effective-version.key'
+        $installerOptions.InitializeVersionKey = $true
+    }
+    & $InstallerPath @installerOptions
     if (-not (Get-Service -Name 'jul' -ErrorAction SilentlyContinue)) {
         throw 'Installer returned without registering jul service.'
     }
@@ -396,7 +401,9 @@ exit 0
         Set-Content -LiteralPath $permissiveConfig -Value $permissiveRaw -Encoding utf8NoBOM
         Invoke-OrdinaryProbe -Readable -Config $permissiveConfig -History (Join-Path $permissiveData 'history')
         $oldEntries = @(Get-AclEntries $permissiveConfig)
-        & $InstallerPath -BinaryPath $permissiveBinary -ConfigPath $permissiveConfig -DataDir $permissiveData
+        $permissiveOptions = @{ BinaryPath = $permissiveBinary; ConfigPath = $permissiveConfig; DataDir = $permissiveData }
+        if ($installerOptions.ContainsKey("VersionKeyFile")) { $permissiveOptions.VersionKeyFile = $installerOptions.VersionKeyFile }
+        & $InstallerPath @permissiveOptions
         foreach ($entry in $oldEntries) {
             if ($entry -notin @(Get-AclEntries $permissiveConfig)) { throw 'Installer removed permissive existing entries.' }
         }

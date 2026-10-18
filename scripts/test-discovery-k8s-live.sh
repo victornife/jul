@@ -29,6 +29,8 @@ JUL_PORT=29081
 ADMIN_PORT=29090
 ADMIN_TOKEN="k8s-lane-test-token"
 
+VERSION_KEY_FIXTURE="$(mktemp -d)"
+export JUL_EFFECTIVE_VERSION_KEY_FILE="$VERSION_KEY_FIXTURE/private/key"
 mkdir -p "$ARTIFACTS"
 
 step() { printf '\n=== %s ===\n' "$1"; }
@@ -41,6 +43,7 @@ cleanup() {
   if [ -n "${PROXY_PID:-}" ] && kill -0 "$PROXY_PID" 2>/dev/null; then
     kill "$PROXY_PID" 2>/dev/null || true
   fi
+  rm -rf "$VERSION_KEY_FIXTURE"
   kubectl delete namespace "$NS" --wait=false --ignore-not-found=true 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -195,6 +198,7 @@ step "Jul check"
 "$JUL_BIN" check -config "$CFG"
 
 step "Starting jul with Kubernetes discovery config"
+"$JUL_BIN" version-key init >/dev/null
 "$JUL_BIN" serve -config "$CFG" \
   > >(tee "$ARTIFACTS/k8s-jul.out.log") 2>&1 &
 JUL_PID=$!

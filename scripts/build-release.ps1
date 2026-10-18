@@ -74,6 +74,13 @@ try {
         go build @buildTags -ldflags $ldflags -o $binPath ./cmd/jul
         if ($LASTEXITCODE -ne 0) { throw "go build failed for $target" }
 
+        Copy-Item (Join-Path $root "README.md") $stage
+        Copy-Item (Join-Path $root "SECURITY.md") $stage
+        # Bundle the new mandatory provisioning/recovery instructions offline.
+        $docDir = Join-Path $stage "docs"
+        New-Item -ItemType Directory -Force -Path $docDir | Out-Null
+        Copy-Item (Join-Path $root "docs/effective-versions.md") $docDir
+
         # Bundle a sample config and the matching deploy assets.
         Copy-Item (Join-Path $root "server.toml") (Join-Path $stage "server.toml")
         if ($os -eq "windows") {

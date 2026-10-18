@@ -188,7 +188,13 @@ $before = Join-Path $artifacts "k8s-before.txt"
 $after = Join-Path $artifacts "k8s-after.txt"
 $proc = $null
 
+$priorVersionKey = $env:JUL_EFFECTIVE_VERSION_KEY_FILE
+$keyFixture = Join-Path ([IO.Path]::GetTempPath()) ('jul-discovery-key-' + [guid]::NewGuid().ToString('N'))
+$env:JUL_EFFECTIVE_VERSION_KEY_FILE = Join-Path $keyFixture 'private\effective-version.key'
 try {
+    & $julPath version-key init
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot provision private discovery key' }
+
     Invoke-Step "Starting Jul with Kubernetes discovery config" {
       $proc = Start-Process -FilePath $julPath -ArgumentList "--config `"$cfgPath`"" -PassThru -NoNewWindow -RedirectStandardOutput $outLog -RedirectStandardError $errLog
     }
@@ -267,6 +273,9 @@ try {
     }
 }
 finally {
+    if ($null -eq $priorVersionKey) { Remove-Item Env:JUL_EFFECTIVE_VERSION_KEY_FILE -ErrorAction SilentlyContinue } else { $env:JUL_EFFECTIVE_VERSION_KEY_FILE = $priorVersionKey }
+    Remove-Item -LiteralPath $keyFixture -Recurse -Force -ErrorAction SilentlyContinue
+
     if ($proc -and -not $proc.HasExited) {
         Stop-Process -Id $proc.Id -Force
     }

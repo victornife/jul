@@ -1725,3 +1725,14 @@ mixed:   goroutines 3 -> 3, heap 25992736 -> 32126928 bytes
 **Conclusion:** WAF reload/reconfiguration churn is leak-free and stable. The
 build-drop-on-reload path retains no goroutines, sockets, or engines, confirming
 the documented no-op `Firewall.Close` is safe at runtime. **AUX-06 (#50) closed.**
+
+## #644 current reproduction prerequisite (unreleased)
+
+Current binaries require an explicitly provisioned private effective-version key.
+Updated source smoke/discovery/fault harnesses allocate disposable keys outside
+retained evidence and preserve them across their process restarts. For DNS,
+disk and storage fault profiles, run as root on a dedicated host: they retain
+mount/network isolation without user remapping, because unmapped ancestor
+ownership cannot establish a trusted key path. Frozen historical commands and
+results above remain evidence for their original binaries. No prior result is
+recertified by this change. See [key provisioning/recovery](effective-versions.md).

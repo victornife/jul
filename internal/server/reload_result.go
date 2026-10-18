@@ -95,8 +95,8 @@ type PluginModuleChange struct {
 	After  string `json:"after,omitempty"`
 }
 
-// CanonicalVersion returns a short, stable fingerprint of a configuration
-// of unresolved configuration for optimistic concurrency and raw history. It
+// CanonicalVersion fingerprints unresolved configuration for optimistic
+// concurrency and raw history. It
 // is computed over the canonical marshaled form so it is insensitive to
 // comments and whitespace in the on-disk file.
 func CanonicalVersion(c *config.Config) string {

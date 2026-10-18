@@ -5,6 +5,7 @@ package versionid
 
 import (
 	"errors"
+	"fmt"
 	"golang.org/x/sys/windows"
 	"os"
 	"path/filepath"
@@ -35,17 +36,23 @@ func checkDescriptor(sd *windows.SECURITY_DESCRIPTOR, directory bool) error {
 		if err := windows.GetAce(acl, i, &ace); err != nil {
 			return err
 		}
+		if directory && ace.Header.AceFlags&windows.INHERIT_ONLY_ACE != 0 {
+			continue
+		}
 		if ace.Header.AceType == windows.ACCESS_DENIED_ACE_TYPE {
 			continue
 		}
 		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
 			return errors.New("unsupported key ACL grant")
 		}
-		if directory && ace.Mask&(windows.GENERIC_ALL|windows.GENERIC_WRITE|windows.WRITE_DAC|windows.WRITE_OWNER|windows.DELETE|windows.FILE_WRITE_DATA|windows.FILE_APPEND_DATA|0x0040 /* FILE_DELETE_CHILD */) == 0 {
+		// Ancestors may create siblings, but cannot replace protected children
+		// or change metadata/ACLs. Reject unknown rights instead of guessing.
+		const ancestorRights = windows.GENERIC_READ | windows.GENERIC_EXECUTE | windows.READ_CONTROL | windows.SYNCHRONIZE | windows.FILE_READ_DATA | windows.FILE_READ_ATTRIBUTES | windows.FILE_READ_EA | windows.FILE_EXECUTE | windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA
+		if directory && ace.Mask&^windows.ACCESS_MASK(ancestorRights) == 0 {
 			continue
 		}
 		if !trustedSID((*windows.SID)(unsafe.Pointer(&ace.SidStart)), tokenUser.User.Sid) {
-			return errors.New("untrusted key ACL grant")
+			return fmt.Errorf("untrusted key ACL grant: sid=%s mask=%#x", (*windows.SID)(unsafe.Pointer(&ace.SidStart)).String(), ace.Mask)
 		}
 	}
 	return nil
@@ -69,7 +76,7 @@ func checkDirectory(path string) error {
 		// read grants): a permissive CreateTemp followed by ACL repair cannot
 		// revoke a readable handle opened before repair. Ancestors may be read-only.
 		if err := checkDescriptor(sd, absolute != leaf); err != nil {
-			return err
+			return fmt.Errorf("directory %q: %w", absolute, err)
 		}
 		parent := filepath.Dir(absolute)
 		if parent == absolute {

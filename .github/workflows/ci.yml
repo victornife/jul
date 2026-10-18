@@ -198,6 +198,8 @@ jobs:
             -ldflags "-s -w -X main.version=ci-smoke" \
             -tags "${{ matrix.tags }}" -o "stage/$name/jul" ./cmd/jul
           cp README.md SECURITY.md server.toml "stage/$name/"
+          mkdir -p "stage/$name/docs"
+          cp docs/effective-versions.md "stage/$name/docs/"
           archive="dist/$name.tar.gz"
           tar -C stage -czf "$archive" "$name"
           shasum -a 256 "$archive" | awk '{print $1}' > "$archive.sha256"

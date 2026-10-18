@@ -59,22 +59,25 @@ def wait_tcp(port, timeout=30):
 
 @contextlib.contextmanager
 def run_jul(jul, config_text, out, name, ports):
-    cfg = out / f"{name}.toml"
-    cfg.write_text(config_text)
-    subprocess.run([jul, "check", "-config", str(cfg)], check=True)
-    log = open(out / f"{name}-jul.log", "w")
-    proc = subprocess.Popen([jul, "-config", str(cfg)], stdout=log, stderr=subprocess.STDOUT)
-    try:
-        for port in ports:
-            wait_tcp(port)
-        yield proc
-    finally:
-        proc.terminate()
+    with tempfile.TemporaryDirectory(prefix="jul-conformance-key-") as key_root:
+        cfg = out / f"{name}.toml"
+        cfg.write_text(config_text)
+        subprocess.run([jul, "check", "-config", str(cfg)], check=True)
+        log = open(out / f"{name}-jul.log", "w")
+        env = dict(os.environ, JUL_EFFECTIVE_VERSION_KEY_FILE=str((Path(key_root) / "private" / "version.key").resolve()))
+        subprocess.run([jul, "version-key", "init"], env=env, check=True, stdout=subprocess.DEVNULL)
+        proc = subprocess.Popen([jul, "-config", str(cfg)], env=env, stdout=log, stderr=subprocess.STDOUT)
         try:
-            proc.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        log.close()
+            for port in ports:
+                wait_tcp(port)
+            yield proc
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            log.close()
 
 
 def self_signed(out):

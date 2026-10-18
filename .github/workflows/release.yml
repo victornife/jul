@@ -157,6 +157,8 @@ jobs:
           set -euo pipefail
           dir="stage/${{ steps.prof.outputs.name }}"
           cp README.md SECURITY.md server.toml "$dir/"
+          mkdir -p "$dir/docs"
+          cp docs/effective-versions.md "$dir/docs/"
           if [ "${{ matrix.os }}" = "windows" ]; then
             cp deploy/windows/install-service.ps1 deploy/windows/new-secure-data-dir.ps1 "$dir/"
           elif [ "${{ matrix.os }}" = "linux" ]; then

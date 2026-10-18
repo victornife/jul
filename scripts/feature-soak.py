@@ -153,10 +153,12 @@ def zero_config(binary, seconds, outdir, summary):
                 "serve": (["run", "--serve", str(site), "--listen", f"127.0.0.1:{serve_port}"], serve_port),
                 "proxy": (["run", "--proxy", f"127.0.0.1:{backend.server_port}", "--listen", f"127.0.0.1:{proxy_port}"], proxy_port),
             }
+            key_env = dict(os.environ, JUL_EFFECTIVE_VERSION_KEY_FILE=str((Path(tmp) / "private" / "version.key").resolve()))
+            subprocess.run([str(binary), "version-key", "init"], env=key_env, check=True, stdout=subprocess.DEVNULL)
             for name, (args, port) in modes.items():
                 log = open(outdir / f"{name}.log", "w", encoding="utf-8")
                 logs.append(log)
-                proc = subprocess.Popen([str(binary), *args], stdout=log, stderr=subprocess.STDOUT)
+                proc = subprocess.Popen([str(binary), *args], env=key_env, stdout=log, stderr=subprocess.STDOUT)
                 procs.append(proc)
                 wait_ready(proc, f"http://127.0.0.1:{port}/", payload)
 

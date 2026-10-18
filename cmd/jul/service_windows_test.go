@@ -191,3 +191,13 @@ func TestEdgeServiceExecuteBadConfig(t *testing.T) {
 		t.Fatalf("exit code = 0, want non-zero for bad config")
 	}
 }
+
+func TestEdgeServiceExplicitKeyPathFailsClosed(t *testing.T) {
+	es := &edgeService{configPath: writeTempConfig(t, minimalValidConfig()), versionKeyPath: filepath.Join(t.TempDir(), "missing")}
+	requests := make(chan svc.ChangeRequest)
+	status := make(chan svc.Status, 4)
+	_, code := es.Execute(nil, requests, status)
+	if code != 1 {
+		t.Fatal("SCM key path fell back to process environment")
+	}
+}

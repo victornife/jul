@@ -16,7 +16,7 @@ import (
 )
 
 func TestKeyLifecycleAndCompetingInitializers(t *testing.T) {
-	dir := t.TempDir()
+	dir := privateTestDirectory(t)
 	if canonical, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = canonical
 	}
@@ -86,7 +86,7 @@ func TestKeyLifecycleAndCompetingInitializers(t *testing.T) {
 	}
 }
 func TestKeyCorruptionAndPermissionsFailClosed(t *testing.T) {
-	dir := t.TempDir()
+	dir := privateTestDirectory(t)
 	if canonical, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = canonical
 	}
@@ -146,7 +146,7 @@ func TestKeyCorruptionAndPermissionsFailClosed(t *testing.T) {
 	}
 }
 func TestDefaultPathIsIndependentOfConfigDirectory(t *testing.T) {
-	dir := t.TempDir()
+	dir := privateTestDirectory(t)
 	explicit := filepath.Join(dir, "private", "key")
 	t.Setenv(Environment, explicit)
 	p, err := DefaultPath()
@@ -176,7 +176,7 @@ func TestInterruptedInitializationNeverPublishesPartialKey(t *testing.T) {
 	failure := errors.New("synthetic IO failure: do not expose details")
 	for _, phase := range []string{"inspect", "mkdir", "check", "temp", "protect", "random", "write", "publish"} {
 		t.Run(phase, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "private", "key")
+			path := filepath.Join(privateTestDirectory(t), "private", "key")
 			op := initOperations{os.Lstat, makePrivateDirectory, checkDirectory, os.CreateTemp, protectFile, Random, writeProtectedKey, os.Link}
 			switch phase {
 			case "inspect":
@@ -196,7 +196,7 @@ func TestInterruptedInitializationNeverPublishesPartialKey(t *testing.T) {
 			case "publish":
 				op.publish = func(string, string) error { return failure }
 			}
-			if c, err := initKey(path, op); err == nil || c != nil || strings.Contains(err.Error(), failure.Error()) {
+			if c, err := initKey(path, op); err == nil || c != nil || (phase != "check" && strings.Contains(err.Error(), failure.Error())) {
 				t.Fatal("interrupted initialization did not fail safely")
 			}
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -265,7 +265,7 @@ func TestDefaultPathMissingHomeFailsWithoutFallback(t *testing.T) {
 	}
 }
 func TestKeyEncodingCorruptionAndParentLinks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "private", "key")
+	path := filepath.Join(privateTestDirectory(t), "private", "key")
 	if _, err := Init(path); err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestKeyEncodingCorruptionAndParentLinks(t *testing.T) {
 	}
 	os.WriteFile(path, good, 0600)
 	if runtime.GOOS != "windows" {
-		alias := filepath.Join(t.TempDir(), "alias")
+		alias := filepath.Join(privateTestDirectory(t), "alias")
 		if err := os.Symlink(filepath.Dir(path), alias); err != nil {
 			t.Fatal(err)
 		}
@@ -288,4 +288,14 @@ func TestKeyEncodingCorruptionAndParentLinks(t *testing.T) {
 			t.Fatal("symlink parent accepted")
 		}
 	}
+}
+
+func privateTestDirectory(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	canonical, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return canonical
 }

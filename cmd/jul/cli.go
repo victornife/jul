@@ -339,6 +339,7 @@ func writeUnifiedDiff(w io.Writer, a, b []string) {
 func cmdRun(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	versionKeyPath := fs.String("effective-version-key-file", "", "startup protected effective-version key file")
 	serveDir := fs.String("serve", "", "serve this directory of static files")
 	proxyTarget := fs.String("proxy", "", "reverse-proxy all requests to this target (URL, host:port, or :port)")
 	listen := fs.String("listen", config.DefaultZeroConfigListen, "address to listen on")
@@ -374,7 +375,7 @@ func cmdRun(args []string) int {
 
 	ctx, reloadSig, stop := signals.Listen(context.Background())
 	defer stop()
-	return app.Serve(ctx, reloadSig, memorySource{name: name, cfg: cfg}, cfg, productName, version)
+	return app.Serve(ctx, reloadSig, memorySource{name: name, cfg: cfg}, cfg, productName, version, app.WithEffectiveVersionKeyFile(*versionKeyPath))
 }
 
 // noticeExposedListen prints one line when `jul run` binds beyond loopback:
@@ -478,6 +479,7 @@ func isTTY(w io.Writer) bool {
 func cmdServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	versionKeyPath := fs.String("effective-version-key-file", "", "startup protected effective-version key file")
 	configPath := fs.String("config", "server.toml", "path to the TOML configuration file")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -502,7 +504,7 @@ func cmdServe(args []string) int {
 	}
 	ctx, reloadSig, stop := signals.Listen(context.Background())
 	defer stop()
-	return app.Serve(ctx, reloadSig, src, cfg, productName, version)
+	return app.Serve(ctx, reloadSig, src, cfg, productName, version, app.WithEffectiveVersionKeyFile(*versionKeyPath))
 }
 
 // cmdCheck validates structure, stateless runtime prerequisites, and the

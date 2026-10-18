@@ -43,8 +43,9 @@ import (
 type ServeOption func(*serveOptions)
 
 type serveOptions struct {
-	logOutput io.Writer
-	versions  *versionid.Context
+	logOutput      io.Writer
+	versions       *versionid.Context
+	versionKeyPath string
 }
 
 func projectPluginInstanceStats(stats []plugins.InstanceStats) []observability.PluginInstanceStats {
@@ -70,6 +71,11 @@ func WithEffectiveVersions(versions *versionid.Context) ServeOption {
 	return func(o *serveOptions) { o.versions = versions }
 }
 
+// WithEffectiveVersionKeyFile selects a startup-only protected key path.
+func WithEffectiveVersionKeyFile(path string) ServeOption {
+	return func(o *serveOptions) { o.versionKeyPath = path }
+}
+
 // Serve builds the runtime from a validated configuration and runs until
 // baseCtx is cancelled. It is the composition root for the Jul.IA server:
 //
@@ -93,7 +99,13 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	}
 
 	if options.versions == nil {
-		loaded, err := versionid.LoadDefault()
+		var loaded *versionid.Context
+		var err error
+		if options.versionKeyPath != "" {
+			loaded, err = versionid.Load(options.versionKeyPath)
+		} else {
+			loaded, err = versionid.LoadDefault()
+		}
 		if err != nil {
 			fmt.Fprintln(options.logOutput, err)
 			return 1

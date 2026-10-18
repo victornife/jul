@@ -3,7 +3,8 @@
 #
 # Usage:
 #   .\install-service.ps1 -BinaryPath 'C:\Program Files\jul\jul.exe' `
-#                         -ConfigPath 'C:\ProgramData\jul\server.toml'
+#                         -ConfigPath 'C:\ProgramData\jul\server.toml' `
+#                         -InitializeVersionKey  # first installation only
 #
 # The service runs under the per-service virtual account "NT SERVICE\jul", the
 # Windows analogue of the systemd unit's unprivileged service user. The data
@@ -20,7 +21,9 @@ param(
     #   <DataDir>\history  config history snapshots
     #   <DataDir>\cache    HTTP disk cache + ACME certificate cache
     #   <DataDir>\logs     access-log "file" sink output
-    [string] $DataDir = 'C:\ProgramData\jul'
+    [string] $DataDir = 'C:\ProgramData\jul',
+    [string] $VersionKeyFile = '',
+    [switch] $InitializeVersionKey
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,6 +44,8 @@ if (-not (Test-Path $ConfigPath)) {
 }
 
 $serviceAccount = "NT SERVICE\$ServiceName"
+if (-not $VersionKeyFile) { $VersionKeyFile = Join-Path ($DataDir + "-version-private") "effective-version.key" }
+$VersionKeyFile = [IO.Path]::GetFullPath($VersionKeyFile)
 
 # Writable runtime directories, created up front so ACLs can be applied before
 # the service starts.
@@ -57,7 +62,7 @@ foreach ($dir in $writableDirs) {
 }
 
 # The service Execute() handler reads --config from the image path arguments.
-$binLine = '"{0}" --config "{1}"' -f $BinaryPath, $ConfigPath
+$binLine = '"{0}" --config "{1}" --effective-version-key-file "{2}"' -f $BinaryPath, $ConfigPath, $VersionKeyFile
 
 if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
     Write-Host "Service '$ServiceName' already exists; updating binary path."
@@ -77,6 +82,52 @@ if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
 # invalid account/password combination (1057); omit it entirely.
 sc.exe config $ServiceName obj= $serviceAccount | Out-Null
 Assert-NativeSuccess 'Setting service account'
+
+# Explicit first-install/upgrade provisioning precedes service Modify grants.
+# Missing established state must never be silently recreated on service restart.
+if (-not (Test-Path -LiteralPath $VersionKeyFile)) {
+    if (-not $InitializeVersionKey) {
+        throw "Version key missing at $VersionKeyFile. Restore its protected backup, or explicitly pass -InitializeVersionKey for a first installation/migration."
+    }
+    & $BinaryPath version-key init --file $VersionKeyFile
+    Assert-NativeSuccess 'Provisioning effective-version key'
+}
+$serviceSid = ([Security.Principal.NTAccount]::new($serviceAccount)).Translate([Security.Principal.SecurityIdentifier])
+$adminsSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+$systemSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+$currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$keyDirectory = Split-Path -Parent $VersionKeyFile
+foreach ($path in @($keyDirectory, $VersionKeyFile)) {
+    $item = Get-Item -LiteralPath $path -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Refusing version-key reparse point: $path" }
+    $oldAcl = Get-Acl -LiteralPath $path
+    $trusted = @($currentSid, $serviceSid.Value, $adminsSid.Value, $systemSid.Value)
+    $owner = $oldAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($owner -notin $trusted) { throw "Refusing untrusted existing version-key owner: $path" }
+    foreach ($rule in $oldAcl.Access) {
+        if ($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -notin $trusted) {
+            throw "Refusing previously exposed version-key permissions: $path"
+        }
+    }
+    if ($item.PSIsContainer) {
+        $acl = [Security.AccessControl.DirectorySecurity]::new()
+        $inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
+        $serviceRights = [Security.AccessControl.FileSystemRights]::ReadAndExecute
+    } else {
+        $acl = [Security.AccessControl.FileSecurity]::new()
+        $inheritance = [Security.AccessControl.InheritanceFlags]::None
+        $serviceRights = [Security.AccessControl.FileSystemRights]::Read
+    }
+    $acl.SetOwner($adminsSid)
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($sid in @($systemSid, $adminsSid)) {
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', $inheritance, 'None', 'Allow'))
+    }
+    $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($serviceSid, $serviceRights, $inheritance, 'None', 'Allow'))
+    Set-Acl -LiteralPath $path -AclObject $acl
+}
+# Existing bytes are never replaced or repaired. The service loads and validates
+# them as its actual identity; corrupt state fails startup.
 
 # Grant the service account read on the config (it must read it), and modify on
 # the writable state directories. The admin console rewrites the config

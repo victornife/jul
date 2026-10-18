@@ -347,7 +347,8 @@ Copy-Item 'C:\path\to\prepared\server.toml' 'C:\ProgramData\jul\server.toml'
 .\deploy\windows\install-service.ps1 `
   -BinaryPath 'C:\Program Files\jul\jul.exe' `
   -ConfigPath 'C:\ProgramData\jul\server.toml' `
-  -DataDir    'C:\ProgramData\jul'
+  -DataDir    'C:\ProgramData\jul' `
+  -InitializeVersionKey
 Start-Service jul
 ```
 
@@ -355,8 +356,11 @@ It creates `C:\ProgramData\jul\{history,cache,logs}` and grants the service
 account **modify** there and **read** on the config. The fresh-directory helper
 refuses an existing path, removes inherited access from the empty directory and
 grants SYSTEM/Administrators; descendants inherit that protected ACL. The
-installer only adds service grants and does not remove inherited or pre-existing
-access for other users. For existing directories or a config stored elsewhere,
+installer only adds service grants to existing config/data paths and does not
+remove their inherited or pre-existing access for other users. Its separate
+version-key directory/file require restrictive grants and receive a protected
+ACL for SYSTEM/Administrators and the service identity. Reuse the same
+`-VersionKeyFile` on reruns; omit first-install initialization after provisioning. For existing directories or a config stored elsewhere,
 review the effective ACLs before storing secrets or relying on confidentiality.
 The supplied `server.toml` also needs
 real static content/backends, and editable Console use requires

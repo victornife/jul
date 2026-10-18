@@ -45,6 +45,13 @@ closed. Native Windows ACL and virtual-service-account tests remain a merge
 blocker for this change; cross-compilation is not runtime evidence. Do not deploy
 this proposal to Windows services until that gate passes.
 
+## Startup path selection
+
+`--effective-version-key-file PATH` takes precedence over
+`JUL_EFFECTIVE_VERSION_KEY_FILE`, then the platform default. This flag is
+available for bare serving, `jul serve`, `jul run` and Windows SCM startup.
+It selects a protected existing file; it never initializes it.
+
 ## Containers, services and immutable deployments
 
 No writable configuration directory is required. Mount a private key read-only,
@@ -72,6 +79,29 @@ uses `/etc/jul/private`: provision as jul before making it read-only (0400 key,
 actually read them; avoid making them group-readable to work around access.
 Neither unit automatically initializes missing state. `ProtectHome` means a
 service cannot use an inaccessible home-directory default.
+
+## Windows service first installation
+
+From elevated PowerShell, prepare the config in its protected root, then invoke
+this source version's installer with explicit first-install opt-in:
+
+```powershell
+.\install-service.ps1 -BinaryPath 'C:\Program Files\jul\jul.exe' `
+  -ConfigPath 'C:\ProgramData\jul\server.toml' -DataDir 'C:\ProgramData\jul' `
+  -InitializeVersionKey
+Start-Service jul
+```
+
+The default key is in a separate private sibling of DataDir. Use
+`-VersionKeyFile PATH` to select another dedicated private location. The installer
+passes that path as an explicit SCM image argument, provisions only when
+explicitly opted in, and sets an administrator-owned protected ACL limited to
+SYSTEM/Administrators and read access for the virtual service identity. Existing
+bytes are retained; unsafe prior grants/reparse points are refused. The service
+validates the key under its actual identity. On installer reruns omit the opt-in
+and reuse the same path. Missing established state requires backup restoration,
+not another initialization. Native service CI must verify this boundary before
+merge; a syntactically valid installer is insufficient evidence.
 
 ## Meaning and exposure
 
@@ -128,3 +158,14 @@ and history, but restores the #644 vulnerability. Returning to the fixed binary
 with the same key restores its context. Downgrade with an unresolved post-fix
 marker is unsupported; recover under the fixed binary first. Never synthesize
 vulnerable hashes or disable concurrency checks to make a downgrade proceed.
+
+## Namespace fault harness boundary
+
+Normal non-root and container deployments use a protected service-owned key.
+Non-root user namespaces can map all host ancestor owners to an indistinguishable
+overflow UID; that cannot establish the required ownership trust. The namespace
+fault harness now requires root on a dedicated host and retains mount/network
+namespace isolation without user remapping. It provisions a disposable key
+outside retained evidence and removes it after the run. This is an explicit
+harness invocation change, not permission to trust arbitrary unmapped owners.
+No long fault/soak job was run for this fix.

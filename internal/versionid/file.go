@@ -127,7 +127,7 @@ func initKey(path string, op initOperations) (*Context, error) {
 		return nil, errors.New("cannot create private effective version key directory")
 	}
 	if err := op.checkDir(dir); err != nil {
-		return nil, errors.New("effective version key directory is not private")
+		return nil, fmt.Errorf("effective version key directory is not private: %w", err)
 	}
 	f, err := op.temp(dir, ".effective-version-key-*")
 	if err != nil {
