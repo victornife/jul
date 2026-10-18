@@ -56,9 +56,12 @@ constrains any design:
    enforcer is context only: it never changes a finding (reconfirmed by the
    maintainer once its warning-reduction benefit was withdrawn). Every plan also
    returns a stateless **postcondition** carrying expected presence or absence
-   per affected entry and an access fingerprint (including the loaded digests
-   of local access files: htpasswd, CA, CRL, WAF rules and request-plugin
-   modules), and digests of the configuration as written. Every digest is keyed
+   per affected entry and an access fingerprint over the access inputs as
+   written, and digests of the configuration as written. File contents
+   (htpasswd, CA, CRL, WAF rules, plugin modules, `${file:…}` values) are never
+   read for a plan or postcondition, because write access is not read access;
+   they are named as not compared, and their changes are classified only at
+   publish, for retirement. Every digest is keyed
    under a key held only by the running process, so the object allows no
    offline check of any secret, whether referenced, literal or inside a local
    file. It can be compared until that process restarts. Afterwards a re-plan

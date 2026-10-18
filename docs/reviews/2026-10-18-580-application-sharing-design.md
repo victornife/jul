@@ -14,9 +14,10 @@
 > **r17** `8385c59c` (round 18, §6.18), **r18** `874df4e4` (round 19, §6.19),
 > **r19** `c0af10a3` (whole-contract review, §6.20), **r20** `1332982a` (round
 > 21, §6.21), **r21** `a27acb0d` (round 22, §6.22), **r22** `68aed05d` (fourth
-> principal re-review, §6.23), **r23** `e73abca6` (round 24, §6.24) and **r24**
-> (this revision; round 25 in §6.25). This packet holds evidence, decisions,
-> review findings and traceability for the
+> principal re-review, §6.23), **r23** `e73abca6` (round 24, §6.24), **r24**
+> `b7d2f786` (round 25, §6.25) and **r25** (this revision; round 26 in §6.26).
+> This packet holds evidence, decisions, review findings and traceability for
+> the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -171,7 +172,7 @@ must be re-checked against the knowledge base by #582.
 | AD-06 | 2026-10-18 | Cloudflare origin enforcement | cloudflared `access.required` default; Jul `forward_auth` validator recommended, required with untrusted local processes (after S-4); Jul header-token change not authorised | Proposed | F3 |
 | AD-07 | 2026-10-18 | Postcondition scope for remote authorities (S6-2) | the access comparison covers configuration and local access files; a JWT key set, forward-auth decisions and provider policy (for entries whose declared intent relies on a provider, after S7-1) are listed in `external_inputs` and shown as not covered. Rejected: binding a key set (network fetch while planning; routine rotation reported as divergence) and `unverifiable` for every JWT entry (hides what Jul did verify) | Proposed; reversible before #641 ships | spec §9.4 |
 | AD-08 | 2026-10-18 | Transport failures in audience classes (R10-1) | request size limits outside the WAF (`client_max_body_size`; the WAF's own body limit stays WAF policy) and transport failures (client abort, malformed framing) are not access inputs, like timeouts and rate limits; so disabled ↔ `detect` without engine control stays `unchanged` (SD-14's intent), with the read-before-action difference disclosed and pinned by a test. Rejected: classing it `narrowed`, which would end every open exchange of every entry inheriting a global `[waf]` when detect mode is enabled for observation | Proposed; maintainer may overturn | spec §9.5; #641 |
-| AD-09 | 2026-10-18 | Keyed postcondition digests (S14-1; extended after RR07; recovery qualified after RR10) | every digest in a postcondition (configuration digests and access fingerprints, which bind written values, resolved references and loaded file contents) is an HMAC-SHA-256 under a key held only in the running process and never persisted, logged or returned; the object records `key_id`. An object can be compared until that process restarts; afterwards it is `unverifiable`. A re-plan confirms a raw candidate or operations #641 marks repeatable; non-repeatable typed operations (E62) stay `unverifiable` and are reconciled by hand. Rejected: unkeyed digests with a narrowed "sensitive object" promise, always-`unverifiable` for secret-bearing inputs, and a persisted key (new secret state, backup and migration) | Proposed; agreed by the third and fourth principal re-reviews; maintainer may overturn | spec §9.4; #641 |
+| AD-09 | 2026-10-18 | Keyed postcondition digests (S14-1; extended after RR07; recovery qualified after RR10) | every digest in a postcondition (configuration digests and access fingerprints over written values; file contents are never read for a plan or postcondition, after W4-1) is an HMAC-SHA-256 under a key held only in the running process and never persisted, logged or returned; the object records `key_id`. An object can be compared until that process restarts; afterwards it is `unverifiable`. A re-plan confirms a raw candidate or operations #641 marks repeatable; non-repeatable typed operations (E62) stay `unverifiable` and are reconciled by hand. Rejected: unkeyed digests with a narrowed "sensitive object" promise, always-`unverifiable` for secret-bearing inputs, and a persisted key (new secret state, backup and migration) | Proposed; agreed by the third and fourth principal re-reviews; maintainer may overturn | spec §9.4; #641 |
 
 "Shown without objection" is not acceptance; AD items become accepted only with
 the maintainer's acceptance of #580.
@@ -754,11 +755,29 @@ and raised three items.
 
 | ID | Sev. (reviewer → author) | Finding | Resolution (r24) |
 | --- | --- | --- | --- |
-| W4-1 | high → low, partly disputed | the exemption for "written and resolved unchanged" reveals equality if a caller can alter a referenced file or environment value | kept, with its boundary stated: it compares only values from outside the candidate (environment, which cannot change within a running process, or file contents); a comparison with a chosen value needs write access to the referenced file, which already controls the value, as for htpasswd, CA, CRL and WAF files. Always-`uncertain` would retire affected entries' exchanges on every unrelated edit. A hidden field the candidate sets now counts as changed whatever its value |
+| W4-1 | high → low, partly disputed (dispute withdrawn in round 25) | the exemption for "written and resolved unchanged" reveals equality if a caller can alter a referenced file or environment value | kept, with its boundary stated: it compares only values from outside the candidate (environment, which cannot change within a running process, or file contents); a comparison with a chosen value needs write access to the referenced file, which already controls the value, as for htpasswd, CA, CRL and WAF files. Always-`uncertain` would retire affected entries' exchanges on every unrelated edit. A hidden field the candidate sets now counts as changed whatever its value |
 | W4-2 | medium | an `unverifiable` result row still said "plan again" for every case | points to reloading a file or to the recovery rules |
 | W4-3 | medium | SD-16 did not say how restricted or private is recognised while intent is optional | refusal applies to declared `restricted` or `private_network` modes and to entries with a Jul check; undeclared entries without checks are not judged (`unanalysed`) |
 
-### 6.25 Round 25 (verification of r24)
+### 6.25 Round 25 (verification of r24 `b7d2f786`)
+
+Both reviewers rejected the author's W4-1 dispute, independently and for the
+same reason: write access is not read authority. Atomic replacement, sidecars
+or deploy tooling can write a referenced file without being able to read what
+Jul loaded, and with `config:write` such an actor could test guesses through
+plans. The whole-contract reviewer also found that the dispute contradicted
+the spec's own prohibition. The dispute is withdrawn. The flaw also reached
+§9.4, whose access fingerprint read file contents at plan time.
+
+| ID | Sev. | Finding | Resolution (r25) |
+| --- | --- | --- | --- |
+| S25-1 = W5-1 | high | the unchanged-reference exemption compared file contents read at plan time with loaded contents, an equality oracle for a write-without-read actor, and it contradicted the prohibition on comparing chosen with unreadable values | plans and postconditions never read file contents: file-backed inputs compare by written value; an unchanged environment reference stays unchanged (constant for the process); content changes are classified at publish, server-side, for retirement only; postconditions name `file_contents` as not compared; the WAF engine-control precondition is judged on the loaded rules |
+| W5-2 | medium | SD-16's scope named only CIDR allow lists | any CIDR policy, allow or deny |
+
+Consequence accepted: a postcondition can no longer tell whether an edited
+htpasswd, CRL or WAF file is serving; it says so, and evidence (§7) answers it.
+
+### 6.26 Round 26 (verification of r25)
 
 (Recorded below.)
 
@@ -799,6 +818,7 @@ resource and value evidence contract maps to §13–§15 and §17.
 | Provider seams (membership, invitations, revocation) remain handoffs | by design | SD-06 outcome gate; #588 |
 | Postconditions are comparable only within the Jul process that produced them (AD-09) | by design; after a restart a re-plan confirms raw candidates and repeatable operations, and non-repeatable typed operations stay `unverifiable` (E62) | #641 marks and tests repeatable operations; maintainer may prefer a stored key later |
 | Classes involving values the caller cannot read are `uncertain` (RR11) | conservative acknowledgement and retirement for some reference-backed edits | #641 negative tests; #645 audits existing output |
+| Postconditions do not compare file contents (W4-1) | an edited htpasswd, CRL or WAF file cannot be confirmed by a postcondition; evidence (§7) answers it | #641; #581 evidence |
 | Remote authorities (JWT key sets, forward-auth decisions, provider policy) change access without a Jul generation | named in every postcondition result as not covered (AD-07) | #641; external evidence per §7 |
 | WAF effects classified only for mode and enablement; every rule change is `uncertain` | conservative by design; retirement on rule tuning may surprise operators | #641/#642 tests; keep-open exception |
 | WAF detect-mode rules depend on pinned Coraza behaviour (E49, E51) and on AD-08's treatment of transport failures | a dependency upgrade could change them; the maintainer may prefer the stricter `narrowed` class | #641 regression tests; rules re-derived on any engine upgrade |

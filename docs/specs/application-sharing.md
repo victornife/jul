@@ -641,7 +641,7 @@ design must satisfy; the design owns mechanisms, bounds and tests.
 
 | Aspect | Requirement |
 | --- | --- |
-| Trigger | A published generation in which an entry's effective access inputs are classed `narrowed` or `uncertain` by §9.5, including: the withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file, WAF rule-file or plugin-module content change; a CA/CRL change that invalidates certificates; host names or match narrowed; **any target change** while exchanges admitted under the old target remain. |
+| Trigger | A published generation in which an entry's effective access inputs are classed `narrowed` or `uncertain` by §9.5, including: the withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file, WAF rule-file or plugin-module content change (classified at publish from the loaded contents, §9.5); a CA/CRL change that invalidates certificates; host names or match narrowed; **any target change** while exchanges admitted under the old target remain. |
 | Uncertain changes (SD-09) | Treated as narrowing by default. The plan offers an explicit "keep open connections" exception per entry; choosing it is recorded in the result and forfeits any complete-withdrawal claim for that entry. |
 | Never triggers | `metadata_only` changes (declared intent and labels); changes to inputs that are not access inputs (§9.5: rate limits, request size limits outside the WAF, cache, compression, timeouts, response headers, transport failures); `widened` changes; and external events (provider policy, issuer key removal), which have no Jul event. |
 | Scope (SD-08) | **Exactly the narrowed entries.** Exchanges of every other entry continue uninterrupted, including exchanges multiplexed on the same HTTP/2 or HTTP/3 connection (browsers coalesce connections when one certificate covers several hosts). |
@@ -847,20 +847,21 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
     prepared candidate as §4.3 takes them from a snapshot: the Jul checks it
     actually applies, client-certificate requirement, bind scope, withdrawal
     state, declared intent. It also holds an **access fingerprint**: a keyed
-    digest over the entry's access inputs (§9.5) as written, the resolved value
-    of every input written as a reference, and the content of the local access
-    files they use (htpasswd, CA, CRL, WAF rule files, request-plugin modules)
-    as read when the plan was computed. Binding written and resolved values
-    together means a plan for a different reference (for example a file the
-    caller controls) can never produce a matching digest. A changed resolved
-    value or loaded file yields `diverged`.
+    digest over the entry's access inputs (§9.5) as written. An environment
+    reference resolves to the same value for the life of the process, which is
+    also the life of the key, so its written form suffices. File-backed inputs
+    enter by written value (path or reference text) only: local access files
+    (htpasswd, CA, CRL, WAF rule files, request-plugin modules) and `${file:…}`
+    references. Their contents are never read for a postcondition, because a
+    caller able to write a file without reading it could otherwise test
+    guesses against what Jul has loaded (§9.5). Each entry result names them
+    under `file_contents` (below).
   - Jul stores nothing; the owner keeps the object with the change.
 - **Evaluator.** A read-only, server-owned operation requiring the same
   permissions as inspecting the configuration (`status:read` and
   `config:read`) compares the object with one captured serving snapshot,
   without re-reading the environment or files. The snapshot pairs the raw and
-  effective configuration with the generation, and the generation records the
-  access-file digests it actually loaded. The evaluator returns:
+  effective configuration with the generation. The evaluator returns:
   - `candidate`: `unverifiable` when `key_id` is not the evaluator's current
     key (the change was planned by an earlier Jul process). Otherwise it uses
     the keyed digest of the snapshot's raw configuration (computed on request;
@@ -873,8 +874,7 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
     or an `absent` entry's `route_id` resolves to nothing); `differs` (with the
     differing field names, or `still_present` for an entry expected absent);
     `not_found` (a `present` reference resolves to nothing); `unverifiable` (a
-    position whose revision is not serving, or an access file whose loaded
-    digest is unavailable); or `unknown`. A revision-bound `absent` entry
+    position whose revision is not serving); or `unknown`. A revision-bound `absent` entry
     matches only while the candidate is serving, because that exact
     configuration does not contain it.
   - `access`, aggregated: `matches` (at least one entry, and all match),
@@ -889,21 +889,23 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
 | `not_serving_yet` | `candidate` is `base_serving` | "Not serving yet: the configuration this change was planned against is still serving." Access details are shown for information only. |
 | `candidate_serving` | `candidate` is `serving`; `access` is `matches` or `none_expected` | With `matches`: "The planned configuration is serving, and its expected access facts match." With `none_expected`: "The planned configuration is serving; this change expected no access facts to compare." The **only** result that may say the change is serving. |
 | `diverged` | `access` is `differs` | "What is serving differs from the plan," naming the entries and fields — including an access file changed after planning while the exact candidate serves. |
-| `unverifiable` | `access` is `unverifiable` | "Jul cannot compare these entries," naming each and the reason, with the next step: reload a file whose loaded digest is missing, or, for a position from another revision, follow the recovery rules below. |
+| `unverifiable` | `access` is `unverifiable` | "Jul cannot compare these entries," naming each and the reason, with the next step from the recovery rules below. |
 | `access_matches` | `candidate` is `other_revision`; `access` is `matches` | "The expected access facts match, but a different configuration (<version>) is serving." |
 | `other_revision` | `candidate` is `other_revision`; `access` is `none_expected` | "A different configuration (<version>) is serving; this change expected no access facts to compare." |
 
 No surface shows a bare "confirmed": the exact-candidate answer and the access
 answer are always shown, separately.
 
-- **Remote authorities are not covered.** A JWT key set fetched from its URL,
-  a forward-auth service's decisions and provider policy change without a Jul
-  generation, so the fingerprint cannot bind them: doing so would need a
-  network fetch while planning and would report routine key rotation as
-  divergence. Each entry result lists them in `external_inputs` (closed set:
-  `jwt_key_set`, `forward_auth`, `provider_policy`), and every surface says
-  what was compared and that these were not ("The key set at <URL> is
-  controlled by its issuer and was not compared"). `provider_policy` is listed
+- **Inputs maintained outside the configuration are not compared.** A JWT key
+  set fetched from its URL, a forward-auth service's decisions and provider
+  policy change without a Jul generation, so the fingerprint cannot bind them:
+  doing so would need a network fetch while planning and would report routine
+  key rotation as divergence. File contents are not compared either (above).
+  Each entry result lists these in `external_inputs` (closed set:
+  `jwt_key_set`, `forward_auth`, `provider_policy`, `file_contents`), and every
+  surface says what was compared and that these were not ("The key set at
+  <URL> is controlled by its issuer and was not compared"; "The contents of
+  dashboard.htpasswd were not compared; test the change, §7"). `provider_policy` is listed
   for every entry that declares an `external_enforcer` (whose label it
   carries), declares `restricted` without a Jul check, or declares
   `private_network` (membership is enforced by the network provider). For an
@@ -916,15 +918,10 @@ answer are always shown, separately.
   but a restart discards the key by design. Before a restart, a failed, staged
   or restart-bound apply yields `not_serving_yet`. A later writer yields
   `access_matches`, `other_revision`, `diverged` or `unverifiable`. After a
-  restart the original object yields `unverifiable` (recovery, below). Access
-  files are compared by the bytes
-  Jul has **loaded**: a file edited on disk but not reloaded changes nothing
-  that serves and is not a divergence by itself. When the loaded bytes differ
-  from what the plan read — the file was changed and reloaded, or the plan
-  expected a new file but an asset-only reload failed while the configuration
-  digest stayed equal — the result is `diverged`, naming the file, even while
-  the exact candidate configuration is serving. Each postcondition entry is
-  bounded in size. Clients never re-implement the comparison;
+  restart the original object yields `unverifiable` (recovery, below). A
+  postcondition cannot tell whether an edited htpasswd, CRL, WAF or other
+  referenced file is serving, because file contents are not compared; evidence
+  (§7) does. Each postcondition entry is bounded in size. Clients never re-implement the comparison;
   they display the server's result.
 - **Recovery after a restart is not universal.** A re-plan confirms a change
   only when the same plan can be computed again and is a no-op against what
@@ -957,22 +954,30 @@ oracle. With `auth.allow = ["${env:OFFICE_CIDR}"]` serving, a plan that sets
 the hidden address, and about 32 such plans could recover an IPv4 address.
 
 The rule: when the comparison for an access input involves a value the caller
-cannot read, that input's class is `uncertain`, unless its written value and
-its resolved value are both unchanged. Such a value is a resolved reference
+cannot read, that input's class is `uncertain` unless its written value is
+unchanged. Such a value is a resolved reference
 (the view and `config:raw` show reference text, never resolved values) or a
 field hidden from that caller; a hidden field that the candidate sets counts as
 changed whatever its value. Directions are still computed wherever they follow
 from readable values alone.
 
-The exemption compares only values from outside the candidate, read when the
-plan runs and when Jul last loaded: an environment variable, which cannot
-change within a running process, or a file's contents. It reveals at most
-whether such a file changed since it was loaded. Turning that into a
-comparison with a chosen value requires write access to the referenced file,
-and anyone with that access already controls the value. The same boundary
-already applies to htpasswd, CA, CRL and WAF files. Treating every unchanged
-reference as `uncertain` instead would retire the open exchanges of affected
-entries on every unrelated edit.
+**Values from outside the candidate.** An environment reference resolves to
+the same value for the life of the process, so an unchanged one is unchanged.
+File contents can change on disk at any time. Write access is not read access:
+a caller able to replace a referenced file without reading it could otherwise
+test guesses against what Jul has loaded.
+
+So plans never read file contents. File-backed inputs (`${file:…}` references,
+htpasswd, CA, CRL, WAF rule files, plugin modules) compare by written value: a
+written change is `uncertain`, and an unchanged one contributes no change.
+Every plan that affects an entry with such inputs says "file contents are read
+again when this is applied; this plan does not compare them". Content changes
+are classified at publish, server-side, from what the new generation loads, and
+only for §8.4 retirement; the htpasswd and CRL rows below apply there, never in
+plan output. Treating every unchanged reference as `uncertain` instead would
+retire the open exchanges of affected entries on every unrelated edit.
+Publishing reveals at most whether a reload changed anything, which needs
+reload authority and is part of #645.
 
 `uncertain` keeps its full meaning: acknowledgement in the Console, and §8.4
 retirement by default with the keep-open exception. A class is never shown as
@@ -980,7 +985,9 @@ retirement by default with the keep-open exception. A class is never shown as
 acknowledgement and retirement for some edits to reference-backed inputs whose
 resolved policy happens to be equal (SD-09). No other part of a plan response
 may compare a caller-chosen value with one the caller cannot read; #645 audits
-the existing output. Jul does not attempt general policy equivalence; anything it cannot
+the existing output.
+
+Jul does not attempt general policy equivalence; anything it cannot
 classify is `uncertain`, never "unchanged". A class is assigned only from a
 rule below; a rule that does not exactly fit falls through to `uncertain`.
 
@@ -1060,8 +1067,8 @@ class or retirement.
 | `client_auth` mode raised to `require` / lowered from `require` | `narrowed` / `widened` |
 | `client_auth` between `none` and `request` (certificates become optional or disappear) | `uncertain` |
 | CIDR: the permitted address set (an empty `allow` list means every address; then `deny` removes addresses) strictly shrinks / strictly grows | `narrowed` / `widened` — computed on that set, so removing the last `allow` entry is `widened` |
-| htpasswd: entries only removed, remaining entries byte-identical | `narrowed` |
-| CRL: revoked `(issuer, serial)` pairs only added for the same issuers / only removed | `narrowed` / `widened` |
+| htpasswd: entries only removed, remaining entries byte-identical (at publish only, from loaded contents) | `narrowed` |
+| CRL: revoked `(issuer, serial)` pairs only added for the same issuers / only removed (at publish only, from loaded contents) | `narrowed` / `widened` |
 | CRL replaced by one for a different issuer; CA bundle, SAN allow-list or forwarded-certificate setting changed | `uncertain` |
 | Bind: a specific IPv4 address → `0.0.0.0`, or a specific IPv6 address → `::` (same port) | `widened` |
 | Bind: the reverse of either | `narrowed` |
@@ -1069,7 +1076,7 @@ class or retirement.
 | CORS: an origin added while credentials are allowed, credentials newly allowed, or `["*"]` introduced | `widened` |
 | CORS: origins only removed or credentials disallowed | `narrowed` |
 | WAF: disabled → `block` / `block` → disabled, with rules, rule files and other WAF settings unchanged (a WAF can only interrupt or fail a request, never admit one; approved CORS preflights skip Jul's credential checks but still pass through it) | `narrowed` / `widened` |
-| WAF without runtime engine control (no loaded rule — inline, in a rule file or anything it includes — uses `ctl:ruleEngine`; the embedded CRS has none, E51): disabled ↔ `detect`, everything else unchanged | `unchanged`: detect mode never interrupts on a rule match and does not enforce its body limit (E49). It does read the request body before the action, so a body that cannot be read — a client abort, malformed framing, or a chunked body over `client_max_body_size` — fails where a handler that ignores the body would answer; that is a transport or size-limit effect, not an access input (above; AD-08) |
+| WAF without runtime engine control (no rule in the serving generation's loaded policy — inline, in a rule file or anything it includes — uses `ctl:ruleEngine`; the embedded CRS has none, E51; never judged from disk contents at plan time): disabled ↔ `detect`, everything else unchanged | `unchanged`: detect mode never interrupts on a rule match and does not enforce its body limit (E49). It does read the request body before the action, so a body that cannot be read — a client abort, malformed framing, or a chunked body over `client_max_body_size` — fails where a handler that ignores the body would answer; that is a transport or size-limit effect, not an access input (above; AD-08) |
 | WAF without runtime engine control: `detect` → `block` / `block` → `detect`, everything else unchanged | `narrowed` / `widened` |
 | WAF with runtime engine control: disabled → `detect` / `detect` → disabled, everything else unchanged | `narrowed` / `widened` (a rule can switch blocking on per request) |
 | WAF with runtime engine control: `detect` ↔ `block` | `uncertain` (detect mode ignores `allow`, so a rule that switches blocking on can deny what `block` mode allows) |
@@ -1507,7 +1514,7 @@ items are failures, not limitations.
 | Forged `X-Forwarded-For`, `Forwarded`, RFC 9440 client-certificate headers | ignored or stripped | ADR 0016 §12 |
 | Forged provider identity headers | decision unchanged; header reaches backend (recorded) | SH-12 |
 | Direct backend or admin access from another host | unreachable | loopback binds |
-| Restricted or private content in a cache | **must not**: restricted and private entries must keep Jul's response cache off in the first release. Jul does not refuse a configuration that enables it: lint and plans warn (`cache_on_restricted_entry`, `intent_restricted_cached`), and the fixtures enable no cache. *Accepted (SD-16):* refusal is the long-term default, introduced through a migration and compatibility decision; until then legacy configurations keep the warnings, and guided sharing flows (#587) and the fixtures require cache off. It applies to what Jul can see: entries that declare `restricted` or `private_network`, and entries with a Jul check (credential, client certificate or CIDR allow list). An undeclared entry without Jul checks is not judged, because external restrictions are invisible to Jul (its posture stays `unanalysed`) | cache key is method + Host + URI with no listener, entry or identity partition; reloads do not purge |
+| Restricted or private content in a cache | **must not**: restricted and private entries must keep Jul's response cache off in the first release. Jul does not refuse a configuration that enables it: lint and plans warn (`cache_on_restricted_entry`, `intent_restricted_cached`), and the fixtures enable no cache. *Accepted (SD-16):* refusal is the long-term default, introduced through a migration and compatibility decision; until then legacy configurations keep the warnings, and guided sharing flows (#587) and the fixtures require cache off. It applies to what Jul can see: entries that declare `restricted` or `private_network`, and entries with a Jul check (credential, client certificate or any CIDR policy, allow or deny). An undeclared entry without Jul checks is not judged, because external restrictions are invisible to Jul (its posture stays `unanalysed`) | cache key is method + Host + URI with no listener, entry or identity partition; reloads do not purge |
 | Public entries sharing cache entries | the process-wide cache is keyed by method + Host + URI, so cache-enabled entries on different listeners that answer the same host name and path share cache entries; correct only when they serve the same content. Plans and lint warn (`cache_shared_across_entries`). The fixtures enable no Jul response cache | partitioning by listener or entry is a cache-owner decision (#620/#623) |
 | Route or backend change of the portal | dashboard audience unchanged (plan shows no dashboard delta) | per-entry checks; §9.5 |
 | Intentional dashboard → public | only via a plan naming it; the Console requires acknowledging the intent change, and the API returns the same classes without enforcing it | SH-5, §4.5 |
