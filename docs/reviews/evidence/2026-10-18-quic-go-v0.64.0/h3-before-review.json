@@ -1,0 +1,96 @@
+{
+  "suite": "h3",
+  "total": 49,
+  "passed": 42,
+  "allow_listed_failures": [
+    {
+      "id": "h3spec HTTP/3 servers: MUST send H3_FRAME_UNEXPECTED if CANCEL_PUSH is received in a request stream [HTTP/3 7.2.5]",
+      "issue": "https://github.com/victornife/jul/issues/569"
+    },
+    {
+      "id": "h3spec HTTP/3 servers: MUST send H3_MISSING_SETTINGS if the first control frame is not SETTINGS [HTTP/3 6.2.1]",
+      "issue": "https://github.com/victornife/jul/issues/569"
+    },
+    {
+      "id": "h3spec HTTP/3 servers: MUST send H3_SETTINGS_ERROR if HTTP/2 settings are included [HTTP/3 7.2.4.1]",
+      "issue": "https://github.com/victornife/jul/issues/569"
+    },
+    {
+      "id": "h3spec HTTP/3 servers: MUST send QPACK_DECODER_STREAM_ERROR if Insert Count Increment is 0 [QPACK 4.4.3]",
+      "issue": "https://github.com/victornife/jul/issues/569"
+    },
+    {
+      "id": "h3spec HTTP/3 servers: MUST send QPACK_DECOMPRESSION_FAILED if an invalid static table index exits in a field line representation [QPACK 3.1]",
+      "issue": "https://github.com/victornife/jul/issues/569"
+    },
+    {
+      "id": "h3spec HTTP/3 servers: MUST send QPACK_ENCODER_STREAM_ERROR if a new dynamic table capacity value exceeds the limit [QPACK 4.1.3]",
+      "issue": "https://github.com/victornife/jul/issues/569"
+    },
+    {
+      "id": "h3spec QUIC servers: MUST send PROTOCOL_VIOLATION if PATH_CHALLENGE in Handshake is received [Transport 17.2.4]",
+      "issue": "https://github.com/victornife/jul/issues/569"
+    }
+  ],
+  "unexpected_failures": [],
+  "stale_allowlist_entries": [],
+  "temporary_exceptions_needing_review": [
+    {
+      "id": "h3spec QUIC servers: MUST send PROTOCOL_VIOLATION if PATH_CHALLENGE in Handshake is received [Transport 17.2.4]",
+      "issue": "https://github.com/victornife/jul/issues/569",
+      "reasons": [
+        "dependency or tool identity changed; recheck exception"
+      ]
+    },
+    {
+      "id": "h3spec HTTP/3 servers: MUST send H3_MISSING_SETTINGS if the first control frame is not SETTINGS [HTTP/3 6.2.1]",
+      "issue": "https://github.com/victornife/jul/issues/569",
+      "reasons": [
+        "dependency or tool identity changed; recheck exception"
+      ]
+    },
+    {
+      "id": "h3spec HTTP/3 servers: MUST send H3_SETTINGS_ERROR if HTTP/2 settings are included [HTTP/3 7.2.4.1]",
+      "issue": "https://github.com/victornife/jul/issues/569",
+      "reasons": [
+        "dependency or tool identity changed; recheck exception"
+      ]
+    },
+    {
+      "id": "h3spec HTTP/3 servers: MUST send H3_FRAME_UNEXPECTED if CANCEL_PUSH is received in a request stream [HTTP/3 7.2.5]",
+      "issue": "https://github.com/victornife/jul/issues/569",
+      "reasons": [
+        "dependency or tool identity changed; recheck exception"
+      ]
+    },
+    {
+      "id": "h3spec HTTP/3 servers: MUST send QPACK_DECOMPRESSION_FAILED if an invalid static table index exits in a field line representation [QPACK 3.1]",
+      "issue": "https://github.com/victornife/jul/issues/569",
+      "reasons": [
+        "dependency or tool identity changed; recheck exception"
+      ]
+    },
+    {
+      "id": "h3spec HTTP/3 servers: MUST send QPACK_ENCODER_STREAM_ERROR if a new dynamic table capacity value exceeds the limit [QPACK 4.1.3]",
+      "issue": "https://github.com/victornife/jul/issues/569",
+      "reasons": [
+        "dependency or tool identity changed; recheck exception"
+      ]
+    },
+    {
+      "id": "h3spec HTTP/3 servers: MUST send QPACK_DECODER_STREAM_ERROR if Insert Count Increment is 0 [QPACK 4.4.3]",
+      "issue": "https://github.com/victornife/jul/issues/569",
+      "reasons": [
+        "dependency or tool identity changed; recheck exception"
+      ]
+    }
+  ],
+  "tool_skip_warnings": [
+    "Warning: 0-RTT is not possible. Skipping this test. Use \"h3spec -s 0-RTT\" next time."
+  ],
+  "versions": {
+    "github.com/quic-go/qpack": "v0.6.0",
+    "github.com/quic-go/quic-go": "v0.64.0",
+    "h3spec_sha256": "b5f8eddd968cb195d1e3e7698d33fa141d6b2ad56153089d89928ac0fdee28bf"
+  }
+}

@@ -71,6 +71,13 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Fixed
 
+- Upgrade quic-go from v0.63.0 to v0.64.0 for HTTP/3 header-buffer allocation
+  hardening and QUIC congestion/recovery, MTU and path-validation fixes. Go
+  1.27.2, qpack v0.6.0, TLS policy and disabled 0-RTT remain unchanged. Pinned
+  h3spec still reports 42/49 with the same seven exact temporary exceptions
+  under #569; the upgrade does not establish full HTTP/3 RFC conformance.
+  See the [compatibility and validation review](docs/reviews/2026-10-18-quic-go-v0.64.0.md).
+
 - Drain the complete retained-metrics summary in the short soak reproduction
   smoke gate, preventing a successful early grep match from causing SIGPIPE
   (exit 141) under pipefail; producer failures still fail the gate.
