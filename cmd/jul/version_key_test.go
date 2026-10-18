@@ -5,9 +5,11 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"jul/internal/versionid"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -25,9 +27,9 @@ func TestVersionKeyCommandLifecycle(t *testing.T) {
 			t.Fatalf("invalid args accepted: %v", args)
 		}
 	}
-	code, out, _ := capture(t, func() int { return cmdVersionKey([]string{"init"}) })
-	if code != 0 || !strings.Contains(out, path) {
-		t.Fatal("provisioning failed")
+	code, out, errOut := capture(t, func() int { return cmdVersionKey([]string{"init"}) })
+	if code != 0 || !strings.Contains(out, strconv.Quote(path)) {
+		t.Fatalf("provisioning failed: code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
 	before, _ := os.ReadFile(path)
 	if strings.Contains(out, string(before)) {
@@ -58,5 +60,18 @@ func TestServingCommandsSelectExplicitKeyPath(t *testing.T) {
 		if code != 1 {
 			t.Fatal("explicit missing key fell back to environment/default key")
 		}
+	}
+}
+
+func TestLegacyStartupSelectsExplicitKeyPath(t *testing.T) {
+	// The original flag-based entry point must honor the same precedence as
+	// serve/run. TestMain supplies a valid environment key; this explicit missing
+	// path must still fail before any listener starts.
+	args, flags := os.Args, flag.CommandLine
+	t.Cleanup(func() { os.Args, flag.CommandLine = args, flags })
+	flag.CommandLine = flag.NewFlagSet("jul", flag.ContinueOnError)
+	os.Args = []string{"jul", "--config", writeTemp(t, validConfig), "--effective-version-key-file", filepath.Join(t.TempDir(), "missing")}
+	if code := run(); code != 1 {
+		t.Fatalf("legacy startup with missing explicit key: %d", code)
 	}
 }

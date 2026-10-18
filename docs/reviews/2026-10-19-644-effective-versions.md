@@ -125,3 +125,14 @@ private key/leaf grants are unchanged. Installer conversion inspects raw ACE
 forms and refuses null/empty or unsupported/exposed established ACLs. The native
 fixture checks refusal without changing dummy bytes or ACL state. Native rerun
 and coverage remain required; this note does not claim those results yet.
+
+The next native run passed all version-key lifecycle preflight tests and the
+virtual-account service recovery journey. Its lean suite exposed a PowerShell
+argument-tokenization error in the new coverage command and a test expecting
+an unescaped Windows path inside quoted CLI output; both are corrected. The
+new reload-fence regressions exercise initial auth rejection and auth/runtime
+changes during resource preparation, asserting keyed desired/serving versions,
+resource abort, unchanged snapshot and the original live HTTP response. They
+and the legacy flag-entry key precedence regression pass under the race
+detector. Rebuilt source maps use a separate dependency installation so their
+paths match clean CI checkouts. The complete final-head gates remain required.
