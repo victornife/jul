@@ -78,8 +78,11 @@ Normative. A successor that cannot satisfy one stops and escalates.
    automation tokens never describe or grant application access.
 5. **SH-5 — Preview is loopback; widening is explicit.** Every change that widens
    an entry's audience, or contradicts its declared intent, is previewed as a
-   plan that names each affected entry and requires an explicit operator choice.
-   No change to one entry may silently widen another.
+   plan that names each affected entry, so no change to one entry can silently
+   widen another. Jul's guided surface, the Console, requires an explicit
+   operator choice before applying it. The API and CLI return the same classes
+   and findings with every plan but do not enforce an acknowledgement (§4.5),
+   and file-owned pipelines run their own review.
 6. **SH-6 — Unknown stays unknown.** External policy Jul cannot observe is
    labelled *operator-declared* or *not declared*; stale or unavailable evidence
    is never shown as current; an ambiguous outcome is never reported as success.
@@ -246,7 +249,7 @@ environment or from files to render the view or evaluate a postcondition.
 | `entry.position` | `{block_index, location_index}` | always | layer's configuration | 0-based positions in the layer's revision; revision-bound, never an identity; what postcondition references use (§9.4) |
 | `entry.identity` | `durable` \| `revision_bound` | always | derived | — |
 | `service.block` | response-local key into `blocks` | always | layer's configuration | the block's label, host names, listener and unmatched-host role live in `blocks`, once per response, never repeated per entry |
-| `listener.address` | string | always | canonical `listen` | bounded string (below) |
+| `listener.address` | `BoundedText` | always | canonical `listen` | display text (below) |
 | `listener.bind_scope` | `loopback` \| `private_address` \| `shared_address_space` \| `all_interfaces` \| `public_address` \| `unknown` | `unknown` when not a literal address | derived from the effective listen address (§4.4) | configured bind, **not** reachability |
 | `listener.transport` | `{tls, client_auth: none\|request\|require\|unknown, http3, h2c}` | always | layer's configuration | listener-scoped (ADR 0016 §11) |
 | `urls` | `{items[], count, truncated}`; each item `{url \| template, kind: concrete\|template\|none\|truncated\|withheld}` | `concrete` only for literal host names and `exact`/`prefix` paths whose complete URL fits its bound; wildcard hosts and regex paths yield a `template` that is not a usable address; no host names yields `none`; a URL whose host, path or whole text exceeds its bound is `truncated`, shown for recognition only and never offered as a usable or copyable address; a host name or path written as a reference makes it `withheld` (reference text only, never resolved); `count` covers every host name of the block | derived from the block's host names and the entry's path | `items` capped (below); what Jul answers locally, never proof of outside reach |
@@ -257,9 +260,9 @@ environment or from files to render the view or evaluate a postcondition.
 | `action`, `upstream_ref` | existing vocabulary; upstream `name` | `upstream_ref` absent for static, literal or non-proxy actions | layer's configuration | — |
 | `controls` | `{cache, waf, rate_limit, cors}` | always | layer's configuration | — |
 | `backend_group` | response-local group key | present when the entry shares a backend with others | derived (§4.2) | never an identity or scope |
-| `warnings[]` | closed set (§4.4) | empty when none | derived | bounded |
-| `declared_intent` | `{mode, audience_label?, external_enforcer?}` \| `not_declared` | from §4.5 | layer's configuration | labels only; never a user list or credential |
-| `intent_findings[]` | closed set (§4.5) | empty when consistent or not declared | derived | bounded |
+| `warnings[]` | closed set (§4.4) + `warnings_complete` | empty only when evaluated completely and none apply; `warnings_complete: false` when an input was `unknown` (saved layer) | derived | bounded |
+| `declared_intent` | `{mode, audience_label?, external_enforcer?}` \| `not_declared` \| `unknown` | from §4.5; `unknown` in a saved layer when the block is written with references | layer's configuration | labels only; never a user list or credential |
+| `intent_findings[]` | closed set (§4.5) + `intent_findings_complete` | empty only when evaluated completely and consistent, or not declared; `intent_findings_complete: false` when an input was `unknown` | derived | bounded |
 | `evidence[]` | §7.1 records | empty ⇒ `unverified` | Jul-local in the first release | ≤ 8 per entry |
 | `authority` | `{config_authority, config_state, desired_version, serving_version}` | once per response | existing status | ADR 0019 §16 |
 | `next_actions[]` | closed set (§9.7) | always | server rule table | — |
@@ -277,14 +280,27 @@ cap with a truthful count, and every string has a byte bound:
   members[], truncated}`; `members[]` capped (proposed 50). Entries reference
   their group by `key`; groups are advisory and not exhaustive.
 - `urls.items` per entry: capped (proposed 3); `count` is the total.
-- **Strings.** Every string the view returns is bounded in bytes and cut at a
-  UTF-8 boundary (proposed: labels, host names, listener addresses, warning
-  details and evidence text 256 bytes; paths 1,024; URLs 2,048). The
-  configuration accepts longer values (only the 16 MiB file cap bounds them,
-  E55). A cut value is returned as `{text, truncated: true, full_bytes}`; it is
-  for display only, never offered as a usable or copyable address, and never
-  used to resolve or act. The full value is available through a paged read of
-  its block or entry, each chunk bounded.
+- **Strings.** The configuration accepts values of any length up to the 16 MiB
+  file cap (E55), so the view separates two kinds of string, each with a single
+  wire type:
+  - **Display text** (labels, host names, paths and listener addresses as shown,
+    URLs, reference text, warning details, evidence text) always uses
+    `BoundedText = {text, truncated, full_bytes}`, even when short. `text` is
+    cut at a UTF-8 boundary (proposed: 256 bytes; paths 1,024; URLs 2,048). A
+    cut value is for display only: it is never offered as a usable or copyable
+    address and never used to resolve or act.
+  - **Machine values** used to act (`route_id`, selector coordinates, positions,
+    enums, digests) are never cut. A literal `route_id` is bounded by its
+    grammar (1–64 bytes, ADR 0019). A selector whose coordinates exceed the
+    selector cap (proposed 4 KiB), or whose block lists its names only in
+    part, is returned as `{too_large: true, full_bytes}` and read in full
+    before use. The entry's position is always present.
+  - **Full values** of either kind come from one read operation addressed by
+    the captured snapshot, a reference (position, `route_id` or block index)
+    and a field name, with an offset. It returns `{chunk, offset, total_bytes,
+    next_offset}` with bounded chunks (proposed 64 KiB) and is refused once
+    the snapshot changes. It requires the view's permissions and never returns
+    a resolved reference value.
 - **Pages.** Entries are paged by count and by bytes (proposed 200 entries and
   1 MiB, whichever comes first; a page always holds at least one entry, which
   the string caps bound). A page carries only the block and backend-group rows
@@ -622,7 +638,7 @@ design must satisfy; the design owns mechanisms, bounds and tests.
 | --- | --- |
 | Trigger | A published generation in which an entry's effective access inputs are classed `narrowed` or `uncertain` by §9.5, including: the withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file, WAF rule-file or plugin-module content change; a CA/CRL change that invalidates certificates; host names or match narrowed; **any target change** while exchanges admitted under the old target remain. |
 | Uncertain changes (SD-09) | Treated as narrowing by default. The plan offers an explicit "keep open connections" exception per entry; choosing it is recorded in the result and forfeits any complete-withdrawal claim for that entry. |
-| Never triggers | `metadata_only` changes (declared intent and labels); changes to inputs that are not access inputs (§9.5: rate limits, request size limits, cache, compression, timeouts, response headers, transport failures); `widened` changes; and external events (provider policy, issuer key removal), which have no Jul event. |
+| Never triggers | `metadata_only` changes (declared intent and labels); changes to inputs that are not access inputs (§9.5: rate limits, request size limits outside the WAF, cache, compression, timeouts, response headers, transport failures); `widened` changes; and external events (provider policy, issuer key removal), which have no Jul event. |
 | Scope (SD-08) | **Exactly the narrowed entries.** Exchanges of every other entry continue uninterrupted, including exchanges multiplexed on the same HTTP/2 or HTTP/3 connection (browsers coalesce connections when one certificate covers several hosts). |
 | Mechanisms | Stream-level: end the narrowed entry's in-flight requests, SSE and gRPC streams and owned H1 WebSockets (#562), without closing connections shared with other entries. Certificate revocation and policy changes are enforced by re-checking the current client-certificate policy (mode, CA bundle, CRL and SAN allow-list) on every request to entries that require a client certificate, instead of closing the connection. Closing a whole connection is a fallback only when no stream-level mechanism exists for that protocol. |
 | Collateral | If a fallback closes a connection that also carried another entry's exchange, the result discloses the count, the entry's claim is downgraded to "new access stopped; open connections ended with collateral interruption", and §13 W3 counts it as a failure. |
@@ -648,7 +664,7 @@ design must satisfy; the design owns mechanisms, bounds and tests.
 | --- | --- | --- | --- | --- | --- |
 | **Inspect** | `status:read`, `config:read` | admin access | — | §4.3 view | — |
 | **Preview** | `config:write`; allowed in both modes | candidate or typed ops | diff, lifecycle, `can_apply`/`can_stage`, lint, intent findings, audience delta (§9.5), postcondition (§9.4; for a raw candidate, or a typed operation that sets a field hidden from the caller, only when the caller also holds `config:raw`) | widened, narrowed and intent-contradicting entries; restart need; external handoffs | edit and re-plan |
-| **Publish / change exposure** | managed: `config:apply` with `base_version` and `Idempotency-Key`; file-owned: owner's pipeline, then watcher/SIGHUP | plan reviewed; widening acknowledged | required | DNS, connector and provider steps listed, not executed | rollback or re-apply; external steps separate |
+| **Publish / change exposure** | managed: `config:apply` with `base_version` and `Idempotency-Key`; file-owned: owner's pipeline, then watcher/SIGHUP | plan reviewed; widening acknowledged in the Console (the API returns the classes but does not enforce acknowledgement, §4.5) | required | DNS, connector and provider steps listed, not executed | rollback or re-apply; external steps separate |
 | **Withdraw (stop new access)** | as publish | explicit entry set; current `base_version` | required | §8 limits; mechanism limits (§9.3) | restore access (a widening, reviewed again) |
 | **Recover** | managed: `history:rollback` or re-apply; file-owned: revert and reload | target revision known | rollback diff with its own audience delta | §15 limits | — |
 | **Cut established** | host service manager | — | — | blast radius | restart |
@@ -797,7 +813,7 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
   - `base_config_digest` and `candidate_config_digest` cover the canonical
     **raw** configuration, as written. They are what the evaluator compares;
     a collision cannot make another configuration pass for the candidate.
-    Equal digests mean the configuration as written is identical. Resolved
+    Equal digests mean the same canonical pre-expansion configuration; comments and formatting are not part of it. Resolved
     reference values and the contents of named files are not in them; for
     access inputs, the access fingerprint covers both.
   - `expect` is `present` or `absent`. Every entry the plan affects (including
@@ -928,8 +944,9 @@ credentials); WAF policy and rule files (they can block requests before the
 action, and their allow and exclusion rules can exempt requests); location
 checks (CIDR, credential method and its settings), `require_client_cert`, the
 credential files they name; the withdrawal gate; and, for retirement only, the
-entry's target. Rate limits, request size limits, cache, compression, timeouts
-and response headers are not access inputs, and neither are transport failures
+entry's target. Rate limits, request size limits outside the WAF
+(`client_max_body_size`), cache, compression, timeouts and response headers are
+not access inputs (the WAF's own body limit is part of WAF policy, below), and neither are transport failures
 (a client abort or malformed framing; AD-08): their changes are shown as plan items and intent
 findings (for example `intent_restricted_cached`) but never produce an audience
 class or retirement.
@@ -1216,11 +1233,13 @@ token = "${env:JUL_ADMIN_TOKEN}"
   listening on loopback.
 - **Implementation prerequisites.** The intent tranche (§17); complete withdrawal
   if delivered in time.
-- **Operator steps.** Preview on loopback → bind the LAN listener (plan names the
-  new listener and both entries, classed `uncertain` because the loopback
-  address stops answering) → declare and enforce the dashboard as
-  restricted → declare and publish the portal (plan names only the portal as
-  widened) → stop new access to the dashboard → restore it → restart.
+- **Operator steps** (each with the plan classes of §9.5). Preview on loopback
+  → move the blocks to the LAN listener (every entry of the moved blocks —
+  default-deny, portal and dashboard — is `uncertain`, because the loopback
+  address stops answering) → declare the dashboard restricted
+  (`metadata_only`) and add its Basic check (`narrowed`) → declare the portal
+  public (`metadata_only`) → stop new access to the dashboard (`narrowed`) →
+  restore it (`widened`, acknowledged) → restart.
 - **Expected states.** Portal: declared `public`, no Jul checks, anonymous
   success from lab-client-2. Dashboard: declared `restricted`, Jul `basic` per
   request, intended 200 and excluded 401. After withdrawal: §8.2 wording.
@@ -1421,7 +1440,7 @@ items are failures, not limitations.
 | Forged `X-Forwarded-For`, `Forwarded`, RFC 9440 client-certificate headers | ignored or stripped | ADR 0016 §12 |
 | Forged provider identity headers | decision unchanged; header reaches backend (recorded) | SH-12 |
 | Direct backend or admin access from another host | unreachable | loopback binds |
-| Restricted or private content in a cache | **never**: restricted and private entries keep Jul's response cache off in the first release, so their responses are neither stored nor served from cache | cache key is method + Host + URI with no listener, entry or identity partition; reloads do not purge |
+| Restricted or private content in a cache | **must not**: restricted and private entries must keep Jul's response cache off in the first release. Jul does not refuse a configuration that enables it: lint and plans warn (`cache_on_restricted_entry`, `intent_restricted_cached`), and the fixtures enable no cache. Making it a refusal needs its own decision, because SD-05 keeps intent findings as warnings | cache key is method + Host + URI with no listener, entry or identity partition; reloads do not purge |
 | Public entries sharing cache entries | the process-wide cache is keyed by method + Host + URI, so cache-enabled entries on different listeners that answer the same host name and path share cache entries; correct only when they serve the same content. Plans and lint warn (`cache_shared_across_entries`). The fixtures enable no Jul response cache | partitioning by listener or entry is a cache-owner decision (#620/#623) |
 | Route or backend change of the portal | dashboard audience unchanged (plan shows no dashboard delta) | per-entry checks; §9.5 |
 | Intentional dashboard → public | only via a plan naming it and acknowledging the intent change | SH-5, §4.5 |
@@ -1576,7 +1595,7 @@ is a projection, not a restore source.
 | Certificates, keys, CA, CRL, htpasswd | operator | referenced by path; restore exactly with permissions; never in exported metadata or evidence |
 | ACME account key and certificate cache | operator | restore to keep certificate continuity; otherwise re-enrolment, issuance delay and rate limits apply |
 | WAF directives and includes, plugins, static roots | operator | referenced by path; restore exactly (#584 proves this) |
-| Secrets and secret references | operator | re-provision values; only references live in configuration |
+| Secrets and secret references | operator | literal secrets stay in the exact configuration and are restored with it; values behind references live outside it and are re-provisioned |
 | Application data and users | application | application backup |
 | Connector identity (cloudflared credentials, tailscaled node state) | operator / provider | provider-specific: credentials may move; a new node may need new identity |
 | Provider policy, DNS, Access applications | provider | export with provider tooling; Jul rollback never rewinds it |

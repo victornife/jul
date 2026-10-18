@@ -98,7 +98,8 @@ constrains any design:
    decision-maker — application, forward-auth service or validator — trusts
    connector identity headers; provider identity is accepted only as a
    cryptographically validated token (SH-12). Restricted and private entries
-   keep Jul's response cache off in the first release. Jul's cache is
+   must keep Jul's response cache off in the first release; Jul warns when they
+   do not, and does not refuse. Jul's cache is
    process-wide and keyed by method, Host and URI, so public entries answering
    the same host and path on different listeners share entries; plans warn, and
    partitioning is the cache owner's decision.

@@ -11,9 +11,10 @@
 > re-review, §6.12), **r12** `de5f194a` (round 13, §6.13), **r13** `5e750d63`
 > (round 14, §6.14), **r14** `3d24bd5f` (round 15, §6.15), **r15** `ce929b49`
 > (third principal re-review, §6.16), **r16** `e513edf2` (round 17, §6.17),
-> **r17** `8385c59c` (round 18, §6.18), **r18** `874df4e4` (round 19, §6.19)
-> and **r19** (this revision: round-19 record). This packet holds evidence,
-> decisions, review findings and traceability for the
+> **r17** `8385c59c` (round 18, §6.18), **r18** `874df4e4` (round 19, §6.19),
+> **r19** `c0af10a3` (whole-contract review, §6.20) and **r20** (this revision;
+> round 21 in §6.21). This packet holds evidence, decisions, review findings
+> and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -164,7 +165,7 @@ must be re-checked against the knowledge base by #582.
 | AD-05 | 2026-10-18 | Connector identity headers | SH-12 | Proposed | spec §3 |
 | AD-06 | 2026-10-18 | Cloudflare origin enforcement | cloudflared `access.required` default; Jul `forward_auth` validator recommended, required with untrusted local processes (after S-4); Jul header-token change not authorised | Proposed | F3 |
 | AD-07 | 2026-10-18 | Postcondition scope for remote authorities (S6-2) | the access comparison covers configuration and local access files; a JWT key set, forward-auth decisions and provider policy (for entries whose declared intent relies on a provider, after S7-1) are listed in `external_inputs` and shown as not covered. Rejected: binding a key set (network fetch while planning; routine rotation reported as divergence) and `unverifiable` for every JWT entry (hides what Jul did verify) | Proposed; reversible before #641 ships | spec §9.4 |
-| AD-08 | 2026-10-18 | Transport failures in audience classes (R10-1) | request size limits and transport failures (client abort, malformed framing) are not access inputs, like timeouts and rate limits; so disabled ↔ `detect` without engine control stays `unchanged` (SD-14's intent), with the read-before-action difference disclosed and pinned by a test. Rejected: classing it `narrowed`, which would end every open exchange of every entry inheriting a global `[waf]` when detect mode is enabled for observation | Proposed; maintainer may overturn | spec §9.5; #641 |
+| AD-08 | 2026-10-18 | Transport failures in audience classes (R10-1) | request size limits outside the WAF (`client_max_body_size`; the WAF's own body limit stays WAF policy) and transport failures (client abort, malformed framing) are not access inputs, like timeouts and rate limits; so disabled ↔ `detect` without engine control stays `unchanged` (SD-14's intent), with the read-before-action difference disclosed and pinned by a test. Rejected: classing it `narrowed`, which would end every open exchange of every entry inheriting a global `[waf]` when detect mode is enabled for observation | Proposed; maintainer may overturn | spec §9.5; #641 |
 | AD-09 | 2026-10-18 | Keyed postcondition digests (S14-1; extended after RR07) | every digest in a postcondition (configuration digests and access fingerprints, which bind written values, resolved references and loaded file contents) is an HMAC-SHA-256 under a key held only in the running process and never persisted, logged or returned; the object records `key_id`. An object can be compared until that process restarts; afterwards it is `unverifiable` and the owner re-plans the same change, which confirms at once when it is serving. Rejected: unkeyed digests with a narrowed "sensitive object" promise (weakens the default; a changed privacy contract), always-`unverifiable` for secret-bearing inputs (cannot be detected reliably for literals and file contents), and a persisted key (new secret state, backup and migration) | Proposed; agreed by the third principal re-review; maintainer may overturn | spec §9.4; #641 |
 
 "Shown without objection" is not acceptance; AD items become accepted only with
@@ -196,6 +197,8 @@ any row above.
 
 | Item | Why no current contract depends on it | Owner | Trigger |
 | --- | --- | --- | --- |
+| Server-side acknowledgement of widening on managed API apply (W-3) | SD-05 makes acknowledgement a Console interaction; plans return the classes to every caller | maintainer | an API consumer widens access unintentionally, or #587 evidence |
+| Refusing response cache on restricted or private entries (W-1) | SD-05 keeps intent findings as warnings so file-owned pipelines never break; lint and plans warn | maintainer with #620/#623 | evidence of a cached restricted response in #581 or a recipe |
 | Earlier read-only provider observation (show provider-policy membership in the view) | evidence model already carries provider-sourced records with freshness; nothing in #581–#586 needs it | #62 / #588 | #583 evidence or the SD-06 outcome gate |
 | Cross-block application grouping key | operations act on explicit entry sets | #587 / later | a recipe needs one name across hosts |
 
@@ -675,6 +678,31 @@ through the caller's projections, access fingerprints are keyed and meaningless
 across inaccessible configurations, and evaluator results follow the same
 authorisation. No new blocker or high finding. No blocker or high finding is
 open.
+
+### 6.20 Round 20 (whole-contract consistency review of r19 `c0af10a3`)
+
+At the maintainer's request to scrutinise everything, a fresh reviewer read the
+entire specification and ADR rather than the latest diff, and the author ran
+mechanical checks: every evidence, decision and section reference resolves;
+estimates and closed sets are stated consistently; a bare Tailscale issue
+reference was qualified (tailscale/tailscale#859); ADR decision 7 now states the
+postcondition's process scope. The reviewer's eight findings were verified;
+two were partly disputed.
+
+| ID | Sev. (reviewer → author) | Finding | Resolution (r20) |
+| --- | --- | --- | --- |
+| W-1 | blocker → medium | §11 and the ADR said restricted and private content is **never** cached, while Jul only warns | wording now says "must not", states that Jul warns and does not refuse, and records refusal as a separate decision. A hard validation gate was not added, because SD-05 deliberately keeps intent findings as warnings so file-owned pipelines never break |
+| W-2 | high | "request size limits are not access inputs" contradicted "any WAF body-limit change is `uncertain`" | the exclusion now names limits outside the WAF (`client_max_body_size`); the WAF's own body limit stays WAF policy; AD-08 qualified |
+| W-3 | high → medium | SH-5 said every widening requires an explicit choice, while §4.5 makes acknowledgement a Console interaction | SH-5 and the Publish row now state exactly that: the Console enforces it, the API returns the classes, file-owned pipelines review their own changes. A server-side interlock would change the external API and is listed as deferred for the maintainer |
+| W-4 | high | the saved layer could show empty warnings or findings, or a definite mode, when an input was `unknown` | `declared_intent` admits `unknown`; `warnings_complete` and `intent_findings_complete` flags |
+| W-5 | high | a field's JSON type changed when truncated, and the full-value read was undefined | one `BoundedText` type for all display text; machine values never cut (selectors too large are flagged and read in full); one defined full-value read bound to the snapshot |
+| W-6 | medium | F1's steps listed wrong delta classes | rewritten with explicit classes for every step |
+| W-7 | medium | §15 said only references live in configuration | literal secrets are restored with the configuration; referenced values are re-provisioned |
+| W-8 | low | "configuration as written is identical" overstated canonical equality | "the same canonical pre-expansion configuration" |
+
+### 6.21 Round 21 (verification of r20)
+
+(Recorded below.)
 
 ## 7. Traceability
 
