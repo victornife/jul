@@ -36,7 +36,8 @@ distributed policy state, and Extended CONNECT.
 ## 2. Vocabulary
 
 Design and API terms are below. Console wording is a candidate that #585 tests
-for comprehension before #587 freezes it (§14).
+for comprehension before #587 freezes it (§14). Strings the intent tranche shows
+earlier are marked provisional and carry no compatibility promise until then.
 
 | Term | Meaning | Not to be confused with |
 | --- | --- | --- |
@@ -105,10 +106,12 @@ Normative. A successor that cannot satisfy one stops and escalates.
     trusted boundary (§6), or the entry needs a Jul-side check.
 12. **SH-12 — No trusted connector identity headers.** Jul forwards unknown
     request headers and can only overwrite, not remove, named headers. No
-    supported journey relies on an application trusting provider-asserted
-    identity headers (`Tailscale-User-*`, `Cf-Access-Authenticated-User-Email`
-    and similar) until every Jul path to that application is controlled and a
-    separate decision covers sanitisation.
+    supported journey relies on **any authorization decision-maker** — the
+    application, a forward-auth service or another validator — trusting
+    provider-asserted identity headers (`Tailscale-User-*`,
+    `Cf-Access-Authenticated-User-Email` and similar) until every Jul path to it
+    is controlled and a separate decision covers sanitisation. Provider identity
+    is accepted only as a cryptographically validated token (§10, F3).
 
 ## 4. The service view
 
@@ -147,12 +150,14 @@ Edge cases:
 - **Same target in preview and apply.** In `managed` mode the `base_version`
   fence guarantees that an apply targets the previewed revision or is refused.
   In `file_owned` mode Jul has no write fence: the owner's pipeline writes the
-  file. Jul therefore treats a file-owned change as **unconfirmed** until, after
-  the reload, it checks a postcondition against the new serving revision: the
-  intended entry (by `route_id`, or by matching the previewed selector *and*
-  content) carries the intended change, and no other entry's audience changed
-  unexpectedly. Pipelines should compare the plan's `desired_version` before
-  writing.
+  file, and Jul keeps **no** record of previews. A file-owned preview therefore
+  returns a stateless **postcondition object** — `base_version`, the candidate's
+  `desired_version`, the explicit entry references and the expected audience
+  delta — which the owner keeps with the change. After the reload, the owner
+  (or a client on its behalf) submits it for evaluation against the current
+  `serving_version`, or evaluates it locally. Without it, Jul reports every
+  observed delta since the previous serving revision and the change stays
+  **unconfirmed**; Jul never claims to have verified the operator's intent.
 - **Rename, delete, recreate.** Changing `route_id` is delete + create. Evidence
   is bound to `route_id` + `serving_version` (§7.1) and becomes stale when either
   changes; reuse of an ID is never treated as continuity.
@@ -172,12 +177,16 @@ Edge cases:
 ### 4.3 Field contract (proposed projection)
 
 Server-computed (SH-9), introduced with internal API stability (ADR 0019 §24),
-promoted to an external `/api/v1` contract only by a separate decision. Once any
-surface or runbook consumes it, its semantics are compatibility-relevant: the
-projection is versioned and a semantic replacement needs dual rendering.
+promoted to an external `/api/v1` contract only by a separate decision. The
+envelope carries `sharing_view_version` (initially `1`). Fields are only ever
+added; a semantic replacement ships side by side under a new version while the
+old one is still rendered. Closed-set codes (warnings, intent findings, next
+actions) are never repurposed: removing or relaxing one is a deprecation, and
+severity is a separate field that may evolve.
 
 | Field | Type | Presence / absence meaning | Source | Sensitivity and bounds |
 | --- | --- | --- | --- | --- |
+| `sharing_view_version` | integer | always | server | — |
 | `entry.route_id` | string | absent ⇒ `entry.identity = revision_bound` | `route_id` | ADR 0019 grammar |
 | `entry.selector` | object + `base_version` | always | config | paths are admin-visible only |
 | `entry.identity` | `durable` \| `revision_bound` | always | derived | — |
@@ -483,7 +492,7 @@ bounds and tests; this section owns what consumers may rely on):
 
 | Aspect | Requirement |
 | --- | --- |
-| Trigger | A published generation that **narrows** an entry's effective access inputs: withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file content change (htpasswd digest); CA/CRL change invalidating certificates; the entry's host names or match narrowed; its target changed where continued access to the old backend matters. CORS changes are not authorization and are excluded. External events (provider policy, issuer key removal) have no Jul event and are not covered. |
+| Trigger | A published generation that **narrows** an entry's effective access inputs: withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file content change (htpasswd digest); CA/CRL change invalidating certificates; the entry's host names or match narrowed; **any change of its target** while long-lived exchanges admitted under the old target remain. A target change may be exempted only by an explicit, previewed exception that states the continuation; an exempted change never supports a complete-withdrawal claim. CORS changes are not authorization and are excluded. External events (provider policy, issuer key removal) have no Jul event and are not covered. |
 | Scope | Connections and streams admitted to the narrowed entry under an earlier generation; for certificate changes, TLS and QUIC connections whose verified certificate is no longer acceptable. |
 | Collateral | HTTP/2 and HTTP/3 connections can carry several entries. Retirement is stream-level where possible; any wider closure is disclosed in the plan and the result. |
 | Protocols | H1 keep-alive and in-flight responses, H1 WebSocket (with #562 ownership), SSE and long responses, native and transcoded gRPC, H2 and H3 streams. |
@@ -524,11 +533,21 @@ The reload outcome and the authority state are reported separately.
 | `not_applied` | Publish not reached; the previous runtime keeps serving | "Not applied; the previous configuration is still serving." Inspect `config_state`: persisted bytes may differ (managed restoration can fail; file-owned files are never rewritten). |
 | `saved_not_live` (non-terminal) | persisted; live result not yet known | "Saved, not confirmed live." Poll the apply until terminal; never report exposure or withdrawal as effective. |
 
-| `config_state` (examples) | Summary statement |
+The authority state is the closed `config_state` enum (ADR 0019 §16); every value
+is rendered, `managed_inconsistent` always from its `reason`:
+
+| `config_state` | Summary statement and next action |
 | --- | --- |
-| `managed_pending_restart`, `managed_desired_ahead` | "Saved; Jul still serves the previous configuration until it restarts." A withdrawal needing a restart is **not** effective. |
+| `managed_clean` | "Managed; serving matches the saved configuration." |
+| `managed_unadopted` | "Managed, but no baseline has been adopted; changes are refused until you adopt the current file." |
+| `managed_drift` | "The file was edited outside Jul; managed changes are refused until you adopt or revert it. Jul keeps serving." |
+| `managed_desired_ahead` | "Saved; Jul still serves the previous configuration and nothing is staged." A withdrawal in this state is **not** effective. |
+| `managed_pending_restart` | "Saved and staged; Jul serves the previous configuration until it restarts." A withdrawal needing a restart is **not** effective. |
+| `managed_failed_apply` | "The last change was saved but could not go live; the previous file was restored and is serving." Nothing to undo. |
+| `managed_inconsistent` + `reason` | rendered from the reason (for example "the managed baseline could not be read"); never as "the file disagrees" unless the reason says so |
+| `file_owned_clean` | "Owned by a file or pipeline; serving matches the file." |
 | `file_owned_desired_ahead` | "The file changed; Jul serves the previous configuration until it restarts." |
-| `managed_drift`, `managed_inconsistent` (with its `reason`) | "Jul's managed baseline and the file disagree; managed changes are refused until resolved." |
+| `file_owned_invalid` | "The current file is invalid; Jul keeps serving the last valid configuration. Fix the file in its owner's pipeline." |
 
 **Ambiguous outcomes.** Clients keep `apply_id` with the server's `boot_id`.
 Poll `GET /api/v1/config/applies/{apply_id}` and branch on `terminal`. A retry
@@ -553,8 +572,10 @@ withdrawal shows:
   method and **must not** be used: it would drop the credential check.
 - Request-phase WASM plugins and the CORS preflight terminator run **before**
   Jul's location checks: a plugin can answer by itself, and an approved preflight
-  receives `204`. The plan refuses to call such an entry withdrawn unless the same
-  change detaches its plugins and CORS policy.
+  receives `204`. The first journeys therefore **do not withdraw** entries with
+  request plugins or a CORS policy; the plan refuses and names the gate as the
+  mechanism for them. (Detaching them would make recovery more than one
+  reversal.)
 - A deny-only CIDR gate admits a client whose address cannot be identified (not
   expected on TCP listeners; stated for completeness).
 - The `deny` action is not used: it cannot coexist with `proxy_pass` and would
@@ -578,7 +599,7 @@ restart in `managed` mode.
 | | `managed` | `file_owned` |
 | --- | --- | --- |
 | Inspect, preview | yes | yes |
-| Publish, withdraw, recover through Jul | yes, under RBAC, CAS and idempotency | refused with `409 config_authority_read_only` before side effects; the view gives the exact change for the owner's pipeline and later checks the §4.2 postcondition |
+| Publish, withdraw, recover through Jul | yes, under RBAC, CAS and idempotency | refused with `409 config_authority_read_only` before side effects; the view gives the exact change for the owner's pipeline and a postcondition object to evaluate after the reload (§4.2) |
 | Drift | writes refused until adopted | n/a |
 | History | managed history and rollback | none (the pipeline owns it) |
 
@@ -660,9 +681,10 @@ Error language says what happened, what did not change and the next step:
   was applied. Review the plan again." (stale `base_version`)
 - "Saved, not yet serving: this change needs a restart. New access is **not**
   stopped until Jul restarts." (restart-bound)
-- "This configuration is owned by a file or pipeline. Make this change there: add
-  `deny = ["0.0.0.0/0", "::/0"]` to the route's `[servers.locations.auth]`; Jul
-  will confirm once it is serving." (`file_owned`)
+- "This configuration is owned by a file or pipeline. Make this change there:
+  <the exact edit from the plan>; keep the postcondition shown below and Jul will
+  confirm once it is serving." (`file_owned`; once the gate ships the exact edit
+  is the gate setting — #587 never recommends `auth.deny`)
 - "Unknown: Jul restarted before confirming the outcome. Nothing will be retried
   automatically. Check what is serving now." (lost ledger)
 
@@ -793,8 +815,10 @@ token = "${env:JUL_ADMIN_TOKEN}"
   request, intended 200 and excluded 401. After withdrawal: §8.2 wording.
 - **Negative cases.** Wrong or missing password; forged `X-Forwarded-For` and
   provider identity headers (decision unchanged); `Host: portal.lab.test` with
-  dashboard paths (portal content or 404); unknown `Host`, IP literal and missing
-  SNI (404 from default-deny); dot-segment and encoded-separator paths (canonical
+  dashboard paths (portal content or 404); unknown `Host` and IP literal (404
+  from default-deny); no or unknown SNI with `Host: dash.lab.test` (TLS
+  completes with the fallback certificate, routing follows `Host`, Basic still
+  applies — there is no SNI-to-Host binding); dot-segment and encoded-separator paths (canonical
   selection); direct backend and admin from a client (unreachable); WAF-blocked
   payload (403); oversized body (413); backend down (502/503, portal unaffected);
   removing the dashboard's check (intent finding and acknowledgement); stale
@@ -921,8 +945,13 @@ ingress:
   `CF_Authorization` cookie, while Jul's JWT check reads only `Authorization:
   Bearer` (E07, X11–X12). A Jul `forward_auth` validator is **recommended** as
   defense in depth and **required** where untrusted local processes can run
-  (§6). A Jul change to read a token from another header is not authorised here;
-  if #583 shows the connector check is insufficient, it records a bounded
+  (§6). Any such validator must: verify the `Cf-Access-Jwt-Assertion` signature
+  against the team's published keys with an algorithm allow-list (RS256);
+  require the exact issuer (`https://<team>.cloudflareaccess.com`) and the
+  application's audience tag; enforce `exp` and `nbf`; fail closed when keys are
+  unavailable beyond a stated cache period; and ignore every identity header
+  (SH-12). A Jul change to read a token from another header is not authorised
+  here; if #583 shows the connector check is insufficient, it records a bounded
   proposal for #62.
 - **Ordering.** Create the Access application before the tunnel route (X13);
   §9.6 applies to every provider step.
@@ -952,7 +981,8 @@ items are failures, not limitations.
 
 | Scenario | Expected | Mechanism |
 | --- | --- | --- |
-| Unknown `Host`, IP literal, missing SNI | 404 from the default-deny block; never portal or dashboard content | first-declared block receives unmatched hosts |
+| Unknown `Host`, IP literal | 404 from the default-deny block; never portal or dashboard content | first-declared block receives unmatched hosts |
+| No or unknown SNI | TLS completes with the fallback certificate; routing follows `Host`; entry checks still apply | certificate selection is separate from Host routing; no SNI-to-Host binding |
 | Host case, trailing dot, port, alias | normalised; selects the named block or default-deny | Host normalisation |
 | Dot segments, repeated or encoded separators | canonical path selects the same location the backend sees | path canonicalisation (E37) |
 | Public prefix shadowing a restricted path | never serves restricted content | separate host names; ADR 0018 precedence; route-test evidence |
@@ -1021,16 +1051,23 @@ vantage and network path; cgroup or container layout; and the bounds below.
 | **W1 representative** | 16 closed-loop clients, 10 min after a 2 min warm-up; 70 % portal HTML (≈ 4 KiB), 10 % portal asset (≈ 256 KiB), 20 % dashboard JSON (≈ 2 KiB) with valid credentials | W0 plus request counts by class, latency p50/p95/p99, in-flight, upstream connections, error ratio |
 | **W2 mixed + long-lived** | W1 plus 10 % excluded-identity requests and 20 held long-lived connections (SSE or H1 WebSocket) to the dashboard — required by SD-02 | W1 plus denial ratio and long-lived connection count from the event log |
 | **W3 access change** | during W2: stop new access to the dashboard, hold 2 min, restore; a fixed-cadence portal probe (1 request/s) throughout | portal probe results; first denied dashboard request relative to the terminal result; long-lived connections that continue, from the event log |
-| **W4 outage and drain** | during W1: stop the backend 60 s, restart it; then stop load and wait at least the longest configured upstream idle timeout | portal continuity; dashboard 502/503 then recovery; return to W0 baseline |
+| **W4 outage and drain** | during W1: stop the backend 60 s, restart it; a fixed-cadence dashboard probe (1 request/s, valid credentials) throughout; then stop load and wait at least the longest configured upstream idle timeout | portal continuity; dashboard 502/503, then recovery time from backend readiness; return to the W0 reference |
 
 **Predeclared bounds.** Hardware-independent, fixed by this design: zero failed
 portal probes during W3 and W4; zero excluded or forged requests succeeding;
 every dashboard request whose headers are sent after the withdrawal's terminal
 `applied_live` result is denied; no Jul restart; no scrape gap longer than two
 intervals; configured cache and queue caps never exceeded; after W4 drain,
-in-flight and upstream counts return to zero and FDs return to the W0 baseline;
-goroutine growth ≤ `4×workers+32` and heap growth ≤ 64 MiB, the existing pass
-criteria of [soak procedures](../soak-procedures.md). Host-dependent bounds (CPU, RSS,
+in-flight and upstream counts return to zero; goroutine growth ≤ `4×workers+32`
+and heap growth ≤ 64 MiB, the existing pass criteria of
+[soak procedures](../soak-procedures.md). **Comparison method:** the W0
+reference is the median of each series over W0's last 5 minutes; the post-drain
+value is the median over 2 minutes after the drain wait; growth is post-drain
+minus reference. #581 declares before the run the FD tolerance over the
+reference and the dashboard recovery deadline after backend readiness (proposed
+default: first successful dashboard probe within 10 s, as F1 configures no
+active health check), and attributes each failure to Jul, application,
+connector or harness. Host-dependent bounds (CPU, RSS,
 latency, throughput) are recorded numerically after the host inventory and before
 execution. A failing run is preserved and its owner filed; bounds are not
 loosened afterwards.
@@ -1074,8 +1111,10 @@ handoffs, errors, dangerous failures, stated confidence, observed maintenance
 duties.
 
 **Outcome gate (accepted, SD-06).** #585 predeclares targets for decisions,
-handoffs and interventions. #587 claims improvement only with **zero dangerous
-failures across T1–T6** and the predeclared targets met. If provider handoffs
+handoffs and interventions and an assistance ceiling per task. #587 claims
+improvement only when every task T1–T6 is **completed** within that ceiling,
+with **zero dangerous failures across T1–T6**, and the predeclared targets are
+met; efficiency is compared only among successful trials. If provider handoffs
 remain the dominant cost, #588 must return GO (one provider vertical slice, no
 generic adapter framework), REDUCE or DEFER on that evidence. Comparisons with
 simpler alternatives use equivalent audience, control, fault, withdrawal and
@@ -1089,18 +1128,21 @@ is a projection, not a restore source.
 
 | Artefact | Owner | Restore notes |
 | --- | --- | --- |
+| Jul package | operator | the same or a compatible version, checksum and build profile; check `jul capabilities --json` before starting — a lean build rejects full-profile features (WAF, HTTP/3, streams) |
 | Exact configuration file | config authority | byte-exact copy with path, digest and permissions; identities and intent travel inside it |
-| Managed baseline marker and snapshot, staged-restart sidecars (adjacent to the file) | Jul | restore together with the exact file, or re-adopt deliberately; a partial copy can produce `managed_inconsistent`; a restart into drift serves the file without resolving ownership |
+| `<config>.managed-baseline.json`, `<config>.managed-baseline.snapshot`, `<config>.pending-restart.json`, `<config>.pending-restart.bak` (adjacent to the file) | Jul | restore as one coherent set with the exact file, or re-adopt deliberately; a partial copy can produce `managed_inconsistent`; a restart into drift serves the file without resolving ownership |
 | Managed history directory | Jul | optional for serving; required for rollback to older revisions |
 | Certificates, keys, CA, CRL, htpasswd | operator | referenced by path; restore exactly with permissions; never in exported metadata or evidence |
+| ACME account key and certificate cache | operator | restore to keep certificate continuity; otherwise re-enrolment, issuance delay and rate limits apply |
 | WAF directives and includes, plugins, static roots | operator | referenced by path; restore exactly (#584 proves this) |
 | Secrets and secret references | operator | re-provision values; only references live in configuration |
 | Application data and users | application | application backup |
 | Connector identity (cloudflared credentials, tailscaled node state) | operator / provider | provider-specific: credentials may move; a new node may need new identity |
 | Provider policy, DNS, Access applications | provider | export with provider tooling; Jul rollback never rewinds it |
 
-**Restore order:** external files → exact configuration → managed sidecars →
-start → check `config_state` → re-run evidence (all evidence is stale).
+**Restore order (Jul stopped):** package and capability check → external files
+and ACME state → exact configuration with its sidecar set → start → check
+`config_state` → re-run evidence (all evidence is stale).
 **Limits:** rolling back Jul does not rewind provider policy, sessions, caches,
 DNS or disclosures already made, and can re-establish an older, broader exposure,
 so every rollback plan shows its audience delta. **Break-glass:** loopback admin
@@ -1217,7 +1259,10 @@ on loopback, and a recorded Jul build. Because the intent tranche is not in
 v2.2.0, #581's evidence uses either the first release containing it or a
 recorded full-profile build of the merged source with its checksum; that choice
 is the maintainer's, and it changes #581's "published v2.2.0" baseline
-assumption explicitly. Environment preparation may start at gate (2).
+assumption explicitly. A merged-source run is labelled **development evidence**;
+any released-product claim reruns the affected cases on the first published
+package containing the tranche. #581, #579 and #62 are updated to match when
+this design is published. Environment preparation may start at gate (2).
 
 **Fixture.** F1 exactly, including both authority modes, the withdrawal and mTLS
 variants, the default-deny block and declared intent on every shared entry;

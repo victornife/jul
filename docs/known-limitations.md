@@ -445,8 +445,11 @@ WebSocket close handshake.
 
 Client-auth/CRL changes apply to new TLS handshakes, not established connections:
 new requests and new HTTP/2 streams on an already-open connection keep the
-certificate identity it was accepted with, including for `require_client_cert`
-(verified 2026-10-18 for the [sharing design](specs/application-sharing.md#81-verified-current-behaviour)).
+certificate identity it was accepted with (observed in a 2026-10-18 probe for
+the [sharing design](specs/application-sharing.md#81-verified-current-behaviour)).
+`require_client_cert` checks only that the connection presented a verified
+certificate, so it follows the same handshake-bound model (source inspection;
+no dedicated route-level test yet).
 Revocation has no enforced time bound on those connections. Client reconnect
 requests are not enforcement, and Jul has no targeted session-termination API;
 operator-controlled backend/load-balancer termination or process shutdown may

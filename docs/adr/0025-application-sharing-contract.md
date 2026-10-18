@@ -61,13 +61,18 @@ constrains any design:
 5. **Withdraw in place.** Withdrawal never deletes a route.
 6. **Separation, trust and cache.** One Jul listener per external enforcement
    domain; same-host processes are inside the trusted boundary, otherwise
-   provider entries need a Jul-side check (SH-11). No journey relies on an
-   application trusting connector identity headers (SH-12). Restricted and
-   private entries keep Jul's response cache off in the first release.
+   provider entries need a Jul-side check (SH-11). No authorization
+   decision-maker — application, forward-auth service or validator — trusts
+   connector identity headers; provider identity is accepted only as a
+   cryptographically validated token (SH-12). Restricted and private entries
+   keep Jul's response cache off in the first release.
 7. **Three layers never merge.** Declared intent, configured posture and observed
    evidence are reported separately, with freshness and vantage. Ambiguous
    outcomes, including a lost apply ledger after restart, are reported as
-   unknown and never retried automatically.
+   unknown and never retried automatically. File-owned changes stay unconfirmed
+   until a stateless postcondition returned by preview is evaluated against the
+   serving revision; Jul stores no preview state. The view is versioned
+   (`sharing_view_version`) and its closed codes are never repurposed.
 8. **Outcome gate (SD-06).** #585 predeclares targets for decisions, handoffs and
    interventions; #587 claims improvement only with zero dangerous failures
    across the six rubric tasks; if provider handoffs dominate, #588 returns GO
@@ -81,7 +86,7 @@ constrains any design:
 
 | Decision | Classification | Why | Exit or migration |
 | --- | --- | --- | --- |
-| Derived view (1) | Reversible until a surface or runbook consumes it; compatibility-relevant afterwards | operators, tests and rubrics encode its semantics | version the projection; dual rendering for any semantic replacement |
+| Derived view (1) | Reversible until a surface or runbook consumes it; compatibility-relevant afterwards | operators, tests and rubrics encode its semantics | `sharing_view_version`; additive fields; side-by-side replacement; closed codes never repurposed |
 | `sharing` block names and `mode` values (2) | **One-way once shipped** | public TOML, generated contracts, GitOps files | additive fields only; a rename needs dual-read and a deprecation window |
 | Intent findings as warnings (2) | Reversible to relax; costly to tighten into rejections | file-owned pipelines would break | tightening needs its own decision and notice |
 | Coarse private-network mode (3) | Costly to tighten once displayed | deployments rely on network-only audiences | migration notice; Jul checks stay optional |

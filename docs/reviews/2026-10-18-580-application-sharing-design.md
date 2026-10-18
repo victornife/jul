@@ -2,8 +2,8 @@
 
 > **Reviewed:** design branch `design/580-application-sharing-contract`; source
 > baseline `main` at `64e4a8b29230134c5dee37dfd8bfa130a9580a2a` (2026-10-18).
-> Design revisions: **r1** `e5b77b42` (adversarial round 1) and **r2** (this
-> revision; round 2 recorded in §6.3). This packet holds evidence, decisions,
+> Design revisions: **r1** `e5b77b42` (round 1), **r2** `75264d61` (round 2)
+> and **r3** (this revision; round-3 verification in §6.4). This packet holds evidence, decisions,
 > review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
@@ -157,7 +157,7 @@ the maintainer's acceptance of #580.
 | V-2 | probe P1 (§4) | as recorded |
 | V-3 | full-tag build of the baseline; `jul check -config` and `jul lint -config` on F1, F1 withdrawal, F1 mTLS, the r1 combined F1+F2+F3, and the r2 combined configuration (default-deny block, F2 without the device allow-list) and its withdrawal variant, with placeholder certificates, htpasswd and admin token | all valid; one intentional lint warning (compression disabled). Rejected as expected: Jul `cache` on a static root; `deny` action together with `proxy_pass` |
 | V-4 | `python3 -c 'yaml.safe_load(...)'` on the F3 `cloudflared` example | parsed |
-| V-5 | `python3 scripts/docs-check.py` | r1: 2,415 passed, 0 failed. r2: see §6.3 |
+| V-5 | `python3 scripts/docs-check.py` | r1: 2,415 passed, 0 failed; r2: 2,419 passed, 0 failed; r3: see §6.4 |
 | V-6 | TOML blocks and relative links of the three new documents parsed with `tomllib` and checked for existence (this packet is outside docs-check scope) | all valid |
 
 Not run: live provider paths, independent clients, race detector, full CI. None
@@ -228,7 +228,38 @@ restore/move — fixed (O-6). 11 lean/unsupported — no finding (S). 12 second
 application/audience — fixed (A-2, A-4). 13 two-way reversed — reclassified
 (A-6). 14 fresh operator — addressed by SD-05, U-3, U-5, U-4.
 
-### 6.3 Round 2
+### 6.3 Round 2 (r2 `75264d61`)
+
+Each reviewer judged its round-1 findings against r2 and attacked the new
+material. **Round-1 status:** resolved — A-2, A-3, A-4, A-5, A-6, O-1, O-3,
+O-4, S-1, S-3, S-6, S-7, U-1, U-2, U-3, U-6, U-7; resolved at design level —
+S-2; partially resolved — A-1, O-2, O-5, O-6, S-4, S-5, U-4, U-5 (each
+completed by a round-2 item below). The architecture reviewer confirmed that the
+SD-05 block does not contradict ADR 0019 §6. The usability reviewer judged the
+design "ambitious enough for a complete Jul-controlled sharing experience…
+not yet seamless across providers", naming one evidence-selected #588 provider
+slice as the most valuable next step.
+
+| ID | Sev. | Type | Finding | Disposition | Resolution in r3 | Owner |
+| --- | --- | --- | --- | --- | --- | --- |
+| A2-1 | high | demonstrated | file-owned postcondition had no correlation mechanism without hidden preview state | accepted | §4.2: stateless postcondition object; unconfirmed without it; Jul never claims to verify intent | intent tranche, #587 |
+| S2-3 | high | risk | target-change retirement trigger was subjective | accepted | §8.4: every target change with admitted long-lived exchanges narrows; explicit exception forfeits complete-withdrawal claim | #563, #562 |
+| S2-4 | high | risk | F3 validator contract undefined; could trust forgeable headers | accepted | SH-12 covers every decision-maker; F3 cryptographic validation contract | #583 |
+| O2-1 | high | demonstrated | `config_state` mapping incomplete and partly misleading | accepted | §9.2: all ten values; `managed_inconsistent` from its reason | #580, #587 |
+| O2-3 | high | risk | restore omitted package/profile compatibility, ACME state, exact sidecars | accepted | §15: package and capabilities, ACME, exact sidecar names, restore with Jul stopped | #580, #584 |
+| U2-1 | high | demonstrated | file-owned guidance would keep prescribing `auth.deny` after the gate | accepted | §9.8: exact edit from the plan; #587 never recommends `auth.deny` | complete withdrawal, #587 |
+| A2-2 | medium | risk | projection versioning not implementable; codes could be repurposed | accepted | §4.3: `sharing_view_version`; additive; codes never repurposed | #586, #587 |
+| A2-3 | medium | demonstrated | #581 baseline change conflicts with #581's body | accepted | §18: development-evidence label; rerun on a published package; #581/#579/#62 updated on publication | maintainer, #581 |
+| S2-1 | medium | demonstrated | missing SNI does not produce 404 | accepted | F1 and §11: SNI fallback separate from Host routing | #580, #581 |
+| S2-2 | medium | demonstrated | detaching plugins/CORS breaks single-step recovery | accepted | §9.3: first journeys do not withdraw such entries | #581, #587 |
+| S2-5 | medium | demonstrated | limitation wording overstated test evidence | accepted | known limitations: probe vs source-inspection distinguished | #580 |
+| O2-2 | medium | risk | W4 recovery deadline and baseline comparison undefined | accepted | §13: comparison method, dashboard probe, recovery deadline, attribution | #581 |
+| U2-2 | medium | demonstrated | safe task failure could pass the outcome gate | accepted | §14: completion within an assistance ceiling required | #585, #587 |
+| U2-3 | medium | risk | early Console strings precede the comprehension test | accepted | §2: provisional, no compatibility promise | intent tranche, #585 |
+
+Rejected findings in round 2: none.
+
+### 6.4 Round 3 (verification of r3 high-severity fixes)
 
 (Recorded below.)
 
