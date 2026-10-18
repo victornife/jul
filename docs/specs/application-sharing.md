@@ -551,7 +551,7 @@ design must satisfy; the design owns mechanisms, bounds and tests.
 
 | Aspect | Requirement |
 | --- | --- |
-| Trigger | A published generation in which an entry's effective access inputs are classed `narrowed` or `uncertain` by §9.5, including: the withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file content change (htpasswd); a CA/CRL change that invalidates certificates; host names or match narrowed; **any target change** while exchanges admitted under the old target remain. |
+| Trigger | A published generation in which an entry's effective access inputs are classed `narrowed` or `uncertain` by §9.5, including: the withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file or WAF rule-file content change; a CA/CRL change that invalidates certificates; host names or match narrowed; **any target change** while exchanges admitted under the old target remain. |
 | Uncertain changes (SD-09) | Treated as narrowing by default. The plan offers an explicit "keep open connections" exception per entry; choosing it is recorded in the result and forfeits any complete-withdrawal claim for that entry. |
 | Never triggers | `metadata_only` changes (declared intent and labels); changes to inputs that are not access inputs (§9.5: rate limits, cache, compression, timeouts, response headers); `widened` changes; and external events (provider policy, issuer key removal), which have no Jul event. |
 | Scope (SD-08) | **Exactly the narrowed entries.** Exchanges of every other entry continue uninterrupted, including exchanges multiplexed on the same HTTP/2 or HTTP/3 connection (browsers coalesce connections when one certificate covers several hosts). |
@@ -691,8 +691,8 @@ file-owned pipelines, which Jul cannot fence.
   (§4.3) — Jul checks, client-certificate requirement, bind scope, withdrawal
   state, declared intent — and an **access fingerprint**: a non-secret digest
   over the entry's effective access inputs (§9.5), including content digests of
-  the credential files they name (htpasswd, CA, CRL) as read when the plan was
-  computed. Only entries the plan affects (including §9.5 expansion) are listed.
+  the local access files they name (htpasswd, CA, CRL, WAF rule files) as read
+  when the plan was computed. Only entries the plan affects (including §9.5 expansion) are listed.
   Jul stores nothing; the owner keeps the object with the change.
 - **Evaluator.** A read-only, server-owned operation requiring the same
   permissions as inspecting the configuration (`status:read` and
@@ -700,13 +700,21 @@ file-owned pipelines, which Jul cannot fence.
   generation records the content digests it actually loaded. Per entry it
   returns `matches` (facts and fingerprint equal), `differs` (with the differing
   field names), `not_found` (the reference no longer resolves; for selectors
-  this includes any revision change that moves the entry), `unverifiable` (a
-  credential file's loaded digest is not available for comparison), or
+  this includes any revision change that moves the entry), `unverifiable` (an
+  access file's loaded digest is not available for comparison), or
   `unknown` (no serving snapshot). Overall it returns `confirmed` only when every
   entry `matches`; otherwise `not_serving_yet` (`serving_version` still equals
   `base_serving_version`), `diverged`, `unverifiable` or `unknown`. It states
   separately whether the exact candidate is serving
   (`serving_version == candidate_desired_version`).
+- **Remote authorities are not covered.** A JWT key set fetched from its URL,
+  a forward-auth service's decisions and provider policy change without a Jul
+  generation, so the fingerprint cannot bind them: doing so would need a
+  network fetch while planning and would report routine key rotation as
+  divergence. Each entry result lists them in `external_inputs` (closed set:
+  `jwt_key_set`, `forward_auth`), and every surface states that Jul's part is
+  confirmed and those inputs are not ("Confirmed for Jul's configuration; the
+  key set at <URL> is controlled by its issuer and not covered").
 - **Limits.** Observation only: it never claims who wrote the change, keeps no
   history, and survives restarts because it only reads the current state. A
   failed reload, a later writer or a restart produce `not_serving_yet`,
@@ -728,7 +736,8 @@ settings; host names and block order; match type, path and predicates, and the
 match/predicate/order of every other entry in the same block (they decide
 fall-through); rewrites; request plugins (they can authorize or answer); CORS
 policy (it decides which web origins may read responses with users'
-credentials); WAF policy (it can block requests before the action); location
+credentials); WAF policy and rule files (they can block requests before the
+action, and their allow and exclusion rules can exempt requests); location
 checks (CIDR, credential method and its settings), `require_client_cert`, the
 credential files they name; the withdrawal gate; and, for retirement only, the
 entry's target. Rate limits, cache, compression, timeouts and response headers
@@ -742,12 +751,13 @@ class or retirement.
   CRLs and SAN lists are unioned across every block on the listener —
   `client_address`, PROXY) affect every entry on that listener;
 - a change to any entry's match, predicates, host names or position, or the
-  removal of an entry, affects **every entry of that block** (requests can fall
+  addition or removal of an entry, affects **every entry of that block** (requests can fall
   through to another entry) and, for host names and block order, the listener's
   first-declared block (it answers every unmatched host);
-- an upstream change affects every entry that proxies to it; a credential file
-  affects every entry that names it; a server-level plugin affects every entry
-  in that block.
+- an upstream change affects every entry that proxies to it; a credential or
+  WAF rule file affects every entry that names it; a server-level plugin
+  affects every entry in that block; the global `[waf]` affects every entry
+  without its own `waf` override (an override replaces it wholesale).
 
 | Class | Meaning | Consequence |
 | --- | --- | --- |
@@ -768,15 +778,15 @@ class or retirement.
 | htpasswd: entries only removed, remaining entries byte-identical | `narrowed` |
 | CRL: revoked `(issuer, serial)` pairs only added for the same issuers / only removed | `narrowed` / `widened` |
 | CRL replaced by one for a different issuer; CA bundle, SAN allow-list or forwarded-certificate setting changed | `uncertain` |
-| Bind: loopback → any other address, or a specific address → all interfaces (same port) | `widened` |
+| Bind: a specific IPv4 address → `0.0.0.0`, or a specific IPv6 address → `::` (same port) | `widened` |
 | Bind: the reverse of either | `narrowed` |
-| Bind between two specific non-loopback addresses, or any port change | `uncertain` |
+| Bind between two specific addresses (including loopback ↔ another address: Jul listens on exactly one address, so a local connector that reaches the loopback address loses access), to or from an empty host, or any port change | `uncertain` |
 | CORS: an origin added while credentials are allowed, credentials newly allowed, or `["*"]` introduced | `widened` |
 | CORS: origins only removed or credentials disallowed | `narrowed` |
-| WAF: `block` → `detect`, WAF disabled, or rules only removed | `widened` |
-| WAF: `detect` → `block` or WAF enabled with otherwise unchanged rules | `narrowed` |
+| WAF: `block` → `detect`, or WAF disabled, with rules, rule files and other WAF settings unchanged | `widened` |
+| WAF: `detect` → `block`, or WAF enabled in either mode (detect mode still rejects request bodies over the limit), with rules, rule files and other WAF settings unchanged | `narrowed` |
 | Target (`proxy_pass`, `root`, upstream membership) changed | `uncertain` for audience; `narrowed` for retirement of exchanges admitted under the old target |
-| Host names, match, predicates, rewrites, request plugins, block order or entry removal changed anywhere in the block; credential method replaced; JWT issuer, audience or key URL changed; forward-auth URL or response headers changed; htpasswd entries added or changed; WAF rules changed in any other way; `client_address` or PROXY settings changed | `uncertain` for every affected entry |
+| Host names, match, predicates, rewrites, request plugins, block order, or entry addition or removal changed anywhere in the block; credential method replaced; JWT issuer, audience or key URL changed; forward-auth URL or response headers changed; htpasswd entries added or changed; any change to WAF rules, rule-file contents, the Core Rule Set, paranoia, body limit or response inspection (rule removal can remove an `allow` or exclusion); `client_address` or PROXY settings changed | `uncertain` for every affected entry |
 | Any change not matched exactly above | `uncertain` |
 
 External widening (provider policy, DNS, connectors) is not computable and is
@@ -981,7 +991,8 @@ token = "${env:JUL_ADMIN_TOKEN}"
 - **Implementation prerequisites.** The intent tranche (§17); complete withdrawal
   if delivered in time.
 - **Operator steps.** Preview on loopback → bind the LAN listener (plan names the
-  new listener and both entries) → declare and enforce the dashboard as
+  new listener and both entries, classed `uncertain` because the loopback
+  address stops answering) → declare and enforce the dashboard as
   restricted → declare and publish the portal (plan names only the portal as
   widened) → stop new access to the dashboard → restore it → restart.
 - **Expected states.** Portal: declared `public`, no Jul checks, anonymous
@@ -1386,10 +1397,10 @@ migration converter.
 
 | Tranche | Scope | Rough effort | Sequencing | Door |
 | --- | --- | --- | --- | --- |
-| **Intent and guarded changes** (SD-05, SD-11, SD-12; #641) | §4.5 block including `external_enforcer`; validation, lifecycle and generated contracts; serving-layer projection with saved-layer labelling (§4.3); Routes read-only display; lint and plan intent findings; §9.5 audience-delta classes; Console acknowledgement; sparse typed op; §9.4 postcondition producer and evaluator; docs; tests with **more than 90 %** of added or edited Go production statements and, separately, of added or edited frontend statements covered, existing floors preserved | 4–8 focused days (author estimate, raised from 3–6 for the postcondition and delta classes; the owner re-estimates at selection) | first shared-code stream after #580 is accepted; prerequisite of #581's evidence run by product decision (SD-05) | names costly once adopted |
+| **Intent and guarded changes** (SD-05, SD-11, SD-12; #641) | §4.5 block including `external_enforcer`; validation, lifecycle and generated contracts; serving-layer projection with saved-layer labelling (§4.3); Routes read-only display; lint and plan intent findings; §9.5 audience-delta classes; Console acknowledgement; sparse typed op; §9.4 postcondition producer and evaluator; docs; tests with **more than 90 %** of added or edited Go production statements and, separately, of added or edited frontend statements covered, existing floors preserved | 5–10 focused days (author estimate, raised from 3–6 for the postcondition and delta classes, and from 4–8 in r6 for the access fingerprint with per-generation access-file digests and the expanded §9.5 rules; the owner re-estimates at selection) | first shared-code stream after #580 is accepted; prerequisite of #581's evidence run by product decision (SD-05) | names costly once adopted |
 | **Complete withdrawal** (SD-04, SD-02 bundle, SD-07–SD-09; #642 with #563/#562) | §9.3 gate and typed op; §8.4 stream-level retirement with #562 WebSocket ownership and per-request revocation re-check; collateral disclosure; real H1/H2/H3 clients; race and leak checks; same coverage rule | design 2–4 days + implementation 10–20 days (author estimate) | next shared-code stream; #581 environment work proceeds in parallel | gate field costly once adopted; promise additive |
 
-Together the two tranches are a nominal 16–32 focused days before waiting and
+Together the two tranches are a nominal 17–34 focused days before waiting and
 shared-work reconciliation. These are author estimates, not owner estimates;
 each owner re-estimates at selection, and #581's standalone evidence work does
 not wait for #642.
@@ -1403,7 +1414,7 @@ order in #579).
 | From → to | Type | What flows |
 | --- | --- | --- |
 | #580 → #581 | A | contract, F1, §13, §14 dry run |
-| #641 intent tranche → #581 evidence run | A (product decision SD-05; a manifest fallback exists technically) | the product answers T1; intent findings and postconditions exist. Cost: #581's evidence run waits for #641 (4–8 days) |
+| #641 intent tranche → #581 evidence run | A (product decision SD-05; a manifest fallback exists technically) | the product answers T1; intent findings and postconditions exist. Cost: #581's evidence run waits for #641 (5–10 days) |
 | #581 → #582 → #583 → #584 → #613 → #585 → #586 → #587 → #588 | S (+ A where each issue says so) | unchanged programme order |
 | tailnet / Cloudflare / independent participant → #582 / #583 / #585 | E | real environments, never simulated |
 | #642 complete withdrawal → #587 guided withdrawal (whole bundle, SD-07); → #613 withdrawal claims for WebSocket apps | H | delivered, real-client-verified gate and retirement; §8.4 delivery table |

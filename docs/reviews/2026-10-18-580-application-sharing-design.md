@@ -4,8 +4,8 @@
 > baseline `main` at `64e4a8b29230134c5dee37dfd8bfa130a9580a2a` (2026-10-18).
 > Design revisions: **r1** `e5b77b42` (round 1), **r2** `75264d61` (round 2),
 > **r3** `fe44f6a0` (round 3, §6.4), **r4** `a76f197e` (independent principal
-> review, §6.5), **r5** `c53b14b5` (round 5, §6.6) and **r6** (this revision;
-> round 6 in §6.7). This packet holds evidence, decisions,
+> review, §6.5), **r5** `c53b14b5` (round 5, §6.6), **r6** `ecde75fa` (round 6,
+> §6.7) and **r7** (this revision). This packet holds evidence, decisions,
 > review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
@@ -84,6 +84,8 @@ the row.
 | E46 | `client_auth` `request` admits clients with or without a certificate (`VerifyClientCertIfGiven`); only `require` rejects them | internal/server/mtls.go:37-50 | F (round 5 P5-5) | — | high |
 | E47 | One process-wide response cache wraps every cache-enabled location; its key has no listener or entry component | internal/app/serve.go:124-128; internal/app/factory.go:398-401; internal/cache/cache.go:478-485 | F (round 5 P5-3) | — | high |
 | E48 | `BeginWrite` changes only the on-disk marker; in-memory status can read `managed_clean` while an apply is in flight | internal/app/managed_baseline.go:175-190; internal/app/config_apply.go:716-747 | F (round 5 P5-6) | — | high |
+| E49 | WAF rule files and inline rules are post-CRS tuning that may hold exclusions and allow rules; detect mode emits `SecRuleEngine DetectionOnly`, yet Coraza still rejects request bodies over the limit with 413 (its default action is reject; Jul enables body access); a location `waf` override replaces the global `[waf]` wholesale | internal/config/schema.go:180-200; internal/waf/firewall.go:62-70,217-224; internal/app/wiring.go:112-116; coraza v3.8.1 internal/corazawaf/transaction.go:947-1000, waf.go:342 | F (round 6 P6-1/S6-1) | source only, not probed live | high |
+| E50 | Each listener binds exactly one address (`net.Listen("tcp", addr)`); moving it from loopback to another address stops the loopback address answering | internal/server/server.go:742-752 | F (round 6, P5-4 reopened) | — | high |
 
 ### External primary sources
 
@@ -141,6 +143,7 @@ must be re-checked against the knowledge base by #582.
 | AD-04 | 2026-10-18 | Provider and public entries on one Jul | SH-11, scoped to off-host reach with explicit host trust (after S-4) | Proposed | spec §3, §6 |
 | AD-05 | 2026-10-18 | Connector identity headers | SH-12 | Proposed | spec §3 |
 | AD-06 | 2026-10-18 | Cloudflare origin enforcement | cloudflared `access.required` default; Jul `forward_auth` validator recommended, required with untrusted local processes (after S-4); Jul header-token change not authorised | Proposed | F3 |
+| AD-07 | 2026-10-18 | Postcondition scope for remote authorities (S6-2) | confirmation covers configuration and local access files; a JWT key set, forward-auth decisions and provider policy are listed in `external_inputs` and shown as not covered. Rejected: binding a key set (network fetch while planning; routine rotation reported as divergence) and `unverifiable` for every JWT entry (hides what Jul did verify) | Proposed; reversible before #641 ships | spec §9.4 |
 
 "Shown without objection" is not acceptance; AD items become accepted only with
 the maintainer's acceptance of #580.
@@ -196,9 +199,9 @@ any row above.
 | V-2 | probe P1 (§4) | as recorded |
 | V-3 | full-tag build of the baseline; `jul check -config` and `jul lint -config` on F1, F1 withdrawal, F1 mTLS, the r1 combined F1+F2+F3, and the r2 combined configuration (default-deny block, F2 without the device allow-list) and its withdrawal variant, with placeholder certificates, htpasswd and admin token | all valid; one intentional lint warning (compression disabled). Rejected as expected: Jul `cache` on a static root; `deny` action together with `proxy_pass` |
 | V-4 | `python3 -c 'yaml.safe_load(...)'` on the F3 `cloudflared` example | parsed |
-| V-5 | `python3 scripts/docs-check.py` | r1: 2,415 passed, 0 failed; r2, r3 and the final revision: 2,419 passed, 0 failed |
+| V-5 | `python3 scripts/docs-check.py` | r1: 2,415 passed, 0 failed; r2 to r4: 2,419 passed, 0 failed; r5 to r7: 2,422 passed, 0 failed |
 | V-6 | TOML blocks and relative links of the three new documents parsed with `tomllib` and checked for existence (this packet is outside docs-check scope) | all valid |
-| V-7 | The exact F1, F2 and F3 TOML blocks extracted from the final specification, plus the F1 withdrawal variant and the combined instance, checked with `jul check` and `jul lint` (full-tag build, placeholder files); the specification's `cloudflared` YAML parsed | all valid; one intentional lint warning (compression disabled). The proposed `sharing` block is not implemented and was not checked by `jul` |
+| V-7 | The exact F1, F2 and F3 TOML blocks extracted from the final specification, plus the F1 withdrawal variant and the combined instance, checked with `jul check` and `jul lint` (full-tag build, placeholder files); the specification's `cloudflared` YAML parsed. Re-run at r5 and r7 (the four TOML blocks are byte-identical between them): F1, F1 withdrawal, F1 mTLS, F1+F2 and F1+F2+F3, each in `managed` and `file_owned` authority (10 files), with `JUL_ADMIN_TOKEN` set to a throwaway placeholder; negative control: `proxy_pass` with `deny = true` | 10/10 `check` and `lint` exit 0 with one intentional warning (compression disabled); negative control exit 1 (`conflicting actions [proxy_pass deny]`). The proposed `sharing` block is not implemented and was not checked by `jul` |
 
 Not run: live provider paths, independent clients, race detector, full CI. None
 is claimed. The full-tag build needed one direct module download after repeated
@@ -317,22 +320,6 @@ dispositioned. The maintainer decided the escalated items (SD-04 for the
 withdrawal blockers, SD-05 for A-3/U-1, SD-06 for U-7). Reviewer agreement is
 recorded as evidence, not as proof of correctness.
 
-## 8. Residual risks and open items
-
-| Item | Status | Owner and trigger |
-| --- | --- | --- |
-| Tailscale behaviour taken from source because the knowledge base was unreachable | unverified against current docs | #582 re-checks before closure |
-| Cloudflare behaviour of open WebSockets on Access revocation | undocumented | #583 measures |
-| Route-level `require_client_cert` on an open connection after revocation | source inspection only (E39); probe P1 was handler-level | candidate regression for #634 or the mTLS owner |
-| Effort for the intent tranche (#641, now including the postcondition and delta classes) and complete withdrawal (#642) | author estimates (nominal 16–32 days), not owner estimates | re-estimated at selection |
-| Stream-level retirement and per-request revocation re-checks on Go HTTP/2 and quic-go HTTP/3 (SD-08) | feasible in principle (handler-owned contexts, hijacked-connection ownership, middleware lookup) but unproven | #642 design; where infeasible for a protocol, the disclosed collateral downgrade applies and W3 fails |
-| `uncertain` classes will be common (any auth-setting edit), so retirement on edit may surprise operators | accepted trade-off (SD-09); keep-open exception exists | #641/#642 tests; #585/#587 usability evidence |
-| Intent field names frozen before first-use evidence | accepted trade-off (SD-05) | additive evolution only |
-| Host trust includes all same-host processes | stated assumption (§6 of the spec) | Jul-side checks where untrusted processes run |
-| Provider seams (membership, invitations, revocation) remain handoffs | by design | SD-06 outcome gate; #588 |
-| Reviewer independence | AI agents; instruction-based blindness | maintainer acceptance is the decision |
-| Issue records for the new baseline and order | posted 2026-10-18: comments on #580, #579, #62, #562, #563; #581 body amended; #641 and #642 registered (all pending #580 acceptance) | maintainer acceptance switches #640 to `Closes #580` |
-
 ### 6.5 Round 4 — independent principal-engineer review (head `a76f197e`)
 
 An external principal-engineer review (four internal adversarial passes plus a
@@ -394,9 +381,19 @@ were verified against source and accepted; none was rejected.
 | S5-6 | medium | evaluator with `status:read` only could act as a posture oracle | §9.4: requires `status:read` and `config:read` |
 | S5-7 | medium | declared `external_enforcer` downgraded `intent_restricted_unenforced` | finding unchanged by the declaration; enforcer shown as unverified context. **Consequence for SD-12:** the "fewer false alarms" benefit cited when the maintainer chose option B no longer holds; the in-product answer to "who enforces (declared)" remains |
 
-### 6.7 Round 6
+### 6.7 Round 6 (verification of r6 `ecde75fa`)
 
-(Recorded below.)
+The same two reviewers verified their round-5 items against the r5→r6 diff and
+attacked the rewritten §9.4 and §9.5. **Verified resolved:** P5-1, P5-2, P5-3,
+P5-5, P5-6 and S5-1 to S5-7. **Reopened:** P5-4. All findings were verified
+against source and accepted; one proposed remedy was corrected by the author
+from source.
+
+| ID | Sev. | Finding | Resolution (r7) |
+| --- | --- | --- | --- |
+| P5-4 (reopened) | high | loopback → another address was still classed `widened`; Jul listens on exactly one address, so a local connector reaching loopback loses access (E50) | §9.5: widened only for a specific address → its own family's wildcard (`0.0.0.0`/`::`); any other bind change, empty host or port change `uncertain`; F1 walkthrough shows the `uncertain` class |
+| P6-1 = S6-1 | high | "WAF rules only removed" classed `widened`, but rule files hold exclusions and allow rules, so removal can narrow (E49) | every WAF rule, rule-file, CRS, paranoia, body-limit or response-inspection change `uncertain`; mode and enablement rules apply only with everything else unchanged; WAF rule files join the access inputs, fingerprint and global-override expansion. The reviewer's suggestion that enabling detect mode is admission-neutral was **not** adopted: Coraza rejects oversized bodies in detect mode too (E49), so enablement in either mode is `narrowed` |
+| S6-2 | high | the postcondition can confirm while a remote JWT key set has changed admission | AD-07: confirmation scoped to configuration and local access files; remote authorities listed as `external_inputs` and shown as not covered |
 
 ## 7. Traceability
 
@@ -419,3 +416,21 @@ were verified against source and accepted; none was rejected.
 Issue deliverables 1–8 map to: (1) spec §1 and ADR 0025; (2) §4; (3) §5;
 (4) §6–§7; (5) §8; (6) §10–§11; (7) §12; (8) §2, §4.3, §9, §9.8, §13. The
 resource and value evidence contract maps to §13–§15 and §17.
+
+## 8. Residual risks and open items
+
+| Item | Status | Owner and trigger |
+| --- | --- | --- |
+| Tailscale behaviour taken from source because the knowledge base was unreachable | unverified against current docs | #582 re-checks before closure |
+| Cloudflare behaviour of open WebSockets on Access revocation | undocumented | #583 measures |
+| Route-level `require_client_cert` on an open connection after revocation | source inspection only (E39); probe P1 was handler-level | candidate regression for #634 or the mTLS owner |
+| Effort for the intent tranche (#641, now including the postcondition and delta classes) and complete withdrawal (#642) | author estimates (nominal 17–34 days after r6), not owner estimates | re-estimated at selection |
+| Stream-level retirement and per-request revocation re-checks on Go HTTP/2 and quic-go HTTP/3 (SD-08) | feasible in principle (handler-owned contexts, hijacked-connection ownership, middleware lookup) but unproven | #642 design; where infeasible for a protocol, the disclosed collateral downgrade applies and W3 fails |
+| `uncertain` classes will be common (any auth-setting edit), so retirement on edit may surprise operators | accepted trade-off (SD-09); keep-open exception exists | #641/#642 tests; #585/#587 usability evidence |
+| Intent field names frozen before first-use evidence | accepted trade-off (SD-05) | additive evolution only |
+| Host trust includes all same-host processes | stated assumption (§6 of the spec) | Jul-side checks where untrusted processes run |
+| Provider seams (membership, invitations, revocation) remain handoffs | by design | SD-06 outcome gate; #588 |
+| Remote authorities (JWT key sets, forward-auth decisions, provider policy) change access without a Jul generation | named in every postcondition result as not covered (AD-07) | #641; external evidence per §7 |
+| WAF effects classified only for mode and enablement; every rule change is `uncertain` | conservative by design; retirement on rule tuning may surprise operators | #641/#642 tests; keep-open exception |
+| Reviewer independence | AI agents; instruction-based blindness | maintainer acceptance is the decision |
+| Issue records for the new baseline and order | posted 2026-10-18: comments on #580, #579, #62, #562, #563; #581 body amended; #641 and #642 registered (all pending #580 acceptance) | maintainer acceptance switches #640 to `Closes #580` |

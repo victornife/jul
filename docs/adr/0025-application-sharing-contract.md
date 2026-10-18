@@ -52,10 +52,12 @@ constrains any design:
    **intent findings** in lint and plans plus an explicit Console acknowledgement
    before any change classed `widened` or `uncertain` (spec §9.5). The declared
    enforcer is context only: it never changes a finding. Every plan also returns
-   a stateless **postcondition** carrying an access fingerprint (including loaded
-   credential-file digests), which a read-only server operation, with the same
-   permissions as configuration inspection, evaluates against the serving
-   snapshot (SD-11). Delivered as a bounded tranche (#641) before #581's evidence
+   a stateless **postcondition** carrying an access fingerprint (including the
+   loaded digests of local access files: htpasswd, CA, CRL and WAF rules), which
+   a read-only server operation, with the same permissions as configuration
+   inspection, evaluates against the serving snapshot (SD-11). Remote
+   authorities (a JWT key set, forward-auth decisions, provider policy) are
+   named as not covered rather than confirmed. Delivered as a bounded tranche (#641) before #581's evidence
    run.
 3. **Four access modes (SD-03).** `preview`, `private_network`, `restricted`,
    `public`. Private-network membership may be a declared *coarse* audience,
