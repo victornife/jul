@@ -9,8 +9,9 @@
 > independent principal re-review, §6.9), **r9** `72871705` (round 10, §6.10),
 > **r10** `74fb5631` (round 11, §6.11), **r11** `1290e14a` (second principal
 > re-review, §6.12), **r12** `de5f194a` (round 13, §6.13), **r13** `5e750d63`
-> (round 14, §6.14) and **r14** (this revision; round 15 in §6.15). This packet
-> holds evidence, decisions, review findings and traceability for the
+> (round 14, §6.14), **r14** `3d24bd5f` (round 15, §6.15) and **r15** (this
+> revision: round-15 record). This packet holds evidence, decisions, review
+> findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -599,9 +600,16 @@ fix; the author also found a garbled sentence that no reviewer had flagged.
 | S14-1 | high | with digests over the configuration as written, an access input written as a reference (`auth.allow = ["${env:OFFICE_CIDR}"]`) can widen on reload while every compared value stays equal, giving a false `candidate_serving` (E57) | AD-09: keyed digests of written-plus-resolved values for referenced access inputs, under a process-only key; changed values yield `diverged`; after a restart they are `unverifiable`; the configuration digest's limit is stated |
 | A14-1 | low | the r13 access-fingerprint sentence had its parentheticals out of order | rewritten |
 
-### 6.15 Round 15 (verification of r14)
+### 6.15 Round 15 (verification of r14 `3d24bd5f`)
 
-(Recorded below.)
+The security reviewer verified S14-1 resolved. Coverage includes referenced
+inputs behind expected facts and §9.5 effective inputs (listener bind and TLS
+settings, client-certificate CA and CRL inputs, host names, ordering). Neither
+the key nor a resolved value is returned or persisted, so the stored digests
+give no offline guessing oracle. Plan and evaluate expose no comparison that
+could recover a resolved value, and key-identifier equality alone cannot
+substitute for digest equality. No new blocker or high finding. No blocker or
+high finding is open.
 
 ## 7. Traceability
 
