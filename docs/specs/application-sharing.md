@@ -740,9 +740,10 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
   guesses of a weak secret offline. For that reason Jul's existing versions,
   which hash the effective configuration with secrets resolved (review packet
   E53, E56), are not carried. Equal digests mean the configuration as written
-  is identical; a secret value rotated under an unchanged configuration is not
-  compared. Neither digest covers the contents of files the configuration
-  names; the access fingerprint below does.
+  is identical; a referenced value that changes under an unchanged
+  configuration is not seen by these digests (referenced *access* inputs are
+  compared through the access fingerprint below). Neither digest covers the
+  contents of files the configuration names; the access fingerprint does.
   - `expect` is `present` or `absent`. Every entry the plan affects (including
     the §9.5 expansion) is listed: `present` when it exists in the candidate,
     `absent` when the plan removes it. A plan that affects no entry (for
@@ -766,10 +767,24 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
     produce in the `serving` layer (§4.3) — the Jul checks it actually applies,
     client-certificate requirement, bind scope, withdrawal state, declared
     intent — and an **access fingerprint**: a SHA-256 digest over the entry's
-    access inputs (§9.5) as configured, so no secret value enters it, including
-    content digests of the local access files they use (none holds a usable
-    password oracle: Basic accepts bcrypt entries only, E56) (htpasswd, CA, CRL, WAF rule files,
-    request-plugin modules) as read when the plan was computed.
+    access inputs (§9.5) as written, so no secret value enters it directly,
+    including content digests of the local access files they use (htpasswd,
+    CA, CRL, WAF rule files, request-plugin modules) as read when the plan was
+    computed. None of these files gives a usable password oracle: Basic
+    accepts bcrypt entries only (E56).
+  - **Referenced access inputs (AD-09).** Any string may hold a secret
+    reference (`${env:…}`, `${file:…}`) that is resolved again on every
+    reload, so an access input as written can stay equal while its value
+    changes (for example `auth.allow = ["${env:OFFICE_CIDR}"]`). For each
+    access input whose written value contains a reference, the fingerprint
+    adds a keyed digest (HMAC-SHA-256) of the written value together with its
+    resolved value, under a key that exists only in the running Jul process:
+    generated at start and never persisted, logged or returned. The object
+    records the key's random identifier (`reference_key_id`). Because the
+    written value is bound in, a plan for a different reference (for example a
+    file the caller controls) can never produce a matching digest, and without
+    the key nobody can check a guess offline. A changed resolved value yields
+    `diverged`.
   - Jul stores nothing; the owner keeps the object with the change.
 - **Evaluator.** A read-only, server-owned operation requiring the same
   permissions as inspecting the configuration (`status:read` and
@@ -788,8 +803,9 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
     or an `absent` entry's `route_id` resolves to nothing); `differs` (with the
     differing field names, or `still_present` for an entry expected absent);
     `not_found` (a `present` reference resolves to nothing); `unverifiable` (a
-    position whose revision is not serving, or an access file whose loaded
-    digest is unavailable); or `unknown`. A revision-bound
+    position whose revision is not serving, an access file whose loaded digest
+    is unavailable, or a referenced access input whose keyed digest was made
+    under another process's key, that is, before a restart); or `unknown`. A revision-bound
     `absent` entry matches only while the candidate is serving, because that
     exact configuration does not contain it.
   - `access`, aggregated: `matches` (at least one entry, and all match),
@@ -826,7 +842,8 @@ answer are always shown, separately.
   forward-auth, client certificate, or none), and its external enforcement
   stays `unanalysed` (§4.5).
 - **Limits.** Observation only: it keeps no history and survives restarts
-  because it reads only the current state. A failed, staged or restart-bound
+  because it reads only the current state, except that referenced access
+  inputs become `unverifiable` after a restart (their key is gone by design). A failed, staged or restart-bound
   apply yields `not_serving_yet`; a later writer yields `access_matches`,
   `other_revision`, `diverged` or `unverifiable`; a restart that loads the
   candidate yields `candidate_serving`. Access files are compared by the bytes

@@ -8,9 +8,9 @@
 > §6.7), **r7** `7e3382c4` (round 7, §6.8), **r8** `292a294c` (round 8, §6.8;
 > independent principal re-review, §6.9), **r9** `72871705` (round 10, §6.10),
 > **r10** `74fb5631` (round 11, §6.11), **r11** `1290e14a` (second principal
-> re-review, §6.12), **r12** `de5f194a` (round 13, §6.13) and **r13** (this
-> revision; round 14 in §6.14). This packet holds evidence, decisions, review
-> findings and traceability for the
+> re-review, §6.12), **r12** `de5f194a` (round 13, §6.13), **r13** `5e750d63`
+> (round 14, §6.14) and **r14** (this revision; round 15 in §6.15). This packet
+> holds evidence, decisions, review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -96,6 +96,7 @@ the row.
 | E54 | The existing route selector resolver compares `listen`, `match_type` and `path` as raw strings and `server_names` as a raw multiset (whitespace and duplicates significant), and counts `match_ordinal` across every block matching those coordinates; the existing route projection and `/api/v1` publish a **per-block** ordinal. With two valid blocks sharing `listen` and identical raw names, the second block's published selector resolves to the first block's location (probe P4) | internal/admin/patch_helpers.go:248-299; internal/admin/routetest.go:221-231; internal/admin/projections.go:52; internal/admin/apiv1_resources.go:85; ADR 0018 §14 | F (round 12; P4) | pre-existing runtime defect outside #580's scope; not fixed here | high |
 | E55 | Configuration files are capped at 16 MiB; validation sets no byte limit on server `name` or `server_names`, so a valid configuration can carry 32 KiB labels or host strings (the principal re-review checked both with `jul check`) | internal/config/parser.go:62-83; internal/config/validate_values.go:152-183 | F (round 12) | — | high |
 | E56 | The canonical marshal does not redact: `CanonicalVersion` hashes the effective configuration with secret references resolved, so `serving_version`/`desired_version` depend on secret values. The serving snapshot also keeps the pre-expansion `RawConfig`. Basic authentication accepts bcrypt htpasswd entries only | internal/config/parser.go:205-217; internal/config/candidate.go:56-72; internal/config/secrets.go:58-89; internal/server/server.go:343-345; internal/config/schema.go (`BasicAuthConfig`) | F (round 13) | — | high |
+| E57 | Secret references (`${env:…}`, `${file:…}`) are resolved in every string field, walked recursively, again on every reload, and each resolved value is registered for log redaction, so any access input (a CIDR list, a host name, a path) may come from a reference | docs/secrets.md:51-69; internal/config/secrets.go:58-89 | D + F (round 14) | — | high |
 
 ### External primary sources
 
@@ -157,6 +158,7 @@ must be re-checked against the knowledge base by #582.
 | AD-06 | 2026-10-18 | Cloudflare origin enforcement | cloudflared `access.required` default; Jul `forward_auth` validator recommended, required with untrusted local processes (after S-4); Jul header-token change not authorised | Proposed | F3 |
 | AD-07 | 2026-10-18 | Postcondition scope for remote authorities (S6-2) | the access comparison covers configuration and local access files; a JWT key set, forward-auth decisions and provider policy (for entries whose declared intent relies on a provider, after S7-1) are listed in `external_inputs` and shown as not covered. Rejected: binding a key set (network fetch while planning; routine rotation reported as divergence) and `unverifiable` for every JWT entry (hides what Jul did verify) | Proposed; reversible before #641 ships | spec §9.4 |
 | AD-08 | 2026-10-18 | Transport failures in audience classes (R10-1) | request size limits and transport failures (client abort, malformed framing) are not access inputs, like timeouts and rate limits; so disabled ↔ `detect` without engine control stays `unchanged` (SD-14's intent), with the read-before-action difference disclosed and pinned by a test. Rejected: classing it `narrowed`, which would end every open exchange of every entry inheriting a global `[waf]` when detect mode is enabled for observation | Proposed; maintainer may overturn | spec §9.5; #641 |
+| AD-09 | 2026-10-18 | Referenced access inputs in postconditions (S14-1) | keyed digest (HMAC-SHA-256) of each referenced access input's written value together with its resolved value, under a key held only in the running process and never persisted, logged or returned; the object records the key identifier; after a restart these inputs are `unverifiable`. Rejected: marking every referenced entry `unverifiable` (removes confirmation from container and pipeline users) and a persisted key (new state and secret material to protect) | Proposed; maintainer may overturn | spec §9.4; #641 |
 
 "Shown without objection" is not acceptance; AD items become accepted only with
 the maintainer's acceptance of #580.
@@ -587,7 +589,17 @@ While checking the position question, the author found a flaw in the design itse
 | --- | --- | --- | --- |
 | A13-1 | medium | the postcondition carried Jul's versions (since r5) and, from r10, full digests of the *effective* configuration, which includes resolved secret values (E56). Owners keep the object with their change, possibly in a repository beside the configuration, where these digests let anyone confirm guesses of a weak secret offline | the object now carries only full SHA-256 digests of the canonical **raw** configuration (secret references unresolved) and access fingerprints over configured access inputs; the versions are no longer carried, and the evaluator shows the current `serving_version` only to its authorised caller. A secret rotated under an unchanged configuration is not compared, and the spec says so |
 
-### 6.14 Round 14 (verification of r13)
+### 6.14 Round 14 (verification of r13 `5e750d63`)
+
+The security reviewer confirmed A13-1 resolved and found one high issue in the
+fix; the author also found a garbled sentence that no reviewer had flagged.
+
+| ID | Sev. | Finding | Resolution (r14) |
+| --- | --- | --- | --- |
+| S14-1 | high | with digests over the configuration as written, an access input written as a reference (`auth.allow = ["${env:OFFICE_CIDR}"]`) can widen on reload while every compared value stays equal, giving a false `candidate_serving` (E57) | AD-09: keyed digests of written-plus-resolved values for referenced access inputs, under a process-only key; changed values yield `diverged`; after a restart they are `unverifiable`; the configuration digest's limit is stated |
+| A14-1 | low | the r13 access-fingerprint sentence had its parentheticals out of order | rewritten |
+
+### 6.15 Round 15 (verification of r14)
 
 (Recorded below.)
 

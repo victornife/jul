@@ -57,7 +57,9 @@ constrains any design:
    per affected entry and an access fingerprint (including the loaded digests
    of local access files: htpasswd, CA, CRL, WAF rules and request-plugin
    modules), and full digests of the configuration as written; it carries no
-   value derived from a secret. A read-only server operation, with the same permissions as
+   value from which a secret can be checked offline (access inputs written as
+   secret references are compared through keyed digests under a key held only
+   by the running process). A read-only server operation, with the same permissions as
    configuration inspection, evaluates it against the serving snapshot (SD-11)
    and answers two questions separately: is the exact planned configuration
    serving, and do the expected access facts match (SD-13)? Only both together
