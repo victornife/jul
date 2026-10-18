@@ -10,9 +10,10 @@
 > **r10** `74fb5631` (round 11, §6.11), **r11** `1290e14a` (second principal
 > re-review, §6.12), **r12** `de5f194a` (round 13, §6.13), **r13** `5e750d63`
 > (round 14, §6.14), **r14** `3d24bd5f` (round 15, §6.15), **r15** `ce929b49`
-> (third principal re-review, §6.16), **r16** `e513edf2` (round 17, §6.17) and
-> **r17** (this revision; round 18 in §6.18). This packet holds evidence,
-> decisions, review findings and traceability for the
+> (third principal re-review, §6.16), **r16** `e513edf2` (round 17, §6.17),
+> **r17** `8385c59c` (round 18, §6.18) and **r18** (this revision; round 19 in
+> §6.19). This packet holds evidence, decisions, review findings and
+> traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -102,6 +103,7 @@ the row.
 | E58 | Literal secrets are valid configuration: validation accepts them and lint warns only for known fields such as `[admin].token` and the OIDC client secret; `config:raw` is separated from `config:read` because raw TOML may contain literal bearer tokens. A supported WAF rule file can admit only a fixed header value (the third principal re-review: 200 for the right value, 403 otherwise). `jul plan` is a remote command, so plans are computed by the serving process | internal/config/validate.go:199-214; internal/config/lint.go:224-235; internal/rbac/permission.go:19-26; cmd/jul/remote_cli.go:64,131-153 | F (round 16) | — | high |
 | E59 | The live snapshot pairs `EffectiveConfig`, `RawConfig`, listener metadata and the handler `Generation`, published atomically. A reload keeps the previous generation only when the no-op is proven over the configuration and every runtime input identity (TLS inputs, plugin modules and others); opaque inputs such as an htpasswd file, WAF rule files or a static root always take the normal reload, which builds a new generation | internal/server/server.go:335-349; internal/server/serving_change.go:24-100,185-231; internal/server/reload_plan.go:220-232,333-347 | F (round 17) | — | high |
 | E60 | The existing configuration diff (`/api/config/diff`, `config:write`) reports whether `[admin].token` changed without showing it, so a writer without `config:raw` can already test guesses of a literal admin token online; discovery tokens are deliberately never diffed | internal/admin/diff_global.go:621-648; internal/admin/diff_helpers.go:980-982; internal/admin/route_catalog.go:620-640 | F (round 17) | pre-existing, outside #580 | high |
+| E61 | `plugin_set` replaces a plugin's whole configuration with `config:write`; plugin configuration is returned only to callers holding `config:raw`; the diff reports "Change plugin config" exactly when the maps differ, so it reveals equality of a hidden value | internal/admin/plugins.go:23-28,126,450-455; internal/admin/diff_global.go:420-421; internal/admin/route_catalog.go:628-637 | F (round 18) | pre-existing, outside #580 | high |
 
 ### External primary sources
 
@@ -646,9 +648,24 @@ attack and found one high issue.
 | S17-1 | high | a `config:write` caller without `config:raw` could plan raw candidates with guessed literal secrets and compare the same-key `base_config_digest` and `candidate_config_digest`, an online oracle that extends to fields the diff deliberately hides (E60) | disclosure rule: a postcondition never discloses more than the plan; raw-candidate plans return one only to callers who also hold `config:raw`; typed-operation plans keep it (their candidate differs only in fields the diff already reports); keyed objects cannot be forged to probe the evaluator |
 
 The existing diff already reveals whether a literal admin token changed (E60);
-that pre-existing oracle is outside #580 and is noted with #644.
+that pre-existing oracle is outside #580 (see the residual risks).
 
-### 6.18 Round 18 (verification of r17)
+### 6.18 Round 18 (verification of r17 `8385c59c`)
+
+The security reviewer judged S17-1 unresolved for typed operations: `plugin_set`
+can replace a plugin configuration hidden from `config:write` callers, so a
+typed-operation postcondition compares a hidden value (E61). The author verified
+the source and notes that today's diff already reveals the same equality bit
+("Change plugin config" appears exactly when the maps differ), so the
+postcondition adds no information *today*. But the r17 justification relied on
+that pre-existing leak, and fixing the diff later would turn the postcondition
+into the oracle. The finding is therefore accepted.
+
+| ID | Sev. | Finding | Resolution (r18) |
+| --- | --- | --- | --- |
+| S18-1 (S17-1 continued) | high | typed operations can set fields hidden from the caller (plugin configuration), so the typed-operation exception compared hidden values | a typed-operation postcondition is returned only when every field the operation sets is readable by the caller; otherwise it also requires `config:raw`; the rule no longer relies on the diff |
+
+### 6.19 Round 19 (verification of r18)
 
 (Recorded below.)
 
@@ -694,7 +711,7 @@ resource and value evidence contract maps to §13–§15 and §17.
 | Host-dispatch rule under-expands if implemented wrongly | property test against the real router over generated host sets; listener-wide fallback | #641 |
 | Projection caps (strings, names, URLs, members, page entries and bytes) are proposals | measured and fixed before exposure | #586 gate for #586/#587 |
 | `serving_version` in status hashes content that includes resolved secret values (E56), so a `status:read` caller who knows the rest of the configuration could confirm guesses of a weak secret | pre-existing, outside #580; the postcondition no longer carries it | filed as #644 |
-| The existing diff tells a `config:write` caller whether a literal admin token changed (E60) | pre-existing online oracle, outside #580; postconditions add none | noted with #644 |
+| The existing diff tells a `config:write` caller whether hidden secret-bearing values changed, such as a literal admin token or a plugin configuration (E60, E61) | pre-existing online oracle, outside #580; postconditions neither rely on nor extend it | separate issue on maintainer authorisation |
 | Existing route projection publishes a per-block `match_ordinal` that the resolver reads across blocks (E54, P4) | pre-existing defect; with a duplicated block a typed patch can edit the wrong route | filed as #643 |
 | Reviewer independence | AI agents; instruction-based blindness | maintainer acceptance is the decision |
 | Issue records for the new baseline and order | posted 2026-10-18: comments on #580, #579, #62, #562, #563; #581 body amended; #641 and #642 registered (all pending #580 acceptance) | maintainer acceptance switches #640 to `Closes #580` |

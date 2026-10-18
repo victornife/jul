@@ -647,7 +647,7 @@ design must satisfy; the design owns mechanisms, bounds and tests.
 | Operation | Authority and permission | Preconditions | Preview | Consequences shown | Recovery |
 | --- | --- | --- | --- | --- | --- |
 | **Inspect** | `status:read`, `config:read` | admin access | — | §4.3 view | — |
-| **Preview** | `config:write`; allowed in both modes | candidate or typed ops | diff, lifecycle, `can_apply`/`can_stage`, lint, intent findings, audience delta (§9.5), postcondition (§9.4; for a raw candidate only when the caller also holds `config:raw`) | widened, narrowed and intent-contradicting entries; restart need; external handoffs | edit and re-plan |
+| **Preview** | `config:write`; allowed in both modes | candidate or typed ops | diff, lifecycle, `can_apply`/`can_stage`, lint, intent findings, audience delta (§9.5), postcondition (§9.4; for a raw candidate, or a typed operation that sets a field hidden from the caller, only when the caller also holds `config:raw`) | widened, narrowed and intent-contradicting entries; restart need; external handoffs | edit and re-plan |
 | **Publish / change exposure** | managed: `config:apply` with `base_version` and `Idempotency-Key`; file-owned: owner's pipeline, then watcher/SIGHUP | plan reviewed; widening acknowledged | required | DNS, connector and provider steps listed, not executed | rollback or re-apply; external steps separate |
 | **Withdraw (stop new access)** | as publish | explicit entry set; current `base_version` | required | §8 limits; mechanism limits (§9.3) | restore access (a widening, reviewed again) |
 | **Recover** | managed: `history:rollback` or re-apply; file-owned: revert and reload | target revision known | rollback diff with its own audience delta | §15 limits | — |
@@ -767,9 +767,15 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
     discovery tokens (E60). So a raw-candidate plan returns a postcondition only
     to a caller who also holds `config:raw`, which already reads that text.
     Other callers still get the plan, with `postcondition: unavailable` and that
-    reason. A typed-operation plan returns one to its normal caller: its
-    candidate differs from the base only in the fields the operation sets,
-    which the plan's diff already reports. A file-owned pipeline's account,
+    reason. A typed-operation plan returns one to its normal caller only when
+    every field the operation sets is one that caller can already read through
+    the projections its permissions allow. An operation that sets a field
+    hidden from that caller also requires `config:raw`; plugin configuration,
+    for example, is shown only with `config:raw` (E61). The rule does not rely
+    on the diff. Today's diff happens to reveal whether such hidden fields
+    changed (E60, E61), a pre-existing disclosure tracked separately, and a
+    postcondition must neither depend on it nor extend it. A file-owned
+    pipeline's account,
     which holds the configuration anyway, can be given `config:raw` for this.
     Because every digest is keyed, nobody can forge an object to probe the
     evaluator.

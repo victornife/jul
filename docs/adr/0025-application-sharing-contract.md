@@ -62,8 +62,10 @@ constrains any design:
    under a key held only by the running process, so the object allows no
    offline check of any secret, whether referenced, literal or inside a local
    file. It can be compared until that process restarts, after which the change
-   is re-planned. It never discloses more than the plan itself: a raw-candidate
-   plan returns one only to a caller who may also read the raw configuration. A read-only server operation, with the same permissions as
+   is re-planned. It never discloses a comparison of values its caller cannot
+   read: a raw-candidate plan, or a typed operation that sets a field hidden
+   from the caller, returns one only to a caller who may also read the raw
+   configuration. A read-only server operation, with the same permissions as
    configuration inspection, evaluates it against the serving snapshot (SD-11)
    and answers two questions separately: is the exact planned configuration
    serving, and do the expected access facts match (SD-13)? Only both together
