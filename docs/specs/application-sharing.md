@@ -22,9 +22,10 @@ access and recover.
 
 **Classification.** Everything here is an *operational enhancement* composing
 existing gateway capabilities, plus two bounded runtime tranches this design
-selects (§17): **declared intent with intent-guarded changes** (§4.5) and
-**complete withdrawal** (a withdrawal gate bundled with #563/#562 retirement,
-§8.4, §9.3). Neither is a category expansion. Separately gated and **not**
+selects (§17): **declared intent with intent-guarded changes** (§4.5,
+[#641](https://github.com/victornife/jul/issues/641)) and **complete
+withdrawal** (a withdrawal gate bundled with #563/#562 retirement, §8.4, §9.3,
+[#642](https://github.com/victornife/jul/issues/642)). Neither is a category expansion. Separately gated and **not**
 authorised: provider-backed audience lifecycle and invitations (#588), group
 sharing (#589), native application OIDC, provider policy or membership mutation,
 a hosted control plane, VPN/relay/NAT traversal, an identity directory, fleet or
@@ -1182,12 +1183,12 @@ migration converter.
 
 ## 17. Dependencies, consequences and ownership
 
-### 17.1 New bounded runtime tranches (selected; registration needs authorisation)
+### 17.1 New bounded runtime tranches (selected; registered as #641 and #642)
 
 | Tranche | Scope | Rough effort | Sequencing | Door |
 | --- | --- | --- | --- | --- |
-| **Intent and guarded changes** (SD-05) | §4.5 block, validation, lifecycle and generated contracts, projection field, Routes read-only display, lint and plan intent findings, Console acknowledgement, sparse typed op, docs, tests (≥ 90 % changed Go and frontend statements) | 3–6 focused days (unestimated by an owner) | first shared-code stream after #580 is accepted; hard prerequisite of #581's evidence run | one-way once shipped |
-| **Complete withdrawal** (SD-04 + SD-02 bundle) | §9.3 gate and typed op; §8.4 retirement with #562 WebSocket ownership; real H1/H2/H3 clients; race and leak checks | design 2–4 days + implementation 10–20 days (unestimated) | next shared-code stream; #581 environment work proceeds in parallel | gate field one-way once shipped; promise additive |
+| **Intent and guarded changes** (SD-05, #641) | §4.5 block, validation, lifecycle and generated contracts, projection field, Routes read-only display, lint and plan intent findings, Console acknowledgement, sparse typed op, docs, tests (≥ 90 % changed Go and frontend statements) | 3–6 focused days (unestimated by an owner) | first shared-code stream after #580 is accepted; hard prerequisite of #581's evidence run | one-way once shipped |
+| **Complete withdrawal** (SD-04 + SD-02 bundle, #642 with #563/#562) | §9.3 gate and typed op; §8.4 retirement with #562 WebSocket ownership; real H1/H2/H3 clients; race and leak checks | design 2–4 days + implementation 10–20 days (unestimated) | next shared-code stream; #581 environment work proceeds in parallel | gate field one-way once shipped; promise additive |
 
 ### 17.2 Dependency edges
 
@@ -1198,11 +1199,11 @@ order in #579).
 | From → to | Type | What flows |
 | --- | --- | --- |
 | #580 → #581 | A | contract, F1, §13, §14 dry run |
-| intent tranche → #581 evidence run | H | the product answers T1; intent findings exist |
+| #641 intent tranche → #581 evidence run | H | the product answers T1; intent findings exist |
 | #581 → #582 → #583 → #584 → #613 → #585 → #586 → #587 → #588 | S (+ A where each issue says so) | unchanged programme order |
 | tailnet / Cloudflare / independent participant → #582 / #583 / #585 | E | real environments, never simulated |
-| complete withdrawal → #587 guided withdrawal and "end open connections"; → #613 withdrawal claims for WebSocket apps | H | delivered, real-client-verified gate and retirement |
-| complete withdrawal → #581 | O | included if delivered before the evidence run, else W3 re-run |
+| #642 complete withdrawal → #587 guided withdrawal and "end open connections"; → #613 withdrawal claims for WebSocket apps | H | delivered, real-client-verified gate and retirement |
+| #642 complete withdrawal → #581 | O | included if delivered before the evidence run, else W3 re-run |
 | #580 → #586, #587 | A | §4 view, §7 evidence, §9 operations |
 | #580 → #633 | A (input) | intent and findings; provider intent stays `unanalysed`; static review proceeds independently |
 | #580 → #634 | O | §11 scenarios and intent as test expectations |
@@ -1253,7 +1254,7 @@ order in #579).
 
 **Entry gates.** (1) Maintainer acceptance of this contract and ADR 0025, and the
 design change merged; (2) #581 selected in #62; (3) **for the evidence run**, the
-intent tranche merged; (4) environment: one host with a LAN address and two
+intent tranche (#641) merged; (4) environment: one host with a LAN address and two
 clients (or labelled namespaces), a pinned harness, an existing dashboard backend
 on loopback, and a recorded Jul build. Because the intent tranche is not in
 v2.2.0, #581's evidence uses either the first release containing it or a

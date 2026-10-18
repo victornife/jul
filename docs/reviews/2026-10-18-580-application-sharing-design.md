@@ -286,7 +286,7 @@ recorded as evidence, not as proof of correctness.
 | Tailscale behaviour taken from source because the knowledge base was unreachable | unverified against current docs | #582 re-checks before closure |
 | Cloudflare behaviour of open WebSockets on Access revocation | undocumented | #583 measures |
 | Route-level `require_client_cert` on an open connection after revocation | source inspection only (E39); probe P1 was handler-level | candidate regression for #634 or the mTLS owner |
-| Effort for the intent tranche and complete withdrawal | author estimates, not owner estimates | re-estimated at registration |
+| Effort for the intent tranche (#641) and complete withdrawal (#642) | author estimates, not owner estimates | re-estimated at selection |
 | Intent field names frozen before first-use evidence | accepted trade-off (SD-05) | additive evolution only |
 | Host trust includes all same-host processes | stated assumption (§6 of the spec) | Jul-side checks where untrusted processes run |
 | Provider seams (membership, invitations, revocation) remain handoffs | by design | SD-06 outcome gate; #588 |

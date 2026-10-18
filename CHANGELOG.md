@@ -18,8 +18,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   It defines a derived sharing view, four access modes, trust and evidence
   contracts, the withdrawal promise, three reference fixtures, a protocol
   matrix, and measurement and usability contracts. It also selects two bounded
-  follow-up tranches: declared intent with guarded changes, and complete
-  withdrawal with #563/#562. Design only: no runtime, configuration, API,
+  follow-up tranches: declared intent with guarded changes (#641), and complete
+  withdrawal with #563/#562 (#642). Design only: no runtime, configuration, API,
   Console or maturity change, and not accepted until the maintainer accepts
   #580. Known limitations and mTLS notes now state that a revoked client
   certificate still passes `require_client_cert` on an already-open connection.

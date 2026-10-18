@@ -44,7 +44,7 @@ constrains any design:
    `audience_label`, requires a `route_id` on the same location, has no runtime
    effect, and drives **intent findings** in lint and plans plus an explicit
    Console acknowledgement before any change that widens or contradicts declared
-   intent. It is delivered as a bounded tranche before #581's evidence run.
+   intent. It is delivered as a bounded tranche (#641) before #581's evidence run.
    Evolution is additive only.
 3. **Four access modes (SD-03).** `preview`, `private_network`, `restricted`,
    `public`. Private-network membership may be a declared *coarse* audience,
@@ -56,7 +56,7 @@ constrains any design:
    complete candidate, with plan guards for plugins and CORS. Before #587 offers
    guided withdrawal, a **dedicated outermost, address-independent withdrawal
    gate** with a sparse typed operation is delivered together with #563/#562
-   **retirement of connections on narrowing** as one capability. No periodic
+   **retirement of connections on narrowing** as one capability (#642). No periodic
    connection age and no general session-termination API.
 5. **Withdraw in place.** Withdrawal never deletes a route.
 6. **Separation, trust and cache.** One Jul listener per external enforcement
