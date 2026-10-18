@@ -69,11 +69,12 @@ func refreshExternalEndpointList() {
 		e, ok := byPattern[route.Pattern]
 		if !ok {
 			e = &adminapi.EndpointAvailability{
-				Path:        route.Pattern,
-				Available:   true,
-				Stability:   route.Stability.String(),
-				Permissions: append([]string(nil), route.Permissions...),
-				SunsetOn:    route.Sunset,
+				Path:              route.Pattern,
+				Available:         true,
+				Stability:         route.Stability.String(),
+				Permissions:       append([]string(nil), route.Permissions...),
+				RequiresConfigRaw: route.RequiresConfigRaw,
+				SunsetOn:          route.Sunset,
 			}
 			byPattern[route.Pattern] = e
 			order = append(order, route.Pattern)

@@ -71,13 +71,14 @@ type ExternalOperation struct {
 }
 
 type ExternalRoute struct {
-	Pattern     string
-	Method      string
-	Stability   RouteStability
-	Operation   ExternalOperation
-	Permissions []string
-	Public      bool
-	Sunset      string
+	Pattern           string
+	Method            string
+	Stability         RouteStability
+	Operation         ExternalOperation
+	Permissions       []string
+	RequiresConfigRaw bool
+	Public            bool
+	Sunset            string
 }
 
 func ExternalRoutes() []ExternalRoute {
@@ -88,13 +89,14 @@ func ExternalRoutes() []ExternalRoute {
 		}
 		for _, m := range spec.Methods {
 			out = append(out, ExternalRoute{
-				Pattern:     spec.Pattern,
-				Method:      m,
-				Stability:   spec.Stability,
-				Operation:   spec.Operations[m],
-				Permissions: spec.permissionsFor(m),
-				Public:      spec.Public,
-				Sunset:      spec.Sunset,
+				Pattern:           spec.Pattern,
+				Method:            m,
+				Stability:         spec.Stability,
+				Operation:         spec.Operations[m],
+				Permissions:       spec.permissionsFor(m),
+				RequiresConfigRaw: spec.RequiresConfigRaw,
+				Public:            spec.Public,
+				Sunset:            spec.Sunset,
 			})
 		}
 	}

@@ -9,7 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Drawer } from "@/components/Drawer.tsx";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { usePermission } from "@/auth/usePermission.ts";
-import {
+import { captureAdminIdentity,
   fetchPendingRestart,
   fetchRawConfig,
   fetchRoutes,
@@ -245,6 +245,7 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
   };
 
   const reviewCache = async (): Promise<void> => {
+    const assertIdentity = captureAdminIdentity();
     clearErrors();
     if (!canRaw) {
       setLocalError("Cache editing requires config:raw because it preserves and stages a complete [cache] table.");
@@ -278,6 +279,7 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
       if (action !== "hot" && action !== "stage_restart" && action !== "update_staged") {
         throw new Error("The server did not offer a safe apply action for this cache candidate.");
       }
+      assertIdentity();
       setPendingDraft({
         kind: "toml",
         toml: candidate,

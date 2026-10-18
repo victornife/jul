@@ -258,7 +258,7 @@ describe("RouteEditor ordered batch creation", () => {
     expect(screen.getByRole("radio", { name: /Create a new server/ })).toBeChecked();
   });
 
-  it("permits preview with config:write alone", async () => {
+  it("explains that config:write alone cannot authorize comparison previews", async () => {
     render(
       <RouteEditor
         existingRoutes={[route()]}
@@ -269,19 +269,8 @@ describe("RouteEditor ordered batch creation", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Review lifecycle and diff →" }));
-    await waitFor(() => {
-      expect(seenBody).toEqual({
-        ops: [
-          {
-            op: "location_add",
-            listen: ":8080",
-            server_names: ["a.example", "b.example"],
-            match_set: { type: "prefix", path: "/write-only" },
-            action: { kind: "deny" },
-          },
-        ],
-      });
-    });
+    expect(await screen.findByText(/Configuration previews require config:raw/)).toBeInTheDocument();
+    expect(seenBody).toBeNull();
   });
 
   it("disables preview and explains config:write permission", () => {

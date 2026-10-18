@@ -4,6 +4,7 @@
  */
 
 import {
+  authToken,
   ConfigDiffSchema,
   PatchLifecycleSchema,
   PatchOperationSummarySchema,
@@ -86,7 +87,10 @@ export interface LegacyPendingPatchDraftInput {
 }
 
 export type PendingDraft = PendingRawDraft | LegacyPendingRawDraft | PendingPatchDraft;
-export type PendingDraftInput = PendingRawDraft | LegacyPendingRawDraft | LegacyPendingPatchDraftInput;
+export type PendingDraftInput =
+  | PendingRawDraft
+  | LegacyPendingRawDraft
+  | LegacyPendingPatchDraftInput;
 
 const STORAGE_KEY = "__jul_config_pending_draft_v4";
 const LEGACY_STORAGE_KEYS = [
@@ -97,6 +101,7 @@ const LEGACY_STORAGE_KEYS = [
 ] as const;
 const ALL_STORAGE_KEYS = [STORAGE_KEY, ...LEGACY_STORAGE_KEYS] as const;
 let pending: PendingDraft | null = null;
+let pendingCredential: string | null = null;
 
 function storage(): Storage | null {
   try {
@@ -186,36 +191,25 @@ function clearStoredDrafts(session: Storage | null): void {
   for (const key of ALL_STORAGE_KEYS) session.removeItem(key);
 }
 
-function secretSafeStoredPatch(draft: PendingPatchDraft): Omit<PendingPatchDraft, "candidate"> {
-  return {
-    kind: draft.kind,
-    ops: [...draft.ops],
-    ...(draft.baseVersion !== undefined ? { baseVersion: draft.baseVersion } : {}),
-    summary: draft.summary,
-    operationSummaries: [...draft.operationSummaries],
-    valid: draft.valid,
-    validationErrors: [...draft.validationErrors],
-    previewDiff: draft.previewDiff,
-    ...(draft.lifecycle !== undefined ? { lifecycle: draft.lifecycle } : {}),
-    recommendedAction: draft.recommendedAction,
-    ...(draft.pendingRestart !== undefined ? { pendingRestart: draft.pendingRestart } : {}),
-    candidateState: draft.candidateState,
-    requiresFreshPreview: draft.requiresFreshPreview,
-  };
-}
-
+/** Full comparison assessments can encode hidden equality. Keep them, their
+ * operations and any raw candidates in same-credential memory only. */
 export function setPendingDraft(draft: PendingDraftInput): void {
   pending = normalizeInput(draft);
-  const session = storage();
+  pendingCredential = authToken.get();
   try {
-    clearStoredDrafts(session);
-    if (pending.kind === "patch") {
-      session?.setItem(STORAGE_KEY, JSON.stringify(secretSafeStoredPatch(pending)));
-    }
-    // Raw/full candidate TOML remains in memory only. Never write it to browser
-    // storage, even for same-tab convenience.
+    clearStoredDrafts(storage());
   } catch {
-    // In-memory navigation still works when storage is unavailable.
+    // Memory handoff still works when browser storage is unavailable.
+  }
+}
+
+export function clearPendingDraft(): void {
+  pending = null;
+  pendingCredential = null;
+  try {
+    clearStoredDrafts(storage());
+  } catch {
+    // Storage may be unavailable; there is no in-memory fallback to restore.
   }
 }
 
@@ -276,7 +270,10 @@ function parsePatch(value: Record<string, unknown>): PendingPatchDraft | null {
     ? (value.candidateState as CandidateAvailability)
     : "not_requested";
   const incomplete =
-    baseVersion === undefined || baseVersion.trim() === "" || !lifecycle.success || pendingRestart === undefined;
+    baseVersion === undefined ||
+    baseVersion.trim() === "" ||
+    !lifecycle.success ||
+    pendingRestart === undefined;
   return {
     kind: "patch",
     ops,
@@ -292,7 +289,9 @@ function parsePatch(value: Record<string, unknown>): PendingPatchDraft | null {
     ...(pendingRestart !== undefined ? { pendingRestart } : {}),
     candidateState,
     requiresFreshPreview:
-      typeof value.requiresFreshPreview === "boolean" ? value.requiresFreshPreview || incomplete : true,
+      typeof value.requiresFreshPreview === "boolean"
+        ? value.requiresFreshPreview || incomplete
+        : true,
     // Ignore candidate/raw TOML even when injected into sessionStorage.
   };
 }
@@ -332,40 +331,10 @@ export function normalizePendingDraft(value: unknown): PendingDraft | null {
   return object.kind === "patch" ? parsePatch(object) : null;
 }
 
-function parseStored(raw: string): PendingPatchDraft | null {
-  try {
-    const normalized = normalizePendingDraft(JSON.parse(raw) as unknown);
-    return normalized?.kind === "patch" ? normalized : null;
-  } catch {
-    return null;
-  }
-}
-
 export function takePendingDraft(): PendingDraft | null {
-  const memory = pending;
-  pending = null;
-  const session = storage();
-  try {
-    if (memory !== null) {
-      clearStoredDrafts(session);
-      return memory;
-    }
-    if (session !== null) {
-      for (const key of ALL_STORAGE_KEYS) {
-        const serialized = session.getItem(key);
-        session.removeItem(key);
-        if (serialized === null) continue;
-        const parsed = parseStored(serialized);
-        if (parsed !== null) {
-          clearStoredDrafts(session);
-          return parsed;
-        }
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
+  const memory = pendingCredential === authToken.get() ? pending : null;
+  clearPendingDraft();
+  return memory;
 }
 
 export const pendingDraftStorageKey = STORAGE_KEY;

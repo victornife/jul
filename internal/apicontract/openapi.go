@@ -52,20 +52,21 @@ type PathItem struct {
 }
 
 type Operation struct {
-	OperationID  string                `json:"operationId"`
-	Summary      string                `json:"summary"`
-	Description  string                `json:"description,omitempty"`
-	Tags         []string              `json:"tags,omitempty"`
-	Deprecated   bool                  `json:"deprecated,omitempty"`
-	Parameters   []Parameter           `json:"parameters,omitempty"`
-	RequestBody  *RequestBody          `json:"requestBody,omitempty"`
-	Responses    map[string]*Response  `json:"responses"`
-	Security     []map[string][]string `json:"security,omitempty"`
-	Stability    string                `json:"x-jul-stability"`
-	Permissions  []string              `json:"x-jul-permissions,omitempty"`
-	Sunset       string                `json:"x-jul-sunset,omitempty"`
-	MaxBodyBytes int64                 `json:"x-jul-max-body-bytes,omitempty"`
-	ErrorCodes   []string              `json:"x-jul-error-codes,omitempty"`
+	OperationID       string                `json:"operationId"`
+	Summary           string                `json:"summary"`
+	Description       string                `json:"description,omitempty"`
+	Tags              []string              `json:"tags,omitempty"`
+	Deprecated        bool                  `json:"deprecated,omitempty"`
+	Parameters        []Parameter           `json:"parameters,omitempty"`
+	RequestBody       *RequestBody          `json:"requestBody,omitempty"`
+	Responses         map[string]*Response  `json:"responses"`
+	Security          []map[string][]string `json:"security,omitempty"`
+	Stability         string                `json:"x-jul-stability"`
+	Permissions       []string              `json:"x-jul-permissions,omitempty"`
+	RequiresConfigRaw bool                  `json:"x-jul-requires-config-raw,omitempty"`
+	Sunset            string                `json:"x-jul-sunset,omitempty"`
+	MaxBodyBytes      int64                 `json:"x-jul-max-body-bytes,omitempty"`
+	ErrorCodes        []string              `json:"x-jul-error-codes,omitempty"`
 }
 
 type Parameter struct {

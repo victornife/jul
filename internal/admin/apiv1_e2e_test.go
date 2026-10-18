@@ -105,7 +105,7 @@ func TestScopedPatchAssessmentDiagnosticRedaction(t *testing.T) {
 	const token = "sibling-preview-writer-token-fixture-514"
 	t.Setenv("JUL_SIBLING_REVIEW_CANARY_514", canary)
 	baseline := config.ProxyTarget("http://127.0.0.1:8082", "127.0.0.1:8081")
-	policy, err := rbac.Build(true, rbac.RoleAdmin, map[string][]string{"write-only": {"config:write"}}, []rbac.PrincipalDef{
+	policy, err := rbac.Build(true, rbac.RoleAdmin, map[string][]string{"write-only": {"config:write", "config:raw"}}, []rbac.PrincipalDef{
 		{Name: "root", Role: rbac.RoleAdmin, Token: "unused-sibling-review-admin-token-514"},
 		{Name: "writer", Role: "write-only", Token: token},
 	}, "", time.Now())

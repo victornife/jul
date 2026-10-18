@@ -187,7 +187,7 @@ route it asked for.
 | `/api/v1/listeners/{addr}/client_address` | GET | external | `config:read` |
 | `/api/v1/streams` | GET | external | `status:read` |
 | `/api/v1/config/export` | GET | external | `config:read` |
-| `/api/v1/config/history/{id}/diff` | GET | external | `history:rollback` |
+| `/api/v1/config/history/{id}/diff` | GET | external | `history:rollback` **and** `config:raw` |
 
 The probes and the scrape target keep their **current unversioned paths**.
 Moving a liveness probe or a Prometheus target under `/api/v1` would break every
@@ -472,11 +472,10 @@ handoff — is one where the operator has filesystem access to the file anyway.
 
 What rolling back to a stored revision would change.
 
-The permission is `history:rollback`, not `history:read`, because this is a
-rollback preview and the operation is shaped so a rollback-only principal can
-use it: it reads the snapshot server-side and accepts **no request body**, so
-that principal can see exactly what its rollback would do without holding
-`config:write` and without submitting arbitrary candidate TOML.
+The permissions are `history:rollback` **and** `config:raw`. The stored snapshot
+is read server-side, without a candidate request body or a `config:write` grant.
+The additional raw-read grant protects hidden-value equality revealed by the
+comparison; `history:raw` alone does not authorize reading the current baseline.
 
 The same reasoning is why the snapshot body never crosses the API. The diff is
 the answer the operator actually needs, and the body would be a second raw
@@ -529,6 +528,42 @@ Each internal route records its own reason in
 - **Legacy operational endpoints** (`/cache/purge`, `/reload`; the reload
   trigger is available only with `file_owned` authority) and
   `/debug/pprof/` are not part of the configuration surface `v1` publishes.
+
+## Configuration comparison permissions (#645)
+
+Full diffs, plans and previews require permission to read hidden configuration,
+including equality, lifecycle consequences and raw canonical fingerprints:
+
+| Operation | Required grants (all) |
+| --- | --- |
+| v1 `POST /config/plan`, `POST /config/patch`; legacy `/config/diff`, `/config/patch`, `/config/patch/preview` | `config:write` and `config:raw` |
+| v1/legacy `GET /config/history/{id}/diff` | `history:rollback` and `config:raw` |
+| v1/legacy `/config/adopt-external/preview` | `config:adopt` and `config:raw` |
+| Legacy `/config/preview`, `/config/patch/candidate` | `config:raw` (existing contract) |
+
+Paths in this table are relative to `/api/v1` or `/api` as labelled. The check
+uses the request's authenticated identity, honours wildcards and runs before
+candidate parsing, baseline/version checks or comparison. A caller without the
+additional permission receives `403`, with no partial comparison. Other allowed
+operations, including validation, route testing and wizard generation, retain
+their permissions; direct mutation permissions are unchanged.
+
+Generated OpenAPI marks this conjunction with `x-jul-requires-config-raw: true`;
+capability entries use `requires_config_raw: true`. These are additional to the
+existing action permission metadata, whose any-of semantics do not change.
+Successful response DTOs are unchanged. Older clients receive an explicit
+forbidden result rather than mistaking an opaque result for a confirmed no-op.
+Automation must treat `403` as a failed preview and request administrator review
+or an explicit raw grant. The remote CLI's plan/diff, rollback and adoption
+workflows all obtain a preview, so those workflows now need this grant too.
+
+This security correction narrows access even for public-only edits: existing
+preview envelopes carry full lifecycle assessments and raw-config CAS versions.
+Masking secret values would retain equality signals. It does not change CAS,
+resolution, persistence, hot reload or restart staging. Status/export/version
+reads and independently authorized real mutations have separate contracts;
+this change does not establish global secrecy of all configuration fingerprints.
+See the [decision and evidence](reviews/2026-10-19-645-preview-disclosure.md).
 
 ## Authentication and authorization
 

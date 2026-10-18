@@ -5,8 +5,15 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchMe, UNAUTHORIZED_EVENT, FORBIDDEN_EVENT, type Identity } from "@/api/client.ts";
+import {
+  fetchMe,
+  invalidateAdminResponses,
+  UNAUTHORIZED_EVENT,
+  FORBIDDEN_EVENT,
+  type Identity,
+} from "@/api/client.ts";
 import { PermissionContext, type PermissionState } from "@/auth/usePermission.ts";
+import { clearPendingDraft } from "@/lib/configDraftHandoff.ts";
 
 // IDENTITY_KEY names the cached current-identity query.
 const IDENTITY_KEY = ["identity"] as const;
@@ -41,10 +48,19 @@ export function PermissionProvider({ children }: { readonly children: ReactNode 
     refetchOnWindowFocus: true,
   });
   const [rejected, setRejected] = useState(false);
+  const [settledIdentity, setSettledIdentity] = useState<string | null>(null);
 
   useEffect(() => {
     function onUnauthorized(): void {
+      invalidateAdminResponses();
       setRejected(true);
+      clearPendingDraft();
+      void qc.cancelQueries({ predicate: (q) => q.queryKey[0] !== "identity" });
+      qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "identity" });
+    }
+    function onCredentialChanged(): void {
+      onUnauthorized();
+      void qc.resetQueries({ queryKey: IDENTITY_KEY });
     }
     // A gated action was forbidden (403): the credential is still valid but its
     // permissions may have changed under a hot RBAC reload, so refetch identity
@@ -54,9 +70,11 @@ export function PermissionProvider({ children }: { readonly children: ReactNode 
     }
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
     window.addEventListener(FORBIDDEN_EVENT, onForbidden);
+    window.addEventListener("jul:credential-changed", onCredentialChanged);
     return () => {
       window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
       window.removeEventListener(FORBIDDEN_EVENT, onForbidden);
+      window.removeEventListener("jul:credential-changed", onCredentialChanged);
     };
   }, [qc]);
 
@@ -68,7 +86,26 @@ export function PermissionProvider({ children }: { readonly children: ReactNode 
   }, [query.isSuccess, dataUpdatedAt]);
 
   const identity: Identity | null = rejected ? null : (query.data ?? null);
-  const ready = !rejected && query.isFetched && identity !== null;
+  const ready = !rejected && query.isSuccess && identity !== null;
+  const identityKey =
+    identity === null
+      ? null
+      : JSON.stringify([
+          identity.principal,
+          identity.token_id,
+          identity.role,
+          [...identity.permissions].sort(),
+        ]);
+  useEffect(() => {
+    if (!ready || identityKey === settledIdentity) return;
+    invalidateAdminResponses();
+    // Never reuse another identity's privileged projections, even when the
+    // same token loses permissions through a live policy update.
+    clearPendingDraft();
+    void qc.cancelQueries({ predicate: (q) => q.queryKey[0] !== "identity" });
+    qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "identity" });
+    setSettledIdentity(identityKey);
+  }, [identityKey, ready, settledIdentity, qc]);
 
   const value = useMemo<PermissionState>(() => {
     const granted = new Set(identity?.permissions ?? []);
@@ -83,5 +120,29 @@ export function PermissionProvider({ children }: { readonly children: ReactNode 
     };
   }, [identity, query.isLoading, ready]);
 
-  return <PermissionContext.Provider value={value}>{children}</PermissionContext.Provider>;
+  // Do not mount panels with cached data while identity is unknown or while
+  // caches from a different permission set are being removed.
+  if (query.isError && !rejected) {
+    return (
+      <div role="alert">
+        Unable to verify admin permissions.{" "}
+        <button
+          type="button"
+          onClick={() => {
+            void query.refetch();
+          }}
+        >
+          Retry permission check
+        </button>
+      </div>
+    );
+  }
+  if (!ready || settledIdentity !== identityKey) {
+    return <p role="status">Checking admin permissions…</p>;
+  }
+  return (
+    <PermissionContext.Provider key={identityKey} value={value}>
+      {children}
+    </PermissionContext.Provider>
+  );
 }
