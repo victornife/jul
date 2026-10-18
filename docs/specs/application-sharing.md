@@ -889,7 +889,7 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
 | `not_serving_yet` | `candidate` is `base_serving` | "Not serving yet: the configuration this change was planned against is still serving." Access details are shown for information only. |
 | `candidate_serving` | `candidate` is `serving`; `access` is `matches` or `none_expected` | With `matches`: "The planned configuration is serving, and its expected access facts match." With `none_expected`: "The planned configuration is serving; this change expected no access facts to compare." The **only** result that may say the change is serving. |
 | `diverged` | `access` is `differs` | "What is serving differs from the plan," naming the entries and fields — including an access file changed after planning while the exact candidate serves. |
-| `unverifiable` | `access` is `unverifiable` | "Jul cannot compare these entries," naming each and the reason, with the next step (reload the file, or plan again). |
+| `unverifiable` | `access` is `unverifiable` | "Jul cannot compare these entries," naming each and the reason, with the next step: reload a file whose loaded digest is missing, or, for a position from another revision, follow the recovery rules below. |
 | `access_matches` | `candidate` is `other_revision`; `access` is `matches` | "The expected access facts match, but a different configuration (<version>) is serving." |
 | `other_revision` | `candidate` is `other_revision`; `access` is `none_expected` | "A different configuration (<version>) is serving; this change expected no access facts to compare." |
 
@@ -960,8 +960,19 @@ The rule: when the comparison for an access input involves a value the caller
 cannot read, that input's class is `uncertain`, unless its written value and
 its resolved value are both unchanged. Such a value is a resolved reference
 (the view and `config:raw` show reference text, never resolved values) or a
-field hidden from that caller. Directions are still computed wherever they
-follow from readable values alone.
+field hidden from that caller; a hidden field that the candidate sets counts as
+changed whatever its value. Directions are still computed wherever they follow
+from readable values alone.
+
+The exemption compares only values from outside the candidate, read when the
+plan runs and when Jul last loaded: an environment variable, which cannot
+change within a running process, or a file's contents. It reveals at most
+whether such a file changed since it was loaded. Turning that into a
+comparison with a chosen value requires write access to the referenced file,
+and anyone with that access already controls the value. The same boundary
+already applies to htpasswd, CA, CRL and WAF files. Treating every unchanged
+reference as `uncertain` instead would retire the open exchanges of affected
+entries on every unrelated edit.
 
 `uncertain` keeps its full meaning: acknowledgement in the Console, and §8.4
 retirement by default with the keep-open exception. A class is never shown as
@@ -1496,7 +1507,7 @@ items are failures, not limitations.
 | Forged `X-Forwarded-For`, `Forwarded`, RFC 9440 client-certificate headers | ignored or stripped | ADR 0016 §12 |
 | Forged provider identity headers | decision unchanged; header reaches backend (recorded) | SH-12 |
 | Direct backend or admin access from another host | unreachable | loopback binds |
-| Restricted or private content in a cache | **must not**: restricted and private entries must keep Jul's response cache off in the first release. Jul does not refuse a configuration that enables it: lint and plans warn (`cache_on_restricted_entry`, `intent_restricted_cached`), and the fixtures enable no cache. *Accepted (SD-16):* refusal is the long-term default, introduced through a migration and compatibility decision; until then legacy configurations keep the warnings, and guided sharing flows (#587) and the fixtures require cache off | cache key is method + Host + URI with no listener, entry or identity partition; reloads do not purge |
+| Restricted or private content in a cache | **must not**: restricted and private entries must keep Jul's response cache off in the first release. Jul does not refuse a configuration that enables it: lint and plans warn (`cache_on_restricted_entry`, `intent_restricted_cached`), and the fixtures enable no cache. *Accepted (SD-16):* refusal is the long-term default, introduced through a migration and compatibility decision; until then legacy configurations keep the warnings, and guided sharing flows (#587) and the fixtures require cache off. It applies to what Jul can see: entries that declare `restricted` or `private_network`, and entries with a Jul check (credential, client certificate or CIDR allow list). An undeclared entry without Jul checks is not judged, because external restrictions are invisible to Jul (its posture stays `unanalysed`) | cache key is method + Host + URI with no listener, entry or identity partition; reloads do not purge |
 | Public entries sharing cache entries | the process-wide cache is keyed by method + Host + URI, so cache-enabled entries on different listeners that answer the same host name and path share cache entries; correct only when they serve the same content. Plans and lint warn (`cache_shared_across_entries`). The fixtures enable no Jul response cache | partitioning by listener or entry is a cache-owner decision (#620/#623) |
 | Route or backend change of the portal | dashboard audience unchanged (plan shows no dashboard delta) | per-entry checks; §9.5 |
 | Intentional dashboard → public | only via a plan naming it; the Console requires acknowledging the intent change, and the API returns the same classes without enforcing it | SH-5, §4.5 |
@@ -1505,8 +1516,9 @@ items are failures, not limitations.
 **Cache rule.** Jul's authenticated-reuse rule covers `Authorization`, not
 cookies, mTLS identity or CIDR-restricted traffic, and cached entries survive
 reloads. The long-term default refuses response cache on restricted and private
-entries (SD-16), introduced through a migration and compatibility decision that
-never silently invalidates today's file-owned configurations. Any exception for
+entries as Jul can see them: a declared `restricted` or `private_network` mode,
+or a Jul check (SD-16). It arrives through a migration and compatibility
+decision that never silently invalidates today's file-owned configurations. Any exception for
 a restricted entry needs a decision by the cache owner (#620/#623) with a
 partitioned key, proof of non-personalised responses and purge on route,
 backend or audience change.

@@ -14,9 +14,9 @@
 > **r17** `8385c59c` (round 18, §6.18), **r18** `874df4e4` (round 19, §6.19),
 > **r19** `c0af10a3` (whole-contract review, §6.20), **r20** `1332982a` (round
 > 21, §6.21), **r21** `a27acb0d` (round 22, §6.22), **r22** `68aed05d` (fourth
-> principal re-review, §6.23) and **r23** (this revision; round 24 in §6.24).
-> This packet holds evidence, decisions, review findings and traceability for
-> the
+> principal re-review, §6.23), **r23** `e73abca6` (round 24, §6.24) and **r24**
+> (this revision; round 25 in §6.25). This packet holds evidence, decisions,
+> review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -745,7 +745,20 @@ Reviewer note recorded: draft PRs #646 and #647 propose fixes for #643 and
 #644. They are not part of this design; #641 reconciles any merged selector or
 version change against its selected baseline.
 
-### 6.24 Round 24 (verification of r23)
+### 6.24 Round 24 (verification of r23 `e73abca6`)
+
+The security reviewer verified RR11 resolved: the precedence covers classes,
+expected facts, findings, warnings and lifecycle output, and `uncertain` keeps
+its retirement consequence. The whole-contract reviewer verified RR09 resolved
+and raised three items.
+
+| ID | Sev. (reviewer → author) | Finding | Resolution (r24) |
+| --- | --- | --- | --- |
+| W4-1 | high → low, partly disputed | the exemption for "written and resolved unchanged" reveals equality if a caller can alter a referenced file or environment value | kept, with its boundary stated: it compares only values from outside the candidate (environment, which cannot change within a running process, or file contents); a comparison with a chosen value needs write access to the referenced file, which already controls the value, as for htpasswd, CA, CRL and WAF files. Always-`uncertain` would retire affected entries' exchanges on every unrelated edit. A hidden field the candidate sets now counts as changed whatever its value |
+| W4-2 | medium | an `unverifiable` result row still said "plan again" for every case | points to reloading a file or to the recovery rules |
+| W4-3 | medium | SD-16 did not say how restricted or private is recognised while intent is optional | refusal applies to declared `restricted` or `private_network` modes and to entries with a Jul check; undeclared entries without checks are not judged (`unanalysed`) |
+
+### 6.25 Round 25 (verification of r24)
 
 (Recorded below.)
 
