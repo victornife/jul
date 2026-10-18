@@ -872,7 +872,7 @@ class or retirement.
 
 | Class | Meaning | Consequence |
 | --- | --- | --- |
-| `unchanged` | the admitted request space is proven identical: no effective access input of the entry changed, or a rule below proves the change has no admission effect | none (the change is still listed as a plan item) |
+| `unchanged` | the admitted request space is proven identical: no effective access input of the entry changed, or a rule below proves the change has no admission effect. Admission is judged for requests that arrive intact and within Jul's size limits (AD-08), so it means access-policy equivalence, not identical outcomes for every request | none (the change is still listed as a plan item) |
 | `metadata_only` | only declared intent or labels changed | acknowledgement if `mode` becomes wider; **never** retirement |
 | `narrowed` | a rule below proves the admitted request space only shrank | §8.4 retirement |
 | `widened` | a rule below proves it only grew | Console acknowledgement before apply |

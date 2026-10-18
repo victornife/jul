@@ -6,9 +6,10 @@
 > **r3** `fe44f6a0` (round 3, §6.4), **r4** `a76f197e` (independent principal
 > review, §6.5), **r5** `c53b14b5` (round 5, §6.6), **r6** `ecde75fa` (round 6,
 > §6.7), **r7** `7e3382c4` (round 7, §6.8), **r8** `292a294c` (round 8, §6.8;
-> independent principal re-review, §6.9), **r9** `72871705` (round 10, §6.10)
-> and **r10** (this revision; round 11 in §6.11). This packet holds evidence,
-> decisions, review findings and traceability for the
+> independent principal re-review, §6.9), **r9** `72871705` (round 10, §6.10),
+> **r10** `74fb5631` (round 11, §6.11) and **r11** (this revision: round-11
+> record and one precision note). This packet holds evidence, decisions,
+> review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -508,9 +509,17 @@ against source and accepted.
 | R10-2 | medium | `none_expected` rendered as "access facts match" | separate wording for `none_expected` |
 | R10-3 | low | "exact" serving equality rested on a 64-bit fingerprint | postcondition carries and compares full SHA-256 configuration digests; versions kept for correlation; E53 corrected |
 
-### 6.11 Round 11 (verification of r10)
+### 6.11 Round 11 (verification of r10 `74fb5631`)
 
-(Recorded below.)
+Both round-10 reviewers verified their items against the r9→r10 diff.
+**Resolved:** S10-1 (router-equivalent normalisation, reused rather than
+restated), R10-1 (AD-08 judged coherent with §8.4 and §9.5; no admission
+difference beyond the excluded transport and size effects found under the
+no-engine-control precondition), R10-2 and R10-3. No new blocker or high
+finding. One precision note was applied: `unchanged` now states that it means
+access-policy equivalence for requests that arrive intact and within size
+limits, not identical outcomes for every request. No blocker or high finding
+is open.
 
 ## 7. Traceability
 
