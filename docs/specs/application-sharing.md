@@ -3,7 +3,7 @@
 > **Status: Proposed — design for maintainer acceptance under
 > [#580](https://github.com/victornife/jul/issues/580).** Nothing here is a
 > shipped capability. Decisions marked *Accepted* record a maintainer answer
-> (SD-01 to SD-06, 2026-10-18); everything else is a proposal until #580 is
+> (SD-01 to SD-14, 2026-10-18); everything else is a proposal until #580 is
 > accepted. Runtime work belongs to the successor owners named in §17. Source
 > baseline: `main` at `64e4a8b29230134c5dee37dfd8bfa130a9580a2a`; published
 > package baseline v2.2.0. Evidence, decision log, adversarial review and
@@ -131,7 +131,8 @@ identifier.
 intent):* declared intent is held in the configuration through one optional,
 location-scoped block, delivered as an early runtime tranche **before #581's
 evidence run**, together with intent-guarded plans and lint (§4.5). *Accepted
-(SD-12):* the block also carries an optional declared `external_enforcer`.
+(SD-12, reconfirmed as context only after round 5):* the block also carries an
+optional declared `external_enforcer`.
 
 *Accepted (SD-10):* current-access facts come from the serving generation
 (SH-13). The view carries two clearly separated layers: `serving` (always
@@ -168,7 +169,12 @@ Edge cases:
   is bound to `route_id` + `serving_version` (§7.1) and becomes stale when either
   changes; reuse of an ID is never treated as continuity.
 - **One application, several entries.** An application reached through several
-  routes, host names, listeners or backends is several entries. Sharing
+  routes, server blocks, listeners or backends is several entries. Host aliases
+  are not: a location in a block with several `server_names` is **one** entry,
+  reachable at each of those names and selected, withdrawn and checked as one,
+  with its addresses listed under it. A `prefix` entry does not cover paths that
+  a more specific entry of the same block answers (for example `/api` beside
+  `/`); those are separate entries and stay as they are unless selected. Sharing
   operations act only on an **explicit, previewed set of entries**. As advisory
   context the view reports **backend groups**: entries that route to the same
   upstream `name`, the same normalised literal backend address or the same
@@ -213,15 +219,15 @@ existing rules, so an unreadable or invalid file yields
 | `layer` | `serving` \| `saved` | per entry layer | server | — |
 | `revision` | `serving_version` or `desired_version` | always for its layer | existing status | — |
 | `entry.route_id` | string | absent ⇒ `entry.identity = revision_bound` | `route_id` | ADR 0019 grammar |
-| `entry.selector` | object + `base_version` | always | layer's configuration | paths are admin-visible only |
+| `entry.selector` | `{listen, host_set, match_type, path, match_ordinal}` + `base_version` | always | layer's configuration | the ADR 0018 §14 selector, with the block's `server_names` given by reference to `host_sets` rather than repeated per entry; paths are admin-visible only |
 | `entry.identity` | `durable` \| `revision_bound` | always | derived | — |
 | `service.display_label` | string | always (fallback chain §4.1) | layer's configuration | not an identity, not a key |
-| `service.hosts` | string[] | may be empty | `server_names` | — |
+| `service.host_set` | response-local key into `host_sets` | always (a set may be empty) | `server_names` | shared by every entry of the block; never repeated per entry |
 | `service.receives_unmatched_hosts` | bool | true for the first-declared block on its listener | router rule | — |
 | `listener.address` | string | always | canonical `listen` | — |
 | `listener.bind_scope` | `loopback` \| `private_address` \| `shared_address_space` \| `all_interfaces` \| `public_address` \| `unknown` | `unknown` when not a literal address | derived (§4.4) | configured bind, **not** reachability |
 | `listener.transport` | `{tls, client_auth: none\|request\|require, http3, h2c}` | always | layer's configuration | listener-scoped (ADR 0016 §11) |
-| `urls[]` | `{url \| template, kind: concrete\|template\|none}` | `concrete` only for literal host names and `exact`/`prefix` paths; wildcard hosts and regex paths yield a `template` that is not a usable address; no host names yields `none` | derived | what Jul answers locally; never proof of outside reach |
+| `urls` | `{items[], count, truncated}`; each item `{url \| template, kind: concrete\|template\|none}` | `concrete` only for literal host names and `exact`/`prefix` paths; wildcard hosts and regex paths yield a `template` that is not a usable address; no host names yields `none`; `count` covers every host name of the block | derived from the entry's host set and path | `items` capped (below); what Jul answers locally, never proof of outside reach |
 | `jul_checks.network` | `none` \| `allow_list` \| `deny_list` \| `allow_and_deny` | always | `auth.allow/deny` | CIDR values not shown in the summary |
 | `jul_checks.credential` | `none` \| `basic` \| `jwt` \| `forward_auth` | always | `auth.*` | no file paths, URLs or secrets |
 | `jul_checks.client_certificate` | `not_required` \| `required_by_route` \| `required_by_listener` | always | `require_client_cert`, `client_auth.mode` | identity is fixed per TLS connection (§8.1) |
@@ -236,12 +242,34 @@ existing rules, so an unreadable or invalid file yields
 | `authority` | `{config_authority, config_state, desired_version, serving_version}` | once per response | existing status | ADR 0019 §16 |
 | `next_actions[]` | closed set (§9.7) | always | server rule table | — |
 
-**Backend groups (bounded).** The response carries a `backend_groups` table
-once: `{key, kind: upstream|address|static_root, member_count, members[]}`,
-with `members[]` capped (proposed: 50) and `truncated: true` plus the omitted
-count when capped. Entries reference their group by `key`. Output is linear in
-the number of entries; the UI states that groups are advisory and not
-exhaustive, and never presents a truncated list as complete.
+**Response size (bounded).** Data that belongs to a server block or a backend
+appears once per response, never once per entry, and every list has a cap with
+a truthful count:
+
+- `host_sets`: `{key, names[], name_count, names_digest, has_wildcard,
+  truncated}`, one per server block and layer; `names[]` capped (proposed
+  100), with the rest available through a paged read of that host set.
+  `names_digest` is the digest used by revision-bound references (§9.4).
+- `backend_groups`: `{key, kind: upstream|address|static_root, member_count,
+  members[], truncated}`; `members[]` capped (proposed 50). Entries reference
+  their group by `key`; groups are advisory and not exhaustive.
+- `urls.items` per entry: capped (proposed 3); `count` is the total.
+- Entries are paged (proposed 200 per page). A page carries only the host sets
+  and backend groups its entries reference, and its cursor is bound to the
+  response's `serving_version` and `desired_version`: a cursor from another
+  revision is refused with "the configuration changed; reload the view", so
+  pages never join revisions (SH-13).
+
+Each page is therefore bounded by constants, and reading the whole view costs
+time and output linear in the configuration's size (entries, host names,
+backend members), never entries × host names. A truncated list is labelled
+"and N more" and never presented as complete. Caps never narrow what an
+operation acts on: operations select entries, an entry always covers every host
+name of its block, and a plan states the count and offers the full list. The
+caps are proposals: #641 implements this shape, and #586 measures response size
+and render time on a synthetic all-aliases × all-routes configuration and fixes
+the values before the view is exposed in the Console or API (a gate for #586
+and #587).
 
 ### 4.4 Derived posture rules
 
@@ -287,7 +315,7 @@ proxy_pass = "http://dashboard"
 | --- | --- |
 | Presence | Optional forever. Absent ⇒ `not_declared`. Existing configurations remain valid. |
 | Validation | `mode` required inside the block, closed enum; `audience_label` and `external_enforcer` optional, printable UTF-8, 1–64 bytes, no control characters; a `route_id` must be present on the same location (validation error otherwise, naming the location). |
-| `external_enforcer` (SD-12) | An operator declaration of who enforces the audience outside Jul (for example a provider and policy name). Rendered only as "declared by the operator, not verified by Jul" and shown alongside findings as context. It never removes, downgrades or changes any finding, and never counts as evidence. Structured, verifiable provider references belong to #588. |
+| `external_enforcer` (SD-12) | An operator declaration of who enforces the audience outside Jul (for example a provider and policy name). Rendered only as "declared by the operator, not verified by Jul" and shown alongside findings as context. It never removes, downgrades or changes any finding, and never counts as evidence. Structured, verifiable provider references belong to #588. Reconfirmed by the maintainer after round 5 removed its warning-reduction benefit (review packet §3). |
 | Runtime effect | None on routing, matching, enforcement, caching or metrics. Lifecycle `hot_reload`; generated contracts, description and lifecycle entries as for any field. |
 | Authority | `file_owned`: written only by the owner. `managed`: raw apply, or a sparse typed operation that **refuses** a route without `route_id` and directs the operator to add one through raw TOML (editing never mints, ADR 0019 §6). |
 | Evolution | New needs get new optional fields; existing fields are not retyped or repurposed. Under the [compatibility policy](../compatibility.md) a change is allowed with notice while the feature is Alpha or Beta, and needs a MAJOR release with a deprecation period once it is GA. |
@@ -551,7 +579,7 @@ design must satisfy; the design owns mechanisms, bounds and tests.
 
 | Aspect | Requirement |
 | --- | --- |
-| Trigger | A published generation in which an entry's effective access inputs are classed `narrowed` or `uncertain` by §9.5, including: the withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file or WAF rule-file content change; a CA/CRL change that invalidates certificates; host names or match narrowed; **any target change** while exchanges admitted under the old target remain. |
+| Trigger | A published generation in which an entry's effective access inputs are classed `narrowed` or `uncertain` by §9.5, including: the withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file, WAF rule-file or plugin-module content change; a CA/CRL change that invalidates certificates; host names or match narrowed; **any target change** while exchanges admitted under the old target remain. |
 | Uncertain changes (SD-09) | Treated as narrowing by default. The plan offers an explicit "keep open connections" exception per entry; choosing it is recorded in the result and forfeits any complete-withdrawal claim for that entry. |
 | Never triggers | `metadata_only` changes (declared intent and labels); changes to inputs that are not access inputs (§9.5: rate limits, cache, compression, timeouts, response headers); `widened` changes; and external events (provider policy, issuer key removal), which have no Jul event. |
 | Scope (SD-08) | **Exactly the narrowed entries.** Exchanges of every other entry continue uninterrupted, including exchanges multiplexed on the same HTTP/2 or HTTP/3 connection (browsers coalesce connections when one certificate covers several hosts). |
@@ -679,54 +707,97 @@ restart in `managed` mode.
 | Drift | writes refused until adopted | n/a |
 | History | managed history and rollback | none (the pipeline owns it) |
 
-**Postcondition (accepted, SD-11; producer and evaluator: #641).** Confirmation
-that a change is serving, usable in both authority modes and essential for
-file-owned pipelines, which Jul cannot fence.
+**Postcondition (accepted, SD-11 and SD-13; producer and evaluator: #641).**
+After any change, in either authority mode, it answers two separate questions:
+*is the exact planned configuration serving?* and *do the access facts the
+change should produce match what is serving?* It matters most for file-owned
+pipelines, which Jul cannot fence, and it never attributes a change to a writer.
 
 - **Producer.** Every plan (raw candidate or typed operations) returns a
   `postcondition`: `{postcondition_version: 1, base_serving_version,
-  candidate_desired_version, entries: [{ref, expected}]}`. `ref` is a
-  `route_id`, or the revision-bound selector for entries without one. `expected`
-  holds the entry facts the change should produce in the `serving` layer
-  (§4.3) — Jul checks, client-certificate requirement, bind scope, withdrawal
-  state, declared intent — and an **access fingerprint**: a non-secret digest
-  over the entry's effective access inputs (§9.5), including content digests of
-  the local access files they name (htpasswd, CA, CRL, WAF rule files) as read
-  when the plan was computed. Only entries the plan affects (including §9.5 expansion) are listed.
-  Jul stores nothing; the owner keeps the object with the change.
+  candidate_desired_version, entries: [{ref, expect, expected?}]}`. The two
+  versions are Jul's existing content versions of the *effective*
+  configuration (a digest of its canonical form, review packet E53): equal
+  versions mean an identical effective configuration, but they say nothing
+  about the contents of files the configuration names.
+  - `expect` is `present` or `absent`. Every entry the plan affects (including
+    the §9.5 expansion) is listed: `present` when it exists in the candidate,
+    `absent` when the plan removes it. A plan that affects no entry (for
+    example a global log-level or timeout change) lists none.
+  - `ref` is the entry's `route_id` when it has one. Otherwise it is a
+    revision-bound selector `{listen, server_names_digest, match_type, path,
+    match_ordinal, revision}`: the ADR 0018 §14 coordinates with the normalised
+    `server_names` replaced by their digest, taken from the candidate for
+    `present` entries and from the base for `absent` ones. It is resolved only
+    in the revision it names; Jul never resolves it in another revision, never
+    mints an identifier and keeps no mapping.
+  - `expected`, for `present` entries, holds the entry facts the change should
+    produce in the `serving` layer (§4.3) — the Jul checks it actually applies,
+    client-certificate requirement, bind scope, withdrawal state, declared
+    intent — and an **access fingerprint**: a non-secret digest over the
+    entry's effective access inputs (§9.5), including content digests of the
+    local access files they use (htpasswd, CA, CRL, WAF rule files,
+    request-plugin modules) as read when the plan was computed.
+  - Jul stores nothing; the owner keeps the object with the change.
 - **Evaluator.** A read-only, server-owned operation requiring the same
   permissions as inspecting the configuration (`status:read` and
-  `config:read`) compares the object with the **current** serving snapshot, whose
-  generation records the content digests it actually loaded. Per entry it
-  returns `matches` (facts and fingerprint equal), `differs` (with the differing
-  field names), `not_found` (the reference no longer resolves; for selectors
-  this includes any revision change that moves the entry), `unverifiable` (an
-  access file's loaded digest is not available for comparison), or
-  `unknown` (no serving snapshot). Overall it returns `confirmed` only when every
-  entry `matches`; otherwise `not_serving_yet` (`serving_version` still equals
-  `base_serving_version`), `diverged`, `unverifiable` or `unknown`. It states
-  separately whether the exact candidate is serving
-  (`serving_version == candidate_desired_version`).
+  `config:read`) compares the object with the **current** serving snapshot,
+  whose generation records the access-file digests it actually loaded. It
+  returns:
+  - `candidate`: `serving` when `serving_version` equals
+    `candidate_desired_version` (checked first, so a plan that changes nothing
+    is `serving` at once); otherwise `base_serving` when it equals
+    `base_serving_version`; otherwise `other_revision`; `unknown` without a
+    serving snapshot.
+  - per entry: `matches` (a `present` entry's facts and fingerprint are equal,
+    or an `absent` entry's `route_id` resolves to nothing); `differs` (with the
+    differing field names, or `still_present` for an entry expected absent);
+    `not_found` (a `present` reference resolves to nothing); `unverifiable` (a
+    revision-bound selector whose revision is not serving, or an access file
+    whose loaded digest is unavailable); or `unknown`. A revision-bound
+    `absent` entry matches only while the candidate is serving, because that
+    exact configuration does not contain it.
+  - `access`, aggregated: `matches` (at least one entry, and all match),
+    `none_expected` (no entries), `differs` (any `differs` or `not_found`),
+    `unverifiable` (otherwise, any `unverifiable`), or `unknown`.
+  - `result`: the first row of the table below that applies.
+
+| `result` | Condition | What every surface says |
+| --- | --- | --- |
+| `unknown` | `candidate` or `access` is `unknown` | "Jul cannot tell what is serving." |
+| `not_serving_yet` | `candidate` is `base_serving` | "Not serving yet: the configuration this change was planned against is still serving." Access details are shown for information only. |
+| `candidate_serving` | `candidate` is `serving`; `access` is `matches` or `none_expected` | "The planned configuration is serving, and its expected access facts match." The **only** result that may say the change is serving. |
+| `diverged` | `access` is `differs` | "What is serving differs from the plan," naming the entries and fields — including an access file changed after planning while the exact candidate serves. |
+| `unverifiable` | `access` is `unverifiable` | "Jul cannot compare these entries," naming each and the reason. |
+| `access_matches` | `candidate` is `other_revision`; `access` is `matches` | "The expected access facts match, but a different configuration (<version>) is serving." |
+| `other_revision` | `candidate` is `other_revision`; `access` is `none_expected` | "A different configuration (<version>) is serving; this change expected no access facts to compare." |
+
+No surface shows a bare "confirmed": the exact-candidate answer and the access
+answer are always shown, separately.
+
 - **Remote authorities are not covered.** A JWT key set fetched from its URL,
   a forward-auth service's decisions and provider policy change without a Jul
   generation, so the fingerprint cannot bind them: doing so would need a
   network fetch while planning and would report routine key rotation as
   divergence. Each entry result lists them in `external_inputs` (closed set:
-  `jwt_key_set`, `forward_auth`, `provider_policy`), and every surface states
-  that Jul's part is confirmed and those inputs are not ("Confirmed for Jul's
-  configuration; the key set at <URL> is controlled by its issuer and not
-  covered"). `provider_policy` is listed for every entry that declares an
-  `external_enforcer` (whose label it carries), declares `restricted` without a
-  Jul check, or declares `private_network` (membership is enforced by the
-  network provider). For an entry with no declaration Jul cannot know whether a
-  provider sits in front; its confirmed facts state that Jul applies no check,
-  and its external enforcement stays `unanalysed` (§4.5).
-- **Limits.** Observation only: it never claims who wrote the change, keeps no
-  history, and survives restarts because it only reads the current state. A
-  failed reload, a later writer or a restart produce `not_serving_yet`,
-  `diverged` or `not_found`. A credential file edited after the plan but before
-  the reload yields `differs`, as it should. Clients never re-implement the
-  comparison; they display the server's result.
+  `jwt_key_set`, `forward_auth`, `provider_policy`), and every surface says
+  what was compared and that these were not ("The key set at <URL> is
+  controlled by its issuer and was not compared"). `provider_policy` is listed
+  for every entry that declares an `external_enforcer` (whose label it
+  carries), declares `restricted` without a Jul check, or declares
+  `private_network` (membership is enforced by the network provider). For an
+  entry with no declaration Jul cannot know whether a provider sits in front:
+  its facts report the Jul checks it actually applies (CIDR, Basic, JWT,
+  forward-auth, client certificate, or none), and its external enforcement
+  stays `unanalysed` (§4.5).
+- **Limits.** Observation only: it keeps no history and survives restarts
+  because it reads only the current state. A failed, staged or restart-bound
+  apply yields `not_serving_yet`; a later writer yields `access_matches`,
+  `other_revision`, `diverged` or `unverifiable`; a restart that loads the
+  candidate yields `candidate_serving`. A local access file edited after the
+  plan yields `diverged`, naming the file, even while the exact candidate is
+  serving. Clients never re-implement the comparison; they display the
+  server's result.
 
 ### 9.5 Audience delta (accepted semantics, SD-09)
 
@@ -740,7 +811,8 @@ entry and whether they are admitted: listener bind and port, TLS,
 `client_auth` (mode, CA bundle, CRL, SAN list), `client_address` and PROXY
 settings; host names and block order; match type, path and predicates, and the
 match/predicate/order of every other entry in the same block (they decide
-fall-through); rewrites; request plugins (they can authorize or answer); CORS
+fall-through); rewrites; request plugins and their modules (they can authorize
+or answer); CORS
 policy (it decides which web origins may read responses with users'
 credentials); WAF policy and rule files (they can block requests before the
 action, and their allow and exclusion rules can exempt requests); location
@@ -756,18 +828,39 @@ class or retirement.
 - listener-level settings (bind, port, TLS, `client_auth` — whose CA bundles,
   CRLs and SAN lists are unioned across every block on the listener —
   `client_address`, PROXY) affect every entry on that listener;
-- a change to any entry's match, predicates, host names or position, or the
-  addition or removal of an entry, affects **every entry of that block** (requests can fall
-  through to another entry) and, for host names and block order, the listener's
-  first-declared block (it answers every unmatched host);
-- an upstream change affects every entry that proxies to it; a credential or
-  WAF rule file affects every entry that names it; a server-level plugin
-  affects every entry in that block; the global `[waf]` affects every entry
+- a change to any entry's match, predicates or position within its block, or
+  the addition or removal of an entry, affects **every entry of that block**
+  (requests can fall through to another entry);
+- **host dispatch** (normative): a change to any block's host names, to the
+  relative order of blocks present in both revisions, or the addition, removal
+  or relocation (`listen` change) of a block can move requests between blocks
+  of a listener. The router sends a request to the block with the
+  best-scoring name (exact over leading wildcard), breaks ties by declaration
+  order, and sends unmatched hosts to the first-declared block (review packet
+  E52). Let *C* be the host patterns added or removed on the listener plus
+  every pattern of a block that was added, removed, relocated or reordered,
+  after the router's normalisation (lower case, no trailing dot). A block is
+  affected when it is the listener's first-declared block in either revision,
+  or when one of its patterns, in either revision, overlaps a pattern in *C*: two exact names
+  overlap when equal; an exact name overlaps `*.s` when it ends in `.s` and is
+  longer; `*.s1` and `*.s2` overlap when `.s1` ends with `.s2` or the reverse.
+  Every entry of an affected block is affected; a relocation applies the rule
+  on both listeners. The rule is sound: a host whose block changes either
+  matches no pattern (so a first-declared block answers it) or matches a
+  pattern in *C*, and its old and new blocks each hold a pattern matching that
+  same host, which therefore overlaps it. Blocks disjoint from *C* stay
+  unaffected, so renaming one site does not disturb unrelated ones. An
+  implementation that cannot apply the rule treats every entry on the listener
+  as affected; plans name every affected entry, so a conservative expansion is
+  visible as extra acknowledgement and retirement, never hidden;
+- an upstream change affects every entry that proxies to it; a credential
+  file, WAF rule file or plugin module affects every entry that uses it; a
+  server-level plugin affects every entry in that block; the global `[waf]` affects every entry
   without its own `waf` override (an override replaces it wholesale).
 
 | Class | Meaning | Consequence |
 | --- | --- | --- |
-| `unchanged` | no effective access input of the entry changed (proven) | none |
+| `unchanged` | the admitted request space is proven identical: no effective access input of the entry changed, or a rule below proves the change has no admission effect | none (the change is still listed as a plan item) |
 | `metadata_only` | only declared intent or labels changed | acknowledgement if `mode` becomes wider; **never** retirement |
 | `narrowed` | a rule below proves the admitted request space only shrank | §8.4 retirement |
 | `widened` | a rule below proves it only grew | Console acknowledgement before apply |
@@ -789,11 +882,19 @@ class or retirement.
 | Bind between two specific addresses (including loopback ↔ another address: Jul listens on exactly one address, so a local connector that reaches the loopback address loses access), to or from an empty host, or any port change | `uncertain` |
 | CORS: an origin added while credentials are allowed, credentials newly allowed, or `["*"]` introduced | `widened` |
 | CORS: origins only removed or credentials disallowed | `narrowed` |
-| WAF: `block` → `detect`, or WAF disabled, with rules, rule files and other WAF settings unchanged | `widened` |
-| WAF: `detect` → `block`, or WAF enabled in either mode (detect mode still rejects request bodies over the limit), with rules, rule files and other WAF settings unchanged | `narrowed` |
+| WAF: disabled → `block` / `block` → disabled, with rules, rule files and other WAF settings unchanged (a WAF only interrupts requests after Jul's checks; it never admits one) | `narrowed` / `widened` |
+| WAF without runtime engine control (no loaded rule — inline, in a rule file or anything it includes — uses `ctl:ruleEngine`; the embedded CRS has none, E51): disabled ↔ `detect`, everything else unchanged | `unchanged`: detect mode never interrupts, and the pinned engine forces body-limit actions to partial processing in that mode (E49) |
+| WAF without runtime engine control: `detect` → `block` / `block` → `detect`, everything else unchanged | `narrowed` / `widened` |
+| WAF with runtime engine control: disabled → `detect` / `detect` → disabled, everything else unchanged | `narrowed` / `widened` (a rule can switch blocking on per request) |
+| WAF with runtime engine control: `detect` ↔ `block` | `uncertain` (detect mode ignores `allow`, so a rule that switches blocking on can deny what `block` mode allows) |
 | Target (`proxy_pass`, `root`, upstream membership) changed | `uncertain` for audience; `narrowed` for retirement of exchanges admitted under the old target |
-| Host names, match, predicates, rewrites, request plugins, block order, or entry addition or removal changed anywhere in the block; credential method replaced; JWT issuer, audience or key URL changed; forward-auth URL or response headers changed; htpasswd entries added or changed; any change to WAF rules, rule-file contents, the Core Rule Set, paranoia, body limit or response inspection (rule removal can remove an `allow` or exclusion); `client_address` or PROXY settings changed | `uncertain` for every affected entry |
+| Host names, match, predicates, rewrites, request plugins or their module content, block order, or entry addition or removal changed anywhere in the block; credential method replaced; JWT issuer, audience or key URL changed; forward-auth URL or response headers changed; htpasswd entries added or changed; any change to WAF rules, rule-file contents, the Core Rule Set, paranoia, body limit or response inspection (rule removal can remove an `allow` or exclusion); `client_address` or PROXY settings changed | `uncertain` for every affected entry |
 | Any change not matched exactly above | `uncertain` |
+
+The WAF mode rules (SD-14) depend on the pinned engine's behaviour. #641 keeps
+a real-HTTP regression test of a body over the limit in `block` mode (413,
+action not reached) and `detect` mode (200, whole body delivered), and re-derives
+these rules whenever the WAF engine is upgraded.
 
 External widening (provider policy, DNS, connectors) is not computable and is
 shown as a checklist item on every plan that touches a provider-path entry.
@@ -817,7 +918,7 @@ idempotency where available, and read-after-write reconciliation.
 | Declare intent | raw apply; sparse typed op (intent tranche) | `jul apply` | intent tranche: read-only display; editing in #587 |
 | Preview | `/api/v1/config/plan`, `/config/patch` (+ intent findings) | `jul plan`, `jul diff` | existing diff + intent acknowledgement |
 | Publish | `/config/apply`, `/config/patch/apply` | `jul apply`, `jul stage` | existing apply; guided flow (#587) |
-| Confirm a change is serving | postcondition from every plan; read-only evaluation against the serving snapshot (#641, §9.4) | `jul plan` output; evaluation command (#641) | shown after apply; file-owned users paste or upload the postcondition (#587) |
+| Check a change (postcondition) | postcondition from every plan; read-only evaluation reports whether the exact planned configuration is serving and whether the expected access facts match (#641, §9.4) | `jul plan` output; evaluation command (#641) | shown after apply with both answers; file-owned users paste or upload the postcondition (#587) |
 | Withdraw | complete candidate via `/config/apply`; gate typed op (complete-withdrawal stream) | `jul apply` | guided withdraw (#587, after the gate) |
 | Recover | `/config/rollback` | `jul rollback` | History |
 | Cut established | — none — | — | guidance only |
@@ -842,7 +943,7 @@ connections. It is a two-step flow with a single mutation path:
 │   [ ] dash.example.net /                Restricted "family" · Cloudflare (declared) │
 │   [ ] jul-host.example-tailnet.ts.net / Private network · tailnet       │
 │   Same backend "dashboard" (advisory; there may be other paths Jul      │
-│   cannot relate). Each address is chosen separately.                    │
+│   cannot relate). Each entry is chosen separately.                      │
 │ [ Cancel ]                              [ Review plan ]                 │
 └─────────────────────────────────────────────────────────────────────────┘
 ┌ Review: stop access to dash.lab.test / ─────────────────────────────────┐
@@ -872,8 +973,9 @@ Error language says what happened, what did not change and the next step:
 - "Saved, not yet serving: this change needs a restart. New access is **not**
   stopped until Jul restarts." (restart-bound)
 - "This configuration is owned by a file or pipeline. Make this change there:
-  <the exact edit from the plan>; keep the postcondition shown below and Jul will
-  confirm once it is serving." (`file_owned`; once the gate ships the exact edit
+  <the exact edit from the plan>; keep the postcondition shown below. After your
+  pipeline reloads Jul, check it here: Jul shows whether this exact change is
+  serving and whether access matches what it should be." (`file_owned`; once the gate ships the exact edit
   is the gate setting — #587 never recommends `auth.deny`)
 - "Unknown: Jul restarted before confirming the outcome. Nothing will be retried
   automatically. Check what is serving now." (lost ledger)
@@ -1172,10 +1274,12 @@ ingress:
     those requests are rejected.
   - *Token expiry*: rejected after `exp`, whatever the endpoint state.
   - *Key rotation*: a token with an unknown key ID triggers a fetch; a
-    successful fetch **replaces** the cached set. Tokens signed by an old key keep
-    validating only while the published set still contains that key (Cloudflare
-    keeps the previous key for a period, X11); a failed fetch leaves the previous
-    cache intact.
+    successful fetch **replaces** the cached set. A key removed from the
+    published set therefore keeps validating tokens **from the cache** until a
+    fetch happens — triggered only by a token with an unknown key ID, or by a
+    `cloudflared` restart, since the cache is in memory — and the successful
+    fetch drops it (Cloudflare keeps the previous key published for a period,
+    X11). A failed fetch leaves the previous cache intact.
   - Summary state for all of these: provider evidence `unavailable` or `stale`,
     never `pass`. Jul's own withdrawal still denies Jul-routed requests.
   - Also: `cloudflared` stopped (provider path down, others unaffected); tunnel
@@ -1297,8 +1401,9 @@ or provider capacity. One host's numbers are a support envelope for that fixture
 and configuration, never a universal sizing, lightweight or cost claim.
 
 **This design's own budgets.** The view adds no background work or metric labels
-and is computed on request in time linear in entries. Evidence is ≤ 8 records per
-entry. The intent block is two bounded fields per location. No new module
+and is computed on request in time and output linear in the configuration's
+size, with every response page bounded by the §4.3 caps. Evidence is ≤ 8
+records per entry. The intent block is three bounded fields per location. No new module
 dependency; provider CLIs are operator tools.
 
 ## 14. Usability and value rubric
@@ -1403,10 +1508,10 @@ migration converter.
 
 | Tranche | Scope | Rough effort | Sequencing | Door |
 | --- | --- | --- | --- | --- |
-| **Intent and guarded changes** (SD-05, SD-11, SD-12; #641) | §4.5 block including `external_enforcer`; validation, lifecycle and generated contracts; serving-layer projection with saved-layer labelling (§4.3); Routes read-only display; lint and plan intent findings; §9.5 audience-delta classes; Console acknowledgement; sparse typed op; §9.4 postcondition producer and evaluator; docs; tests with **more than 90 %** of added or edited Go production statements and, separately, of added or edited frontend statements covered, existing floors preserved | 5–10 focused days (author estimate, raised from 3–6 for the postcondition and delta classes, and from 4–8 in r6 for the access fingerprint with per-generation access-file digests and the expanded §9.5 rules; the owner re-estimates at selection) | first shared-code stream after #580 is accepted; prerequisite of #581's evidence run by product decision (SD-05) | names costly once adopted |
+| **Intent and guarded changes** (SD-05, SD-11 to SD-14; #641) | §4.5 block including `external_enforcer`; validation, lifecycle and generated contracts; serving-layer projection with saved-layer labelling and the bounded, paged response shape (§4.3); Routes read-only display; lint and plan intent findings; §9.5 audience-delta classes including the host-dispatch rule; Console acknowledgement; sparse typed op; §9.4 postcondition producer and evaluator; docs; tests with **more than 90 %** of added or edited Go production statements and, separately, of added or edited frontend statements covered, existing floors preserved | 6–12 focused days (author estimate, raised from 3–6 for the postcondition and delta classes, from 4–8 in r6 for the access fingerprint with per-generation access-file digests and the expanded §9.5 rules, and from 5–10 in r9 for the bounded paged projection, the host-dispatch analysis with its property test, and expected-absence postconditions; the owner re-estimates at selection) | first shared-code stream after #580 is accepted; prerequisite of #581's evidence run by product decision (SD-05) | names costly once adopted |
 | **Complete withdrawal** (SD-04, SD-02 bundle, SD-07–SD-09; #642 with #563/#562) | §9.3 gate and typed op; §8.4 stream-level retirement with #562 WebSocket ownership and per-request revocation re-check; collateral disclosure; real H1/H2/H3 clients; race and leak checks; same coverage rule | design 2–4 days + implementation 10–20 days (author estimate) | next shared-code stream; #581 environment work proceeds in parallel | gate field costly once adopted; promise additive |
 
-Together the two tranches are a nominal 17–34 focused days before waiting and
+Together the two tranches are a nominal 18–36 focused days before waiting and
 shared-work reconciliation. These are author estimates, not owner estimates;
 each owner re-estimates at selection, and #581's standalone evidence work does
 not wait for #642.
@@ -1420,7 +1525,7 @@ order in #579).
 | From → to | Type | What flows |
 | --- | --- | --- |
 | #580 → #581 | A | contract, F1, §13, §14 dry run |
-| #641 intent tranche → #581 evidence run | A (product decision SD-05; a manifest fallback exists technically) | the product answers T1; intent findings and postconditions exist. Cost: #581's evidence run waits for #641 (5–10 days) |
+| #641 intent tranche → #581 evidence run | A (product decision SD-05; a manifest fallback exists technically) | the product answers T1; intent findings and postconditions exist. Cost: #581's evidence run waits for #641 (6–12 days) |
 | #581 → #582 → #583 → #584 → #613 → #585 → #586 → #587 → #588 | S (+ A where each issue says so) | unchanged programme order |
 | tailnet / Cloudflare / independent participant → #582 / #583 / #585 | E | real environments, never simulated |
 | #642 complete withdrawal → #587 guided withdrawal (whole bundle, SD-07); → #613 withdrawal claims for WebSocket apps | H | delivered, real-client-verified gate and retirement; §8.4 delivery table |
@@ -1449,8 +1554,9 @@ order in #579).
 | SD-08 exact-entry scope | #642, #581 (W3), #587 | stream-level mechanisms; collateral is a disclosed downgrade and a W3 failure |
 | SD-09 uncertain = narrowing; access inputs defined | #641 (classes), #642 (retirement), #587 (acknowledgement) | §9.5 decision table |
 | SD-10 serving snapshot (SH-13) | #586, #587, #641 | serving and saved layers; no cross-revision joins |
-| SD-11 postcondition | #641 (producer and evaluator), #581, #587, #642 | §9.4 observation-only contract |
-| SD-12 declared `external_enforcer` | #641, #582, #583, #587, #633 | declared, never verified; precise intent findings |
+| SD-11 / SD-13 postcondition | #641 (producer and evaluator), #581, #587, #642 | §9.4: exact-candidate and access answers shown separately; expected absence; revision-bound references never cross revisions |
+| SD-12 declared `external_enforcer` (reconfirmed) | #641, #582, #583, #587, #633 | declared, never verified; context only, never changes a finding |
+| SD-14 WAF detect-mode classes | #641, #642 | §9.5 precondition-based WAF rows; real-HTTP regression guard |
 
 ### 17.4 Vision commitments: owner and exit evidence
 
@@ -1502,9 +1608,10 @@ layer for a restart-bound change; §8.2 (or §8.4 if delivered); §9.2 statement
 for `applied_live`, `applied_degraded` where reproducible, `no_change`,
 `not_applied` and a restart-bound change; every §11 row; the intent findings and
 §9.5 classes for the "remove the dashboard's check" case; the §9.4 postcondition
-evaluated after each change in both authority modes (`confirmed`,
-`not_serving_yet` for the restart-bound change, `diverged` after a deliberate
-second edit).
+evaluated after each change in both authority modes (`candidate_serving`;
+`not_serving_yet` for the restart-bound change; after a deliberate second edit,
+`access_matches` when it leaves the dashboard's access unchanged and `diverged`
+when it changes it).
 
 **Negative, failure and recovery cases.** As listed for F1 (§10).
 

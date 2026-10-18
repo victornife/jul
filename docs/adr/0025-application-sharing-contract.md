@@ -1,6 +1,6 @@
 # ADR 0025 — Application-sharing contract: derived view, declared intent and complete withdrawal
 
-- **Status:** Proposed — awaiting maintainer acceptance under [#580](https://github.com/victornife/jul/issues/580). Decisions SD-01 to SD-12 were answered by the maintainer on 2026-10-18 (verbatim record in the review packet §3); the remaining content is the author's proposal until #580 is accepted.
+- **Status:** Proposed — awaiting maintainer acceptance under [#580](https://github.com/victornife/jul/issues/580). Decisions SD-01 to SD-14 were answered by the maintainer on 2026-10-18 (verbatim record in the review packet §3); the remaining content is the author's proposal until #580 is accepted.
 - **Date:** 2026-10-18
 - **Deciders:** Jul.IA maintainer (decision owner); #580 design author
 - **Applies to:** the sharing programme [#579](https://github.com/victornife/jul/issues/579) and successors #581–#588, #613; inputs to #627, #633, #634; #562/#563
@@ -51,15 +51,20 @@ constrains any design:
    requires a `route_id` on the same location, has no runtime effect, and drives
    **intent findings** in lint and plans plus an explicit Console acknowledgement
    before any change classed `widened` or `uncertain` (spec §9.5). The declared
-   enforcer is context only: it never changes a finding. Every plan also returns
-   a stateless **postcondition** carrying an access fingerprint (including the
-   loaded digests of local access files: htpasswd, CA, CRL and WAF rules), which
-   a read-only server operation, with the same permissions as configuration
-   inspection, evaluates against the serving snapshot (SD-11). Remote
-   authorities (a JWT key set, forward-auth decisions, and the provider policy
-   of any entry whose declared intent relies on one) are named as not covered
-   rather than confirmed. Delivered as a bounded tranche (#641) before #581's evidence
-   run.
+   enforcer is context only: it never changes a finding (reconfirmed by the
+   maintainer once its warning-reduction benefit was withdrawn). Every plan also
+   returns a stateless **postcondition** carrying expected presence or absence
+   per affected entry and an access fingerprint (including the loaded digests
+   of local access files: htpasswd, CA, CRL, WAF rules and request-plugin
+   modules). A read-only server operation, with the same permissions as
+   configuration inspection, evaluates it against the serving snapshot (SD-11)
+   and answers two questions separately: is the exact planned configuration
+   serving, and do the expected access facts match (SD-13)? Only both together
+   may be described as the change serving. References without a `route_id` are
+   resolved only in the revision they name. Remote authorities (a JWT key set,
+   forward-auth decisions, and the provider policy of any entry whose declared
+   intent relies on one) are named as not compared. Delivered as a bounded
+   tranche (#641) before #581's evidence run.
 3. **Four access modes (SD-03).** `preview`, `private_network`, `restricted`,
    `public`. Private-network membership may be a declared *coarse* audience,
    enforced by the network provider and never presented as a named identity.
