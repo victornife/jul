@@ -188,13 +188,16 @@ passes, disappears from the run, or the tested dependency/tool identities
 change; review the owner issue and remove or reverify them.
 
 HTTP/3 currently has seven exact temporary dependency exceptions under
-[#569](https://github.com/victornife/jul/issues/569). Go 1.26.9 and Go 1.27.2
-both reproduce **42/49** with quic-go v0.63.0 and qpack v0.6.0. The guard reads
+[#569](https://github.com/victornife/jul/issues/569). On 2026-10-18, Jul and a
+plain upstream server both reproduce **42/49** with quic-go **v0.64.0**, qpack
+v0.6.0 and Go 1.27.2. The same seven case IDs failed on the previous v0.63.0
+baseline; none was recovered by this upgrade. The guard reads
 those versions from the tested binary and binds the exceptions to the h3spec
 v0.1.13 binary hash. Reports preserve actual passes, allowed failures and the
 tool's skipped 0-RTT warning. An accepted verdict is not a claim of complete
-RFC conformance. See the [upgrade review](reviews/2026-10-10-go-1.27.2.md)
-for upstream dispositions and exception policy.
+RFC conformance. See the [quic-go upgrade review](reviews/2026-10-18-quic-go-v0.64.0.md)
+for current evidence and the [Go upgrade review](reviews/2026-10-10-go-1.27.2.md)
+for the historical upstream dispositions.
 
 | Suite | Tool | Target |
 | --- | --- | --- |

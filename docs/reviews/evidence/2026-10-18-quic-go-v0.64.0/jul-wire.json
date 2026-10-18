@@ -1,0 +1,34 @@
+[
+  {
+    "case": "max-push-id-before-settings",
+    "connection_alive_after_invalid_input": true,
+    "valid_request_received_response_headers": true
+  },
+  {
+    "case": "reserved-setting-0x2",
+    "connection_alive_after_invalid_input": true,
+    "valid_request_received_response_headers": true
+  },
+  {
+    "case": "cancel-push-on-request",
+    "connection_alive_after_invalid_input": true,
+    "valid_request_received_response_headers": true
+  },
+  {
+    "case": "invalid-static-index",
+    "connection_alive_after_invalid_input": true,
+    "stream_error_code": 512,
+    "stream_error_remote": true,
+    "valid_request_received_response_headers": true
+  },
+  {
+    "case": "encoder-capacity-over-zero",
+    "connection_alive_after_invalid_input": true,
+    "valid_request_received_response_headers": true
+  },
+  {
+    "case": "decoder-zero-increment",
+    "connection_alive_after_invalid_input": true,
+    "valid_request_received_response_headers": true
+  }
+]
