@@ -1,6 +1,6 @@
 # ADR 0025 — Application-sharing contract: derived view, declared intent and complete withdrawal
 
-- **Status:** Proposed — awaiting maintainer acceptance under [#580](https://github.com/victornife/jul/issues/580). Decisions SD-01 to SD-14 were answered by the maintainer on 2026-10-18 (verbatim record in the review packet §3); the remaining content is the author's proposal until #580 is accepted.
+- **Status:** Proposed — awaiting maintainer acceptance under [#580](https://github.com/victornife/jul/issues/580). Decisions SD-01 to SD-16 were answered by the maintainer on 2026-10-18 and 2026-10-19 (verbatim record in the review packet §3); the remaining content is the author's proposal until #580 is accepted.
 - **Date:** 2026-10-18
 - **Deciders:** Jul.IA maintainer (decision owner); #580 design author
 - **Applies to:** the sharing programme [#579](https://github.com/victornife/jul/issues/579) and successors #581–#588, #613; inputs to #627, #633, #634; #562/#563
@@ -61,8 +61,10 @@ constrains any design:
    modules), and digests of the configuration as written. Every digest is keyed
    under a key held only by the running process, so the object allows no
    offline check of any secret, whether referenced, literal or inside a local
-   file. It can be compared until that process restarts, after which the change
-   is re-planned. It never discloses a comparison of values its caller cannot
+   file. It can be compared until that process restarts. Afterwards a re-plan
+   confirms a raw candidate or repeatable typed operations; non-repeatable ones
+   (for example adding or removing a route) stay unverifiable and are
+   reconciled by hand. It never discloses a comparison of values its caller cannot
    read: a raw-candidate plan, or a typed operation that sets a field hidden
    from the caller, returns one only to a caller who may also read the raw
    configuration. A read-only server operation, with the same permissions as
@@ -99,7 +101,8 @@ constrains any design:
    connector identity headers; provider identity is accepted only as a
    cryptographically validated token (SH-12). Restricted and private entries
    must keep Jul's response cache off in the first release; Jul warns when they
-   do not, and does not refuse. Jul's cache is
+   do not, and does not refuse yet. Refusal is the long-term default, introduced
+   with a migration (SD-16). Jul's cache is
    process-wide and keyed by method, Host and URI, so public entries answering
    the same host and path on different listeners share entries; plans warn, and
    partitioning is the cache owner's decision.
@@ -108,8 +111,8 @@ constrains any design:
    outcomes, including a lost apply ledger after restart, are reported as
    unknown and never retried automatically. File-owned changes stay unconfirmed
    until a stateless postcondition returned by preview is evaluated against the
-   serving revision by the same Jul process (after a restart, by re-planning the
-   change); Jul stores no preview state. The view is versioned
+   serving revision by the same Jul process (after a restart, by re-planning a
+   raw candidate or repeatable operations); Jul stores no preview state. The view is versioned
    (`sharing_view_version`) and its closed codes are never repurposed.
 8. **Outcome gate (SD-06).** #585 predeclares targets for decisions, handoffs and
    interventions; #587 claims improvement only with zero dangerous failures
@@ -153,7 +156,9 @@ evidence uses a build newer than v2.2.0. Until complete withdrawal lands, open
 connections of a withdrawn entry continue unless the operator restarts Jul or
 stops a connector. Provider paths need more listeners. Restricted entries must
 not use Jul's response cache; a configuration that does is warned about but
-currently accepted.
+currently accepted, until refusal arrives with a migration (SD-16). Classes
+involving values the caller cannot read are `uncertain`, which costs
+conservative acknowledgement and retirement.
 
 **Neutral.** NGINX migration disposition for this design: not applicable. Each
 runtime tranche records its own.

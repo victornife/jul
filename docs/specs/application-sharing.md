@@ -3,7 +3,7 @@
 > **Status: Proposed — design for maintainer acceptance under
 > [#580](https://github.com/victornife/jul/issues/580).** Nothing here is a
 > shipped capability. Decisions marked *Accepted* record a maintainer answer
-> (SD-01 to SD-14, 2026-10-18); everything else is a proposal until #580 is
+> (SD-01 to SD-16, 2026-10-18/19); everything else is a proposal until #580 is
 > accepted. Runtime work belongs to the successor owners named in §17. Source
 > baseline: `main` at `64e4a8b29230134c5dee37dfd8bfa130a9580a2a`; published
 > package baseline v2.2.0. Evidence, decision log, adversarial review and
@@ -400,7 +400,10 @@ only check on an entry declared restricted"). The Console requires an explicit
 acknowledgement naming every entry classed `widened` or `uncertain`, or whose
 declared `mode` becomes wider, before apply; API and CLI return the same data
 with the existing plan output (the acknowledgement is a Console interaction,
-not a server-side interlock on raw API use). A change to intent fields alone is
+not a server-side interlock on raw API use). *Accepted (SD-15):* existing API
+and CLI automation keeps working unchanged; an enforced acknowledgement for API
+apply may be introduced only as an opt-in, versioned contract, with an explicit
+migration if it ever becomes the default. A change to intent fields alone is
 `metadata_only`: it may need acknowledgement but never triggers retirement.
 
 **How intent maps to consumers** (no second enforcement store):
@@ -795,8 +798,9 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
     postcondition must neither depend on it nor extend it. A file-owned
     pipeline's account,
     which holds the configuration anyway, can be given `config:raw` for this.
-    Because every digest is keyed, nobody can forge an object to probe the
-    evaluator.
+    Because every digest is keyed, nobody can synthesise digests for guessed
+    content to probe the evaluator. The object is an observation aid, not an
+    attestation of who applied a change.
   - **Every digest is keyed (AD-09).** Each digest in the object is an
     HMAC-SHA-256 under a key that exists only in that running process:
     generated at start, never persisted, logged or returned; `key_id` is its
@@ -881,7 +885,7 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
 | `result` | Condition | What every surface says |
 | --- | --- | --- |
 | `unknown` | `candidate` or `access` is `unknown` | "Jul cannot tell what is serving." |
-| `unverifiable` | `candidate` is `unverifiable` | "Jul has restarted since this change was planned, so it cannot compare it. Plan the same change again: if it is already serving, the new plan says so at once." Nothing is re-applied automatically. |
+| `unverifiable` | `candidate` is `unverifiable` | "Jul has restarted since this change was planned, so it cannot compare it." The next step depends on what was planned (recovery, below): plan the same raw configuration or repeatable operations again, or check the listed entries' current facts and the history by hand. Nothing is re-applied automatically. |
 | `not_serving_yet` | `candidate` is `base_serving` | "Not serving yet: the configuration this change was planned against is still serving." Access details are shown for information only. |
 | `candidate_serving` | `candidate` is `serving`; `access` is `matches` or `none_expected` | With `matches`: "The planned configuration is serving, and its expected access facts match." With `none_expected`: "The planned configuration is serving; this change expected no access facts to compare." The **only** result that may say the change is serving. |
 | `diverged` | `access` is `differs` | "What is serving differs from the plan," naming the entries and fields — including an access file changed after planning while the exact candidate serves. |
@@ -912,10 +916,8 @@ answer are always shown, separately.
   but a restart discards the key by design. Before a restart, a failed, staged
   or restart-bound apply yields `not_serving_yet`. A later writer yields
   `access_matches`, `other_revision`, `diverged` or `unverifiable`. After a
-  restart the original object yields `unverifiable`, and planning the same
-  change again yields `candidate_serving` at once when it is serving. A
-  restart-bound change is therefore confirmed by re-planning it after the
-  restart. Access files are compared by the bytes
+  restart the original object yields `unverifiable` (recovery, below). Access
+  files are compared by the bytes
   Jul has **loaded**: a file edited on disk but not reloaded changes nothing
   that serves and is not a divergence by itself. When the loaded bytes differ
   from what the plan read — the file was changed and reloaded, or the plan
@@ -924,13 +926,50 @@ answer are always shown, separately.
   the exact candidate configuration is serving. Each postcondition entry is
   bounded in size. Clients never re-implement the comparison;
   they display the server's result.
+- **Recovery after a restart is not universal.** A re-plan confirms a change
+  only when the same plan can be computed again and is a no-op against what
+  serves:
+  - a raw candidate, which its owner keeps and may plan again while holding
+    `config:raw`;
+  - typed operations that #641 marks **repeatable**, after testing them as
+    target-state setters whose repeat is a no-op.
+  Non-repeatable operations, such as `location_add` and `location_remove`,
+  are rejected by a re-plan once their result serves (E62), and a typed
+  preview does not return its candidate unless the caller holds `config:raw`.
+  For these the result stays `unverifiable`: Jul shows the current facts the
+  caller may read for the listed entries and points to the route list and
+  history for reconciliation by hand. Jul never replays a mutation, broadens a
+  permission, exports hidden raw content or keeps a durable key to make
+  recovery work. A restart-bound change planned as typed operations is
+  therefore confirmed after the restart only if its operations are
+  repeatable.
 
 ### 9.5 Audience delta (accepted semantics, SD-09)
 
 Computed server-side per entry, between the serving snapshot and the
-prepared candidate. Inputs written as references are classified on their
-resolved values in both, as Jul loaded or prepared them; the class is shown,
-and the values never are. Jul does not attempt general policy equivalence; anything it cannot
+prepared candidate.
+
+**Disclosure precedence (applied before every rule below).** A class must
+never reveal a value that its caller cannot read. Plans go to callers who
+choose candidate values, so a direction computed against a hidden value is an
+oracle. With `auth.allow = ["${env:OFFICE_CIDR}"]` serving, a plan that sets
+`0.0.0.0/1` would answer `widened` or `uncertain` depending on which half holds
+the hidden address, and about 32 such plans could recover an IPv4 address.
+
+The rule: when the comparison for an access input involves a value the caller
+cannot read, that input's class is `uncertain`, unless its written value and
+its resolved value are both unchanged. Such a value is a resolved reference
+(the view and `config:raw` show reference text, never resolved values) or a
+field hidden from that caller. Directions are still computed wherever they
+follow from readable values alone.
+
+`uncertain` keeps its full meaning: acknowledgement in the Console, and §8.4
+retirement by default with the keep-open exception. A class is never shown as
+`uncertain` while retirement is silently skipped. The cost is conservative
+acknowledgement and retirement for some edits to reference-backed inputs whose
+resolved policy happens to be equal (SD-09). No other part of a plan response
+may compare a caller-chosen value with one the caller cannot read; #645 audits
+the existing output. Jul does not attempt general policy equivalence; anything it cannot
 classify is `uncertain`, never "unchanged". A class is assigned only from a
 rule below; a rule that does not exactly fit falls through to `uncertain`.
 
@@ -1235,13 +1274,28 @@ token = "${env:JUL_ADMIN_TOKEN}"
   listening on loopback.
 - **Implementation prerequisites.** The intent tranche (§17); complete withdrawal
   if delivered in time.
-- **Operator steps** (each with the plan classes of §9.5). Preview on loopback
-  → move the blocks to the LAN listener (every entry of the moved blocks —
-  default-deny, portal and dashboard — is `uncertain`, because the loopback
-  address stops answering) → declare the dashboard restricted
-  (`metadata_only`) and add its Basic check (`narrowed`) → declare the portal
-  public (`metadata_only`) → stop new access to the dashboard (`narrowed`) →
-  restore it (`widened`, acknowledged) → restart.
+- **Starting configuration.** The configuration above with every block's
+  `listen` set to `127.0.0.1:443` and the dashboard location **without** its
+  `auth.basic` block: a loopback preview, reachable from this host only.
+- **Operator steps** (each with the plan classes of §9.5). Protection is in
+  place before anything becomes reachable (SH-5); no reachable intermediate
+  state exposes the dashboard without its check.
+  1. On loopback, add the dashboard's Basic check and declare it `restricted`
+     in one candidate: the check is `narrowed`, the declaration
+     `metadata_only`. Verify from the host: intended credentials 200, missing
+     or wrong credentials 401.
+  2. Declare the portal `public` (`metadata_only`).
+  3. Move all three blocks to `192.0.2.10:443` in one candidate. Every entry of
+     the moved blocks (default-deny, portal and dashboard) is `uncertain`,
+     because the loopback address stops answering. The result is the
+     configuration shown above. Immediately verify that lab-client-2 gets 401
+     from the dashboard and that lab-client-1 succeeds with credentials.
+  4. Stop new access to the dashboard (`narrowed`), then restore it
+     (`widened`, acknowledged in the Console).
+  5. Restart.
+
+  An operator may combine steps 1–3 into one candidate; its plan then shows
+  every moved entry as `uncertain`.
 - **Expected states.** Portal: declared `public`, no Jul checks, anonymous
   success from lab-client-2. Dashboard: declared `restricted`, Jul `basic` per
   request, intended 200 and excluded 401. After withdrawal: §8.2 wording.
@@ -1442,17 +1496,20 @@ items are failures, not limitations.
 | Forged `X-Forwarded-For`, `Forwarded`, RFC 9440 client-certificate headers | ignored or stripped | ADR 0016 §12 |
 | Forged provider identity headers | decision unchanged; header reaches backend (recorded) | SH-12 |
 | Direct backend or admin access from another host | unreachable | loopback binds |
-| Restricted or private content in a cache | **must not**: restricted and private entries must keep Jul's response cache off in the first release. Jul does not refuse a configuration that enables it: lint and plans warn (`cache_on_restricted_entry`, `intent_restricted_cached`), and the fixtures enable no cache. Making it a refusal needs its own decision, because SD-05 keeps intent findings as warnings | cache key is method + Host + URI with no listener, entry or identity partition; reloads do not purge |
+| Restricted or private content in a cache | **must not**: restricted and private entries must keep Jul's response cache off in the first release. Jul does not refuse a configuration that enables it: lint and plans warn (`cache_on_restricted_entry`, `intent_restricted_cached`), and the fixtures enable no cache. *Accepted (SD-16):* refusal is the long-term default, introduced through a migration and compatibility decision; until then legacy configurations keep the warnings, and guided sharing flows (#587) and the fixtures require cache off | cache key is method + Host + URI with no listener, entry or identity partition; reloads do not purge |
 | Public entries sharing cache entries | the process-wide cache is keyed by method + Host + URI, so cache-enabled entries on different listeners that answer the same host name and path share cache entries; correct only when they serve the same content. Plans and lint warn (`cache_shared_across_entries`). The fixtures enable no Jul response cache | partitioning by listener or entry is a cache-owner decision (#620/#623) |
 | Route or backend change of the portal | dashboard audience unchanged (plan shows no dashboard delta) | per-entry checks; §9.5 |
-| Intentional dashboard → public | only via a plan naming it and acknowledging the intent change | SH-5, §4.5 |
+| Intentional dashboard → public | only via a plan naming it; the Console requires acknowledging the intent change, and the API returns the same classes without enforcing it | SH-5, §4.5 |
 | Provider-restricted and public entries on one Jul | different listeners | SH-11 |
 
 **Cache rule.** Jul's authenticated-reuse rule covers `Authorization`, not
 cookies, mTLS identity or CIDR-restricted traffic, and cached entries survive
-reloads. Any later exception for a restricted entry needs a decision by the cache
-owner (#620/#623) with a partitioned key, proof of non-personalised responses and
-purge on route, backend or audience change.
+reloads. The long-term default refuses response cache on restricted and private
+entries (SD-16), introduced through a migration and compatibility decision that
+never silently invalidates today's file-owned configurations. Any exception for
+a restricted entry needs a decision by the cache owner (#620/#623) with a
+partitioned key, proof of non-personalised responses and purge on route,
+backend or audience change.
 
 ## 12. Protocol matrix
 
@@ -1697,6 +1754,8 @@ order in #579).
 | SD-11 / SD-13 postcondition | #641 (producer and evaluator), #581, #587, #642 | §9.4: exact-candidate and access answers shown separately; expected absence; revision-bound references never cross revisions |
 | SD-12 declared `external_enforcer` (reconfirmed) | #641, #582, #583, #587, #633 | declared, never verified; context only, never changes a finding |
 | SD-14 WAF detect-mode classes | #641, #642 | §9.5 precondition-based WAF rows; real-HTTP regression guard |
+| SD-15 API acknowledgement only by opt-in versioned contract | #641, later API owner | existing automation unchanged; Console acknowledgement; not a #580 gate |
+| SD-16 refusal of cache on restricted/private as long-term default | #620/#623, #587, #641 | migration and compatibility decision; legacy warnings meanwhile; guided flows and fixtures require cache off; not a #580 gate |
 
 ### 17.4 Vision commitments: owner and exit evidence
 
@@ -1738,8 +1797,11 @@ any released-product claim reruns the affected cases on the first published
 package containing the tranche. #581, #579 and #62 are updated to match when
 this design is published. Environment preparation may start at gate (2).
 
-**Fixture.** F1 exactly, including both authority modes, the withdrawal and mTLS
-variants, the default-deny block and declared intent on every shared entry;
+**Fixture.** F1 exactly, including its starting configuration and safe step order
+(the dashboard's check installed and verified on loopback before the move, and
+excluded-client denial checked immediately after it), both authority modes, the
+withdrawal and mTLS variants, the default-deny block and declared intent on
+every shared entry;
 evidence per §7.1; examples and runbook in the proposed `examples/sharing/` and
 `docs/sharing/`, validated by `scripts/config-check.sh`.
 
@@ -1750,7 +1812,8 @@ for `applied_live`, `applied_degraded` where reproducible, `no_change`,
 §9.5 classes for the "remove the dashboard's check" case; the §9.4 postcondition
 evaluated after each change in both authority modes (`candidate_serving`;
 `not_serving_yet` for the restart-bound change before the restart, and after it
-`unverifiable` for the original object and `candidate_serving` for a re-plan;
+`unverifiable` for the original object and `candidate_serving` for a re-plan of
+the same raw configuration;
 after a deliberate second edit,
 `access_matches` when it leaves the dashboard's access unchanged and `diverged`
 when it changes it).

@@ -13,9 +13,10 @@
 > (third principal re-review, §6.16), **r16** `e513edf2` (round 17, §6.17),
 > **r17** `8385c59c` (round 18, §6.18), **r18** `874df4e4` (round 19, §6.19),
 > **r19** `c0af10a3` (whole-contract review, §6.20), **r20** `1332982a` (round
-> 21, §6.21), **r21** `a27acb0d` (round 22, §6.22) and **r22** (this revision:
-> round-22 record). This packet holds evidence, decisions, review findings and
-> traceability for the
+> 21, §6.21), **r21** `a27acb0d` (round 22, §6.22), **r22** `68aed05d` (fourth
+> principal re-review, §6.23) and **r23** (this revision; round 24 in §6.24).
+> This packet holds evidence, decisions, review findings and traceability for
+> the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -106,6 +107,7 @@ the row.
 | E59 | The live snapshot pairs `EffectiveConfig`, `RawConfig`, listener metadata and the handler `Generation`, published atomically. A reload keeps the previous generation only when the no-op is proven over the configuration and every runtime input identity (TLS inputs, plugin modules and others); opaque inputs such as an htpasswd file, WAF rule files or a static root always take the normal reload, which builds a new generation | internal/server/server.go:335-349; internal/server/serving_change.go:24-100,185-231; internal/server/reload_plan.go:220-232,333-347 | F (round 17) | — | high |
 | E60 | The existing configuration diff (`/api/config/diff`, `config:write`) reports whether `[admin].token` changed without showing it, so a writer without `config:raw` can already test guesses of a literal admin token online; discovery tokens are deliberately never diffed | internal/admin/diff_global.go:621-648; internal/admin/diff_helpers.go:980-982; internal/admin/route_catalog.go:620-640 | F (round 17) | pre-existing, outside #580 (#645) | high |
 | E61 | `plugin_set` replaces a plugin's whole configuration with `config:write`; plugin configuration is returned only to callers holding `config:raw`; the diff reports "Change plugin config" exactly when the maps differ, so it reveals equality of a hidden value | internal/admin/plugins.go:23-28,126,450-455; internal/admin/diff_global.go:420-421; internal/admin/route_catalog.go:628-637 | F (round 18) | pre-existing, outside #580 (#645) | high |
+| E62 | Typed `location_add` rejects a route that already exists, and `location_remove` rejects a missing target, so re-planning either against its own serving result fails. The normal typed preview returns no candidate configuration; `/api/config/patch/candidate` returns it only with `config:raw` | internal/admin/patch.go:662-679,707-711; internal/admin/patch_http.go:44-50,256-258; internal/admin/route_catalog.go:640-642 | F (round 23; the fourth principal re-review reproduced both through `executePatchBatch` with a refreshed fence) | — | high |
 
 ### External primary sources
 
@@ -159,6 +161,8 @@ must be re-checked against the knowledge base by #582.
 | SD-12 | 2026-10-18 | R08: source of "who enforces" on provider paths | B: optional declared `external_enforcer` in #641 — maintainer; **reconfirmed** as context only after round 5 withdrew its warning-reduction benefit (answer 10) | Accepted | spec §4.5; #641 |
 | SD-13 | 2026-10-18 | RR02/RR03: what the postcondition may claim | scoped: exact-candidate and access answers shown separately; only both together say the change is serving; expected absence; revision-bound references never cross revisions — maintainer | Accepted | spec §9.4; ADR D2; #641 |
 | SD-14 | 2026-10-18 | RR01: WAF detect-mode classes | precondition-based rules (no per-request engine control) with a real-HTTP regression guard; `uncertain` where engine control exists — maintainer | Accepted | spec §9.5; #641, #642 |
+| SD-15 | 2026-10-19 | W-3: enforced acknowledgement on API apply | preserve existing automation; introduce enforced acknowledgement only through an opt-in, versioned contract — maintainer | Accepted; not a #580 acceptance gate | spec §4.5; later API owner |
+| SD-16 | 2026-10-19 | W-1: response cache on restricted/private entries | refusal as the long-term default, with migration; legacy warnings meanwhile; guided sharing flows require cache off — maintainer | Accepted; not a #580 acceptance gate | spec §11; ADR D6; #620/#623, #587 |
 | AD-01 | 2026-10-18 | Withdrawal mechanism (author) | superseded by SD-04 | Superseded | — |
 | AD-02 | 2026-10-18 | F1 layout | separate host names on one listener **plus a first-declared default-deny block** (after S-3) | Proposed | F1 |
 | AD-03 | 2026-10-18 | Vocabulary | design/API terms fixed; Console wording validated by #585 before #587 freezes it (after U-4) | Proposed | spec §2 |
@@ -167,7 +171,7 @@ must be re-checked against the knowledge base by #582.
 | AD-06 | 2026-10-18 | Cloudflare origin enforcement | cloudflared `access.required` default; Jul `forward_auth` validator recommended, required with untrusted local processes (after S-4); Jul header-token change not authorised | Proposed | F3 |
 | AD-07 | 2026-10-18 | Postcondition scope for remote authorities (S6-2) | the access comparison covers configuration and local access files; a JWT key set, forward-auth decisions and provider policy (for entries whose declared intent relies on a provider, after S7-1) are listed in `external_inputs` and shown as not covered. Rejected: binding a key set (network fetch while planning; routine rotation reported as divergence) and `unverifiable` for every JWT entry (hides what Jul did verify) | Proposed; reversible before #641 ships | spec §9.4 |
 | AD-08 | 2026-10-18 | Transport failures in audience classes (R10-1) | request size limits outside the WAF (`client_max_body_size`; the WAF's own body limit stays WAF policy) and transport failures (client abort, malformed framing) are not access inputs, like timeouts and rate limits; so disabled ↔ `detect` without engine control stays `unchanged` (SD-14's intent), with the read-before-action difference disclosed and pinned by a test. Rejected: classing it `narrowed`, which would end every open exchange of every entry inheriting a global `[waf]` when detect mode is enabled for observation | Proposed; maintainer may overturn | spec §9.5; #641 |
-| AD-09 | 2026-10-18 | Keyed postcondition digests (S14-1; extended after RR07) | every digest in a postcondition (configuration digests and access fingerprints, which bind written values, resolved references and loaded file contents) is an HMAC-SHA-256 under a key held only in the running process and never persisted, logged or returned; the object records `key_id`. An object can be compared until that process restarts; afterwards it is `unverifiable` and the owner re-plans the same change, which confirms at once when it is serving. Rejected: unkeyed digests with a narrowed "sensitive object" promise (weakens the default; a changed privacy contract), always-`unverifiable` for secret-bearing inputs (cannot be detected reliably for literals and file contents), and a persisted key (new secret state, backup and migration) | Proposed; agreed by the third principal re-review; maintainer may overturn | spec §9.4; #641 |
+| AD-09 | 2026-10-18 | Keyed postcondition digests (S14-1; extended after RR07; recovery qualified after RR10) | every digest in a postcondition (configuration digests and access fingerprints, which bind written values, resolved references and loaded file contents) is an HMAC-SHA-256 under a key held only in the running process and never persisted, logged or returned; the object records `key_id`. An object can be compared until that process restarts; afterwards it is `unverifiable`. A re-plan confirms a raw candidate or operations #641 marks repeatable; non-repeatable typed operations (E62) stay `unverifiable` and are reconciled by hand. Rejected: unkeyed digests with a narrowed "sensitive object" promise, always-`unverifiable` for secret-bearing inputs, and a persisted key (new secret state, backup and migration) | Proposed; agreed by the third and fourth principal re-reviews; maintainer may overturn | spec §9.4; #641 |
 
 "Shown without objection" is not acceptance; AD items become accepted only with
 the maintainer's acceptance of #580.
@@ -190,6 +194,9 @@ verbatim, spelling included; option texts are abridged.
 | 8 | Acceptance of the contract; publication authority | `accept=Is this final? 10/10? I will review after you confirm you consider this to be a 10/10 ready for ready for review delivery, issues=true, notes=No additional notes other than keeping github issues and documentation updated, push_pr=True but once we merge - it closes 580, register=true` | contract **not** accepted; publication authorised; PR kept non-closing until acceptance |
 | 9 | After the principal review: confirm SD-01–SD-06 (R10); R03 delivery, scope and uncertain edits; R05 source; R06 confirmation; R08 enforcer | `notes=If you think the principal engineer is more sound than my answers, it makes sense to follow his guidance. We are here to get THE BEST product. The only authority is quality., q1=Follow the feedback from the audit unless you disagree with it or think it materally changes direction, q2a=whole, q2b=exact, q2c=narrowing, q3a=serving, q3b=keep, q4=B` | SD-07–SD-12; SD-01–SD-06 stand (the audit recommends preserving genuine prior decisions with provenance; nothing in it changes their direction) |
 | 10 | After the principal re-review: postcondition scope (scoped / whole-candidate); SD-12 after its changed premise (keep as context / defer); WAF detect-mode classes (precondition-based / always conservative); publication after a clean focused review | `postcondition_scope=scoped, sd12=keep_context, waf_detect=precondition, publish=true, notes=Remember to be bold and focus on the user longer term - no short term "shortcuts"` | SD-13 scoped; SD-12 reconfirmed; SD-14 precondition-based; publication authorised after a clean focused review |
+| 11 | Filing two pre-existing defects found during the review (route ordinal mismatch; secret-dependent status versions) | `file_ordinal_bug=true, file_status_version=true, notes=` | #643 and #644 filed |
+| 12 | Filing the configuration-diff disclosure | `file_diff_oracle=true, notes=Remember to scrutinize everything to ensure there are no other issues` | #645 filed; whole-contract review (§6.20) |
+| 13 | The two enforcement choices raised in round 20 (free-text message, quoted) | `API acknowledgement: preserve existing automation. Introduce enforced acknowledgement only through an opt-in, versioned contract. Restricted/private caching: choose refusal as the long-term default, with migration. Keep legacy warnings meanwhile and require cache-off in guided sharing flows. Neither policy decision becomes an additional #580 acceptance gate.` | SD-15, SD-16 |
 
 Final whole-contract acceptance is a separate, later act and is not implied by
 any row above.
@@ -198,8 +205,8 @@ any row above.
 
 | Item | Why no current contract depends on it | Owner | Trigger |
 | --- | --- | --- | --- |
-| Server-side acknowledgement of widening on managed API apply (W-3) | SD-05 makes acknowledgement a Console interaction; plans return the classes to every caller | maintainer | an API consumer widens access unintentionally, or #587 evidence |
-| Refusing response cache on restricted or private entries (W-1) | SD-05 keeps intent findings as warnings so file-owned pipelines never break; lint and plans warn | maintainer with #620/#623 | evidence of a cached restricted response in #581 or a recipe |
+| Opt-in, versioned enforced acknowledgement for API apply (SD-15) | decided direction; existing automation unchanged and the Console enforces acknowledgement meanwhile | later API owner | an API consumer asks for it, or #587 evidence |
+| Refusal of response cache on restricted or private entries as the default (SD-16) | decided direction; legacy warnings meanwhile and guided flows require cache off | #620/#623 with a migration decision | cache-owner selection in #62 |
 | Earlier read-only provider observation (show provider-policy membership in the view) | evidence model already carries provider-sourced records with freshness; nothing in #581–#586 needs it | #62 / #588 | #583 evidence or the SD-06 outcome gate |
 | Cross-block application grouping key | operations act on explicit entry sets | #587 / later | a recipe needs one name across hosts |
 
@@ -718,6 +725,30 @@ hidden interlock. Two new medium findings were accepted:
 The whole-contract reviewer verified W2-1 and W2-2 resolved and found no new
 contradiction. No blocker or high finding is open.
 
+### 6.23 Fourth principal re-review (head `68aed05d`)
+
+The external principal engineer re-reviewed head `68aed05d` (four fresh passes,
+root reproductions, exact-head CI) and found no blocker or high finding. RR07,
+RR08 and the earlier identity and byte-bound fixes are confirmed. Three medium
+findings and two low items were raised. The author verified each against
+source and agreed; none was rejected. The maintainer answered the two
+enforcement choices in the same exchange (SD-15, SD-16; answer 13).
+
+| ID | Sev. | Finding | Author verification | Resolution (r23) |
+| --- | --- | --- | --- | --- |
+| RR09 | medium | F1's steps moved the blocks to the LAN before adding the dashboard's check, while the final TOML already had it: either a temporarily exposed dashboard or a wrong `narrowed` class | verified in the spec; authentication admits requests when no rule applies | explicit starting configuration (loopback, no check); check installed and verified on loopback, then one move candidate, then an immediate excluded-client check; §18 handoff aligned |
+| RR10 | medium | "re-plan the same change" cannot recover typed operations that are not repeatable, and a typed preview returns no candidate without `config:raw` | verified (E62) | recovery qualified: re-plan for raw candidates and operations #641 marks repeatable; otherwise `unverifiable` with authorised current facts and reconciliation by hand; no replay, no broader permission, no durable key; ADR, AD-09 and §18 aligned |
+| RR11 | medium | direction classes computed on resolved reference values let a writer locate a hidden CIDR with chosen candidates | verified against the §9.5 rule; the reviewer's probe shows the existing preview is identical for both hidden bases | disclosure precedence before every §9.5 rule: comparisons involving values the caller cannot read are `uncertain`, with full consequences; no plan output may compare a chosen value with an unreadable one; #645 audit scope extended |
+| Low | — | §11 intentional-public row implied acknowledgement everywhere; "nobody can forge an object" overstated | agreed | row qualified (Console enforces, API reports); wording now says digests cannot be synthesised for guessed content and the object is not an attestation |
+
+Reviewer note recorded: draft PRs #646 and #647 propose fixes for #643 and
+#644. They are not part of this design; #641 reconciles any merged selector or
+version change against its selected baseline.
+
+### 6.24 Round 24 (verification of r23)
+
+(Recorded below.)
+
 ## 7. Traceability
 
 | # | Criterion (abridged) | Design section | Review / validation evidence | Runtime verification owner |
@@ -753,7 +784,8 @@ resource and value evidence contract maps to §13–§15 and §17.
 | Intent field names frozen before first-use evidence | accepted trade-off (SD-05) | additive evolution only |
 | Host trust includes all same-host processes | stated assumption (§6 of the spec) | Jul-side checks where untrusted processes run |
 | Provider seams (membership, invitations, revocation) remain handoffs | by design | SD-06 outcome gate; #588 |
-| Postconditions are comparable only within the Jul process that produced them (AD-09) | by design; a restart-bound change is confirmed by re-planning after the restart | #641 tests; maintainer may prefer a stored key later |
+| Postconditions are comparable only within the Jul process that produced them (AD-09) | by design; after a restart a re-plan confirms raw candidates and repeatable operations, and non-repeatable typed operations stay `unverifiable` (E62) | #641 marks and tests repeatable operations; maintainer may prefer a stored key later |
+| Classes involving values the caller cannot read are `uncertain` (RR11) | conservative acknowledgement and retirement for some reference-backed edits | #641 negative tests; #645 audits existing output |
 | Remote authorities (JWT key sets, forward-auth decisions, provider policy) change access without a Jul generation | named in every postcondition result as not covered (AD-07) | #641; external evidence per §7 |
 | WAF effects classified only for mode and enablement; every rule change is `uncertain` | conservative by design; retirement on rule tuning may surprise operators | #641/#642 tests; keep-open exception |
 | WAF detect-mode rules depend on pinned Coraza behaviour (E49, E51) and on AD-08's treatment of transport failures | a dependency upgrade could change them; the maintainer may prefer the stricter `narrowed` class | #641 regression tests; rules re-derived on any engine upgrade |
