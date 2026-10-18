@@ -107,7 +107,8 @@ constrains any design:
    outcomes, including a lost apply ledger after restart, are reported as
    unknown and never retried automatically. File-owned changes stay unconfirmed
    until a stateless postcondition returned by preview is evaluated against the
-   serving revision; Jul stores no preview state. The view is versioned
+   serving revision by the same Jul process (after a restart, by re-planning the
+   change); Jul stores no preview state. The view is versioned
    (`sharing_view_version`) and its closed codes are never repurposed.
 8. **Outcome gate (SD-06).** #585 predeclares targets for decisions, handoffs and
    interventions; #587 claims improvement only with zero dangerous failures
