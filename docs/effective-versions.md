@@ -40,7 +40,10 @@ Unix key files require no group/other permission (0600 or read-only 0400), and
 trusted current-user/root ownership. Ancestors must not permit untrusted
 replacement; symlinks are refused. Windows requires a private leaf directory and
 protected key grants limited to the service identity, SYSTEM and Administrators;
-ancestors may allow untrusted reads but no replacement. Unsupported ACEs fail
+ancestors may allow reads/sibling creation, but no replacement or metadata/ACL
+writes. Windows TrustedInstaller is accepted only as an ancestor owner, never
+as a key-reader grant. An explicit ancestor grant to that already-trusted
+owner has the same authority as its implicit ability to change the DACL. Unsupported ACEs fail
 closed. Native Windows ACL and virtual-service-account tests remain a merge
 blocker for this change; cross-compilation is not runtime evidence. Do not deploy
 this proposal to Windows services until that gate passes.
@@ -92,7 +95,9 @@ this source version's installer with explicit first-install opt-in:
 Start-Service jul
 ```
 
-The default key is in a separate private sibling of DataDir. Use
+The default service key is `%SystemDrive%\JulVersionKey-jul\effective-version.key`
+(on the system volume), independent of DataDir. Standard ProgramData grants include
+untrusted metadata writes and are refused for key ancestors. Use
 `-VersionKeyFile PATH` to select another dedicated private location. The installer
 passes that path as an explicit SCM image argument, provisions only when
 explicitly opted in, and sets an administrator-owned protected ACL limited to
@@ -169,3 +174,8 @@ namespace isolation without user remapping. It provisions a disposable key
 outside retained evidence and removes it after the run. This is an explicit
 harness invocation change, not permission to trust arbitrary unmapped owners.
 No long fault/soak job was run for this fix.
+
+Windows ancestor ownership follows the host OS trust boundary. Microsoft documents
+[owner DACL authority](https://learn.microsoft.com/en-us/windows/win32/secauthz/owner-of-a-new-object)
+and [TrustedInstaller servicing authority](https://learn.microsoft.com/en-us/windows/win32/wfp/about-windows-file-protection).
+This is a trust decision about ancestors, not a grant to read the private key.

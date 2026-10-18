@@ -141,6 +141,8 @@ jobs:
       # and listener drain timing (the CQ-1 class of intermittent hang). Race is
       # not run here — it needs a CGO C toolchain and is covered on the Linux
       # `race` job — but the goroutine-leak checks (goleak) still run.
+      - name: Private version-key lifecycle on the native filesystem
+        run: go test -v ./internal/versionid
       - name: go build
         run: go build -tags "${{ matrix.tags }}" ./...
       - name: go test

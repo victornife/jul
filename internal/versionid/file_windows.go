@@ -18,13 +18,29 @@ func trustedSID(sid *windows.SID, user *windows.SID) bool {
 	admins, _ := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
 	return sid.Equals(user) || sid.Equals(system) || sid.Equals(admins)
 }
+func trustedDirectoryOwner(sid, user *windows.SID) bool {
+	if trustedSID(sid, user) {
+		return true
+	}
+	// Windows servicing owns standard volume roots. This local OS identity is
+	// trusted only for ancestor ownership, never as a key/leaf read grant.
+	installer, _, _, err := windows.LookupSID("", `NT SERVICE\TrustedInstaller`)
+	return err == nil && sid.Equals(installer)
+}
 func checkDescriptor(sd *windows.SECURITY_DESCRIPTOR, directory bool) error {
 	tokenUser, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		return err
 	}
 	owner, _, err := sd.Owner()
-	if err != nil || owner == nil || !trustedSID(owner, tokenUser.User.Sid) {
+	if err != nil || owner == nil {
+		return errors.New("missing key owner")
+	}
+	trustedOwner := trustedSID(owner, tokenUser.User.Sid)
+	if directory {
+		trustedOwner = trustedDirectoryOwner(owner, tokenUser.User.Sid)
+	}
+	if !trustedOwner {
 		return errors.New("untrusted key owner")
 	}
 	acl, _, err := sd.DACL()
@@ -51,7 +67,13 @@ func checkDescriptor(sd *windows.SECURITY_DESCRIPTOR, directory bool) error {
 		if directory && ace.Mask&^windows.ACCESS_MASK(ancestorRights) == 0 {
 			continue
 		}
-		if !trustedSID((*windows.SID)(unsafe.Pointer(&ace.SidStart)), tokenUser.User.Sid) {
+		grantSID := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		// An already-trusted ancestor owner can rewrite its DACL regardless of
+		// this ACE. This never extends the private leaf/file reader allowlist.
+		if directory && grantSID.Equals(owner) {
+			continue
+		}
+		if !trustedSID(grantSID, tokenUser.User.Sid) {
 			return fmt.Errorf("untrusted key ACL grant: sid=%s mask=%#x", (*windows.SID)(unsafe.Pointer(&ace.SidStart)).String(), ace.Mask)
 		}
 	}

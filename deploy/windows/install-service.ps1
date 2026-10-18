@@ -43,8 +43,12 @@ if (-not (Test-Path $ConfigPath)) {
     throw "Config not found: $ConfigPath"
 }
 
+# The service name also forms one directory component; reject path aliases.
+if ([string]::IsNullOrWhiteSpace($ServiceName) -or $ServiceName.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or $ServiceName.EndsWith('.') -or $ServiceName.EndsWith(' ')) {
+    throw 'ServiceName must be a single valid filename component.'
+}
 $serviceAccount = "NT SERVICE\$ServiceName"
-if (-not $VersionKeyFile) { $VersionKeyFile = Join-Path ($DataDir + "-version-private") "effective-version.key" }
+if (-not $VersionKeyFile) { $VersionKeyFile = Join-Path (Join-Path (($env:SystemDrive + "\")) ("JulVersionKey-" + $ServiceName)) "effective-version.key" }
 $VersionKeyFile = [IO.Path]::GetFullPath($VersionKeyFile)
 
 # Writable runtime directories, created up front so ACLs can be applied before
@@ -104,8 +108,15 @@ foreach ($path in @($keyDirectory, $VersionKeyFile)) {
     $trusted = @($currentSid, $serviceSid.Value, $adminsSid.Value, $systemSid.Value)
     $owner = $oldAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value
     if ($owner -notin $trusted) { throw "Refusing untrusted existing version-key owner: $path" }
-    foreach ($rule in $oldAcl.Access) {
-        if ($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -notin $trusted) {
+    $raw = [Security.AccessControl.RawSecurityDescriptor]::new($oldAcl.GetSecurityDescriptorBinaryForm(), 0)
+    if ($null -eq $raw.DiscretionaryAcl -or $raw.DiscretionaryAcl.Count -eq 0) {
+        throw "Refusing missing or empty version-key DACL: $path"
+    }
+    foreach ($ace in $raw.DiscretionaryAcl) {
+        if ($ace.AceType -notin @([Security.AccessControl.AceType]::AccessAllowed, [Security.AccessControl.AceType]::AccessDenied)) {
+            throw "Refusing unsupported existing version-key ACE: $path"
+        }
+        if ($ace.AceType -eq [Security.AccessControl.AceType]::AccessAllowed -and $ace.SecurityIdentifier.Value -notin $trusted) {
             throw "Refusing previously exposed version-key permissions: $path"
         }
     }

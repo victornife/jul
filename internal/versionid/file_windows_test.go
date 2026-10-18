@@ -57,3 +57,34 @@ func TestWindowsKeyRejectsPublicAndUnsupportedACLs(t *testing.T) {
 		t.Fatal("unsafe key published")
 	}
 }
+
+func TestWindowsServicingOwnerAndAncestorRights(t *testing.T) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer, _, _, err := windows.LookupSID("", `NT SERVICE\TrustedInstaller`)
+	if err != nil {
+		t.Skip("OS servicing identity is not installed")
+	}
+	sd, err := windows.SecurityDescriptorFromString("O:" + installer.String() + "D:P(A;;FA;;;" + installer.String() + ")(A;;FA;;;BA)(A;;FA;;;SY)(A;;GR;;;WD)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkDescriptor(sd, true); err != nil {
+		t.Fatal("trusted servicing ancestor refused", err)
+	}
+	if err := checkDescriptor(sd, false); err == nil {
+		t.Fatal("servicing owner/read grant accepted as private leaf")
+	}
+	for _, rights := range []string{"0x00000006", "0x00000116", "0x00000040", "0x00040000"} {
+		sd, err := windows.SecurityDescriptorFromString("O:" + user.User.Sid.String() + "D:P(A;;FA;;;" + user.User.Sid.String() + ")(A;;" + rights + ";;;WD)")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := checkDescriptor(sd, true)
+		if (got == nil) != (rights == "0x00000006") {
+			t.Fatalf("ancestor rights policy mismatch: %s %v", rights, got)
+		}
+	}
+}

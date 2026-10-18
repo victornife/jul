@@ -116,3 +116,12 @@ still reject every untrusted grant. Native rerun is required. D11 current asset
 paths/mapping are reconciled without altering frozen identities or historical
 review evidence. The fault namespace harness now requires dedicated-host root
 without user remapping; its trust boundary and invocation change are explicit.
+
+Native Windows follow-up: standard ProgramData grants include untrusted ancestor
+metadata writes, so the service key moves to a flat protected system-volume leaf
+rather than relaxing those rights. Standard TrustedInstaller-owned ancestors
+are recognized as trusted OS servicing owners, with the same owner DACL authority;
+private key/leaf grants are unchanged. Installer conversion inspects raw ACE
+forms and refuses null/empty or unsupported/exposed established ACLs. The native
+fixture checks refusal without changing dummy bytes or ACL state. Native rerun
+and coverage remain required; this note does not claim those results yet.
