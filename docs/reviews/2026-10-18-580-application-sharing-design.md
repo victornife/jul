@@ -10,9 +10,9 @@
 > **r10** `74fb5631` (round 11, §6.11), **r11** `1290e14a` (second principal
 > re-review, §6.12), **r12** `de5f194a` (round 13, §6.13), **r13** `5e750d63`
 > (round 14, §6.14), **r14** `3d24bd5f` (round 15, §6.15), **r15** `ce929b49`
-> (third principal re-review, §6.16) and **r16** (this revision; round 17 in
-> §6.17). This packet holds evidence, decisions, review findings and
-> traceability for the
+> (third principal re-review, §6.16), **r16** `e513edf2` (round 17, §6.17) and
+> **r17** (this revision; round 18 in §6.18). This packet holds evidence,
+> decisions, review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -100,6 +100,8 @@ the row.
 | E56 | The canonical marshal does not redact: `CanonicalVersion` hashes the effective configuration with secret references resolved, so `serving_version`/`desired_version` depend on secret values. The serving snapshot also keeps the pre-expansion `RawConfig`. Basic authentication accepts bcrypt htpasswd entries only | internal/config/parser.go:205-217; internal/config/candidate.go:56-72; internal/config/secrets.go:58-89; internal/server/server.go:343-345; internal/config/schema.go (`BasicAuthConfig`) | F (round 13) | — | high |
 | E57 | Secret references (`${env:…}`, `${file:…}`) are resolved in every string field, walked recursively, again on every reload, and each resolved value is registered for log redaction, so any access input (a CIDR list, a host name, a path) may come from a reference | docs/secrets.md:51-69; internal/config/secrets.go:58-89 | D + F (round 14) | — | high |
 | E58 | Literal secrets are valid configuration: validation accepts them and lint warns only for known fields such as `[admin].token` and the OIDC client secret; `config:raw` is separated from `config:read` because raw TOML may contain literal bearer tokens. A supported WAF rule file can admit only a fixed header value (the third principal re-review: 200 for the right value, 403 otherwise). `jul plan` is a remote command, so plans are computed by the serving process | internal/config/validate.go:199-214; internal/config/lint.go:224-235; internal/rbac/permission.go:19-26; cmd/jul/remote_cli.go:64,131-153 | F (round 16) | — | high |
+| E59 | The live snapshot pairs `EffectiveConfig`, `RawConfig`, listener metadata and the handler `Generation`, published atomically. A reload keeps the previous generation only when the no-op is proven over the configuration and every runtime input identity (TLS inputs, plugin modules and others); opaque inputs such as an htpasswd file, WAF rule files or a static root always take the normal reload, which builds a new generation | internal/server/server.go:335-349; internal/server/serving_change.go:24-100,185-231; internal/server/reload_plan.go:220-232,333-347 | F (round 17) | — | high |
+| E60 | The existing configuration diff (`/api/config/diff`, `config:write`) reports whether `[admin].token` changed without showing it, so a writer without `config:raw` can already test guesses of a literal admin token online; discovery tokens are deliberately never diffed | internal/admin/diff_global.go:621-648; internal/admin/diff_helpers.go:980-982; internal/admin/route_catalog.go:620-640 | F (round 17) | pre-existing, outside #580 | high |
 
 ### External primary sources
 
@@ -630,7 +632,23 @@ verified both against source and agreed.
 | RR08 | medium | the view was prescribed to read only the pre-expansion configuration, which cannot answer reference-derived access facts (for example `client_auth.mode` written as a reference) | verified (E57; spec text) | §4.3 sources: text from the raw configuration, closed-set access facts from the effective configuration of the same captured snapshot, no re-reads; reference-derived text marked `from_reference` and never usable; saved layer reports reference-dependent facts as `unknown`; `unknown` added to client-certificate enums; §9.5 classifies on resolved values without showing them |
 | Low | — | post-restart wording; actionable `unverifiable` next steps; cursor and derivation binding under asset-only reloads | agreed | limits rewritten; restart row with next step; cursors and derivations bound to the snapshot generation and raw digest |
 
-### 6.17 Round 17 (verification of r16)
+### 6.17 Round 17 (verification of r16 `e513edf2`)
+
+The source-truth reviewer verified RR08 with no finding: the snapshot pairs raw
+and effective configuration with the generation; asset changes take a new
+generation, and only a proven no-op keeps it (E59, wording made exact); every
+listed access fact is a closed-set value derivable from the effective
+configuration. The security reviewer confirmed that keying removes the offline
+attack and found one high issue.
+
+| ID | Sev. | Finding | Resolution (r17) |
+| --- | --- | --- | --- |
+| S17-1 | high | a `config:write` caller without `config:raw` could plan raw candidates with guessed literal secrets and compare the same-key `base_config_digest` and `candidate_config_digest`, an online oracle that extends to fields the diff deliberately hides (E60) | disclosure rule: a postcondition never discloses more than the plan; raw-candidate plans return one only to callers who also hold `config:raw`; typed-operation plans keep it (their candidate differs only in fields the diff already reports); keyed objects cannot be forged to probe the evaluator |
+
+The existing diff already reveals whether a literal admin token changed (E60);
+that pre-existing oracle is outside #580 and is noted with #644.
+
+### 6.18 Round 18 (verification of r17)
 
 (Recorded below.)
 
@@ -676,6 +694,7 @@ resource and value evidence contract maps to §13–§15 and §17.
 | Host-dispatch rule under-expands if implemented wrongly | property test against the real router over generated host sets; listener-wide fallback | #641 |
 | Projection caps (strings, names, URLs, members, page entries and bytes) are proposals | measured and fixed before exposure | #586 gate for #586/#587 |
 | `serving_version` in status hashes content that includes resolved secret values (E56), so a `status:read` caller who knows the rest of the configuration could confirm guesses of a weak secret | pre-existing, outside #580; the postcondition no longer carries it | filed as #644 |
+| The existing diff tells a `config:write` caller whether a literal admin token changed (E60) | pre-existing online oracle, outside #580; postconditions add none | noted with #644 |
 | Existing route projection publishes a per-block `match_ordinal` that the resolver reads across blocks (E54, P4) | pre-existing defect; with a duplicated block a typed patch can edit the wrong route | filed as #643 |
 | Reviewer independence | AI agents; instruction-based blindness | maintainer acceptance is the decision |
 | Issue records for the new baseline and order | posted 2026-10-18: comments on #580, #579, #62, #562, #563; #581 body amended; #641 and #642 registered (all pending #580 acceptance) | maintainer acceptance switches #640 to `Closes #580` |

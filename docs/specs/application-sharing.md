@@ -289,8 +289,9 @@ cap with a truthful count, and every string has a byte bound:
   1 MiB, whichever comes first; a page always holds at least one entry, which
   the string caps bound). A page carries only the block and backend-group rows
   its entries reference, and its cursor is bound to the captured snapshot
-  (its generation, which changes on every reload including an asset-only one,
-  and the digest of its raw configuration) and to the saved layer's
+  (its generation, which changes whenever a reload changes anything Jul
+  serves, including an asset-only change, and is kept only by a proven no-op
+  reload, E59; and the digest of its raw configuration) and to the saved layer's
   `desired_version`. A cursor from anything else is refused with "the
   configuration changed; reload the view", so pages never join revisions
   (SH-13).
@@ -646,7 +647,7 @@ design must satisfy; the design owns mechanisms, bounds and tests.
 | Operation | Authority and permission | Preconditions | Preview | Consequences shown | Recovery |
 | --- | --- | --- | --- | --- | --- |
 | **Inspect** | `status:read`, `config:read` | admin access | — | §4.3 view | — |
-| **Preview** | `config:write`; allowed in both modes | candidate or typed ops | diff, lifecycle, `can_apply`/`can_stage`, lint, intent findings, audience delta (§9.5) | widened, narrowed and intent-contradicting entries; restart need; external handoffs | edit and re-plan |
+| **Preview** | `config:write`; allowed in both modes | candidate or typed ops | diff, lifecycle, `can_apply`/`can_stage`, lint, intent findings, audience delta (§9.5), postcondition (§9.4; for a raw candidate only when the caller also holds `config:raw`) | widened, narrowed and intent-contradicting entries; restart need; external handoffs | edit and re-plan |
 | **Publish / change exposure** | managed: `config:apply` with `base_version` and `Idempotency-Key`; file-owned: owner's pipeline, then watcher/SIGHUP | plan reviewed; widening acknowledged | required | DNS, connector and provider steps listed, not executed | rollback or re-apply; external steps separate |
 | **Withdraw (stop new access)** | as publish | explicit entry set; current `base_version` | required | §8 limits; mechanism limits (§9.3) | restore access (a widening, reviewed again) |
 | **Recover** | managed: `history:rollback` or re-apply; file-owned: revert and reload | target revision known | rollback diff with its own audience delta | §15 limits | — |
@@ -753,11 +754,25 @@ After any change, in either authority mode, it answers two separate questions:
 change should produce match what is serving?* It matters most for file-owned
 pipelines, which Jul cannot fence, and it never attributes a change to a writer.
 
-- **Producer.** Every plan (raw candidate or typed operations) returns a
-  `postcondition`: `{postcondition_version: 1, key_id, base_config_digest,
+- **Producer.** A plan (raw candidate or typed operations) returns a
+  `postcondition`, subject to the disclosure rule below:
+  `{postcondition_version: 1, key_id, base_config_digest,
   candidate_config_digest, entries: [{ref, expect, expected?}]}`. Plans are
   computed by the serving Jul process (`jul plan` calls it, E58), which also
   evaluates them.
+  - **Disclosure (S17-1).** A postcondition never tells its caller more than
+    the plan already does. Comparing a candidate with the base, or with what
+    serves, reveals whether they are equal. Raw TOML may hold literal secrets
+    (E58) in fields that the plan's diff deliberately does not report, such as
+    discovery tokens (E60). So a raw-candidate plan returns a postcondition only
+    to a caller who also holds `config:raw`, which already reads that text.
+    Other callers still get the plan, with `postcondition: unavailable` and that
+    reason. A typed-operation plan returns one to its normal caller: its
+    candidate differs from the base only in the fields the operation sets,
+    which the plan's diff already reports. A file-owned pipeline's account,
+    which holds the configuration anyway, can be given `config:raw` for this.
+    Because every digest is keyed, nobody can forge an object to probe the
+    evaluator.
   - **Every digest is keyed (AD-09).** Each digest in the object is an
     HMAC-SHA-256 under a key that exists only in that running process:
     generated at start, never persisted, logged or returned; `key_id` is its
