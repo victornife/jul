@@ -2,8 +2,9 @@
 
 > **Reviewed:** design branch `design/580-application-sharing-contract`; source
 > baseline `main` at `64e4a8b29230134c5dee37dfd8bfa130a9580a2a` (2026-10-18).
-> Design revisions: **r1** `e5b77b42` (round 1), **r2** `75264d61` (round 2)
-> and **r3** (this revision; round-3 verification in §6.4). This packet holds evidence, decisions,
+> Design revisions: **r1** `e5b77b42` (round 1), **r2** `75264d61` (round 2),
+> **r3** `fe44f6a0` (round-3 verification, §6.4); the final revision adds only
+> review-record updates to this packet. This packet holds evidence, decisions,
 > review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
@@ -157,8 +158,9 @@ the maintainer's acceptance of #580.
 | V-2 | probe P1 (§4) | as recorded |
 | V-3 | full-tag build of the baseline; `jul check -config` and `jul lint -config` on F1, F1 withdrawal, F1 mTLS, the r1 combined F1+F2+F3, and the r2 combined configuration (default-deny block, F2 without the device allow-list) and its withdrawal variant, with placeholder certificates, htpasswd and admin token | all valid; one intentional lint warning (compression disabled). Rejected as expected: Jul `cache` on a static root; `deny` action together with `proxy_pass` |
 | V-4 | `python3 -c 'yaml.safe_load(...)'` on the F3 `cloudflared` example | parsed |
-| V-5 | `python3 scripts/docs-check.py` | r1: 2,415 passed, 0 failed; r2: 2,419 passed, 0 failed; r3: see §6.4 |
+| V-5 | `python3 scripts/docs-check.py` | r1: 2,415 passed, 0 failed; r2, r3 and the final revision: 2,419 passed, 0 failed |
 | V-6 | TOML blocks and relative links of the three new documents parsed with `tomllib` and checked for existence (this packet is outside docs-check scope) | all valid |
+| V-7 | The exact F1, F2 and F3 TOML blocks extracted from the final specification, plus the F1 withdrawal variant and the combined instance, checked with `jul check` and `jul lint` (full-tag build, placeholder files); the specification's `cloudflared` YAML parsed | all valid; one intentional lint warning (compression disabled). The proposed `sharing` block is not implemented and was not checked by `jul` |
 
 Not run: live provider paths, independent clients, race detector, full CI. None
 is claimed. The full-tag build needed one direct module download after repeated
@@ -259,9 +261,37 @@ slice as the most valuable next step.
 
 Rejected findings in round 2: none.
 
-### 6.4 Round 3 (verification of r3 high-severity fixes)
+### 6.4 Round 3 (verification of r3 `fe44f6a0`)
 
-(Recorded below.)
+Each reviewer verified its round-2 items against the r2→r3 diff and checked
+for new blocker or high findings.
+
+| Reviewer | Items verified | Verdict | New blocker/high |
+| --- | --- | --- | --- |
+| Architecture | A2-1, A2-2, A2-3 | all resolved | none |
+| Security | S2-1 to S2-5, S-4, S-5 | all resolved | none |
+| Operability | O2-1, O2-2, O2-3 | all resolved (state semantics checked against ADR 0019 §10/§16) | none |
+| Usability | U2-1, U2-2, U2-3 | all resolved | none |
+
+Totals across rounds: 40 finding rows (5 blocker, 21 high, 14 medium), of
+which three pairs overlap (S-1/O-1, A-2/U-2, A-3/U-1); none rejected, all
+dispositioned. The maintainer decided the escalated items (SD-04 for the
+withdrawal blockers, SD-05 for A-3/U-1, SD-06 for U-7). Reviewer agreement is
+recorded as evidence, not as proof of correctness.
+
+## 8. Residual risks and open items
+
+| Item | Status | Owner and trigger |
+| --- | --- | --- |
+| Tailscale behaviour taken from source because the knowledge base was unreachable | unverified against current docs | #582 re-checks before closure |
+| Cloudflare behaviour of open WebSockets on Access revocation | undocumented | #583 measures |
+| Route-level `require_client_cert` on an open connection after revocation | source inspection only (E39); probe P1 was handler-level | candidate regression for #634 or the mTLS owner |
+| Effort for the intent tranche and complete withdrawal | author estimates, not owner estimates | re-estimated at registration |
+| Intent field names frozen before first-use evidence | accepted trade-off (SD-05) | additive evolution only |
+| Host trust includes all same-host processes | stated assumption (§6 of the spec) | Jul-side checks where untrusted processes run |
+| Provider seams (membership, invitations, revocation) remain handoffs | by design | SD-06 outcome gate; #588 |
+| Reviewer independence | AI agents; instruction-based blindness | maintainer acceptance is the decision |
+| #581, #579, #62 still describe the old baseline and order | not yet updated | on authorised publication |
 
 ## 7. Traceability
 
