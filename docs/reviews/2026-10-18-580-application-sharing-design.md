@@ -9,9 +9,10 @@
 > independent principal re-review, §6.9), **r9** `72871705` (round 10, §6.10),
 > **r10** `74fb5631` (round 11, §6.11), **r11** `1290e14a` (second principal
 > re-review, §6.12), **r12** `de5f194a` (round 13, §6.13), **r13** `5e750d63`
-> (round 14, §6.14), **r14** `3d24bd5f` (round 15, §6.15) and **r15** (this
-> revision: round-15 record). This packet holds evidence, decisions, review
-> findings and traceability for the
+> (round 14, §6.14), **r14** `3d24bd5f` (round 15, §6.15), **r15** `ce929b49`
+> (third principal re-review, §6.16) and **r16** (this revision; round 17 in
+> §6.17). This packet holds evidence, decisions, review findings and
+> traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -98,6 +99,7 @@ the row.
 | E55 | Configuration files are capped at 16 MiB; validation sets no byte limit on server `name` or `server_names`, so a valid configuration can carry 32 KiB labels or host strings (the principal re-review checked both with `jul check`) | internal/config/parser.go:62-83; internal/config/validate_values.go:152-183 | F (round 12) | — | high |
 | E56 | The canonical marshal does not redact: `CanonicalVersion` hashes the effective configuration with secret references resolved, so `serving_version`/`desired_version` depend on secret values. The serving snapshot also keeps the pre-expansion `RawConfig`. Basic authentication accepts bcrypt htpasswd entries only | internal/config/parser.go:205-217; internal/config/candidate.go:56-72; internal/config/secrets.go:58-89; internal/server/server.go:343-345; internal/config/schema.go (`BasicAuthConfig`) | F (round 13) | — | high |
 | E57 | Secret references (`${env:…}`, `${file:…}`) are resolved in every string field, walked recursively, again on every reload, and each resolved value is registered for log redaction, so any access input (a CIDR list, a host name, a path) may come from a reference | docs/secrets.md:51-69; internal/config/secrets.go:58-89 | D + F (round 14) | — | high |
+| E58 | Literal secrets are valid configuration: validation accepts them and lint warns only for known fields such as `[admin].token` and the OIDC client secret; `config:raw` is separated from `config:read` because raw TOML may contain literal bearer tokens. A supported WAF rule file can admit only a fixed header value (the third principal re-review: 200 for the right value, 403 otherwise). `jul plan` is a remote command, so plans are computed by the serving process | internal/config/validate.go:199-214; internal/config/lint.go:224-235; internal/rbac/permission.go:19-26; cmd/jul/remote_cli.go:64,131-153 | F (round 16) | — | high |
 
 ### External primary sources
 
@@ -159,7 +161,7 @@ must be re-checked against the knowledge base by #582.
 | AD-06 | 2026-10-18 | Cloudflare origin enforcement | cloudflared `access.required` default; Jul `forward_auth` validator recommended, required with untrusted local processes (after S-4); Jul header-token change not authorised | Proposed | F3 |
 | AD-07 | 2026-10-18 | Postcondition scope for remote authorities (S6-2) | the access comparison covers configuration and local access files; a JWT key set, forward-auth decisions and provider policy (for entries whose declared intent relies on a provider, after S7-1) are listed in `external_inputs` and shown as not covered. Rejected: binding a key set (network fetch while planning; routine rotation reported as divergence) and `unverifiable` for every JWT entry (hides what Jul did verify) | Proposed; reversible before #641 ships | spec §9.4 |
 | AD-08 | 2026-10-18 | Transport failures in audience classes (R10-1) | request size limits and transport failures (client abort, malformed framing) are not access inputs, like timeouts and rate limits; so disabled ↔ `detect` without engine control stays `unchanged` (SD-14's intent), with the read-before-action difference disclosed and pinned by a test. Rejected: classing it `narrowed`, which would end every open exchange of every entry inheriting a global `[waf]` when detect mode is enabled for observation | Proposed; maintainer may overturn | spec §9.5; #641 |
-| AD-09 | 2026-10-18 | Referenced access inputs in postconditions (S14-1) | keyed digest (HMAC-SHA-256) of each referenced access input's written value together with its resolved value, under a key held only in the running process and never persisted, logged or returned; the object records the key identifier; after a restart these inputs are `unverifiable`. Rejected: marking every referenced entry `unverifiable` (removes confirmation from container and pipeline users) and a persisted key (new state and secret material to protect) | Proposed; maintainer may overturn | spec §9.4; #641 |
+| AD-09 | 2026-10-18 | Keyed postcondition digests (S14-1; extended after RR07) | every digest in a postcondition (configuration digests and access fingerprints, which bind written values, resolved references and loaded file contents) is an HMAC-SHA-256 under a key held only in the running process and never persisted, logged or returned; the object records `key_id`. An object can be compared until that process restarts; afterwards it is `unverifiable` and the owner re-plans the same change, which confirms at once when it is serving. Rejected: unkeyed digests with a narrowed "sensitive object" promise (weakens the default; a changed privacy contract), always-`unverifiable` for secret-bearing inputs (cannot be detected reliably for literals and file contents), and a persisted key (new secret state, backup and migration) | Proposed; agreed by the third principal re-review; maintainer may overturn | spec §9.4; #641 |
 
 "Shown without objection" is not acceptance; AD items become accepted only with
 the maintainer's acceptance of #580.
@@ -613,6 +615,25 @@ could recover a resolved value, and key-identifier equality alone cannot
 substitute for digest equality. No new blocker or high finding. No blocker or
 high finding is open.
 
+### 6.16 Third principal re-review (head `ce929b49`)
+
+The external principal engineer re-reviewed head `ce929b49` (four fresh passes,
+root reproductions, exact-head CI) and found no blocker or high finding. RR06,
+RR05-B and the three low items are addressed; A13-1 partially (completed by
+RR07); S14-1 addressed. AD-09's process-only key is preferred over a stored key
+or always-`unverifiable` references. Two medium findings were raised; the author
+verified both against source and agreed.
+
+| ID | Sev. | Finding | Author verification | Resolution (r16) |
+| --- | --- | --- | --- | --- |
+| RR07 | medium | the claim that the postcondition carries no secret-derived value is false: unkeyed digests over the raw configuration expose **literal** secrets (valid; lint only warns), and plain content digests expose secrets inside WAF rule files or plugin modules, to offline guessing | verified (E58); the reviewer's literal-token and WAF probes are consistent with source | AD-09 extended: every digest in the object is keyed under the process-only key; the object reveals only references, flags and closed-set expected facts, never text; restart yields `unverifiable` with a re-plan path, nothing re-applied automatically |
+| RR08 | medium | the view was prescribed to read only the pre-expansion configuration, which cannot answer reference-derived access facts (for example `client_auth.mode` written as a reference) | verified (E57; spec text) | §4.3 sources: text from the raw configuration, closed-set access facts from the effective configuration of the same captured snapshot, no re-reads; reference-derived text marked `from_reference` and never usable; saved layer reports reference-dependent facts as `unknown`; `unknown` added to client-certificate enums; §9.5 classifies on resolved values without showing them |
+| Low | — | post-restart wording; actionable `unverifiable` next steps; cursor and derivation binding under asset-only reloads | agreed | limits rewritten; restart row with next step; cursors and derivations bound to the snapshot generation and raw digest |
+
+### 6.17 Round 17 (verification of r16)
+
+(Recorded below.)
+
 ## 7. Traceability
 
 | # | Criterion (abridged) | Design section | Review / validation evidence | Runtime verification owner |
@@ -648,6 +669,7 @@ resource and value evidence contract maps to §13–§15 and §17.
 | Intent field names frozen before first-use evidence | accepted trade-off (SD-05) | additive evolution only |
 | Host trust includes all same-host processes | stated assumption (§6 of the spec) | Jul-side checks where untrusted processes run |
 | Provider seams (membership, invitations, revocation) remain handoffs | by design | SD-06 outcome gate; #588 |
+| Postconditions are comparable only within the Jul process that produced them (AD-09) | by design; a restart-bound change is confirmed by re-planning after the restart | #641 tests; maintainer may prefer a stored key later |
 | Remote authorities (JWT key sets, forward-auth decisions, provider policy) change access without a Jul generation | named in every postcondition result as not covered (AD-07) | #641; external evidence per §7 |
 | WAF effects classified only for mode and enablement; every rule change is `uncertain` | conservative by design; retirement on rule tuning may surprise operators | #641/#642 tests; keep-open exception |
 | WAF detect-mode rules depend on pinned Coraza behaviour (E49, E51) and on AD-08's treatment of transport failures | a dependency upgrade could change them; the maintainer may prefer the stricter `narrowed` class | #641 regression tests; rules re-derived on any engine upgrade |

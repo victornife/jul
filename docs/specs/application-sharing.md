@@ -201,9 +201,8 @@ period, consumers ignore unknown fields and treat unknown enum values as
 `unknown`, and closed-set codes (warnings, intent findings, next actions) are
 never given a new meaning. Severity is a separate, evolvable field.
 
-**Layers (SD-10, SH-13).** Every entry has a `serving` layer computed from the
-serving generation's configuration (the live snapshot's pre-expansion
-configuration, so secrets are never resolved into the view). When the saved
+**Layers (SD-10, SH-13).** Every entry has a `serving` layer computed from one
+captured live snapshot (sources below). When the saved
 configuration differs from what is serving, a `saved` layer with the same
 fields and its own `desired_version` is added and labelled "saved, not
 serving". An entry that exists only in the saved configuration has only a
@@ -213,23 +212,47 @@ different revisions into one layer. The saved layer reads the file under its
 existing rules, so an unreadable or invalid file yields
 `saved: unavailable` rather than an error for the whole view.
 
+**Sources: text from the raw configuration, access facts from the effective
+one.** Any string may be written as a secret reference, resolved again on
+every load (E57), so neither form alone answers every field. One response reads
+one captured live snapshot, which already pairs the serving raw configuration
+with its effective configuration and generation. Nothing is re-read from the
+environment or from files to render the view or evaluate a postcondition.
+
+- **Text** comes from the raw configuration: host names, paths, listener
+  addresses, labels, `route_id`s and selectors. The view therefore never
+  contains a resolved reference. A value written as a reference appears as its
+  reference text, marked `from_reference`, and is never offered as a usable
+  URL or identifier.
+- **Access facts** come from the effective configuration of the same snapshot,
+  so they describe what actually serves even when the setting is written as a
+  reference: bind scope, TLS and client-certificate modes, the kinds of Jul
+  checks, controls, declared mode and withdrawal state. Only closed-set values
+  (enums, booleans, counts) are derived this way; resolved text is never
+  returned.
+- **The saved layer** has no effective configuration: resolving references for
+  a file that is not serving would read the environment and files on its
+  behalf. A fact that depends on a reference is `unknown` there, labelled
+  "resolved when loaded". Every closed-set fact admits `unknown` for this
+  reason.
+
 | Field | Type | Presence / absence meaning | Source | Sensitivity and bounds |
 | --- | --- | --- | --- | --- |
 | `sharing_view_version` | integer | always | server | — |
 | `layer` | `serving` \| `saved` | per entry layer | server | — |
 | `revision` | `serving_version` or `desired_version` | always for its layer | existing status | — |
-| `entry.route_id` | string | absent ⇒ `entry.identity = revision_bound` | `route_id` | ADR 0019 grammar |
+| `entry.route_id` | string | absent ⇒ `entry.identity = revision_bound`; a `route_id` written as a reference is shown as its reference text, marked `from_reference`, and the entry is treated as `revision_bound` (its resolved value is never shown or exported) | `route_id` | ADR 0019 grammar |
 | `entry.selector` | `{block, match_type, path, match_ordinal}` + `base_version` | always | layer's configuration | the ADR 0018 §14 selector with exactly the existing resolver's semantics: `listen` (from `block`), `match_type` and `path` compared as raw strings, the block's raw `server_names` compared as a multiset (whitespace and duplicates significant), and `match_ordinal` counted across **every** block matching those coordinates, in declaration order — not the per-block ordinal the existing route projection publishes (E54); paths are admin-visible only |
 | `entry.position` | `{block_index, location_index}` | always | layer's configuration | 0-based positions in the layer's revision; revision-bound, never an identity; what postcondition references use (§9.4) |
 | `entry.identity` | `durable` \| `revision_bound` | always | derived | — |
 | `service.block` | response-local key into `blocks` | always | layer's configuration | the block's label, host names, listener and unmatched-host role live in `blocks`, once per response, never repeated per entry |
 | `listener.address` | string | always | canonical `listen` | bounded string (below) |
-| `listener.bind_scope` | `loopback` \| `private_address` \| `shared_address_space` \| `all_interfaces` \| `public_address` \| `unknown` | `unknown` when not a literal address | derived (§4.4) | configured bind, **not** reachability |
-| `listener.transport` | `{tls, client_auth: none\|request\|require, http3, h2c}` | always | layer's configuration | listener-scoped (ADR 0016 §11) |
-| `urls` | `{items[], count, truncated}`; each item `{url \| template, kind: concrete\|template\|none\|truncated}` | `concrete` only for literal host names and `exact`/`prefix` paths whose complete URL fits its bound; wildcard hosts and regex paths yield a `template` that is not a usable address; no host names yields `none`; a URL whose host, path or whole text exceeds its bound is `truncated`, shown for recognition only and never offered as a usable or copyable address; `count` covers every host name of the block | derived from the block's host names and the entry's path | `items` capped (below); what Jul answers locally, never proof of outside reach |
+| `listener.bind_scope` | `loopback` \| `private_address` \| `shared_address_space` \| `all_interfaces` \| `public_address` \| `unknown` | `unknown` when not a literal address | derived from the effective listen address (§4.4) | configured bind, **not** reachability |
+| `listener.transport` | `{tls, client_auth: none\|request\|require\|unknown, http3, h2c}` | always | layer's configuration | listener-scoped (ADR 0016 §11) |
+| `urls` | `{items[], count, truncated}`; each item `{url \| template, kind: concrete\|template\|none\|truncated\|withheld}` | `concrete` only for literal host names and `exact`/`prefix` paths whose complete URL fits its bound; wildcard hosts and regex paths yield a `template` that is not a usable address; no host names yields `none`; a URL whose host, path or whole text exceeds its bound is `truncated`, shown for recognition only and never offered as a usable or copyable address; a host name or path written as a reference makes it `withheld` (reference text only, never resolved); `count` covers every host name of the block | derived from the block's host names and the entry's path | `items` capped (below); what Jul answers locally, never proof of outside reach |
 | `jul_checks.network` | `none` \| `allow_list` \| `deny_list` \| `allow_and_deny` | always | `auth.allow/deny` | CIDR values not shown in the summary |
 | `jul_checks.credential` | `none` \| `basic` \| `jwt` \| `forward_auth` | always | `auth.*` | no file paths, URLs or secrets |
-| `jul_checks.client_certificate` | `not_required` \| `required_by_route` \| `required_by_listener` | always | `require_client_cert`, `client_auth.mode` | identity is fixed per TLS connection (§8.1) |
+| `jul_checks.client_certificate` | `not_required` \| `required_by_route` \| `required_by_listener` \| `unknown` | always | `require_client_cert`, `client_auth.mode` | identity is fixed per TLS connection (§8.1) |
 | `jul_checks.outside_auth` | `{redirect_rewrites, request_plugins, cors_preflight: bool}` | always | layer's configuration | these answer before Jul's location checks (§9.3) |
 | `action`, `upstream_ref` | existing vocabulary; upstream `name` | `upstream_ref` absent for static, literal or non-proxy actions | layer's configuration | — |
 | `controls` | `{cache, waf, rate_limit, cors}` | always | layer's configuration | — |
@@ -265,17 +288,19 @@ cap with a truthful count, and every string has a byte bound:
 - **Pages.** Entries are paged by count and by bytes (proposed 200 entries and
   1 MiB, whichever comes first; a page always holds at least one entry, which
   the string caps bound). A page carries only the block and backend-group rows
-  its entries reference, and its cursor is bound to the response's
-  `serving_version` and `desired_version`: a cursor from another revision is
-  refused with "the configuration changed; reload the view", so pages never
-  join revisions (SH-13).
+  its entries reference, and its cursor is bound to the captured snapshot
+  (its generation, which changes on every reload including an asset-only one,
+  and the digest of its raw configuration) and to the saved layer's
+  `desired_version`. A cursor from anything else is refused with "the
+  configuration changed; reload the view", so pages never join revisions
+  (SH-13).
 
 Every entry, block row and group row is bounded by these caps, so each page is
 bounded by constants. Reading every page costs output linear in the number of
 entries (each page adds at most one bounded row per referenced block or group)
 and time linear in the configuration's size: the projection is derived once per
-serving revision (an in-memory derivation discarded when the revision changes,
-never persisted) or by equivalent means, so paging never recomputes the whole
+captured snapshot (an in-memory derivation discarded when the snapshot or the
+saved file changes, never persisted) or by equivalent means, so paging never recomputes the whole
 view per page. A truncated list is labelled "and N more" and never presented as
 complete. Caps never narrow what an operation acts on: operations select
 entries by reference, an entry always covers every host name of its block, and
@@ -729,85 +754,86 @@ change should produce match what is serving?* It matters most for file-owned
 pipelines, which Jul cannot fence, and it never attributes a change to a writer.
 
 - **Producer.** Every plan (raw candidate or typed operations) returns a
-  `postcondition`: `{postcondition_version: 1, base_config_digest,
-  candidate_config_digest, entries: [{ref, expect, expected?}]}`. The two
-  digests are full SHA-256 digests of the canonical **raw** configuration — as
-  written, with secret references unresolved — and they are what the evaluator
-  compares, so a fingerprint collision can never make another configuration
-  pass for the candidate. The object carries **no value derived from a secret**:
-  owners keep it with their change, possibly in a repository beside the
-  configuration, where a digest over resolved secrets would let anyone check
-  guesses of a weak secret offline. For that reason Jul's existing versions,
-  which hash the effective configuration with secrets resolved (review packet
-  E53, E56), are not carried. Equal digests mean the configuration as written
-  is identical; a referenced value that changes under an unchanged
-  configuration is not seen by these digests (referenced *access* inputs are
-  compared through the access fingerprint below). Neither digest covers the
-  contents of files the configuration names; the access fingerprint does.
+  `postcondition`: `{postcondition_version: 1, key_id, base_config_digest,
+  candidate_config_digest, entries: [{ref, expect, expected?}]}`. Plans are
+  computed by the serving Jul process (`jul plan` calls it, E58), which also
+  evaluates them.
+  - **Every digest is keyed (AD-09).** Each digest in the object is an
+    HMAC-SHA-256 under a key that exists only in that running process:
+    generated at start, never persisted, logged or returned; `key_id` is its
+    random identifier. Owners keep the object with their change, possibly in
+    a repository or ticket that fewer controls protect than the configuration
+    itself. An unkeyed digest there would let anyone holding the object check
+    guesses of a weak secret offline: one referenced from the environment or a
+    file, a **literal** secret, which validation accepts (lint only warns,
+    E58), or a secret inside a local file, such as a WAF rule that admits a
+    fixed header value. With every digest keyed, the object allows no offline
+    check of any secret. It reveals only `route_id`s, positions, the
+    `present`/`absent` flags and the expected closed-set facts below (the
+    planned access posture), never configuration text. Jul's existing versions,
+    which are unkeyed hashes of the effective configuration (E53, E56, #644),
+    are not carried.
+  - `base_config_digest` and `candidate_config_digest` cover the canonical
+    **raw** configuration, as written. They are what the evaluator compares;
+    a collision cannot make another configuration pass for the candidate.
+    Equal digests mean the configuration as written is identical. Resolved
+    reference values and the contents of named files are not in them; for
+    access inputs, the access fingerprint covers both.
   - `expect` is `present` or `absent`. Every entry the plan affects (including
     the §9.5 expansion) is listed: `present` when it exists in the candidate,
     `absent` when the plan removes it. A plan that affects no entry (for
     example a global log-level or timeout change) lists none.
-  - `ref` is the entry's `route_id` when it has one. Otherwise it is a
-    revision-bound **position** `{revision, block_index, location_index}`: the
-    0-based index of the server block in the configuration named by
-    `revision` (`candidate` for `present` entries, `base` for `absent` ones,
-    meaning the corresponding digest above) and of the location within that
-    block. It is resolved only while that configuration's digest is serving,
-    where positions are exact. It uses no names, ordinals or normalisation, so
-    it cannot merge two distinct entries (review packet E54) and its size is
-    constant. A non-resolving `display` (listener and path, bounded as in
-    §4.3) is carried for people. Jul never resolves a position in another
-    revision, never mints an identifier and keeps no mapping; router host
-    matching (§9.5) and reference identity are separate relations.
-    **Round trip:** every emitted reference resolves, in its named revision, to
-    exactly the entry it was produced from; anything else is `unverifiable`,
-    never a guess.
-  - `expected`, for `present` entries, holds the entry facts the change should
-    produce in the `serving` layer (§4.3) — the Jul checks it actually applies,
-    client-certificate requirement, bind scope, withdrawal state, declared
-    intent — and an **access fingerprint**: a SHA-256 digest over the entry's
-    access inputs (§9.5) as written, so no secret value enters it directly,
-    including content digests of the local access files they use (htpasswd,
-    CA, CRL, WAF rule files, request-plugin modules) as read when the plan was
-    computed. None of these files gives a usable password oracle: Basic
-    accepts bcrypt entries only (E56).
-  - **Referenced access inputs (AD-09).** Any string may hold a secret
-    reference (`${env:…}`, `${file:…}`) that is resolved again on every
-    reload, so an access input as written can stay equal while its value
-    changes (for example `auth.allow = ["${env:OFFICE_CIDR}"]`). For each
-    access input whose written value contains a reference, the fingerprint
-    adds a keyed digest (HMAC-SHA-256) of the written value together with its
-    resolved value, under a key that exists only in the running Jul process:
-    generated at start and never persisted, logged or returned. The object
-    records the key's random identifier (`reference_key_id`). Because the
-    written value is bound in, a plan for a different reference (for example a
-    file the caller controls) can never produce a matching digest, and without
-    the key nobody can check a guess offline. A changed resolved value yields
-    `diverged`.
+  - `ref` is the entry's `route_id` when it has one written literally.
+    Otherwise (including a `route_id` written as a reference, whose resolved
+    value is never exported) it is a revision-bound **position**
+    `{revision, block_index, location_index}`: the 0-based index of the server
+    block in the configuration named by `revision` (`candidate` for `present`
+    entries, `base` for `absent` ones, meaning the corresponding digest above)
+    and of the location within that block. It is resolved only while that
+    configuration's digest is serving, where positions are exact. It uses no
+    names, ordinals or normalisation, so it cannot merge two distinct entries
+    (review packet E54) and its size is constant. The object carries no display
+    text; the evaluator's response, shown only to its authorised caller, names
+    each entry. Jul never resolves a position in another revision, never mints
+    an identifier and keeps no mapping; router host matching (§9.5) and
+    reference identity are separate relations. **Round trip:** every emitted
+    reference resolves, in its named revision, to exactly the entry it was
+    produced from; anything else is `unverifiable`, never a guess.
+  - `expected`, for `present` entries, holds the closed-set facts the change
+    should produce in the `serving` layer (§4.3), taken from the plan's
+    prepared candidate as §4.3 takes them from a snapshot: the Jul checks it
+    actually applies, client-certificate requirement, bind scope, withdrawal
+    state, declared intent. It also holds an **access fingerprint**: a keyed
+    digest over the entry's access inputs (§9.5) as written, the resolved value
+    of every input written as a reference, and the content of the local access
+    files they use (htpasswd, CA, CRL, WAF rule files, request-plugin modules)
+    as read when the plan was computed. Binding written and resolved values
+    together means a plan for a different reference (for example a file the
+    caller controls) can never produce a matching digest. A changed resolved
+    value or loaded file yields `diverged`.
   - Jul stores nothing; the owner keeps the object with the change.
 - **Evaluator.** A read-only, server-owned operation requiring the same
   permissions as inspecting the configuration (`status:read` and
-  `config:read`) compares the object with the **current** serving snapshot,
-  whose generation records the access-file digests it actually loaded. It
-  returns:
-  - `candidate`: computed from the full SHA-256 digest of the serving
-    snapshot's raw configuration, which the snapshot already holds (computed on
-    request; nothing stored). The response also shows the current
-    `serving_version` to its authorised caller. `serving`
-    when it equals `candidate_config_digest` (checked first, so a plan that
-    changes nothing is `serving` at once); otherwise `base_serving` when it
-    equals `base_config_digest`; otherwise `other_revision`; `unknown` without
-    a serving snapshot.
+  `config:read`) compares the object with one captured serving snapshot,
+  without re-reading the environment or files. The snapshot pairs the raw and
+  effective configuration with the generation, and the generation records the
+  access-file digests it actually loaded. The evaluator returns:
+  - `candidate`: `unverifiable` when `key_id` is not the evaluator's current
+    key (the change was planned by an earlier Jul process). Otherwise it uses
+    the keyed digest of the snapshot's raw configuration (computed on request;
+    nothing stored): `serving` when it equals `candidate_config_digest` (checked
+    first, so a plan that changes nothing is `serving` at once); otherwise
+    `base_serving` when it equals `base_config_digest`; otherwise
+    `other_revision`; `unknown` without a serving snapshot. The response also
+    shows the current `serving_version` to its authorised caller.
   - per entry: `matches` (a `present` entry's facts and fingerprint are equal,
     or an `absent` entry's `route_id` resolves to nothing); `differs` (with the
     differing field names, or `still_present` for an entry expected absent);
     `not_found` (a `present` reference resolves to nothing); `unverifiable` (a
-    position whose revision is not serving, an access file whose loaded digest
-    is unavailable, or a referenced access input whose keyed digest was made
-    under another process's key, that is, before a restart); or `unknown`. A revision-bound
-    `absent` entry matches only while the candidate is serving, because that
-    exact configuration does not contain it.
+    position whose revision is not serving, or an access file whose loaded
+    digest is unavailable); or `unknown`. A revision-bound `absent` entry
+    matches only while the candidate is serving, because that exact
+    configuration does not contain it.
   - `access`, aggregated: `matches` (at least one entry, and all match),
     `none_expected` (no entries), `differs` (any `differs` or `not_found`),
     `unverifiable` (otherwise, any `unverifiable`), or `unknown`.
@@ -816,10 +842,11 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
 | `result` | Condition | What every surface says |
 | --- | --- | --- |
 | `unknown` | `candidate` or `access` is `unknown` | "Jul cannot tell what is serving." |
+| `unverifiable` | `candidate` is `unverifiable` | "Jul has restarted since this change was planned, so it cannot compare it. Plan the same change again: if it is already serving, the new plan says so at once." Nothing is re-applied automatically. |
 | `not_serving_yet` | `candidate` is `base_serving` | "Not serving yet: the configuration this change was planned against is still serving." Access details are shown for information only. |
 | `candidate_serving` | `candidate` is `serving`; `access` is `matches` or `none_expected` | With `matches`: "The planned configuration is serving, and its expected access facts match." With `none_expected`: "The planned configuration is serving; this change expected no access facts to compare." The **only** result that may say the change is serving. |
 | `diverged` | `access` is `differs` | "What is serving differs from the plan," naming the entries and fields — including an access file changed after planning while the exact candidate serves. |
-| `unverifiable` | `access` is `unverifiable` | "Jul cannot compare these entries," naming each and the reason. |
+| `unverifiable` | `access` is `unverifiable` | "Jul cannot compare these entries," naming each and the reason, with the next step (reload the file, or plan again). |
 | `access_matches` | `candidate` is `other_revision`; `access` is `matches` | "The expected access facts match, but a different configuration (<version>) is serving." |
 | `other_revision` | `candidate` is `other_revision`; `access` is `none_expected` | "A different configuration (<version>) is serving; this change expected no access facts to compare." |
 
@@ -841,25 +868,30 @@ answer are always shown, separately.
   its facts report the Jul checks it actually applies (CIDR, Basic, JWT,
   forward-auth, client certificate, or none), and its external enforcement
   stays `unanalysed` (§4.5).
-- **Limits.** Observation only: it keeps no history and survives restarts
-  because it reads only the current state, except that referenced access
-  inputs become `unverifiable` after a restart (their key is gone by design). A failed, staged or restart-bound
-  apply yields `not_serving_yet`; a later writer yields `access_matches`,
-  `other_revision`, `diverged` or `unverifiable`; a restart that loads the
-  candidate yields `candidate_serving`. Access files are compared by the bytes
+- **Limits.** Observation only: it keeps no history. An object can be compared
+  for as long as the Jul process that produced it runs: reloads keep it valid,
+  but a restart discards the key by design. Before a restart, a failed, staged
+  or restart-bound apply yields `not_serving_yet`. A later writer yields
+  `access_matches`, `other_revision`, `diverged` or `unverifiable`. After a
+  restart the original object yields `unverifiable`, and planning the same
+  change again yields `candidate_serving` at once when it is serving. A
+  restart-bound change is therefore confirmed by re-planning it after the
+  restart. Access files are compared by the bytes
   Jul has **loaded**: a file edited on disk but not reloaded changes nothing
   that serves and is not a divergence by itself. When the loaded bytes differ
   from what the plan read — the file was changed and reloaded, or the plan
   expected a new file but an asset-only reload failed while the configuration
   digest stayed equal — the result is `diverged`, naming the file, even while
   the exact candidate configuration is serving. Each postcondition entry is
-  bounded by the §4.3 string caps. Clients never re-implement the comparison;
+  bounded in size. Clients never re-implement the comparison;
   they display the server's result.
 
 ### 9.5 Audience delta (accepted semantics, SD-09)
 
-Computed server-side per entry, between the serving configuration and the
-candidate. Jul does not attempt general policy equivalence; anything it cannot
+Computed server-side per entry, between the serving snapshot and the
+prepared candidate. Inputs written as references are classified on their
+resolved values in both, as Jul loaded or prepared them; the class is shown,
+and the values never are. Jul does not attempt general policy equivalence; anything it cannot
 classify is `uncertain`, never "unchanged". A class is assigned only from a
 rule below; a rule that does not exactly fit falls through to `uncertain`.
 
@@ -1675,7 +1707,9 @@ for `applied_live`, `applied_degraded` where reproducible, `no_change`,
 `not_applied` and a restart-bound change; every §11 row; the intent findings and
 §9.5 classes for the "remove the dashboard's check" case; the §9.4 postcondition
 evaluated after each change in both authority modes (`candidate_serving`;
-`not_serving_yet` for the restart-bound change; after a deliberate second edit,
+`not_serving_yet` for the restart-bound change before the restart, and after it
+`unverifiable` for the original object and `candidate_serving` for a re-plan;
+after a deliberate second edit,
 `access_matches` when it leaves the dashboard's access unchanged and `diverged`
 when it changes it).
 

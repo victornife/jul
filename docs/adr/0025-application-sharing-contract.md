@@ -43,8 +43,10 @@ constrains any design:
    previewed entry sets; bounded, response-local backend groups are advisory,
    never identity. No application resource, mapping store or new identifier
    namespace. Statements about current access come from the **serving**
-   generation; saved-but-not-serving configuration is a separately labelled
-   layer (SD-10, SH-13).
+   generation, read from one captured snapshot: text from the raw
+   configuration, closed-set access facts from the effective configuration.
+   Saved-but-not-serving configuration is a separately labelled layer (SD-10,
+   SH-13).
 2. **Declared intent in the configuration, built early (SD-05 "B+").** One
    optional location block, `[servers.locations.sharing]` with `mode`,
    `audience_label` and a declared, never-verified `external_enforcer` (SD-12),
@@ -56,10 +58,11 @@ constrains any design:
    returns a stateless **postcondition** carrying expected presence or absence
    per affected entry and an access fingerprint (including the loaded digests
    of local access files: htpasswd, CA, CRL, WAF rules and request-plugin
-   modules), and full digests of the configuration as written; it carries no
-   value from which a secret can be checked offline (access inputs written as
-   secret references are compared through keyed digests under a key held only
-   by the running process). A read-only server operation, with the same permissions as
+   modules), and digests of the configuration as written. Every digest is keyed
+   under a key held only by the running process, so the object allows no
+   offline check of any secret, whether referenced, literal or inside a local
+   file. It can be compared until that process restarts, after which the change
+   is re-planned. A read-only server operation, with the same permissions as
    configuration inspection, evaluates it against the serving snapshot (SD-11)
    and answers two questions separately: is the exact planned configuration
    serving, and do the expected access facts match (SD-13)? Only both together
