@@ -6,9 +6,9 @@
 > **r3** `fe44f6a0` (round 3, §6.4), **r4** `a76f197e` (independent principal
 > review, §6.5), **r5** `c53b14b5` (round 5, §6.6), **r6** `ecde75fa` (round 6,
 > §6.7), **r7** `7e3382c4` (round 7, §6.8), **r8** `292a294c` (round 8, §6.8;
-> independent principal re-review, §6.9) and **r9** (this revision; round 10 in
-> §6.10). This packet holds evidence, decisions, review findings and
-> traceability for the
+> independent principal re-review, §6.9), **r9** `72871705` (round 10, §6.10)
+> and **r10** (this revision; round 11 in §6.11). This packet holds evidence,
+> decisions, review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -86,11 +86,11 @@ the row.
 | E46 | `client_auth` `request` admits clients with or without a certificate (`VerifyClientCertIfGiven`); only `require` rejects them | internal/server/mtls.go:37-50 | F (round 5 P5-5) | — | high |
 | E47 | One process-wide response cache wraps every cache-enabled location; its key has no listener or entry component | internal/app/serve.go:124-128; internal/app/factory.go:398-401; internal/cache/cache.go:478-485 | F (round 5 P5-3) | — | high |
 | E48 | `BeginWrite` changes only the on-disk marker; in-memory status can read `managed_clean` while an apply is in flight | internal/app/managed_baseline.go:175-190; internal/app/config_apply.go:716-747 | F (round 5 P5-6) | — | high |
-| E49 | WAF rule files and inline rules are post-CRS tuning that may hold exclusions and allow rules. Detect mode emits `SecRuleEngine DetectionOnly`, in which the engine never interrupts a request, and Coraza's constructor then forces the request and response body-limit actions to `ProcessPartial`, so detect mode does **not** reject oversized bodies (probe P2: `block` 413, `detect` 200 with the whole body delivered). **Corrected in round 9 (RR01):** r7 and r8 claimed the opposite from the transaction's reject branch and default alone, missing the constructor rule. A location `waf` override replaces the global `[waf]` wholesale | internal/config/schema.go:180-200; internal/waf/firewall.go:54-90,212-228; internal/app/wiring.go:112-116; coraza v3.8.1 waf.go:107-117, internal/corazawaf/transaction.go:335-363 | F (rounds 6 and 9; P2) | transport errors while reading a body fail the request with or without the WAF | high |
+| E49 | WAF rule files and inline rules are post-CRS tuning that may hold exclusions and allow rules. Detect mode emits `SecRuleEngine DetectionOnly`, in which the engine never interrupts a request, and Coraza's constructor then forces the request and response body-limit actions to `ProcessPartial`, so detect mode does **not** reject oversized bodies (probe P2: `block` 413, `detect` 200 with the whole body delivered). **Corrected in round 9 (RR01):** r7 and r8 claimed the opposite from the transaction's reject branch and default alone, missing the constructor rule. In either mode the WAF reads the request body before the action and, on a read error, returns without calling it; Jul's `client_max_body_size` surfaces a chunked body over the limit as such an error, so an unreadable body fails even where the action would not read it (round 10, R10-1). Approved CORS preflights skip credential checks but pass through the WAF. A location `waf` override replaces the global `[waf]` wholesale | internal/config/schema.go:180-200; internal/waf/firewall.go:54-90,212-228; internal/app/wiring.go:112-116; internal/middleware/bodylimit.go:20-33; internal/middleware/preflight.go:25-58; coraza v3.8.1 waf.go:107-117, http/middleware.go:69-96, internal/corazawaf/transaction.go:335-363 | F (rounds 6, 9 and 10; P2) | the read-before-action difference was found in source, not probed | high |
 | E50 | Each listener binds exactly one address (`net.Listen("tcp", addr)`); moving it from loopback to another address stops the loopback address answering | internal/server/server.go:742-752 | F (round 6, P5-4 reopened) | — | high |
 | E51 | Coraza's `ctl:ruleEngine` action changes the engine for one transaction, so a rule can switch blocking on in detect mode; in DetectionOnly mode `allow` is not enforced. The embedded CRS v4.25.0 contains no `ctl:ruleEngine` | coraza v3.8.1 internal/actions/ctl.go:261-271, internal/corazawaf/transaction.go:353-363; coraza-coreruleset v4.25.0 (no match) | F (round 9) | operators' rule files may use it | high |
-| E52 | Host dispatch: each block scores the request host (3 exact, 2 leading wildcard matching any deeper name, 0 none) after lower-casing and trimming a trailing dot; the highest score wins, ties go to the earlier-declared block, and no match falls to the listener's first-declared block | internal/router/host.go:20-39; internal/router/router.go:73-85 | F (round 9, RR04; the reviewer's real-router probe: 410 → 200 after renaming only an exact host) | — | high |
-| E53 | `serving_version` and `desired_version` are both `CanonicalVersion`: the first 8 bytes of SHA-256 over the canonical marshalled **effective** configuration. Equal versions mean an identical effective configuration; the contents of referenced files are not included | internal/server/reload_result.go:101-111; internal/app/config_apply.go:624-625; internal/app/config_apply_restore.go:34 | F (round 9) | 64-bit truncation; not a practical concern for equality checks | high |
+| E52 | Host dispatch: each block scores the request host (3 exact, 2 leading wildcard matching any deeper name, 0 none) after trimming surrounding whitespace, lower-casing and removing one trailing dot (configuration validation does not reject padded or upper-case names; the existing selector normalisation trims and de-duplicates but does not lower-case); the highest score wins, ties go to the earlier-declared block, and no match falls to the listener's first-declared block | internal/router/host.go:20-39; internal/router/router.go:73-85; internal/config/validate_values.go:152-183; internal/admin/normalize.go:14-29 | F (round 9, RR04; the reviewer's real-router probe: 410 → 200 after renaming only an exact host) | — | high |
+| E53 | `serving_version` and `desired_version` are both `CanonicalVersion`: the first 8 bytes of SHA-256 over the canonical marshalled **effective** configuration. Equal versions are a 64-bit fingerprint match of the canonical effective configuration, so the postcondition compares full SHA-256 digests of the same form (round 10, R10-3); the contents of referenced files are not included | internal/server/reload_result.go:101-111; internal/app/config_apply.go:624-625; internal/app/config_apply_restore.go:34 | F (rounds 9 and 10) | — | high |
 
 ### External primary sources
 
@@ -151,6 +151,7 @@ must be re-checked against the knowledge base by #582.
 | AD-05 | 2026-10-18 | Connector identity headers | SH-12 | Proposed | spec §3 |
 | AD-06 | 2026-10-18 | Cloudflare origin enforcement | cloudflared `access.required` default; Jul `forward_auth` validator recommended, required with untrusted local processes (after S-4); Jul header-token change not authorised | Proposed | F3 |
 | AD-07 | 2026-10-18 | Postcondition scope for remote authorities (S6-2) | the access comparison covers configuration and local access files; a JWT key set, forward-auth decisions and provider policy (for entries whose declared intent relies on a provider, after S7-1) are listed in `external_inputs` and shown as not covered. Rejected: binding a key set (network fetch while planning; routine rotation reported as divergence) and `unverifiable` for every JWT entry (hides what Jul did verify) | Proposed; reversible before #641 ships | spec §9.4 |
+| AD-08 | 2026-10-18 | Transport failures in audience classes (R10-1) | request size limits and transport failures (client abort, malformed framing) are not access inputs, like timeouts and rate limits; so disabled ↔ `detect` without engine control stays `unchanged` (SD-14's intent), with the read-before-action difference disclosed and pinned by a test. Rejected: classing it `narrowed`, which would end every open exchange of every entry inheriting a global `[waf]` when detect mode is enabled for observation | Proposed; maintainer may overturn | spec §9.5; #641 |
 
 "Shown without objection" is not acceptance; AD items become accepted only with
 the maintainer's acceptance of #580.
@@ -226,9 +227,14 @@ any row above.
   four blocks over a vocabulary of overlapping exact and wildcard names, each
   with one random mutation (rename, add alias, swap order, insert or remove a
   block), evaluated on 12 hosts; the rule was implemented independently in the
-  test and every block whose winner changed was checked against it.
-- **Result.** 2,400,000 host evaluations; 472,507 moved between blocks; every
-  old and new winner was in the affected set (fixed seed, about 2 s).
+  test and every block whose winner changed was checked against it. Run twice:
+  at r9, and after round 10 (S10-1) with padded, upper-case and trailing-dot
+  name variants, both with the router's full normalisation and, as a negative
+  control, without trimming whitespace.
+- **Result.** r9: 2,400,000 evaluations, 472,507 moves, none missed. Round 10:
+  2,400,000 evaluations, 501,945 moves; none missed with the router's
+  normalisation, and 3,667 missed without trimming, reproducing S10-1 (fixed
+  seed, about 4 s).
 - **Cleanup.** The file was deleted; `git status` showed no residue.
 - **Limits.** One listener; a bounded vocabulary; relocation was modelled as
   removal from one listener and insertion into another, not run across two
@@ -246,7 +252,7 @@ any row above.
 | V-6 | TOML blocks and relative links of the three new documents parsed with `tomllib` and checked for existence (this packet is outside docs-check scope) | all valid |
 | V-7 | The exact F1, F2 and F3 TOML blocks extracted from the final specification, plus the F1 withdrawal variant and the combined instance, checked with `jul check` and `jul lint` (full-tag build, placeholder files); the specification's `cloudflared` YAML parsed. Re-run at r5 and r7 (the four TOML blocks are byte-identical between them): F1, F1 withdrawal, F1 mTLS, F1+F2 and F1+F2+F3, each in `managed` and `file_owned` authority (10 files), with `JUL_ADMIN_TOKEN` set to a throwaway placeholder; negative control: `proxy_pass` with `deny = true` | 10/10 `check` and `lint` exit 0 with one intentional warning (compression disabled); negative control exit 1 (`conflicting actions [proxy_pass deny]`). The proposed `sharing` block is not implemented and was not checked by `jul`. At r9 the five fixture blocks (TOML and YAML) were compared byte for byte with r8 and are identical, so `jul` was not re-run; the principal re-review independently ran all 20 `check`/`lint` commands at r8 (exit 0) |
 | V-8 | probe P2 (§4): disposable `go test -count=1 -tags waf ./internal/waf -run TestPR640ProbeDetectBodyLimit -v` | `block` 413 (action not reached); `detect` 200 (32 bytes delivered); file deleted |
-| V-9 | probe P3 (§4): disposable property test `go test -count=1 ./internal/router -run TestPR640HostDispatchOverlapRuleIsSound -v` | passed: 2,400,000 evaluations, 472,507 moves, all within the affected set; file deleted |
+| V-9 | probe P3 (§4): disposable property test `go test -count=1 ./internal/router -run TestPR640HostDispatchOverlapRuleIsSound -v`, at r9 and again after round 10 | passed both times: no move outside the affected set with the router's normalisation; the no-trim negative control missed 3,667 moves as expected; file deleted |
 
 Not run: live provider paths, independent clients, race detector, full CI. None
 is claimed. The full-tag build needed one direct module download after repeated
@@ -487,7 +493,22 @@ The #641 author estimate rose to 6–12 focused days (bounded paged projection,
 host-dispatch analysis with its property test, expected absence); the two
 tranches total a nominal 18–36 days.
 
-### 6.10 Round 10 (verification of r9)
+### 6.10 Round 10 (verification of r9 `72871705`)
+
+A fresh source-truth reviewer and the round-5 security reviewer examined the
+r8→r9 diff. The fresh reviewer verified the WAF engine facts, the host scoring
+and the result table (all 20 `candidate` × `access` combinations covered, first
+match unambiguous) and found no blocker. All four findings were verified
+against source and accepted.
+
+| ID | Sev. | Finding | Resolution (r10) |
+| --- | --- | --- | --- |
+| S10-1 | high | the host-dispatch rule normalised names by case and trailing dot only; the router also trims whitespace and validation accepts padded names, so `" victim.example"` could be missed and gain traffic silently | §9.5 compares patterns exactly as the router does and requires reusing its normalisation; selector digest normalisation stated separately; E52 extended; probe P3 re-run with name variants and a negative control |
+| R10-1 | medium | the WAF reads the body before the action in either mode, so `detect` is not admission-identical for unreadable bodies; E49's limitation text was false; "after Jul's checks" is wrong for approved preflights | AD-08: request size limits and transport failures are not access inputs; the WAF row states the difference; regression test added to #641; E49 and the WAF rationale corrected |
+| R10-2 | medium | `none_expected` rendered as "access facts match" | separate wording for `none_expected` |
+| R10-3 | low | "exact" serving equality rested on a 64-bit fingerprint | postcondition carries and compares full SHA-256 configuration digests; versions kept for correlation; E53 corrected |
+
+### 6.11 Round 11 (verification of r10)
 
 (Recorded below.)
 
@@ -528,7 +549,7 @@ resource and value evidence contract maps to §13–§15 and §17.
 | Provider seams (membership, invitations, revocation) remain handoffs | by design | SD-06 outcome gate; #588 |
 | Remote authorities (JWT key sets, forward-auth decisions, provider policy) change access without a Jul generation | named in every postcondition result as not covered (AD-07) | #641; external evidence per §7 |
 | WAF effects classified only for mode and enablement; every rule change is `uncertain` | conservative by design; retirement on rule tuning may surprise operators | #641/#642 tests; keep-open exception |
-| WAF detect-mode rules depend on pinned Coraza behaviour (E49, E51) | a dependency upgrade could change them | #641 regression test; rules re-derived on any engine upgrade |
+| WAF detect-mode rules depend on pinned Coraza behaviour (E49, E51) and on AD-08's treatment of transport failures | a dependency upgrade could change them; the maintainer may prefer the stricter `narrowed` class | #641 regression tests; rules re-derived on any engine upgrade |
 | Host-dispatch rule under-expands if implemented wrongly | property test against the real router over generated host sets; listener-wide fallback | #641 |
 | Projection caps (names, URLs, members, page size) are proposals | measured and fixed before exposure | #586 gate for #586/#587 |
 | Reviewer independence | AI agents; instruction-based blindness | maintainer acceptance is the decision |

@@ -581,7 +581,7 @@ design must satisfy; the design owns mechanisms, bounds and tests.
 | --- | --- |
 | Trigger | A published generation in which an entry's effective access inputs are classed `narrowed` or `uncertain` by §9.5, including: the withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file, WAF rule-file or plugin-module content change; a CA/CRL change that invalidates certificates; host names or match narrowed; **any target change** while exchanges admitted under the old target remain. |
 | Uncertain changes (SD-09) | Treated as narrowing by default. The plan offers an explicit "keep open connections" exception per entry; choosing it is recorded in the result and forfeits any complete-withdrawal claim for that entry. |
-| Never triggers | `metadata_only` changes (declared intent and labels); changes to inputs that are not access inputs (§9.5: rate limits, cache, compression, timeouts, response headers); `widened` changes; and external events (provider policy, issuer key removal), which have no Jul event. |
+| Never triggers | `metadata_only` changes (declared intent and labels); changes to inputs that are not access inputs (§9.5: rate limits, request size limits, cache, compression, timeouts, response headers, transport failures); `widened` changes; and external events (provider policy, issuer key removal), which have no Jul event. |
 | Scope (SD-08) | **Exactly the narrowed entries.** Exchanges of every other entry continue uninterrupted, including exchanges multiplexed on the same HTTP/2 or HTTP/3 connection (browsers coalesce connections when one certificate covers several hosts). |
 | Mechanisms | Stream-level: end the narrowed entry's in-flight requests, SSE and gRPC streams and owned H1 WebSockets (#562), without closing connections shared with other entries. Certificate revocation is enforced by re-checking the current CA/CRL policy on every request to entries that require a client certificate, instead of closing the connection. Closing a whole connection is a fallback only when no stream-level mechanism exists for that protocol. |
 | Collateral | If a fallback closes a connection that also carried another entry's exchange, the result discloses the count, the entry's claim is downgraded to "new access stopped; open connections ended with collateral interruption", and §13 W3 counts it as a failure. |
@@ -715,28 +715,34 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
 
 - **Producer.** Every plan (raw candidate or typed operations) returns a
   `postcondition`: `{postcondition_version: 1, base_serving_version,
-  candidate_desired_version, entries: [{ref, expect, expected?}]}`. The two
-  versions are Jul's existing content versions of the *effective*
-  configuration (a digest of its canonical form, review packet E53): equal
-  versions mean an identical effective configuration, but they say nothing
-  about the contents of files the configuration names.
+  candidate_desired_version, base_config_digest, candidate_config_digest,
+  entries: [{ref, expect, expected?}]}`. The two versions are Jul's existing
+  64-bit fingerprints of the canonical *effective* configuration (review packet
+  E53), carried for correlation with status and history. The two digests are
+  full SHA-256 digests of the same canonical form, and they are what the
+  evaluator compares, so a fingerprint collision can never make another
+  configuration pass for the candidate. Neither covers the contents of files
+  the configuration names; the access fingerprint below does.
   - `expect` is `present` or `absent`. Every entry the plan affects (including
     the §9.5 expansion) is listed: `present` when it exists in the candidate,
     `absent` when the plan removes it. A plan that affects no entry (for
     example a global log-level or timeout change) lists none.
   - `ref` is the entry's `route_id` when it has one. Otherwise it is a
     revision-bound selector `{listen, server_names_digest, match_type, path,
-    match_ordinal, revision}`: the ADR 0018 §14 coordinates with the normalised
-    `server_names` replaced by their digest, taken from the candidate for
-    `present` entries and from the base for `absent` ones. It is resolved only
-    in the revision it names; Jul never resolves it in another revision, never
-    mints an identifier and keeps no mapping.
+    match_ordinal, revision}`: the ADR 0018 §14 coordinates with
+    `server_names` (normalised as the existing selector normalises them:
+    trimmed, empty names dropped, duplicates removed, order kept) replaced by
+    their digest. `revision` is `candidate` for `present` entries and `base`
+    for `absent` ones, naming the configuration digest the coordinates were
+    taken from. The selector is resolved only while that digest is serving;
+    Jul never resolves it in another revision, never mints an identifier and
+    keeps no mapping.
   - `expected`, for `present` entries, holds the entry facts the change should
     produce in the `serving` layer (§4.3) — the Jul checks it actually applies,
     client-certificate requirement, bind scope, withdrawal state, declared
-    intent — and an **access fingerprint**: a non-secret digest over the
-    entry's effective access inputs (§9.5), including content digests of the
-    local access files they use (htpasswd, CA, CRL, WAF rule files,
+    intent — and an **access fingerprint**: a non-secret SHA-256 digest over
+    the entry's effective access inputs (§9.5), including content digests of
+    the local access files they use (htpasswd, CA, CRL, WAF rule files,
     request-plugin modules) as read when the plan was computed.
   - Jul stores nothing; the owner keeps the object with the change.
 - **Evaluator.** A read-only, server-owned operation requiring the same
@@ -744,11 +750,12 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
   `config:read`) compares the object with the **current** serving snapshot,
   whose generation records the access-file digests it actually loaded. It
   returns:
-  - `candidate`: `serving` when `serving_version` equals
-    `candidate_desired_version` (checked first, so a plan that changes nothing
-    is `serving` at once); otherwise `base_serving` when it equals
-    `base_serving_version`; otherwise `other_revision`; `unknown` without a
-    serving snapshot.
+  - `candidate`: computed from the full digest of the serving snapshot's
+    effective configuration (computed on request; nothing stored): `serving`
+    when it equals `candidate_config_digest` (checked first, so a plan that
+    changes nothing is `serving` at once); otherwise `base_serving` when it
+    equals `base_config_digest`; otherwise `other_revision`; `unknown` without
+    a serving snapshot.
   - per entry: `matches` (a `present` entry's facts and fingerprint are equal,
     or an `absent` entry's `route_id` resolves to nothing); `differs` (with the
     differing field names, or `still_present` for an entry expected absent);
@@ -766,7 +773,7 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
 | --- | --- | --- |
 | `unknown` | `candidate` or `access` is `unknown` | "Jul cannot tell what is serving." |
 | `not_serving_yet` | `candidate` is `base_serving` | "Not serving yet: the configuration this change was planned against is still serving." Access details are shown for information only. |
-| `candidate_serving` | `candidate` is `serving`; `access` is `matches` or `none_expected` | "The planned configuration is serving, and its expected access facts match." The **only** result that may say the change is serving. |
+| `candidate_serving` | `candidate` is `serving`; `access` is `matches` or `none_expected` | With `matches`: "The planned configuration is serving, and its expected access facts match." With `none_expected`: "The planned configuration is serving; this change expected no access facts to compare." The **only** result that may say the change is serving. |
 | `diverged` | `access` is `differs` | "What is serving differs from the plan," naming the entries and fields — including an access file changed after planning while the exact candidate serves. |
 | `unverifiable` | `access` is `unverifiable` | "Jul cannot compare these entries," naming each and the reason. |
 | `access_matches` | `candidate` is `other_revision`; `access` is `matches` | "The expected access facts match, but a different configuration (<version>) is serving." |
@@ -818,8 +825,9 @@ credentials); WAF policy and rule files (they can block requests before the
 action, and their allow and exclusion rules can exempt requests); location
 checks (CIDR, credential method and its settings), `require_client_cert`, the
 credential files they name; the withdrawal gate; and, for retirement only, the
-entry's target. Rate limits, cache, compression, timeouts and response headers
-are not access inputs: their changes are shown as plan items and intent
+entry's target. Rate limits, request size limits, cache, compression, timeouts
+and response headers are not access inputs, and neither are transport failures
+(a client abort or malformed framing; AD-08): their changes are shown as plan items and intent
 findings (for example `intent_restricted_cached`) but never produce an audience
 class or retirement.
 
@@ -838,8 +846,12 @@ class or retirement.
   best-scoring name (exact over leading wildcard), breaks ties by declaration
   order, and sends unmatched hosts to the first-declared block (review packet
   E52). Let *C* be the host patterns added or removed on the listener plus
-  every pattern of a block that was added, removed, relocated or reordered,
-  after the router's normalisation (lower case, no trailing dot). A block is
+  every pattern of a block that was added, removed, relocated or reordered.
+  Patterns are compared exactly as the router compares them: surrounding
+  whitespace trimmed, lower-cased, one trailing dot removed (E52). An
+  implementation reuses the router's normalisation rather than restating it,
+  because configuration validation accepts names such as `" Victim.example."`
+  that the router treats as `victim.example`. A block is
   affected when it is the listener's first-declared block in either revision,
   or when one of its patterns, in either revision, overlaps a pattern in *C*: two exact names
   overlap when equal; an exact name overlaps `*.s` when it ends in `.s` and is
@@ -882,8 +894,8 @@ class or retirement.
 | Bind between two specific addresses (including loopback ↔ another address: Jul listens on exactly one address, so a local connector that reaches the loopback address loses access), to or from an empty host, or any port change | `uncertain` |
 | CORS: an origin added while credentials are allowed, credentials newly allowed, or `["*"]` introduced | `widened` |
 | CORS: origins only removed or credentials disallowed | `narrowed` |
-| WAF: disabled → `block` / `block` → disabled, with rules, rule files and other WAF settings unchanged (a WAF only interrupts requests after Jul's checks; it never admits one) | `narrowed` / `widened` |
-| WAF without runtime engine control (no loaded rule — inline, in a rule file or anything it includes — uses `ctl:ruleEngine`; the embedded CRS has none, E51): disabled ↔ `detect`, everything else unchanged | `unchanged`: detect mode never interrupts, and the pinned engine forces body-limit actions to partial processing in that mode (E49) |
+| WAF: disabled → `block` / `block` → disabled, with rules, rule files and other WAF settings unchanged (a WAF can only interrupt or fail a request, never admit one; approved CORS preflights skip Jul's credential checks but still pass through it) | `narrowed` / `widened` |
+| WAF without runtime engine control (no loaded rule — inline, in a rule file or anything it includes — uses `ctl:ruleEngine`; the embedded CRS has none, E51): disabled ↔ `detect`, everything else unchanged | `unchanged`: detect mode never interrupts on a rule match and does not enforce its body limit (E49). It does read the request body before the action, so a body that cannot be read — a client abort, malformed framing, or a chunked body over `client_max_body_size` — fails where a handler that ignores the body would answer; that is a transport or size-limit effect, not an access input (above; AD-08) |
 | WAF without runtime engine control: `detect` → `block` / `block` → `detect`, everything else unchanged | `narrowed` / `widened` |
 | WAF with runtime engine control: disabled → `detect` / `detect` → disabled, everything else unchanged | `narrowed` / `widened` (a rule can switch blocking on per request) |
 | WAF with runtime engine control: `detect` ↔ `block` | `uncertain` (detect mode ignores `allow`, so a rule that switches blocking on can deny what `block` mode allows) |
@@ -893,8 +905,9 @@ class or retirement.
 
 The WAF mode rules (SD-14) depend on the pinned engine's behaviour. #641 keeps
 a real-HTTP regression test of a body over the limit in `block` mode (413,
-action not reached) and `detect` mode (200, whole body delivered), and re-derives
-these rules whenever the WAF engine is upgraded.
+action not reached) and `detect` mode (200, whole body delivered), plus a test
+that pins the read-before-action difference for an unreadable body, and
+re-derives these rules whenever the WAF engine is upgraded.
 
 External widening (provider policy, DNS, connectors) is not computable and is
 shown as a checklist item on every plan that touches a provider-path entry.
