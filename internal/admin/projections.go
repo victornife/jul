@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"jul/internal/config"
+	"jul/internal/server"
 	"math"
 	"sort"
 	"strconv"
@@ -23,10 +24,13 @@ import (
 
 func projectRoutes(c *config.Config) []RouteProjection {
 	out := make([]RouteProjection, 0, len(c.Servers))
+	ordinals := routeOrdinals(c)
+	baseVersion := server.CanonicalVersion(c)
 	for i := range c.Servers {
 		srv := &c.Servers[i]
 		rp := RouteProjection{
 			Name:        srv.Name,
+			BaseVersion: baseVersion,
 			Listen:      srv.Listen,
 			ServerNames: srv.ServerNames,
 			H2C:         srv.H2C,
@@ -49,7 +53,8 @@ func projectRoutes(c *config.Config) []RouteProjection {
 				Index:             j,
 				Match:             loc.Match.Path,
 				Type:              loc.Match.Type,
-				MatchOrdinal:      matchOrdinalOf(srv, j),
+				MatchOrdinal:      ordinals[i][j],
+				SelectorVersion:   routeSelectorVersion,
 				RouteID:           routeID(loc),
 				Predicates:        locationPredicateSummary(loc),
 				Methods:           loc.Match.Methods,

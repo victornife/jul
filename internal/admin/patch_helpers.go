@@ -211,17 +211,19 @@ type routeTarget struct {
 	// correlate a route across revisions. Inserting a same-path route above the
 	// target shifts every later ordinal, which is why a patch carrying one is
 	// bound to a base_version (ADR 0018 §14).
-	Ordinal *int
+	Ordinal         *int
+	SelectorVersion string
 }
 
 // locationTarget builds the target a patch operation addresses.
 func (r patchRequest) locationTarget() routeTarget {
 	return routeTarget{
-		Listen:      r.Listen,
-		ServerNames: r.ServerNames,
-		MatchType:   r.MatchType,
-		Path:        r.Path,
-		Ordinal:     r.MatchOrdinal,
+		Listen:          r.Listen,
+		ServerNames:     r.ServerNames,
+		MatchType:       r.MatchType,
+		Path:            r.Path,
+		Ordinal:         r.MatchOrdinal,
+		SelectorVersion: r.SelectorVersion,
 	}
 }
 
@@ -246,6 +248,9 @@ func findLocation(c *config.Config, t routeTarget) (*config.LocationConfig, erro
 // enclosing server index and the location index, which location_remove needs to
 // splice the location out of its server's slice.
 func findLocationIndex(c *config.Config, t routeTarget) (int, int, error) {
+	if t.SelectorVersion != "" && t.SelectorVersion != routeSelectorVersion {
+		return -1, -1, fmt.Errorf("unsupported selector_version %q; fetch a fresh route projection", t.SelectorVersion)
+	}
 	if strings.TrimSpace(t.Listen) == "" || strings.TrimSpace(t.Path) == "" {
 		return -1, -1, fmt.Errorf("route target requires both listen and path")
 	}
@@ -276,6 +281,9 @@ func findLocationIndex(c *config.Config, t routeTarget) (int, int, error) {
 	if ordinal < 0 || ordinal >= len(matches) {
 		return -1, -1, fmt.Errorf("match_ordinal %d is out of range: %d location(s) match listen %q names %v match %q path %q",
 			ordinal, len(matches), t.Listen, t.ServerNames, t.MatchType, t.Path)
+	}
+	if t.SelectorVersion == "" && matches[0].srv != matches[len(matches)-1].srv {
+		return -1, -1, fmt.Errorf("cross-block route target requires selector_version %q; refresh the Console or fetch a fresh route projection and echo its selector", routeSelectorVersion)
 	}
 	return matches[ordinal].srv, matches[ordinal].loc, nil
 }

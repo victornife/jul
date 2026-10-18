@@ -71,6 +71,11 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Fixed
 
+- Route selectors now count declaration order across matching server blocks
+  (#643). Console edits use the projection revision. Old cross-block selectors
+  and batches that could shift later ordinal targets are refused before writes;
+  refresh cached Console/API projections after upgrading.
+
 - Upgrade quic-go from v0.63.0 to v0.64.0 for HTTP/3 header-buffer allocation
   hardening and QUIC congestion/recovery, MTU and path-validation fixes. Go
   1.27.2, qpack v0.6.0, TLS policy and disabled 0-RTT remain unchanged. Pinned

@@ -8,6 +8,7 @@ import { Drawer } from "@/components/Drawer.tsx";
 import type { LocationProjection, RouteProjection } from "@/api/client.ts";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { usePermission } from "@/auth/usePermission.ts";
+import { routeTargetFromProjection } from "@/lib/routePatch.ts";
 import { useRunPatch } from "@/lib/useRunPatch.ts";
 import {
   actionChanged,
@@ -38,10 +39,7 @@ import {
 
 function routeTarget(route: RouteProjection, loc: LocationProjection) {
   return {
-    listen: route.listen,
-    server_names: route.server_names ?? [],
-    match_type: loc.type,
-    path: loc.match,
+    ...routeTargetFromProjection(route, loc),
   };
 }
 
@@ -59,7 +57,7 @@ export interface RouteMatchEditorProps {
  * route's identity, so the diff lists the old route removed and the renamed
  * route added — the warning copy makes that explicit. */
 export function RouteMatchEditor({ route, loc, onClose }: RouteMatchEditorProps) {
-  const { run: runPatch, error, busy } = useRunPatch();
+  const { run: runPatch, error, busy } = useRunPatch(route.base_version);
   const { has } = usePermission();
   const canWrite = has("config:write");
   const [draft, setDraft] = useState<MatchDraft>(() => seedMatch(loc));
@@ -166,7 +164,7 @@ export interface RouteActionEditorProps {
 /** Switch a route's action in place among the tag-free kinds represented by
  * the generic editor. Protocol-specific actions remain on dedicated/raw paths. */
 export function RouteActionEditor({ route, loc, onClose }: RouteActionEditorProps) {
-  const { run: runPatch, error, busy } = useRunPatch();
+  const { run: runPatch, error, busy } = useRunPatch(route.base_version);
   const { has } = usePermission();
   const canWrite = has("config:write");
   const [draft, setDraft] = useState<ActionDraft>(() => seedAction(loc));
@@ -282,7 +280,7 @@ export interface RouteRenameEditorProps {
  * virtual host's identity, so the diff may re-create the block when the first
  * host name changes — the warning copy makes that explicit. */
 export function RouteRenameEditor({ route, onClose }: RouteRenameEditorProps) {
-  const { run: runPatch, error, busy } = useRunPatch();
+  const { run: runPatch, error, busy } = useRunPatch(route.base_version);
   const { has } = usePermission();
   const canWrite = has("config:write");
   const [draft, setDraft] = useState<RenameDraft>(() => seedRename(route.server_names));

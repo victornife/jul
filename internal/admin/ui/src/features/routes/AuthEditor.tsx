@@ -25,6 +25,7 @@ import { AuthFields } from "@/features/routes/RouteEditor.tsx";
 export interface AuthEditorProps {
   /** The location whose access-control rule is being edited. */
   readonly target: RouteTarget;
+ readonly baseVersion?: string | undefined;
   /**
    * The location's current rule, from the route projection, used to seed the
    * form. Absent when adding a rule to a location that has none.
@@ -112,9 +113,9 @@ function toPatch(d: AuthDraft): LocationAuthPatch {
  * directly: it previews the patch, then hands the diff to the Config editor for
  * Validate → Diff → Apply.
  */
-export function AuthEditor({ target, seed, existing = Boolean(seed), onClose }: AuthEditorProps) {
+export function AuthEditor({ target, baseVersion, seed, existing = Boolean(seed), onClose }: AuthEditorProps) {
   const [draft, setDraft] = useState<AuthDraft>(() => seedDraft(seed));
-  const { run: runPatch, error, busy } = useRunPatch();
+  const { run: runPatch, error, busy } = useRunPatch(baseVersion);
   const { has } = usePermission();
   const canWrite = has("config:write");
 

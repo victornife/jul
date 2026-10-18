@@ -155,6 +155,7 @@ function RouteCard({
                 key={routeIdentityKey(serverIdentityFromRoute(route), {
                   matchType: loc.type,
                   path: loc.match,
+                  ...(loc.match_ordinal !== undefined ? { matchOrdinal: loc.match_ordinal } : {}),
                   ...(loc.route_id ? { routeId: loc.route_id } : {}),
                 })}
                 loc={loc}
@@ -476,7 +477,7 @@ export function RoutesPanel() {
         <div className="space-y-4">
           {filtered.map(({ route, locations }) => (
             <RouteCard
-              key={serverIdentityKey(serverIdentityFromRoute(route))}
+              key={`${serverIdentityKey(serverIdentityFromRoute(route))}:${String(data.indexOf(route))}`}
               route={route}
               locations={locations}
               onOpen={(loc) => {
