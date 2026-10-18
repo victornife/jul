@@ -712,9 +712,15 @@ file-owned pipelines, which Jul cannot fence.
   generation, so the fingerprint cannot bind them: doing so would need a
   network fetch while planning and would report routine key rotation as
   divergence. Each entry result lists them in `external_inputs` (closed set:
-  `jwt_key_set`, `forward_auth`), and every surface states that Jul's part is
-  confirmed and those inputs are not ("Confirmed for Jul's configuration; the
-  key set at <URL> is controlled by its issuer and not covered").
+  `jwt_key_set`, `forward_auth`, `provider_policy`), and every surface states
+  that Jul's part is confirmed and those inputs are not ("Confirmed for Jul's
+  configuration; the key set at <URL> is controlled by its issuer and not
+  covered"). `provider_policy` is listed for every entry that declares an
+  `external_enforcer` (whose label it carries), declares `restricted` without a
+  Jul check, or declares `private_network` (membership is enforced by the
+  network provider). For an entry with no declaration Jul cannot know whether a
+  provider sits in front; its confirmed facts state that Jul applies no check,
+  and its external enforcement stays `unanalysed` (§4.5).
 - **Limits.** Observation only: it never claims who wrote the change, keeps no
   history, and survives restarts because it only reads the current state. A
   failed reload, a later writer or a restart produce `not_serving_yet`,

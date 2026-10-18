@@ -5,8 +5,8 @@
 > Design revisions: **r1** `e5b77b42` (round 1), **r2** `75264d61` (round 2),
 > **r3** `fe44f6a0` (round 3, §6.4), **r4** `a76f197e` (independent principal
 > review, §6.5), **r5** `c53b14b5` (round 5, §6.6), **r6** `ecde75fa` (round 6,
-> §6.7) and **r7** (this revision). This packet holds evidence, decisions,
-> review findings and traceability for the
+> §6.7), **r7** `7e3382c4` (round 7, §6.8) and **r8** (this revision). This
+> packet holds evidence, decisions, review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -143,7 +143,7 @@ must be re-checked against the knowledge base by #582.
 | AD-04 | 2026-10-18 | Provider and public entries on one Jul | SH-11, scoped to off-host reach with explicit host trust (after S-4) | Proposed | spec §3, §6 |
 | AD-05 | 2026-10-18 | Connector identity headers | SH-12 | Proposed | spec §3 |
 | AD-06 | 2026-10-18 | Cloudflare origin enforcement | cloudflared `access.required` default; Jul `forward_auth` validator recommended, required with untrusted local processes (after S-4); Jul header-token change not authorised | Proposed | F3 |
-| AD-07 | 2026-10-18 | Postcondition scope for remote authorities (S6-2) | confirmation covers configuration and local access files; a JWT key set, forward-auth decisions and provider policy are listed in `external_inputs` and shown as not covered. Rejected: binding a key set (network fetch while planning; routine rotation reported as divergence) and `unverifiable` for every JWT entry (hides what Jul did verify) | Proposed; reversible before #641 ships | spec §9.4 |
+| AD-07 | 2026-10-18 | Postcondition scope for remote authorities (S6-2) | confirmation covers configuration and local access files; a JWT key set, forward-auth decisions and provider policy (for entries whose declared intent relies on a provider, after S7-1) are listed in `external_inputs` and shown as not covered. Rejected: binding a key set (network fetch while planning; routine rotation reported as divergence) and `unverifiable` for every JWT entry (hides what Jul did verify) | Proposed; reversible before #641 ships | spec §9.4 |
 
 "Shown without objection" is not acceptance; AD items become accepted only with
 the maintainer's acceptance of #580.
@@ -394,6 +394,19 @@ from source.
 | P5-4 (reopened) | high | loopback → another address was still classed `widened`; Jul listens on exactly one address, so a local connector reaching loopback loses access (E50) | §9.5: widened only for a specific address → its own family's wildcard (`0.0.0.0`/`::`); any other bind change, empty host or port change `uncertain`; F1 walkthrough shows the `uncertain` class |
 | P6-1 = S6-1 | high | "WAF rules only removed" classed `widened`, but rule files hold exclusions and allow rules, so removal can narrow (E49) | every WAF rule, rule-file, CRS, paranoia, body-limit or response-inspection change `uncertain`; mode and enablement rules apply only with everything else unchanged; WAF rule files join the access inputs, fingerprint and global-override expansion. The reviewer's suggestion that enabling detect mode is admission-neutral was **not** adopted: Coraza rejects oversized bodies in detect mode too (E49), so enablement in either mode is `narrowed` |
 | S6-2 | high | the postcondition can confirm while a remote JWT key set has changed admission | AD-07: confirmation scoped to configuration and local access files; remote authorities listed as `external_inputs` and shown as not covered |
+
+### 6.8 Round 7 (verification of r7 `7e3382c4`)
+
+**Verified resolved:** P5-4, P6-1 (with E49 independently confirmed: detect
+mode still rejects oversized bodies), S6-1 and S6-2. Source-truth reviewer: no
+new blocker or high finding.
+
+| ID | Sev. | Finding | Resolution (r8) |
+| --- | --- | --- | --- |
+| S7-1 | high | `external_inputs` omitted provider policy, so an entry enforced only by a provider or tailnet could read `confirmed` without naming its real enforcer | §9.4: `provider_policy` added, listed for every entry that declares an `external_enforcer`, declares `restricted` without a Jul check, or declares `private_network`; undeclared entries keep `unanalysed` external enforcement |
+
+Round 8: the security reviewer verified S7-1 resolved in r8 (before this note)
+and found no new blocker or high finding. No blocker or high finding is open.
 
 ## 7. Traceability
 

@@ -56,8 +56,9 @@ constrains any design:
    loaded digests of local access files: htpasswd, CA, CRL and WAF rules), which
    a read-only server operation, with the same permissions as configuration
    inspection, evaluates against the serving snapshot (SD-11). Remote
-   authorities (a JWT key set, forward-auth decisions, provider policy) are
-   named as not covered rather than confirmed. Delivered as a bounded tranche (#641) before #581's evidence
+   authorities (a JWT key set, forward-auth decisions, and the provider policy
+   of any entry whose declared intent relies on one) are named as not covered
+   rather than confirmed. Delivered as a bounded tranche (#641) before #581's evidence
    run.
 3. **Four access modes (SD-03).** `preview`, `private_network`, `restricted`,
    `public`. Private-network membership may be a declared *coarse* audience,
